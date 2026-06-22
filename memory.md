@@ -427,3 +427,25 @@
   - 저장소 안에 실제 raw 데이터 파일이 확인되지 않는 항목은 보고서에서 진행 중 또는 검증 필요로 표기했다.
   - 로컬에 LibreOffice `soffice`가 없어 DOCX 렌더러 기반 PDF 변환은 실패했고, 최종 PDF는 ReportLab 직접 생성 방식으로 만들었다.
   - `pdfinfo` 콘솔 출력에서 PDF 메타데이터 한글은 깨져 보일 수 있으나, 본문 렌더링과 텍스트 추출은 정상 확인됐다.
+
+## 2026-06-22 Decision: #43 표준 운영 준비형
+
+### Options
+
+| 선택 | 방향 | 판정 |
+|---|---|---|
+| A | 문서·이슈 close 정리형 | 선택하지 않음 |
+| B | 표준 운영 준비형 | 선택됨 |
+| C | 정적 프론트 MVP 강화형 | 선택하지 않음 |
+| D | Agent 계약 골격형 | 선택하지 않음 |
+
+### Decision
+
+사용자는 `B. 표준 운영 준비형`을 선택했다. 작업 대상 이슈는 `#43 chore-final-stabilization-and-release-readiness`이며, 작업 브랜치는 `chore-final-stabilization-and-release-readiness`다.
+
+### Constraints
+
+- 표준 운영 준비형 기준으로 배포 준비성 검토, 운영 절차, 정적 검증 테스트를 먼저 만든다.
+- 실제 Google 로그인, Agent, RAG, API endpoint, 모델 선택은 구현하지 않는다.
+- 팀원 schema 없이 `#22`, `#27`, `#29`, `#40`, `#41`을 완료 처리하지 않는다.
+- close 가능성은 검증 결과와 사용자 승인 후에만 판정한다.
