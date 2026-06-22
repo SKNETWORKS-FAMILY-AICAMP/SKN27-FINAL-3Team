@@ -1,0 +1,1066 @@
+﻿[
+    {
+        "number":  46,
+        "title":  "chore: scaffold project folder structure",
+        "state":  "closed",
+        "assignees":  [
+
+                      ],
+        "labels":  [
+
+                   ],
+        "milestone":  null,
+        "comments":  1,
+        "created_at":  "2026-06-22T00:17:16Z",
+        "updated_at":  "2026-06-22T00:25:33Z",
+        "closed_at":  "2026-06-22T00:25:20Z",
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/46",
+        "is_pull_request":  true,
+        "body":  "## Summary\n- 기존 루트 폴더(app, ai, etl, storage, test, docs)를 유지하면서 하위 폴더 구조를 추가했습니다.\n- 신규 하위 폴더는 `.gitkeep`으로 Git 추적 가능하게 했습니다.\n- 기존 README.md 7개에 각 폴더와 하위 폴더의 역할을 정리했습니다.\n- 새 README.md는 생성하지 않았습니다.\n\n## Related Issues\n- Related: #3, #16, #17, #18, #22, #29, #40, #41\n\n## Verification\n- `git status --short --branch`\n- `git diff --stat origin/dev...project-folder-structure`\n- README.md 파일 수 확인: 7개\n- `.gitkeep` 파일 수 확인: 33개\n\n## Note\n- 이전 PR #45는 브랜치명에서 `codex/` prefix를 제거하기 위해 이 PR로 대체했습니다."
+    },
+    {
+        "number":  45,
+        "title":  "chore: scaffold project folder structure",
+        "state":  "closed",
+        "assignees":  [
+
+                      ],
+        "labels":  [
+
+                   ],
+        "milestone":  null,
+        "comments":  0,
+        "created_at":  "2026-06-22T00:14:55Z",
+        "updated_at":  "2026-06-22T00:17:47Z",
+        "closed_at":  "2026-06-22T00:17:18Z",
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/45",
+        "is_pull_request":  true,
+        "body":  "## Summary\n- 기존 루트 폴더(app, ai, etl, storage, test, docs)를 유지하면서 하위 폴더 구조를 추가했습니다.\n- 신규 하위 폴더는 `.gitkeep`으로 Git 추적 가능하게 했습니다.\n- 기존 README.md 7개에 각 폴더와 하위 폴더의 역할을 정리했습니다.\n- 새 README.md는 생성하지 않았습니다.\n\n## Related Issues\n- Related: #3, #16, #17, #18, #22, #29, #40, #41\n\n## Verification\n- `git status --short --branch`\n- `git diff --stat origin/dev...HEAD`\n- README.md 파일 수 확인: 7개\n- `.gitkeep` 파일 수 확인: 33개"
+    },
+    {
+        "number":  44,
+        "title":  "test 업무",
+        "state":  "closed",
+        "assignees":  [
+
+                      ],
+        "labels":  [
+
+                   ],
+        "milestone":  null,
+        "comments":  2,
+        "created_at":  "2026-06-18T03:03:02Z",
+        "updated_at":  "2026-06-18T03:09:10Z",
+        "closed_at":  "2026-06-18T03:09:10Z",
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/44",
+        "is_pull_request":  false,
+        "body":  "ㅁㄴㅇㄹ"
+    },
+    {
+        "number":  43,
+        "title":  "chore-final-stabilization-and-release-readiness",
+        "state":  "open",
+        "assignees":  [
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:final",
+                       "domain:qa"
+                   ],
+        "milestone":  "2026-08-04 최종 마무리",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:45:43Z",
+        "updated_at":  "2026-06-18T08:56:59Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/43",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker\n- 목표: 최종 안정화, 배포 상태, 문서 제출 상태를 마무리한다.\n\n## 산출물\n\n- 최종 QA 결과\n- 배포 확인\n- 제출 문서 확인\n\n## 완료 기준\n\n- 2026-08-04 최종 마무리 기준을 만족함\n\n## 메모\n\n- production 배포와 운영 문서가 포함된다."
+    },
+    {
+        "number":  42,
+        "title":  "docs-final-demo-scenario-and-risk-checklist",
+        "state":  "open",
+        "assignees":  [
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "documentation",
+                       "wbs",
+                       "phase:final",
+                       "domain:docs",
+                       "domain:qa"
+                   ],
+        "milestone":  "2026-08-04 최종 마무리",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:43:21Z",
+        "updated_at":  "2026-06-18T08:56:58Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/42",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker\n- 목표: 최종 발표 시나리오와 리스크 체크리스트를 작성한다.\n\n## 산출물\n\n- 최종 데모 시나리오\n- 리스크 체크리스트\n- 발표 흐름\n\n## 완료 기준\n\n- 2026-08-04 최종 제출 전 데모 시나리오가 확정됨\n\n## 메모\n\n- 중간 발표 피드백을 반영한다."
+    },
+    {
+        "number":  41,
+        "title":  "test-legal-ai-guardrail-validation",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "wbs",
+                       "phase:middle",
+                       "domain:legal",
+                       "domain:qa"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:42:49Z",
+        "updated_at":  "2026-06-18T08:56:56Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/41",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 법률/과실비율/과태료 답변이 확정 판단처럼 보이지 않도록 guardrail을 검증한다.\n\n## 산출물\n\n- guardrail 체크리스트\n- 금지 표현 목록\n- 면책/한계 문구\n\n## 완료 기준\n\n- 성공 보장, 법률 확정 판단, 과실비율 단정 수치를 피함\n\n## 메모\n\n- 최종 답변은 Supervisor가 생성하므로 Supervisor 레이어에서 검증한다."
+    },
+    {
+        "number":  40,
+        "title":  "test-cross-mvp-integration-scenarios",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "wbs",
+                       "phase:middle",
+                       "domain:qa"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:42:18Z",
+        "updated_at":  "2026-06-19T03:22:54Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/40",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 과태료·범칙금, 과실비율, 법률, Vision, 이의신청서 생성 흐름의 통합 시나리오를 검증한다.\n\n## 산출물\n\n- 통합 시나리오\n- E2E 검증 결과\n- 실패 목록\n\n## 완료 기준\n\n- 중간 발표 MVP 흐름이 최소 1개 이상 끝까지 연결됨\n\n## 메모\n\n- Supervisor 결과 스키마 통합을 함께 검증한다."
+    },
+    {
+        "number":  39,
+        "title":  "test-vision-accident-poc-validation",
+        "state":  "open",
+        "assignees":  [
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "wbs",
+                       "phase:middle",
+                       "domain:vision",
+                       "domain:qa"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:41:16Z",
+        "updated_at":  "2026-06-18T08:56:53Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/39",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: ohjuheecode\n- 목표: Vision/DL POC의 정확도, 한계, 실패 케이스를 검증한다.\n\n## 산출물\n\n- 검증 샘플\n- 성공/실패 케이스\n- 한계 문서\n\n## 완료 기준\n\n- 중간 발표에서 보여줄 수 있는 샘플 결과가 준비됨\n\n## 메모\n\n- 과실비율 확정 판단은 제외한다."
+    },
+    {
+        "number":  38,
+        "title":  "feat-accident-image-video-agent-result-flow",
+        "state":  "open",
+        "assignees":  [
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor",
+                       "domain:vision"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:40:48Z",
+        "updated_at":  "2026-06-22T06:32:35Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/38",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: ohjuheecode, hi20260204-maker\n- 목표: 영상·이미지 분석 결과를 텍스트 요약과 confidence metadata로 변환해 Supervisor에 넘긴다.\n\n## 산출물\n\n- 영상 분석 결과\n- 이미지 분석 결과\n- 텍스트 요약\n- confidence\n\n## 완료 기준\n\n- 재강 텍스트 ML/판례 결과와 과실비율 흐름에서 병합 가능\n\n## 메모\n\n- 주희 DL 결과가 재강 ML의 필수 입력이 되지 않도록 병목을 피한다."
+    },
+    {
+        "number":  37,
+        "title":  "feat-accident-vision-data-manifest-pipeline",
+        "state":  "open",
+        "assignees":  [
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:vision"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:40:17Z",
+        "updated_at":  "2026-06-22T06:25:17Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/37",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: ohjuheecode\n- 목표: 차량 사고 이미지·영상 데이터셋 manifest와 전처리 구조를 만든다.\n\n## 산출물\n\n- 데이터셋 manifest\n- 영상 metadata\n- 프레임 추출 결과\n\n## 완료 기준\n\n- DL/RAG 입력으로 사용할 수 있는 파일/metadata 구조가 만들어짐\n\n## 메모\n\n- 주희 담당으로 단일화한다."
+    },
+    {
+        "number":  36,
+        "title":  "spike-vision-model-use-case-decision",
+        "state":  "open",
+        "assignees":  [
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:vision"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  3,
+        "created_at":  "2026-06-17T01:39:30Z",
+        "updated_at":  "2026-06-22T06:28:39Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/36",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: ohjuheecode\n- 목표: 차량 사고 이미지/영상 분석에서 사용할 Vision/DL 베이스라인 범위를 결정한다.\n\n## 산출물\n\n- Vision/DL 적용 범위\n- 모델 후보\n- 샘플 검증 기준\n\n## 완료 기준\n\n- 영상/이미지 Agent의 입력과 출력이 정리됨\n\n## 메모\n\n- 고지서 OCR은 필주 흐름으로 분리한다."
+    },
+    {
+        "number":  35,
+        "title":  "feat-settlement-document-draft",
+        "state":  "closed",
+        "assignees":  [
+
+                      ],
+        "labels":  [
+                       "wbs",
+                       "scope:out"
+                   ],
+        "milestone":  null,
+        "comments":  3,
+        "created_at":  "2026-06-17T01:38:36Z",
+        "updated_at":  "2026-06-18T08:56:48Z",
+        "closed_at":  "2026-06-18T08:44:33Z",
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/35",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: \n- 목표: 합의금/보험 문서 초안 기능은 최신 핵심 WBS에서 제외한다.\n\n## 산출물\n\n- 후순위 기록\n\n## 완료 기준\n\n- 현재 MVP 범위에서 닫힘 처리\n\n## 메모\n\n- 이의신청서 생성과 혼동하지 않는다."
+    },
+    {
+        "number":  34,
+        "title":  "feat-settlement-checklist-flow",
+        "state":  "closed",
+        "assignees":  [
+
+                      ],
+        "labels":  [
+                       "wbs",
+                       "scope:out"
+                   ],
+        "milestone":  null,
+        "comments":  3,
+        "created_at":  "2026-06-17T01:37:58Z",
+        "updated_at":  "2026-06-18T08:56:47Z",
+        "closed_at":  "2026-06-18T08:44:31Z",
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/34",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: \n- 목표: 합의금 체크리스트 기능은 최신 핵심 WBS에서 제외한다.\n\n## 산출물\n\n- 후순위 기록\n\n## 완료 기준\n\n- 현재 MVP 범위에서 닫힘 처리\n\n## 메모\n\n- 보험 약관/합의금 확장은 후순위로 관리한다."
+    },
+    {
+        "number":  33,
+        "title":  "feat-fault-response-evidence-schema",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor",
+                       "domain:fault"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:36:59Z",
+        "updated_at":  "2026-06-19T13:06:17Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/33",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: leejaegang27, hi20260204-maker\n- 목표: 과실비율 흐름에서 대응 스크립트가 아니라 Supervisor 답변에 들어갈 근거/후속 행동 스키마를 만든다.\n\n## 산출물\n\n- 후속 행동\n- 근거 요약\n- 대응 문구 후보\n\n## 완료 기준\n\n- 판례/사례/영상/법률 근거가 분리된 evidence로 반환됨\n\n## 메모\n\n- 최종 답변 문장은 Supervisor가 조합한다."
+    },
+    {
+        "number":  32,
+        "title":  "feat-fault-ratio-result-range-view",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fault"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:36:21Z",
+        "updated_at":  "2026-06-19T12:56:20Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/32",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27\n- 목표: 과실비율 결과를 단정 수치가 아니라 정성 범위와 근거 중심으로 표시한다.\n\n## 산출물\n\n- 결과 범위 표시\n- 근거 카드\n- 한계/주의 문구\n\n## 완료 기준\n\n- 법적 구속력 있는 판단처럼 보이지 않음\n\n## 메모\n\n- 리포트 화면에서 과실비율 수치는 참고용으로만 표시한다."
+    },
+    {
+        "number":  31,
+        "title":  "feat-fault-ratio-structured-question-flow",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor",
+                       "domain:fault"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:35:52Z",
+        "updated_at":  "2026-06-19T12:54:42Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/31",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: leejaegang27, hi20260204-maker\n- 목표: 사고 설명 텍스트를 기반으로 추가 질문과 사고 유형 후보를 구성한다.\n\n## 산출물\n\n- 사고유형 후보\n- 추가 질문 schema\n- 쟁점/증거 태그\n\n## 완료 기준\n\n- Supervisor가 사용자에게 필요한 추가 정보를 간단히 요청할 수 있음\n\n## 메모\n\n- 경위서/OCR 결과와 일반 텍스트 질문 모두 처리한다."
+    },
+    {
+        "number":  30,
+        "title":  "feat-fault-ratio-knowledge-base",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fault"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  3,
+        "created_at":  "2026-06-17T01:19:26Z",
+        "updated_at":  "2026-06-19T12:52:46Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/30",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: leejaegang27\n- 목표: 과실비율 판례, 자막 사례, 심의사례, 경위서/OCR 결과를 ML/RAG 지식베이스로 구성한다.\n\n## 산출물\n\n- 텍스트 chunk\n- embedding\n- summary\n- metadata\n- tags\n\n## 완료 기준\n\n- 분류값, 요약값, 태그값, 유사도/추천값을 산출함\n- 최종 과실비율 확정 판단 모델로 정의하지 않음\n\n## 메모\n\n- 재강 담당 ML 모델 범위를 명확히 둔다."
+    },
+    {
+        "number":  29,
+        "title":  "feat-supervisor-chatbot-routing",
+        "state":  "open",
+        "assignees":  [
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:18:55Z",
+        "updated_at":  "2026-06-19T03:22:50Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/29",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker\n- 목표: 메인 챗봇에서 질문/자료 유형을 분류하고 적절한 Agent 흐름으로 분기한다.\n\n## 산출물\n\n- Supervisor routing\n- 질문 의도 분류\n- 자료 유형 분기\n- 통합 답변 생성\n\n## 완료 기준\n\n- 이미지, 영상, 고지서 OCR, 경위서/OCR, 법률 질문이 올바른 노드로 분기됨\n\n## 메모\n\n- 최종 답변은 각 Agent 결과 스키마를 보고 Supervisor가 형성한다."
+    },
+    {
+        "number":  28,
+        "title":  "test-fine-mvp-sample-case-validation",
+        "state":  "open",
+        "assignees":  [
+                          "workzion2"
+                      ],
+        "labels":  [
+                       "wbs",
+                       "phase:middle",
+                       "domain:fine",
+                       "domain:qa"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:18:09Z",
+        "updated_at":  "2026-06-19T03:22:49Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/28",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: workzion2\n- 목표: 과태료·범칙금 샘플 케이스로 OCR/분석/근거 연결 흐름을 검증한다.\n\n## 산출물\n\n- 샘플 케이스 검증표\n- 실패 케이스\n- 누락 필드 목록\n\n## 완료 기준\n\n- 중간 발표 샘플 케이스가 통과됨\n\n## 메모\n\n- 검증 결과는 Supervisor 통합 QA로 넘긴다."
+    },
+    {
+        "number":  27,
+        "title":  "feat-objection-draft-report-node",
+        "state":  "open",
+        "assignees":  [
+                          "workzion2",
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor",
+                       "domain:fine"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:17:08Z",
+        "updated_at":  "2026-06-18T08:56:38Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/27",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, workzion2\n- 목표: 필주 분석 결과와 동혁 법률 근거를 받아 이의신청서 초안을 생성한다.\n\n## 산출물\n\n- 이의신청서 생성 입력 schema\n- 초안 생성 결과\n- 복사/다운로드 연계\n\n## 완료 기준\n\n- 이의신청서 생성은 요청자 담당으로 고정됨\n- 필주 분석 결과를 입력으로 사용함\n\n## 메모\n\n- 혜림 담당으로 두지 않고 요청자 담당으로 정리한다."
+    },
+    {
+        "number":  26,
+        "title":  "feat-fine-law-ground-search",
+        "state":  "open",
+        "assignees":  [
+                          "techshin31",
+                          "workzion2"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fine",
+                       "domain:legal"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  5,
+        "created_at":  "2026-06-17T01:16:07Z",
+        "updated_at":  "2026-06-22T07:46:21Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/26",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: workzion2, techshin31\n- 목표: 필주 과태료·범칙금 분석 결과에 동혁 법률 근거 검색 결과를 연결한다.\n\n## 산출물\n\n- 법률 근거 검색 연결\n- 근거 metadata\n- 분석 결과 evidence\n\n## 완료 기준\n\n- 관련 법령/행정 기준 근거가 분석 결과에 포함됨\n\n## 메모\n\n- 최종 자연어 답변은 Supervisor가 생성한다."
+    },
+    {
+        "number":  25,
+        "title":  "feat-fine-analysis-detail-view",
+        "state":  "open",
+        "assignees":  [
+                          "workzion2"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fine"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  3,
+        "created_at":  "2026-06-17T01:13:40Z",
+        "updated_at":  "2026-06-22T07:45:39Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/25",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: workzion2\n- 목표: 과태료·범칙금 분석 상세보기에서 OCR 결과, 처분 단계, 부족 서류, 필요 증거를 표시한다.\n\n## 산출물\n\n- 상세보기 응답 구조\n- 분석 결과 화면 항목\n- 부족 서류/필요 증거 목록\n\n## 완료 기준\n\n- 사용자가 고지서 분석 결과를 한 화면에서 확인함\n\n## 메모\n\n- 리포팅 상세 분석과 분리된 과태료·범칙금 상세 화면이다."
+    },
+    {
+        "number":  24,
+        "title":  "feat-fine-penalty-rule-mapping",
+        "state":  "open",
+        "assignees":  [
+                          "workzion2"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fine"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  3,
+        "created_at":  "2026-06-17T01:13:05Z",
+        "updated_at":  "2026-06-22T07:43:45Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/24",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: workzion2\n- 목표: 과태료, 범칙금, 벌칙 데이터를 분석용 룰/매핑 데이터로 정리한다.\n\n## 산출물\n\n- 과태료 룰\n- 범칙금 룰\n- 벌칙 매핑\n- 처분 단계 상태값\n\n## 완료 기준\n\n- 동혁 법률 원문 DB와 중복되지 않는 분석용 데이터로 분리됨\n\n## 메모\n\n- 법률 근거 원문은 동혁 데이터에서 참조한다."
+    },
+    {
+        "number":  23,
+        "title":  "feat-fine-notice-ocr-intake-flow",
+        "state":  "open",
+        "assignees":  [
+                          "workzion2"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fine"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  4,
+        "created_at":  "2026-06-17T01:12:14Z",
+        "updated_at":  "2026-06-22T07:42:51Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/23",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: workzion2\n- 목표: 고지서 이미지/OCR 원문을 받아 위반 정보 필드로 구조화한다.\n\n## 산출물\n\n- 고지서 OCR 구조화 결과\n- 필드 누락/신뢰도 상태\n\n## 완료 기준\n\n- 위반 일시, 장소, 유형, 통지일, 납부기한, 기관 필드가 구조화됨\n\n## 메모\n\n- 필주 담당에서 고지서 OCR을 제외하지 않는다."
+    },
+    {
+        "number":  22,
+        "title":  "feat-agent-result-schema-and-rag-contract",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  3,
+        "created_at":  "2026-06-17T01:11:28Z",
+        "updated_at":  "2026-06-21T12:45:29Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/22",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 각 Agent가 반환할 결과 스키마와 RAG 근거 metadata 계약을 정의한다.\n\n## 산출물\n\n- Agent result schema\n- RAG chunk metadata\n- Supervisor 통합 답변 포맷\n\n## 완료 기준\n\n- 개별 Agent는 근거/분석 결과를 반환하고 최종 답변은 Supervisor가 생성함\n\n## 메모\n\n- 법률 답변 Agent를 동혁 개인 담당으로 지정. "
+    },
+    {
+        "number":  21,
+        "title":  "feat-fault-ratio-precedent-caption-review-case-pipeline",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fault"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:10:21Z",
+        "updated_at":  "2026-06-19T12:48:46Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/21",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: leejaegang27\n- 목표: 과실비율 판례, 유튜브 자막 사례, 과실비율심의사례 데이터를 수집·전처리한다.\n\n## 산출물\n\n- 과실비율 판례 데이터\n- 유튜브 자막 사례 데이터\n- 과실비율심의사례 데이터\n- RAG 등록 metadata\n\n## 완료 기준\n\n- 보험 텍스트 수집/전처리 파이프라인은 재강 담당으로 정리됨\n- workzion2 담당으로 남지 않음\n\n## 메모\n\n- 경위서/OCR 결과 처리와 텍스트 ML 입력으로 연결한다."
+    },
+    {
+        "number":  20,
+        "title":  "feat-traffic-law-data-pipeline",
+        "state":  "open",
+        "assignees":  [
+                          "techshin31"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:legal"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:09:42Z",
+        "updated_at":  "2026-06-18T08:56:29Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/20",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: techshin31\n- 목표: 도로교통법, 시행령, 시행규칙, 행정 기준 등 법률 데이터를 수집·전처리·DB 적재한다.\n\n## 산출물\n\n- 법률 원천 데이터 목록\n- 전처리된 법률 데이터\n- DB 적재 결과\n- 적재 검증 로그\n\n## 완료 기준\n\n- 판례 데이터는 포함하지 않음\n- 과태료·범칙금 분석과 Supervisor 근거 검색에 사용할 수 있음\n\n## 메모\n\n- 동혁 담당 범위는 법률 데이터만이다."
+    },
+    {
+        "number":  19,
+        "title":  "docs-data-governance-retention-policy",
+        "state":  "open",
+        "assignees":  [
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "documentation",
+                       "wbs",
+                       "phase:final",
+                       "domain:docs"
+                   ],
+        "milestone":  "2026-08-04 최종 마무리",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:05:02Z",
+        "updated_at":  "2026-06-18T08:56:28Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/19",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker\n- 목표: 고지서, 영상, OCR, 리포트 데이터의 보관/삭제/마스킹 정책을 정리한다.\n\n## 산출물\n\n- 데이터 보관 정책\n- 개인정보 마스킹 기준\n- 삭제 기준\n\n## 완료 기준\n\n- 최종 제출 전 운영 리스크가 문서화됨\n\n## 메모\n\n- 중간 발표 이후 최종 마무리 단계에서 보강한다."
+    },
+    {
+        "number":  18,
+        "title":  "feat-separate-domain-case-schemas",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:03:21Z",
+        "updated_at":  "2026-06-22T00:26:17Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/18",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 과태료·범칙금, 과실비율, 법률, Vision 결과 schema를 분리하고 Supervisor에서 병합한다.\n\n## 산출물\n\n- domain schema\n- Agent result schema\n- Supervisor merge contract\n\n## 완료 기준\n\n- 도메인별 판단 책임이 섞이지 않음\n\n## 메모\n\n- 동혁 법률 원문 DB와 필주 분석용 룰/매핑을 분리한다."
+    },
+    {
+        "number":  17,
+        "title":  "feat-incremental-ingestion-run-tracking",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fine",
+                       "domain:legal",
+                       "domain:fault",
+                       "domain:vision"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:02:41Z",
+        "updated_at":  "2026-06-18T08:56:25Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/17",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 각 데이터 파이프라인 실행 이력과 증분 수집 상태를 추적한다.\n\n## 산출물\n\n- pipeline run log\n- 증분 수집 기준\n- 실패/성공 건수\n\n## 완료 기준\n\n- 중복 수집과 누락 필드를 검증할 수 있음\n\n## 메모\n\n- 최소 중간 발표에서는 실행 로그 형태를 먼저 고정한다."
+    },
+    {
+        "number":  16,
+        "title":  "feat-data-source-registry-schema",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fine",
+                       "domain:legal",
+                       "domain:fault",
+                       "domain:vision"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T01:01:47Z",
+        "updated_at":  "2026-06-18T08:56:24Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/16",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 법률, 과태료 룰, 판례/사례, 영상 데이터 출처를 추적하는 registry schema를 정리한다.\n\n## 산출물\n\n- source registry schema\n- source_type/domain 규칙\n- 원문 위치 metadata\n\n## 완료 기준\n\n- 각 데이터가 출처, 수집일, 이용조건, 원문 위치를 가진다\n\n## 메모\n\n- 동혁/재강/필주/주희 데이터가 같은 출처 계약을 사용한다."
+    },
+    {
+        "number":  15,
+        "title":  "feat-common-analysis-job-model",
+        "state":  "open",
+        "assignees":  [
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:vision"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T01:00:58Z",
+        "updated_at":  "2026-06-18T08:56:23Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/15",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: ohjuheecode\n- 목표: RAG, OCR, ML, DL, 문서 생성 작업 상태를 공통 모델로 관리한다.\n\n## 산출물\n\n- Job 상태 모델\n- 실패 사유\n- 재시도/검증 상태\n\n## 완료 기준\n\n- 영상/DL 흐름과 다른 Agent 작업 상태를 추적할 수 있음\n\n## 메모\n\n- 기존 주희 담당 Job 모델 흐름을 유지한다."
+    },
+    {
+        "number":  14,
+        "title":  "feat-home-login-chatbot-entry",
+        "state":  "open",
+        "assignees":  [
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T00:59:57Z",
+        "updated_at":  "2026-06-18T08:56:21Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/14",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker\n- 목표: 홈 화면, 로그인 모달, 로그인 후 챗봇 진입 흐름을 구성한다.\n\n## 산출물\n\n- 홈 화면\n- 로그인 모달\n- 챗봇 진입 라우팅\n\n## 완료 기준\n\n- 사용자는 로그인 후 바로 챗봇 페이지로 이동함\n- 질문/자료 유형에 따라 Supervisor가 분기함\n\n## 메모\n\n- 동혁은 이 UI를 담당하지 않고 법률 데이터만 담당한다."
+    },
+    {
+        "number":  13,
+        "title":  "docs-requirement-gap-and-risk-log",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "documentation",
+                       "wbs",
+                       "phase:middle",
+                       "domain:qa"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  7,
+        "created_at":  "2026-06-17T00:57:56Z",
+        "updated_at":  "2026-06-19T05:26:20Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/13",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 기존 요구사항과 최신 회의 기준의 충돌, 리스크, 남은 결정을 추적한다.\n\n## 산출물\n\n- Gap/Risk 로그\n- 결정 필요 사항\n- 범위 변경 기록\n\n## 완료 기준\n\n- 보험 약관 후순위, 합의금 scope-out, Supervisor 최종 답변 구조가 기록됨\n\n## 메모\n\n- 구현 전 불명확한 요구사항은 확인 대상으로 남긴다."
+    },
+    {
+        "number":  12,
+        "title":  "docs-mvp-screen-and-process-flows",
+        "state":  "open",
+        "assignees":  [
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "documentation",
+                       "wbs",
+                       "phase:middle",
+                       "domain:docs",
+                       "domain:supervisor"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  2,
+        "created_at":  "2026-06-17T00:56:47Z",
+        "updated_at":  "2026-06-19T03:22:45Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/12",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker\n- 목표: 홈, 로그인 모달, 챗봇 진입, Supervisor 분기, 리포트 흐름을 문서화한다.\n\n## 산출물\n\n- 화면 흐름\n- 시퀀스 다이어그램\n- LangGraph 흐름도\n\n## 완료 기준\n\n- 로그인 후 챗봇 페이지로 진입하는 흐름이 반영됨\n\n## 메모\n\n- 상세 설명보다 사용자가 이해하기 쉬운 간단한 설명 중심으로 둔다."
+    },
+    {
+        "number":  11,
+        "title":  "docs-wbs-owner-deliverable-plan",
+        "state":  "open",
+        "assignees":  [
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "documentation",
+                       "wbs",
+                       "phase:middle",
+                       "domain:docs"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  4,
+        "created_at":  "2026-06-17T00:56:13Z",
+        "updated_at":  "2026-06-19T08:20:14Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/11",
+        "is_pull_request":  false,
+        "body":  "# WBS, 이슈, 담당자 재배정 계획\n\n작성일: 2026-06-18  \n중간 기준일: 2026-07-14  \n최종 기준일: 2026-08-04  \n기준 문서: `memory.md`, 요구사항 정의서 v0.4, GitHub Issues 1~43, 2026-06-18 회의 정리\n\n## 1. 문서 목적\n\n이 문서는 최신 회의 기준으로 WBS, GitHub Issue, 담당자, 산출물, 마일스톤을 다시 정리한다.\n\n기존 GitHub Issue에는 보험 텍스트 파이프라인이 `workzion2`에 배정된 항목, 합의금 확장 항목, 보험 RAG/Front 중심 항목이 남아 있었다. 최신 기준에서는 아래 구조를 우선한다.\n\n- 최종 답변은 개별 Agent가 아니라 Supervisor가 각 Agent 결과 스키마를 통합해 생성한다.\n- 과태료·범칙금 분석은 필주 담당이다.\n- 법률 데이터 수집·전처리·DB 적재는 동혁 담당이다.\n- 경위서/OCR 결과, 텍스트 ML, 과실비율 판례·유튜브 자막 사례·과실비율심의사례 데이터는 재강 담당이다.\n- 차량 사고 이미지·영상 및 Vision/DL 흐름은 주희 담당이다.\n- 이의신청서 생성은 요청자 담당으로 고정한다.\n- 보험 약관과 합의금 확장 기능은 이번 중간 WBS의 핵심 경로에서 제외하고 후순위로 둔다.\n\n## 2. 담당자와 GitHub 계정 매핑\n\n| 이름 | GitHub 계정 | 최신 담당 영역 |\n|---|---|---|\n| 요청자/문서·QA | `hi20260204-maker` | WBS/문서, Supervisor 통합 답변 구조, 홈·로그인·챗봇 진입 흐름, 이의신청서 생성 노드, 통합 QA |\n| 재강 | `leejaegang27` | 경위서/OCR 결과 처리, 텍스트 ML, 과실비율 판례, 유튜브 자막 사례, 과실비율심의사례 데이터, 판례 Agent |\n| 주희 | `ohjuheecode` | 차량 사고 이미지·영상 데이터셋, Vision/DL 분석, 영상·이미지 Agent, DL 결과 구조화 |\n| 동혁 | `techshin31` | 법률 데이터 수집, 전처리, DB 적재, 법률 원문/조문/근거 metadata |\n| 필주 | `workzion2` | 고지서 OCR, 과태료·범칙금·벌칙 분석용 룰/매핑 데이터, 과태료·범칙금 분석 흐름 |\n\n## 3. 일정 기준\n\n| 기간 | 목표 | 주요 산출물 |\n|---|---|---|\n| 2026-06-18 ~ 2026-06-21 | 역할/WBS/Issue 재정렬 | WBS 문서, GitHub Issue 재배정, 중간/최종 milestone |\n| 2026-06-22 ~ 2026-06-28 | 데이터·DB·RAG 계약 고정 | 법률/과태료/과실비율/영상 데이터 schema, RAG metadata 계약 |\n| 2026-06-29 ~ 2026-07-05 | 파이프라인·Agent 골격 연결 | 데이터 수집·전처리·적재 MVP, Agent 결과 스키마, Supervisor 분기 |\n| 2026-07-06 ~ 2026-07-13 | 중간 발표 MVP 동결 | 로그인→챗봇 진입, 과태료·범칙금 흐름, 과실비율 흐름, AWS staging |\n| 2026-07-14 | 중간 발표 | 연결된 MVP 시연 |\n| 2026-07-15 ~ 2026-07-27 | 피드백 반영 및 품질 고도화 | RAG 품질 개선, ML/DL 결과 검증, 리포트 품질 개선 |\n| 2026-07-28 ~ 2026-08-03 | 최종 QA/배포/문서화 | production 배포, README, API/DB/파이프라인 문서, 최종 발표자료 |\n| 2026-08-04 | 최종 마무리 | 최종 제출 상태 |\n\n## 4. GitHub Issue 정리 정책\n\n| 처리 | 기준 |\n|---|---|\n| 유지·수정 | 최신 역할 기준에 맞지만 제목, 담당자, 본문, milestone이 틀린 이슈 |\n| 담당자 변경 | 동혁은 법률 데이터만, 필주는 과태료·범칙금 분석만, 재강은 과실비율 텍스트/판례/ML만, 주희는 Vision/DL만 담당하도록 조정 |\n| Scope out | 합의금 관련 이슈처럼 이번 핵심 WBS에서 제외된 이슈는 삭제 대신 `scope:out`으로 닫아 추적성을 보존 |\n| 삭제 대상 | `test 업무`처럼 실제 프로젝트 산출물과 무관한 테스트 이슈는 별도 확인 후 영구 삭제 가능 |\n| Project 보드 | classic token 기준 현재 토큰에 `read:project` 또는 전체 제어용 `project` scope가 없으면 GitHub Project 연결은 수동 처리 필요 |\n\n## 5. 역할별 WBS\n\n### 5.1 요청자/문서·QA, Supervisor, 이의신청서 생성\n\n| WBS | 기간 | GitHub Issue | 산출물 | 완료 기준 |\n|---|---|---|---|---|\n| 역할/WBS/Issue 재정렬 | 2026-06-18 ~ 2026-06-21 | `#2`, `#10`, `#11`, `#12`, `#13` | WBS, 역할 매트릭스, 화면/프로세스, Gap/Risk | 최신 역할 기준으로 Issue 담당자와 milestone이 정리됨 |\n| 홈·로그인·챗봇 진입 흐름 | 2026-06-22 ~ 2026-07-05 | `#14`, `#29` | 홈 화면, 로그인 모달, 로그인 후 챗봇 진입, Supervisor 분기 UI | 사용자가 로그인 후 챗봇 화면으로 진입하고 질문/자료 유형에 따라 분기됨 |\n| Supervisor 결과 통합 | 2026-06-29 ~ 2026-07-13 | `#22`, `#29`, `#40`, `#41` | Agent 결과 스키마, 통합 답변 포맷, guardrail | 개별 Agent 결과를 Supervisor가 통합해 최종 답변을 생성함 |\n| 이의신청서 생성 노드 | 2026-06-29 ~ 2026-07-13 | `#27` | 이의신청서 초안 생성 노드, 복사/다운로드 입력 계약 | 필주 분석 결과와 동혁 법률 근거를 받아 초안 생성 |\n| 통합 QA/최종 데모 | 2026-07-15 ~ 2026-08-04 | `#40`, `#41`, `#42`, `#43` | 통합 시나리오, 발표 시나리오, 최종 안정화 | 최종 제출 가능한 상태로 배포와 문서가 정리됨 |\n\n### 5.2 필주: 고지서 OCR 및 과태료·범칙금 분석\n\n| WBS | 기간 | GitHub Issue | 산출물 | 완료 기준 |\n|---|---|---|---|---|\n| 고지서 OCR 입력 구조 | 2026-06-22 ~ 2026-06-28 | `#23` | 고지서 이미지/OCR 결과 입력 schema | 위반 일시, 장소, 유형, 통지일, 납부기한, 기관 필드 구조화 |\n| 과태료·범칙금·벌칙 룰/매핑 | 2026-06-22 ~ 2026-07-05 | `#24` | 분석용 룰/매핑 데이터 | 동혁 법률 원문 DB와 중복되지 않는 분석용 매핑 데이터 |\n| 과태료·범칙금 상세보기 | 2026-06-29 ~ 2026-07-13 | `#25` | OCR 결과, 처분 단계, 부족 서류, 필요 증거 화면/응답 구조 | 사용자가 분석 결과를 상세 화면에서 확인 가능 |\n| 법률 근거 검색 연결 | 2026-06-29 ~ 2026-07-13 | `#26` | 동혁 법률 데이터 검색 결과 연결 | 분석 결과에 관련 법령/행정 기준 근거가 포함됨 |\n| 분석 샘플 검증 | 2026-07-06 ~ 2026-07-13 | `#28` | 샘플 고지서/OCR 검증 결과 | 중간 발표용 샘플 케이스가 통과됨 |\n\n### 5.3 동혁: 법률 데이터 수집·전처리·DB 적재\n\n| WBS | 기간 | GitHub Issue | 산출물 | 완료 기준 |\n|---|---|---|---|---|\n| 법률 데이터 출처 확정 | 2026-06-22 ~ 2026-06-28 | `#20` | 도로교통법, 시행령, 시행규칙, 고시/행정 기준 출처 목록 | 판례가 아닌 법률 계열 데이터만 범위로 확정 |\n| 법률 원문 수집·전처리 | 2026-06-22 ~ 2026-07-05 | `#20` | 조문/항/호/별표/벌점/금액/예외 조건 구조화 데이터 | HTML, 중복, 깨진 텍스트가 제거됨 |\n| 법률 DB 적재 | 2026-06-29 ~ 2026-07-13 | `#16`, `#17`, `#20` | DB 적재 결과, 적재 검증 로그 | 적재 건수, 실패 건수, 누락 필드, 중복 여부 확인 |\n| 법률 RAG 문서 준비 | 2026-06-29 ~ 2026-07-13 | `#22` | 법률 chunk, summary, metadata | Supervisor/필주 흐름에서 근거 검색 가능 |\n\n### 5.4 재강: 경위서/OCR, 텍스트 ML, 판례/사례 데이터\n\n| WBS | 기간 | GitHub Issue | 산출물 | 완료 기준 |\n|---|---|---|---|---|\n| 경위서/OCR 결과 처리 | 2026-06-22 ~ 2026-06-28 | `#21`, `#30` | OCR 텍스트 정제, 사고 설명 정규화 | 경위서/OCR 원문이 ML/RAG 입력으로 변환됨 |\n| 과실비율 판례 데이터 | 2026-06-22 ~ 2026-07-05 | `#21`, `#30` | 과실비율 판례 수집·전처리 결과 | 판례 원문과 metadata가 RAG 등록 가능 상태 |\n| 유튜브 자막 사례 데이터 | 2026-06-22 ~ 2026-07-05 | `#1`, `#21` | 유튜브 자막 기반 사고 사례 데이터 | 자막 원문, 출처, 사고유형 후보 metadata 확보 |\n| 과실비율심의사례 데이터 | 2026-06-22 ~ 2026-07-05 | `#21`, `#30` | 심의사례 수집·전처리 결과 | 유사 사례 검색에 필요한 chunk/metadata 확보 |\n| 텍스트 ML 베이스라인 | 2026-06-29 ~ 2026-07-13 | `#30`, `#31`, `#33` | 사고 유형 분류, 요약, 키워드/태그, 유사 사례 추천 | 최종 판단이 아닌 근거/추천값 형태로 반환 |\n| 판례 Agent 결과 스키마 | 2026-06-29 ~ 2026-07-13 | `#22`, `#30`, `#33` | 판례 검색 결과 스키마 | Supervisor가 통합 답변에 사용할 수 있는 근거 반환 |\n\n### 5.5 주희: 차량 사고 이미지·영상, Vision/DL\n\n| WBS | 기간 | GitHub Issue | 산출물 | 완료 기준 |\n|---|---|---|---|---|\n| 비전 데이터셋 정리 | 2026-06-22 ~ 2026-06-28 | `#36`, `#37` | 이미지/영상 데이터셋 목록, manifest | 파일 출처, 사고유형, metadata가 정리됨 |\n| 영상/이미지 전처리 | 2026-06-29 ~ 2026-07-05 | `#37`, `#38` | frame 추출, key frame, 장면 요약 | DL/RAG 입력 가능한 구조로 변환 |\n| Vision/DL 베이스라인 | 2026-06-29 ~ 2026-07-13 | `#36`, `#38`, `#39` | 사고 장면 후보, 객체/상황 분석, confidence | 과실비율 확정이 아닌 참고 근거로 반환 |\n| 영상·이미지 Agent 스키마 | 2026-07-06 ~ 2026-07-13 | `#22`, `#38` | Vision 결과 스키마 | Supervisor/과실비율 흐름에서 텍스트 근거로 병합 가능 |\n\n## 6. Issue별 재정리 목록\n\n| Issue | 처리 | 신규/유지 제목 | 담당자 | Milestone |\n|---|---|---|---|---|\n| `#1` | 수정 | `feat-fault-youtube-caption-case-collector` | `leejaegang27` | 2026-07-14 |\n| `#2` | 수정 | `epic-planning-wbs-scope` | `hi20260204-maker` | 2026-07-14 |\n| `#3` | 수정 | `epic-common-architecture-data-pipeline` | 전원 | 2026-07-14 |\n| `#4` | 수정 | `epic-fine-ocr-penalty-analysis` | `workzion2`, `hi20260204-maker` | 2026-07-14 |\n| `#5` | 수정 | `epic-fault-ratio-precedent-vision-flow` | `leejaegang27`, `ohjuheecode`, `techshin31`, `hi20260204-maker` | 2026-07-14 |\n| `#6` | 닫기 | `epic-settlement-helper-mvp` | 기존 유지 | Scope out |\n| `#7` | 수정 | `epic-vision-accident-image-video-agent` | `ohjuheecode` | 2026-07-14 |\n| `#8` | 수정 | `epic-integration-qa-final-demo` | 전원 | 2026-08-04 |\n| `#9` | 수정 | `epic-legal-precedent-data-ingestion-and-rag` | `techshin31`, `leejaegang27` | 2026-07-14 |\n| `#10`~`#13` | 수정 | 문서/Gap/Risk | `hi20260204-maker` 중심 | 2026-07-14 |\n| `#14` | 수정 | `feat-home-login-chatbot-entry` | `hi20260204-maker` | 2026-07-14 |\n| `#15` | 유지 | `feat-common-analysis-job-model` | `ohjuheecode` | 2026-07-14 |\n| `#16`~`#18` | 수정 | 공통 DB/증분/schema | 전원 또는 연관 담당 | 2026-07-14 |\n| `#19` | 유지 | `docs-data-governance-retention-policy` | `hi20260204-maker` | 2026-08-04 |\n| `#20` | 수정 | `feat-traffic-law-data-pipeline` | `techshin31` | 2026-07-14 |\n| `#21` | 수정 | `feat-fault-ratio-precedent-caption-review-case-pipeline` | `leejaegang27` | 2026-07-14 |\n| `#22` | 수정 | `feat-agent-result-schema-and-rag-contract` | 전원 | 2026-07-14, parent `#3` |\n| `#23`~`#28` | 수정 | 과태료·범칙금/OCR/이의신청 흐름 | `workzion2`, `hi20260204-maker` | 2026-07-14 |\n| `#29` | 수정 | `feat-supervisor-chatbot-routing` | `hi20260204-maker` | 2026-07-14, parent `#3` |\n| `#30`~`#33` | 수정 | 과실비율 ML/RAG/판례 결과 스키마 | `leejaegang27`, 일부 `hi20260204-maker` | 2026-07-14 |\n| `#34`, `#35` | 닫기 | 합의금 확장 | 미배정 | Scope out |\n| `#36`~`#39` | 수정 | Vision/DL/영상·이미지 Agent | `ohjuheecode` | 2026-07-14 |\n| `#40`, `#41` | 수정 | 통합 QA/guardrail | 전원 | 2026-07-14 |\n| `#42`, `#43` | 수정 | 최종 데모/안정화 | `hi20260204-maker` | 2026-08-04 |\n| `#44` | 삭제 후보 | 테스트 이슈 | 없음 | 삭제 확인 필요 |\n\n## 7. Supervisor 기준 결과 스키마 초안\n\n개별 Agent는 최종 자연어 답변을 확정하지 않고 아래 형태의 결과를 반환한다. 최종 답변은 Supervisor가 통합한다.\n\n```json\n{\n  \"agent\": \"fine | law | precedent | text_ml | vision | objection\",\n  \"status\": \"success | partial | failed\",\n  \"summary\": \"Agent가 생성한 요약\",\n  \"structured_result\": {},\n  \"evidence\": [\n    {\n      \"source_type\": \"law | precedent | caption_case | review_case | fine_rule | vision_result\",\n      \"title\": \"근거 제목\",\n      \"source_url\": \"원문 URL 또는 내부 문서 ID\",\n      \"metadata\": {},\n      \"confidence\": 0.0\n    }\n  ],\n  \"next_actions\": [],\n  \"limitations\": []\n}\n```\n\n## 8. 남은 결정 사항\n\n| 항목 | 현재 상태 | 필요 조치 |\n|---|---|---|\n| GitHub Project 보드 연결 | 현재 인증 토큰에 `read:project` 또는 전체 제어용 `project` scope 없음. fine-grained token이면 Projects 권한을 Read and write로 부여해야 함 | 토큰 scope 갱신 후 Project 연결 가능 |\n| `#44 test 업무` 영구 삭제 | 닫힌 테스트 이슈로 확인 | 삭제 전 명시 확인 필요 |\n| 요청자 GitHub 계정 | 현재 인증 계정은 `hi20260204-maker` | 요청자 담당 이슈는 이 계정으로 설정 |\n| 합의금 기능 | 최신 핵심 WBS에서 제외 | `#6`, `#34`, `#35` 닫고 후순위 기록 |\n| 보험 약관 | 후순위 | 최종 고도화 또는 추가 스프린트에서 별도 이슈 생성 |\n"
+    },
+    {
+        "number":  10,
+        "title":  "docs-project-scope-and-role-matrix",
+        "state":  "open",
+        "assignees":  [
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "documentation",
+                       "wbs",
+                       "phase:middle",
+                       "domain:docs"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T00:55:34Z",
+        "updated_at":  "2026-06-18T08:56:16Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/10",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker\n- 목표: 최신 역할 매트릭스와 MVP 범위를 문서화한다.\n\n## 산출물\n\n- 역할 매트릭스\n- 도메인 경계\n- 담당자 기준\n\n## 완료 기준\n\n- workzion2 보험 텍스트 파이프라인 오배정이 제거됨\n- 재강/필주/동혁/주희/요청자 역할이 반영됨\n\n## 메모\n\n- 한국어 이름과 GitHub 계정 매핑을 명시한다."
+    },
+    {
+        "number":  9,
+        "title":  "epic-legal-precedent-data-ingestion-and-rag",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:legal",
+                       "domain:fault"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T00:42:13Z",
+        "updated_at":  "2026-06-18T08:56:15Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/9",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: techshin31, leejaegang27\n- 목표: 동혁 법률 데이터와 재강 판례/과실비율 사례 데이터를 분리해 수집·전처리·RAG 등록한다.\n\n## 산출물\n\n- 법률 원문 DB\n- 판례/사례 RAG\n- 근거 metadata\n\n## 완료 기준\n\n- 동혁은 판례를 담당하지 않음\n- 재강은 법률 원문 DB를 담당하지 않음\n\n## 메모\n\n- 최종 답변은 Supervisor가 생성한다."
+    },
+    {
+        "number":  8,
+        "title":  "epic-integration-qa-final-demo",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:final",
+                       "domain:qa"
+                   ],
+        "milestone":  "2026-08-04 최종 마무리",
+        "comments":  1,
+        "created_at":  "2026-06-17T00:37:31Z",
+        "updated_at":  "2026-06-18T08:56:14Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/8",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 중간 MVP 이후 최종 QA, guardrail, 배포, 발표 산출물을 마무리한다.\n\n## 산출물\n\n- 통합 QA\n- 최종 데모 시나리오\n- 운영/배포 문서\n\n## 완료 기준\n\n- 2026-08-04 최종 제출 기준을 만족함\n\n## 메모\n\n- 중간 발표 이후 피드백을 반영한다."
+    },
+    {
+        "number":  7,
+        "title":  "epic-vision-accident-image-video-agent",
+        "state":  "open",
+        "assignees":  [
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:vision"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T00:36:01Z",
+        "updated_at":  "2026-06-18T08:56:13Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/7",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: ohjuheecode\n- 목표: 차량 사고 이미지·영상 데이터셋과 Vision/DL Agent 흐름을 구축한다.\n\n## 산출물\n\n- 비전 데이터셋\n- 영상 frame/key frame\n- 장면 요약\n- confidence metadata\n\n## 완료 기준\n\n- Vision 결과가 과실비율 흐름의 참고 근거로 반환됨\n- 과실비율 자동 확정 판단은 제외됨\n\n## 메모\n\n- 주희 담당으로 재정렬한다."
+    },
+    {
+        "number":  6,
+        "title":  "epic-settlement-helper-mvp",
+        "state":  "closed",
+        "assignees":  [
+
+                      ],
+        "labels":  [
+                       "wbs",
+                       "scope:out"
+                   ],
+        "milestone":  null,
+        "comments":  1,
+        "created_at":  "2026-06-17T00:31:32Z",
+        "updated_at":  "2026-06-18T08:56:11Z",
+        "closed_at":  "2026-06-18T08:43:35Z",
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/6",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: \n- 목표: 합의금 기능은 최신 WBS 핵심 경로에서 제외한다.\n\n## 산출물\n\n- 후순위 기록\n\n## 완료 기준\n\n- 현재 MVP 범위에서 닫힘 처리\n\n## 메모\n\n- 필요 시 최종 이후 별도 스프린트로 재개한다."
+    },
+    {
+        "number":  5,
+        "title":  "epic-fault-ratio-precedent-vision-flow",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fault",
+                       "domain:vision"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T00:29:11Z",
+        "updated_at":  "2026-06-18T08:56:10Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/5",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: leejaegang27, ohjuheecode, techshin31, hi20260204-maker\n- 목표: 경위서/OCR/텍스트 ML, 판례·자막·심의사례, 영상/이미지 분석, 법률 근거를 과실비율 흐름에서 통합한다.\n\n## 산출물\n\n- 과실비율 텍스트 RAG\n- Vision/DL 결과\n- 법률 근거 metadata\n- Supervisor 통합 응답\n\n## 완료 기준\n\n- 과실비율을 확정 수치로 단정하지 않음\n- 근거와 한계를 포함한 결과를 Supervisor가 생성함\n\n## 메모\n\n- 재강과 주희 결과는 병렬로 실행 가능해야 하며 한쪽 결과를 다른 쪽 필수 입력으로 묶지 않는다."
+    },
+    {
+        "number":  4,
+        "title":  "epic-fine-ocr-penalty-analysis",
+        "state":  "open",
+        "assignees":  [
+                          "workzion2",
+                          "hi20260204-maker"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fine"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-17T00:23:14Z",
+        "updated_at":  "2026-06-18T08:56:09Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/4",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: workzion2, hi20260204-maker\n- 목표: 고지서 OCR, 과태료·범칙금·벌칙 분석, 이의신청서 생성 입력까지 연결한다.\n\n## 산출물\n\n- 고지서 OCR 구조화\n- 과태료·범칙금 분석 결과\n- 이의신청서 생성 입력 schema\n\n## 완료 기준\n\n- 필주 분석 결과가 요청자 이의신청서 생성 노드로 전달됨\n- 동혁 법률 근거 데이터와 연결됨\n\n## 메모\n\n- 필주는 분석용 룰/매핑 데이터를 담당하고, 동혁은 법률 원문/근거 DB를 담당한다."
+    },
+    {
+        "number":  3,
+        "title":  "epic-common-architecture-data-pipeline",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:supervisor"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-16T23:55:58Z",
+        "updated_at":  "2026-06-18T08:56:08Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/3",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker, leejaegang27, ohjuheecode, techshin31, workzion2\n- 목표: 데이터 타입별 Agent 흐름, RAG metadata, DB 적재, Supervisor 통합 구조를 맞춘다.\n\n## 산출물\n\n- 공통 schema\n- Agent 결과 스키마\n- RAG metadata 계약\n- 파이프라인 상태 계약\n\n## 완료 기준\n\n- 법률, 과태료, 판례/텍스트, 영상 결과가 같은 통합 계약으로 연결됨\n- Supervisor가 각 Agent 결과를 받아 최종 답변을 만들 수 있음\n\n## 메모\n\n- 개별 Agent는 최종 답변을 확정하지 않고 근거/분석 결과 스키마를 반환한다."
+    },
+    {
+        "number":  2,
+        "title":  "epic-planning-wbs-scope",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27",
+                          "techshin31",
+                          "workzion2",
+                          "hi20260204-maker",
+                          "ohjuheecode"
+                      ],
+        "labels":  [
+                       "documentation",
+                       "wbs",
+                       "phase:middle",
+                       "domain:docs"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  1,
+        "created_at":  "2026-06-16T23:55:18Z",
+        "updated_at":  "2026-06-18T08:56:07Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/2",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: hi20260204-maker\n- 목표: 최신 회의 기준으로 WBS, 범위, 담당자, 산출물, 일정 기준을 확정한다.\n\n## 산출물\n\n- WBS 문서\n- 역할 매트릭스\n- 이슈 재배정 기준\n\n## 완료 기준\n\n- 중간 2026-07-14, 최종 2026-08-04 기준이 반영됨\n- 담당자별 책임 경계가 문서화됨\n\n## 메모\n\n- 요청자 담당 이의신청서 생성 노드를 명시한다."
+    },
+    {
+        "number":  1,
+        "title":  "feat-fault-youtube-caption-case-collector",
+        "state":  "open",
+        "assignees":  [
+                          "leejaegang27"
+                      ],
+        "labels":  [
+                       "enhancement",
+                       "wbs",
+                       "phase:middle",
+                       "domain:fault"
+                   ],
+        "milestone":  "2026-07-14 중간 발표 MVP",
+        "comments":  3,
+        "created_at":  "2026-06-15T11:52:33Z",
+        "updated_at":  "2026-06-19T12:41:07Z",
+        "closed_at":  null,
+        "html_url":  "https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/issues/1",
+        "is_pull_request":  false,
+        "body":  "## 최신 WBS 기준\n\n- 기준일: 2026-06-18\n- 중간 기준일: 2026-07-14\n- 최종 기준일: 2026-08-04\n- 담당자: leejaegang27\n- 목표: 과실비율 분석에 사용할 유튜브 자막 기반 사고 사례 데이터를 수집하고 원천 metadata를 정리한다.\n\n## 산출물\n\n- 유튜브 자막 원천 데이터\n- 영상/자막 출처 metadata\n- 사고 유형 후보 태그\n\n## 완료 기준\n\n- 공개 자막 수집 가능 범위가 문서화됨\n- 전처리 전 원문과 metadata가 분리 저장됨\n- 재강 ML/RAG 파이프라인 입력으로 넘길 수 있음\n\n## 메모\n\n- 기존 한문철TV 자막 ETL 이슈를 재강 담당 과실비율 사례 데이터 수집으로 재정렬한다.\n- 우회 수집, 로그인 필요 데이터, 접근 제한 회피는 제외한다."
+    }
+]
