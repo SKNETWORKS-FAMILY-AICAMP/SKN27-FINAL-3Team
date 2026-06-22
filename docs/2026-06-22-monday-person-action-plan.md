@@ -28,7 +28,7 @@
 | 우선순위 | 이슈 | 오늘 확인할 내용 | 상태 판단 |
 |---:|---|---|---|
 | 1 | `#22 feat-agent-result-schema-and-rag-contract` | 모든 담당자의 노드별 input/output과 `structured_result`가 들어왔는지 확인 | 2026-06-21 `techshin31` 댓글 있음. 내용은 "구성 예정" 수준이라 구체 schema 보완 필요 |
-| 2 | `#26 feat-fine-law-ground-search` | 필주 고지서 분석 결과와 동혁 법률 근거 검색 input/output 연결 기준 확인 | 2026-06-21 `techshin31` 댓글 있음. 데이터 범위 기준이 아직 추상적이라 보완 필요 |
+| 2 | `#26 feat-fine-law-ground-search` | 법률 근거 항상 호출 원칙과 입력 방식 분기 기준 확인 | 2026-06-22 회의 수정 기준. 호출 필요/불필요가 아니라 `law_code` exact 입력과 `violation_text` semantic 입력으로 구분 필요 |
 | 3 | `#23`, `#28` | 고지서 OCR 필드와 샘플 검증 계획 확인 | 2026-06-19 이후 추가 업데이트 없음. 오늘 구체 산출물 확인 필요 |
 | 4 | `#29` | Supervisor routing rule과 추가 질문 조건 확인 | 2026-06-19 이후 추가 업데이트 없음. PM이 오늘 보완 필요 |
 | 5 | `#40` | Cross-MVP 통합 시나리오 상태 업데이트 | 현재 전부 `검증 필요`. 샘플 확보 여부를 오늘 반영해야 함 |
@@ -46,14 +46,14 @@
 | 리스크 로그 업데이트 | `#13` | 미정 항목을 `확정`, `초안`, `검증 필요`, `보류`로 분류한다. |
 | 통합 시나리오 갱신 | `#40` | `INT-001` ~ `INT-006`의 입력 샘플 확보 여부, 실행 노드, 상태를 갱신한다. |
 | 화면 흐름 반영 범위 정리 | `#12` | 홈 -> 로그인 -> 챗봇 -> 결과/리포트 진입 흐름을 최소 MVP 기준으로 정리한다. |
-| 이의신청서 생성 조건 정리 | `#27` | 필주 분석 결과와 동혁 법률 근거를 받아 초안을 만들 조건, 부족 시 추가 질문 조건, 면책 문구를 정리한다. |
+| 이의신청서 생성 조건 정리 | `#27` | 필주 분석 패키지와 법령 근거 metadata를 받아 초안을 만들 조건, 부족 시 추가 질문 조건, 면책 문구를 정리한다. |
 
 ### 오늘 받아야 할 산출물
 
 | 담당자 | 받아야 하는 내용 | 반영할 이슈 |
 |---|---|---|
-| 필주 | 고지서 OCR 필드, 분석 결과 구조, 부족 서류, 필요 증거, 법률 근거 호출 조건 | `#22`, `#27`, `#29`, `#40` |
-| 동혁 | 법률 근거 metadata, 법률 검색어 변환 기준, 최신성 표시 기준 | `#22`, `#26`, `#27`, `#29` |
+| 필주 | 고지서 OCR 필드, 분석 결과 구조, 부족 서류, 필요 증거, 법률 근거 입력 방식 분기 | `#22`, `#27`, `#29`, `#40` |
+| 동혁 | 법령 원문/조문 metadata, RDB 적재 구조, 최신성 표시 기준 | `#20`, `#22` |
 | 재강 | 과실비율 텍스트 ML/판례·사례 검색 결과 schema, 단정 방지 기준 | `#22`, `#29`, `#40` |
 | 주희 | 영상·이미지 분석 결과 schema, key frame, 장면 요약, confidence | `#22`, `#29`, `#40` |
 
@@ -75,9 +75,9 @@
 | 이슈 | 오늘 업데이트할 내용 | PM 확인 포인트 |
 |---|---|---|
 | `#23 feat-fine-notice-ocr-intake-flow` | 고지서 OCR input/output 필드, 필수 필드, 누락 필드, OCR 실패/부분 인식 시 재업로드·수동 입력·추가 질문 흐름 | `structured_result.notice_fields`, `ocr_status`, `missing_fields`가 `#22`와 연결되는지 |
-| `#24 feat-fine-penalty-rule-mapping` | 과태료·범칙금·벌칙 분석용 룰/매핑 데이터 범위 | 동혁 법률 원문 DB와 중복되지 않는 분석용 데이터인지 |
+| `#24 feat-fine-penalty-rule-mapping` | 과태료·범칙금·벌칙 분석용 룰/매핑 데이터 범위 | 감경 판단 output schema와 `FINE_RULES` 적용 기준이 분리되어 있는지 |
 | `#25 feat-fine-analysis-detail-view` | 처분 단계, 이의제기 가능성, 부족 서류, 필요 증거 표시 구조 | 결과 화면과 `#12` 화면 흐름에 연결 가능한지 |
-| `#26 feat-fine-law-ground-search` | 법률 근거 검색 노드 호출 시점, 필요한 케이스/불필요한 케이스 | 동혁의 법률 검색 input과 맞는지 |
+| `#26 feat-fine-law-ground-search` | 법률 근거 항상 호출 원칙, `law_code` exact 입력과 `violation_text` semantic 입력 분기, 감경 판단 직접 처리 기준 | 호출 필요/불필요 표가 아니라 입력 방식 판단표로 정리됐는지 |
 | `#27 feat-objection-draft-report-node` | 이의신청서 생성 노드로 넘길 분석 결과, 부족 서류, 필요 증거, 사용자 추가 입력 조건 | `#27`의 input 조건과 맞는지 |
 | `#28 test-fine-mvp-sample-case-validation` | 고지서 샘플 종류, 확보 방식, 샘플별 일반 분석 vs 법률 근거 포함 분석 비교 계획 | `#40`의 `INT-001`, `INT-002`, `INT-005` 실행 가능 여부 |
 
@@ -86,8 +86,10 @@
 - 고지서 샘플 5~6개 목록 또는 확보 계획
 - 고지서 OCR input/output schema 초안
 - OCR 실패/부분 인식 시 fallback 흐름
-- 일반 분석 결과와 법률 근거 포함 분석 결과 비교표 초안
-- 법률 근거 검색 노드 호출 필요 여부와 호출 단계 판단 근거
+- 법률 근거 입력 방식 판단표 초안
+- 필주 `law_search_node`는 항상 호출하고, `law_code` 기반 exact 입력과 `violation_text` 기반 natural language semantic 입력으로 구분
+- 서류 단계 정규화 기준: `사전통지서 = 1차`, `사전통지서 독촉 = 2차 통지서`
+- 감경 판단은 필주 범위에서 직접 처리
 
 ### 최신 확인 사항
 
@@ -105,15 +107,13 @@
 |---|---|---|
 | `#20 feat-traffic-law-data-pipeline` | 법률 데이터 범위, API key 필요 여부, 기존 코드 활용 방식, 수집·전처리·DB 적재 파이프라인 계획 | 도로교통법, 시행령, 시행규칙, 고시/행정 기준 중 MVP 범위가 명확한지 |
 | `#22 feat-agent-result-schema-and-rag-contract` | 법률 근거 검색 결과 metadata schema | `law_name`, `article`, `paragraph`, `item`, `effective_date`, `retrieved_at`, `jurisdiction`, `source_reference`가 포함되는지 |
-| `#26 feat-fine-law-ground-search` | 고지서 위반 유형을 법률 검색어로 변환하는 기준 | 필주의 `law_code`, `violation_text`, `notice_stage`와 맞는지 |
-| `#9 epic-legal-precedent-data-ingestion-and-rag` | 법률 데이터와 판례/사례 데이터의 경계 | 판례가 아닌 법령 계열 데이터로 범위가 제한되는지 |
 
 ### 오늘 받아야 할 구체 산출물
 
 - 법률 데이터 source 목록
 - 법률 원문/조문 metadata schema
-- 고지서 위반 유형 -> 법률 검색어 변환 기준
-- 법률 근거 검색 결과가 Supervisor에 전달되는 구조 초안
+- 법령 원문/조문 metadata schema
+- 법령 DB/RAG 검색 결과가 근거 metadata로 전달되는 구조 초안
 - 법률 데이터 최신성 표시 기준
 
 ### 최신 확인 사항
@@ -188,7 +188,7 @@
 | 공통 Agent 결과 schema | 7개 필드 사용 여부: `node_name`, `node_code`, `status`, `summary`, `structured_result`, `evidence`, `next_actions`, `limitations` |
 | 노드 정식 명칭 | 고지서 OCR·과태료/범칙금 분석 노드, 법률 근거 검색 노드, 텍스트 ML/판례·사례 검색 노드, 영상·이미지 분석 노드, 이의신청서 생성/리포트 노드 |
 | Agent 식별 코드값 | `fine_notice_analysis`, `law_ground_search`, `text_ml_case_search`, `vision_media_analysis`, `objection_report_generation` 후보 확정 여부 |
-| 법률 근거 검색 호출 시점 | OCR 직후, 고지서 분석 후, 이의신청서 생성 전 중 어떤 조건에서 호출할지 |
+| 법률 근거/감경 판단 호출 시점 | 고지서 OCR 후 필주 `law_search_node`는 항상 호출하고, `law_code`가 있으면 exact 입력, 없으면 `violation_text` natural language semantic 입력으로 처리한다. 감경 판단은 필주 범위에서 처리한다. |
 | 추가 질문 기준 | 어떤 필드가 없으면 분석하지 않고 질문할지 |
 | guardrail | 법률 단정, 과실비율 수치 단정, 제출 성공 보장 표현 금지 |
 | API 명세 우선순위 | 챗봇 메시지, 파일 업로드, 분석 Job, Agent 결과 조회, 리포트, 이의신청서 초안 중 무엇부터 문서화할지 |
