@@ -395,3 +395,16 @@
   - 진행도는 기능 구현 완료율이 아니라 이슈 관리/문서화/커밋 근거 기준의 추정치로 명시했다.
   - 현재 브랜치 기준 기본 브랜치 대비 추가 커밋은 2개, 변경 파일은 58개, 추가 라인은 8,766 lines다.
   - 커밋 메시지에 `#이슈번호`가 직접 포함된 커밋은 없어 이슈별 직접 연결 커밋 수는 0개로 기록했다.
+
+## 2026-06-19 폴더 구조 및 dev 반영 이슈 확인
+
+- 현재 원격 `dev`는 `f3ff6aec796654ac41d5435fe9e1d6680e20a1c8` 초기 커밋 상태이며, 루트 골격은 `README.md`, `app/`, `ai/`, `docs/`, `etl/`, `storage/`, `test/` README 중심이다.
+- 현재 브랜치 `docs-wbs-owner-deliverable-plan`은 `origin/dev` 대비 4개 커밋 앞서 있으며, 추가 내용은 주로 WBS, 화면설계, 이슈 템플릿, PDF/output, GitHub 동기화 스크립트다.
+- GitHub Issue 최신 조회 기준으로 `폴더 구조`, `프로젝트 구조`, `scaffold`를 직접 제목으로 다루는 전용 이슈는 없다.
+- 폴더 구조 작업을 기존 이슈에 연결한다면 가장 가까운 후보는 아래 순서다.
+  - `#3 epic-common-architecture-data-pipeline`: 공통 아키텍처와 데이터 파이프라인 parent issue.
+  - `#18 feat-separate-domain-case-schemas`: 도메인별 schema 분리와 책임 경계.
+  - `#16 feat-data-source-registry-schema`: 데이터 출처 registry와 원문 위치 metadata.
+  - `#22 feat-agent-result-schema-and-rag-contract`: Agent 결과 schema와 RAG evidence 계약.
+- 다만 구현 문서에는 실제 패키지/폴더 세부 구조가 명시되어 있지 않다. 따라서 `app/ai/etl/storage/test` 하위 구조를 임의로 만들거나 `dev`에 병합하기 전에는 별도 확인이 필요하다.
+- `docs/260619_내부회의.md` 기준으로 구현/문서 커밋은 회의 결정 후 진행하며, 구현 착수용 세부 문서와 커밋/푸시는 각 이슈 브랜치 또는 문서 파일에서 회의 결정 후 진행하도록 기록되어 있다.
