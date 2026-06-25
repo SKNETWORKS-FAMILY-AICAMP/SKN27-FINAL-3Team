@@ -17,11 +17,22 @@
 | 문서 | 목적 |
 |---|---|
 | `wbs-owner-deliverable-plan.md` | WBS, 이슈, 담당자 재배정 기준 |
+| `2026-06-25-meeting-action-summary.md` | 2026-06-25 회의 후속 액션과 챗봇/RAG/리포트 누락 금지 흐름 |
+| `pm-api-json-schema-spec-2026-06-23.md` | Agent/Supervisor/API JSON schema 초안과 화면 표시 계약 |
+| `schema-ready-implementation-checklist-2026-06-24.md` | schema 수신 직후 mock data, 화면 상태, 검증 착수 기준 |
 | `screen-design-specification.md` | 화면설계서 |
 | `screen-design-ui-ux-flow-guide.md` | UI/UX 흐름 설명 |
 | `deployment-readiness-review-2026-06-22.md` | 배포 준비성 검토 보고서 |
 | `hi20260204-maker-solo-execution-close-check-2026-06-22.md` | PM 단독 처리와 close 가능성 점검 |
 | `hi20260204-maker-collaboration-dependencies-2026-06-22.md` | 협업 의존성 상세 보고서 |
+
+## 흐름도 자산
+
+| 경로 | 목적 |
+|---|---|
+| `assets/flowcharts/project-overall-flow-2026-06-25.svg` | 프로젝트 전체 흐름도 원문 |
+| `assets/flowcharts/user-screen-flow-2026-06-25.svg` | 사용자 화면 흐름도 원문 |
+| `assets/flowcharts/internal-processing-flow-2026-06-25.svg` | 내부 처리 흐름도 원문 |
 
 ## 운영 문서
 
