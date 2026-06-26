@@ -1,0 +1,6 @@
+PyYAML
+numpy
+neo4j
+openai
+psycopg2-binary
+sentence-transformers

@@ -1,0 +1,127 @@
+# 1st MVP query-understanding terms for traffic-law search.
+# These terms are not legal evidence. They only expand vague user language into
+# candidate legal search terms. Official provisions must still come from
+# law_provisions[].
+
+terms:
+  - code: personal_mobility
+    type: vehicle_type
+    canonical: 개인형 이동장치
+    user_terms:
+      - 킥보드
+      - 전동킥보드
+      - PM
+      - 전동보드
+    search_terms:
+      - 개인형 이동장치
+      - 원동기장치자전거
+      - 도로교통법
+
+  - code: motorcycle
+    type: vehicle_type
+    canonical: 이륜자동차
+    user_terms:
+      - 오토바이
+      - 바이크
+      - 이륜차
+    search_terms:
+      - 이륜자동차
+      - 원동기장치자전거
+      - 도로교통법
+
+  - code: drunk_driving
+    type: violation_type
+    canonical: 음주운전
+    user_terms:
+      - 술
+      - 음주
+      - 술마시고
+      - 술 먹고
+      - 음주단속
+    search_terms:
+      - 음주운전
+      - 술에 취한 상태
+      - 혈중알코올농도
+      - 운전 금지
+
+  - code: helmet_not_worn
+    type: violation_type
+    canonical: 보호장구 미착용
+    user_terms:
+      - 헬멧
+      - 안전모
+      - 보호장구
+      - 모자 안씀
+    search_terms:
+      - 인명보호 장구
+      - 안전모
+      - 보호장구
+      - 개인형 이동장치
+
+  - code: speeding
+    type: violation_type
+    canonical: 속도위반
+    user_terms:
+      - 속도위반
+      - 과속
+      - 속도 초과
+      - 제한속도
+    search_terms:
+      - 속도위반
+      - 제한속도
+      - 최고속도
+      - 범칙금
+
+  - code: signal_violation
+    type: violation_type
+    canonical: 신호위반
+    user_terms:
+      - 신호위반
+      - 빨간불
+      - 신호 무시
+      - 정지선
+    search_terms:
+      - 신호위반
+      - 신호기
+      - 정지선
+      - 범칙금
+
+  - code: fine_notice
+    type: penalty_type
+    canonical: 과태료 고지
+    user_terms:
+      - 딱지
+      - 고지서
+      - 과태료
+      - 벌금
+      - 범칙금
+    search_terms:
+      - 과태료
+      - 범칙금
+      - 벌칙
+      - 처분 기준
+
+  - code: demerit_points
+    type: penalty_type
+    canonical: 벌점
+    user_terms:
+      - 벌점
+      - 면허점수
+      - 점수
+    search_terms:
+      - 벌점
+      - 운전면허
+      - 행정처분
+
+  - code: license_suspension_or_revocation
+    type: penalty_type
+    canonical: 면허 정지 또는 취소
+    user_terms:
+      - 면허정지
+      - 면허 취소
+      - 면허취소
+      - 정지처분
+    search_terms:
+      - 운전면허 정지
+      - 운전면허 취소
+      - 행정처분
