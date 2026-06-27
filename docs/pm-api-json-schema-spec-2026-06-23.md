@@ -15,6 +15,7 @@
 |---|---|---|
 | 사용자 입력 API | 텍스트, 이미지, 영상, 문서 첨부를 분리해서 Supervisor로 넘기는 계약 | PM 초안 |
 | Supervisor input | Django에서 Supervisor Agent로 넘기는 JSON 패키지 | PM 초안 |
+| Supervisor analysis plan | Agent 호출 전 입력 검증, 실행 순서, fallback 조건을 담는 내부 계획 | PM 초안 |
 | Agent result envelope | 모든 Agent가 공통으로 반환해야 하는 wrapper JSON | PM 초안 |
 | Agent별 structured_result | 각 Agent가 envelope 안에 넣어야 하는 핵심 결과 JSON | 담당자 확인 필요 |
 | Supervisor display output | LLM 답변과 HTML 화면설계서 결과 카드에 뿌릴 JSON | PM 초안 |
@@ -40,6 +41,7 @@
 | `job.status` | `queued`, `running`, `success`, `partial`, `failed` | 분석 job 진행 상태 |
 | `agent.status` | `success`, `partial`, `failed` | Agent 결과 envelope |
 | `card_type` | `fine_notice`, `fault_ratio`, `law_ground`, `vision`, `objection_report` | 화면 결과 카드 |
+| `analysis_step.status` | `ready`, `blocked`, `running`, `success`, `partial`, `failed`, `skipped` | `analysis_plan.steps[]`, 진행 상태 |
 | `error.code` | `auth_required`, `forbidden`, `missing_required_field`, `invalid_file`, `analysis_failed` | API 오류 응답 |
 
 ## 2. 공통 API 오류 응답
@@ -136,6 +138,10 @@
 
 고지서 이미지, 사고 영상, 증빙 문서 파일을 저장하고 분석 가능한 metadata를 반환한다. 실제 파일 전송은 multipart가 될 수 있으나, API 명세에서는 metadata JSON을 기준으로 설명한다.
 
+> 2026-06-27 Django mock 구현 메모:
+> 중간발표용 backend는 운영 후보 `/api/files/` 대신 `POST /api/mock/attachments/`, `GET /api/mock/attachments/`, `GET /api/mock/attachments/{attachment_id}/`를 제공한다. multipart 파일은 `backend/media/mock_uploads/`에 임시 저장하고, JSON metadata-only 등록도 허용한다. 응답의 `attachment.agent_handoff`를 `attachments[]` 입력으로 넘겨 Supervisor/Agent handoff를 검증한다.
+> `POST /api/mock/chat/messages/`와 `POST /api/mock/agents/plans/run/`는 `attachments=[{"attachment_id":"att_..."}]`만 받아도 저장된 mock metadata를 조회해 `purpose`, `type`, `storage_uri`, `content_type`, `size_bytes`를 자동 보강한다. 조회 실패 시 `attachment_resolution.unresolved_attachment_ids`와 `limitations`에 남긴다.
+
 #### Request metadata JSON
 
 ```json
@@ -162,6 +168,33 @@
 }
 ```
 
+#### Mock response JSON
+
+```json
+{
+  "attachment": {
+    "attachment_id": "att_0001",
+    "session_id": "ses_20260623_0001",
+    "purpose": "fine_notice",
+    "type": "image",
+    "original_filename": "notice.jpg",
+    "content_type": "image/jpeg",
+    "size_bytes": 394820,
+    "storage_uri": "mock://uploads/att_0001/notice.jpg",
+    "status": "uploaded",
+    "agent_handoff": {
+      "attachment_id": "att_0001",
+      "purpose": "fine_notice",
+      "type": "image",
+      "storage_uri": "mock://uploads/att_0001/notice.jpg",
+      "content_type": "image/jpeg",
+      "size_bytes": 394820
+    },
+    "limitations": ["mock local storage"]
+  }
+}
+```
+
 | Field | 필수성 | Type/Allowed | 왜 필요한가 | 사용 위치와 누락 시 처리 |
 |---|---|---|---|---|
 | `session_id` | 필수 | string | 업로드 파일을 대화와 소유자 권한에 연결한다. | 없으면 400. |
@@ -173,6 +206,8 @@
 | `file_type` | 필수 | enum | Supervisor input의 `input_modalities`로 변환된다. | 없으면 routing 불가. |
 | `privacy_risk` | 필수 | boolean | 개인정보 보호, masking, 보관 제한에 필요하다. | 없으면 `true`로 간주. |
 | `status` | 필수 | string | 업로드 완료 여부를 FE에 표시한다. | 없으면 업로드 성공으로 처리하지 않는다. |
+| `storage_uri` | 조건부 필수 | string | Agent adapter가 실제 파일 또는 object storage 위치를 참조한다. | mock은 `mock://...`, 운영은 object storage URI 후보. |
+| `agent_handoff` | 조건부 필수 | object | Supervisor/Agent 호출에 넘길 최소 첨부 metadata다. | mock backend에서 우선 제공한다. |
 
 ## 5. Supervisor input package
 
@@ -211,11 +246,84 @@ Django service layer가 사용자 메시지와 파일 metadata를 정리해 Supe
 | `missing_inputs` | 필수 | string[] | Agent 호출 전 부족한 입력을 명시한다. | 없으면 추가 질문 카드 생성 불가. |
 | `limitations` | 필수 | string[] | 개인정보, 입력 품질, 근거 부족을 사용자에게 표시한다. | 없으면 빈 배열. |
 
+### 5.1 Supervisor `analysis_plan` package
+
+Supervisor는 사용자 입력을 바로 Agent에 넘기지 않고, 먼저 실행 가능한 호출 계획을 만든다. 이 계획은 내부 상태가 기본이며, 화면에는 `progress`, `pending_questions`, `limitations`로 변환해서 보여준다.
+
+```json
+{
+  "plan_id": "plan_0001",
+  "session_id": "ses_20260623_0001",
+  "message_id": "msg_0001",
+  "routing_intent": "objection_request",
+  "input_summary": {
+    "has_user_command": true,
+    "modalities": ["text", "image"],
+    "attachment_purposes": ["fine_notice"]
+  },
+  "required_inputs": ["fine_notice_image", "user_facts"],
+  "pending_questions": [
+    {
+      "field": "user_facts",
+      "question": "이의신청 사유와 당시 상황을 입력해 주세요."
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "node_code": "fine_notice_analysis",
+      "status": "ready",
+      "required_inputs": ["attachments[purpose=fine_notice]"],
+      "depends_on": [],
+      "fallback": "missing_input_question"
+    },
+    {
+      "order": 2,
+      "node_code": "law_ground_search",
+      "status": "blocked",
+      "required_inputs": ["law_code|violation_text"],
+      "depends_on": ["fine_notice_analysis"],
+      "fallback": "semantic_search_or_limitations"
+    },
+    {
+      "order": 3,
+      "node_code": "objection_report_generation",
+      "status": "blocked",
+      "required_inputs": ["notice_analysis_result", "law_ground_result", "user_facts"],
+      "depends_on": ["fine_notice_analysis", "law_ground_search"],
+      "fallback": "pending_questions"
+    }
+  ],
+  "blocked_reason": "user_facts가 없어 초안 생성은 보류합니다.",
+  "limitations": []
+}
+```
+
+| Field | 필수성 | Type/Allowed | 왜 필요한가 | 사용 위치와 누락 시 처리 |
+|---|---|---|---|---|
+| `plan_id` | 필수 | string | 한 메시지 안에서 호출 계획과 실행 결과를 추적한다. | 없으면 progress와 Agent result 연결이 어렵다. |
+| `session_id` | 필수 | string | 대화와 권한 경계를 유지한다. | 없으면 Supervisor 실행 보류. |
+| `message_id` | 필수 | string | 사용자 입력과 계획을 연결한다. | 없으면 결과 재조회 시 추적 불가. |
+| `routing_intent` | 필수 | enum | 어떤 분석 흐름을 계획했는지 표시한다. | 없으면 계획 생성 실패로 본다. |
+| `input_summary` | 필수 | object | 명령문, 첨부, modality를 요약한다. | 없으면 디버깅과 화면 진행 문구 생성이 어렵다. |
+| `required_inputs` | 필수 | string[] | 전체 흐름에서 필요한 입력을 표시한다. | 없으면 부족 입력 판단 불가. |
+| `pending_questions` | 필수 | object[] | 부족 입력이 있을 때 사용자에게 되물을 질문이다. | 없으면 빈 배열. |
+| `steps[]` | 필수 | object[] | 실행할 Agent와 순서를 정의한다. | 비어 있으면 Agent 호출 없이 일반 답변 또는 보류. |
+| `steps[].node_code` | 필수 | string | Agent result envelope의 `node_code`와 맞춘다. | 알 수 없는 node면 해당 step은 `skipped`. |
+| `steps[].status` | 필수 | enum | 호출 가능, 대기, 실패, 생략 상태를 표시한다. | 없으면 `blocked`로 처리하고 확인 필요. |
+| `steps[].depends_on` | 필수 | string[] | 선행 Agent 결과 의존성을 표시한다. | 없으면 빈 배열. |
+| `steps[].fallback` | 선택 | string/null | 실패 또는 입력 부족 시 다음 행동을 정한다. | 없으면 Supervisor가 `limitations`에 기록. |
+| `blocked_reason` | 선택 | string/null | 계획 전체가 실행 보류된 이유를 설명한다. | 없으면 실행 가능으로 본다. |
+| `limitations` | 필수 | string[] | 입력 품질, 권한, 근거 부족 한계를 표시한다. | 없으면 빈 배열. |
+
 ## 6. 분석 job API
 
 ### 6.1 `POST /api/analysis/jobs/`
 
 Supervisor 분석 job을 생성한다.
+
+> 2026-06-27 Django mock 구현 메모:
+> 중간발표용 backend는 운영 후보 `/api/analysis/jobs/` 대신 `POST /api/mock/analysis/jobs/`, `GET /api/mock/analysis/jobs/`, `GET /api/mock/analysis/jobs/{job_id}/`를 제공한다. mock job은 실제 queue, Redis, DB 없이 `backend/media/mock_analysis_jobs/{job_id}/job.json`에 저장하며, 하나의 `job_id` 아래 `chat_response`, `analysis_plan`, `node_execution`, `history`를 묶는다.
 
 #### Request JSON
 
@@ -1082,6 +1190,9 @@ Frontend는 Agent raw output을 직접 화면에 뿌리지 않는다. `GET /api/
 ## 14. Agent node 간 input/output handoff
 
 아래 표는 각 노드가 Supervisor 또는 다른 Agent에게 넘겨야 하는 최소 handoff 계약이다. 담당자 output이 수신되기 전까지는 PM 초안이며, 충돌 시 구현하지 않고 확인한다.
+
+> 2026-06-27 구현 메모:
+> Django mock backend는 `GET /api/mock/agents/nodes/`, `POST /api/mock/agents/nodes/run/`, `POST /api/mock/agents/plans/run/`를 제공한다. 이 endpoint들은 실제 Agent, RAG, MCP, LLM을 호출하지 않고 `analysis_plan.steps[].node_code`를 공통 Agent envelope mock output으로 변환해 프론트엔드와 담당자별 node adapter 연결 위치를 검증한다.
 
 | 흐름 | 보내는 쪽 | 받는 쪽 | 전달 JSON 핵심 필드 | 화면/API에서 필요한 이유 | 확인 담당 |
 |---|---|---|---|---|---|

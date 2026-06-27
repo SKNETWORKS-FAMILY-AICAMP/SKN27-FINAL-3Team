@@ -11,9 +11,13 @@ const MOCK_ATTACHMENTS = [
 ];
 
 const STATUS_LABELS = {
-  pending: "분석 중",
-  partial: "추가 확인",
+  blocked: "대기",
   failed: "실패",
+  partial: "추가 확인",
+  pending: "분석 중",
+  ready: "준비",
+  running: "실행 중",
+  skipped: "생략",
   success: "완료",
 };
 
@@ -26,6 +30,7 @@ export default function ChatbotMockFlow({ apiBase = "/api/mock" }) {
   const [loading, setLoading] = useState(false);
 
   const progressStatus = response?.progress?.status || "pending";
+  const analysisSteps = response?.analysis_plan?.steps || [];
   const canRunReportAction = response?.report_links?.length > 0;
 
   const requestPayload = useMemo(
@@ -129,6 +134,17 @@ export default function ChatbotMockFlow({ apiBase = "/api/mock" }) {
 
           <p>{response.assistant_message}</p>
 
+          {analysisSteps.length > 0 && (
+            <ol className="chatbot-mock__plan" aria-label="Supervisor analysis plan">
+              {analysisSteps.map((step) => (
+                <li className={`is-${step.status}`} key={`${step.order}-${step.node_code}`}>
+                  <strong>{step.node_code}</strong>
+                  <span>{STATUS_LABELS[step.status] || step.status}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+
           {response.pending_questions?.map((item) => (
             <div className="chatbot-mock__question" key={item.field}>
               <strong>{item.field}</strong>
@@ -210,6 +226,7 @@ function buildFallbackResponse(payload) {
       ...common,
       assistant_message: "현재 입력만으로는 분석 결과를 만들 수 없습니다.",
       progress: { status: "failed", message: "분석 가능한 입력을 찾지 못했습니다." },
+      analysis_plan: buildFallbackAnalysisPlan({ status: "failed" }),
       cards: [],
       report_links: [],
       limitations: ["지원 형식의 고지서 이미지, PDF, 설명 텍스트를 다시 입력해 주세요."],
@@ -221,6 +238,7 @@ function buildFallbackResponse(payload) {
       ...common,
       assistant_message: "일부 결과만 확인되었습니다. 추가 정보가 필요합니다.",
       progress: { status: "partial", message: "필수 입력 보완이 필요합니다." },
+      analysis_plan: buildFallbackAnalysisPlan({ status: "partial" }),
       pending_questions: [
         {
           field: "user_facts",
@@ -244,6 +262,7 @@ function buildFallbackResponse(payload) {
     ...common,
     assistant_message: "고지서 내용과 관련 법령 근거 후보를 확인했습니다.",
     progress: { status: status === "pending" ? "pending" : "success", message: "분석 결과를 표시할 수 있습니다." },
+    analysis_plan: buildFallbackAnalysisPlan({ status }),
     cards: [
       {
         card_type: "fine_notice",
@@ -260,6 +279,30 @@ function buildFallbackResponse(payload) {
     ],
     report_links: [{ action: "save" }, { action: "download" }],
     limitations: ["프론트엔드 fallback mock 결과이며 실제 Agent 호출 결과가 아닙니다."],
+  };
+}
+
+function buildFallbackAnalysisPlan({ status }) {
+  const stepStatuses = {
+    failed: ["failed", "skipped", "skipped", "skipped"],
+    partial: ["success", "partial", "blocked", "blocked"],
+    pending: ["running", "blocked", "blocked", "blocked"],
+    success: ["success", "success", "success", "partial"],
+  }[status] || ["success", "success", "success", "partial"];
+
+  return {
+    plan_id: `plan_mock_${Date.now()}`,
+    routing_intent: "objection_request",
+    steps: [
+      "input_context_validation",
+      "fine_notice_analysis",
+      "law_ground_search",
+      "objection_report_generation",
+    ].map((node_code, index) => ({
+      order: index + 1,
+      node_code,
+      status: stepStatuses[index],
+    })),
   };
 }
 

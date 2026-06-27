@@ -1,0 +1,13 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: skn27-demo-backend
+    container_name: skn27-demo-backend
+    environment:
+      DJANGO_DEBUG: "1"
+      DJANGO_SECRET_KEY: "dev-secret"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1]"
+    ports:
+      - "8000:8000"

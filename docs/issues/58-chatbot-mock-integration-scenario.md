@@ -16,8 +16,9 @@
 1. 사용자가 챗봇에 고지서 관련 질문을 입력한다.
 2. 사용자가 고지서 이미지 attachment metadata를 함께 보낸다.
 3. mock service가 `fine_notice`, `law_ground`, `objection_report` 카드를 반환한다.
-4. 사용자가 리포트 저장 또는 다운로드 action을 누른다.
-5. mock report action이 `report_id`, `case_id`, `status`, `download_url` 후보를 반환한다.
+4. mock service가 `analysis_plan.steps[]`로 입력 검증, 고지서 분석, 법령 근거, 이의신청서 생성의 상태를 반환한다.
+5. 사용자가 리포트 저장 또는 다운로드 action을 누른다.
+6. mock report action이 `report_id`, `case_id`, `status`, `download_url` 후보를 반환한다.
 
 추가로 과실비율 흐름은 MCP/외부 조회 없이 사고 설명 기반 mock 결과만 확인한다.
 
@@ -47,6 +48,7 @@ python -m pytest test/test_chatbot_mock_service.py
 - 실제 Agent/RAG/MCP 호출 없이 mock fixture만으로 동작한다.
 - 과실비율 흐름에서 `fault_ratio`, `similar_case`, `recommended_evidence` 카드와 `similar_cases` schema가 반환된다.
 - 과실비율 수치 확정 문구가 아니라 `ratio_range_label`과 `limitations`로 표시된다.
+- 모든 message response에 `analysis_plan`이 포함되고, 실패 입력은 Agent 실행 전 `failed/skipped` step으로 표시된다.
 
 ## 5. 남은 검증
 

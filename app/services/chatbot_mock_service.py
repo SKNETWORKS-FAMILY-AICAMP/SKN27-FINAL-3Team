@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.services.attachment_mock_service import resolve_attachment_references
+
 
 SCENARIO_INTENTS = {
     "fine_notice": "objection_request",
@@ -261,21 +263,71 @@ def create_session(user_id: str | None = None) -> dict[str, Any]:
 
 
 def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = resolve_attachment_references(payload)
     scenario = payload.get("mock_scenario") or _infer_scenario(payload)
     requested_status = payload.get("mock_status") or _infer_status(payload)
     scenario_fixtures = MOCK_SCENARIO_RESULTS.get(scenario, MOCK_SCENARIO_RESULTS["fine_notice"])
     fixture = deepcopy(scenario_fixtures.get(requested_status, scenario_fixtures["success"]))
+    _append_attachment_resolution_limitations(fixture, payload)
+    message_id = f"msg_{uuid4().hex[:12]}"
+    session_id = payload.get("session_id") or f"ses_{uuid4().hex[:12]}"
+    routing_intent = payload.get("routing_intent") or SCENARIO_INTENTS.get(scenario, "general")
     fixture.update(
         {
-            "message_id": f"msg_{uuid4().hex[:12]}",
-            "session_id": payload.get("session_id") or f"ses_{uuid4().hex[:12]}",
+            "message_id": message_id,
+            "session_id": session_id,
             "mock_scenario": scenario,
-            "routing_intent": payload.get("routing_intent") or SCENARIO_INTENTS.get(scenario, "general"),
+            "routing_intent": routing_intent,
             "status": fixture["progress"]["status"],
             "created_at": _now_iso(),
+            "attachments": deepcopy(payload.get("attachments", [])),
+            "attachment_resolution": deepcopy(payload.get("attachment_resolution", {})),
+            "analysis_plan": build_analysis_plan(
+                scenario=scenario,
+                requested_status=requested_status,
+                payload=payload,
+                session_id=session_id,
+                message_id=message_id,
+                routing_intent=routing_intent,
+                pending_questions=fixture.get("pending_questions", []),
+            ),
         }
     )
     return fixture
+
+
+def build_analysis_plan(
+    *,
+    scenario: str,
+    requested_status: str,
+    payload: dict[str, Any],
+    session_id: str,
+    message_id: str,
+    routing_intent: str,
+    pending_questions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Create the Supervisor call plan that precedes mock Agent execution."""
+
+    steps = _plan_steps_for_scenario(scenario, requested_status)
+    blocked_reason = _plan_blocked_reason(requested_status, pending_questions)
+    return {
+        "plan_id": f"plan_{uuid4().hex[:12]}",
+        "session_id": session_id,
+        "message_id": message_id,
+        "routing_intent": routing_intent,
+        "input_summary": {
+            "has_user_command": bool(payload.get("user_text")),
+            "modalities": _input_modalities(payload),
+            "attachment_purposes": _attachment_purposes(payload),
+        },
+        "required_inputs": _required_inputs_for_scenario(scenario),
+        "pending_questions": deepcopy(pending_questions),
+        "steps": steps,
+        "blocked_reason": blocked_reason,
+        "limitations": [
+            "중간발표용 mock analysis_plan이며 실제 LangGraph 실행 계획은 아닙니다."
+        ],
+    }
 
 
 def perform_report_action(payload: dict[str, Any]) -> dict[str, Any]:
@@ -305,6 +357,141 @@ def _infer_scenario(payload: dict[str, Any]) -> str:
     if "과실" in text or "사고" in text or "블랙박스" in text:
         return "fault_ratio"
     return "fine_notice"
+
+
+def _plan_steps_for_scenario(scenario: str, requested_status: str) -> list[dict[str, Any]]:
+    if scenario == "fault_ratio":
+        base_steps = [
+            _step(1, "input_context_validation", [], "missing_input_question"),
+            _step(2, "text_ml_case_search", ["input_context_validation"], "pending_questions"),
+            _step(3, "law_ground_search", ["text_ml_case_search"], "limitations"),
+            _step(4, "agent_result_validation", ["text_ml_case_search"], "limitations"),
+        ]
+    else:
+        base_steps = [
+            _step(1, "input_context_validation", [], "missing_input_question"),
+            _step(2, "fine_notice_analysis", ["input_context_validation"], "missing_input_question"),
+            _step(3, "law_ground_search", ["fine_notice_analysis"], "semantic_search_or_limitations"),
+            _step(
+                4,
+                "objection_report_generation",
+                ["fine_notice_analysis", "law_ground_search"],
+                "pending_questions",
+            ),
+            _step(5, "agent_result_validation", ["objection_report_generation"], "limitations"),
+        ]
+
+    status_patterns = {
+        "success": ["success", "success", "success", "partial", "success"],
+        "partial": ["success", "partial", "blocked", "blocked", "blocked"],
+        "pending": ["running", "blocked", "blocked", "blocked", "blocked"],
+        "failed": ["failed", "skipped", "skipped", "skipped", "skipped"],
+    }
+    if scenario == "fault_ratio":
+        status_patterns = {
+            "success": ["success", "success", "partial", "success"],
+            "partial": ["success", "partial", "blocked", "blocked"],
+            "pending": ["running", "blocked", "blocked", "blocked"],
+            "failed": ["failed", "skipped", "skipped", "skipped"],
+        }
+
+    statuses = status_patterns.get(requested_status, status_patterns["success"])
+    for step, status in zip(base_steps, statuses, strict=False):
+        step["status"] = status
+    return base_steps
+
+
+def _step(
+    order: int,
+    node_code: str,
+    depends_on: list[str],
+    fallback: str,
+) -> dict[str, Any]:
+    return {
+        "order": order,
+        "node_code": node_code,
+        "status": "ready",
+        "required_inputs": _required_inputs_for_node(node_code),
+        "depends_on": depends_on,
+        "fallback": fallback,
+    }
+
+
+def _required_inputs_for_node(node_code: str) -> list[str]:
+    return {
+        "input_context_validation": ["user_text|attachments"],
+        "fine_notice_analysis": ["attachments[purpose=fine_notice]|user_text"],
+        "law_ground_search": ["law_code|violation_text|search_query"],
+        "objection_report_generation": [
+            "notice_analysis_result",
+            "law_ground_result",
+            "user_facts",
+        ],
+        "text_ml_case_search": ["query_text|accident_context"],
+        "agent_result_validation": ["agent_results"],
+    }.get(node_code, [])
+
+
+def _required_inputs_for_scenario(scenario: str) -> list[str]:
+    if scenario == "fault_ratio":
+        return ["accident_context", "query_text"]
+    return ["fine_notice_image_or_text", "user_facts"]
+
+
+def _plan_blocked_reason(
+    requested_status: str,
+    pending_questions: list[dict[str, Any]],
+) -> str | None:
+    if requested_status == "failed":
+        return "분석 가능한 명령문 또는 첨부자료가 없습니다."
+    if pending_questions:
+        return "필수 입력이 부족해 일부 Agent 호출을 보류합니다."
+    return None
+
+
+def _input_modalities(payload: dict[str, Any]) -> list[str]:
+    modalities = ["text"] if payload.get("user_text") else []
+    for attachment in payload.get("attachments", []):
+        attachment_type = _modality_for_attachment_type(attachment.get("type"))
+        if attachment_type and attachment_type not in modalities:
+            modalities.append(attachment_type)
+    return modalities
+
+
+def _attachment_purposes(payload: dict[str, Any]) -> list[str]:
+    purposes = []
+    for attachment in payload.get("attachments", []):
+        purpose = attachment.get("purpose") or "unknown"
+        if purpose not in purposes:
+            purposes.append(purpose)
+    return purposes
+
+
+def _append_attachment_resolution_limitations(
+    fixture: dict[str, Any],
+    payload: dict[str, Any],
+) -> None:
+    resolution = payload.get("attachment_resolution", {})
+    unresolved_ids = resolution.get("unresolved_attachment_ids") or []
+    metadata_missing_ids = resolution.get("metadata_missing_attachment_ids") or []
+    if not unresolved_ids and not metadata_missing_ids:
+        return
+
+    fixture.setdefault("limitations", [])
+    if unresolved_ids:
+        fixture["limitations"].append(
+            f"attachment metadata를 찾지 못한 ID가 있습니다: {', '.join(unresolved_ids)}"
+        )
+    if metadata_missing_ids:
+        fixture["limitations"].append(
+            f"registry metadata는 없지만 요청 inline metadata로 처리한 첨부가 있습니다: {', '.join(metadata_missing_ids)}"
+        )
+
+
+def _modality_for_attachment_type(attachment_type: Any) -> str | None:
+    if attachment_type in {"pdf", "document", "file", "text"}:
+        return "document"
+    return str(attachment_type) if attachment_type else None
 
 
 def _now_iso() -> str:
