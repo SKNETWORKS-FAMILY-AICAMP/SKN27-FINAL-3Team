@@ -17,6 +17,7 @@ from app.services.agent_node_service import (
 from app.services.analysis_job_mock_service import (
     create_analysis_job,
     get_analysis_job,
+    get_analysis_result,
     list_analysis_jobs,
 )
 from app.services.attachment_mock_service import (
@@ -33,6 +34,7 @@ from app.services.chatbot_mock_service import (
 
 
 MOCK_TO_CANONICAL_PATH_PREFIXES = (
+    ("/api/mock/analysis/results/", "/api/analysis/results/"),
     ("/api/mock/analysis/jobs/", "/api/analysis/jobs/"),
     ("/api/mock/agents/nodes/run/", "/api/agents/nodes/run/"),
     ("/api/mock/agents/plans/run/", "/api/agents/plans/run/"),
@@ -40,6 +42,7 @@ MOCK_TO_CANONICAL_PATH_PREFIXES = (
     ("/api/mock/reports/", "/api/reports/"),
     ("/api/mock/chat/sessions/", "/api/chat/sessions/"),
     ("/api/mock/chat/messages/", "/api/chat/messages/"),
+    ("/api/mock/analysis/results", "/api/analysis/results"),
     ("/api/mock/analysis/jobs", "/api/analysis/jobs"),
     ("/api/mock/agents/nodes/run", "/api/agents/nodes/run"),
     ("/api/mock/agents/plans/run", "/api/agents/plans/run"),
@@ -124,6 +127,23 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             status=404,
         )
     return _json_response(request, {"job": job})
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
+    result = get_analysis_result(job_id)
+    if not result:
+        return _json_response(
+            request,
+            {
+                "error": {
+                    "code": "analysis_result_not_found",
+                    "message": "Requested analysis result was not found.",
+                }
+            },
+            status=404,
+        )
+    return _json_response(request, {"result": result})
 
 
 @csrf_exempt

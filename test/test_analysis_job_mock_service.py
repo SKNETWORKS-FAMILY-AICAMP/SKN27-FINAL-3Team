@@ -1,6 +1,7 @@
 from app.services.analysis_job_mock_service import (
     create_analysis_job,
     get_analysis_job,
+    get_analysis_result,
     list_analysis_jobs,
 )
 from app.services.attachment_mock_service import register_attachment
@@ -40,6 +41,36 @@ def test_create_analysis_job_stores_chat_plan_and_node_execution(monkeypatch, tm
     stored = get_analysis_job(job["job_id"])
     assert stored["job_id"] == job["job_id"]
     assert stored["chat_response"]["message_id"] == job["message_id"]
+
+
+def test_get_analysis_result_returns_display_payload_without_raw_job_details(monkeypatch, tmp_path):
+    monkeypatch.setenv("MOCK_UPLOAD_ROOT", str(tmp_path / "uploads"))
+    monkeypatch.setenv("MOCK_ANALYSIS_JOB_ROOT", str(tmp_path / "jobs"))
+
+    job = create_analysis_job(
+        {
+            "session_id": "ses_result",
+            "user_text": "Please prepare a fine notice objection.",
+            "mock_scenario": "fine_notice",
+            "mock_status": "success",
+        }
+    )
+
+    result = get_analysis_result(job["job_id"])
+
+    assert result["result_id"] == f"res_{job['job_id']}"
+    assert result["job_id"] == job["job_id"]
+    assert result["assistant_message"]["answer"]
+    assert result["progress"][0]["node_code"] == "input_context_validation"
+    assert result["progress"][0]["status"] == "done"
+    assert result["cards"]
+    assert result["agent_results"][0]["node_code"] == "input_context_validation"
+    assert "summary" in result["agent_results"][0]
+    assert result["evidence"]
+    assert result["report_links"][1]["endpoint"].endswith("/download/")
+    assert "analysis_plan" not in result
+    assert "node_execution" not in result
+    assert "chat_response" not in result
 
 
 def test_list_analysis_jobs_filters_by_session(monkeypatch, tmp_path):

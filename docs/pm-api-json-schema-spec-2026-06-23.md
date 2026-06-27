@@ -78,7 +78,7 @@
 운영 배포 흐름을 고려해 Django mock backend도 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더를 요구한다. 현재 mock은 JWT 서명 검증을 하지 않고 Bearer 헤더의 존재와 형식만 확인한다. 실제 운영 전환 시 같은 위치에 JWT 서명, 만료, 사용자 권한 검증을 연결한다.
 
 > 2026-06-28 구현 메모:
-> 운영 후보 path를 미리 검증하기 위해 canonical `/api/...` shadow endpoint를 추가했다. 예를 들어 `POST /api/chat/messages/`, `POST /api/files/`, `POST /api/analysis/jobs/`, `GET /api/agents/nodes/`는 기존 `/api/mock/...` service를 재사용하며 응답에 `api_surface="canonical_mock"`, `execution_mode="mock"`을 포함한다. Canonical 응답 안의 report/file/job 링크도 `/api/...` 형태로 변환한다. 명시적 mock endpoint도 회귀 테스트용으로 유지한다.
+> 운영 후보 path를 미리 검증하기 위해 canonical `/api/...` shadow endpoint를 추가했다. 예를 들어 `POST /api/chat/messages/`, `POST /api/files/`, `POST /api/analysis/jobs/`, `GET /api/analysis/results/{id}/`, `GET /api/agents/nodes/`는 기존 `/api/mock/...` service를 재사용하며 응답에 `api_surface="canonical_mock"`, `execution_mode="mock"`을 포함한다. Canonical 응답 안의 report/file/job 링크도 `/api/...` 형태로 변환한다. 명시적 mock endpoint도 회귀 테스트용으로 유지한다.
 
 공개 endpoint:
 
@@ -700,6 +700,9 @@ Supervisor 분석 job을 생성한다.
 ### 9.1 `GET /api/analysis/results/{id}/`
 
 Agent raw output이 아니라 Supervisor가 병합한 display output을 반환한다.
+
+> 2026-06-28 Django mock 구현 메모:
+> `GET /api/mock/analysis/results/{job_id}/`와 canonical `GET /api/analysis/results/{job_id}/`를 추가했다. mock 구현은 저장된 analysis job에서 `assistant_message`, `progress`, `cards`, `pending_questions`, `attachments`, `report_links`, `evidence`, `agent_results`, `limitations`를 표시용 DTO로 변환하며, raw `analysis_plan`, `node_execution`, `chat_response`는 result 응답에 직접 노출하지 않는다.
 
 ```json
 {

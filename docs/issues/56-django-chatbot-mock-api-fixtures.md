@@ -38,6 +38,7 @@
 | `GET /api/files/{attachment_id}/` | `GET /api/mock/attachments/{attachment_id}/` | 단일 attachment metadata 조회 |
 | `GET/POST /api/analysis/jobs/` | `GET/POST /api/mock/analysis/jobs/` | analysis job 목록/생성 |
 | `GET /api/analysis/jobs/{job_id}/` | `GET /api/mock/analysis/jobs/{job_id}/` | 단일 analysis job 조회 |
+| `GET /api/analysis/results/{job_id}/` | `GET /api/mock/analysis/results/{job_id}/` | 화면 표시용 analysis result 조회 |
 | `GET /api/agents/nodes/` | `GET /api/mock/agents/nodes/` | Agent/Node registry 목록 |
 | `POST /api/agents/nodes/run/` | `POST /api/mock/agents/nodes/run/` | 단일 node 실행 envelope |
 | `POST /api/agents/plans/run/` | `POST /api/mock/agents/plans/run/` | plan step 전체 node 실행 |
@@ -53,6 +54,7 @@
 | `GET /api/mock/analysis/jobs/` | `analysis_jobs` | session별 analysis job 목록 |
 | `POST /api/mock/analysis/jobs/` | `analysis_jobs` | 메시지, plan, node execution을 묶은 job 생성 |
 | `GET /api/mock/analysis/jobs/{job_id}/` | `analysis_job_detail` | 단일 analysis job 상태/결과 조회 |
+| `GET /api/mock/analysis/results/{job_id}/` | `analysis_result` | 화면 표시용 result DTO 조회 |
 | `GET /api/mock/agents/nodes/` | `agent_nodes` | Agent/Node registry 목록 |
 | `POST /api/mock/agents/nodes/run/` | `run_agent_node` | 단일 node mock 실행 결과 envelope 반환 |
 | `POST /api/mock/agents/plans/run/` | `run_agent_plan` | `analysis_plan` steps 전체를 mock node 실행으로 변환 |
@@ -204,6 +206,12 @@ Resolver 결과는 응답의 `attachments[]`, `attachment_resolution`, `analysis
 
 현재 mock은 실제 queue, Redis, DB 없이 `backend/media/mock_analysis_jobs/{job_id}/job.json`에 저장한다. `mock_status=pending`은 job 상태 `running`으로 매핑하고, `mock_job_status`를 주면 UI 상태 테스트용으로 job status를 강제할 수 있다.
 
+### 6.1 Analysis result display DTO
+
+`GET /api/mock/analysis/results/{job_id}/`는 저장된 job을 프론트 표시용 DTO로 변환한다. Canonical shadow endpoint는 `GET /api/analysis/results/{job_id}/`이며 기존 canonical mock 규칙처럼 `api_surface="canonical_mock"`, `execution_mode="mock"`을 포함하고 내부 mock 링크를 `/api/...`로 변환한다.
+
+반환 필드는 `assistant_message`, `progress`, `cards`, `pending_questions`, `attachments`, `report_links`, `evidence`, `agent_results`, `limitations` 중심이다. `GET /api/mock/analysis/jobs/{job_id}/`가 디버깅용 raw 묶음이라면, result endpoint는 화면에 노출할 Supervisor display output 성격이므로 `analysis_plan`, `node_execution`, `chat_response`를 직접 반환하지 않는다.
+
 ## 7. 중간발표 우선 시나리오
 
 MCP, 외부 법령 API, 최신 판례 조회는 중간발표 범위에서 제외한다. mock service는 앱 흐름 확인을 위해 다음 두 시나리오를 우선 지원한다.
@@ -287,12 +295,14 @@ docker compose up --build backend
 - `POST http://127.0.0.1:8001/api/chat/messages/` returns `api_surface=canonical_mock`
 - `POST http://127.0.0.1:8001/api/files/`
 - `POST http://127.0.0.1:8001/api/analysis/jobs/`
+- `GET http://127.0.0.1:8001/api/analysis/results/{job_id}/`
 - `GET http://127.0.0.1:8001/api/agents/nodes/`
 - explicit mock endpoint smoke도 `Authorization: Bearer dev-mock-token` header 포함
 - `GET http://127.0.0.1:8001/api/mock/attachments/?session_id=...`
 - `POST http://127.0.0.1:8001/api/mock/chat/messages/` with `attachments=[{"attachment_id": "..."}]`
 - `POST http://127.0.0.1:8001/api/mock/analysis/jobs/` with `attachments=[{"attachment_id": "..."}]`
 - `GET http://127.0.0.1:8001/api/mock/analysis/jobs/{job_id}/`
+- `GET http://127.0.0.1:8001/api/mock/analysis/results/{job_id}/`
 - `GET http://127.0.0.1:8001/api/mock/analysis/jobs/?session_id=...`
 - `POST http://127.0.0.1:8001/api/mock/agents/plans/run/` with `attachments=[{"attachment_id": "..."}]`
 - `GET http://127.0.0.1:8001/api/mock/agents/nodes/`

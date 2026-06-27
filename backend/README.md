@@ -91,6 +91,7 @@ docker run --rm -p 8000:8000 `
 | `GET` | `/api/files/{attachment_id}/` | `/api/mock/attachments/{attachment_id}/` |
 | `GET`/`POST` | `/api/analysis/jobs/` | `/api/mock/analysis/jobs/` |
 | `GET` | `/api/analysis/jobs/{job_id}/` | `/api/mock/analysis/jobs/{job_id}/` |
+| `GET` | `/api/analysis/results/{job_id}/` | `/api/mock/analysis/results/{job_id}/` |
 | `GET` | `/api/agents/nodes/` | `/api/mock/agents/nodes/` |
 | `POST` | `/api/agents/nodes/run/` | `/api/mock/agents/nodes/run/` |
 | `POST` | `/api/agents/plans/run/` | `/api/mock/agents/plans/run/` |
@@ -107,6 +108,7 @@ docker run --rm -p 8000:8000 `
 | `GET` | `/api/mock/analysis/jobs/` | session별 mock analysis job 목록 |
 | `POST` | `/api/mock/analysis/jobs/` | 메시지, plan, node 실행을 job으로 묶어 생성 |
 | `GET` | `/api/mock/analysis/jobs/{job_id}/` | 단일 analysis job 상태와 결과 조회 |
+| `GET` | `/api/mock/analysis/results/{job_id}/` | 화면 표시용 analysis result DTO 조회 |
 | `GET` | `/api/mock/agents/nodes/` | Agent/Node registry 목록 |
 | `POST` | `/api/mock/agents/nodes/run/` | 단일 Agent/Node mock 실행 envelope 반환 |
 | `POST` | `/api/mock/agents/plans/run/` | `analysis_plan` 기반 전체 node mock 실행 |
@@ -155,6 +157,12 @@ docker run --rm -p 8000:8000 `
 
 `POST /api/mock/analysis/jobs/` 응답의 `status`는 `queued`, `running`, `success`, `partial`, `failed` 중 하나다. 현재 mock backend는 실제 queue 없이 즉시 실행한 결과를 JSON sidecar로 저장한다.
 
+## Analysis result display DTO
+
+`GET /api/mock/analysis/results/{job_id}/`는 프론트 화면이 바로 사용하는 표시용 결과를 반환한다. Canonical shadow endpoint는 `GET /api/analysis/results/{job_id}/`이며 응답에 `api_surface: "canonical_mock"`, `execution_mode: "mock"`을 포함하고 report/file/job 링크를 `/api/...` 형태로 변환한다.
+
+반환 필드는 `assistant_message`, `progress`, `cards`, `pending_questions`, `attachments`, `report_links`, `evidence`, `agent_results`, `limitations` 중심이다. 디버깅용 원본 묶음인 `analysis_plan`, `node_execution`, `chat_response`는 `GET /api/mock/analysis/jobs/{job_id}/`에서만 조회한다.
+
 ## Agent adapter 계약
 
 `GET /api/mock/agents/nodes/` 응답의 각 node에는 `adapter_contract`가 포함된다. 실제 Agent 구현체는 이 계약의 함수명과 입출력 필드를 맞춘다.
@@ -192,6 +200,7 @@ Invoke-RestMethod `
 - 과실비율 흐름: `mock_scenario=fault_ratio`
 - 파일/첨부 metadata 연결: `POST /api/files/`, mock alias `POST /api/mock/attachments/`
 - 분석 job 추적: `POST /api/analysis/jobs/`, `GET /api/analysis/jobs/{job_id}/`
+- 분석 결과 표시: `GET /api/analysis/results/{job_id}/`, mock alias `GET /api/mock/analysis/results/{job_id}/`
 - Agent/Node 연결 경계: `GET /api/agents/nodes/`, `POST /api/agents/plans/run/`
 - JWT 인증은 현재 mock에서 Bearer 헤더 형식과 실패 envelope까지 연결, 운영 전환 때 실제 JWT 서명/권한 검증으로 교체
 - MCP, 최신 법령 조회, 외부 API, 실제 ML/RAG 호출은 제외

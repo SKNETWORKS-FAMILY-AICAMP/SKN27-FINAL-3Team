@@ -402,6 +402,19 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["job"]["job_id"], job["job_id"])
 
+        result_response = self.client.get(f"/api/mock/analysis/results/{job['job_id']}/")
+        self.assertEqual(result_response.status_code, 200)
+        result = result_response.json()["result"]
+        self.assertEqual(result["job_id"], job["job_id"])
+        self.assertIn("answer", result["assistant_message"])
+        self.assertIn("progress", result)
+        self.assertIn("cards", result)
+        self.assertIn("agent_results", result)
+        self.assertIn("evidence", result)
+        self.assertNotIn("analysis_plan", result)
+        self.assertNotIn("node_execution", result)
+        self.assertNotIn("chat_response", result)
+
     def test_canonical_analysis_jobs_endpoint_reuses_mock_job_service(self):
         response = self.client.post(
             "/api/analysis/jobs/",
@@ -428,6 +441,29 @@ class ChatbotMockApiTests(TestCase):
         detail = self.client.get(f"/api/analysis/jobs/{job['job_id']}/")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["api_surface"], "canonical_mock")
+
+        result_response = self.client.get(f"/api/analysis/results/{job['job_id']}/")
+        self.assertEqual(result_response.status_code, 200)
+        result_body = result_response.json()
+        result = result_body["result"]
+        self.assertEqual(result_body["api_surface"], "canonical_mock")
+        self.assertEqual(result_body["execution_mode"], "mock")
+        self.assertIn(
+            "/api/reports/",
+            {link["endpoint"] for link in result["report_links"]},
+        )
+        self.assertTrue(
+            all(
+                not link["endpoint"].startswith("/api/mock/")
+                for link in result["report_links"]
+            )
+        )
+
+    def test_analysis_result_endpoint_returns_404_for_missing_job(self):
+        response = self.client.get("/api/mock/analysis/results/job_missing/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "analysis_result_not_found")
 
     def test_analysis_job_list_endpoint_filters_by_session(self):
         response = self.client.post(
