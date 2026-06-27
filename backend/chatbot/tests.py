@@ -53,6 +53,18 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(error["auth"]["scheme"], "Bearer")
         self.assertEqual(error["auth"]["reason"], "missing_token")
 
+    def test_protected_canonical_endpoint_requires_authorization_header(self):
+        response = Client().post(
+            "/api/chat/messages/",
+            data={"session_id": "ses_missing_auth", "user_text": "hello"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "auth_required")
+        self.assertEqual(error["auth"]["reason"], "missing_token")
+
     def test_protected_mock_endpoint_rejects_expired_mock_token(self):
         response = Client(HTTP_AUTHORIZATION="Bearer expired").post(
             "/api/mock/chat/messages/",
@@ -111,6 +123,29 @@ class ChatbotMockApiTests(TestCase):
         self.assertIn("structured_result", body)
         self.assertIn("similar_cases", body["structured_result"])
 
+    def test_canonical_chat_message_endpoint_reuses_mock_service(self):
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_canonical_chat",
+                "user_text": "이 고지서로 이의신청서를 만들 수 있을까요?",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["api_surface"], "canonical_mock")
+        self.assertEqual(body["execution_mode"], "mock")
+        self.assertEqual(body["mock_scenario"], "fine_notice")
+        self.assertIn("analysis_plan", body)
+        self.assertIn(
+            "/api/reports",
+            {link["endpoint"] for link in body["report_links"]},
+        )
+
     def test_agent_nodes_endpoint_returns_registry(self):
         response = self.client.get("/api/mock/agents/nodes/")
 
@@ -129,6 +164,18 @@ class ChatbotMockApiTests(TestCase):
         self.assertIn(
             "structured_result",
             fine_notice_node["adapter_contract"]["required_output_fields"],
+        )
+
+    def test_canonical_agent_nodes_endpoint_marks_canonical_mock_surface(self):
+        response = self.client.get("/api/agents/nodes/")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["api_surface"], "canonical_mock")
+        self.assertEqual(body["execution_mode"], "mock")
+        self.assertIn(
+            "fine_notice_analysis",
+            {node["node_code"] for node in body["nodes"]},
         )
 
     def test_agent_node_run_endpoint_returns_envelope(self):
@@ -202,6 +249,29 @@ class ChatbotMockApiTests(TestCase):
         detail = self.client.get(f"/api/mock/attachments/{attachment['attachment_id']}/")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["attachment"]["attachment_id"], attachment["attachment_id"])
+
+    def test_canonical_files_endpoint_reuses_attachment_metadata_service(self):
+        response = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": "ses_canonical_files",
+                "purpose": "fine_notice",
+                "filename": "notice.jpg",
+                "content_type": "image/jpeg",
+                "size_bytes": 2048,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        attachment = body["attachment"]
+        self.assertEqual(body["api_surface"], "canonical_mock")
+        self.assertEqual(attachment["purpose"], "fine_notice")
+
+        detail = self.client.get(f"/api/files/{attachment['attachment_id']}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["api_surface"], "canonical_mock")
 
     def test_attachment_list_endpoint_filters_by_session(self):
         response = self.client.post(
@@ -332,6 +402,33 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["job"]["job_id"], job["job_id"])
 
+    def test_canonical_analysis_jobs_endpoint_reuses_mock_job_service(self):
+        response = self.client.post(
+            "/api/analysis/jobs/",
+            data={
+                "session_id": "ses_canonical_job",
+                "user_text": "이 고지서로 이의신청서를 만들 수 있을까요?",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        job = body["job"]
+        self.assertEqual(body["api_surface"], "canonical_mock")
+        self.assertEqual(body["execution_mode"], "mock")
+        self.assertEqual(job["status"], "success")
+        self.assertIn(
+            "/api/reports",
+            {link["endpoint"] for link in job["chat_response"]["report_links"]},
+        )
+
+        detail = self.client.get(f"/api/analysis/jobs/{job['job_id']}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["api_surface"], "canonical_mock")
+
     def test_analysis_job_list_endpoint_filters_by_session(self):
         response = self.client.post(
             "/api/mock/analysis/jobs/",
@@ -356,4 +453,11 @@ class ChatbotMockApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_canonical_report_download_marks_canonical_mock_surface(self):
+        response = self.client.get("/api/reports/rep_mock/download/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-API-Surface"], "canonical_mock")
+        self.assertEqual(response["X-Execution-Mode"], "mock")
 

@@ -13,6 +13,15 @@ MOCK_AUTH_PUBLIC_PATHS = (
     "/api/mock/chat/scenarios/",
 )
 
+MOCK_AUTH_PROTECTED_PREFIXES = (
+    "/api/agents/",
+    "/api/analysis/",
+    "/api/chat/",
+    "/api/files/",
+    "/api/mock/",
+    "/api/reports/",
+)
+
 
 class DemoCorsMiddleware:
     """Allow local frontend apps to call the mock API during the mid-demo build."""
@@ -57,5 +66,5 @@ def _requires_mock_auth(request: HttpRequest) -> bool:
         return False
     if request.path in MOCK_AUTH_PUBLIC_PATHS:
         return False
-    return request.path.startswith("/api/mock/")
+    return request.path.startswith(MOCK_AUTH_PROTECTED_PREFIXES)
 

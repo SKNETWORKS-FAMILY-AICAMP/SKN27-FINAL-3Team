@@ -28,12 +28,12 @@ docker run --rm -p 8000:8000 --name skn27-demo-backend skn27-demo-backend
 Invoke-RestMethod http://127.0.0.1:8000/api/health/
 ```
 
-보호된 mock endpoint는 배포 흐름과 맞추기 위해 `Authorization: Bearer ...` 헤더가 필요하다.
+보호된 endpoint는 배포 흐름과 맞추기 위해 `Authorization: Bearer ...` 헤더가 필요하다.
 
 ```powershell
 Invoke-RestMethod `
   -Headers @{ Authorization = "Bearer dev-mock-token" } `
-  http://127.0.0.1:8000/api/mock/agents/nodes/
+  http://127.0.0.1:8000/api/agents/nodes/
 ```
 
 Docker Compose를 쓰면 빌드와 실행을 한 번에 처리할 수 있다.
@@ -56,7 +56,7 @@ docker run --rm -p 8000:8000 `
 
 ## 인증/JWT 경계
 
-현재 mock API는 실제 JWT 서명 검증은 수행하지 않는다. 대신 `MOCK_REQUIRE_AUTH=1`을 기본값으로 두고 보호된 `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. 토큰이 없거나 형식이 맞지 않으면 운영 전환 때 사용할 공통 auth error envelope로 `401`을 반환한다.
+현재 mock API는 실제 JWT 서명 검증은 수행하지 않는다. 대신 `MOCK_REQUIRE_AUTH=1`을 기본값으로 두고 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. 토큰이 없거나 형식이 맞지 않으면 운영 전환 때 사용할 공통 auth error envelope로 `401`을 반환한다.
 
 공개 endpoint는 `GET /api/health/`, `GET /api/mock/chat/scenarios/`로 제한한다. 운영 전환 시에는 같은 middleware 위치에서 실제 JWT 검증 또는 DRF authentication layer로 교체하고, 권한 부족은 같은 envelope의 `forbidden`/`403`으로 반환한다.
 
@@ -80,6 +80,22 @@ docker run --rm -p 8000:8000 `
 ```
 
 ## 주요 endpoint
+
+운영 후보 URL은 canonical `/api/...` 형태로 먼저 호출할 수 있다. 이 경로도 내부적으로는 mock service를 사용하므로 JSON 응답에 `api_surface: "canonical_mock"`, `execution_mode: "mock"`을 포함한다. Canonical 응답에 포함된 report/file/job 링크도 `/api/...` 형태로 변환된다. 기존 `/api/mock/...` 경로는 회귀 테스트와 명시적 mock smoke용으로 계속 유지한다.
+
+| Method | Canonical path | Mock path |
+|---|---|---|
+| `POST` | `/api/chat/sessions/` | `/api/mock/chat/sessions/` |
+| `POST` | `/api/chat/messages/` | `/api/mock/chat/messages/` |
+| `GET`/`POST` | `/api/files/` | `/api/mock/attachments/` |
+| `GET` | `/api/files/{attachment_id}/` | `/api/mock/attachments/{attachment_id}/` |
+| `GET`/`POST` | `/api/analysis/jobs/` | `/api/mock/analysis/jobs/` |
+| `GET` | `/api/analysis/jobs/{job_id}/` | `/api/mock/analysis/jobs/{job_id}/` |
+| `GET` | `/api/agents/nodes/` | `/api/mock/agents/nodes/` |
+| `POST` | `/api/agents/nodes/run/` | `/api/mock/agents/nodes/run/` |
+| `POST` | `/api/agents/plans/run/` | `/api/mock/agents/plans/run/` |
+| `POST` | `/api/reports/` | `/api/mock/reports/` |
+| `GET` | `/api/reports/{report_id}/download/` | `/api/mock/reports/{report_id}/download/` |
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -167,16 +183,16 @@ Docker 실행 후 smoke check:
 Invoke-RestMethod http://127.0.0.1:8000/api/health/
 Invoke-RestMethod `
   -Headers @{ Authorization = "Bearer dev-mock-token" } `
-  http://127.0.0.1:8000/api/mock/agents/nodes/
+  http://127.0.0.1:8000/api/agents/nodes/
 ```
 
 ## 발표 우선 범위
 
 - 과태료/이의신청 흐름: `mock_scenario=fine_notice`
 - 과실비율 흐름: `mock_scenario=fault_ratio`
-- 파일/첨부 metadata 연결: `POST /api/mock/attachments/`
-- 분석 job 추적: `POST /api/mock/analysis/jobs/`, `GET /api/mock/analysis/jobs/{job_id}/`
-- Agent/Node 연결 경계: `GET /api/mock/agents/nodes/`, `POST /api/mock/agents/plans/run/`
+- 파일/첨부 metadata 연결: `POST /api/files/`, mock alias `POST /api/mock/attachments/`
+- 분석 job 추적: `POST /api/analysis/jobs/`, `GET /api/analysis/jobs/{job_id}/`
+- Agent/Node 연결 경계: `GET /api/agents/nodes/`, `POST /api/agents/plans/run/`
 - JWT 인증은 현재 mock에서 Bearer 헤더 형식과 실패 envelope까지 연결, 운영 전환 때 실제 JWT 서명/권한 검증으로 교체
 - MCP, 최신 법령 조회, 외부 API, 실제 ML/RAG 호출은 제외
 

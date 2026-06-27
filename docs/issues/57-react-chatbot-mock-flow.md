@@ -26,9 +26,9 @@
 
 ## 3. 동작 기준
 
-- `POST /api/mock/chat/messages`를 우선 호출한다.
+- `POST /api/chat/messages`를 우선 호출한다. 필요하면 `apiBase="/api/mock"` prop으로 명시적 mock endpoint도 호출할 수 있다.
 - API가 연결되지 않아도 프론트 fallback mock으로 화면 상태를 확인할 수 있다.
-- 리포트 저장/다운로드 action은 `POST /api/mock/reports`를 우선 호출한다.
+- 리포트 저장/다운로드 action은 `POST /api/reports`를 우선 호출한다.
 - Django mock backend가 `MOCK_REQUIRE_AUTH=1`일 때도 호출할 수 있도록 기본 `Authorization: Bearer dev-mock-token` 헤더를 붙인다.
 - 실제 LLM, Agent, RAG 호출은 포함하지 않는다.
 

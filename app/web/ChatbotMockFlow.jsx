@@ -21,7 +21,7 @@ const STATUS_LABELS = {
   success: "완료",
 };
 
-export default function ChatbotMockFlow({ apiBase = "/api/mock", authToken = "dev-mock-token" }) {
+export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-mock-token" }) {
   const [sessionId, setSessionId] = useState(null);
   const [question, setQuestion] = useState("이 고지서로 이의신청서를 만들 수 있을까요?");
   const [mockStatus, setMockStatus] = useState("success");
@@ -86,7 +86,7 @@ export default function ChatbotMockFlow({ apiBase = "/api/mock", authToken = "de
       report_id: `rep_mock_${Date.now()}`,
       case_id: `case_mock_${Date.now()}`,
       status: action === "download" ? "downloaded" : "report_saved",
-      download_url: action === "download" ? "/api/mock/reports/mock/download" : null,
+      download_url: action === "download" ? "/api/reports/mock/download" : null,
       limitations: ["프론트엔드 fallback mock 결과입니다."],
     };
 

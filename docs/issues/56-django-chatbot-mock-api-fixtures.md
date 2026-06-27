@@ -28,6 +28,22 @@
 
 ## 2. Endpoint 후보
 
+운영 전환 전 프론트가 canonical `/api/...` 경로로도 붙어볼 수 있도록 shadow endpoint를 둔다. Canonical endpoint는 아직 실제 운영 구현이 아니라 같은 mock service를 재사용하며, JSON 응답에는 `api_surface: "canonical_mock"`, `execution_mode: "mock"`을 포함한다. Canonical 응답 안의 report/file/job 링크도 `/api/...` 형태로 변환한다. 기존 `/api/mock/...` endpoint는 명시적 mock smoke와 회귀 테스트용으로 유지한다.
+
+| Canonical endpoint | Mock endpoint | 목적 |
+|---|---|---|
+| `POST /api/chat/sessions/` | `POST /api/mock/chat/sessions/` | chat session 생성 |
+| `POST /api/chat/messages/` | `POST /api/mock/chat/messages/` | 사용자 질문/첨부 입력 후 분석 응답 반환 |
+| `GET/POST /api/files/` | `GET/POST /api/mock/attachments/` | 파일/attachment metadata 등록과 목록 |
+| `GET /api/files/{attachment_id}/` | `GET /api/mock/attachments/{attachment_id}/` | 단일 attachment metadata 조회 |
+| `GET/POST /api/analysis/jobs/` | `GET/POST /api/mock/analysis/jobs/` | analysis job 목록/생성 |
+| `GET /api/analysis/jobs/{job_id}/` | `GET /api/mock/analysis/jobs/{job_id}/` | 단일 analysis job 조회 |
+| `GET /api/agents/nodes/` | `GET /api/mock/agents/nodes/` | Agent/Node registry 목록 |
+| `POST /api/agents/nodes/run/` | `POST /api/mock/agents/nodes/run/` | 단일 node 실행 envelope |
+| `POST /api/agents/plans/run/` | `POST /api/mock/agents/plans/run/` | plan step 전체 node 실행 |
+| `POST /api/reports/` | `POST /api/mock/reports/` | 리포트 action |
+| `GET /api/reports/{report_id}/download/` | `GET /api/mock/reports/{report_id}/download/` | report 다운로드 |
+
 | Endpoint | 함수 | 목적 |
 |---|---|---|
 | `GET /api/health/` | `health_check` | backend health와 scenario 목록 |
@@ -218,7 +234,7 @@ docker compose up --build backend
 
 ## 9. 인증/JWT mock 경계
 
-회의 기록의 인증 항목은 `JWT` 기준으로 정정한다. 현재 mock backend는 실제 JWT 서명 검증은 수행하지 않지만, 배포 흐름에 맞춰 보호된 `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. `MOCK_REQUIRE_AUTH=1`이 기본값이며, `GET /api/health/`, `GET /api/mock/chat/scenarios/`만 공개 endpoint로 둔다.
+회의 기록의 인증 항목은 `JWT` 기준으로 정정한다. 현재 mock backend는 실제 JWT 서명 검증은 수행하지 않지만, 배포 흐름에 맞춰 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. `MOCK_REQUIRE_AUTH=1`이 기본값이며, `GET /api/health/`, `GET /api/mock/chat/scenarios/`만 공개 endpoint로 둔다.
 
 토큰이 없거나 형식이 맞지 않으면 공통 auth error envelope로 `401`을 반환한다. mock smoke에서는 `Authorization: Bearer dev-mock-token`처럼 임의 Bearer 값을 붙여 보호 endpoint를 호출한다. `Bearer expired`, `Bearer invalid`는 각각 `token_expired`, `token_invalid` 실패 응답을 확인하기 위한 mock 시뮬레이션 값이다.
 
@@ -267,7 +283,12 @@ docker compose up --build backend
 - `docker run --rm -d --name skn27-demo-backend-test -p 8001:8000 skn27-demo-backend`
 - `GET http://127.0.0.1:8001/api/health/`
 - `POST http://127.0.0.1:8001/api/mock/attachments/`
-- protected endpoint smoke는 `Authorization: Bearer dev-mock-token` header 포함
+- canonical protected endpoint smoke는 `Authorization: Bearer dev-mock-token` header 포함
+- `POST http://127.0.0.1:8001/api/chat/messages/` returns `api_surface=canonical_mock`
+- `POST http://127.0.0.1:8001/api/files/`
+- `POST http://127.0.0.1:8001/api/analysis/jobs/`
+- `GET http://127.0.0.1:8001/api/agents/nodes/`
+- explicit mock endpoint smoke도 `Authorization: Bearer dev-mock-token` header 포함
 - `GET http://127.0.0.1:8001/api/mock/attachments/?session_id=...`
 - `POST http://127.0.0.1:8001/api/mock/chat/messages/` with `attachments=[{"attachment_id": "..."}]`
 - `POST http://127.0.0.1:8001/api/mock/analysis/jobs/` with `attachments=[{"attachment_id": "..."}]`

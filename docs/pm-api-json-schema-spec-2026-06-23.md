@@ -75,7 +75,10 @@
 
 ### 2.1 JWT/auth 실패 envelope
 
-운영 배포 흐름을 고려해 Django mock backend도 보호된 `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더를 요구한다. 현재 mock은 JWT 서명 검증을 하지 않고 Bearer 헤더의 존재와 형식만 확인한다. 실제 운영 전환 시 같은 위치에 JWT 서명, 만료, 사용자 권한 검증을 연결한다.
+운영 배포 흐름을 고려해 Django mock backend도 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더를 요구한다. 현재 mock은 JWT 서명 검증을 하지 않고 Bearer 헤더의 존재와 형식만 확인한다. 실제 운영 전환 시 같은 위치에 JWT 서명, 만료, 사용자 권한 검증을 연결한다.
+
+> 2026-06-28 구현 메모:
+> 운영 후보 path를 미리 검증하기 위해 canonical `/api/...` shadow endpoint를 추가했다. 예를 들어 `POST /api/chat/messages/`, `POST /api/files/`, `POST /api/analysis/jobs/`, `GET /api/agents/nodes/`는 기존 `/api/mock/...` service를 재사용하며 응답에 `api_surface="canonical_mock"`, `execution_mode="mock"`을 포함한다. Canonical 응답 안의 report/file/job 링크도 `/api/...` 형태로 변환한다. 명시적 mock endpoint도 회귀 테스트용으로 유지한다.
 
 공개 endpoint:
 
