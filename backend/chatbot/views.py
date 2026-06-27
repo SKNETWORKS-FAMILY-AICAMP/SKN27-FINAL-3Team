@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -31,25 +28,14 @@ from app.services.chatbot_mock_service import (
     perform_report_action,
     submit_message,
 )
-
-
-MOCK_TO_CANONICAL_PATH_PREFIXES = (
-    ("/api/mock/analysis/results/", "/api/analysis/results/"),
-    ("/api/mock/analysis/jobs/", "/api/analysis/jobs/"),
-    ("/api/mock/agents/nodes/run/", "/api/agents/nodes/run/"),
-    ("/api/mock/agents/plans/run/", "/api/agents/plans/run/"),
-    ("/api/mock/attachments/", "/api/files/"),
-    ("/api/mock/reports/", "/api/reports/"),
-    ("/api/mock/chat/sessions/", "/api/chat/sessions/"),
-    ("/api/mock/chat/messages/", "/api/chat/messages/"),
-    ("/api/mock/analysis/results", "/api/analysis/results"),
-    ("/api/mock/analysis/jobs", "/api/analysis/jobs"),
-    ("/api/mock/agents/nodes/run", "/api/agents/nodes/run"),
-    ("/api/mock/agents/plans/run", "/api/agents/plans/run"),
-    ("/api/mock/attachments", "/api/files"),
-    ("/api/mock/reports", "/api/reports"),
-    ("/api/mock/chat/sessions", "/api/chat/sessions"),
-    ("/api/mock/chat/messages", "/api/chat/messages"),
+from chatbot.api_response import (
+    is_canonical_mock_request as _is_canonical_mock_request,
+    json_response as _json_response,
+)
+from chatbot.request_parsing import (
+    first_upload_file as _first_upload_file,
+    json_body as _json_body,
+    request_payload as _request_payload,
 )
 
 
@@ -204,51 +190,4 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
         response["X-API-Surface"] = "canonical_mock"
         response["X-Execution-Mode"] = "mock"
     return response
-
-
-def _json_response(request: HttpRequest, data: dict[str, Any], status: int = 200) -> JsonResponse:
-    response_data = dict(data)
-    if _is_canonical_mock_request(request):
-        response_data = _canonicalize_mock_paths(response_data)
-        response_data.setdefault("api_surface", "canonical_mock")
-        response_data.setdefault("execution_mode", "mock")
-    return JsonResponse(response_data, status=status)
-
-
-def _is_canonical_mock_request(request: HttpRequest) -> bool:
-    return request.path.startswith("/api/") and not request.path.startswith("/api/mock/")
-
-
-def _canonicalize_mock_paths(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {key: _canonicalize_mock_paths(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_canonicalize_mock_paths(item) for item in value]
-    if isinstance(value, str):
-        for mock_prefix, canonical_prefix in MOCK_TO_CANONICAL_PATH_PREFIXES:
-            if value.startswith(mock_prefix):
-                return value.replace(mock_prefix, canonical_prefix, 1)
-    return value
-
-
-def _json_body(request: HttpRequest) -> dict[str, Any]:
-    raw_body = request.body or b"{}"
-    try:
-        return json.loads(raw_body.decode("utf-8"))
-    except json.JSONDecodeError:
-        return {}
-
-
-def _request_payload(request: HttpRequest) -> dict[str, Any]:
-    if request.content_type and request.content_type.startswith("multipart/"):
-        return {key: request.POST.get(key) for key in request.POST}
-    if request.content_type and request.content_type.startswith("application/x-www-form-urlencoded"):
-        return {key: request.POST.get(key) for key in request.POST}
-    return _json_body(request)
-
-
-def _first_upload_file(request: HttpRequest) -> Any | None:
-    if not request.FILES:
-        return None
-    return request.FILES.get("file") or next(iter(request.FILES.values()))
 
