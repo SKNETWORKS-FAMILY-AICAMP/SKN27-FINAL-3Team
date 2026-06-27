@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.services.agent_adapter_contract import (
+    build_adapter_context,
+    build_agent_adapter_contract,
+)
 from app.services.attachment_mock_service import resolve_attachment_references
 
 
@@ -102,13 +106,13 @@ def list_agent_nodes() -> list[dict[str, Any]]:
     """Return the current Agent/Node registry in execution-friendly order."""
 
     return [
-        deepcopy(NODE_REGISTRY[node_code])
+        _node_with_adapter_contract(NODE_REGISTRY[node_code])
         for node_code in sorted(NODE_REGISTRY, key=lambda code: NODE_REGISTRY[code]["order"])
     ]
 
 
 def get_agent_node(node_code: str) -> dict[str, Any]:
-    return deepcopy(NODE_REGISTRY.get(node_code, _unknown_node(node_code)))
+    return _node_with_adapter_contract(NODE_REGISTRY.get(node_code, _unknown_node(node_code)))
 
 
 def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
@@ -118,13 +122,20 @@ def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
     result_status = _normalize_result_status(execution_status)
     node = get_agent_node(node_code)
     agent_input = _agent_input(payload, node)
+    execution_id = f"exec_{uuid4().hex[:12]}"
 
     return {
-        "execution_id": f"exec_{uuid4().hex[:12]}",
+        "execution_id": execution_id,
         "execution_mode": "mock",
         "job_id": payload.get("job_id"),
         "node_code": node_code,
         "node": node,
+        "adapter_context": build_adapter_context(
+            execution_id=execution_id,
+            execution_mode="mock",
+            node=node,
+            plan_step=payload.get("plan_step"),
+        ),
         "agent_input": agent_input,
         "agent_output": build_agent_output(
             node_code=node_code,
@@ -139,6 +150,7 @@ def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
 def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     payload = resolve_attachment_references(payload)
     executions = []
+    upstream_results = deepcopy(payload.get("upstream_results", {}))
     for step in analysis_plan.get("steps", []):
         step_payload = deepcopy(payload)
         step_payload.update(
@@ -150,11 +162,14 @@ def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) ->
                 "execution_status": step.get("status", "success"),
                 "required_inputs": step.get("required_inputs", []),
                 "depends_on": step.get("depends_on", []),
+                "plan_step": step,
+                "upstream_results": deepcopy(upstream_results),
             }
         )
         execution = execute_mock_node(step_payload)
         execution["plan_step"] = deepcopy(step)
         executions.append(execution)
+        upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
 
     return {
         "execution_mode": "mock",
@@ -222,7 +237,14 @@ def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any
         "context": deepcopy(payload.get("context", {})),
         "required_inputs": deepcopy(payload.get("required_inputs") or node["required_inputs"]),
         "depends_on": deepcopy(payload.get("depends_on", [])),
+        "upstream_results": deepcopy(payload.get("upstream_results", {})),
     }
+
+
+def _node_with_adapter_contract(node: dict[str, Any]) -> dict[str, Any]:
+    node_copy = deepcopy(node)
+    node_copy["adapter_contract"] = build_agent_adapter_contract(node_copy)
+    return node_copy
 
 
 def _normalize_result_status(status: str) -> str:

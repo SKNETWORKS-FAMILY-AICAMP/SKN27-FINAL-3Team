@@ -16,6 +16,7 @@
 | `app/services/chatbot_mock_service.py` | 순수 Python mock fixture와 service 함수 |
 | `app/services/attachment_mock_service.py` | mock upload 저장과 attachment metadata 생성 |
 | `app/services/analysis_job_mock_service.py` | 메시지, plan, node execution을 묶는 mock analysis job 저장/조회 |
+| `app/services/agent_adapter_contract.py` | 실제 Agent adapter 함수 시그니처와 output envelope 검증 계약 |
 | `app/services/agent_node_service.py` | Agent/Node registry와 mock 실행 envelope |
 | `app/api/django_chatbot_mock_views.py` | Django에 연결 가능한 optional view adapter |
 | `backend/config/settings.py` | mock API 실행용 최소 Django settings |
@@ -78,6 +79,45 @@
 | `agent_result_validation` | Supervisor internal | `hi20260204-maker` | mock 최종 검증 envelope |
 
 모든 node mock output은 `node_name`, `node_code`, `status`, `summary`, `structured_result`, `evidence`, `next_actions`, `limitations` 공통 envelope를 반환한다. Plan step의 `blocked`, `running`, `skipped` 상태는 Agent envelope의 `partial` 또는 `failed`로 정규화하고 원본 상태는 `execution_status`로 남긴다.
+
+### 4.1 실제 Agent adapter 함수 계약
+
+실제 Agent 구현체는 `node_code`별로 같은 함수 모양을 따른다. Django mock runtime은 아직 이 함수를 호출하지 않지만, `GET /api/mock/agents/nodes/` 응답의 `adapter_contract`에 함수명, 입력 필드, 출력 필드를 노출한다.
+
+```python
+def run_{node_code}(
+    agent_input: AgentAdapterInput,
+    context: AgentAdapterContext,
+) -> AgentAdapterOutput:
+    ...
+```
+
+예시:
+
+```python
+def run_law_ground_search(
+    agent_input: AgentAdapterInput,
+    context: AgentAdapterContext,
+) -> AgentAdapterOutput:
+    ...
+```
+
+`AgentAdapterInput`의 공통 필드는 다음 기준으로 고정한다.
+
+| Field | 설명 |
+|---|---|
+| `analysis_plan_id` | 현재 실행이 속한 Supervisor plan |
+| `job_id` | 분석 job 식별자 |
+| `session_id` / `message_id` | 사용자 세션과 메시지 연결 |
+| `node_code` | 실행 대상 node 식별자 |
+| `user_text` | 원문 사용자 입력 |
+| `attachments` | resolver가 보강한 attachment metadata |
+| `context` | 추가 runtime context |
+| `required_inputs` | node가 요구하는 입력 조건 |
+| `depends_on` | 선행 node 목록 |
+| `upstream_results` | 선행 node의 Agent output envelope 모음 |
+
+`AgentAdapterContext`는 `execution_id`, `execution_mode`, `node`, `plan_step`을 포함한다. `AgentAdapterOutput`은 기존 공통 envelope와 동일하게 `node_name`, `node_code`, `status`, `summary`, `structured_result`, `evidence`, `next_actions`, `limitations`, `created_at`을 반환해야 한다. `status`는 `success`, `partial`, `failed` 중 하나만 허용한다.
 
 ## 5. Attachment metadata mock
 
@@ -216,7 +256,7 @@ docker compose up --build backend
 
 - `#22` 공통 result envelope와 필드명 정렬
 - `#29` Supervisor routing rule과 fixture intent 정렬
-- 담당자별 실제 Agent adapter 함수 시그니처 확정
+- 담당자별 실제 Agent adapter 구현체 연결
 - 실제 업로드 파일 보관 위치와 DB metadata table 연결
 - 실제 job 저장소를 PostgreSQL/Redis/Celery 중 어디까지 분리할지 결정
 - `analysis_plan`을 실제 API response에 디버그용으로 유지할지 내부 상태로 숨길지 결정

@@ -111,6 +111,20 @@ docker run --rm -p 8000:8000 `
 
 `POST /api/mock/analysis/jobs/` 응답의 `status`는 `queued`, `running`, `success`, `partial`, `failed` 중 하나다. 현재 mock backend는 실제 queue 없이 즉시 실행한 결과를 JSON sidecar로 저장한다.
 
+## Agent adapter 계약
+
+`GET /api/mock/agents/nodes/` 응답의 각 node에는 `adapter_contract`가 포함된다. 실제 Agent 구현체는 이 계약의 함수명과 입출력 필드를 맞춘다.
+
+```python
+def run_{node_code}(
+    agent_input: AgentAdapterInput,
+    context: AgentAdapterContext,
+) -> AgentAdapterOutput:
+    ...
+```
+
+공통 입력은 `analysis_plan_id`, `job_id`, `session_id`, `message_id`, `node_code`, `user_text`, `attachments`, `context`, `required_inputs`, `depends_on`, `upstream_results`를 포함한다. 출력은 `node_name`, `node_code`, `status`, `summary`, `structured_result`, `evidence`, `next_actions`, `limitations`, `created_at` 공통 envelope를 반환하며 `status`는 `success`, `partial`, `failed`만 사용한다.
+
 ## 테스트
 
 ```powershell

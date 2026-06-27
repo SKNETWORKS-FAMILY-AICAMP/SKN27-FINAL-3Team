@@ -83,6 +83,17 @@ class ChatbotMockApiTests(TestCase):
         node_codes = {node["node_code"] for node in body["nodes"]}
         self.assertIn("fine_notice_analysis", node_codes)
         self.assertIn("vision_media_analysis", node_codes)
+        fine_notice_node = next(
+            node for node in body["nodes"] if node["node_code"] == "fine_notice_analysis"
+        )
+        self.assertEqual(
+            fine_notice_node["adapter_contract"]["function_name"],
+            "run_fine_notice_analysis",
+        )
+        self.assertIn(
+            "structured_result",
+            fine_notice_node["adapter_contract"]["required_output_fields"],
+        )
 
     def test_agent_node_run_endpoint_returns_envelope(self):
         response = self.client.post(

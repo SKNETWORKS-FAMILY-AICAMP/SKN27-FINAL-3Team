@@ -1193,6 +1193,8 @@ Frontend는 Agent raw output을 직접 화면에 뿌리지 않는다. `GET /api/
 
 > 2026-06-27 구현 메모:
 > Django mock backend는 `GET /api/mock/agents/nodes/`, `POST /api/mock/agents/nodes/run/`, `POST /api/mock/agents/plans/run/`를 제공한다. 이 endpoint들은 실제 Agent, RAG, MCP, LLM을 호출하지 않고 `analysis_plan.steps[].node_code`를 공통 Agent envelope mock output으로 변환해 프론트엔드와 담당자별 node adapter 연결 위치를 검증한다.
+> 2026-06-28 구현 메모:
+> `GET /api/mock/agents/nodes/`의 각 node는 `adapter_contract`를 포함한다. 실제 Agent adapter 함수는 `run_{node_code}(agent_input: AgentAdapterInput, context: AgentAdapterContext) -> AgentAdapterOutput` 형태를 따른다. 공통 입력은 `analysis_plan_id`, `job_id`, `session_id`, `message_id`, `node_code`, `user_text`, `attachments`, `context`, `required_inputs`, `depends_on`, `upstream_results`이며, 출력은 공통 Agent result envelope와 같은 필수 필드를 반환한다.
 
 | 흐름 | 보내는 쪽 | 받는 쪽 | 전달 JSON 핵심 필드 | 화면/API에서 필요한 이유 | 확인 담당 |
 |---|---|---|---|---|---|

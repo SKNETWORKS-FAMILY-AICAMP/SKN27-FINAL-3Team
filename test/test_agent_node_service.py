@@ -1,3 +1,4 @@
+from app.services.agent_adapter_contract import validate_agent_output_envelope
 from app.services.agent_node_service import (
     execute_mock_node,
     execute_mock_plan,
@@ -23,6 +24,22 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert {node["node_type"] for node in nodes} >= {"agent", "supervisor_internal"}
 
 
+def test_agent_node_registry_exposes_real_adapter_contract():
+    nodes = list_agent_nodes()
+    law_node = next(node for node in nodes if node["node_code"] == "law_ground_search")
+    contract = law_node["adapter_contract"]
+
+    assert contract["adapter_key"] == "law_ground_search"
+    assert contract["function_name"] == "run_law_ground_search"
+    assert (
+        contract["call_signature"]
+        == "run_law_ground_search(agent_input: AgentAdapterInput, context: AgentAdapterContext) -> AgentAdapterOutput"
+    )
+    assert "upstream_results" in contract["required_input_fields"]
+    assert "structured_result" in contract["required_output_fields"]
+    assert contract["allowed_statuses"] == ["success", "partial", "failed"]
+
+
 def test_execute_mock_node_returns_common_agent_output_envelope():
     execution = execute_mock_node(
         {
@@ -39,6 +56,9 @@ def test_execute_mock_node_returns_common_agent_output_envelope():
     assert output["status"] == "success"
     assert output["structured_result"]["matched_laws"]
     assert output["evidence"][0]["source_type"] == "law"
+    assert execution["adapter_context"]["execution_id"] == execution["execution_id"]
+    assert execution["adapter_context"]["node"]["adapter_contract"]["adapter_key"] == "law_ground_search"
+    assert "upstream_results" in execution["agent_input"]
     assert {
         "node_name",
         "node_code",
@@ -49,6 +69,19 @@ def test_execute_mock_node_returns_common_agent_output_envelope():
         "next_actions",
         "limitations",
     } <= set(output)
+    assert validate_agent_output_envelope(output, expected_node_code="law_ground_search")["valid"]
+
+
+def test_agent_output_validator_reports_adapter_contract_errors():
+    validation = validate_agent_output_envelope(
+        {"node_code": "fine_notice_analysis", "status": "pending"},
+        expected_node_code="law_ground_search",
+    )
+
+    assert not validation["valid"]
+    assert validation["invalid_status"]
+    assert validation["node_code_mismatch"]
+    assert "summary" in validation["missing_fields"]
 
 
 def test_execute_mock_plan_maps_analysis_steps_to_node_executions():
@@ -71,6 +104,10 @@ def test_execute_mock_plan_maps_analysis_steps_to_node_executions():
     assert "fine_notice_analysis" in {
         item["agent_output"]["node_code"] for item in execution["executions"]
     }
+    dependent_execution = next(
+        item for item in execution["executions"] if item["agent_input"]["depends_on"]
+    )
+    assert dependent_execution["agent_input"]["upstream_results"]
 
 
 def test_execute_mock_node_resolves_attachment_id_for_agent_input(monkeypatch, tmp_path):
