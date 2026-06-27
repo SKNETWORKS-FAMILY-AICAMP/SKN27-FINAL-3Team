@@ -9,6 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-change-before-deploy")
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
+MOCK_REQUIRE_AUTH = os.environ.get("MOCK_REQUIRE_AUTH", "1") != "0"
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
@@ -23,6 +24,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "config.middleware.DemoCorsMiddleware",
+    "config.middleware.MockJwtAuthMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]
 

@@ -21,7 +21,7 @@ const STATUS_LABELS = {
   success: "완료",
 };
 
-export default function ChatbotMockFlow({ apiBase = "/api/mock" }) {
+export default function ChatbotMockFlow({ apiBase = "/api/mock", authToken = "dev-mock-token" }) {
   const [sessionId, setSessionId] = useState(null);
   const [question, setQuestion] = useState("이 고지서로 이의신청서를 만들 수 있을까요?");
   const [mockStatus, setMockStatus] = useState("success");
@@ -62,10 +62,14 @@ export default function ChatbotMockFlow({ apiBase = "/api/mock" }) {
     });
 
     try {
-      const result = await postJson(`${apiBase}/chat/messages`, {
-        ...requestPayload,
-        session_id: activeSessionId,
-      });
+      const result = await postJson(
+        `${apiBase}/chat/messages`,
+        {
+          ...requestPayload,
+          session_id: activeSessionId,
+        },
+        authToken
+      );
       setResponse(result);
     } catch (_error) {
       setResponse(fallbackResponse);
@@ -87,10 +91,14 @@ export default function ChatbotMockFlow({ apiBase = "/api/mock" }) {
     };
 
     try {
-      const result = await postJson(`${apiBase}/reports`, {
-        action,
-        session_id: response.session_id,
-      });
+      const result = await postJson(
+        `${apiBase}/reports`,
+        {
+          action,
+          session_id: response.session_id,
+        },
+        authToken
+      );
       setReport(result);
     } catch (_error) {
       setReport(fallbackReport);
@@ -195,11 +203,12 @@ export default function ChatbotMockFlow({ apiBase = "/api/mock" }) {
   );
 }
 
-async function postJson(url, payload) {
+async function postJson(url, payload, authToken) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     },
     body: JSON.stringify(payload),
   });

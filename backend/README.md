@@ -22,10 +22,18 @@ docker build -t skn27-demo-backend .
 docker run --rm -p 8000:8000 --name skn27-demo-backend skn27-demo-backend
 ```
 
-실행 확인:
+공개 health endpoint 실행 확인:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health/
+```
+
+보호된 mock endpoint는 배포 흐름과 맞추기 위해 `Authorization: Bearer ...` 헤더가 필요하다.
+
+```powershell
+Invoke-RestMethod `
+  -Headers @{ Authorization = "Bearer dev-mock-token" } `
+  http://127.0.0.1:8000/api/mock/agents/nodes/
 ```
 
 Docker Compose를 쓰면 빌드와 실행을 한 번에 처리할 수 있다.
@@ -40,6 +48,7 @@ docker compose up --build backend
 docker run --rm -p 8000:8000 `
   -e DJANGO_SECRET_KEY=dev-secret `
   -e DJANGO_DEBUG=1 `
+  -e MOCK_REQUIRE_AUTH=1 `
   -e DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1 `
   --name skn27-demo-backend `
   skn27-demo-backend
@@ -47,9 +56,28 @@ docker run --rm -p 8000:8000 `
 
 ## 인증/JWT 경계
 
-현재 mock API는 실제 JWT 검증을 수행하지 않는다. 다만 프론트엔드가 운영 API와 같은 방식으로 `Authorization: Bearer ...` 헤더를 붙여 호출할 수 있도록 CORS preflight에서 `Authorization` 헤더를 허용한다.
+현재 mock API는 실제 JWT 서명 검증은 수행하지 않는다. 대신 `MOCK_REQUIRE_AUTH=1`을 기본값으로 두고 보호된 `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. 토큰이 없거나 형식이 맞지 않으면 운영 전환 때 사용할 공통 auth error envelope로 `401`을 반환한다.
 
-운영 전환 시에는 `/api/mock/...`가 아니라 실제 `/api/...` endpoint 앞단에 JWT 검증 middleware 또는 DRF authentication layer를 붙이고, 권한 실패 응답 envelope를 별도로 확정해야 한다.
+공개 endpoint는 `GET /api/health/`, `GET /api/mock/chat/scenarios/`로 제한한다. 운영 전환 시에는 같은 middleware 위치에서 실제 JWT 검증 또는 DRF authentication layer로 교체하고, 권한 부족은 같은 envelope의 `forbidden`/`403`으로 반환한다.
+
+인증 실패 응답 예시:
+
+```json
+{
+  "error": {
+    "code": "auth_required",
+    "message": "로그인이 필요합니다.",
+    "status": 401,
+    "missing_fields": [],
+    "retryable": false,
+    "required_action": "login",
+    "auth": {
+      "scheme": "Bearer",
+      "reason": "missing_token"
+    }
+  }
+}
+```
 
 ## 주요 endpoint
 
@@ -137,7 +165,9 @@ Docker 실행 후 smoke check:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health/
-Invoke-RestMethod http://127.0.0.1:8000/api/mock/agents/nodes/
+Invoke-RestMethod `
+  -Headers @{ Authorization = "Bearer dev-mock-token" } `
+  http://127.0.0.1:8000/api/mock/agents/nodes/
 ```
 
 ## 발표 우선 범위
@@ -147,6 +177,6 @@ Invoke-RestMethod http://127.0.0.1:8000/api/mock/agents/nodes/
 - 파일/첨부 metadata 연결: `POST /api/mock/attachments/`
 - 분석 job 추적: `POST /api/mock/analysis/jobs/`, `GET /api/mock/analysis/jobs/{job_id}/`
 - Agent/Node 연결 경계: `GET /api/mock/agents/nodes/`, `POST /api/mock/agents/plans/run/`
-- JWT 인증은 운영 전환 전 검증 위치와 실패 envelope 확정 후 연결
+- JWT 인증은 현재 mock에서 Bearer 헤더 형식과 실패 envelope까지 연결, 운영 전환 때 실제 JWT 서명/권한 검증으로 교체
 - MCP, 최신 법령 조회, 외부 API, 실제 ML/RAG 호출은 제외
 

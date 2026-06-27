@@ -4,7 +4,7 @@ from django.test import Client, TestCase
 
 class ChatbotMockApiTests(TestCase):
     def setUp(self):
-        self.client = Client()
+        self.client = Client(HTTP_AUTHORIZATION="Bearer dev-mock-token")
 
     def test_health_check_returns_scenarios(self):
         response = self.client.get("/api/health/")
@@ -28,6 +28,42 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertEqual(response["Access-Control-Allow-Origin"], "*")
         self.assertIn("Authorization", response["Access-Control-Allow-Headers"])
+
+    def test_public_mock_endpoints_do_not_require_authorization_header(self):
+        public_client = Client()
+
+        health_response = public_client.get("/api/health/")
+        scenarios_response = public_client.get("/api/mock/chat/scenarios/")
+
+        self.assertEqual(health_response.status_code, 200)
+        self.assertEqual(scenarios_response.status_code, 200)
+
+    def test_protected_mock_endpoint_requires_authorization_header(self):
+        response = Client().post(
+            "/api/mock/chat/messages/",
+            data={"session_id": "ses_missing_auth", "user_text": "hello"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "auth_required")
+        self.assertEqual(error["status"], 401)
+        self.assertEqual(error["required_action"], "login")
+        self.assertEqual(error["auth"]["scheme"], "Bearer")
+        self.assertEqual(error["auth"]["reason"], "missing_token")
+
+    def test_protected_mock_endpoint_rejects_expired_mock_token(self):
+        response = Client(HTTP_AUTHORIZATION="Bearer expired").post(
+            "/api/mock/chat/messages/",
+            data={"session_id": "ses_expired_auth", "user_text": "hello"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "token_expired")
+        self.assertEqual(error["auth"]["reason"], "expired_token")
 
     def test_submit_fine_notice_message(self):
         session_response = self.client.post(

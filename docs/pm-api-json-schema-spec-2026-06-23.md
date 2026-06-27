@@ -54,7 +54,12 @@
     "code": "auth_required|forbidden|missing_required_field|invalid_file|analysis_failed",
     "message": "사용자에게 보여줄 수 있는 오류 요약",
     "missing_fields": ["session_id"],
-    "retryable": false
+    "retryable": false,
+    "required_action": "login|none|retry|complete_input",
+    "auth": {
+      "scheme": "Bearer",
+      "reason": "missing_token|invalid_token|expired_token|permission_denied"
+    }
   }
 }
 ```
@@ -65,6 +70,43 @@
 | `error.message` | 필수 | string | 사용자에게 현재 상태를 설명해야 한다. | 없으면 FE 기본 문구로 대체하되 BE 응답은 불완전하다. |
 | `error.missing_fields` | 조건부 필수 | string[] | 필수 입력이 부족할 때 어떤 값을 보완해야 하는지 알려준다. | `missing_required_field`인데 없으면 추가 질문 생성이 어렵다. |
 | `error.retryable` | 필수 | boolean | 재시도 버튼 노출 여부를 결정한다. | 없으면 기본값 `false`로 처리한다. |
+| `error.required_action` | 조건부 필수 | enum | 로그인, 입력 보완, 재시도처럼 FE가 다음 행동을 정한다. | 인증 오류인데 없으면 FE가 로그인 이동 여부를 판단하기 어렵다. |
+| `error.auth` | 조건부 필수 | object | JWT/Bearer 실패 원인을 기계적으로 구분한다. | 인증 오류에서 없으면 `error.code`만으로 처리한다. |
+
+### 2.1 JWT/auth 실패 envelope
+
+운영 배포 흐름을 고려해 Django mock backend도 보호된 `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더를 요구한다. 현재 mock은 JWT 서명 검증을 하지 않고 Bearer 헤더의 존재와 형식만 확인한다. 실제 운영 전환 시 같은 위치에 JWT 서명, 만료, 사용자 권한 검증을 연결한다.
+
+공개 endpoint:
+
+- `GET /api/health/`
+- `GET /api/mock/chat/scenarios/`
+
+보호 endpoint 실패 응답:
+
+| code | HTTP | auth.reason | required_action | FE 처리 |
+|---|---:|---|---|---|
+| `auth_required` | 401 | `missing_token` | `login` | 로그인/재로그인 안내 |
+| `token_invalid` | 401 | `invalid_token` 또는 `malformed_authorization_header` | `login` | 토큰 폐기 후 로그인 |
+| `token_expired` | 401 | `expired_token` | `login` | 재로그인 또는 refresh flow |
+| `forbidden` | 403 | `permission_denied` | `none` | 권한 없음 안내 |
+
+```json
+{
+  "error": {
+    "code": "token_expired",
+    "message": "로그인이 만료되었습니다. 다시 로그인해 주세요.",
+    "status": 401,
+    "missing_fields": [],
+    "retryable": false,
+    "required_action": "login",
+    "auth": {
+      "scheme": "Bearer",
+      "reason": "expired_token"
+    }
+  }
+}
+```
 
 ## 3. 사용자 메시지 입력 API
 

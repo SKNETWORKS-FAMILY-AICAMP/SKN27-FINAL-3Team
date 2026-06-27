@@ -218,9 +218,35 @@ docker compose up --build backend
 
 ## 9. 인증/JWT mock 경계
 
-회의 기록의 인증 항목은 `JWT` 기준으로 정정하며, 현재 mock backend는 실제 JWT 검증을 수행하지 않는다. 프론트엔드 연동 확인을 위해 CORS preflight에서 `Authorization` 헤더만 허용한다.
+회의 기록의 인증 항목은 `JWT` 기준으로 정정한다. 현재 mock backend는 실제 JWT 서명 검증은 수행하지 않지만, 배포 흐름에 맞춰 보호된 `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. `MOCK_REQUIRE_AUTH=1`이 기본값이며, `GET /api/health/`, `GET /api/mock/chat/scenarios/`만 공개 endpoint로 둔다.
 
-운영 전환 시에는 mock endpoint 앞이 아니라 실제 `/api/...` endpoint 앞단에서 JWT 검증 위치를 정한다. 권한 실패 응답은 공통 error envelope로 별도 확정해야 한다.
+토큰이 없거나 형식이 맞지 않으면 공통 auth error envelope로 `401`을 반환한다. mock smoke에서는 `Authorization: Bearer dev-mock-token`처럼 임의 Bearer 값을 붙여 보호 endpoint를 호출한다. `Bearer expired`, `Bearer invalid`는 각각 `token_expired`, `token_invalid` 실패 응답을 확인하기 위한 mock 시뮬레이션 값이다.
+
+```json
+{
+  "error": {
+    "code": "auth_required",
+    "message": "로그인이 필요합니다.",
+    "status": 401,
+    "missing_fields": [],
+    "retryable": false,
+    "required_action": "login",
+    "auth": {
+      "scheme": "Bearer",
+      "reason": "missing_token"
+    }
+  }
+}
+```
+
+| code | HTTP | reason | required_action |
+|---|---:|---|---|
+| `auth_required` | 401 | `missing_token` | `login` |
+| `token_invalid` | 401 | `invalid_token` 또는 `malformed_authorization_header` | `login` |
+| `token_expired` | 401 | `expired_token` | `login` |
+| `forbidden` | 403 | `permission_denied` | `none` |
+
+운영 전환 시에는 같은 middleware 위치에서 실제 JWT 검증 또는 DRF authentication layer로 교체하고, 사용자 소유 session/report/file 권한 실패는 같은 envelope의 `forbidden`/`403`으로 반환한다.
 
 ## 10. 구현 제외
 
@@ -229,7 +255,7 @@ docker compose up --build backend
 - 실제 object storage 저장
 - 실제 virus scan, OCR, 개인정보 masking
 - 실제 Agent, RAG, MCP, LLM 호출
-- 실제 인증/JWT 검증
+- 실제 JWT 서명 검증과 사용자별 리소스 권한 검증
 
 ## 11. 검증 기록
 
@@ -241,6 +267,7 @@ docker compose up --build backend
 - `docker run --rm -d --name skn27-demo-backend-test -p 8001:8000 skn27-demo-backend`
 - `GET http://127.0.0.1:8001/api/health/`
 - `POST http://127.0.0.1:8001/api/mock/attachments/`
+- protected endpoint smoke는 `Authorization: Bearer dev-mock-token` header 포함
 - `GET http://127.0.0.1:8001/api/mock/attachments/?session_id=...`
 - `POST http://127.0.0.1:8001/api/mock/chat/messages/` with `attachments=[{"attachment_id": "..."}]`
 - `POST http://127.0.0.1:8001/api/mock/analysis/jobs/` with `attachments=[{"attachment_id": "..."}]`
@@ -251,6 +278,8 @@ docker compose up --build backend
 - `POST http://127.0.0.1:8001/api/mock/agents/plans/run/`
 - `POST http://127.0.0.1:8001/api/mock/chat/messages/` with `mock_scenario=fine_notice`
 - `POST http://127.0.0.1:8001/api/mock/chat/messages/` with `mock_scenario=fault_ratio`
+- no-auth protected endpoint returns `401 auth_required`
+- `Authorization: Bearer expired` returns `401 token_expired`
 
 ## 12. 검증 필요
 
@@ -260,5 +289,5 @@ docker compose up --build backend
 - 실제 업로드 파일 보관 위치와 DB metadata table 연결
 - 실제 job 저장소를 PostgreSQL/Redis/Celery 중 어디까지 분리할지 결정
 - `analysis_plan`을 실제 API response에 디버그용으로 유지할지 내부 상태로 숨길지 결정
-- 운영/배포 단계의 JWT 검증 위치와 권한 실패 envelope 결정
+- 운영/배포 단계의 실제 JWT 서명 검증과 사용자별 권한 검증 연결
 

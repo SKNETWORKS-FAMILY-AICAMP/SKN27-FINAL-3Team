@@ -29,6 +29,7 @@
 - `POST /api/mock/chat/messages`를 우선 호출한다.
 - API가 연결되지 않아도 프론트 fallback mock으로 화면 상태를 확인할 수 있다.
 - 리포트 저장/다운로드 action은 `POST /api/mock/reports`를 우선 호출한다.
+- Django mock backend가 `MOCK_REQUIRE_AUTH=1`일 때도 호출할 수 있도록 기본 `Authorization: Bearer dev-mock-token` 헤더를 붙인다.
 - 실제 LLM, Agent, RAG 호출은 포함하지 않는다.
 
 ## 4. 검증 필요
@@ -36,6 +37,6 @@
 - 실제 React 프로젝트 생성 후 import 경로와 bundler 설정
 - CSS/design system 적용
 - 파일 업로드 컴포넌트 연결
-- 인증 실패와 비회원 정책 UI
+- 인증 실패와 비회원 정책 UI 세부 문구
 - `#56` Django mock endpoint와 실제 URL 일치 여부
 
