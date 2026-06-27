@@ -321,4 +321,5 @@ docker compose up --build backend
 - 실제 job 저장소를 PostgreSQL/Redis/Celery 중 어디까지 분리할지 결정
 - `analysis_plan`을 실제 API response에 디버그용으로 유지할지 내부 상태로 숨길지 결정
 - 운영/배포 단계의 실제 JWT 서명 검증과 사용자별 권한 검증 연결
+- 운영 저장소 전환 설계 초안: `docs/issues/56-django-production-storage-transition-design.md`
 
