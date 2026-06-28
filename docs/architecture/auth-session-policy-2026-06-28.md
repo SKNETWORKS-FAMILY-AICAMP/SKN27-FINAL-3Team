@@ -219,14 +219,14 @@ MVP에서 바로 테이블을 늘릴 수도 있지만, 현재 저장소는 Postg
 
 | Method | Path | 상태 | 목적 |
 |---|---|---|---|
-| `POST` | `/api/auth/guest-session/` | 검토 | 비회원 `guest_id` 발급 또는 갱신 |
+| `POST` | `/api/auth/guest-session/` | mock 구현 | 비회원 `guest_id` 발급 또는 갱신 |
 | `POST` | `/api/auth/login/` | 검토 | 로그인 성공 후 JWT 발급 |
 | `POST` | `/api/auth/refresh/` | 검토 | access token 갱신 |
 | `POST` | `/api/auth/logout/` | 검토 | `auth_session_id` revoke |
 | `POST` | `/api/auth/merge-guest-session/` | 검토 | 사용자가 승인한 비회원 상담 이력만 계정에 병합 |
-| `GET` | `/api/auth/me/` | 검토 | 현재 사용자, guest, auth session 상태 확인 |
+| `GET` | `/api/auth/me/` | mock 구현 | 현재 사용자, guest, auth session 상태 확인 |
 
-현재 mock backend에는 실제 로그인 API가 없으므로, 위 API는 바로 구현 확정이 아니라 다음 컨펌 후보로 둔다.
+현재 mock backend에는 실제 로그인 발급/refresh/logout API가 없으므로, `login`, `refresh`, `logout`, `merge-guest-session`은 구현 확정이 아니라 다음 컨펌 후보로 둔다. `guest-session`, `me`는 정책 검증용 mock API로만 제공한다.
 
 ## 8. 히스토리 설계와의 관계
 
@@ -258,7 +258,7 @@ MVP에서 바로 테이블을 늘릴 수도 있지만, 현재 저장소는 Postg
 
 다음 브랜치 또는 같은 브랜치의 후속 커밋에서 아래 순서로 진행한다.
 
-1. 위 정책을 기준으로 `GET /api/auth/me/`와 `POST /api/auth/guest-session/` mock API 후보를 확정한다.
+1. `GET /api/auth/me/`와 `POST /api/auth/guest-session/` mock API를 프론트에서 연결해본다.
 2. `ChatSession.metadata`에 `guest_id`, `auth_session_id`, `auth_state`를 저장하는 MVP 방식을 검토한다.
 3. 로그인 후 guest session 병합 API의 request/response를 설계한다.
-4. 히스토리 이벤트 table 또는 JSON event schema를 사용자가 직접 검토할 수 있게 후보안을 만든다.
+4. `docs/architecture/history-event-design-2026-06-28.md`의 히스토리 이벤트 저장 단계를 사용자 컨펌 후 구현한다.
