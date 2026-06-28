@@ -1,10 +1,11 @@
-# 히스토리 이벤트 저장 설계 초안
+# 히스토리 이벤트 저장 설계 및 mock 구현
 
 | 항목 | 내용 |
 |---|---|
 | 작성일 | 2026-06-28 |
-| 브랜치 | `hi20260204-auth-session-policy` |
-| 상태 | 설계 초안, 저장 범위와 보관 기간은 사용자 컨펌 필요 |
+| 설계 브랜치 | `hi20260204-auth-session-policy` |
+| mock 구현 브랜치 | `hi20260204-history-event-mock` |
+| 상태 | 표준-라이트 mock sidecar 구현, 보관 기간과 DB 전환은 사용자 컨펌 필요 |
 | 선행 정책 | `docs/architecture/auth-session-policy-2026-06-28.md` |
 | 목적 | 멘토 회의에서 강조된 히스토리 저장/수집을 향후 고도화, 디버깅, 애프터서비스에 쓸 수 있게 이벤트 단위로 설계 |
 
@@ -17,7 +18,7 @@
 | 단계 | 의미 | 기본 입장 |
 |---|---|---|
 | 최소 | 화면 복구와 사건 상태 표시만 가능 | MVP 기본 |
-| 표준 | 디버깅, Agent 실패 분석, 애프터서비스 가능 | 추천 후보 |
+| 표준-라이트 | 디버깅, Agent 실패 분석, 애프터서비스 가능. 단 원문과 reasoning 전문 제외 | MVP 구현 |
 | 상세 | 모델 개선과 품질 분석까지 가능 | 별도 동의/마스킹/보관 기간 확정 후 |
 
 ## 2. 히스토리와 채팅 로그의 차이
@@ -155,10 +156,13 @@ MVP에서는 migration을 늘리지 않고 기존 JSON/모델을 활용한다.
 
 | 저장 위치 | 용도 |
 |---|---|
+| `backend/media/mock_history_events` sidecar JSON | `history_event.v1` 표준-라이트 이벤트 저장 |
 | `analysis_jobs.history` mock sidecar | 현재 mock job 진행도 |
 | `analysis_job_events` | job 진행 이벤트 |
 | `ChatSession.metadata.history_summary` 후보 | session 단위 요약 |
 | `AgentResult.raw_output` | Agent adapter 원본 보관 후보, 상세 저장은 주의 |
+
+현재 구현은 DB migration 없이 `MOCK_HISTORY_EVENT_ROOT` 환경변수로 저장 위치를 바꿀 수 있는 sidecar JSON을 사용한다. `GET /api/history/?session_id=...`와 `/api/mock/history/`에서 조회할 수 있다.
 
 ### 6.2 운영 전환 후보
 
@@ -249,17 +253,17 @@ sequenceDiagram
 
 | 질문 | 선택지 | 추천 후보 |
 |---|---|---|
-| 기본 히스토리 단계 | 최소, 표준, 상세 | 표준 |
-| 사용자 원문 저장 | 저장 안 함, 제한 저장, 전체 저장 | 제한 저장 |
-| OCR 원문 저장 | 저장 안 함, 마스킹 후 저장, 전체 저장 | 마스킹 후 저장 후보 |
-| Agent reasoning 저장 | 저장 안 함, 실패 시 요약만, 전체 저장 | 실패 시 요약만 |
+| 기본 히스토리 단계 | 최소, 표준-라이트, 상세 | 표준-라이트로 mock 구현 |
+| 사용자 원문 저장 | 저장 안 함, 제한 저장, 전체 저장 | 현재 저장 안 함 |
+| OCR 원문 저장 | 저장 안 함, 마스킹 후 저장, 전체 저장 | 현재 저장 안 함 |
+| Agent reasoning 저장 | 저장 안 함, 실패 시 요약만, 전체 저장 | 현재 전문 저장 안 함 |
 | 비회원 히스토리 TTL | 1일, 7일, 30일 | 7일 후보 |
 | 회원 히스토리 보관 | 3개월, 6개월, 직접 삭제 전까지 | 3개월 후보 |
 | 이벤트 table 즉시 추가 | 지금 추가, MVP는 metadata로 보류 | MVP는 보류 |
 
 ## 10. 구현 순서 제안
 
-1. 현재 mock API에 `history_event.v1` 생성 helper를 만든다.
-2. `guest_session_created`, `auth_me_checked`, `analysis_job_created`, `agent_call_completed`부터 최소 이벤트를 남긴다.
-3. `/api/history/` 조회 mock endpoint를 만든다.
-4. 사용자 컨펌 후 `history_events` table migration을 별도 브랜치에서 진행한다.
+1. 현재 mock API에 `history_event.v1` 생성 helper를 만든다. 구현됨.
+2. `guest_session_created`, `auth_me_checked`, `chat_message_created`, `analysis_job_created`, `agent_call_completed/partial/failed`, `report_saved/downloaded` 이벤트를 남긴다. 구현됨.
+3. `/api/history/` 조회 mock endpoint를 만든다. 구현됨.
+4. 사용자 컨펌 후 TTL, 조회 권한, `history_events` table migration을 별도 브랜치에서 진행한다.

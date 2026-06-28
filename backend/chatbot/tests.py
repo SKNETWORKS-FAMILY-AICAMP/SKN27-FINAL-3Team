@@ -1,3 +1,7 @@
+import json
+import os
+import tempfile
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 
@@ -137,6 +141,16 @@ class ChatbotPersistenceModelTests(TestCase):
 class ChatbotMockApiTests(TestCase):
     def setUp(self):
         self.client = Client(HTTP_AUTHORIZATION="Bearer dev-mock-token")
+        self._history_root = tempfile.TemporaryDirectory()
+        self._previous_history_root = os.environ.get("MOCK_HISTORY_EVENT_ROOT")
+        os.environ["MOCK_HISTORY_EVENT_ROOT"] = self._history_root.name
+
+    def tearDown(self):
+        if self._previous_history_root is None:
+            os.environ.pop("MOCK_HISTORY_EVENT_ROOT", None)
+        else:
+            os.environ["MOCK_HISTORY_EVENT_ROOT"] = self._previous_history_root
+        self._history_root.cleanup()
 
     def test_health_check_returns_scenarios(self):
         response = self.client.get("/api/health/")
@@ -293,6 +307,47 @@ class ChatbotMockApiTests(TestCase):
         error = response.json()["error"]
         self.assertEqual(error["contract_version"], "auth_error.v1")
         self.assertEqual(error["code"], "token_expired")
+
+    def test_history_endpoint_requires_authorization_header(self):
+        response = Client().get("/api/history/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "auth_required")
+
+    def test_history_endpoint_returns_standard_light_session_events(self):
+        raw_user_text = "이 고지서 원문은 history metadata에 저장되면 안 됩니다."
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_history_api",
+                "auth_context": {
+                    "auth_state": "guest",
+                    "guest_id": "gst_history",
+                    "session_id": "ses_history_api",
+                },
+                "user_text": raw_user_text,
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+            HTTP_X_GUEST_ID="gst_history",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        history_response = self.client.get("/api/history/?session_id=ses_history_api")
+
+        self.assertEqual(history_response.status_code, 200)
+        body = history_response.json()
+        self.assertEqual(body["history_contract"], "history_event.v1")
+        self.assertEqual(body["storage"]["policy"], "standard_light")
+        events = body["events"]
+        self.assertIn("chat_message_created", {event["event_type"] for event in events})
+        chat_event = next(event for event in events if event["event_type"] == "chat_message_created")
+        self.assertEqual(chat_event["actor"]["guest_id"], "gst_history")
+        self.assertEqual(chat_event["subject"]["session_id"], "ses_history_api")
+        self.assertFalse(chat_event["privacy"]["contains_user_text"])
+        self.assertNotIn(raw_user_text, json.dumps(events, ensure_ascii=False))
+        self.assertNotIn("user_text", json.dumps([event["metadata"] for event in events], ensure_ascii=False))
 
     def test_protected_mock_endpoint_rejects_invalid_mock_token(self):
         response = Client(HTTP_AUTHORIZATION="Bearer invalid").post(

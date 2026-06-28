@@ -89,6 +89,7 @@ docker run --rm -p 8000:8000 `
 |---|---|---|
 | `POST` | `/api/auth/guest-session/` | - |
 | `GET` | `/api/auth/me/` | - |
+| `GET` | `/api/history/` | `/api/mock/history/` |
 | `POST` | `/api/chat/sessions/` | `/api/mock/chat/sessions/` |
 | `POST` | `/api/chat/messages/` | `/api/mock/chat/messages/` |
 | `GET`/`POST` | `/api/files/` | `/api/mock/attachments/` |
@@ -107,6 +108,7 @@ docker run --rm -p 8000:8000 `
 | `GET` | `/api/health/` | backend health와 demo scenario 목록 |
 | `POST` | `/api/auth/guest-session/` | 비회원 `guest_id`, rate limit key, merge policy mock 발급 |
 | `GET` | `/api/auth/me/` | 현재 Bearer/guest identity와 `auth_session_id` 분리 상태 확인 |
+| `GET` | `/api/history/` | `history_event.v1` 표준-라이트 mock sidecar 이벤트 조회 |
 | `GET` | `/api/mock/chat/scenarios/` | `fine_notice`, `fault_ratio` 시나리오 목록 |
 | `GET` | `/api/mock/attachments/` | session별 mock attachment metadata 목록 |
 | `POST` | `/api/mock/attachments/` | multipart 파일 업로드 또는 JSON metadata 등록 |
@@ -122,6 +124,12 @@ docker run --rm -p 8000:8000 `
 | `POST` | `/api/mock/chat/messages/` | 챗봇 mock 분석 응답 반환 |
 | `POST` | `/api/mock/reports/` | 리포트 저장/다운로드 action mock |
 | `GET` | `/api/mock/reports/{report_id}/download/` | mock report 다운로드 |
+
+## History event mock
+
+`GET /api/history/?session_id=...`는 `backend/media/mock_history_events`의 sidecar JSON 이벤트를 조회한다. 현재 정책은 `standard_light`이며 사용자 원문, OCR 원문, Agent reasoning 전문은 저장하지 않는다.
+
+테스트나 로컬 실험에서 저장 위치를 분리하려면 `MOCK_HISTORY_EVENT_ROOT` 환경변수를 사용한다.
 
 ## Attachment handoff 예시
 
