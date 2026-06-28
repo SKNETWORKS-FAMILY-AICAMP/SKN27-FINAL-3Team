@@ -14,6 +14,7 @@ info:
     - internal_note: implementation or routing memo that should not be treated as a public API guarantee.
   x-contract-version: pm-api-json-schema.v0
   x-contract-date: "2026-06-28"
+  x-distribution-date: "2026-06-29"
   x-openapi-source:
     pdf: C:/Users/Playdata/Downloads/pm-api-json-schema-spec-2026-06-23.pdf
     markdown: docs/pm-api-json-schema-spec-2026-06-23.md
@@ -32,6 +33,8 @@ security:
 tags:
   - name: Health
     description: Public health and demo scenario endpoints.
+  - name: Auth
+    description: Guest identity, current subject, and mock Bearer session boundaries.
   - name: Chat
     description: Chat session and user message entry points.
   - name: Files
@@ -82,8 +85,60 @@ paths:
                 properties:
                   scenarios:
                     type: array
-                    items:
-                      $ref: "#/components/schemas/DemoScenario"
+                items:
+                  $ref: "#/components/schemas/DemoScenario"
+
+  /api/auth/guest-session/:
+    post:
+      tags: [Auth]
+      summary: Issue or refresh a guest identity
+      operationId: createGuestSession
+      security: []
+      x-contract-status: confirmed
+      x-review-note: Guest TTL, quota numbers, and account merge policy are still review-required.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuestSessionRequest"
+            examples:
+              withChatSession:
+                value:
+                  guest_id: gst_existing
+                  session_id: ses_guest_chat
+      responses:
+        "200":
+          description: Guest identity preview and merge/rate-limit policy.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/GuestSessionResponse"
+
+  /api/auth/me/:
+    get:
+      tags: [Auth]
+      summary: Inspect current auth subject
+      operationId: getCurrentAuthSubject
+      security: []
+      x-contract-status: confirmed
+      x-review-note: Current mock validates Bearer shape only. Real JWT signature verification is review-required.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/OptionalSessionId"
+      responses:
+        "200":
+          description: Current anonymous, guest, or authenticated subject.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/AuthSubjectResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
 
   /api/chat/sessions/:
     get:
@@ -179,6 +234,9 @@ paths:
       description: |
         Accepts text and attachment references. The current implementation returns
         mock Supervisor output immediately and includes `analysis_plan` for Agent handoff.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/AuthSessionIdHeader"
       requestBody:
         required: true
         content:
@@ -575,6 +633,9 @@ paths:
       operationId: createReportAction
       x-contract-status: confirmed
       description: Current mock route accepts report save/download actions. The objection-draft-specific API remains review-required.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/AuthSessionIdHeader"
       requestBody:
         required: true
         content:
@@ -701,23 +762,47 @@ paths:
       tags: [MyPage]
       summary: List user history events
       operationId: listHistory
-      x-contract-status: review_required
-      x-review-note: Candidate endpoint for after-service history and debugging. Not implemented.
+      x-contract-status: confirmed
+      x-review-note: Mock sidecar implementation uses standard-light storage. TTL and DB migration remain review-required.
       parameters:
         - $ref: "#/components/parameters/OptionalSessionId"
+        - $ref: "#/components/parameters/OptionalGuestId"
+        - $ref: "#/components/parameters/OptionalUserId"
+        - $ref: "#/components/parameters/OptionalJobId"
+        - $ref: "#/components/parameters/OptionalEventType"
+        - $ref: "#/components/parameters/OptionalLimit"
       responses:
         "200":
-          description: Candidate history response.
+          description: Standard-light history event response.
           content:
             application/json:
               schema:
-                type: object
-                required: [events]
-                properties:
-                  events:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/HistoryEvent"
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/HistoryEventListResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/mock/history/:
+    get:
+      tags: [MyPage, Mock Aliases]
+      summary: Mock alias for history event list
+      operationId: listMockHistory
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+        - $ref: "#/components/parameters/OptionalGuestId"
+        - $ref: "#/components/parameters/OptionalUserId"
+        - $ref: "#/components/parameters/OptionalJobId"
+        - $ref: "#/components/parameters/OptionalEventType"
+        - $ref: "#/components/parameters/OptionalLimit"
+      responses:
+        "200":
+          description: Standard-light history event response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryEventListResponse"
         "401":
           $ref: "#/components/responses/AuthRequired"
 
@@ -1012,6 +1097,57 @@ components:
       schema:
         type: string
       description: Candidate owner filter for member history.
+    OptionalUserId:
+      name: user_id
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter history by authenticated user id.
+    OptionalGuestId:
+      name: guest_id
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter history by guest id.
+    OptionalJobId:
+      name: job_id
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter history by analysis job id.
+    OptionalEventType:
+      name: event_type
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter history by event type.
+    OptionalLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 100
+      description: Maximum number of history events to return.
+    GuestIdHeader:
+      name: X-Guest-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Guest identity used before login or during guest-to-member handoff.
+    AuthSessionIdHeader:
+      name: X-Auth-Session-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Mock auth session id derived from the Bearer token.
     SessionId:
       name: session_id
       in: path
@@ -1118,6 +1254,200 @@ components:
           enum: [mock]
           description: Current execution mode for canonical shadow endpoints.
 
+    GuestSessionRequest:
+      type: object
+      properties:
+        guest_id:
+          type: string
+          description: Existing guest id to refresh. If omitted, backend issues a mock id.
+        session_id:
+          type: string
+          description: Chat session id to bind for preview only.
+
+    GuestSessionResponse:
+      type: object
+      required: [auth_state, guest, subject, session_binding, rate_limit, merge_policy, limitations]
+      properties:
+        auth_state:
+          type: string
+          enum: [guest]
+        guest:
+          $ref: "#/components/schemas/GuestIdentity"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        rate_limit:
+          $ref: "#/components/schemas/RateLimitPolicy"
+        merge_policy:
+          $ref: "#/components/schemas/MergePolicy"
+        limitations:
+          type: array
+          items:
+            type: string
+
+    AuthSubjectResponse:
+      type: object
+      required: [auth_state, subject, rate_limit, merge_policy, limitations]
+      properties:
+        auth_state:
+          type: string
+          enum: [anonymous, guest, authenticated]
+        user:
+          type:
+            - object
+            - "null"
+          properties:
+            user_id:
+              type: string
+            display_name:
+              type: string
+            status:
+              type: string
+            policy_status:
+              type: string
+        guest:
+          oneOf:
+            - $ref: "#/components/schemas/GuestIdentity"
+            - type: "null"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        auth_session:
+          oneOf:
+            - $ref: "#/components/schemas/AuthSession"
+            - type: "null"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        rate_limit:
+          $ref: "#/components/schemas/RateLimitPolicy"
+        merge_policy:
+          $ref: "#/components/schemas/MergePolicy"
+        limitations:
+          type: array
+          items:
+            type: string
+
+    AuthContext:
+      type: object
+      x-contract-status: confirmed
+      description: Frontend-provided identity context used to keep auth session and chat session separate.
+      properties:
+        auth_state:
+          type: string
+          enum: [anonymous, guest, authenticated]
+        user_id:
+          type:
+            - string
+            - "null"
+        guest_id:
+          type:
+            - string
+            - "null"
+        auth_session_id:
+          type:
+            - string
+            - "null"
+        session_id:
+          type:
+            - string
+            - "null"
+
+    GuestIdentity:
+      type: object
+      properties:
+        guest_id:
+          type: string
+        status:
+          type: string
+          enum: [active]
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        ttl_seconds:
+          type: integer
+        policy_status:
+          type: string
+          enum: [review_required, mock_only]
+
+    AuthSubject:
+      type: object
+      required: [subject_id, subject_type, is_authenticated]
+      properties:
+        subject_id:
+          type: string
+        subject_type:
+          type: string
+          enum: [anonymous, guest, user]
+        user_id:
+          type:
+            - string
+            - "null"
+        guest_id:
+          type:
+            - string
+            - "null"
+        auth_session_id:
+          type:
+            - string
+            - "null"
+        is_authenticated:
+          type: boolean
+
+    AuthSession:
+      type: object
+      properties:
+        auth_session_id:
+          type: string
+        jwt_jti:
+          type: string
+        status:
+          type: string
+        verification:
+          type: string
+
+    SessionBinding:
+      type: object
+      properties:
+        session_id:
+          type:
+            - string
+            - "null"
+        can_bind_to_chat_session:
+          type: boolean
+        binding_policy:
+          type: string
+
+    RateLimitPolicy:
+      type: object
+      properties:
+        subject_id:
+          type: string
+        policy_status:
+          type: string
+          enum: [review_required]
+        keys:
+          type: array
+          items:
+            type: string
+        notes:
+          type: array
+          items:
+            type: string
+
+    MergePolicy:
+      type: object
+      properties:
+        guest_to_user_merge:
+          type: string
+          enum: [user_confirmation_required]
+        auto_merge:
+          type: boolean
+        reason:
+          type: string
+
     HealthResponse:
       type: object
       required: [ok, service, available_scenarios]
@@ -1215,6 +1545,8 @@ components:
       properties:
         session_id:
           type: string
+        auth_context:
+          $ref: "#/components/schemas/AuthContext"
         user_text:
           type: string
           description: Required when no usable attachment is provided.
@@ -2500,6 +2832,8 @@ components:
           type: string
           enum: [save, download]
           default: save
+        auth_context:
+          $ref: "#/components/schemas/AuthContext"
         report_id:
           type: string
         case_id:
@@ -2669,27 +3003,154 @@ components:
 
     HistoryEvent:
       type: object
-      x-contract-status: review_required
+      x-contract-status: confirmed
+      required: [event_id, event_type, event_version, occurred_at, actor, subject, source, status, summary, metadata, privacy]
       properties:
         event_id:
           type: string
-        session_id:
-          type: string
-        job_id:
-          type: string
         event_type:
           type: string
-          enum: [chat_message, file_upload, analysis_job, agent_call, report_action, auth_event]
+          enum:
+            - guest_session_created
+            - auth_me_checked
+            - chat_session_created
+            - chat_message_created
+            - analysis_job_created
+            - agent_call_completed
+            - agent_call_partial
+            - agent_call_failed
+            - report_saved
+            - report_downloaded
+        event_version:
+          type: string
+          enum: [history_event.v1]
+        occurred_at:
+          type: string
+          format: date-time
+        actor:
+          $ref: "#/components/schemas/HistoryEventActor"
+        subject:
+          $ref: "#/components/schemas/HistoryEventSubject"
+        source:
+          $ref: "#/components/schemas/HistoryEventSource"
         status:
           type: string
+          enum: [success, partial, failed, blocked, running, downloaded, report_saved]
         summary:
           type: string
         metadata:
           type: object
           additionalProperties: true
+          description: Standard-light metadata. User text, OCR raw text, prompts, reasoning, raw output, and raw payload are omitted.
+        privacy:
+          $ref: "#/components/schemas/HistoryEventPrivacy"
         created_at:
           type: string
           format: date-time
+
+    HistoryEventListResponse:
+      type: object
+      x-contract-status: confirmed
+      required: [history_contract, storage, count, events, limitations]
+      properties:
+        history_contract:
+          type: string
+          enum: [history_event.v1]
+        storage:
+          type: object
+          required: [backend, policy]
+          properties:
+            backend:
+              type: string
+              enum: [mock_sidecar_json]
+            policy:
+              type: string
+              enum: [standard_light]
+        count:
+          type: integer
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryEvent"
+        limitations:
+          type: array
+          items:
+            type: string
+
+    HistoryEventActor:
+      type: object
+      required: [auth_state]
+      properties:
+        user_id:
+          type:
+            - string
+            - "null"
+        guest_id:
+          type:
+            - string
+            - "null"
+        auth_session_id:
+          type:
+            - string
+            - "null"
+        auth_state:
+          type: string
+          enum: [anonymous, guest, authenticated]
+
+    HistoryEventSubject:
+      type: object
+      properties:
+        session_id:
+          type:
+            - string
+            - "null"
+        message_id:
+          type:
+            - string
+            - "null"
+        job_id:
+          type:
+            - string
+            - "null"
+        report_id:
+          type:
+            - string
+            - "null"
+
+    HistoryEventSource:
+      type: object
+      properties:
+        surface:
+          type: string
+          enum: [web, api, worker, agent]
+        api_path:
+          type:
+            - string
+            - "null"
+        execution_mode:
+          type: string
+          enum: [mock, canonical_mock, sync, async_worker]
+        node_code:
+          type:
+            - string
+            - "null"
+
+    HistoryEventPrivacy:
+      type: object
+      required: [risk_level, contains_user_text, contains_file_uri, contains_model_output, retention_policy]
+      properties:
+        risk_level:
+          type: string
+          enum: [low, medium, high, restricted]
+        contains_user_text:
+          type: boolean
+        contains_file_uri:
+          type: boolean
+        contains_model_output:
+          type: boolean
+        retention_policy:
+          type: string
+          enum: [review_required]
 
     ApiErrorEnvelope:
       type: object

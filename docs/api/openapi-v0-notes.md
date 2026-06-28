@@ -6,6 +6,7 @@
 | 대상 파일 | `docs/api/openapi-v0.yaml` |
 | 기준 원본 | `C:/Users/Playdata/Downloads/pm-api-json-schema-spec-2026-06-23.pdf`, `docs/pm-api-json-schema-spec-2026-06-23.md` |
 | OpenAPI 버전 | `3.2.0` |
+| 배포 정리일 | 2026-06-29 |
 | 목적 | PM API JSON Schema 초안을 팀원이 같은 계약으로 볼 수 있게 기계 판독 가능한 API 문서로 정리 |
 
 ## 1. 작성 원칙
@@ -35,8 +36,10 @@ OpenAPI는 API 계약을 사람이 읽는 문서가 아니라, 프론트엔드, 
 | 차이 | PDF | 마크다운/코드 | 반영 |
 |---|---|---|---|
 | 인증 오류 | 공통 오류 중심 | `auth_error.v1`, `token_invalid`, `token_expired`, `WWW-Authenticate` 추가 | 확정 |
+| 비회원/auth subject | 제한적 | `POST /api/auth/guest-session/`, `GET /api/auth/me/`, `X-Guest-Id`, `auth_context` 추가 | 확정 |
 | canonical/mock 구분 | 제한적 | `/api/...`가 mock service를 재사용하고 `api_surface=canonical_mock`, `execution_mode=mock` 포함 | 확정 |
 | Agent adapter | 제한적 | `agent_adapter.v1`, `adapter_contract`, `run_{node_code}` 계약 추가 | 확정 |
+| 히스토리 이벤트 | 후보 | `history_event.v1`, standard-light sidecar, `/api/history/` mock 조회 추가 | 확정 |
 | `accident_statement` | 없음 | 첨부 purpose와 테스트에 존재 | 검토 표시 포함 |
 | `blackbox_video`, `insurance_record` | 없음 | mock 첨부 service에 존재 | 검토 표시 포함 |
 | `damage_image` | 없음 | Vision handoff 내부 매핑 메모 | 내부메모, public enum 미반영 |
@@ -48,6 +51,8 @@ OpenAPI는 API 계약을 사람이 읽는 문서가 아니라, 프론트엔드, 
 다음 항목은 현재 코드나 테스트에 근거가 있어 `confirmed`로 두었다.
 
 - `GET /api/health/`
+- `POST /api/auth/guest-session/`
+- `GET /api/auth/me/`
 - `POST /api/chat/sessions/`
 - `POST /api/chat/messages/`
 - `GET/POST /api/files/`
@@ -60,8 +65,10 @@ OpenAPI는 API 계약을 사람이 읽는 문서가 아니라, 프론트엔드, 
 - `POST /api/agents/plans/run/`
 - `POST /api/reports/`
 - `GET /api/reports/{report_id}/download/`
+- `GET /api/history/`
 - 명시적 `/api/mock/...` alias
 - `auth_error.v1`
+- `history_event.v1`
 - `agent_adapter.v1`
 
 ## 5. 검토 필요로 둔 범위
@@ -74,7 +81,8 @@ OpenAPI는 API 계약을 사람이 읽는 문서가 아니라, 프론트엔드, 
 | `GET /api/chat/sessions/{session_id}/messages/` | 메시지 이력 조회 API 필요 여부와 권한 정책 미확정 |
 | `GET /api/reports/`, `GET /api/reports/{report_id}/` | 리포트 목록/상세 화면은 필요하지만 현재 다운로드/mock action 중심 |
 | `POST /api/reports/objection-draft/` | PDF에는 있지만 현재 Django route 없음 |
-| `GET /api/mypage/summary/`, `GET /api/history/` | 멘토 회의에서 강조한 히스토리/애프터서비스 흐름과 연결 필요 |
+| `GET /api/mypage/summary/` | 마이페이지 집계 화면은 필요하지만 현재 Django route 없음 |
+| 히스토리 TTL/보관 기간 | `/api/history/` mock 조회는 구현됐지만 비회원 TTL, 회원 보관 기간, DB table 전환은 미확정 |
 | 비회원 session 정책 | TTL, rate limit, 파일 보관, 로그인 전후 session merge가 갈림 |
 | `accident_statement` 수신 node | 첨부 목적은 존재하지만 실제 담당 node와 output schema가 미확정 |
 | `blackbox_video`, `insurance_record` public enum 승격 | mock에는 있지만 PM 상위 API enum으로 확정할지 확인 필요 |
