@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const MOCK_ATTACHMENTS = [
   {
@@ -21,14 +21,28 @@ const STATUS_LABELS = {
   success: "완료",
 };
 
+const AUTH_STATE_LABELS = {
+  anonymous: "익명",
+  authenticated: "회원",
+  guest: "비회원",
+};
+
 export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-mock-token" }) {
   const [sessionId, setSessionId] = useState(null);
+  const [guestSession, setGuestSession] = useState(null);
+  const [authSubject, setAuthSubject] = useState(null);
+  const [authError, setAuthError] = useState(null);
   const [question, setQuestion] = useState("이 고지서로 이의신청서를 만들 수 있을까요?");
   const [mockStatus, setMockStatus] = useState("success");
   const [response, setResponse] = useState(null);
   const [report, setReport] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const authApiBase = useMemo(() => toCanonicalApiBase(apiBase), [apiBase]);
+  const guestId = authSubject?.subject?.guest_id || guestSession?.guest?.guest_id || null;
+  const authSessionId = authSubject?.subject?.auth_session_id || null;
+  const authState = authSubject?.auth_state || guestSession?.auth_state || "anonymous";
   const progressStatus = response?.progress?.status || "pending";
   const analysisSteps = response?.analysis_plan?.steps || [];
   const canRunReportAction = response?.report_links?.length > 0;
@@ -36,39 +50,138 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
   const requestPayload = useMemo(
     () => ({
       session_id: sessionId,
+      auth_context: buildAuthContext({ authState, guestId, authSessionId, sessionId }),
       user_text: question,
       attachments: MOCK_ATTACHMENTS,
       mock_status: mockStatus,
     }),
-    [mockStatus, question, sessionId]
+    [authSessionId, authState, guestId, mockStatus, question, sessionId]
   );
 
-  async function ensureSession() {
-    if (sessionId) {
-      return sessionId;
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrapIdentity() {
+      setAuthLoading(true);
+      setAuthError(null);
+
+      try {
+        const guest = await postJson(joinApiPath(authApiBase, "auth/guest-session/"), {
+          session_id: sessionId,
+        });
+        if (cancelled) {
+          return;
+        }
+
+        setGuestSession(guest);
+
+        const subject = await getJson(buildAuthMeUrl(authApiBase, sessionId), {
+          authToken,
+          guestId: guest?.guest?.guest_id,
+        });
+        if (cancelled) {
+          return;
+        }
+
+        setAuthSubject(subject);
+      } catch (error) {
+        if (!cancelled) {
+          setAuthError(error.message);
+        }
+      } finally {
+        if (!cancelled) {
+          setAuthLoading(false);
+        }
+      }
     }
-    const nextSessionId = `ses_mock_${Date.now()}`;
-    setSessionId(nextSessionId);
-    return nextSessionId;
+
+    bootstrapIdentity();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authApiBase, authToken]);
+
+  async function refreshAuthSubject({ nextGuestId = guestId, nextSessionId = sessionId } = {}) {
+    const subject = await getJson(buildAuthMeUrl(authApiBase, nextSessionId), {
+      authToken,
+      guestId: nextGuestId,
+    });
+    setAuthSubject(subject);
+    return subject;
+  }
+
+  async function refreshGuestSession(nextSessionId) {
+    const guest = await postJson(joinApiPath(authApiBase, "auth/guest-session/"), {
+      guest_id: guestId,
+      session_id: nextSessionId,
+    });
+    setGuestSession(guest);
+
+    const subject = await refreshAuthSubject({
+      nextGuestId: guest?.guest?.guest_id,
+      nextSessionId,
+    });
+
+    return { guest, subject };
+  }
+
+  async function ensureSession() {
+    const activeSessionId = sessionId || `ses_mock_${Date.now()}`;
+    if (!sessionId) {
+      setSessionId(activeSessionId);
+    }
+
+    let activeGuestId = guestId;
+    let activeAuthSessionId = authSessionId;
+    let activeAuthState = authState;
+
+    if (!activeGuestId || guestSession?.session_binding?.session_id !== activeSessionId) {
+      try {
+        const { guest, subject } = await refreshGuestSession(activeSessionId);
+        activeGuestId = subject?.subject?.guest_id || guest?.guest?.guest_id || activeGuestId;
+        activeAuthSessionId = subject?.subject?.auth_session_id || activeAuthSessionId;
+        activeAuthState = subject?.auth_state || activeAuthState;
+        setAuthError(null);
+      } catch (error) {
+        setAuthError(error.message);
+      }
+    }
+
+    return {
+      activeSessionId,
+      activeGuestId,
+      activeAuthSessionId,
+      activeAuthState,
+    };
   }
 
   async function submitMockMessage() {
     setLoading(true);
     setReport(null);
-    const activeSessionId = await ensureSession();
-    const fallbackResponse = buildFallbackResponse({
+    const { activeSessionId, activeGuestId, activeAuthSessionId, activeAuthState } = await ensureSession();
+    const activeAuthContext = buildAuthContext({
+      authState: activeAuthState,
+      guestId: activeGuestId,
+      authSessionId: activeAuthSessionId,
+      sessionId: activeSessionId,
+    });
+    const messagePayload = {
       ...requestPayload,
       session_id: activeSessionId,
-    });
+      auth_context: activeAuthContext,
+    };
+    const fallbackResponse = buildFallbackResponse(messagePayload);
 
     try {
       const result = await postJson(
-        `${apiBase}/chat/messages`,
+        joinApiPath(apiBase, "chat/messages/"),
+        messagePayload,
         {
-          ...requestPayload,
-          session_id: activeSessionId,
-        },
-        authToken
+          authToken,
+          guestId: activeGuestId,
+          authSessionId: activeAuthSessionId,
+        }
       );
       setResponse(result);
     } catch (_error) {
@@ -92,12 +205,22 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
 
     try {
       const result = await postJson(
-        `${apiBase}/reports`,
+        joinApiPath(apiBase, "reports/"),
         {
           action,
           session_id: response.session_id,
+          auth_context: buildAuthContext({
+            authState,
+            guestId,
+            authSessionId,
+            sessionId: response.session_id,
+          }),
         },
-        authToken
+        {
+          authToken,
+          guestId,
+          authSessionId,
+        }
       );
       setReport(result);
     } catch (_error) {
@@ -131,6 +254,25 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
         <button type="button" onClick={submitMockMessage} disabled={loading}>
           {loading ? "요청 중" : "분석 요청"}
         </button>
+      </section>
+
+      <section className="chatbot-mock__identity" aria-live="polite">
+        <strong>{authLoading ? "인증 확인 중" : AUTH_STATE_LABELS[authState] || authState}</strong>
+        <dl>
+          <div>
+            <dt>guest_id</dt>
+            <dd>{guestId || "-"}</dd>
+          </div>
+          <div>
+            <dt>auth_session_id</dt>
+            <dd>{authSessionId || "-"}</dd>
+          </div>
+          <div>
+            <dt>chat_session_id</dt>
+            <dd>{sessionId || "-"}</dd>
+          </div>
+        </dl>
+        {authError && <p role="alert">{authError}</p>}
       </section>
 
       {response && (
@@ -203,13 +345,10 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
   );
 }
 
-async function postJson(url, payload, authToken) {
+async function postJson(url, payload, identity = {}) {
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-    },
+    headers: buildRequestHeaders(identity, { includeContentType: true }),
     body: JSON.stringify(payload),
   });
 
@@ -220,11 +359,67 @@ async function postJson(url, payload, authToken) {
   return response.json();
 }
 
+async function getJson(url, identity = {}) {
+  const response = await fetch(url, {
+    method: "GET",
+    headers: buildRequestHeaders(identity),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function buildRequestHeaders(
+  { authToken, guestId, authSessionId } = {},
+  { includeContentType = false } = {}
+) {
+  return {
+    ...(includeContentType ? { "Content-Type": "application/json" } : {}),
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    ...(guestId ? { "X-Guest-Id": guestId } : {}),
+    ...(authSessionId ? { "X-Auth-Session-Id": authSessionId } : {}),
+  };
+}
+
+function buildAuthContext({ authState, guestId, authSessionId, sessionId }) {
+  return {
+    auth_state: authState || "anonymous",
+    guest_id: guestId || null,
+    auth_session_id: authSessionId || null,
+    session_id: sessionId || null,
+  };
+}
+
+function buildAuthMeUrl(apiBase, sessionId) {
+  const url = joinApiPath(apiBase, "auth/me/");
+  if (!sessionId) {
+    return url;
+  }
+  return `${url}?session_id=${encodeURIComponent(sessionId)}`;
+}
+
+function joinApiPath(apiBase, path) {
+  return `${trimTrailingSlash(apiBase)}/${path.replace(/^\/+/, "")}`;
+}
+
+function toCanonicalApiBase(apiBase) {
+  const normalized = trimTrailingSlash(apiBase);
+  return normalized.endsWith("/mock") ? normalized.slice(0, -"/mock".length) : normalized;
+}
+
+function trimTrailingSlash(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
 function buildFallbackResponse(payload) {
   const status = payload.mock_status || "success";
   const common = {
     message_id: `msg_mock_${Date.now()}`,
     session_id: payload.session_id,
+    auth_context: payload.auth_context,
     routing_intent: "objection_request",
     status,
     created_at: new Date().toISOString(),
