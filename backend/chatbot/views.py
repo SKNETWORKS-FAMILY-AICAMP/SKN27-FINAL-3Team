@@ -22,6 +22,11 @@ from app.services.attachment_mock_service import (
     list_attachments as list_mock_attachments,
     register_attachment as register_mock_attachment,
 )
+from app.services.auth_session_mock_service import (
+    create_guest_session as _create_guest_session,
+    get_current_auth_subject as _get_current_auth_subject,
+)
+from app.services.auth_error_contract import build_www_authenticate_header
 from app.services.chatbot_mock_service import (
     create_session,
     list_demo_scenarios,
@@ -58,6 +63,26 @@ def health_check(_request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "OPTIONS"])
 def demo_scenarios(_request: HttpRequest) -> JsonResponse:
     return JsonResponse({"scenarios": list_demo_scenarios()})
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def guest_session(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request)
+    return _json_response(request, _create_guest_session(body))
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def auth_me(request: HttpRequest) -> JsonResponse:
+    status, payload = _get_current_auth_subject(
+        authorization_header=request.headers.get("Authorization"),
+        guest_id=request.headers.get("X-Guest-Id") or request.GET.get("guest_id"),
+        session_id=request.GET.get("session_id"),
+    )
+    response = _json_response(request, payload, status=status)
+    if status in {401, 403} and isinstance(payload.get("error"), dict):
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+    return response
 
 
 @require_http_methods(["GET", "OPTIONS"])

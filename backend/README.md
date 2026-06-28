@@ -87,6 +87,8 @@ docker run --rm -p 8000:8000 `
 
 | Method | Canonical path | Mock path |
 |---|---|---|
+| `POST` | `/api/auth/guest-session/` | - |
+| `GET` | `/api/auth/me/` | - |
 | `POST` | `/api/chat/sessions/` | `/api/mock/chat/sessions/` |
 | `POST` | `/api/chat/messages/` | `/api/mock/chat/messages/` |
 | `GET`/`POST` | `/api/files/` | `/api/mock/attachments/` |
@@ -103,6 +105,8 @@ docker run --rm -p 8000:8000 `
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/health/` | backend health와 demo scenario 목록 |
+| `POST` | `/api/auth/guest-session/` | 비회원 `guest_id`, rate limit key, merge policy mock 발급 |
+| `GET` | `/api/auth/me/` | 현재 Bearer/guest identity와 `auth_session_id` 분리 상태 확인 |
 | `GET` | `/api/mock/chat/scenarios/` | `fine_notice`, `fault_ratio` 시나리오 목록 |
 | `GET` | `/api/mock/attachments/` | session별 mock attachment metadata 목록 |
 | `POST` | `/api/mock/attachments/` | multipart 파일 업로드 또는 JSON metadata 등록 |
