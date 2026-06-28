@@ -40,7 +40,7 @@ class DemoCorsMiddleware:
 
         response["Access-Control-Allow-Origin"] = "*"
         response["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Guest-Id, X-Auth-Session-Id"
         return response
 
 

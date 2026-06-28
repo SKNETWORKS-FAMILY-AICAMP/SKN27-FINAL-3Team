@@ -154,12 +154,13 @@ class ChatbotMockApiTests(TestCase):
             "/api/mock/chat/messages/",
             HTTP_ORIGIN="http://localhost:5173",
             HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
-            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="Content-Type, Authorization",
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="Content-Type, Authorization, X-Guest-Id",
         )
 
         self.assertEqual(response.status_code, 204)
         self.assertEqual(response["Access-Control-Allow-Origin"], "*")
         self.assertIn("Authorization", response["Access-Control-Allow-Headers"])
+        self.assertIn("X-Guest-Id", response["Access-Control-Allow-Headers"])
 
     def test_public_mock_endpoints_do_not_require_authorization_header(self):
         public_client = Client()
@@ -237,6 +238,61 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(error["contract_version"], "auth_error.v1")
         self.assertEqual(error["code"], "token_expired")
         self.assertEqual(error["auth"]["reason"], "expired_token")
+
+    def test_auth_guest_session_issues_guest_identity_without_login(self):
+        response = Client().post(
+            "/api/auth/guest-session/",
+            data={"guest_id": "gst_existing", "session_id": "ses_guest_chat"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["api_surface"], "canonical_mock")
+        self.assertEqual(body["execution_mode"], "mock")
+        self.assertEqual(body["auth_state"], "guest")
+        self.assertEqual(body["guest"]["guest_id"], "gst_existing")
+        self.assertEqual(body["subject"]["subject_id"], "guest:gst_existing")
+        self.assertIsNone(body["subject"]["auth_session_id"])
+        self.assertEqual(body["session_binding"]["session_id"], "ses_guest_chat")
+        self.assertFalse(body["merge_policy"]["auto_merge"])
+
+    def test_auth_me_reports_authenticated_subject_with_mock_bearer(self):
+        response = self.client.get(
+            "/api/auth/me/?session_id=ses_auth_me",
+            HTTP_X_GUEST_ID="gst_before_login",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["auth_state"], "authenticated")
+        self.assertEqual(body["subject"]["subject_id"], "user:usr_mock")
+        self.assertEqual(body["subject"]["guest_id"], "gst_before_login")
+        self.assertEqual(body["subject"]["auth_session_id"], "auth_dev_mock")
+        self.assertEqual(body["auth_session"]["verification"], "mock_bearer_shape_only")
+        self.assertEqual(body["session_binding"]["session_id"], "ses_auth_me")
+
+    def test_auth_me_can_report_guest_subject_without_bearer(self):
+        response = Client().get("/api/auth/me/", HTTP_X_GUEST_ID="guest_header")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["auth_state"], "guest")
+        self.assertEqual(body["guest"]["guest_id"], "gst_guest_header")
+        self.assertEqual(body["subject"]["subject_type"], "guest")
+        self.assertFalse(body["subject"]["is_authenticated"])
+
+    def test_auth_me_reuses_auth_error_header_for_invalid_bearer(self):
+        response = Client(HTTP_AUTHORIZATION="Bearer expired").get("/api/auth/me/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response["WWW-Authenticate"],
+            'Bearer error="token_expired", error_description="expired_token"',
+        )
+        error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "auth_error.v1")
+        self.assertEqual(error["code"], "token_expired")
 
     def test_protected_mock_endpoint_rejects_invalid_mock_token(self):
         response = Client(HTTP_AUTHORIZATION="Bearer invalid").post(
