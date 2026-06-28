@@ -4,7 +4,7 @@
 |---|---|
 | Issue | `#56 django chatbot mock api fixtures` 후속 |
 | Scope | mock sidecar 저장소를 PostgreSQL, Redis, object storage로 전환하기 위한 경계 설계 |
-| Status | 설계 초안, 구현 없음 |
+| Status | 설계 초안, 1차 model/migration foundation 구현 시작 |
 | 작성일 | 2026-06-28 |
 
 ## 1. 이 브랜치에서의 범위
@@ -24,6 +24,24 @@
 - sidecar 저장 제거
 - 실제 JWT 사용자 FK, 권한 검증 구현
 - Celery 또는 background worker 도입
+
+### 1.1 2026-06-28 foundation 구현 반영
+
+`django-production-storage-foundation` 브랜치에서는 운영 저장소 전환의 첫 단계로 Django model과 initial migration만 추가한다. 기존 mock sidecar service와 API endpoint는 계속 그대로 동작한다.
+
+추가된 구현 범위:
+
+- `backend/chatbot/models.py`: chat session, message, uploaded file, analysis job, job event, agent result, display result, report model 정의
+- `backend/chatbot/migrations/0001_initial.py`: 위 model의 initial migration
+- `backend/chatbot/tests.py`: model 관계와 JSONField snapshot 저장 검증
+
+아직 구현하지 않는 범위:
+
+- mock service에서 DB model 사용
+- object storage adapter
+- Redis progress cache
+- 실제 JWT user FK와 권한 검증
+- background worker 또는 Celery queue
 
 ## 2. 현재 mock 저장 구조
 

@@ -1,6 +1,128 @@
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 
+from chatbot.models import (
+    AgentResult,
+    AgentResultStatus,
+    AnalysisDisplayResult,
+    AnalysisJob,
+    AnalysisJobEvent,
+    AnalysisJobStatus,
+    ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
+    MessageRole,
+    Report,
+    ReportStatus,
+    ReportType,
+    UploadedFile,
+    UploadedFileStatus,
+)
+
+
+class ChatbotPersistenceModelTests(TestCase):
+    def test_storage_foundation_links_session_files_jobs_results_and_reports(self):
+        session = ChatSession.objects.create(
+            session_id="ses_db_foundation",
+            owner_id="usr_db",
+            title="Storage foundation",
+            status=ChatSessionStatus.ACTIVE,
+            current_intent="objection_request",
+        )
+        message = ChatMessage.objects.create(
+            message_id="msg_db_foundation",
+            session=session,
+            role=MessageRole.USER,
+            content="Prepare an objection draft.",
+            routing_intent="objection_request",
+        )
+        upload = UploadedFile.objects.create(
+            attachment_id="att_db_foundation",
+            owner_id="usr_db",
+            session=session,
+            purpose="fine_notice",
+            file_type="image",
+            original_filename="notice.jpg",
+            content_type="image/jpeg",
+            size_bytes=2048,
+            storage_uri="s3://mock-bucket/uploads/usr_db/ses_db_foundation/notice.jpg",
+            status=UploadedFileStatus.READY,
+            agent_handoff={"attachment_id": "att_db_foundation", "purpose": "fine_notice"},
+        )
+        job = AnalysisJob.objects.create(
+            job_id="job_db_foundation",
+            session=session,
+            message=message,
+            owner_id="usr_db",
+            routing_intent="objection_request",
+            status=AnalysisJobStatus.RUNNING,
+            active_node="fine_notice_analysis",
+            progress_message="Analyzing fine notice.",
+            analysis_plan_id="plan_db_foundation",
+            status_counts={"success": 1, "partial": 0, "failed": 0},
+        )
+        event = AnalysisJobEvent.objects.create(
+            job=job,
+            status=AnalysisJobStatus.RUNNING,
+            active_node="fine_notice_analysis",
+            message="Fine notice analysis started.",
+        )
+        agent_result = AgentResult.objects.create(
+            result_id="res_agent_db_foundation",
+            job=job,
+            node_code="fine_notice_analysis",
+            node_name="Fine notice analysis",
+            status=AgentResultStatus.SUCCESS,
+            summary="Fine notice fields extracted.",
+            structured_result={"notice_type": "traffic_fine_notice"},
+            evidence=[
+                {
+                    "source_type": "user_uploaded_file",
+                    "source_reference": upload.attachment_id,
+                }
+            ],
+            next_actions=["Generate objection draft"],
+            limitations=["Mock persistence foundation sample."],
+        )
+        display_result = AnalysisDisplayResult.objects.create(
+            display_result_id="disp_db_foundation",
+            job=job,
+            assistant_message={
+                "answer": "Fine notice analysis is ready.",
+                "limitations": [],
+            },
+            progress=[{"node_code": "fine_notice_analysis", "status": "done"}],
+            cards=[{"card_type": "fine_notice", "title": "Fine notice"}],
+            attachments=[{"attachment_id": upload.attachment_id, "purpose": upload.purpose}],
+            report_links=[{"action": "download", "endpoint": "/api/reports/rep_db/download/"}],
+        )
+        report = Report.objects.create(
+            report_id="rep_db_foundation",
+            owner_id="usr_db",
+            session=session,
+            job=job,
+            display_result=display_result,
+            report_type=ReportType.OBJECTION_DRAFT,
+            status=ReportStatus.READY,
+            title="Objection draft",
+            storage_uri="s3://mock-bucket/reports/usr_db/rep_db_foundation.txt",
+            content_summary="Draft generated from fine notice analysis.",
+            content={"format": "text"},
+        )
+
+        self.assertEqual(str(session), "ses_db_foundation")
+        self.assertEqual(str(event), "job_db_foundation:running")
+        self.assertEqual(session.messages.get(), message)
+        self.assertEqual(session.uploaded_files.get(), upload)
+        self.assertEqual(session.analysis_jobs.get(), job)
+        self.assertEqual(job.events.get(), event)
+        self.assertEqual(job.agent_results.get(), agent_result)
+        self.assertEqual(job.display_result, display_result)
+        self.assertEqual(job.reports.get(), report)
+        self.assertEqual(agent_result.evidence[0]["source_reference"], "att_db_foundation")
+        self.assertEqual(display_result.cards[0]["card_type"], "fine_notice")
+        self.assertEqual(report.content["format"], "text")
+
 
 class ChatbotMockApiTests(TestCase):
     def setUp(self):
