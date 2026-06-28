@@ -418,6 +418,9 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(attachment["type"], "image")
         self.assertEqual(attachment["status"], "uploaded")
         self.assertEqual(attachment["agent_handoff"]["attachment_id"], attachment["attachment_id"])
+        self.assertFalse(
+            UploadedFile.objects.filter(attachment_id=attachment["attachment_id"]).exists()
+        )
 
         detail = self.client.get(f"/api/mock/attachments/{attachment['attachment_id']}/")
         self.assertEqual(detail.status_code, 200)
@@ -441,10 +444,71 @@ class ChatbotMockApiTests(TestCase):
         attachment = body["attachment"]
         self.assertEqual(body["api_surface"], "canonical_mock")
         self.assertEqual(attachment["purpose"], "fine_notice")
+        self.assertEqual(attachment["persistence"]["backend"], "postgresql")
+        self.assertEqual(attachment["persistence"]["table"], "uploaded_files")
+        self.assertEqual(attachment["checks"]["metadata_repository"], "uploaded_files")
+
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
+        self.assertEqual(uploaded_file.session.session_id, "ses_canonical_files")
+        self.assertEqual(uploaded_file.purpose, "fine_notice")
+        self.assertEqual(uploaded_file.file_type, "image")
+        self.assertEqual(uploaded_file.content_type, "image/jpeg")
+        self.assertEqual(uploaded_file.size_bytes, 2048)
+        self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+        self.assertEqual(uploaded_file.metadata["mock_status"], "metadata_registered")
 
         detail = self.client.get(f"/api/files/{attachment['attachment_id']}/")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["api_surface"], "canonical_mock")
+        self.assertEqual(
+            detail.json()["attachment"]["persistence"]["table"],
+            "uploaded_files",
+        )
+
+        list_response = self.client.get("/api/files/?session_id=ses_canonical_files")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertIn(
+            attachment["attachment_id"],
+            {item["attachment_id"] for item in list_response.json()["attachments"]},
+        )
+
+    def test_canonical_file_detail_reads_uploaded_file_repository(self):
+        session = ChatSession.objects.create(
+            session_id="ses_db_file_detail",
+            owner_id="usr_file_detail",
+            status=ChatSessionStatus.ACTIVE,
+        )
+        uploaded_file = UploadedFile.objects.create(
+            attachment_id="att_db_file_detail",
+            owner_id="usr_file_detail",
+            session=session,
+            purpose="accident_statement",
+            file_type="pdf",
+            original_filename="statement.pdf",
+            content_type="application/pdf",
+            size_bytes=1204,
+            storage_uri="mock://metadata/att_db_file_detail",
+            status=UploadedFileStatus.READY,
+            agent_handoff={
+                "attachment_id": "att_db_file_detail",
+                "purpose": "accident_statement",
+                "type": "pdf",
+            },
+            metadata={
+                "filename": "statement.pdf",
+                "checks": {"extension": ".pdf"},
+                "limitations": [],
+            },
+        )
+
+        response = self.client.get(f"/api/files/{uploaded_file.attachment_id}/")
+
+        self.assertEqual(response.status_code, 200)
+        attachment = response.json()["attachment"]
+        self.assertEqual(attachment["attachment_id"], uploaded_file.attachment_id)
+        self.assertEqual(attachment["session_id"], session.session_id)
+        self.assertEqual(attachment["status"], UploadedFileStatus.READY)
+        self.assertEqual(attachment["persistence"]["table"], "uploaded_files")
 
     def test_attachment_list_endpoint_filters_by_session(self):
         response = self.client.post(

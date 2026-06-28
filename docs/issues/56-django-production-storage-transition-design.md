@@ -60,6 +60,25 @@
 
 API 응답은 canonical `/api/...` shape를 유지한다. DB repository로 저장소가 바뀌더라도 `GET /api/analysis/results/{job_id}/`는 raw `analysis_plan`, `node_execution`, `chat_response`를 직접 노출하지 않고 display DTO만 반환한다.
 
+### 1.3 2026-06-28 repository 1차 연결 반영
+
+`django-postgresql-repository-integration` 브랜치에서는 canonical 파일 API부터 PostgreSQL metadata 저장을 시작한다.
+
+구현된 범위:
+
+- `backend/chatbot/repositories.py`: `UploadedFile` repository helper 추가
+- `POST /api/files/`: mock local storage 등록 후 `uploaded_files` row upsert
+- `GET /api/files/`, `GET /api/files/{attachment_id}/`: `uploaded_files` 조회
+- `/api/mock/attachments/`: 기존 sidecar-only 회귀 테스트 경로 유지
+- 테스트: canonical 파일 API가 DB row를 만들고 mock 경로는 DB row를 만들지 않는 경계 검증
+
+아직 구현하지 않는 범위:
+
+- object storage adapter와 private download flow
+- `POST /api/chat/messages/`의 `chat_messages` 저장
+- `analysis_jobs`, `agent_results`, `analysis_display_results`, `reports` repository 연결
+- Redis progress cache와 worker queue
+
 ## 2. 현재 mock 저장 구조
 
 | 현재 mock 대상 | 현재 위치 | 현재 책임 | 운영 전환 대상 |
