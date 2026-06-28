@@ -40,6 +40,7 @@ from chatbot.request_parsing import (
 from chatbot.repositories import (
     get_uploaded_file,
     list_uploaded_files,
+    persist_chat_message_analysis_boundary,
     register_uploaded_file,
 )
 
@@ -159,7 +160,10 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def submit_chat_message(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    return _json_response(request, submit_message(body))
+    chat_response = submit_message(body)
+    if _is_canonical_mock_request(request):
+        persist_chat_message_analysis_boundary(body, chat_response)
+    return _json_response(request, chat_response)
 
 
 @csrf_exempt
