@@ -79,6 +79,26 @@ API 응답은 canonical `/api/...` shape를 유지한다. DB repository로 저�
 - `analysis_jobs`, `agent_results`, `analysis_display_results`, `reports` repository 연결
 - Redis progress cache와 worker queue
 
+### 1.4 2026-06-28 chat/message job boundary 연결 반영
+
+`django-chat-analysis-persistence` 브랜치에서는 canonical 채팅 메시지 API의 DB 저장 경계를 추가한다.
+
+구현된 범위:
+
+- `POST /api/chat/messages/`: mock 응답 shape 유지
+- `chat_sessions`: session이 없으면 canonical message 저장 시 생성
+- `chat_messages`: 사용자 입력, routing intent, 첨부 resolution metadata 저장
+- `analysis_jobs`: message에 연결된 분석 job boundary, plan id, status, active node, status counts 저장
+- `analysis_job_events`: 초기 job event/audit trail 저장
+- `/api/mock/chat/messages/`: 기존 mock-only 회귀 경로 유지
+
+이 브랜치 기준 아직 구현하지 않는 범위:
+
+- Agent 실행 결과를 `agent_results`에 저장
+- Supervisor display DTO를 `analysis_display_results`에 저장하거나 DB에서 재구성
+- `reports` persistence와 object storage download flow
+- Redis progress cache와 PostgreSQL fallback
+
 ## 2. 현재 mock 저장 구조
 
 | 현재 mock 대상 | 현재 위치 | 현재 책임 | 운영 전환 대상 |

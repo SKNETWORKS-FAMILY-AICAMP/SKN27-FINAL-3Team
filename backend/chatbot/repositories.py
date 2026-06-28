@@ -10,7 +10,17 @@ from django.db import transaction
 from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
-from chatbot.models import ChatSession, ChatSessionStatus, UploadedFile, UploadedFileStatus
+from chatbot.models import (
+    AnalysisJob,
+    AnalysisJobEvent,
+    AnalysisJobStatus,
+    ChatMessage,
+    ChatSession,
+    ChatSessionStatus,
+    MessageRole,
+    UploadedFile,
+    UploadedFileStatus,
+)
 
 
 def register_uploaded_file(
@@ -76,6 +86,78 @@ def get_uploaded_file(attachment_id: str) -> dict[str, Any] | None:
     if uploaded_file is None:
         return None
     return uploaded_file_to_api(uploaded_file)
+
+
+def persist_chat_message_analysis_boundary(
+    payload: dict[str, Any],
+    chat_response: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist the canonical chat message and its analysis-job boundary."""
+
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(chat_response.get("session_id"), owner_id=owner_id)
+    if session is None:
+        raise ValueError("chat_response must include session_id")
+
+    message_id = _text(chat_response.get("message_id"))
+    analysis_plan = chat_response.get("analysis_plan") or {}
+    progress = chat_response.get("progress") or {}
+    job_id = _analysis_job_id(payload, chat_response)
+
+    with transaction.atomic():
+        message, _message_created = ChatMessage.objects.update_or_create(
+            message_id=message_id,
+            defaults={
+                "session": session,
+                "role": MessageRole.USER,
+                "content": _message_content(payload),
+                "routing_intent": _text(chat_response.get("routing_intent")),
+                "metadata": {
+                    "source": "canonical_chat_message",
+                    "analysis_job_id": job_id,
+                    "mock_scenario": chat_response.get("mock_scenario"),
+                    "mock_status": payload.get("mock_status"),
+                    "response_status": chat_response.get("status"),
+                    "attachments": chat_response.get("attachments", []),
+                    "attachment_resolution": chat_response.get("attachment_resolution", {}),
+                    "raw_payload": _safe_payload(payload),
+                },
+            },
+        )
+        job, _job_created = AnalysisJob.objects.update_or_create(
+            job_id=job_id,
+            defaults={
+                "session": session,
+                "message": message,
+                "owner_id": owner_id or session.owner_id,
+                "routing_intent": _text(chat_response.get("routing_intent")),
+                "mock_scenario": _text(chat_response.get("mock_scenario")),
+                "status": _analysis_job_status(chat_response.get("status")),
+                "active_node": _text(progress.get("active_node")),
+                "progress_message": _text(progress.get("message")),
+                "analysis_plan_id": _text(analysis_plan.get("plan_id")),
+                "status_counts": _analysis_plan_status_counts(analysis_plan),
+                "metadata": {
+                    "source": "canonical_chat_message",
+                    "analysis_plan": analysis_plan,
+                    "assistant_message": chat_response.get("assistant_message"),
+                    "case_status": chat_response.get("case_status"),
+                    "cards": chat_response.get("cards", []),
+                    "pending_questions": chat_response.get("pending_questions", []),
+                    "report_links": chat_response.get("report_links", []),
+                    "attachments": chat_response.get("attachments", []),
+                    "attachment_resolution": chat_response.get("attachment_resolution", {}),
+                    "limitations": chat_response.get("limitations", []),
+                },
+            },
+        )
+        _upsert_initial_job_event(job, progress=progress)
+
+    return {
+        "message_id": message.message_id,
+        "job_id": job.job_id,
+        "session_id": session.session_id,
+    }
 
 
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
@@ -160,6 +242,66 @@ def _safe_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _owner_id(payload: dict[str, Any]) -> str:
     return _text(payload.get("owner_id") or payload.get("user_id"))
+
+
+def _message_content(payload: dict[str, Any]) -> str:
+    return _text(payload.get("user_text") or payload.get("message") or payload.get("content"))
+
+
+def _analysis_job_id(payload: dict[str, Any], chat_response: dict[str, Any]) -> str:
+    explicit_job_id = _text(payload.get("job_id"))
+    if explicit_job_id:
+        return explicit_job_id
+    message_id = _text(chat_response.get("message_id"))
+    if message_id.startswith("msg_"):
+        return f"job_{message_id.removeprefix('msg_')}"
+    return f"job_{message_id}"
+
+
+def _analysis_job_status(status: Any) -> str:
+    status_text = _text(status)
+    if status_text in {choice.value for choice in AnalysisJobStatus}:
+        return status_text
+    if status_text == "pending":
+        return AnalysisJobStatus.RUNNING
+    return AnalysisJobStatus.RUNNING
+
+
+def _analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    steps = analysis_plan.get("steps") or []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        status = _text(step.get("status")) or "unknown"
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _upsert_initial_job_event(
+    job: AnalysisJob,
+    *,
+    progress: dict[str, Any],
+) -> None:
+    status = job.status
+    active_node = _text(progress.get("active_node"))
+    message = _text(progress.get("message")) or "canonical chat message에서 분석 job 경계를 생성했습니다."
+    first_event = job.events.order_by("created_at").first()
+    if first_event is None:
+        AnalysisJobEvent.objects.create(
+            job=job,
+            status=status,
+            active_node=active_node,
+            message=message,
+            metadata={"source": "canonical_chat_message"},
+        )
+        return
+
+    first_event.status = status
+    first_event.active_node = active_node
+    first_event.message = message
+    first_event.metadata = {"source": "canonical_chat_message"}
+    first_event.save(update_fields=["status", "active_node", "message", "metadata"])
 
 
 def _model_status(status: Any) -> str:

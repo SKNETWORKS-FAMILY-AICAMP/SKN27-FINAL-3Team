@@ -276,6 +276,9 @@ class ChatbotMockApiTests(TestCase):
         self.assertIn("analysis_plan", body)
         self.assertIn("fine_notice_analysis", {step["node_code"] for step in body["analysis_plan"]["steps"]})
         self.assertIn("report_links", body)
+        self.assertFalse(
+            ChatMessage.objects.filter(message_id=body["message_id"]).exists()
+        )
 
     def test_submit_fault_ratio_message(self):
         response = self.client.post(
@@ -318,6 +321,27 @@ class ChatbotMockApiTests(TestCase):
             "/api/reports",
             {link["endpoint"] for link in body["report_links"]},
         )
+
+        session = ChatSession.objects.get(session_id="ses_canonical_chat")
+        message = ChatMessage.objects.get(message_id=body["message_id"])
+        job = AnalysisJob.objects.get(message=message)
+        event = job.events.get()
+        self.assertEqual(message.session, session)
+        self.assertEqual(message.role, MessageRole.USER)
+        self.assertEqual(message.content, "이 고지서로 이의신청서를 만들 수 있을까요?")
+        self.assertEqual(message.routing_intent, "objection_request")
+        self.assertEqual(message.metadata["analysis_job_id"], job.job_id)
+        self.assertEqual(message.metadata["source"], "canonical_chat_message")
+        self.assertEqual(job.session, session)
+        self.assertEqual(job.owner_id, "")
+        self.assertEqual(job.routing_intent, "objection_request")
+        self.assertEqual(job.mock_scenario, "fine_notice")
+        self.assertEqual(job.status, AnalysisJobStatus.SUCCESS)
+        self.assertEqual(job.analysis_plan_id, body["analysis_plan"]["plan_id"])
+        self.assertEqual(job.metadata["analysis_plan"]["plan_id"], body["analysis_plan"]["plan_id"])
+        self.assertEqual(job.metadata["assistant_message"], body["assistant_message"])
+        self.assertEqual(event.status, AnalysisJobStatus.SUCCESS)
+        self.assertEqual(event.metadata["source"], "canonical_chat_message")
 
     def test_agent_nodes_endpoint_returns_registry(self):
         response = self.client.get("/api/mock/agents/nodes/")

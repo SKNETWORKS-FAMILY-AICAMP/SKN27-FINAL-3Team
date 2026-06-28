@@ -5,7 +5,7 @@
 | 작성일 | 2026-06-28 |
 | 대상 브랜치 | `django-production-storage-foundation` |
 | 관련 이슈 | `#56`, `#58`, `#68` |
-| 구현 상태 | Django model + initial migration foundation 완료, canonical 파일 metadata는 `uploaded_files` 저장 연결 |
+| 구현 상태 | Django model + initial migration foundation 완료, canonical 파일/채팅 분석 경계 metadata 저장 연결 |
 
 ## 1. 현재 진행 정도
 
@@ -19,11 +19,11 @@
 | JWT 실패 envelope | 완료 | `auth_error.v1`, `WWW-Authenticate` header, 401/403 계약 |
 | Agent adapter 계약 | 완료 | `agent_adapter.v1`, input/context/output validator |
 | PostgreSQL schema foundation | 완료 | Django models + `0001_initial` migration |
-| PostgreSQL 실제 저장 연결 | 부분 완료 | `POST/GET /api/files/`는 `uploaded_files` metadata 저장/조회 연결 |
+| PostgreSQL 실제 저장 연결 | 부분 완료 | `POST/GET /api/files/`, `POST /api/chat/messages/`의 message/job boundary 저장 연결 |
 | Redis progress cache | 미완료 | DB fallback 정책만 설계 |
 | Object storage | 미완료 | `storage_uri` metadata 필드만 준비 |
 
-즉, 팀원이 오늘 dev에서 확인할 수 있는 것은 “Django 서버와 운영 후보 API 경로가 살아 있고, PostgreSQL로 갈 테이블 뼈대가 정해졌으며, canonical 파일 API는 `uploaded_files` row를 만들기 시작한 상태”다. 분석 job, Agent 결과, report 저장 연결은 다음 단계다.
+즉, 팀원이 오늘 dev에서 확인할 수 있는 것은 “Django 서버와 운영 후보 API 경로가 살아 있고, PostgreSQL로 갈 테이블 뼈대가 정해졌으며, canonical 파일 API와 채팅 메시지 분석 경계가 DB row를 만들기 시작한 상태”다. Agent 결과, display result, report 저장 연결은 다음 단계다.
 
 ## 2. ERD
 
@@ -201,12 +201,13 @@ erDiagram
 
 2026-06-28 현재 `POST /api/files/`, `GET /api/files/`, `GET /api/files/{attachment_id}/`는 Django repository를 통해 `uploaded_files`를 사용한다. 파일 byte 저장은 object storage adapter 도입 전까지 기존 mock local storage를 유지하고, DB에는 `attachment_id`, `session_id`, `purpose`, `file_type`, `content_type`, `size_bytes`, `storage_uri`, `agent_handoff`, `metadata`를 저장한다.
 
+`POST /api/chat/messages/`는 mock 응답 shape를 유지하면서 `chat_sessions`, `chat_messages`, `analysis_jobs`, `analysis_job_events`에 상담 메시지와 분석 job 생성 경계를 기록한다. 아직 Agent 실행 결과와 Supervisor display DTO는 DB에서 읽어 응답하지 않고, 다음 단계에서 `agent_results`, `analysis_display_results`, `reports`로 연결한다.
+
 명시적 회귀 테스트 경로인 `/api/mock/attachments/`는 기존 sidecar-only 동작을 유지한다.
 
 ## 7. 남은 구현 순서
 
-1. `POST /api/chat/messages/`에서 `chat_messages`와 `analysis_jobs` 생성 경계를 연결한다.
-2. Agent adapter 실행 결과를 `agent_results`에 저장한다.
-3. Supervisor display DTO를 `analysis_display_results`로 저장하거나, `agent_results`에서 매번 병합할지 결정한다.
-4. `reports`와 object storage download flow를 연결한다.
-5. Redis progress cache와 PostgreSQL fallback을 연결한다.
+1. Agent adapter 실행 결과를 `agent_results`에 저장한다.
+2. Supervisor display DTO를 `analysis_display_results`로 저장하거나, `agent_results`에서 매번 병합할지 결정한다.
+3. `reports`와 object storage download flow를 연결한다.
+4. Redis progress cache와 PostgreSQL fallback을 연결한다.
