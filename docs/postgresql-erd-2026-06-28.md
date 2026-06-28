@@ -5,7 +5,7 @@
 | 작성일 | 2026-06-28 |
 | 대상 브랜치 | `django-production-storage-foundation` |
 | 관련 이슈 | `#56`, `#58`, `#68` |
-| 구현 상태 | Django model + initial migration foundation 완료, API는 아직 mock sidecar 저장소 사용 |
+| 구현 상태 | Django model + initial migration foundation 완료, canonical 파일 metadata는 `uploaded_files` 저장 연결 |
 
 ## 1. 현재 진행 정도
 
@@ -19,11 +19,11 @@
 | JWT 실패 envelope | 완료 | `auth_error.v1`, `WWW-Authenticate` header, 401/403 계약 |
 | Agent adapter 계약 | 완료 | `agent_adapter.v1`, input/context/output validator |
 | PostgreSQL schema foundation | 완료 | Django models + `0001_initial` migration |
-| PostgreSQL 실제 저장 연결 | 미완료 | 다음 브랜치에서 repository/service 계층으로 연결 |
+| PostgreSQL 실제 저장 연결 | 부분 완료 | `POST/GET /api/files/`는 `uploaded_files` metadata 저장/조회 연결 |
 | Redis progress cache | 미완료 | DB fallback 정책만 설계 |
 | Object storage | 미완료 | `storage_uri` metadata 필드만 준비 |
 
-즉, 팀원이 오늘 dev에서 확인할 수 있는 것은 “Django 서버와 운영 후보 API 경로가 살아 있고, PostgreSQL로 갈 테이블 뼈대가 정해진 상태”다. 아직 실제 API 요청이 PostgreSQL row를 만들지는 않는다.
+즉, 팀원이 오늘 dev에서 확인할 수 있는 것은 “Django 서버와 운영 후보 API 경로가 살아 있고, PostgreSQL로 갈 테이블 뼈대가 정해졌으며, canonical 파일 API는 `uploaded_files` row를 만들기 시작한 상태”다. 분석 job, Agent 결과, report 저장 연결은 다음 단계다.
 
 ## 2. ERD
 
@@ -197,11 +197,16 @@ erDiagram
 - Redis는 빠른 progress cache로만 사용하고, Redis miss 시 PostgreSQL의 `analysis_jobs`와 `analysis_job_events`에서 재구성 가능해야 한다.
 - Object storage에는 원본 파일과 생성 리포트 byte를 저장하고, PostgreSQL에는 `storage_uri`와 metadata만 저장한다.
 
-## 6. 다음 구현 순서
+## 6. 현재 repository 연결 상태
 
-1. repository/service 계층을 추가하고 test DB에서 model CRUD를 먼저 검증한다.
-2. `POST /api/files/`를 `uploaded_files` 저장으로 전환한다.
-3. `POST /api/chat/messages/`에서 `chat_messages`와 `analysis_jobs` 생성 경계를 연결한다.
-4. Agent adapter 실행 결과를 `agent_results`에 저장한다.
-5. Supervisor display DTO를 `analysis_display_results`로 저장하거나, `agent_results`에서 매번 병합할지 결정한다.
-6. `reports`와 object storage download flow를 연결한다.
+2026-06-28 현재 `POST /api/files/`, `GET /api/files/`, `GET /api/files/{attachment_id}/`는 Django repository를 통해 `uploaded_files`를 사용한다. 파일 byte 저장은 object storage adapter 도입 전까지 기존 mock local storage를 유지하고, DB에는 `attachment_id`, `session_id`, `purpose`, `file_type`, `content_type`, `size_bytes`, `storage_uri`, `agent_handoff`, `metadata`를 저장한다.
+
+명시적 회귀 테스트 경로인 `/api/mock/attachments/`는 기존 sidecar-only 동작을 유지한다.
+
+## 7. 남은 구현 순서
+
+1. `POST /api/chat/messages/`에서 `chat_messages`와 `analysis_jobs` 생성 경계를 연결한다.
+2. Agent adapter 실행 결과를 `agent_results`에 저장한다.
+3. Supervisor display DTO를 `analysis_display_results`로 저장하거나, `agent_results`에서 매번 병합할지 결정한다.
+4. `reports`와 object storage download flow를 연결한다.
+5. Redis progress cache와 PostgreSQL fallback을 연결한다.

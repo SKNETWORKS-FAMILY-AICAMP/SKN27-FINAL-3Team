@@ -18,9 +18,9 @@ from app.services.analysis_job_mock_service import (
     list_analysis_jobs,
 )
 from app.services.attachment_mock_service import (
-    get_attachment,
-    list_attachments,
-    register_attachment,
+    get_attachment as get_mock_attachment,
+    list_attachments as list_mock_attachments,
+    register_attachment as register_mock_attachment,
 )
 from app.services.chatbot_mock_service import (
     create_session,
@@ -36,6 +36,11 @@ from chatbot.request_parsing import (
     first_upload_file as _first_upload_file,
     json_body as _json_body,
     request_payload as _request_payload,
+)
+from chatbot.repositories import (
+    get_uploaded_file,
+    list_uploaded_files,
+    register_uploaded_file,
 )
 
 
@@ -64,16 +69,27 @@ def agent_nodes(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "POST", "OPTIONS"])
 def attachments(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
-        return _json_response(request, {"attachments": list_attachments(session_id=request.GET.get("session_id"))})
+        if _is_canonical_mock_request(request):
+            attachments_payload = list_uploaded_files(session_id=request.GET.get("session_id"))
+        else:
+            attachments_payload = list_mock_attachments(session_id=request.GET.get("session_id"))
+        return _json_response(request, {"attachments": attachments_payload})
 
     payload = _request_payload(request)
     upload_file = _first_upload_file(request)
-    return _json_response(request, {"attachment": register_attachment(payload, upload_file=upload_file)})
+    if _is_canonical_mock_request(request):
+        attachment = register_uploaded_file(payload, upload_file=upload_file)
+    else:
+        attachment = register_mock_attachment(payload, upload_file=upload_file)
+    return _json_response(request, {"attachment": attachment})
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
-    attachment = get_attachment(attachment_id)
+    if _is_canonical_mock_request(request):
+        attachment = get_uploaded_file(attachment_id)
+    else:
+        attachment = get_mock_attachment(attachment_id)
     if not attachment:
         return _json_response(
             request,
