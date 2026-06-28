@@ -1,0 +1,11 @@
+.git
+.github
+.pytest_cache
+**/__pycache__/
+*.py[cod]
+*.log
+backend/db.sqlite3
+backend/media/
+tmp/
+output/
+docs/assets/

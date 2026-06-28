@@ -15,6 +15,7 @@
 |---|---|---|
 | 사용자 입력 API | 텍스트, 이미지, 영상, 문서 첨부를 분리해서 Supervisor로 넘기는 계약 | PM 초안 |
 | Supervisor input | Django에서 Supervisor Agent로 넘기는 JSON 패키지 | PM 초안 |
+| Supervisor analysis plan | Agent 호출 전 입력 검증, 실행 순서, fallback 조건을 담는 내부 계획 | PM 초안 |
 | Agent result envelope | 모든 Agent가 공통으로 반환해야 하는 wrapper JSON | PM 초안 |
 | Agent별 structured_result | 각 Agent가 envelope 안에 넣어야 하는 핵심 결과 JSON | 담당자 확인 필요 |
 | Supervisor display output | LLM 답변과 HTML 화면설계서 결과 카드에 뿌릴 JSON | PM 초안 |
@@ -40,6 +41,7 @@
 | `job.status` | `queued`, `running`, `success`, `partial`, `failed` | 분석 job 진행 상태 |
 | `agent.status` | `success`, `partial`, `failed` | Agent 결과 envelope |
 | `card_type` | `fine_notice`, `fault_ratio`, `law_ground`, `vision`, `objection_report` | 화면 결과 카드 |
+| `analysis_step.status` | `ready`, `blocked`, `running`, `success`, `partial`, `failed`, `skipped` | `analysis_plan.steps[]`, 진행 상태 |
 | `error.code` | `auth_required`, `forbidden`, `missing_required_field`, `invalid_file`, `analysis_failed` | API 오류 응답 |
 
 ## 2. 공통 API 오류 응답
@@ -49,20 +51,74 @@
 ```json
 {
   "error": {
+    "contract_version": "auth_error.v1",
+    "type": "auth",
     "code": "auth_required|forbidden|missing_required_field|invalid_file|analysis_failed",
     "message": "사용자에게 보여줄 수 있는 오류 요약",
+    "status": 401,
     "missing_fields": ["session_id"],
-    "retryable": false
+    "retryable": false,
+    "required_action": "login|none|retry|complete_input",
+    "auth": {
+      "scheme": "Bearer",
+      "reason": "missing_token|invalid_token|expired_token|permission_denied"
+    }
   }
 }
 ```
 
 | Field | 필수성 | Type/Allowed | 왜 필요한가 | 사용 위치와 누락 시 처리 |
 |---|---|---|---|---|
+| `error.contract_version` | 인증 오류 필수 | string | FE/BE가 auth envelope 변경을 구분한다. | 인증 오류에서 없으면 legacy envelope로 보고 기본 로그인 처리한다. |
+| `error.type` | 인증 오류 필수 | `auth` | 오류 범주를 빠르게 분기한다. | 없으면 `error.code` 기준으로 fallback한다. |
 | `error.code` | 필수 | enum | Frontend가 오류별 UI를 분기해야 한다. | 없으면 공통 오류 카드만 표시 가능하므로 API 응답 실패로 본다. |
 | `error.message` | 필수 | string | 사용자에게 현재 상태를 설명해야 한다. | 없으면 FE 기본 문구로 대체하되 BE 응답은 불완전하다. |
+| `error.status` | 필수 | HTTP status number | JSON body와 HTTP status를 함께 확인한다. | 없으면 실제 HTTP status를 우선한다. |
 | `error.missing_fields` | 조건부 필수 | string[] | 필수 입력이 부족할 때 어떤 값을 보완해야 하는지 알려준다. | `missing_required_field`인데 없으면 추가 질문 생성이 어렵다. |
 | `error.retryable` | 필수 | boolean | 재시도 버튼 노출 여부를 결정한다. | 없으면 기본값 `false`로 처리한다. |
+| `error.required_action` | 조건부 필수 | enum | 로그인, 입력 보완, 재시도처럼 FE가 다음 행동을 정한다. | 인증 오류인데 없으면 FE가 로그인 이동 여부를 판단하기 어렵다. |
+| `error.auth` | 조건부 필수 | object | JWT/Bearer 실패 원인을 기계적으로 구분한다. | 인증 오류에서 없으면 `error.code`만으로 처리한다. |
+
+### 2.1 JWT/auth 실패 envelope
+
+운영 배포 흐름을 고려해 Django mock backend도 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더를 요구한다. 현재 mock은 JWT 서명 검증을 하지 않고 Bearer 헤더의 존재와 형식만 확인한다. 실제 운영 전환 시 같은 위치에 JWT 서명, 만료, 사용자 권한 검증을 연결한다.
+실패 응답은 `auth_error.v1` envelope와 `WWW-Authenticate: Bearer error="...", error_description="..."` header를 함께 반환한다.
+
+> 2026-06-28 구현 메모:
+> 운영 후보 path를 미리 검증하기 위해 canonical `/api/...` shadow endpoint를 추가했다. 예를 들어 `POST /api/chat/messages/`, `POST /api/files/`, `POST /api/analysis/jobs/`, `GET /api/analysis/results/{id}/`, `GET /api/agents/nodes/`는 기존 `/api/mock/...` service를 재사용하며 응답에 `api_surface="canonical_mock"`, `execution_mode="mock"`을 포함한다. Canonical 응답 안의 report/file/job 링크도 `/api/...` 형태로 변환한다. 명시적 mock endpoint도 회귀 테스트용으로 유지한다.
+
+공개 endpoint:
+
+- `GET /api/health/`
+- `GET /api/mock/chat/scenarios/`
+
+보호 endpoint 실패 응답:
+
+| code | HTTP | auth.reason | required_action | FE 처리 |
+|---|---:|---|---|---|
+| `auth_required` | 401 | `missing_token` | `login` | 로그인/재로그인 안내 |
+| `token_invalid` | 401 | `invalid_token` 또는 `malformed_authorization_header` | `login` | 토큰 폐기 후 로그인 |
+| `token_expired` | 401 | `expired_token` | `login` | 재로그인 또는 refresh flow |
+| `forbidden` | 403 | `permission_denied` | `none` | 권한 없음 안내 |
+
+```json
+{
+  "error": {
+    "contract_version": "auth_error.v1",
+    "type": "auth",
+    "code": "token_expired",
+    "message": "로그인이 만료되었습니다. 다시 로그인해 주세요.",
+    "status": 401,
+    "missing_fields": [],
+    "retryable": false,
+    "required_action": "login",
+    "auth": {
+      "scheme": "Bearer",
+      "reason": "expired_token"
+    }
+  }
+}
+```
 
 ## 3. 사용자 메시지 입력 API
 
@@ -136,6 +192,10 @@
 
 고지서 이미지, 사고 영상, 증빙 문서 파일을 저장하고 분석 가능한 metadata를 반환한다. 실제 파일 전송은 multipart가 될 수 있으나, API 명세에서는 metadata JSON을 기준으로 설명한다.
 
+> 2026-06-27 Django mock 구현 메모:
+> 중간발표용 backend는 운영 후보 `/api/files/` 대신 `POST /api/mock/attachments/`, `GET /api/mock/attachments/`, `GET /api/mock/attachments/{attachment_id}/`를 제공한다. multipart 파일은 `backend/media/mock_uploads/`에 임시 저장하고, JSON metadata-only 등록도 허용한다. 응답의 `attachment.agent_handoff`를 `attachments[]` 입력으로 넘겨 Supervisor/Agent handoff를 검증한다.
+> `POST /api/mock/chat/messages/`와 `POST /api/mock/agents/plans/run/`는 `attachments=[{"attachment_id":"att_..."}]`만 받아도 저장된 mock metadata를 조회해 `purpose`, `type`, `storage_uri`, `content_type`, `size_bytes`를 자동 보강한다. 조회 실패 시 `attachment_resolution.unresolved_attachment_ids`와 `limitations`에 남긴다.
+
 #### Request metadata JSON
 
 ```json
@@ -162,6 +222,33 @@
 }
 ```
 
+#### Mock response JSON
+
+```json
+{
+  "attachment": {
+    "attachment_id": "att_0001",
+    "session_id": "ses_20260623_0001",
+    "purpose": "fine_notice",
+    "type": "image",
+    "original_filename": "notice.jpg",
+    "content_type": "image/jpeg",
+    "size_bytes": 394820,
+    "storage_uri": "mock://uploads/att_0001/notice.jpg",
+    "status": "uploaded",
+    "agent_handoff": {
+      "attachment_id": "att_0001",
+      "purpose": "fine_notice",
+      "type": "image",
+      "storage_uri": "mock://uploads/att_0001/notice.jpg",
+      "content_type": "image/jpeg",
+      "size_bytes": 394820
+    },
+    "limitations": ["mock local storage"]
+  }
+}
+```
+
 | Field | 필수성 | Type/Allowed | 왜 필요한가 | 사용 위치와 누락 시 처리 |
 |---|---|---|---|---|
 | `session_id` | 필수 | string | 업로드 파일을 대화와 소유자 권한에 연결한다. | 없으면 400. |
@@ -173,6 +260,8 @@
 | `file_type` | 필수 | enum | Supervisor input의 `input_modalities`로 변환된다. | 없으면 routing 불가. |
 | `privacy_risk` | 필수 | boolean | 개인정보 보호, masking, 보관 제한에 필요하다. | 없으면 `true`로 간주. |
 | `status` | 필수 | string | 업로드 완료 여부를 FE에 표시한다. | 없으면 업로드 성공으로 처리하지 않는다. |
+| `storage_uri` | 조건부 필수 | string | Agent adapter가 실제 파일 또는 object storage 위치를 참조한다. | mock은 `mock://...`, 운영은 object storage URI 후보. |
+| `agent_handoff` | 조건부 필수 | object | Supervisor/Agent 호출에 넘길 최소 첨부 metadata다. | mock backend에서 우선 제공한다. |
 
 ## 5. Supervisor input package
 
@@ -211,11 +300,84 @@ Django service layer가 사용자 메시지와 파일 metadata를 정리해 Supe
 | `missing_inputs` | 필수 | string[] | Agent 호출 전 부족한 입력을 명시한다. | 없으면 추가 질문 카드 생성 불가. |
 | `limitations` | 필수 | string[] | 개인정보, 입력 품질, 근거 부족을 사용자에게 표시한다. | 없으면 빈 배열. |
 
+### 5.1 Supervisor `analysis_plan` package
+
+Supervisor는 사용자 입력을 바로 Agent에 넘기지 않고, 먼저 실행 가능한 호출 계획을 만든다. 이 계획은 내부 상태가 기본이며, 화면에는 `progress`, `pending_questions`, `limitations`로 변환해서 보여준다.
+
+```json
+{
+  "plan_id": "plan_0001",
+  "session_id": "ses_20260623_0001",
+  "message_id": "msg_0001",
+  "routing_intent": "objection_request",
+  "input_summary": {
+    "has_user_command": true,
+    "modalities": ["text", "image"],
+    "attachment_purposes": ["fine_notice"]
+  },
+  "required_inputs": ["fine_notice_image", "user_facts"],
+  "pending_questions": [
+    {
+      "field": "user_facts",
+      "question": "이의신청 사유와 당시 상황을 입력해 주세요."
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "node_code": "fine_notice_analysis",
+      "status": "ready",
+      "required_inputs": ["attachments[purpose=fine_notice]"],
+      "depends_on": [],
+      "fallback": "missing_input_question"
+    },
+    {
+      "order": 2,
+      "node_code": "law_ground_search",
+      "status": "blocked",
+      "required_inputs": ["law_code|violation_text"],
+      "depends_on": ["fine_notice_analysis"],
+      "fallback": "semantic_search_or_limitations"
+    },
+    {
+      "order": 3,
+      "node_code": "objection_report_generation",
+      "status": "blocked",
+      "required_inputs": ["notice_analysis_result", "law_ground_result", "user_facts"],
+      "depends_on": ["fine_notice_analysis", "law_ground_search"],
+      "fallback": "pending_questions"
+    }
+  ],
+  "blocked_reason": "user_facts가 없어 초안 생성은 보류합니다.",
+  "limitations": []
+}
+```
+
+| Field | 필수성 | Type/Allowed | 왜 필요한가 | 사용 위치와 누락 시 처리 |
+|---|---|---|---|---|
+| `plan_id` | 필수 | string | 한 메시지 안에서 호출 계획과 실행 결과를 추적한다. | 없으면 progress와 Agent result 연결이 어렵다. |
+| `session_id` | 필수 | string | 대화와 권한 경계를 유지한다. | 없으면 Supervisor 실행 보류. |
+| `message_id` | 필수 | string | 사용자 입력과 계획을 연결한다. | 없으면 결과 재조회 시 추적 불가. |
+| `routing_intent` | 필수 | enum | 어떤 분석 흐름을 계획했는지 표시한다. | 없으면 계획 생성 실패로 본다. |
+| `input_summary` | 필수 | object | 명령문, 첨부, modality를 요약한다. | 없으면 디버깅과 화면 진행 문구 생성이 어렵다. |
+| `required_inputs` | 필수 | string[] | 전체 흐름에서 필요한 입력을 표시한다. | 없으면 부족 입력 판단 불가. |
+| `pending_questions` | 필수 | object[] | 부족 입력이 있을 때 사용자에게 되물을 질문이다. | 없으면 빈 배열. |
+| `steps[]` | 필수 | object[] | 실행할 Agent와 순서를 정의한다. | 비어 있으면 Agent 호출 없이 일반 답변 또는 보류. |
+| `steps[].node_code` | 필수 | string | Agent result envelope의 `node_code`와 맞춘다. | 알 수 없는 node면 해당 step은 `skipped`. |
+| `steps[].status` | 필수 | enum | 호출 가능, 대기, 실패, 생략 상태를 표시한다. | 없으면 `blocked`로 처리하고 확인 필요. |
+| `steps[].depends_on` | 필수 | string[] | 선행 Agent 결과 의존성을 표시한다. | 없으면 빈 배열. |
+| `steps[].fallback` | 선택 | string/null | 실패 또는 입력 부족 시 다음 행동을 정한다. | 없으면 Supervisor가 `limitations`에 기록. |
+| `blocked_reason` | 선택 | string/null | 계획 전체가 실행 보류된 이유를 설명한다. | 없으면 실행 가능으로 본다. |
+| `limitations` | 필수 | string[] | 입력 품질, 권한, 근거 부족 한계를 표시한다. | 없으면 빈 배열. |
+
 ## 6. 분석 job API
 
 ### 6.1 `POST /api/analysis/jobs/`
 
 Supervisor 분석 job을 생성한다.
+
+> 2026-06-27 Django mock 구현 메모:
+> 중간발표용 backend는 운영 후보 `/api/analysis/jobs/` 대신 `POST /api/mock/analysis/jobs/`, `GET /api/mock/analysis/jobs/`, `GET /api/mock/analysis/jobs/{job_id}/`를 제공한다. mock job은 실제 queue, Redis, DB 없이 `backend/media/mock_analysis_jobs/{job_id}/job.json`에 저장하며, 하나의 `job_id` 아래 `chat_response`, `analysis_plan`, `node_execution`, `history`를 묶는다.
 
 #### Request JSON
 
@@ -548,6 +710,9 @@ Supervisor 분석 job을 생성한다.
 
 Agent raw output이 아니라 Supervisor가 병합한 display output을 반환한다.
 
+> 2026-06-28 Django mock 구현 메모:
+> `GET /api/mock/analysis/results/{job_id}/`와 canonical `GET /api/analysis/results/{job_id}/`를 추가했다. mock 구현은 저장된 analysis job에서 `assistant_message`, `progress`, `cards`, `pending_questions`, `attachments`, `report_links`, `evidence`, `agent_results`, `limitations`를 표시용 DTO로 변환하며, raw `analysis_plan`, `node_execution`, `chat_response`는 result 응답에 직접 노출하지 않는다.
+
 ```json
 {
   "assistant_message": {
@@ -719,7 +884,7 @@ PostgreSQL은 영속 저장소로 확정한다. 대화 이력, 파일 metadata, 
 |---|---|---|---|
 | `users` | `user_id` | 로그인 사용자, 권한 검사 | 인증/인가 |
 | `chat_sessions` | `session_id`, `user_id`, `title`, `created_at`, `updated_at` | 대화 목록과 session 소유자 연결 | `/api/chat/sessions/` |
-| `messages` | `message_id`, `session_id`, `role`, `content`, `created_at` | 사용자/assistant 메시지 이력 | `/api/chat/messages/` |
+| `chat_messages` | `message_id`, `session_id`, `role`, `content`, `created_at` | 사용자/assistant 메시지 이력 | `/api/chat/messages/` |
 | `uploaded_files` | `attachment_id`, `owner_id`, `session_id`, `file_type`, `purpose`, `privacy_risk`, `storage_uri` | 파일 권한, 분석 job 연결 | `/api/files/` |
 | `analysis_jobs` | `job_id`, `session_id`, `routing_intent`, `status`, `active_node` | 분석 진행 이력 | `/api/analysis/jobs/` |
 | `agent_results` | `result_id`, `job_id`, `node_code`, `status`, `structured_result`, `evidence`, `limitations` | 결과 카드와 리포트 생성 | `/api/analysis/results/{id}/` |
@@ -844,7 +1009,7 @@ Frontend는 Agent raw output을 직접 화면에 뿌리지 않는다. `GET /api/
     ]
   },
   "storage_contract": {
-    "postgresql": ["chat_sessions", "messages", "uploaded_files", "analysis_jobs", "agent_results", "reports"],
+    "postgresql": ["chat_sessions", "chat_messages", "uploaded_files", "analysis_jobs", "agent_results", "reports"],
     "redis": ["chat_session_state:{session_id}", "analysis_job_progress:{job_id}"],
     "neo4j_rag": ["source_ref", "chunk_id", "expected_counts"]
   }
@@ -1082,6 +1247,11 @@ Frontend는 Agent raw output을 직접 화면에 뿌리지 않는다. `GET /api/
 ## 14. Agent node 간 input/output handoff
 
 아래 표는 각 노드가 Supervisor 또는 다른 Agent에게 넘겨야 하는 최소 handoff 계약이다. 담당자 output이 수신되기 전까지는 PM 초안이며, 충돌 시 구현하지 않고 확인한다.
+
+> 2026-06-27 구현 메모:
+> Django mock backend는 `GET /api/mock/agents/nodes/`, `POST /api/mock/agents/nodes/run/`, `POST /api/mock/agents/plans/run/`를 제공한다. 이 endpoint들은 실제 Agent, RAG, MCP, LLM을 호출하지 않고 `analysis_plan.steps[].node_code`를 공통 Agent envelope mock output으로 변환해 프론트엔드와 담당자별 node adapter 연결 위치를 검증한다.
+> 2026-06-28 구현 메모:
+> `GET /api/mock/agents/nodes/`의 각 node는 `adapter_contract`를 포함한다. 실제 Agent adapter 함수는 `agent_adapter.v1` 기준으로 `run_{node_code}(agent_input: AgentAdapterInput, context: AgentAdapterContext) -> AgentAdapterOutput` 형태를 따른다. 공통 입력은 `analysis_plan_id`, `job_id`, `session_id`, `message_id`, `node_code`, `user_text`, `attachments`, `context`, `required_inputs`, `depends_on`, `upstream_results`이며, context는 `signature_version`, `execution_id`, `execution_mode`, `node`, `plan_step`을 포함한다. Adapter는 저장 side effect 없이 공통 Agent result envelope를 반환하고, persistence와 retry/queue 처리는 Django/worker 계층이 맡는다.
 
 | 흐름 | 보내는 쪽 | 받는 쪽 | 전달 JSON 핵심 필드 | 화면/API에서 필요한 이유 | 확인 담당 |
 |---|---|---|---|---|---|
