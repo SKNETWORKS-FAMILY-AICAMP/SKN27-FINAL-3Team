@@ -1,0 +1,3247 @@
+openapi: 3.2.0
+info:
+  title: SKN27 Traffic Dispute AI API
+  summary: PM API JSON Schema OpenAPI contract for Django, Frontend, Supervisor, and Agent teams.
+  version: 0.0.0
+  description: |
+    OpenAPI ver0 generated from the 2026-06-23 PM API JSON schema PDF and the
+    repository Markdown follow-up notes. This is a contract-first draft, not a
+    production guarantee.
+
+    Contract statuses:
+    - confirmed: reflected in the current Django mock/backend code or stable PM contract.
+    - review_required: present in PM/meeting notes but still needs team confirmation.
+    - internal_note: implementation or routing memo that should not be treated as a public API guarantee.
+  x-contract-version: pm-api-json-schema.v0
+  x-contract-date: "2026-06-28"
+  x-distribution-date: "2026-06-29"
+  x-openapi-source:
+    pdf: C:/Users/Playdata/Downloads/pm-api-json-schema-spec-2026-06-23.pdf
+    markdown: docs/pm-api-json-schema-spec-2026-06-23.md
+  x-contract-status-policy:
+    confirmed: Current mock implementation or stable cross-team JSON contract.
+    review_required: Included for coordination but must be confirmed before production implementation.
+    internal_note: Captured as context only; do not expose as a public product promise.
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+servers:
+  - url: http://127.0.0.1:8000
+    description: Local Django mock server
+  - url: /
+    description: Relative deployment root
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+    description: Public health and demo scenario endpoints.
+  - name: Auth
+    description: Guest identity, current subject, and mock Bearer session boundaries.
+  - name: Chat
+    description: Chat session and user message entry points.
+  - name: Files
+    description: Attachment metadata, upload handoff, and Agent file routing.
+  - name: Analysis Jobs
+    description: Supervisor analysis job lifecycle and progress polling.
+  - name: Analysis Results
+    description: Frontend display DTO produced from Supervisor and Agent results.
+  - name: Agents
+    description: Agent registry, adapter contract, and mock execution endpoints.
+  - name: Reports
+    description: Report save, download, and objection draft contracts.
+  - name: MyPage
+    description: Review-required history and case summary candidates.
+  - name: Mock Aliases
+    description: Explicit mock endpoints kept for smoke tests and demo fixtures.
+paths:
+  /api/health/:
+    get:
+      tags: [Health]
+      summary: Backend health check
+      operationId: getHealth
+      security: []
+      x-contract-status: confirmed
+      responses:
+        "200":
+          description: Health payload with scenario list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/mock/chat/scenarios/:
+    get:
+      tags: [Health, Mock Aliases]
+      summary: List demo mock scenarios
+      operationId: listMockChatScenarios
+      security: []
+      x-contract-status: confirmed
+      responses:
+        "200":
+          description: Available mock scenarios.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scenarios]
+                properties:
+                  scenarios:
+                    type: array
+                items:
+                  $ref: "#/components/schemas/DemoScenario"
+
+  /api/auth/guest-session/:
+    post:
+      tags: [Auth]
+      summary: Issue or refresh a guest identity
+      operationId: createGuestSession
+      security: []
+      x-contract-status: confirmed
+      x-review-note: Guest TTL, quota numbers, and account merge policy are still review-required.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuestSessionRequest"
+            examples:
+              withChatSession:
+                value:
+                  guest_id: gst_existing
+                  session_id: ses_guest_chat
+      responses:
+        "200":
+          description: Guest identity preview and merge/rate-limit policy.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/GuestSessionResponse"
+
+  /api/auth/me/:
+    get:
+      tags: [Auth]
+      summary: Inspect current auth subject
+      operationId: getCurrentAuthSubject
+      security: []
+      x-contract-status: confirmed
+      x-review-note: Current mock validates Bearer shape only. Real JWT signature verification is review-required.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/OptionalSessionId"
+      responses:
+        "200":
+          description: Current anonymous, guest, or authenticated subject.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/AuthSubjectResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/chat/sessions/:
+    get:
+      tags: [Chat]
+      summary: List chat sessions
+      operationId: listChatSessions
+      x-contract-status: review_required
+      x-review-note: Mentioned in PM/screen mapping, but current Django routes only implement POST.
+      parameters:
+        - $ref: "#/components/parameters/OptionalOwnerId"
+      responses:
+        "200":
+          description: Candidate chat session list response.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [sessions]
+                    properties:
+                      sessions:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ChatSessionSummary"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+    post:
+      tags: [Chat]
+      summary: Create a chat session
+      operationId: createChatSession
+      x-contract-status: confirmed
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChatSessionRequest"
+            examples:
+              guestSession:
+                value:
+                  user_id: null
+              memberSession:
+                value:
+                  user_id: user_123
+      responses:
+        "200":
+          description: Chat session created.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/CreateChatSessionResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/chat/sessions/{session_id}/messages/:
+    get:
+      tags: [Chat]
+      summary: List messages in a chat session
+      operationId: listChatSessionMessages
+      x-contract-status: review_required
+      x-review-note: Required by screen mapping, but not implemented in current Django urls.
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Candidate message history response.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [session_id, messages]
+                    properties:
+                      session_id:
+                        type: string
+                      messages:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ChatMessageRecord"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/chat/messages/:
+    post:
+      tags: [Chat]
+      summary: Submit a user message and create a Supervisor analysis plan
+      operationId: submitChatMessage
+      x-contract-status: confirmed
+      description: |
+        Accepts text and attachment references. The current implementation returns
+        mock Supervisor output immediately and includes `analysis_plan` for Agent handoff.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/AuthSessionIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessageRequest"
+            examples:
+              fineNotice:
+                value:
+                  session_id: ses_demo
+                  user_text: 이 고지서로 이의신청서를 만들 수 있을까요?
+                  attachments:
+                    - attachment_id: att_0001
+                  mock_scenario: fine_notice
+                  mock_status: success
+              faultRatio:
+                value:
+                  session_id: ses_demo
+                  user_text: 신호 없는 교차로 사고 과실비율 쟁점을 정리해줘
+                  mock_scenario: fault_ratio
+                  mock_status: partial
+      responses:
+        "200":
+          description: Chat response and analysis plan.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/ChatMessageResponse"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/files/:
+    get:
+      tags: [Files]
+      summary: List uploaded file metadata
+      operationId: listFiles
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+      responses:
+        "200":
+          description: Attachment metadata list.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [attachments]
+                    properties:
+                      attachments:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Attachment"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+    post:
+      tags: [Files]
+      summary: Register or upload an attachment
+      operationId: createFile
+      x-contract-status: confirmed
+      description: |
+        The current Django implementation accepts JSON metadata or multipart upload.
+        Canonical `/api/files/` persists metadata to the `uploaded_files` table while
+        file bytes still use mock local storage until object storage is introduced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachmentCreateRequest"
+            examples:
+              metadataOnly:
+                value:
+                  session_id: ses_demo
+                  filename: accident_statement.pdf
+                  content_type: application/pdf
+                  purpose: accident_statement
+                  size_bytes: 1204
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                session_id:
+                  type: string
+                purpose:
+                  $ref: "#/components/schemas/AttachmentPurpose"
+                owner_id:
+                  type: string
+      responses:
+        "200":
+          description: Registered attachment.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [attachment]
+                    properties:
+                      attachment:
+                        $ref: "#/components/schemas/Attachment"
+        "400":
+          $ref: "#/components/responses/InvalidFile"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/files/{attachment_id}/:
+    get:
+      tags: [Files]
+      summary: Get attachment metadata
+      operationId: getFile
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "200":
+          description: Single attachment metadata.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [attachment]
+                    properties:
+                      attachment:
+                        $ref: "#/components/schemas/Attachment"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+        "404":
+          description: Attachment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorEnvelope"
+
+  /api/analysis/jobs/:
+    get:
+      tags: [Analysis Jobs]
+      summary: List analysis jobs
+      operationId: listAnalysisJobs
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+      responses:
+        "200":
+          description: Analysis job summaries.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [jobs]
+                    properties:
+                      jobs:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AnalysisJobSummary"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+    post:
+      tags: [Analysis Jobs]
+      summary: Create an analysis job
+      operationId: createAnalysisJob
+      x-contract-status: confirmed
+      description: Current mock implementation executes synchronously and stores a JSON sidecar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisJobCreateRequest"
+            examples:
+              createFineNoticeJob:
+                value:
+                  session_id: ses_demo
+                  user_text: 이 고지서로 이의신청서를 만들 수 있을까요?
+                  attachments:
+                    - attachment_id: att_0001
+                  mock_scenario: fine_notice
+                  mock_status: success
+      responses:
+        "200":
+          description: Analysis job with raw mock execution details.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [job]
+                    properties:
+                      job:
+                        $ref: "#/components/schemas/AnalysisJob"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/analysis/jobs/{job_id}/:
+    get:
+      tags: [Analysis Jobs]
+      summary: Get analysis job status and raw mock details
+      operationId: getAnalysisJob
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Analysis job detail.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [job]
+                    properties:
+                      job:
+                        $ref: "#/components/schemas/AnalysisJob"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+        "404":
+          description: Analysis job not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorEnvelope"
+
+  /api/analysis/results/{job_id}/:
+    get:
+      tags: [Analysis Results]
+      summary: Get frontend display result for an analysis job
+      operationId: getAnalysisResult
+      x-contract-status: confirmed
+      description: Returns display DTO only. Raw `analysis_plan`, `node_execution`, and `chat_response` stay on job detail.
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Display-ready analysis result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [result]
+                    properties:
+                      result:
+                        $ref: "#/components/schemas/AnalysisResult"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+        "404":
+          description: Analysis result not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorEnvelope"
+
+  /api/agents/nodes/:
+    get:
+      tags: [Agents]
+      summary: List Agent and Supervisor node registry
+      operationId: listAgentNodes
+      x-contract-status: confirmed
+      responses:
+        "200":
+          description: Agent node registry.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [nodes]
+                    properties:
+                      nodes:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AgentNode"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/agents/nodes/run/:
+    post:
+      tags: [Agents]
+      summary: Run one Agent node in mock mode
+      operationId: runAgentNode
+      x-contract-status: confirmed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentNodeRunRequest"
+            examples:
+              lawNode:
+                value:
+                  node_code: law_ground_search
+                  analysis_plan_id: plan_demo
+                  job_id: job_demo
+                  session_id: ses_demo
+                  message_id: msg_demo
+                  user_text: 법률 근거를 확인해줘
+                  mock_status: success
+      responses:
+        "200":
+          description: Mock node execution envelope.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/AgentNodeExecution"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/agents/plans/run/:
+    post:
+      tags: [Agents]
+      summary: Run all Agent nodes in an analysis plan in mock mode
+      operationId: runAgentPlan
+      x-contract-status: confirmed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentPlanRunRequest"
+      responses:
+        "200":
+          description: Plan execution result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [analysis_plan, node_execution]
+                    properties:
+                      analysis_plan:
+                        $ref: "#/components/schemas/AnalysisPlan"
+                      node_execution:
+                        $ref: "#/components/schemas/AgentPlanExecution"
+                      chat_response:
+                        $ref: "#/components/schemas/ChatMessageResponse"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/reports/:
+    get:
+      tags: [Reports]
+      summary: List saved reports
+      operationId: listReports
+      x-contract-status: review_required
+      x-review-note: Required by screen mapping and ERD, but current Django route only implements POST.
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+      responses:
+        "200":
+          description: Candidate report list.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [reports]
+                    properties:
+                      reports:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ReportSummary"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+    post:
+      tags: [Reports]
+      summary: Save or request a report action
+      operationId: createReportAction
+      x-contract-status: confirmed
+      description: Current mock route accepts report save/download actions. The objection-draft-specific API remains review-required.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/AuthSessionIdHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportActionRequest"
+            examples:
+              save:
+                value:
+                  action: save
+                  case_id: case_demo
+                  job_id: job_demo
+                  result_id: res_demo
+              download:
+                value:
+                  action: download
+                  report_id: rep_demo
+      responses:
+        "200":
+          description: Report action response.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/ReportActionResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/reports/{report_id}/:
+    get:
+      tags: [Reports]
+      summary: Get report detail
+      operationId: getReport
+      x-contract-status: review_required
+      x-review-note: Mentioned in PM mapping, but current Django urls only provide download detail.
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200":
+          description: Candidate report detail.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - type: object
+                    required: [report]
+                    properties:
+                      report:
+                        $ref: "#/components/schemas/ReportDetail"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/reports/{report_id}/download/:
+    get:
+      tags: [Reports]
+      summary: Download report artifact
+      operationId: downloadReport
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200":
+          description: Mock text report download.
+          headers:
+            X-API-Surface:
+              schema:
+                type: string
+                enum: [canonical_mock]
+            X-Execution-Mode:
+              schema:
+                type: string
+                enum: [mock]
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/reports/objection-draft/:
+    post:
+      tags: [Reports]
+      summary: Generate an objection draft
+      operationId: createObjectionDraft
+      x-contract-status: review_required
+      x-review-note: Present in PDF/PM contract but not implemented in current Django urls. Current mock report action is `/api/reports/`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ObjectionDraftRequest"
+      responses:
+        "200":
+          description: Candidate objection draft response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectionDraftResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/mypage/summary/:
+    get:
+      tags: [MyPage]
+      summary: Get MyPage case and activity summary
+      operationId: getMyPageSummary
+      x-contract-status: review_required
+      x-review-note: Mentioned in screen/API mapping for history and case progress. Not implemented.
+      responses:
+        "200":
+          description: Candidate MyPage summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyPageSummary"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/history/:
+    get:
+      tags: [MyPage]
+      summary: List user history events
+      operationId: listHistory
+      x-contract-status: confirmed
+      x-review-note: Mock sidecar implementation uses standard-light storage. TTL and DB migration remain review-required.
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+        - $ref: "#/components/parameters/OptionalGuestId"
+        - $ref: "#/components/parameters/OptionalUserId"
+        - $ref: "#/components/parameters/OptionalJobId"
+        - $ref: "#/components/parameters/OptionalEventType"
+        - $ref: "#/components/parameters/OptionalLimit"
+      responses:
+        "200":
+          description: Standard-light history event response.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/HistoryEventListResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/mock/history/:
+    get:
+      tags: [MyPage, Mock Aliases]
+      summary: Mock alias for history event list
+      operationId: listMockHistory
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+        - $ref: "#/components/parameters/OptionalGuestId"
+        - $ref: "#/components/parameters/OptionalUserId"
+        - $ref: "#/components/parameters/OptionalJobId"
+        - $ref: "#/components/parameters/OptionalEventType"
+        - $ref: "#/components/parameters/OptionalLimit"
+      responses:
+        "200":
+          description: Standard-light history event response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryEventListResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/mock/attachments/:
+    get:
+      tags: [Files, Mock Aliases]
+      summary: Mock alias for listing attachment metadata
+      operationId: listMockAttachments
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+      responses:
+        "200":
+          $ref: "#/components/responses/AttachmentList"
+    post:
+      tags: [Files, Mock Aliases]
+      summary: Mock alias for registering attachment metadata
+      operationId: createMockAttachment
+      x-contract-status: confirmed
+      requestBody:
+        $ref: "#/components/requestBodies/AttachmentCreate"
+      responses:
+        "200":
+          $ref: "#/components/responses/AttachmentCreated"
+
+  /api/mock/attachments/{attachment_id}/:
+    get:
+      tags: [Files, Mock Aliases]
+      summary: Mock alias for attachment detail
+      operationId: getMockAttachment
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "200":
+          $ref: "#/components/responses/AttachmentCreated"
+        "404":
+          description: Attachment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimpleErrorEnvelope"
+
+  /api/mock/chat/sessions/:
+    post:
+      tags: [Chat, Mock Aliases]
+      summary: Mock alias for creating chat sessions
+      operationId: createMockChatSession
+      x-contract-status: confirmed
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChatSessionRequest"
+      responses:
+        "200":
+          description: Mock chat session created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateChatSessionResponse"
+
+  /api/mock/chat/messages/:
+    post:
+      tags: [Chat, Mock Aliases]
+      summary: Mock alias for chat message submission
+      operationId: submitMockChatMessage
+      x-contract-status: confirmed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatMessageRequest"
+      responses:
+        "200":
+          description: Mock chat response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessageResponse"
+
+  /api/mock/analysis/jobs/:
+    get:
+      tags: [Analysis Jobs, Mock Aliases]
+      summary: Mock alias for listing analysis jobs
+      operationId: listMockAnalysisJobs
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+      responses:
+        "200":
+          description: Mock analysis job summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobs]
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AnalysisJobSummary"
+    post:
+      tags: [Analysis Jobs, Mock Aliases]
+      summary: Mock alias for creating analysis jobs
+      operationId: createMockAnalysisJob
+      x-contract-status: confirmed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalysisJobCreateRequest"
+      responses:
+        "200":
+          description: Mock analysis job.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job]
+                properties:
+                  job:
+                    $ref: "#/components/schemas/AnalysisJob"
+
+  /api/mock/analysis/jobs/{job_id}/:
+    get:
+      tags: [Analysis Jobs, Mock Aliases]
+      summary: Mock alias for analysis job detail
+      operationId: getMockAnalysisJob
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Mock analysis job detail.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job]
+                properties:
+                  job:
+                    $ref: "#/components/schemas/AnalysisJob"
+
+  /api/mock/analysis/results/{job_id}/:
+    get:
+      tags: [Analysis Results, Mock Aliases]
+      summary: Mock alias for analysis display result
+      operationId: getMockAnalysisResult
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Mock display-ready result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result:
+                    $ref: "#/components/schemas/AnalysisResult"
+
+  /api/mock/agents/nodes/:
+    get:
+      tags: [Agents, Mock Aliases]
+      summary: Mock alias for Agent node registry
+      operationId: listMockAgentNodes
+      x-contract-status: confirmed
+      responses:
+        "200":
+          description: Mock Agent node registry.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nodes]
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AgentNode"
+
+  /api/mock/agents/nodes/run/:
+    post:
+      tags: [Agents, Mock Aliases]
+      summary: Mock alias for single Agent node execution
+      operationId: runMockAgentNode
+      x-contract-status: confirmed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentNodeRunRequest"
+      responses:
+        "200":
+          description: Mock node execution envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentNodeExecution"
+
+  /api/mock/agents/plans/run/:
+    post:
+      tags: [Agents, Mock Aliases]
+      summary: Mock alias for Agent plan execution
+      operationId: runMockAgentPlan
+      x-contract-status: confirmed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentPlanRunRequest"
+      responses:
+        "200":
+          description: Mock plan execution response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [analysis_plan, node_execution]
+                properties:
+                  analysis_plan:
+                    $ref: "#/components/schemas/AnalysisPlan"
+                  node_execution:
+                    $ref: "#/components/schemas/AgentPlanExecution"
+                  chat_response:
+                    $ref: "#/components/schemas/ChatMessageResponse"
+
+  /api/mock/reports/:
+    post:
+      tags: [Reports, Mock Aliases]
+      summary: Mock alias for report action
+      operationId: createMockReportAction
+      x-contract-status: confirmed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportActionRequest"
+      responses:
+        "200":
+          description: Mock report action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportActionResponse"
+
+  /api/mock/reports/{report_id}/download/:
+    get:
+      tags: [Reports, Mock Aliases]
+      summary: Mock alias for report download
+      operationId: downloadMockReport
+      x-contract-status: confirmed
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200":
+          description: Mock text report download.
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Current mock only validates Bearer header shape. Production JWT verification is review-required.
+
+  parameters:
+    OptionalSessionId:
+      name: session_id
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter by chat session id.
+    OptionalOwnerId:
+      name: owner_id
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Candidate owner filter for member history.
+    OptionalUserId:
+      name: user_id
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter history by authenticated user id.
+    OptionalGuestId:
+      name: guest_id
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter history by guest id.
+    OptionalJobId:
+      name: job_id
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter history by analysis job id.
+    OptionalEventType:
+      name: event_type
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter history by event type.
+    OptionalLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 100
+      description: Maximum number of history events to return.
+    GuestIdHeader:
+      name: X-Guest-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Guest identity used before login or during guest-to-member handoff.
+    AuthSessionIdHeader:
+      name: X-Auth-Session-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Mock auth session id derived from the Bearer token.
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+    AttachmentId:
+      name: attachment_id
+      in: path
+      required: true
+      schema:
+        type: string
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ReportId:
+      name: report_id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  requestBodies:
+    AttachmentCreate:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AttachmentCreateRequest"
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file:
+                type: string
+                format: binary
+              session_id:
+                type: string
+              purpose:
+                $ref: "#/components/schemas/AttachmentPurpose"
+
+  responses:
+    AuthRequired:
+      description: Authentication failed.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+          example: Bearer error="auth_required", error_description="missing_token"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AuthErrorEnvelope"
+    InvalidRequest:
+      description: Invalid request or missing required field.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+    InvalidFile:
+      description: Invalid or unsupported attachment.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+    AttachmentList:
+      description: Attachment metadata list.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [attachments]
+            properties:
+              attachments:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Attachment"
+    AttachmentCreated:
+      description: Registered attachment.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [attachment]
+            properties:
+              attachment:
+                $ref: "#/components/schemas/Attachment"
+
+  schemas:
+    CanonicalMockMeta:
+      type: object
+      x-contract-status: confirmed
+      properties:
+        api_surface:
+          type: string
+          enum: [canonical_mock]
+          description: Present on canonical `/api/...` responses while they reuse mock services.
+        execution_mode:
+          type: string
+          enum: [mock]
+          description: Current execution mode for canonical shadow endpoints.
+
+    GuestSessionRequest:
+      type: object
+      properties:
+        guest_id:
+          type: string
+          description: Existing guest id to refresh. If omitted, backend issues a mock id.
+        session_id:
+          type: string
+          description: Chat session id to bind for preview only.
+
+    GuestSessionResponse:
+      type: object
+      required: [auth_state, guest, subject, session_binding, rate_limit, merge_policy, limitations]
+      properties:
+        auth_state:
+          type: string
+          enum: [guest]
+        guest:
+          $ref: "#/components/schemas/GuestIdentity"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        rate_limit:
+          $ref: "#/components/schemas/RateLimitPolicy"
+        merge_policy:
+          $ref: "#/components/schemas/MergePolicy"
+        limitations:
+          type: array
+          items:
+            type: string
+
+    AuthSubjectResponse:
+      type: object
+      required: [auth_state, subject, rate_limit, merge_policy, limitations]
+      properties:
+        auth_state:
+          type: string
+          enum: [anonymous, guest, authenticated]
+        user:
+          type:
+            - object
+            - "null"
+          properties:
+            user_id:
+              type: string
+            display_name:
+              type: string
+            status:
+              type: string
+            policy_status:
+              type: string
+        guest:
+          oneOf:
+            - $ref: "#/components/schemas/GuestIdentity"
+            - type: "null"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        auth_session:
+          oneOf:
+            - $ref: "#/components/schemas/AuthSession"
+            - type: "null"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        rate_limit:
+          $ref: "#/components/schemas/RateLimitPolicy"
+        merge_policy:
+          $ref: "#/components/schemas/MergePolicy"
+        limitations:
+          type: array
+          items:
+            type: string
+
+    AuthContext:
+      type: object
+      x-contract-status: confirmed
+      description: Frontend-provided identity context used to keep auth session and chat session separate.
+      properties:
+        auth_state:
+          type: string
+          enum: [anonymous, guest, authenticated]
+        user_id:
+          type:
+            - string
+            - "null"
+        guest_id:
+          type:
+            - string
+            - "null"
+        auth_session_id:
+          type:
+            - string
+            - "null"
+        session_id:
+          type:
+            - string
+            - "null"
+
+    GuestIdentity:
+      type: object
+      properties:
+        guest_id:
+          type: string
+        status:
+          type: string
+          enum: [active]
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        ttl_seconds:
+          type: integer
+        policy_status:
+          type: string
+          enum: [review_required, mock_only]
+
+    AuthSubject:
+      type: object
+      required: [subject_id, subject_type, is_authenticated]
+      properties:
+        subject_id:
+          type: string
+        subject_type:
+          type: string
+          enum: [anonymous, guest, user]
+        user_id:
+          type:
+            - string
+            - "null"
+        guest_id:
+          type:
+            - string
+            - "null"
+        auth_session_id:
+          type:
+            - string
+            - "null"
+        is_authenticated:
+          type: boolean
+
+    AuthSession:
+      type: object
+      properties:
+        auth_session_id:
+          type: string
+        jwt_jti:
+          type: string
+        status:
+          type: string
+        verification:
+          type: string
+
+    SessionBinding:
+      type: object
+      properties:
+        session_id:
+          type:
+            - string
+            - "null"
+        can_bind_to_chat_session:
+          type: boolean
+        binding_policy:
+          type: string
+
+    RateLimitPolicy:
+      type: object
+      properties:
+        subject_id:
+          type: string
+        policy_status:
+          type: string
+          enum: [review_required]
+        keys:
+          type: array
+          items:
+            type: string
+        notes:
+          type: array
+          items:
+            type: string
+
+    MergePolicy:
+      type: object
+      properties:
+        guest_to_user_merge:
+          type: string
+          enum: [user_confirmation_required]
+        auto_merge:
+          type: boolean
+        reason:
+          type: string
+
+    HealthResponse:
+      type: object
+      required: [ok, service, available_scenarios]
+      properties:
+        ok:
+          type: boolean
+        service:
+          type: string
+        available_scenarios:
+          type: array
+          items:
+            $ref: "#/components/schemas/DemoScenario"
+
+    DemoScenario:
+      type: object
+      required: [scenario, label]
+      properties:
+        scenario:
+          type: string
+          enum: [fine_notice, fault_ratio]
+        label:
+          type: string
+
+    CreateChatSessionRequest:
+      type: object
+      properties:
+        user_id:
+          type:
+            - string
+            - "null"
+          description: Null for guest session until login/session policy is finalized.
+      x-review-note: Guest/member session retention policy is still review-required.
+
+    CreateChatSessionResponse:
+      type: object
+      required: [session_id, status, created_at, available_scenarios]
+      properties:
+        session_id:
+          type: string
+        user_id:
+          type:
+            - string
+            - "null"
+        status:
+          type: string
+          enum: [draft, active, closed]
+        created_at:
+          type: string
+          format: date-time
+        available_scenarios:
+          type: array
+          items:
+            $ref: "#/components/schemas/DemoScenario"
+
+    ChatSessionSummary:
+      type: object
+      x-contract-status: review_required
+      properties:
+        session_id:
+          type: string
+        title:
+          type: string
+        last_summary:
+          type: string
+        status:
+          type: string
+        current_intent:
+          $ref: "#/components/schemas/RoutingIntent"
+        updated_at:
+          type: string
+          format: date-time
+
+    ChatMessageRecord:
+      type: object
+      x-contract-status: review_required
+      properties:
+        message_id:
+          type: string
+        session_id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        routing_intent:
+          $ref: "#/components/schemas/RoutingIntent"
+        created_at:
+          type: string
+          format: date-time
+
+    ChatMessageRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+        auth_context:
+          $ref: "#/components/schemas/AuthContext"
+        user_text:
+          type: string
+          description: Required when no usable attachment is provided.
+        routing_intent:
+          $ref: "#/components/schemas/RoutingIntent"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentReference"
+        attachment_ids:
+          type: array
+          items:
+            type: string
+        mock_scenario:
+          type: string
+          enum: [fine_notice, fault_ratio]
+        mock_status:
+          type: string
+          enum: [success, partial, pending, failed]
+        needs_more_input:
+          type: boolean
+      anyOf:
+        - required: [user_text]
+        - required: [attachments]
+        - required: [attachment_ids]
+
+    ChatMessageResponse:
+      type: object
+      required:
+        - message_id
+        - session_id
+        - routing_intent
+        - status
+        - assistant_message
+        - progress
+        - cards
+        - report_links
+        - limitations
+        - analysis_plan
+      properties:
+        message_id:
+          type: string
+        session_id:
+          type: string
+        mock_scenario:
+          type: string
+          enum: [fine_notice, fault_ratio]
+        routing_intent:
+          $ref: "#/components/schemas/RoutingIntent"
+        status:
+          type: string
+          enum: [success, partial, pending, failed]
+        assistant_message:
+          type: string
+        progress:
+          $ref: "#/components/schemas/ChatProgress"
+        case_status:
+          type: string
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResultCard"
+        structured_result:
+          type: object
+          additionalProperties: true
+        report_links:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLink"
+        pending_questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingQuestion"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentReference"
+        attachment_resolution:
+          $ref: "#/components/schemas/AttachmentResolution"
+        analysis_plan:
+          $ref: "#/components/schemas/AnalysisPlan"
+        limitations:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ChatProgress:
+      type: object
+      required: [status, active_node, message]
+      properties:
+        status:
+          type: string
+          enum: [queued, running, pending, success, partial, failed]
+        active_node:
+          type:
+            - string
+            - "null"
+        message:
+          type: string
+
+    AttachmentPurpose:
+      type: string
+      enum:
+        - fine_notice
+        - accident_scene
+        - evidence
+        - accident_statement
+        - blackbox_video
+        - insurance_record
+        - unknown
+      x-contract-status: confirmed
+      x-review-required-values:
+        - accident_statement
+        - blackbox_video
+        - insurance_record
+      x-review-note: PDF only contained the smaller public enum. Markdown and current mock code accept these extended values.
+
+    AttachmentType:
+      type: string
+      enum: [image, video, document, pdf, text, file]
+
+    InputModality:
+      type: string
+      enum: [text, image, video, document]
+
+    AttachmentCreateRequest:
+      type: object
+      required: [session_id]
+      properties:
+        attachment_id:
+          type: string
+        session_id:
+          type: string
+        message_id:
+          type: string
+        owner_id:
+          type: string
+        user_id:
+          type: string
+        purpose:
+          $ref: "#/components/schemas/AttachmentPurpose"
+        type:
+          $ref: "#/components/schemas/AttachmentType"
+        filename:
+          type: string
+        original_filename:
+          type: string
+        content_type:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+        storage_uri:
+          type: string
+
+    AttachmentReference:
+      type: object
+      required: [attachment_id]
+      properties:
+        attachment_id:
+          type: string
+        purpose:
+          $ref: "#/components/schemas/AttachmentPurpose"
+        type:
+          $ref: "#/components/schemas/AttachmentType"
+        original_filename:
+          type: string
+        filename:
+          type: string
+        content_type:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+        storage_uri:
+          type: string
+        resolution_status:
+          type: string
+          enum: [resolved, inline_metadata, unresolved]
+
+    Attachment:
+      allOf:
+        - $ref: "#/components/schemas/AttachmentReference"
+        - type: object
+          required: [session_id, status, storage_uri, agent_handoff]
+          properties:
+            session_id:
+              type:
+                - string
+                - "null"
+            message_id:
+              type:
+                - string
+                - "null"
+            status:
+              type: string
+              enum: [uploaded, metadata_registered]
+            created_at:
+              type: string
+              format: date-time
+            checks:
+              type: object
+              additionalProperties: true
+            agent_handoff:
+              $ref: "#/components/schemas/AgentAttachmentHandoff"
+            limitations:
+              type: array
+              items:
+                type: string
+            persistence:
+              type: object
+              additionalProperties: true
+
+    AgentAttachmentHandoff:
+      type: object
+      required: [attachment_id, purpose, type, storage_uri, content_type, size_bytes]
+      properties:
+        attachment_id:
+          type: string
+        purpose:
+          $ref: "#/components/schemas/AttachmentPurpose"
+        type:
+          $ref: "#/components/schemas/AttachmentType"
+        storage_uri:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+
+    AttachmentResolution:
+      type: object
+      properties:
+        resolved_attachment_ids:
+          type: array
+          items:
+            type: string
+        inline_attachment_ids:
+          type: array
+          items:
+            type: string
+        metadata_missing_attachment_ids:
+          type: array
+          items:
+            type: string
+        unresolved_attachment_ids:
+          type: array
+          items:
+            type: string
+
+    RoutingIntent:
+      type: string
+      enum:
+        - fine_notice
+        - law_question
+        - fault_ratio
+        - vision_analysis
+        - objection_request
+        - general
+
+    JobStatus:
+      type: string
+      enum: [queued, running, success, partial, failed]
+
+    AgentStatus:
+      type: string
+      enum: [success, partial, failed]
+
+    AnalysisStepStatus:
+      type: string
+      enum: [ready, blocked, running, success, partial, failed, skipped]
+
+    CardType:
+      type: string
+      enum:
+        - fine_notice
+        - fault_ratio
+        - law_ground
+        - vision
+        - objection_report
+        - similar_case
+        - recommended_evidence
+
+    PendingQuestion:
+      type: object
+      required: [field, question]
+      properties:
+        field:
+          type: string
+        question:
+          type: string
+
+    AnalysisPlan:
+      type: object
+      required:
+        - plan_id
+        - session_id
+        - message_id
+        - routing_intent
+        - input_summary
+        - required_inputs
+        - pending_questions
+        - steps
+        - limitations
+      properties:
+        plan_id:
+          type: string
+        session_id:
+          type: string
+        message_id:
+          type: string
+        routing_intent:
+          $ref: "#/components/schemas/RoutingIntent"
+        input_summary:
+          type: object
+          required: [has_user_command, modalities, attachment_purposes]
+          properties:
+            has_user_command:
+              type: boolean
+            modalities:
+              type: array
+              items:
+                $ref: "#/components/schemas/InputModality"
+            attachment_purposes:
+              type: array
+              items:
+                $ref: "#/components/schemas/AttachmentPurpose"
+        required_inputs:
+          type: array
+          items:
+            type: string
+        pending_questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingQuestion"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalysisPlanStep"
+        blocked_reason:
+          type:
+            - string
+            - "null"
+        limitations:
+          type: array
+          items:
+            type: string
+
+    AnalysisPlanStep:
+      type: object
+      required: [order, node_code, status, required_inputs, depends_on, fallback]
+      properties:
+        order:
+          type: integer
+        node_code:
+          $ref: "#/components/schemas/NodeCode"
+        status:
+          $ref: "#/components/schemas/AnalysisStepStatus"
+        required_inputs:
+          type: array
+          items:
+            type: string
+        depends_on:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeCode"
+        fallback:
+          type: string
+
+    AnalysisJobCreateRequest:
+      allOf:
+        - $ref: "#/components/schemas/ChatMessageRequest"
+        - type: object
+          properties:
+            job_id:
+              type: string
+            mock_job_status:
+              $ref: "#/components/schemas/JobStatus"
+
+    AnalysisJobSummary:
+      type: object
+      required: [job_id, session_id, message_id, routing_intent, status, created_at, updated_at]
+      properties:
+        job_id:
+          type: string
+        session_id:
+          type: string
+        message_id:
+          type: string
+        routing_intent:
+          $ref: "#/components/schemas/RoutingIntent"
+        mock_scenario:
+          type: string
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        active_node:
+          type:
+            - string
+            - "null"
+        progress_message:
+          type: string
+        analysis_plan_id:
+          type: string
+        status_counts:
+          type: object
+          additionalProperties:
+            type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AnalysisJob:
+      allOf:
+        - $ref: "#/components/schemas/AnalysisJobSummary"
+        - type: object
+          required: [analysis_plan, chat_response, node_execution, history, limitations]
+          properties:
+            analysis_plan:
+              $ref: "#/components/schemas/AnalysisPlan"
+            attachment_resolution:
+              $ref: "#/components/schemas/AttachmentResolution"
+            attachments:
+              type: array
+              items:
+                $ref: "#/components/schemas/AttachmentReference"
+            chat_response:
+              $ref: "#/components/schemas/ChatMessageResponse"
+            node_execution:
+              $ref: "#/components/schemas/AgentPlanExecution"
+            history:
+              type: array
+              items:
+                $ref: "#/components/schemas/AnalysisJobEvent"
+            limitations:
+              type: array
+              items:
+                type: string
+
+    AnalysisJobEvent:
+      type: object
+      required: [status, message, created_at]
+      properties:
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        active_node:
+          type:
+            - string
+            - "null"
+        message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    AnalysisResult:
+      type: object
+      required:
+        - result_id
+        - job_id
+        - session_id
+        - message_id
+        - routing_intent
+        - status
+        - assistant_message
+        - progress
+        - cards
+        - pending_questions
+        - attachments
+        - report_links
+        - evidence
+        - agent_results
+        - limitations
+      properties:
+        result_id:
+          type: string
+        job_id:
+          type: string
+        session_id:
+          type: string
+        message_id:
+          type: string
+        routing_intent:
+          $ref: "#/components/schemas/RoutingIntent"
+        mock_scenario:
+          type: string
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        assistant_message:
+          $ref: "#/components/schemas/AssistantMessage"
+        progress:
+          type: array
+          items:
+            $ref: "#/components/schemas/DisplayProgressStep"
+        cards:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResultCard"
+        pending_questions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingQuestion"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/DisplayAttachment"
+        report_links:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReportLink"
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/Evidence"
+        agent_results:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentResultSummary"
+        limitations:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AssistantMessage:
+      type: object
+      required: [summary, answer, limitations]
+      properties:
+        summary:
+          type: string
+        answer:
+          type: string
+        limitations:
+          type: array
+          items:
+            type: string
+
+    DisplayProgressStep:
+      type: object
+      required: [order, node_code, label, status, source_status, active]
+      properties:
+        order:
+          type: integer
+        node_code:
+          type:
+            - string
+            - "null"
+        label:
+          type: string
+        status:
+          type: string
+          enum: [done, waiting, failed]
+        source_status:
+          type:
+            - string
+            - "null"
+        active:
+          type: boolean
+
+    DisplayAttachment:
+      type: object
+      properties:
+        attachment_id:
+          type: string
+        label:
+          type: string
+        purpose:
+          $ref: "#/components/schemas/AttachmentPurpose"
+        type:
+          $ref: "#/components/schemas/AttachmentType"
+        status:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+        storage_uri:
+          type: string
+
+    ResultCard:
+      type: object
+      required: [card_type, title, status, summary]
+      properties:
+        card_type:
+          $ref: "#/components/schemas/CardType"
+        title:
+          type: string
+        status:
+          type: string
+          enum: [success, partial, failed]
+        summary:
+          type: string
+        evidence_refs:
+          type: array
+          items:
+            type: string
+
+    ReportLink:
+      type: object
+      required: [action, label, endpoint]
+      properties:
+        action:
+          type: string
+          enum: [save, download]
+        label:
+          type: string
+        endpoint:
+          type: string
+        report_id:
+          type: string
+
+    Evidence:
+      type: object
+      required: [source_type, title, source_reference]
+      properties:
+        evidence_id:
+          type: string
+        source_type:
+          type: string
+        title:
+          type: string
+        source_reference:
+          type: string
+        source_ref:
+          type: string
+        chunk_id:
+          type: string
+        node_code:
+          $ref: "#/components/schemas/NodeCode"
+        node_name:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        confidence:
+          type:
+            - number
+            - "null"
+
+    AgentResultSummary:
+      type: object
+      required: [result_id, node_code, status, summary, evidence_count, limitation_count]
+      properties:
+        result_id:
+          type: string
+        execution_id:
+          type: string
+        node_code:
+          $ref: "#/components/schemas/NodeCode"
+        node_name:
+          type: string
+        status:
+          $ref: "#/components/schemas/AgentStatus"
+        summary:
+          type: string
+        next_actions:
+          type: array
+          items:
+            type: string
+        evidence_count:
+          type: integer
+        limitation_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    NodeCode:
+      type: string
+      enum:
+        - input_context_validation
+        - fine_notice_analysis
+        - law_ground_search
+        - text_ml_case_search
+        - vision_media_analysis
+        - objection_report_generation
+        - agent_result_validation
+        - final_response_merge
+        - missing_input_question
+
+    AgentNode:
+      type: object
+      required:
+        - order
+        - node_name
+        - node_code
+        - node_type
+        - owner
+        - description
+        - required_inputs
+        - produces
+        - handoff_to
+        - status
+        - adapter_contract
+      properties:
+        order:
+          type: integer
+        node_name:
+          type: string
+        node_code:
+          $ref: "#/components/schemas/NodeCode"
+        node_type:
+          type: string
+          enum: [agent, supervisor_internal, unknown]
+        owner:
+          type: string
+        description:
+          type: string
+        required_inputs:
+          type: array
+          items:
+            type: string
+        produces:
+          type: array
+          items:
+            type: string
+        handoff_to:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        adapter_contract:
+          $ref: "#/components/schemas/AgentAdapterContract"
+
+    AgentAdapterContract:
+      type: object
+      required:
+        - signature_version
+        - adapter_key
+        - function_name
+        - call_signature
+        - input_model
+        - context_model
+        - output_model
+        - required_input_fields
+        - required_context_fields
+        - required_output_fields
+        - allowed_statuses
+        - call_style
+        - execution_modes
+        - idempotency_scope
+        - timeout_seconds
+        - retry_policy
+        - side_effect_policy
+      properties:
+        signature_version:
+          type: string
+          enum: [agent_adapter.v1]
+        adapter_key:
+          $ref: "#/components/schemas/NodeCode"
+        function_name:
+          type: string
+        call_signature:
+          type: string
+        input_model:
+          type: string
+          enum: [AgentAdapterInput]
+        context_model:
+          type: string
+          enum: [AgentAdapterContext]
+        output_model:
+          type: string
+          enum: [AgentAdapterOutput]
+        required_input_fields:
+          type: array
+          items:
+            type: string
+        required_context_fields:
+          type: array
+          items:
+            type: string
+        required_output_fields:
+          type: array
+          items:
+            type: string
+        allowed_statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentStatus"
+        call_style:
+          type: string
+          enum: [sync_callable]
+        execution_modes:
+          type: array
+          items:
+            type: string
+            enum: [mock, sync, async_worker]
+        idempotency_scope:
+          type: string
+        timeout_seconds:
+          type: integer
+        retry_policy:
+          type: object
+          required: [max_attempts, retryable_statuses]
+          properties:
+            max_attempts:
+              type: integer
+            retryable_statuses:
+              type: array
+              items:
+                $ref: "#/components/schemas/AgentStatus"
+        side_effect_policy:
+          type: string
+        owner:
+          type: string
+        node_type:
+          type: string
+
+    AgentNodeRunRequest:
+      allOf:
+        - $ref: "#/components/schemas/AgentAdapterInput"
+        - type: object
+          required: [node_code]
+          properties:
+            mock_status:
+              type: string
+              enum: [success, partial, pending, running, blocked, failed, skipped]
+            execution_status:
+              type: string
+              enum: [success, partial, pending, running, blocked, failed, skipped]
+            plan_step:
+              $ref: "#/components/schemas/AnalysisPlanStep"
+            agent_input:
+              $ref: "#/components/schemas/AgentAdapterInput"
+
+    AgentPlanRunRequest:
+      allOf:
+        - $ref: "#/components/schemas/ChatMessageRequest"
+        - type: object
+          properties:
+            analysis_plan:
+              $ref: "#/components/schemas/AnalysisPlan"
+            upstream_results:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/AgentAdapterOutput"
+
+    AgentAdapterInput:
+      type: object
+      required:
+        - analysis_plan_id
+        - job_id
+        - session_id
+        - message_id
+        - node_code
+        - user_text
+        - attachments
+        - context
+        - required_inputs
+        - depends_on
+        - upstream_results
+      properties:
+        analysis_plan_id:
+          type:
+            - string
+            - "null"
+        job_id:
+          type:
+            - string
+            - "null"
+        session_id:
+          type:
+            - string
+            - "null"
+        message_id:
+          type:
+            - string
+            - "null"
+        node_code:
+          $ref: "#/components/schemas/NodeCode"
+        user_text:
+          type:
+            - string
+            - "null"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentReference"
+        context:
+          type: object
+          additionalProperties: true
+        required_inputs:
+          type: array
+          items:
+            type: string
+        depends_on:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeCode"
+        upstream_results:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/AgentAdapterOutput"
+
+    AgentAdapterContext:
+      type: object
+      required: [signature_version, execution_id, execution_mode, node, plan_step]
+      properties:
+        signature_version:
+          type: string
+          enum: [agent_adapter.v1]
+        execution_id:
+          type: string
+        execution_mode:
+          type: string
+          enum: [mock, sync, async_worker]
+        node:
+          $ref: "#/components/schemas/AgentNode"
+        plan_step:
+          $ref: "#/components/schemas/AnalysisPlanStep"
+
+    AgentAdapterOutput:
+      type: object
+      required:
+        - session_id
+        - message_id
+        - job_id
+        - node_name
+        - node_code
+        - node_type
+        - owner
+        - status
+        - summary
+        - structured_result
+        - evidence
+        - next_actions
+        - limitations
+        - created_at
+      properties:
+        session_id:
+          type:
+            - string
+            - "null"
+        message_id:
+          type:
+            - string
+            - "null"
+        job_id:
+          type:
+            - string
+            - "null"
+        node_name:
+          type: string
+        node_code:
+          $ref: "#/components/schemas/NodeCode"
+        node_type:
+          type: string
+        owner:
+          type: string
+        status:
+          $ref: "#/components/schemas/AgentStatus"
+        summary:
+          type: string
+        structured_result:
+          oneOf:
+            - $ref: "#/components/schemas/InputContextValidationResult"
+            - $ref: "#/components/schemas/FineNoticeAnalysisResult"
+            - $ref: "#/components/schemas/LawGroundSearchResult"
+            - $ref: "#/components/schemas/TextMlCaseSearchResult"
+            - $ref: "#/components/schemas/VisionMediaAnalysisResult"
+            - $ref: "#/components/schemas/ObjectionReportGenerationResult"
+            - $ref: "#/components/schemas/AgentResultValidationResult"
+            - type: object
+              additionalProperties: true
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/Evidence"
+        next_actions:
+          type: array
+          items:
+            type: string
+        limitations:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    AgentNodeExecution:
+      type: object
+      required: [execution_id, execution_mode, node_code, node, adapter_context, agent_input, agent_output, created_at]
+      properties:
+        execution_id:
+          type: string
+        execution_mode:
+          type: string
+          enum: [mock]
+        job_id:
+          type:
+            - string
+            - "null"
+        node_code:
+          $ref: "#/components/schemas/NodeCode"
+        node:
+          $ref: "#/components/schemas/AgentNode"
+        adapter_context:
+          $ref: "#/components/schemas/AgentAdapterContext"
+        agent_input:
+          $ref: "#/components/schemas/AgentAdapterInput"
+        agent_output:
+          $ref: "#/components/schemas/AgentAdapterOutput"
+        plan_step:
+          $ref: "#/components/schemas/AnalysisPlanStep"
+        created_at:
+          type: string
+          format: date-time
+
+    AgentPlanExecution:
+      type: object
+      required: [execution_mode, executions, status_counts, completed_node_codes, limitations, created_at]
+      properties:
+        execution_mode:
+          type: string
+          enum: [mock]
+        job_id:
+          type:
+            - string
+            - "null"
+        plan_id:
+          type:
+            - string
+            - "null"
+        session_id:
+          type:
+            - string
+            - "null"
+        message_id:
+          type:
+            - string
+            - "null"
+        executions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentNodeExecution"
+        status_counts:
+          type: object
+          required: [success, partial, failed]
+          properties:
+            success:
+              type: integer
+            partial:
+              type: integer
+            failed:
+              type: integer
+        completed_node_codes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeCode"
+        limitations:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    InputContextValidationResult:
+      type: object
+      properties:
+        has_user_text:
+          type: boolean
+        attachment_count:
+          type: integer
+        modalities:
+          type: array
+          items:
+            $ref: "#/components/schemas/InputModality"
+        attachment_purposes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentPurpose"
+        routing_hints:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeCode"
+        missing_fields:
+          type: array
+          items:
+            type: string
+
+    FineNoticeAnalysisResult:
+      type: object
+      x-contract-status: review_required
+      x-review-note: PM schema expects notice_stage, law_code, violation_text, fine_amount, and issuing_authority. Current mock result uses notice_fields.
+      properties:
+        notice_stage:
+          type: string
+          enum: [사전통지, 1차 고지서, 2차 고지서, 즉결심판]
+        notice_fields:
+          type: object
+          additionalProperties: true
+        law_code:
+          type: string
+        violation_text:
+          type: string
+        ocr_status:
+          type: string
+        ocr_confidence:
+          type: number
+        fine_amount:
+          type: number
+        issuing_authority:
+          type: string
+        missing_fields:
+          type: array
+          items:
+            type: string
+        prepayment_amount:
+          type:
+            - number
+            - "null"
+        violation_datetime:
+          type:
+            - string
+            - "null"
+          format: date-time
+        violation_location:
+          type:
+            - string
+            - "null"
+        required_documents:
+          type: array
+          items:
+            type: string
+
+    LawGroundSearchResult:
+      type: object
+      properties:
+        matched_laws:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        applicable_conditions:
+          type: array
+          items:
+            type: string
+        exceptions:
+          type: array
+          items:
+            type: string
+        retrieval_quality:
+          type: string
+        objection_possible:
+          type:
+            - boolean
+            - "null"
+        applicability_limit:
+          type: string
+
+    TextMlCaseSearchResult:
+      type: object
+      properties:
+        normalized_description:
+          type: string
+        accident_type_candidates:
+          type: array
+          items:
+            type: string
+        issue_tags:
+          type: array
+          items:
+            type: string
+        evidence_tags:
+          type: array
+          items:
+            type: string
+        similar_cases:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        reliability_score:
+          type: number
+        ratio_range_label:
+          type: string
+        recommended_evidence:
+          type: array
+          items:
+            type: string
+
+    VisionMediaAnalysisResult:
+      type: object
+      x-internal-note: damage_image is an internal Supervisor handoff value, not a public AttachmentPurpose enum in ver0.
+      properties:
+        media_type:
+          type: string
+        key_frames:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        observations:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        scene_summary:
+          type: string
+        detected_objects:
+          type: array
+          items:
+            type: string
+        accident_scene_candidates:
+          type: array
+          items:
+            type: string
+        evidence_candidates:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        confidence_label:
+          type: string
+        privacy_redaction_required:
+          type: boolean
+        quality_issues:
+          type: array
+          items:
+            type: string
+        limitations:
+          type: array
+          items:
+            type: string
+
+    ObjectionReportGenerationResult:
+      type: object
+      properties:
+        recipient_agency:
+          type: string
+        document_title:
+          type: string
+        case_summary:
+          type: string
+        grounds:
+          type: array
+          items:
+            type: string
+        attachment_list:
+          type: array
+          items:
+            type: string
+        disclaimer:
+          type: string
+
+    AgentResultValidationResult:
+      type: object
+      properties:
+        checked_contract_fields:
+          type: array
+          items:
+            type: string
+        rejected_results:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        merge_ready:
+          type: boolean
+
+    ReportActionRequest:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [save, download]
+          default: save
+        auth_context:
+          $ref: "#/components/schemas/AuthContext"
+        report_id:
+          type: string
+        case_id:
+          type: string
+        job_id:
+          type: string
+        result_id:
+          type: string
+        report_type:
+          type: string
+          enum: [objection_draft, fault_analysis, general]
+        content:
+          type: object
+          additionalProperties: true
+
+    ReportActionResponse:
+      type: object
+      required: [report_id, case_id, status, created_at, limitations]
+      properties:
+        report_id:
+          type: string
+        case_id:
+          type: string
+        status:
+          type: string
+          enum: [report_saved, downloaded]
+        download_url:
+          type:
+            - string
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+        limitations:
+          type: array
+          items:
+            type: string
+
+    ReportSummary:
+      type: object
+      x-contract-status: review_required
+      properties:
+        report_id:
+          type: string
+        case_id:
+          type: string
+        session_id:
+          type: string
+        job_id:
+          type: string
+        report_type:
+          type: string
+        status:
+          type: string
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ReportDetail:
+      allOf:
+        - $ref: "#/components/schemas/ReportSummary"
+        - type: object
+          properties:
+            content_summary:
+              type: string
+            content:
+              type: object
+              additionalProperties: true
+            download_url:
+              type: string
+
+    ObjectionDraftRequest:
+      type: object
+      x-contract-status: review_required
+      required: [session_id, notice_analysis_result, user_facts]
+      properties:
+        session_id:
+          type: string
+        job_id:
+          type: string
+        notice_analysis_result:
+          $ref: "#/components/schemas/FineNoticeAnalysisResult"
+        law_ground_result:
+          $ref: "#/components/schemas/LawGroundSearchResult"
+        user_facts:
+          type: object
+          required: [claim_summary]
+          properties:
+            claim_summary:
+              type: string
+            event_context:
+              type: string
+            requested_outcome:
+              type: string
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/AttachmentReference"
+        additional_explanation:
+          type: string
+        requested_format:
+          type: string
+          enum: [text, pdf, docx]
+
+    ObjectionDraftResponse:
+      type: object
+      x-contract-status: review_required
+      required: [report_id, status, missing_inputs, next_actions]
+      properties:
+        report_id:
+          type: string
+        status:
+          type: string
+          enum: [success, partial, failed]
+        draft:
+          type: object
+          additionalProperties: true
+        missing_inputs:
+          type: array
+          items:
+            type: string
+        next_actions:
+          type: array
+          items:
+            type: string
+        disclaimer:
+          type: string
+
+    MyPageSummary:
+      type: object
+      x-contract-status: review_required
+      properties:
+        active_cases:
+          type: integer
+        due_soon_cases:
+          type: integer
+        saved_reports:
+          type: integer
+        recent_analysis_count:
+          type: integer
+        cases:
+          type: array
+          items:
+            $ref: "#/components/schemas/CaseSummary"
+
+    CaseSummary:
+      type: object
+      properties:
+        case_id:
+          type: string
+        session_id:
+          type: string
+        title:
+          type: string
+        case_status:
+          type: string
+        routing_intent:
+          $ref: "#/components/schemas/RoutingIntent"
+        last_event_at:
+          type: string
+          format: date-time
+        next_deadline:
+          type: string
+          format: date-time
+
+    HistoryEvent:
+      type: object
+      x-contract-status: confirmed
+      required: [event_id, event_type, event_version, occurred_at, actor, subject, source, status, summary, metadata, privacy]
+      properties:
+        event_id:
+          type: string
+        event_type:
+          type: string
+          enum:
+            - guest_session_created
+            - auth_me_checked
+            - chat_session_created
+            - chat_message_created
+            - analysis_job_created
+            - agent_call_completed
+            - agent_call_partial
+            - agent_call_failed
+            - report_saved
+            - report_downloaded
+        event_version:
+          type: string
+          enum: [history_event.v1]
+        occurred_at:
+          type: string
+          format: date-time
+        actor:
+          $ref: "#/components/schemas/HistoryEventActor"
+        subject:
+          $ref: "#/components/schemas/HistoryEventSubject"
+        source:
+          $ref: "#/components/schemas/HistoryEventSource"
+        status:
+          type: string
+          enum: [success, partial, failed, blocked, running, downloaded, report_saved]
+        summary:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Standard-light metadata. User text, OCR raw text, prompts, reasoning, raw output, and raw payload are omitted.
+        privacy:
+          $ref: "#/components/schemas/HistoryEventPrivacy"
+        created_at:
+          type: string
+          format: date-time
+
+    HistoryEventListResponse:
+      type: object
+      x-contract-status: confirmed
+      required: [history_contract, storage, count, events, limitations]
+      properties:
+        history_contract:
+          type: string
+          enum: [history_event.v1]
+        storage:
+          type: object
+          required: [backend, policy]
+          properties:
+            backend:
+              type: string
+              enum: [mock_sidecar_json]
+            policy:
+              type: string
+              enum: [standard_light]
+        count:
+          type: integer
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryEvent"
+        limitations:
+          type: array
+          items:
+            type: string
+
+    HistoryEventActor:
+      type: object
+      required: [auth_state]
+      properties:
+        user_id:
+          type:
+            - string
+            - "null"
+        guest_id:
+          type:
+            - string
+            - "null"
+        auth_session_id:
+          type:
+            - string
+            - "null"
+        auth_state:
+          type: string
+          enum: [anonymous, guest, authenticated]
+
+    HistoryEventSubject:
+      type: object
+      properties:
+        session_id:
+          type:
+            - string
+            - "null"
+        message_id:
+          type:
+            - string
+            - "null"
+        job_id:
+          type:
+            - string
+            - "null"
+        report_id:
+          type:
+            - string
+            - "null"
+
+    HistoryEventSource:
+      type: object
+      properties:
+        surface:
+          type: string
+          enum: [web, api, worker, agent]
+        api_path:
+          type:
+            - string
+            - "null"
+        execution_mode:
+          type: string
+          enum: [mock, canonical_mock, sync, async_worker]
+        node_code:
+          type:
+            - string
+            - "null"
+
+    HistoryEventPrivacy:
+      type: object
+      required: [risk_level, contains_user_text, contains_file_uri, contains_model_output, retention_policy]
+      properties:
+        risk_level:
+          type: string
+          enum: [low, medium, high, restricted]
+        contains_user_text:
+          type: boolean
+        contains_file_uri:
+          type: boolean
+        contains_model_output:
+          type: boolean
+        retention_policy:
+          type: string
+          enum: [review_required]
+
+    ApiErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ApiError"
+
+    AuthErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - type: object
+              required: [contract_version, type, code, auth]
+              properties:
+                contract_version:
+                  type: string
+                  enum: [auth_error.v1]
+                type:
+                  type: string
+                  enum: [auth]
+                code:
+                  type: string
+                  enum: [auth_required, token_invalid, token_expired, forbidden]
+                auth:
+                  type: object
+                  required: [scheme, reason]
+                  properties:
+                    scheme:
+                      type: string
+                      enum: [Bearer]
+                    reason:
+                      type: string
+                      enum:
+                        - missing_token
+                        - invalid_token
+                        - expired_token
+                        - permission_denied
+                        - malformed_authorization_header
+                        - empty_token
+
+    ApiError:
+      type: object
+      required: [code, message, status, missing_fields, retryable, required_action]
+      properties:
+        contract_version:
+          type: string
+        type:
+          type: string
+        code:
+          type: string
+          enum:
+            - auth_required
+            - token_invalid
+            - token_expired
+            - forbidden
+            - missing_required_field
+            - invalid_file
+            - analysis_failed
+            - attachment_not_found
+            - analysis_job_not_found
+            - analysis_result_not_found
+        message:
+          type: string
+        status:
+          type: integer
+        missing_fields:
+          type: array
+          items:
+            type: string
+        retryable:
+          type: boolean
+        required_action:
+          type: string
+          enum: [login, none, retry, complete_input]
+        auth:
+          type: object
+          additionalProperties: true
+
+    SimpleErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
