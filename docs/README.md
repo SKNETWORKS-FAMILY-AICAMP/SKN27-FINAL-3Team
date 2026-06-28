@@ -19,6 +19,7 @@
 | `wbs-owner-deliverable-plan.md` | WBS, 이슈, 담당자 재배정 기준 |
 | `2026-06-25-meeting-action-summary.md` | 2026-06-25 회의 후속 액션과 챗봇/RAG/리포트 누락 금지 흐름 |
 | `pm-api-json-schema-spec-2026-06-23.md` | Agent/Supervisor/API JSON schema 초안과 화면 표시 계약 |
+| `architecture/auth-session-policy-2026-06-28.md` | 로그인, 비회원, auth session, 채팅 session 분리 정책 |
 | `schema-ready-implementation-checklist-2026-06-24.md` | schema 수신 직후 mock data, 화면 상태, 검증 착수 기준 |
 | `screen-design-specification.md` | 화면설계서 |
 | `screen-design-ui-ux-flow-guide.md` | UI/UX 흐름 설명 |
