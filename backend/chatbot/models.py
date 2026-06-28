@@ -81,9 +81,13 @@ class ChatSession(TimestampedModel):
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
+        db_table = "chat_sessions"
         ordering = ["-updated_at"]
         indexes = [
-            models.Index(fields=["owner_id", "status"]),
+            models.Index(
+                fields=["owner_id", "status"],
+                name="chat_sessions_owner_status_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -100,10 +104,17 @@ class ChatMessage(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "chat_messages"
         ordering = ["created_at"]
         indexes = [
-            models.Index(fields=["session", "created_at"]),
-            models.Index(fields=["routing_intent"]),
+            models.Index(
+                fields=["session", "created_at"],
+                name="chat_msg_session_created_idx",
+            ),
+            models.Index(
+                fields=["routing_intent"],
+                name="chat_msg_routing_intent_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -137,10 +148,17 @@ class UploadedFile(TimestampedModel):
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
+        db_table = "uploaded_files"
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["owner_id", "session"]),
-            models.Index(fields=["status", "purpose"]),
+            models.Index(
+                fields=["owner_id", "session"],
+                name="upl_files_owner_session_idx",
+            ),
+            models.Index(
+                fields=["status", "purpose"],
+                name="upl_files_status_purpose_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -173,10 +191,17 @@ class AnalysisJob(TimestampedModel):
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
+        db_table = "analysis_jobs"
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["owner_id", "status"]),
-            models.Index(fields=["session", "status"]),
+            models.Index(
+                fields=["owner_id", "status"],
+                name="analysis_jobs_owner_status_idx",
+            ),
+            models.Index(
+                fields=["session", "status"],
+                name="ana_jobs_session_status_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -192,10 +217,17 @@ class AnalysisJobEvent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "analysis_job_events"
         ordering = ["created_at"]
         indexes = [
-            models.Index(fields=["job", "created_at"]),
-            models.Index(fields=["status"]),
+            models.Index(
+                fields=["job", "created_at"],
+                name="ana_job_events_job_created_idx",
+            ),
+            models.Index(
+                fields=["status"],
+                name="ana_job_events_status_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -222,10 +254,17 @@ class AgentResult(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = "agent_results"
         ordering = ["created_at"]
         indexes = [
-            models.Index(fields=["job", "node_code"]),
-            models.Index(fields=["job", "status"]),
+            models.Index(
+                fields=["job", "node_code"],
+                name="agent_results_job_node_idx",
+            ),
+            models.Index(
+                fields=["job", "status"],
+                name="agent_results_job_status_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -248,6 +287,7 @@ class AnalysisDisplayResult(TimestampedModel):
     limitations = models.JSONField(default=list, blank=True)
 
     class Meta:
+        db_table = "analysis_display_results"
         ordering = ["-updated_at"]
 
     def __str__(self) -> str:
@@ -296,10 +336,17 @@ class Report(TimestampedModel):
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
+        db_table = "reports"
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["owner_id", "status"]),
-            models.Index(fields=["report_type", "status"]),
+            models.Index(
+                fields=["owner_id", "status"],
+                name="reports_owner_status_idx",
+            ),
+            models.Index(
+                fields=["report_type", "status"],
+                name="reports_type_status_idx",
+            ),
         ]
 
     def __str__(self) -> str:

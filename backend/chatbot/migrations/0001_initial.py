@@ -30,6 +30,7 @@ class Migration(migrations.Migration):
                 ('metadata', models.JSONField(blank=True, default=dict)),
             ],
             options={
+                'db_table': 'analysis_jobs',
                 'ordering': ['-created_at'],
             },
         ),
@@ -45,6 +46,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True)),
             ],
             options={
+                'db_table': 'chat_messages',
                 'ordering': ['created_at'],
             },
         ),
@@ -65,6 +67,7 @@ class Migration(migrations.Migration):
                 ('job', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='display_result', to='chatbot.analysisjob')),
             ],
             options={
+                'db_table': 'analysis_display_results',
                 'ordering': ['-updated_at'],
             },
         ),
@@ -87,8 +90,9 @@ class Migration(migrations.Migration):
                 ('metadata', models.JSONField(blank=True, default=dict)),
             ],
             options={
+                'db_table': 'chat_sessions',
                 'ordering': ['-updated_at'],
-                'indexes': [models.Index(fields=['owner_id', 'status'], name='chatbot_cha_owner_i_d3f643_idx')],
+                'indexes': [models.Index(fields=['owner_id', 'status'], name='chat_sessions_owner_status_idx')],
             },
         ),
         migrations.AddField(
@@ -121,6 +125,7 @@ class Migration(migrations.Migration):
                 ('session', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='reports', to='chatbot.chatsession')),
             ],
             options={
+                'db_table': 'reports',
                 'ordering': ['-created_at'],
             },
         ),
@@ -146,6 +151,7 @@ class Migration(migrations.Migration):
                 ('session', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='uploaded_files', to='chatbot.chatsession')),
             ],
             options={
+                'db_table': 'uploaded_files',
                 'ordering': ['-created_at'],
             },
         ),
@@ -167,8 +173,9 @@ class Migration(migrations.Migration):
                 ('job', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='agent_results', to='chatbot.analysisjob')),
             ],
             options={
+                'db_table': 'agent_results',
                 'ordering': ['created_at'],
-                'indexes': [models.Index(fields=['job', 'node_code'], name='chatbot_age_job_id_c7fcea_idx'), models.Index(fields=['job', 'status'], name='chatbot_age_job_id_2b0f46_idx')],
+                'indexes': [models.Index(fields=['job', 'node_code'], name='agent_results_job_node_idx'), models.Index(fields=['job', 'status'], name='agent_results_job_status_idx')],
             },
         ),
         migrations.CreateModel(
@@ -183,40 +190,41 @@ class Migration(migrations.Migration):
                 ('job', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='events', to='chatbot.analysisjob')),
             ],
             options={
+                'db_table': 'analysis_job_events',
                 'ordering': ['created_at'],
-                'indexes': [models.Index(fields=['job', 'created_at'], name='chatbot_ana_job_id_62e5d8_idx'), models.Index(fields=['status'], name='chatbot_ana_status_13d797_idx')],
+                'indexes': [models.Index(fields=['job', 'created_at'], name='ana_job_events_job_created_idx'), models.Index(fields=['status'], name='ana_job_events_status_idx')],
             },
         ),
         migrations.AddIndex(
             model_name='chatmessage',
-            index=models.Index(fields=['session', 'created_at'], name='chatbot_cha_session_24e989_idx'),
+            index=models.Index(fields=['session', 'created_at'], name='chat_msg_session_created_idx'),
         ),
         migrations.AddIndex(
             model_name='chatmessage',
-            index=models.Index(fields=['routing_intent'], name='chatbot_cha_routing_fafc7c_idx'),
+            index=models.Index(fields=['routing_intent'], name='chat_msg_routing_intent_idx'),
         ),
         migrations.AddIndex(
             model_name='analysisjob',
-            index=models.Index(fields=['owner_id', 'status'], name='chatbot_ana_owner_i_551b1c_idx'),
+            index=models.Index(fields=['owner_id', 'status'], name='analysis_jobs_owner_status_idx'),
         ),
         migrations.AddIndex(
             model_name='analysisjob',
-            index=models.Index(fields=['session', 'status'], name='chatbot_ana_session_0c8c95_idx'),
+            index=models.Index(fields=['session', 'status'], name='ana_jobs_session_status_idx'),
         ),
         migrations.AddIndex(
             model_name='report',
-            index=models.Index(fields=['owner_id', 'status'], name='chatbot_rep_owner_i_35defb_idx'),
+            index=models.Index(fields=['owner_id', 'status'], name='reports_owner_status_idx'),
         ),
         migrations.AddIndex(
             model_name='report',
-            index=models.Index(fields=['report_type', 'status'], name='chatbot_rep_report__e8c88b_idx'),
+            index=models.Index(fields=['report_type', 'status'], name='reports_type_status_idx'),
         ),
         migrations.AddIndex(
             model_name='uploadedfile',
-            index=models.Index(fields=['owner_id', 'session'], name='chatbot_upl_owner_i_f7ec56_idx'),
+            index=models.Index(fields=['owner_id', 'session'], name='upl_files_owner_session_idx'),
         ),
         migrations.AddIndex(
             model_name='uploadedfile',
-            index=models.Index(fields=['status', 'purpose'], name='chatbot_upl_status_ebe737_idx'),
+            index=models.Index(fields=['status', 'purpose'], name='upl_files_status_purpose_idx'),
         ),
     ]

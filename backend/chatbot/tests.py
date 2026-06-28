@@ -21,6 +21,16 @@ from chatbot.models import (
 
 
 class ChatbotPersistenceModelTests(TestCase):
+    def test_storage_foundation_uses_postgresql_erd_table_names(self):
+        self.assertEqual(ChatSession._meta.db_table, "chat_sessions")
+        self.assertEqual(ChatMessage._meta.db_table, "chat_messages")
+        self.assertEqual(UploadedFile._meta.db_table, "uploaded_files")
+        self.assertEqual(AnalysisJob._meta.db_table, "analysis_jobs")
+        self.assertEqual(AnalysisJobEvent._meta.db_table, "analysis_job_events")
+        self.assertEqual(AgentResult._meta.db_table, "agent_results")
+        self.assertEqual(AnalysisDisplayResult._meta.db_table, "analysis_display_results")
+        self.assertEqual(Report._meta.db_table, "reports")
+
     def test_storage_foundation_links_session_files_jobs_results_and_reports(self):
         session = ChatSession.objects.create(
             session_id="ses_db_foundation",
@@ -168,7 +178,13 @@ class ChatbotMockApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response["WWW-Authenticate"],
+            'Bearer error="auth_required", error_description="missing_token"',
+        )
         error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "auth_error.v1")
+        self.assertEqual(error["type"], "auth")
         self.assertEqual(error["code"], "auth_required")
         self.assertEqual(error["status"], 401)
         self.assertEqual(error["required_action"], "login")
@@ -187,6 +203,24 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(error["code"], "auth_required")
         self.assertEqual(error["auth"]["reason"], "missing_token")
 
+    def test_protected_endpoint_rejects_malformed_authorization_header(self):
+        response = Client(HTTP_AUTHORIZATION="Token dev-mock-token").post(
+            "/api/mock/chat/messages/",
+            data={"session_id": "ses_malformed_auth", "user_text": "hello"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response["WWW-Authenticate"],
+            'Bearer error="token_invalid", error_description="malformed_authorization_header"',
+        )
+        error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "auth_error.v1")
+        self.assertEqual(error["type"], "auth")
+        self.assertEqual(error["code"], "token_invalid")
+        self.assertEqual(error["auth"]["reason"], "malformed_authorization_header")
+
     def test_protected_mock_endpoint_rejects_expired_mock_token(self):
         response = Client(HTTP_AUTHORIZATION="Bearer expired").post(
             "/api/mock/chat/messages/",
@@ -195,9 +229,26 @@ class ChatbotMockApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response["WWW-Authenticate"],
+            'Bearer error="token_expired", error_description="expired_token"',
+        )
         error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "auth_error.v1")
         self.assertEqual(error["code"], "token_expired")
         self.assertEqual(error["auth"]["reason"], "expired_token")
+
+    def test_protected_mock_endpoint_rejects_invalid_mock_token(self):
+        response = Client(HTTP_AUTHORIZATION="Bearer invalid").post(
+            "/api/mock/chat/messages/",
+            data={"session_id": "ses_invalid_auth", "user_text": "hello"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "token_invalid")
+        self.assertEqual(error["auth"]["reason"], "invalid_token")
 
     def test_submit_fine_notice_message(self):
         session_response = self.client.post(
@@ -580,6 +631,108 @@ class ChatbotMockApiTests(TestCase):
                 for link in result["report_links"]
             )
         )
+
+    def test_canonical_api_smoke_covers_session_file_job_result_and_report(self):
+        session_response = self.client.post(
+            "/api/chat/sessions/",
+            data={"user_id": "usr_canonical_smoke"},
+            content_type="application/json",
+        )
+        self.assertEqual(session_response.status_code, 200)
+        session_body = session_response.json()
+        session_id = session_body["session_id"]
+        self.assertEqual(session_body["api_surface"], "canonical_mock")
+
+        file_response = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": session_id,
+                "purpose": "fine_notice",
+                "filename": "canonical-notice.jpg",
+                "content_type": "image/jpeg",
+                "size_bytes": 2048,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(file_response.status_code, 200)
+        attachment = file_response.json()["attachment"]
+
+        message_payload = {
+            "session_id": session_id,
+            "user_text": "과태료 고지서 이의신청 초안을 만들어줘",
+            "attachments": [{"attachment_id": attachment["attachment_id"]}],
+            "mock_scenario": "fine_notice",
+            "mock_status": "success",
+        }
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data=message_payload,
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        message_body = message_response.json()
+        self.assertEqual(message_body["api_surface"], "canonical_mock")
+        self.assertEqual(
+            message_body["analysis_plan"]["input_summary"]["attachment_purposes"],
+            ["fine_notice"],
+        )
+        self.assertTrue(
+            all(
+                not link["endpoint"].startswith("/api/mock/")
+                for link in message_body["report_links"]
+            )
+        )
+
+        job_response = self.client.post(
+            "/api/analysis/jobs/",
+            data=message_payload,
+            content_type="application/json",
+        )
+        self.assertEqual(job_response.status_code, 200)
+        job_body = job_response.json()
+        job = job_body["job"]
+        self.assertEqual(job_body["api_surface"], "canonical_mock")
+        self.assertEqual(job["session_id"], session_id)
+        self.assertEqual(job["status"], "success")
+
+        detail_response = self.client.get(f"/api/analysis/jobs/{job['job_id']}/")
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.json()["job"]["job_id"], job["job_id"])
+
+        result_response = self.client.get(f"/api/analysis/results/{job['job_id']}/")
+        self.assertEqual(result_response.status_code, 200)
+        result_body = result_response.json()
+        result = result_body["result"]
+        self.assertEqual(result_body["api_surface"], "canonical_mock")
+        self.assertEqual(result["status"], "success")
+        self.assertIn("agent_results", result)
+        self.assertNotIn("analysis_plan", result)
+        self.assertTrue(
+            all(
+                not link["endpoint"].startswith("/api/mock/")
+                for link in result["report_links"]
+            )
+        )
+
+        report_response = self.client.post(
+            "/api/reports/",
+            data={
+                "action": "download",
+                "report_id": "rep_canonical_smoke",
+                "job_id": job["job_id"],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        report_body = report_response.json()
+        self.assertEqual(report_body["api_surface"], "canonical_mock")
+        self.assertTrue(report_body["download_url"].startswith("/api/reports/"))
+
+        download_response = self.client.get(
+            f"/api/reports/{report_body['report_id']}/download/"
+        )
+        self.assertEqual(download_response.status_code, 200)
+        self.assertEqual(download_response["X-API-Surface"], "canonical_mock")
 
     def test_analysis_result_endpoint_returns_404_for_missing_job(self):
         response = self.client.get("/api/mock/analysis/results/job_missing/")

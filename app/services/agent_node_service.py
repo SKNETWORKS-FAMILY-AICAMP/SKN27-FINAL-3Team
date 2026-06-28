@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from app.services.agent_adapter_contract import (
     build_adapter_context,
+    build_agent_adapter_input,
     build_agent_adapter_contract,
 )
 from app.services.attachment_mock_service import resolve_attachment_references
@@ -226,19 +227,19 @@ def _payload_node_code(payload: dict[str, Any]) -> str:
 
 
 def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "analysis_plan_id": payload.get("analysis_plan_id"),
-        "job_id": payload.get("job_id"),
-        "session_id": payload.get("session_id"),
-        "message_id": payload.get("message_id"),
-        "node_code": node["node_code"],
-        "user_text": payload.get("user_text"),
-        "attachments": deepcopy(payload.get("attachments", [])),
-        "context": deepcopy(payload.get("context", {})),
-        "required_inputs": deepcopy(payload.get("required_inputs") or node["required_inputs"]),
-        "depends_on": deepcopy(payload.get("depends_on", [])),
-        "upstream_results": deepcopy(payload.get("upstream_results", {})),
-    }
+    return build_agent_adapter_input(
+        analysis_plan_id=payload.get("analysis_plan_id"),
+        job_id=payload.get("job_id"),
+        session_id=payload.get("session_id"),
+        message_id=payload.get("message_id"),
+        node=node,
+        user_text=payload.get("user_text"),
+        attachments=payload.get("attachments", []),
+        context=payload.get("context", {}),
+        required_inputs=payload.get("required_inputs") or node["required_inputs"],
+        depends_on=payload.get("depends_on", []),
+        upstream_results=payload.get("upstream_results", {}),
+    )
 
 
 def _node_with_adapter_contract(node: dict[str, Any]) -> dict[str, Any]:

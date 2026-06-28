@@ -5,7 +5,10 @@ from __future__ import annotations
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
-from app.services.auth_error_contract import is_valid_mock_bearer_header
+from app.services.auth_error_contract import (
+    build_www_authenticate_header,
+    is_valid_mock_bearer_header,
+)
 
 
 MOCK_AUTH_PUBLIC_PATHS = (
@@ -56,7 +59,9 @@ class MockJwtAuthMiddleware:
             return self.get_response(request)
 
         status = error_body["error"]["status"]
-        return JsonResponse(error_body, status=status)
+        response = JsonResponse(error_body, status=status)
+        response["WWW-Authenticate"] = build_www_authenticate_header(error_body)
+        return response
 
 
 def _requires_mock_auth(request: HttpRequest) -> bool:

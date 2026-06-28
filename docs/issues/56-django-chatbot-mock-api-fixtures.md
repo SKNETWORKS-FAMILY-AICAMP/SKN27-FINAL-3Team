@@ -100,7 +100,7 @@
 
 ### 4.1 실제 Agent adapter 함수 계약
 
-실제 Agent 구현체는 `node_code`별로 같은 함수 모양을 따른다. Django mock runtime은 아직 이 함수를 호출하지 않지만, `GET /api/mock/agents/nodes/` 응답의 `adapter_contract`에 함수명, 입력 필드, 출력 필드를 노출한다.
+실제 Agent 구현체는 `node_code`별로 같은 함수 모양을 따른다. Django mock runtime은 아직 이 함수를 호출하지 않지만, `GET /api/mock/agents/nodes/` 응답의 `adapter_contract`에 `signature_version`, 함수명, 입력 필드, context 필드, 출력 필드, timeout/retry 정책을 노출한다.
 
 ```python
 def run_{node_code}(
@@ -135,7 +135,7 @@ def run_law_ground_search(
 | `depends_on` | 선행 node 목록 |
 | `upstream_results` | 선행 node의 Agent output envelope 모음 |
 
-`AgentAdapterContext`는 `execution_id`, `execution_mode`, `node`, `plan_step`을 포함한다. `AgentAdapterOutput`은 기존 공통 envelope와 동일하게 `node_name`, `node_code`, `status`, `summary`, `structured_result`, `evidence`, `next_actions`, `limitations`, `created_at`을 반환해야 한다. `status`는 `success`, `partial`, `failed` 중 하나만 허용한다.
+`AgentAdapterContext`는 `signature_version`, `execution_id`, `execution_mode`, `node`, `plan_step`을 포함한다. 현재 signature version은 `agent_adapter.v1`이며, 허용 실행 모드는 `mock`, `sync`, `async_worker`다. Adapter는 persistence side effect를 직접 수행하지 않고 envelope만 반환하며, DB 저장과 retry/queue orchestration은 Django/worker 계층이 담당한다. `AgentAdapterOutput`은 기존 공통 envelope와 동일하게 `node_name`, `node_code`, `status`, `summary`, `structured_result`, `evidence`, `next_actions`, `limitations`, `created_at`을 반환해야 한다. `status`는 `success`, `partial`, `failed` 중 하나만 허용한다.
 
 ## 5. Attachment metadata mock
 
@@ -244,11 +244,13 @@ docker compose up --build backend
 
 회의 기록의 인증 항목은 `JWT` 기준으로 정정한다. 현재 mock backend는 실제 JWT 서명 검증은 수행하지 않지만, 배포 흐름에 맞춰 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. `MOCK_REQUIRE_AUTH=1`이 기본값이며, `GET /api/health/`, `GET /api/mock/chat/scenarios/`만 공개 endpoint로 둔다.
 
-토큰이 없거나 형식이 맞지 않으면 공통 auth error envelope로 `401`을 반환한다. mock smoke에서는 `Authorization: Bearer dev-mock-token`처럼 임의 Bearer 값을 붙여 보호 endpoint를 호출한다. `Bearer expired`, `Bearer invalid`는 각각 `token_expired`, `token_invalid` 실패 응답을 확인하기 위한 mock 시뮬레이션 값이다.
+토큰이 없거나 형식이 맞지 않으면 공통 auth error envelope로 `401`을 반환하고 `WWW-Authenticate` header를 함께 내려준다. mock smoke에서는 `Authorization: Bearer dev-mock-token`처럼 임의 Bearer 값을 붙여 보호 endpoint를 호출한다. `Bearer expired`, `Bearer invalid`는 각각 `token_expired`, `token_invalid` 실패 응답을 확인하기 위한 mock 시뮬레이션 값이다.
 
 ```json
 {
   "error": {
+    "contract_version": "auth_error.v1",
+    "type": "auth",
     "code": "auth_required",
     "message": "로그인이 필요합니다.",
     "status": 401,

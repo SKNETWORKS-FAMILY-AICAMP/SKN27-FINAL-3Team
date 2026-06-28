@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 
+AUTH_ERROR_CONTRACT_VERSION = "auth_error.v1"
+AUTH_SCHEME = "Bearer"
+
 AUTH_ERROR_TEMPLATES: dict[str, dict[str, Any]] = {
     "auth_required": {
         "status": 401,
@@ -45,6 +48,8 @@ def build_auth_error(
     auth_reason = reason or template["reason"]
     return {
         "error": {
+            "contract_version": AUTH_ERROR_CONTRACT_VERSION,
+            "type": "auth",
             "code": code if code in AUTH_ERROR_TEMPLATES else "token_invalid",
             "message": message or template["message"],
             "status": template["status"],
@@ -52,11 +57,21 @@ def build_auth_error(
             "retryable": False,
             "required_action": template["required_action"],
             "auth": {
-                "scheme": "Bearer",
+                "scheme": AUTH_SCHEME,
                 "reason": auth_reason,
             },
         }
     }
+
+
+def build_www_authenticate_header(error_body: dict[str, Any]) -> str:
+    """Build the HTTP auth challenge header for JWT/Bearer failures."""
+
+    error = error_body.get("error", {})
+    auth = error.get("auth", {})
+    reason = auth.get("reason") or "invalid_token"
+    code = error.get("code") or "token_invalid"
+    return f'{AUTH_SCHEME} error="{code}", error_description="{reason}"'
 
 
 def list_auth_error_contracts() -> dict[str, dict[str, Any]]:

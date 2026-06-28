@@ -51,8 +51,11 @@
 ```json
 {
   "error": {
+    "contract_version": "auth_error.v1",
+    "type": "auth",
     "code": "auth_required|forbidden|missing_required_field|invalid_file|analysis_failed",
     "message": "사용자에게 보여줄 수 있는 오류 요약",
+    "status": 401,
     "missing_fields": ["session_id"],
     "retryable": false,
     "required_action": "login|none|retry|complete_input",
@@ -66,8 +69,11 @@
 
 | Field | 필수성 | Type/Allowed | 왜 필요한가 | 사용 위치와 누락 시 처리 |
 |---|---|---|---|---|
+| `error.contract_version` | 인증 오류 필수 | string | FE/BE가 auth envelope 변경을 구분한다. | 인증 오류에서 없으면 legacy envelope로 보고 기본 로그인 처리한다. |
+| `error.type` | 인증 오류 필수 | `auth` | 오류 범주를 빠르게 분기한다. | 없으면 `error.code` 기준으로 fallback한다. |
 | `error.code` | 필수 | enum | Frontend가 오류별 UI를 분기해야 한다. | 없으면 공통 오류 카드만 표시 가능하므로 API 응답 실패로 본다. |
 | `error.message` | 필수 | string | 사용자에게 현재 상태를 설명해야 한다. | 없으면 FE 기본 문구로 대체하되 BE 응답은 불완전하다. |
+| `error.status` | 필수 | HTTP status number | JSON body와 HTTP status를 함께 확인한다. | 없으면 실제 HTTP status를 우선한다. |
 | `error.missing_fields` | 조건부 필수 | string[] | 필수 입력이 부족할 때 어떤 값을 보완해야 하는지 알려준다. | `missing_required_field`인데 없으면 추가 질문 생성이 어렵다. |
 | `error.retryable` | 필수 | boolean | 재시도 버튼 노출 여부를 결정한다. | 없으면 기본값 `false`로 처리한다. |
 | `error.required_action` | 조건부 필수 | enum | 로그인, 입력 보완, 재시도처럼 FE가 다음 행동을 정한다. | 인증 오류인데 없으면 FE가 로그인 이동 여부를 판단하기 어렵다. |
@@ -76,6 +82,7 @@
 ### 2.1 JWT/auth 실패 envelope
 
 운영 배포 흐름을 고려해 Django mock backend도 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더를 요구한다. 현재 mock은 JWT 서명 검증을 하지 않고 Bearer 헤더의 존재와 형식만 확인한다. 실제 운영 전환 시 같은 위치에 JWT 서명, 만료, 사용자 권한 검증을 연결한다.
+실패 응답은 `auth_error.v1` envelope와 `WWW-Authenticate: Bearer error="...", error_description="..."` header를 함께 반환한다.
 
 > 2026-06-28 구현 메모:
 > 운영 후보 path를 미리 검증하기 위해 canonical `/api/...` shadow endpoint를 추가했다. 예를 들어 `POST /api/chat/messages/`, `POST /api/files/`, `POST /api/analysis/jobs/`, `GET /api/analysis/results/{id}/`, `GET /api/agents/nodes/`는 기존 `/api/mock/...` service를 재사용하며 응답에 `api_surface="canonical_mock"`, `execution_mode="mock"`을 포함한다. Canonical 응답 안의 report/file/job 링크도 `/api/...` 형태로 변환한다. 명시적 mock endpoint도 회귀 테스트용으로 유지한다.
@@ -97,6 +104,8 @@
 ```json
 {
   "error": {
+    "contract_version": "auth_error.v1",
+    "type": "auth",
     "code": "token_expired",
     "message": "로그인이 만료되었습니다. 다시 로그인해 주세요.",
     "status": 401,
@@ -875,7 +884,7 @@ PostgreSQL은 영속 저장소로 확정한다. 대화 이력, 파일 metadata, 
 |---|---|---|---|
 | `users` | `user_id` | 로그인 사용자, 권한 검사 | 인증/인가 |
 | `chat_sessions` | `session_id`, `user_id`, `title`, `created_at`, `updated_at` | 대화 목록과 session 소유자 연결 | `/api/chat/sessions/` |
-| `messages` | `message_id`, `session_id`, `role`, `content`, `created_at` | 사용자/assistant 메시지 이력 | `/api/chat/messages/` |
+| `chat_messages` | `message_id`, `session_id`, `role`, `content`, `created_at` | 사용자/assistant 메시지 이력 | `/api/chat/messages/` |
 | `uploaded_files` | `attachment_id`, `owner_id`, `session_id`, `file_type`, `purpose`, `privacy_risk`, `storage_uri` | 파일 권한, 분석 job 연결 | `/api/files/` |
 | `analysis_jobs` | `job_id`, `session_id`, `routing_intent`, `status`, `active_node` | 분석 진행 이력 | `/api/analysis/jobs/` |
 | `agent_results` | `result_id`, `job_id`, `node_code`, `status`, `structured_result`, `evidence`, `limitations` | 결과 카드와 리포트 생성 | `/api/analysis/results/{id}/` |
@@ -1000,7 +1009,7 @@ Frontend는 Agent raw output을 직접 화면에 뿌리지 않는다. `GET /api/
     ]
   },
   "storage_contract": {
-    "postgresql": ["chat_sessions", "messages", "uploaded_files", "analysis_jobs", "agent_results", "reports"],
+    "postgresql": ["chat_sessions", "chat_messages", "uploaded_files", "analysis_jobs", "agent_results", "reports"],
     "redis": ["chat_session_state:{session_id}", "analysis_job_progress:{job_id}"],
     "neo4j_rag": ["source_ref", "chunk_id", "expected_counts"]
   }
@@ -1242,7 +1251,7 @@ Frontend는 Agent raw output을 직접 화면에 뿌리지 않는다. `GET /api/
 > 2026-06-27 구현 메모:
 > Django mock backend는 `GET /api/mock/agents/nodes/`, `POST /api/mock/agents/nodes/run/`, `POST /api/mock/agents/plans/run/`를 제공한다. 이 endpoint들은 실제 Agent, RAG, MCP, LLM을 호출하지 않고 `analysis_plan.steps[].node_code`를 공통 Agent envelope mock output으로 변환해 프론트엔드와 담당자별 node adapter 연결 위치를 검증한다.
 > 2026-06-28 구현 메모:
-> `GET /api/mock/agents/nodes/`의 각 node는 `adapter_contract`를 포함한다. 실제 Agent adapter 함수는 `run_{node_code}(agent_input: AgentAdapterInput, context: AgentAdapterContext) -> AgentAdapterOutput` 형태를 따른다. 공통 입력은 `analysis_plan_id`, `job_id`, `session_id`, `message_id`, `node_code`, `user_text`, `attachments`, `context`, `required_inputs`, `depends_on`, `upstream_results`이며, 출력은 공통 Agent result envelope와 같은 필수 필드를 반환한다.
+> `GET /api/mock/agents/nodes/`의 각 node는 `adapter_contract`를 포함한다. 실제 Agent adapter 함수는 `agent_adapter.v1` 기준으로 `run_{node_code}(agent_input: AgentAdapterInput, context: AgentAdapterContext) -> AgentAdapterOutput` 형태를 따른다. 공통 입력은 `analysis_plan_id`, `job_id`, `session_id`, `message_id`, `node_code`, `user_text`, `attachments`, `context`, `required_inputs`, `depends_on`, `upstream_results`이며, context는 `signature_version`, `execution_id`, `execution_mode`, `node`, `plan_step`을 포함한다. Adapter는 저장 side effect 없이 공통 Agent result envelope를 반환하고, persistence와 retry/queue 처리는 Django/worker 계층이 맡는다.
 
 | 흐름 | 보내는 쪽 | 받는 쪽 | 전달 JSON 핵심 필드 | 화면/API에서 필요한 이유 | 확인 담당 |
 |---|---|---|---|---|---|

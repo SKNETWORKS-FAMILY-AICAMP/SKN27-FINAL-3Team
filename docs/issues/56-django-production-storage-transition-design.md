@@ -7,6 +7,8 @@
 | Status | 설계 초안, 1차 model/migration foundation 구현 시작 |
 | 작성일 | 2026-06-28 |
 
+상세 ERD: [`docs/postgresql-erd-2026-06-28.md`](../postgresql-erd-2026-06-28.md)
+
 ## 1. 이 브랜치에서의 범위
 
 `django-mock-api-integration` 브랜치는 mock API와 운영 후보 `/api/...` surface를 검증하는 브랜치다. 따라서 여기서는 실제 DB model, migration, Redis, object storage client를 추가하지 않는다.
@@ -43,6 +45,21 @@
 - 실제 JWT user FK와 권한 검증
 - background worker 또는 Celery queue
 
+### 1.2 API service/repository 연결 전 경계
+
+현재 foundation model은 durable schema를 고정하기 위한 기준점이며, view나 mock service에서 직접 사용하지 않는다. 다음 브랜치에서 실제 API 저장소 연결을 시작할 때는 아래 경계를 먼저 둔다.
+
+| Layer | 책임 | 아직 하지 않는 일 |
+|---|---|---|
+| Django view | request parsing, auth owner 추출, service 호출, response envelope 반환 | model 직접 생성/조회 |
+| service | use case 단위 orchestration, mock/DB backend 선택, display DTO 조립 | SQL query 세부 구현 |
+| repository | `ChatSession`, `UploadedFile`, `AnalysisJob`, `AgentResult`, `Report` CRUD와 FK 연결 | HTTP response shape 결정 |
+| adapter/worker | Agent adapter 호출, retry, progress event 기록 | 사용자 권한 판단 |
+
+전환 초기에는 `settings` 또는 service factory로 mock sidecar backend와 DB repository backend를 나눠 선택한다. 기본값은 현재 mock sidecar를 유지하고, DB repository는 테스트에서 먼저 검증한다. 이 단계에서는 `owner_id`를 문자열로 전달하되, 실제 JWT 연결 후 `request.user` 또는 JWT claim 기반 FK/owner 정책으로 승격한다.
+
+API 응답은 canonical `/api/...` shape를 유지한다. DB repository로 저장소가 바뀌더라도 `GET /api/analysis/results/{job_id}/`는 raw `analysis_plan`, `node_execution`, `chat_response`를 직접 노출하지 않고 display DTO만 반환한다.
+
 ## 2. 현재 mock 저장 구조
 
 | 현재 mock 대상 | 현재 위치 | 현재 책임 | 운영 전환 대상 |
@@ -63,7 +80,7 @@ PostgreSQL은 영속 저장소와 권한 판단의 기준이다. Redis나 object
 | Logical table | 핵심 필드 | 책임 |
 |---|---|---|
 | `chat_sessions` | `session_id`, `owner_id`, `title`, `status`, `created_at`, `updated_at` | 사용자별 상담 묶음과 목록 조회 |
-| `messages` | `message_id`, `session_id`, `role`, `content`, `routing_intent`, `created_at` | 사용자/assistant 메시지 이력 |
+| `chat_messages` | `message_id`, `session_id`, `role`, `content`, `routing_intent`, `created_at` | 사용자/assistant 메시지 이력 |
 | `uploaded_files` | `attachment_id`, `owner_id`, `session_id`, `purpose`, `file_type`, `content_type`, `size_bytes`, `storage_uri`, `privacy_risk`, `scan_status`, `created_at` | 파일 metadata, 권한, Agent handoff 기준 |
 | `analysis_jobs` | `job_id`, `session_id`, `message_id`, `owner_id`, `routing_intent`, `status`, `active_node`, `progress_message`, `created_at`, `updated_at` | 분석 job 생명주기 기준 |
 | `analysis_job_events` | `event_id`, `job_id`, `status`, `active_node`, `message`, `created_at` | 진행 이력과 audit trail |
