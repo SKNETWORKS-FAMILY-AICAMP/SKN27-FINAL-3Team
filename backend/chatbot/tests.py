@@ -997,6 +997,13 @@ class ChatbotMockApiTests(TestCase):
         )
         self.assertEqual(download_response.status_code, 200)
         self.assertEqual(download_response["X-API-Surface"], "canonical_mock")
+        self.assertEqual(download_response["X-Report-Persistence"], "postgresql")
+        self.assertEqual(download_response["X-Report-Storage-Backend"], "mock_placeholder")
+        self.assertEqual(download_response["X-Report-Storage-URI"], "mock://reports/rep_canonical_smoke")
+        self.assertIn(
+            "Report metadata download for rep_canonical_smoke",
+            download_response.content.decode("utf-8"),
+        )
 
     def test_analysis_result_endpoint_returns_404_for_missing_job(self):
         response = self.client.get("/api/mock/analysis/results/job_missing/")
@@ -1051,4 +1058,5 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["X-API-Surface"], "canonical_mock")
         self.assertEqual(response["X-Execution-Mode"], "mock")
+        self.assertNotIn("X-Report-Persistence", response)
 

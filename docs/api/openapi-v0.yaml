@@ -710,6 +710,17 @@ paths:
               schema:
                 type: string
                 enum: [mock]
+            X-Report-Persistence:
+              schema:
+                type: string
+                enum: [postgresql]
+            X-Report-Storage-Backend:
+              schema:
+                type: string
+                enum: [mock_placeholder, object_storage, local_file, unknown]
+            X-Report-Storage-URI:
+              schema:
+                type: string
           content:
             text/plain:
               schema:
