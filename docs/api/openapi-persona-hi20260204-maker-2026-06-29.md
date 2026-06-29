@@ -8,6 +8,7 @@
 | persona | `hi20260204-maker` |
 | 실행 기준 | `confirmed` contract만 1차 실행 대상으로 사용 |
 | 제외 기준 | MCP, 외부 API, 실제 Agent/RAG/LLM 호출, `review_required` endpoint 직접 구현 |
+| 연결 전략 | `docs/architecture/service-protocol-persona-strategy-2026-06-29.md` |
 
 ## 1. 시작 가능 여부
 
@@ -149,6 +150,20 @@
 | 3 | report persistence와 object storage download flow 연결 | `#27`, `#43`, `#58`, `#68` |
 | 4 | Redis progress cache와 PostgreSQL fallback 기준 정리 | `#40`, `#43`, `#68` |
 | 5 | `review_required` endpoint 정책 확정 후 다음 OpenAPI 버전 반영 | `#22`, `#41`, `#68` |
+
+## 7.1 회의 메모 반영 우선순위
+
+2026-06-29 추가 메모 기준으로 아래 항목을 우선 확인한다.
+
+| 우선 | 항목 | 처리 |
+|---:|---|---|
+| 1 | 로그인 세션과 채팅/사건 세션 구분 | `user_id`, `guest_id`, `auth_session_id`, `session_id`를 OpenAPI와 DB metadata에서 섞지 않는다. |
+| 2 | 히스토리와 애프터서비스 | 채팅 원문 저장보다 `history_event.v1` 표준-라이트 이벤트를 우선한다. |
+| 3 | 비회원/회원/구독 rate limit | API 비용이 드는 Agent 실행, 파일 업로드, report 생성에 quota key를 둔다. |
+| 4 | 내 사건 진행도 | `analysis_jobs`, `analysis_job_events`, `agent_results`, `reports`, `history_events`에서 재구성한다. |
+| 5 | Agent 동기/비동기 기준 | 입력 검증과 plan 생성은 동기, OCR/RAG/이미지/LLM은 비동기 worker 후보로 둔다. |
+| 6 | 사고 장면 샘플과 rule | 실제 Vision 비용 전 mock sample과 품질 rule을 먼저 만든다. |
+| 7 | RAG 사용 이유 | 법령/판례/사례 근거 추적과 재현성을 위해 쓰고, frontier model은 요약/설명에 제한한다. |
 
 ## 8. 완료 기준
 

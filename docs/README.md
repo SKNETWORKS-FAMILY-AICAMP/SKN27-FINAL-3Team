@@ -25,6 +25,7 @@
 | `api/openapi-persona-hi20260204-maker-2026-06-29.md` | `hi20260204-maker` persona 기준 confirmed-only 1차 실행 범위 |
 | `architecture/auth-session-policy-2026-06-28.md` | 로그인, 비회원, auth session, 채팅 session 분리 정책 |
 | `architecture/history-event-design-2026-06-28.md` | 히스토리 이벤트 저장, 민감도, 애프터서비스 설계 초안 |
+| `architecture/service-protocol-persona-strategy-2026-06-29.md` | 로그인/비회원/히스토리/구독/ERD/OpenAPI/Agent 실행 전략 |
 | `schema-ready-implementation-checklist-2026-06-24.md` | schema 수신 직후 mock data, 화면 상태, 검증 착수 기준 |
 | `screen-design-specification.md` | 화면설계서 |
 | `screen-design-ui-ux-flow-guide.md` | UI/UX 흐름 설명 |
