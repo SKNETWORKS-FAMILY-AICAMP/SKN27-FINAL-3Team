@@ -58,6 +58,7 @@ from chatbot.repositories import (
     persist_analysis_display_result,
     persist_analysis_job_execution,
     persist_chat_message_analysis_boundary,
+    persist_report_action,
     register_uploaded_file,
 )
 
@@ -389,6 +390,9 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
 def report_action(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     report = perform_report_action(body)
+    if _is_canonical_mock_request(request):
+        report = _canonicalize_mock_paths(report)
+        report["persistence"] = persist_report_action(body, report)
     _record_history_safely(
         event_type="report_downloaded" if body.get("action") == "download" else "report_saved",
         status=report.get("status") or "success",
