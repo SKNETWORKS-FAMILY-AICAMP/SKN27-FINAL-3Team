@@ -1,0 +1,33 @@
+﻿.env
+__pycache__/
+*.py[cod]
+
+# Model weights
+*.pt
+*.pth
+*.onnx
+
+# Vision raw data and generated artifacts
+storage/vision/raw/*
+storage/vision/processed/*
+storage/vision/outputs/*
+storage/vision/models/*
+
+!storage/vision/raw/.gitkeep
+!storage/vision/processed/.gitkeep
+!storage/vision/outputs/.gitkeep
+!storage/vision/models/.gitkeep
+
+# Generated manifests from Drive/listing/sample jobs
+storage/vision/manifests/*.csv
+storage/vision/manifests/drive_listing_*.json
+!storage/vision/manifests/.gitkeep
+
+# Classification datasets and generated manifests
+storage/vision/datasets/classification/manifests/*.csv
+storage/vision/datasets/classification/raw_videos/*
+storage/vision/datasets/classification/frames/*
+
+!storage/vision/datasets/classification/manifests/.gitkeep
+!storage/vision/datasets/classification/raw_videos/.gitkeep
+!storage/vision/datasets/classification/frames/.gitkeep
