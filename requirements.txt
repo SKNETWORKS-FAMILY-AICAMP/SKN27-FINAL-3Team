@@ -1,4 +1,7 @@
-﻿numpy
+Django==5.2.14
+
+
+numpy
 opencv-python
 pillow
 gdown

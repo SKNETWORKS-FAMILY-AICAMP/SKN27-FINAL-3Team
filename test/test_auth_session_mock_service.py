@@ -1,0 +1,60 @@
+from app.services.auth_session_mock_service import (
+    create_guest_session,
+    get_current_auth_subject,
+)
+
+
+def test_create_guest_session_separates_guest_and_chat_session_ids():
+    payload = {"guest_id": "gst_existing", "session_id": "ses_guest_chat"}
+
+    guest_session = create_guest_session(payload)
+
+    assert guest_session["auth_state"] == "guest"
+    assert guest_session["guest"]["guest_id"] == "gst_existing"
+    assert guest_session["subject"]["subject_id"] == "guest:gst_existing"
+    assert guest_session["subject"]["auth_session_id"] is None
+    assert guest_session["session_binding"]["session_id"] == "ses_guest_chat"
+    assert guest_session["merge_policy"]["auto_merge"] is False
+    assert guest_session["rate_limit"]["policy_status"] == "review_required"
+
+
+def test_auth_me_returns_authenticated_subject_for_valid_mock_bearer():
+    status, payload = get_current_auth_subject(
+        authorization_header="Bearer dev-mock-token",
+        guest_id="gst_before_login",
+        session_id="ses_after_login",
+    )
+
+    assert status == 200
+    assert payload["auth_state"] == "authenticated"
+    assert payload["subject"]["subject_id"] == "user:usr_mock"
+    assert payload["subject"]["guest_id"] == "gst_before_login"
+    assert payload["subject"]["auth_session_id"] == "auth_dev_mock"
+    assert payload["auth_session"]["verification"] == "mock_bearer_shape_only"
+
+
+def test_auth_me_returns_guest_or_anonymous_without_bearer():
+    guest_status, guest_payload = get_current_auth_subject(
+        authorization_header=None,
+        guest_id="guest_from_header",
+    )
+    anon_status, anon_payload = get_current_auth_subject(
+        authorization_header=None,
+        guest_id=None,
+    )
+
+    assert guest_status == 200
+    assert guest_payload["auth_state"] == "guest"
+    assert guest_payload["guest"]["guest_id"] == "gst_guest_from_header"
+    assert anon_status == 200
+    assert anon_payload["auth_state"] == "anonymous"
+
+
+def test_auth_me_reuses_auth_error_contract_for_invalid_bearer():
+    status, payload = get_current_auth_subject(
+        authorization_header="Bearer expired",
+    )
+
+    assert status == 401
+    assert payload["error"]["contract_version"] == "auth_error.v1"
+    assert payload["error"]["code"] == "token_expired"

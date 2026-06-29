@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">사용자 관점 화면 흐름도</title>
+  <desc id="desc">진입 화면에서 채팅, 분석 결과, 마이페이지, 히스토리, 리포트까지의 사용자 화면 흐름</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 28px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #0f172a; }
+      .label { font: 600 16px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #0f172a; }
+      .text { font: 14px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #334155; }
+      .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; rx: 14; }
+      .blue { fill: #e0f2fe; stroke: #0284c7; }
+      .pink { fill: #fce7f3; stroke: #db2777; }
+      .amber { fill: #fef3c7; stroke: #d97706; }
+      .green { fill: #dcfce7; stroke: #16a34a; }
+      .line { stroke: #475569; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1600" height="900"/>
+  <text class="title" x="60" y="60">사용자 관점 화면 흐름도</text>
+  <text class="text" x="60" y="88">기준: 화면설계서, 로그인/챗봇 진입, 마이페이지 플로우, 저장/다운로드 흐름 반영</text>
+
+  <rect class="box blue" x="70" y="160" width="260" height="110" rx="14"/>
+  <text class="label" x="100" y="205">진입 화면</text>
+  <text class="text" x="100" y="235">서비스 설명</text>
+  <text class="text" x="100" y="258">Google 로그인 / 비회원 시작</text>
+
+  <rect class="box blue" x="420" y="160" width="260" height="110" rx="14"/>
+  <text class="label" x="450" y="205">채팅 화면</text>
+  <text class="text" x="450" y="235">텍스트 질문, 파일 업로드</text>
+  <text class="text" x="450" y="258">상담 다시 호출하기</text>
+
+  <rect class="box amber" x="780" y="100" width="290" height="120" rx="14"/>
+  <text class="label" x="810" y="145">과태료/범칙금 결과</text>
+  <text class="text" x="810" y="175">OCR 결과, 이의신청 가능성</text>
+  <text class="text" x="810" y="198">리포트 저장/다운로드</text>
+
+  <rect class="box amber" x="780" y="260" width="290" height="120" rx="14"/>
+  <text class="label" x="810" y="305">과실비율 결과</text>
+  <text class="text" x="810" y="335">사고 쟁점, 유사 사례</text>
+  <text class="text" x="810" y="358">리포트 저장/다운로드</text>
+
+  <rect class="box pink" x="1170" y="100" width="300" height="120" rx="14"/>
+  <text class="label" x="1200" y="145">마이페이지</text>
+  <text class="text" x="1200" y="175">사건 상태값</text>
+  <text class="text" x="1200" y="198">기본 정렬: 상태 -> 날짜</text>
+
+  <rect class="box pink" x="1170" y="260" width="300" height="120" rx="14"/>
+  <text class="label" x="1200" y="305">과거 이력</text>
+  <text class="text" x="1200" y="335">저장된 상담/분석 재조회</text>
+  <text class="text" x="1200" y="358">상담 다시 호출하기</text>
+
+  <rect class="box green" x="1170" y="420" width="300" height="120" rx="14"/>
+  <text class="label" x="1200" y="465">리포트 목록</text>
+  <text class="text" x="1200" y="495">저장 리포트 목록</text>
+  <text class="text" x="1200" y="518">다운로드 / 상세 보기</text>
+
+  <rect class="box green" x="420" y="470" width="320" height="120" rx="14"/>
+  <text class="label" x="450" y="515">관련 사례 / 근거 화면</text>
+  <text class="text" x="450" y="545">판례, 보험사례, 법령 근거</text>
+  <text class="text" x="450" y="568">RAG 조회 결과 확인</text>
+
+  <path class="line" d="M330 215 L420 215"/>
+  <path class="line" d="M680 215 L780 160"/>
+  <path class="line" d="M680 215 L780 320"/>
+  <path class="line" d="M1070 160 L1170 160"/>
+  <path class="line" d="M1070 320 L1170 320"/>
+  <path class="line" d="M1320 220 L1320 260"/>
+  <path class="line" d="M1320 380 L1320 420"/>
+  <path class="line" d="M925 380 L925 480 L740 530"/>
+  <path class="line" d="M1320 540 L1320 620 L550 620 L550 590"/>
+
+  <text class="text" x="60" y="760">핵심 포인트: 로그인/채팅에서 출발해 결과 화면으로 가고, 저장된 결과는 마이페이지와 이력, 리포트 목록에서 다시 조회한다.</text>
+  <text class="text" x="60" y="785">개인 화면은 사건 상태값이 먼저 보이고, 정렬 기준은 상태 다음 날짜다.</text>
+</svg>

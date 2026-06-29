@@ -1,0 +1,1915 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>교통분쟁 AI</title>
+  <style>
+    :root {
+      --ink: #20242b;
+      --muted: #647282;
+      --subtle: #8a96a3;
+      --line: #d8dee7;
+      --soft: #f6f8fb;
+      --surface: #ffffff;
+      --teal: #1f7a6d;
+      --teal-dark: #14584f;
+      --blue: #285f9f;
+      --red: #b42318;
+      --amber: #a15c00;
+      --green-soft: #e7f4f1;
+      --blue-soft: #e9f0fa;
+      --amber-soft: #fff4df;
+      --red-soft: #fff0ed;
+      --shadow: 0 16px 42px rgba(24, 36, 50, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f4f6f9;
+      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      line-height: 1.5;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+      letter-spacing: 0;
+    }
+
+    p {
+      color: var(--muted);
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(12px);
+    }
+
+    .topbar-inner {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      font-weight: 900;
+      text-decoration: none;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--teal);
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .button {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 8px 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      background: #fff;
+      font-weight: 800;
+      text-decoration: none;
+    }
+
+    .button.primary {
+      border-color: var(--teal);
+      color: #fff;
+      background: var(--teal);
+    }
+
+    .button.warning {
+      border-color: #f1c15a;
+      color: #6d3f00;
+      background: var(--amber-soft);
+    }
+
+    .button.ghost {
+      color: var(--muted);
+      background: transparent;
+    }
+
+    .button:focus-visible,
+    .nav-item:focus-visible,
+    .quick-chip:focus-visible {
+      outline: 3px solid rgba(31, 122, 109, 0.22);
+      outline-offset: 2px;
+    }
+
+    .layout {
+      max-width: 1360px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 22px 24px 34px;
+      display: grid;
+      grid-template-columns: 248px minmax(0, 1fr);
+      gap: 18px;
+    }
+
+    body[data-screen="entry"] .layout {
+      max-width: none;
+      padding: 0;
+      grid-template-columns: 1fr;
+    }
+
+    body[data-screen="entry"] .sidebar {
+      display: none;
+    }
+
+    body[data-screen="entry"] .workspace {
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    .sidebar {
+      align-self: start;
+      position: sticky;
+      top: 82px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .profile-box,
+    .nav-panel,
+    .deadline-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 8px 24px rgba(24, 36, 50, 0.06);
+    }
+
+    .profile-box {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .profile-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .avatar {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-weight: 900;
+    }
+
+    .profile-name {
+      font-weight: 900;
+    }
+
+    .profile-meta {
+      color: var(--subtle);
+      font-size: 13px;
+    }
+
+    .nav-panel {
+      padding: 8px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .nav-item {
+      width: 100%;
+      min-height: 42px;
+      padding: 9px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+      font-weight: 800;
+    }
+
+    .nav-item.active {
+      border-color: #bddbd6;
+      color: var(--teal-dark);
+      background: var(--green-soft);
+    }
+
+    .badge {
+      display: inline-flex;
+      min-width: 24px;
+      min-height: 24px;
+      padding: 2px 8px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      color: var(--teal-dark);
+      background: var(--green-soft);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .deadline-panel {
+      padding: 15px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .deadline-panel strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .deadline-item {
+      display: grid;
+      gap: 4px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+
+    .deadline-item:first-of-type {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .workspace {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .screen {
+      display: none;
+      min-height: calc(100vh - 120px);
+    }
+
+    .screen.active {
+      display: block;
+    }
+
+    .entry-screen {
+      display: none;
+    }
+
+    .entry-screen.active {
+      display: grid;
+      grid-template-columns: minmax(0, 0.94fr) minmax(360px, 1.06fr);
+    }
+
+    .entry-copy {
+      padding: 48px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 22px;
+      border-right: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+
+    .eyebrow {
+      width: max-content;
+      display: inline-flex;
+      min-height: 28px;
+      padding: 4px 10px;
+      align-items: center;
+      border-radius: 999px;
+      color: var(--teal-dark);
+      background: var(--green-soft);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .entry-copy h1 {
+      max-width: 640px;
+      font-size: 40px;
+      line-height: 1.15;
+    }
+
+    .entry-copy .lead {
+      max-width: 620px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .entry-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .trust-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      max-width: 650px;
+    }
+
+    .trust-item {
+      min-height: 96px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .trust-item strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .entry-preview {
+      padding: 28px;
+      display: grid;
+      align-content: center;
+      background: #eef4f7;
+    }
+
+    .phone-frame {
+      width: min(100%, 520px);
+      margin: 0 auto;
+      border: 1px solid #c9d4df;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 22px 54px rgba(24, 36, 50, 0.16);
+      overflow: hidden;
+    }
+
+    .phone-head {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .phone-body {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .preview-bubble {
+      max-width: 86%;
+      padding: 12px 14px;
+      border-radius: 8px;
+      color: var(--ink);
+      background: var(--soft);
+    }
+
+    .preview-bubble.answer {
+      margin-left: auto;
+      color: #fff;
+      background: var(--teal);
+    }
+
+    .preview-result {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+      border: 1px solid #bddbd6;
+      border-radius: 8px;
+      background: var(--green-soft);
+    }
+
+    .screen-header {
+      padding: 22px 24px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .screen-title {
+      display: grid;
+      gap: 6px;
+    }
+
+    .screen-title h2 {
+      font-size: 24px;
+      line-height: 1.25;
+    }
+
+    .screen-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .chat-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      min-height: calc(100vh - 186px);
+      background: #fff;
+    }
+
+    .conversation-list,
+    .case-panel {
+      padding: 18px;
+      background: #fbfcfe;
+    }
+
+    .conversation-list {
+      border-right: 1px solid var(--line);
+    }
+
+    .case-panel {
+      border-left: 1px solid var(--line);
+    }
+
+    .section-label {
+      margin-bottom: 10px;
+      color: var(--subtle);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .conversation-card,
+    .upload-card,
+    .evidence-card,
+    .history-row {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .conversation-card {
+      padding: 12px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .conversation-card + .conversation-card {
+      margin-top: 8px;
+    }
+
+    .conversation-card.active {
+      border-color: #bddbd6;
+      background: var(--green-soft);
+    }
+
+    .conversation-card strong {
+      font-size: 14px;
+    }
+
+    .chat-main {
+      min-width: 0;
+      width: min(100%, 1080px);
+      margin: 0 auto;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      background: #fff;
+    }
+
+    .messages {
+      padding: 24px 28px;
+      display: grid;
+      align-content: start;
+      gap: 16px;
+      overflow: auto;
+    }
+
+    .message {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .message.user {
+      flex-direction: row-reverse;
+    }
+
+    .message-avatar {
+      flex: 0 0 34px;
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--blue);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .message.user .message-avatar {
+      background: var(--teal);
+    }
+
+    .bubble {
+      width: min(100%, 760px);
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .bubble.wide {
+      width: min(100%, 920px);
+    }
+
+    .message.user .bubble {
+      width: min(100%, 720px);
+      color: #fff;
+      border-color: var(--teal);
+      background: var(--teal);
+    }
+
+    .message.user .bubble p {
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .bubble strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+
+    .policy-grid,
+    .inline-panel-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .policy-card,
+    .attachment-inline,
+    .agent-plan,
+    .analysis-status-card,
+    .reporting-summary {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .policy-card {
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .policy-card.is-disabled {
+      background: #f8fafc;
+      color: var(--muted);
+    }
+
+    .policy-card span,
+    .plan-status,
+    .upload-meta,
+    .reporting-summary span {
+      color: var(--subtle);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .attachment-inline,
+    .agent-plan,
+    .analysis-status-card,
+    .reporting-summary {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .attachment-dropzone {
+      min-height: 112px;
+      border: 1px dashed #b7c2cf;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      background: #fff;
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .upload-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .upload-meta span {
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: #fff;
+    }
+
+    .plan-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .plan-step {
+      min-height: 46px;
+      padding: 9px 10px;
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .plan-index {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--blue);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .plan-step p,
+    .policy-card p,
+    .reporting-summary p {
+      margin: 0;
+    }
+
+    .result-cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .result-card {
+      min-height: 134px;
+      padding: 13px;
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .result-card strong {
+      margin: 0;
+    }
+
+    .quick-row {
+      padding: 0 22px 14px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .quick-chip {
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--ink);
+      background: #fff;
+      font-weight: 800;
+    }
+
+    .chat-input {
+      padding: 14px 22px 20px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      background: #fff;
+    }
+
+    .input-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .attachment-strip {
+      min-height: 42px;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      border: 1px dashed #b7c2cf;
+      border-radius: 8px;
+      color: var(--muted);
+      background: #fbfcfe;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .upload-chip {
+      padding: 6px 9px;
+      border-radius: 999px;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+
+    .chat-input textarea {
+      min-height: 54px;
+      max-height: 130px;
+      padding: 14px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      background: #fff;
+    }
+
+    .chat-input .button {
+      align-self: end;
+      min-height: 54px;
+    }
+
+    .upload-card,
+    .evidence-card {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .file-preview {
+      aspect-ratio: 4 / 3;
+      border: 1px dashed #b7c2cf;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fff, #eef3f7);
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .status-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 14px;
+    }
+
+    .status-dot {
+      display: inline-flex;
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+
+    .status-dot.wait {
+      background: var(--amber);
+    }
+
+    .dashboard {
+      padding: 22px;
+      display: grid;
+      gap: 18px;
+      background: #fbfcfe;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric-card,
+    .report-panel,
+    .table-panel,
+    .timeline-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .metric-card {
+      min-height: 112px;
+      padding: 15px;
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .metric-card span {
+      color: var(--subtle);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .metric-card strong {
+      font-size: 26px;
+      line-height: 1.15;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.18fr) minmax(300px, 0.82fr);
+      gap: 14px;
+    }
+
+    .report-panel,
+    .table-panel,
+    .timeline-panel {
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-body {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .notice-preview {
+      min-height: 300px;
+      padding: 16px;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f9fafc;
+    }
+
+    .notice-line {
+      height: 12px;
+      border-radius: 999px;
+      background: #d5dde7;
+    }
+
+    .notice-line.short {
+      width: 58%;
+    }
+
+    .notice-line.mid {
+      width: 76%;
+    }
+
+    .notice-amount {
+      margin-top: 12px;
+      padding: 14px;
+      border-radius: 8px;
+      color: var(--red);
+      background: var(--red-soft);
+      font-size: 24px;
+      font-weight: 900;
+    }
+
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .info-block {
+      min-height: 112px;
+      padding: 14px;
+      display: grid;
+      gap: 7px;
+      align-content: start;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .info-block strong {
+      font-size: 15px;
+    }
+
+    .info-block.emphasis {
+      border-color: #bddbd6;
+      background: var(--green-soft);
+    }
+
+    .info-block.warning {
+      border-color: #f1c15a;
+      background: var(--amber-soft);
+    }
+
+    .info-block.danger {
+      border-color: #f1b6ae;
+      background: var(--red-soft);
+    }
+
+    .draft-box {
+      min-height: 220px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--muted);
+      white-space: pre-line;
+    }
+
+    .fault-visual {
+      min-height: 310px;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #eef3f7;
+    }
+
+    .road-scene {
+      position: relative;
+      min-height: 250px;
+      background:
+        linear-gradient(90deg, transparent 48%, rgba(255,255,255,0.75) 48% 52%, transparent 52%),
+        linear-gradient(180deg, #dbe6ef 0 43%, #9aa8b5 43% 57%, #dbe6ef 57% 100%);
+    }
+
+    .car {
+      position: absolute;
+      width: 86px;
+      height: 42px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 900;
+    }
+
+    .car.a {
+      left: 30%;
+      top: 42%;
+      background: var(--blue);
+      transform: rotate(0deg);
+    }
+
+    .car.b {
+      right: 28%;
+      top: 34%;
+      background: var(--teal);
+      transform: rotate(90deg);
+    }
+
+    .impact {
+      position: absolute;
+      left: 50%;
+      top: 45%;
+      width: 62px;
+      height: 62px;
+      transform: translate(-50%, -50%);
+      border: 3px solid var(--amber);
+      border-radius: 999px;
+      background: rgba(255, 244, 223, 0.8);
+    }
+
+    .scene-caption {
+      padding: 12px 14px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+    }
+
+    .timeline-step {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      gap: 10px;
+    }
+
+    .step-num {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border-radius: 999px;
+      color: #fff;
+      background: var(--teal);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .history-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .history-table th,
+    .history-table td {
+      padding: 13px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+      font-size: 14px;
+    }
+
+    .history-table th {
+      color: var(--subtle);
+      background: #fbfcfe;
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .history-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      min-height: 26px;
+      padding: 4px 8px;
+      align-items: center;
+      border-radius: 999px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .tag.green {
+      color: var(--teal-dark);
+      background: var(--green-soft);
+    }
+
+    .tag.amber {
+      color: #6d3f00;
+      background: var(--amber-soft);
+    }
+
+    .mobile-only {
+      display: none;
+    }
+
+    @media (max-width: 1180px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+      }
+
+      .nav-panel {
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .chat-shell {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .case-panel {
+        grid-column: 1 / -1;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .upload-card,
+      .evidence-card {
+        margin-bottom: 0;
+      }
+
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 860px) {
+      .topbar-inner,
+      .layout {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .topbar-inner {
+        align-items: flex-start;
+      }
+
+      .top-actions {
+        justify-content: flex-end;
+      }
+
+      .top-actions .button.ghost {
+        display: none;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .mobile-only {
+        display: inline-flex;
+      }
+
+      .entry-screen.active {
+        grid-template-columns: 1fr;
+      }
+
+      .entry-copy {
+        padding: 30px 20px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .entry-copy h1 {
+        font-size: 30px;
+      }
+
+      .entry-preview {
+        padding: 20px;
+      }
+
+      .trust-row,
+      .result-cards,
+      .policy-grid,
+      .inline-panel-grid,
+      .report-grid,
+      .content-grid,
+      .case-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .chat-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .conversation-list {
+        display: none;
+      }
+
+      .screen-header {
+        flex-direction: column;
+      }
+
+      .screen-actions {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .history-table {
+        min-width: 720px;
+      }
+
+      .table-scroll {
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <button class="brand" type="button" data-screen="entry" aria-label="교통분쟁 AI 처음 화면">
+          <span class="brand-mark">AI</span>
+          <span>교통분쟁 AI</span>
+        </button>
+        <nav class="top-actions" aria-label="주요 메뉴">
+          <button class="button ghost" type="button" data-screen="chat">상담</button>
+          <button class="button ghost" type="button" data-screen="fine">과태료 분석</button>
+          <button class="button ghost" type="button" data-screen="fault">과실비율 분석</button>
+          <button class="button" type="button" data-screen="mypage">내 사건</button>
+          <button class="button primary" type="button" data-screen="chat">상담 시작</button>
+        </nav>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar" aria-label="사용자 작업 영역">
+        <section class="profile-box">
+          <div class="profile-row">
+            <span class="avatar">김</span>
+            <div>
+              <div class="profile-name">김민준</div>
+              <div class="profile-meta">Google 계정 연결됨</div>
+            </div>
+          </div>
+          <button class="button primary" type="button" data-screen="chat">새 상담 시작</button>
+        </section>
+
+        <nav class="nav-panel" aria-label="화면 이동">
+          <button class="nav-item" type="button" data-screen="entry">로그인</button>
+          <button class="nav-item" type="button" data-screen="chat">상담<span class="badge">2</span></button>
+          <button class="nav-item" type="button" data-screen="fine">과태료</button>
+          <button class="nav-item" type="button" data-screen="fault">과실비율</button>
+          <button class="nav-item" type="button" data-screen="mypage">내 사건</button>
+        </nav>
+
+        <section class="deadline-panel">
+          <strong>다가오는 일정</strong>
+          <div class="deadline-item">
+            <span class="tag amber">D-3</span>
+            <p>어린이보호구역 과태료 의견제출 마감</p>
+          </div>
+          <div class="deadline-item">
+            <span class="tag green">저장됨</span>
+            <p>교차로 접촉사고 과실비율 리포트</p>
+          </div>
+        </section>
+      </aside>
+
+      <main class="workspace" aria-live="polite">
+        <section class="screen entry-screen active" id="entry-screen">
+          <div class="entry-copy">
+            <span class="eyebrow">로그인 후 바로 상담 시작</span>
+            <h1>사고와 과태료 자료를 올리면 AI가 필요한 다음 행동을 정리합니다.</h1>
+            <p class="lead">고지서, 사고 사진, 블랙박스 설명을 입력하면 과태료 이의제기 가능성, 과실비율 쟁점, 관련 근거와 작성 초안을 한 화면에서 확인할 수 있습니다.</p>
+            <div class="entry-actions">
+              <button class="button primary" type="button" data-screen="chat">Google로 계속하기</button>
+              <button class="button" type="button" data-screen="chat">비회원 상담 시작</button>
+            </div>
+            <div class="trust-row">
+              <div class="trust-item">
+                <strong>자료 기반 분석</strong>
+                <p>사진, 고지서, 상황 설명을 함께 확인합니다.</p>
+              </div>
+              <div class="trust-item">
+                <strong>근거 확인</strong>
+                <p>관련 법령, 판례, 보험 기준을 결과와 함께 보여줍니다.</p>
+              </div>
+              <div class="trust-item">
+                <strong>문서 초안</strong>
+                <p>의견제출서와 이의신청서 초안을 이어서 작성합니다.</p>
+              </div>
+            </div>
+          </div>
+          <div class="entry-preview" aria-label="상담 미리보기">
+            <div class="phone-frame">
+              <div class="phone-head">
+                <strong>AI 교통 상담</strong>
+                <span class="tag green">온라인</span>
+              </div>
+              <div class="phone-body">
+                <div class="preview-bubble">과태료 고지서와 차량 정차 위치 사진을 올려주세요.</div>
+                <div class="preview-bubble answer">어린이보호구역 주정차 위반 고지서를 받았어요.</div>
+                <div class="preview-result">
+                  <strong>분석 준비 완료</strong>
+                  <p>고지서 OCR, 위반 장소, 의견제출 기한을 먼저 확인합니다.</p>
+                  <button class="button primary" type="button" data-screen="chat">상담 화면 열기</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" id="chat-screen">
+          <div class="screen-header">
+            <div class="screen-title">
+              <h2>AI 교통 상담</h2>
+              <p>회원은 명령문과 자료를 함께 제출하고, 비회원은 단순 교통 질문만 상담합니다.</p>
+            </div>
+            <div class="screen-actions">
+              <button class="button" type="button" data-screen="mypage">내 사건 보기</button>
+              <button class="button primary" type="button">회원 자료 추가</button>
+            </div>
+          </div>
+
+          <div class="chat-shell">
+            <div class="chat-main">
+              <div class="messages">
+                <article class="message">
+                  <span class="message-avatar">AI</span>
+                  <div class="bubble wide">
+                    <strong>어떤 교통 문제를 확인할까요?</strong>
+                    <p>먼저 원하는 결과를 문장으로 적어 주세요. 자료가 있는 회원은 고지서, 현장 사진, 블랙박스 영상을 명령문과 함께 제출할 수 있습니다.</p>
+                    <div class="policy-grid">
+                      <div class="policy-card">
+                        <span>회원</span>
+                        <strong>명령문 + 자료 분석</strong>
+                        <p>이미지만 보내는 입력은 받지 않고, 원하는 분석 목적을 함께 확인합니다.</p>
+                      </div>
+                      <div class="policy-card is-disabled">
+                        <span>비회원</span>
+                        <strong>단순 질문만 가능</strong>
+                        <p>사고 분석, 고지서 OCR, 이미지·영상 첨부는 로그인 후 진행합니다.</p>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+                <article class="message user">
+                  <span class="message-avatar">나</span>
+                  <div class="bubble">
+                    <strong>어린이보호구역 주정차 과태료가 나왔습니다.</strong>
+                    <p>고지서 사진과 현장 사진을 함께 올렸고, 표지판이 가려져 있었는지 확인해서 이의제기 가능성을 알고 싶습니다.</p>
+                  </div>
+                </article>
+                <article class="message">
+                  <span class="message-avatar">AI</span>
+                  <div class="bubble wide">
+                    <strong>바로 분석하기 전에 문맥을 먼저 확인하겠습니다.</strong>
+                    <p>첨부 자료가 고지서인지, 사고 현장 사진인지 구분하고 부족한 상황 설명이 있으면 먼저 질문합니다.</p>
+                    <div class="inline-panel-grid">
+                      <div class="attachment-inline">
+                        <strong>첨부 자료</strong>
+                        <div class="attachment-dropzone">고지서 이미지<br>IMG_2481.jpg</div>
+                        <div class="upload-meta">
+                          <span>회원 첨부</span>
+                          <span>명령문 확인됨</span>
+                          <span>고지서 후보</span>
+                          <span>현장 사진 후보</span>
+                        </div>
+                      </div>
+                      <div class="attachment-inline">
+                        <strong>추가 확인 질문</strong>
+                        <p>정차 위치, 정차 시간, 표지판이 가려진 원인, 현장 사진 촬영 시점을 알려 주세요.</p>
+                        <button class="button" type="button">답변 추가</button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+                <article class="message">
+                  <span class="message-avatar">AI</span>
+                  <div class="bubble wide">
+                    <strong>Supervisor가 분석 호출 플랜을 만들었습니다.</strong>
+                    <p>아래 순서로 실행하고, 각 Agent가 사용할 수 없다고 판단한 결과는 Supervisor로 되돌려 추가 질문을 진행합니다.</p>
+                    <div class="agent-plan">
+                      <div class="plan-list">
+                        <div class="plan-step">
+                          <span class="plan-index">1</span>
+                          <div>
+                            <strong>문맥/입력 검증</strong>
+                            <p>명령문과 첨부 자료가 함께 있는지 확인하고 분석 가능 여부를 판단합니다.</p>
+                          </div>
+                          <span class="plan-status">완료</span>
+                        </div>
+                        <div class="plan-step">
+                          <span class="plan-index">2</span>
+                          <div>
+                            <strong>고지서 OCR</strong>
+                            <p>고지서 여부, 처분일, 위반 장소, 의견제출 기한을 확인합니다.</p>
+                          </div>
+                          <span class="plan-status">완료</span>
+                        </div>
+                        <div class="plan-step">
+                          <span class="plan-index">3</span>
+                          <div>
+                            <strong>법령 근거</strong>
+                            <p>OCR 결과의 위반 유형과 법령 후보를 연결합니다.</p>
+                          </div>
+                          <span class="plan-status">확인</span>
+                        </div>
+                        <div class="plan-step">
+                          <span class="plan-index">4</span>
+                          <div>
+                            <strong>현장 사진 검증</strong>
+                            <p>사진이 사고·현장 증거로 사용 가능한지 Agent가 검증합니다.</p>
+                          </div>
+                          <span class="plan-status">대기</span>
+                        </div>
+                        <div class="plan-step">
+                          <span class="plan-index">5</span>
+                          <div>
+                            <strong>초안 생성</strong>
+                            <p>분석 가능한 결과만 모아 이의제기 초안과 리포트 요약을 만듭니다.</p>
+                          </div>
+                          <span class="plan-status">준비</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="analysis-status-card">
+                      <strong>분석 상태</strong>
+                      <div class="status-list">
+                        <div class="status-row"><span><span class="status-dot"></span> 고지서 OCR</span><strong>완료</strong></div>
+                        <div class="status-row"><span><span class="status-dot"></span> 법령 근거</span><strong>확인</strong></div>
+                        <div class="status-row"><span><span class="status-dot wait"></span> 현장 사진</span><strong>대기</strong></div>
+                        <div class="status-row"><span><span class="status-dot wait"></span> 초안 생성</span><strong>준비</strong></div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+                <article class="message">
+                  <span class="message-avatar">AI</span>
+                  <div class="bubble wide">
+                    <strong>리포팅 요약이 준비되었습니다.</strong>
+                    <div class="reporting-summary">
+                      <span>요약</span>
+                      <p>고지서 OCR 결과와 법령 근거는 확인되었고, 표지판 식별 가능성은 현장 사진 검증 후 보완 판단이 필요합니다.</p>
+                      <div class="result-cards">
+                        <div class="result-card">
+                          <strong>과태료 고지서 분석</strong>
+                          <p>처분 내용, 의견제출 기한, 이의제기 쟁점을 정리합니다.</p>
+                          <button class="button primary" type="button" data-screen="fine">리포팅 결과 보기</button>
+                        </div>
+                        <div class="result-card">
+                          <strong>추가 질문 계속하기</strong>
+                          <p>현장 사진 검증 결과가 부족하면 Supervisor가 다시 질문합니다.</p>
+                          <button class="button" type="button">채팅에서 보완</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <div class="quick-row" aria-label="빠른 질문">
+                <button class="quick-chip" type="button" data-screen="fine">고지서 분석하기</button>
+                <button class="quick-chip" type="button" data-screen="fault">사고 분석 준비</button>
+                <button class="quick-chip" type="button">의견제출서 초안 만들기</button>
+                <button class="quick-chip" type="button">단순 법령 질문</button>
+              </div>
+
+              <div class="chat-input">
+                <div class="input-stack">
+                  <div class="attachment-strip">
+                    <span class="upload-chip">IMG_2481.jpg</span>
+                    <span class="upload-chip">scene_photo.jpg</span>
+                    <span>회원만 첨부 가능 · 이미지만 전송 불가</span>
+                  </div>
+                  <textarea aria-label="상담 메시지 입력">고지서 사진과 현장 사진을 첨부했습니다. 이의제기 가능성이 있는지 알려주세요.</textarea>
+                </div>
+                <button class="button primary" type="button" data-screen="fine">전송</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" id="fine-screen">
+          <div class="screen-header">
+            <div class="screen-title">
+              <h2>과태료·범칙금 분석 결과</h2>
+              <p>고지서에서 읽은 처분 정보와 이의제기 검토 결과를 확인합니다.</p>
+            </div>
+            <div class="screen-actions">
+              <button class="button" type="button" data-screen="chat">상담으로 돌아가기</button>
+              <button class="button primary" type="button" data-screen="mypage">리포트 저장</button>
+            </div>
+          </div>
+
+          <div class="dashboard">
+            <div class="summary-grid">
+              <article class="metric-card">
+                <span>납부 금액</span>
+                <strong>120,000원</strong>
+                <p>어린이보호구역 주정차 위반</p>
+              </article>
+              <article class="metric-card">
+                <span>의견제출 기한</span>
+                <strong>D-3</strong>
+                <p>2026.06.25 18:00까지</p>
+              </article>
+              <article class="metric-card">
+                <span>이의제기 가능성</span>
+                <strong>검토 필요</strong>
+                <p>표지판 식별 자료가 핵심입니다.</p>
+              </article>
+              <article class="metric-card">
+                <span>필요 자료</span>
+                <strong>2건</strong>
+                <p>현장 사진, 정차 사유 메모</p>
+              </article>
+            </div>
+
+            <div class="content-grid">
+              <article class="report-panel">
+                <div class="panel-head">
+                  <strong>고지서 OCR 결과</strong>
+                  <span class="tag green">확인 완료</span>
+                </div>
+                <div class="panel-body">
+                  <div class="notice-preview" aria-label="고지서 미리보기">
+                    <div class="notice-line mid"></div>
+                    <div class="notice-line"></div>
+                    <div class="notice-line short"></div>
+                    <div class="notice-amount">과태료 120,000원</div>
+                    <div class="notice-line"></div>
+                    <div class="notice-line mid"></div>
+                  </div>
+                  <div class="report-grid">
+                    <div class="info-block">
+                      <strong>위반 장소</strong>
+                      <p>서울시 ○○구 어린이보호구역 인근</p>
+                    </div>
+                    <div class="info-block">
+                      <strong>처분 유형</strong>
+                      <p>주정차 위반 과태료</p>
+                    </div>
+                    <div class="info-block emphasis">
+                      <strong>확인된 쟁점</strong>
+                      <p>표지판 가림, 정차 시간, 긴급 정차 사유</p>
+                    </div>
+                    <div class="info-block warning">
+                      <strong>추가 요청</strong>
+                      <p>표지판과 차량 위치가 함께 보이는 사진</p>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="timeline-panel">
+                <div class="panel-head">
+                  <strong>다음 행동</strong>
+                  <span class="tag amber">기한 임박</span>
+                </div>
+                <div class="panel-body">
+                  <div class="timeline">
+                    <div class="timeline-step">
+                      <span class="step-num">1</span>
+                      <div>
+                        <strong>현장 자료 보강</strong>
+                        <p>표지판, 노면 표시, 차량 정차 위치가 보이는 사진을 추가합니다.</p>
+                      </div>
+                    </div>
+                    <div class="timeline-step">
+                      <span class="step-num">2</span>
+                      <div>
+                        <strong>의견제출서 초안 확인</strong>
+                        <p>AI가 작성한 초안을 사실관계 중심으로 수정합니다.</p>
+                      </div>
+                    </div>
+                    <div class="timeline-step">
+                      <span class="step-num">3</span>
+                      <div>
+                        <strong>제출 전 최종 점검</strong>
+                        <p>처분기관, 제출 기한, 첨부 파일을 다시 확인합니다.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="draft-box">의견제출서 초안
+
+본인은 위반 장소의 표지 식별이 어려운 상황에서 단시간 정차하였으며, 당시 현장 사진과 정차 사유를 함께 제출합니다. 처분 전 사실관계 재확인을 요청드립니다.</div>
+                  <button class="button primary" type="button">초안 내려받기</button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" id="fault-screen">
+          <div class="screen-header">
+            <div class="screen-title">
+              <h2>사고 과실비율 분석 결과</h2>
+              <p>사고 개요, 제출 자료, 쟁점과 후속 조치를 한 화면에서 확인합니다.</p>
+            </div>
+            <div class="screen-actions">
+              <button class="button" type="button" data-screen="chat">상담으로 돌아가기</button>
+              <button class="button primary" type="button" data-screen="mypage">리포트 저장</button>
+            </div>
+          </div>
+
+          <div class="dashboard">
+            <div class="summary-grid">
+              <article class="metric-card">
+                <span>사고 유형</span>
+                <strong>교차로 접촉</strong>
+                <p>신호 없는 교차로 진입</p>
+              </article>
+              <article class="metric-card">
+                <span>주요 쟁점</span>
+                <strong>3건</strong>
+                <p>진입 순서, 속도, 시야 확보</p>
+              </article>
+              <article class="metric-card">
+                <span>제출 자료</span>
+                <strong>4개</strong>
+                <p>사진 2, 영상 1, 진술 1</p>
+              </article>
+              <article class="metric-card">
+                <span>검토 상태</span>
+                <strong>완료</strong>
+                <p>리포트 저장 가능</p>
+              </article>
+            </div>
+
+            <div class="content-grid">
+              <article class="report-panel">
+                <div class="panel-head">
+                  <strong>사고 장면 정리</strong>
+                  <span class="tag green">자료 반영</span>
+                </div>
+                <div class="panel-body">
+                  <div class="fault-visual" aria-label="사고 장면 도식">
+                    <div class="road-scene">
+                      <span class="car a">A차</span>
+                      <span class="car b">B차</span>
+                      <span class="impact" aria-hidden="true"></span>
+                    </div>
+                    <div class="scene-caption">
+                      <strong>A차 직진, B차 우측 진입</strong>
+                      <p>충돌 위치와 진입 방향이 과실 판단의 핵심 자료입니다.</p>
+                    </div>
+                  </div>
+                  <div class="report-grid">
+                    <div class="info-block emphasis">
+                      <strong>AI 분석 요약</strong>
+                      <p>A차는 선진입 주장 자료가 일부 있고, B차는 일시정지 여부 확인이 필요합니다.</p>
+                    </div>
+                    <div class="info-block warning">
+                      <strong>다툼 예상 지점</strong>
+                      <p>교차로 진입 시점과 블랙박스 사각 구간입니다.</p>
+                    </div>
+                    <div class="info-block">
+                      <strong>관련 기준</strong>
+                      <p>교차로 사고, 우선 진입, 서행 의무 기준을 비교합니다.</p>
+                    </div>
+                    <div class="info-block">
+                      <strong>추가 자료</strong>
+                      <p>상대 차량 진입 전후 5초 영상 원본이 있으면 정확도가 높아집니다.</p>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="timeline-panel">
+                <div class="panel-head">
+                  <strong>대응 흐름</strong>
+                  <span class="tag">리포트</span>
+                </div>
+                <div class="panel-body">
+                  <div class="timeline">
+                    <div class="timeline-step">
+                      <span class="step-num">1</span>
+                      <div>
+                        <strong>사고 사실관계 고정</strong>
+                        <p>시간, 장소, 방향, 충돌 위치를 리포트에 고정합니다.</p>
+                      </div>
+                    </div>
+                    <div class="timeline-step">
+                      <span class="step-num">2</span>
+                      <div>
+                        <strong>보험사 주장 비교</strong>
+                        <p>보험사 안내 과실비율과 AI 쟁점 분석을 비교합니다.</p>
+                      </div>
+                    </div>
+                    <div class="timeline-step">
+                      <span class="step-num">3</span>
+                      <div>
+                        <strong>추가 증거 요청</strong>
+                        <p>블랙박스 원본, 사고 직후 사진, 현장 도로 표시를 추가합니다.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="draft-box">보험사 문의 초안
+
+본 사고는 신호 없는 교차로에서 발생했으며, 선진입 여부와 상대 차량의 일시정지 여부가 핵심 쟁점입니다. 첨부한 블랙박스와 현장 사진을 기준으로 과실비율 산정 근거를 회신해 주시기 바랍니다.</div>
+                  <button class="button primary" type="button">문의 초안 내려받기</button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" id="mypage-screen">
+          <div class="screen-header">
+            <div class="screen-title">
+              <h2>내 사건</h2>
+              <p>진행 중인 상담, 저장한 리포트, 기한이 임박한 사건을 관리합니다.</p>
+            </div>
+            <div class="screen-actions">
+              <button class="button" type="button" data-screen="chat">새 상담</button>
+              <button class="button primary" type="button">전체 리포트 내려받기</button>
+            </div>
+          </div>
+
+          <div class="dashboard">
+            <div class="summary-grid">
+              <article class="metric-card">
+                <span>등록 사건</span>
+                <strong>7건</strong>
+                <p>최근 30일 기준</p>
+              </article>
+              <article class="metric-card">
+                <span>기한 임박</span>
+                <strong>1건</strong>
+                <p>의견제출 D-3</p>
+              </article>
+              <article class="metric-card">
+                <span>저장 리포트</span>
+                <strong>5건</strong>
+                <p>PDF 생성 가능</p>
+              </article>
+              <article class="metric-card">
+                <span>추가 자료 요청</span>
+                <strong>2건</strong>
+                <p>사진 또는 영상 필요</p>
+              </article>
+            </div>
+
+            <div class="content-grid">
+              <article class="table-panel">
+                <div class="panel-head">
+                  <strong>최근 분석 이력</strong>
+                  <button class="button" type="button">필터</button>
+                </div>
+                <div class="table-scroll">
+                  <table class="history-table">
+                    <thead>
+                      <tr>
+                        <th>유형</th>
+                        <th>사건명</th>
+                        <th>상태</th>
+                        <th>최근 작업</th>
+                        <th>이동</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><span class="tag amber">과태료</span></td>
+                        <td>어린이보호구역 주정차 위반</td>
+                        <td>의견제출 기한 임박</td>
+                        <td>2026.06.22</td>
+                        <td><button class="button" type="button" data-screen="fine">열기</button></td>
+                      </tr>
+                      <tr>
+                        <td><span class="tag green">과실비율</span></td>
+                        <td>신호 없는 교차로 접촉사고</td>
+                        <td>리포트 저장</td>
+                        <td>2026.06.21</td>
+                        <td><button class="button" type="button" data-screen="fault">열기</button></td>
+                      </tr>
+                      <tr>
+                        <td><span class="tag">상담</span></td>
+                        <td>차선 변경 사고 보험사 주장 검토</td>
+                        <td>추가 자료 요청</td>
+                        <td>2026.06.19</td>
+                        <td><button class="button" type="button" data-screen="chat">열기</button></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+
+              <article class="timeline-panel">
+                <div class="panel-head">
+                  <strong>오늘 처리할 일</strong>
+                  <span class="tag amber">1건 우선</span>
+                </div>
+                <div class="panel-body">
+                  <div class="timeline">
+                    <div class="timeline-step">
+                      <span class="step-num">1</span>
+                      <div>
+                        <strong>고지서 현장 사진 추가</strong>
+                        <p>표지판과 차량 위치가 같이 보이는 사진이 필요합니다.</p>
+                      </div>
+                    </div>
+                    <div class="timeline-step">
+                      <span class="step-num">2</span>
+                      <div>
+                        <strong>의견제출서 초안 검토</strong>
+                        <p>사실관계와 제출 기관 정보를 확인합니다.</p>
+                      </div>
+                    </div>
+                    <div class="timeline-step">
+                      <span class="step-num">3</span>
+                      <div>
+                        <strong>PDF 저장</strong>
+                        <p>최종 리포트와 초안을 함께 보관합니다.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <button class="button primary" type="button" data-screen="fine">가장 급한 사건 열기</button>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    const screenMap = {
+      entry: document.querySelector("#entry-screen"),
+      chat: document.querySelector("#chat-screen"),
+      fine: document.querySelector("#fine-screen"),
+      fault: document.querySelector("#fault-screen"),
+      mypage: document.querySelector("#mypage-screen"),
+    };
+
+    const navButtons = Array.from(document.querySelectorAll("[data-screen]"));
+
+    function normalizeScreenName(value) {
+      if (!value) {
+        return "entry";
+      }
+
+      const normalized = value.replace("#", "").replace("-screen", "");
+      return Object.prototype.hasOwnProperty.call(screenMap, normalized) ? normalized : "entry";
+    }
+
+    function activateScreen(name, updateHash = true) {
+      const targetName = normalizeScreenName(name);
+
+      Object.entries(screenMap).forEach(([screenName, element]) => {
+        element.classList.toggle("active", screenName === targetName);
+      });
+
+      document.body.dataset.screen = targetName;
+
+      navButtons.forEach((button) => {
+        const isActive = button.dataset.screen === targetName;
+        button.classList.toggle("active", isActive);
+        if (button.classList.contains("nav-item")) {
+          button.setAttribute("aria-current", isActive ? "page" : "false");
+        }
+      });
+
+      if (updateHash) {
+        history.replaceState(null, "", `#${targetName}`);
+      }
+
+      document.querySelector(".workspace").scrollIntoView({ block: "start" });
+    }
+
+    navButtons.forEach((button) => {
+      button.addEventListener("click", () => activateScreen(button.dataset.screen));
+    });
+
+    window.addEventListener("hashchange", () => {
+      activateScreen(window.location.hash, false);
+    });
+
+    activateScreen(window.location.hash || "entry", false);
+  </script>
+</body>
+</html>

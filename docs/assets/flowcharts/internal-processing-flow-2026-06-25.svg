@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="980" viewBox="0 0 1700 980" role="img" aria-labelledby="title desc">
+  <title id="title">내부 처리 흐름도</title>
+  <desc id="desc">메시지 입력부터 Supervisor, RAG, Agent, 최종 검증 노드까지의 내부 처리 흐름</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 28px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #0f172a; }
+      .label { font: 600 16px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #0f172a; }
+      .text { font: 14px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #334155; }
+      .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; rx: 14; }
+      .blue { fill: #dbeafe; stroke: #2563eb; }
+      .green { fill: #dcfce7; stroke: #16a34a; }
+      .amber { fill: #fef3c7; stroke: #d97706; }
+      .violet { fill: #ede9fe; stroke: #7c3aed; }
+      .red { fill: #fee2e2; stroke: #dc2626; }
+      .line { stroke: #475569; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #64748b; stroke-width: 2.2; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1700" height="980"/>
+  <text class="title" x="60" y="60">내부 처리 흐름도</text>
+  <text class="text" x="60" y="88">기준: Supervisor 라우팅, RAG 호출, 재질문, 최종 검증 노드, 상태값/코드테이블 조회 요구 반영</text>
+
+  <rect class="box blue" x="60" y="150" width="260" height="110" rx="14"/>
+  <text class="label" x="90" y="195">1. 메시지 입력</text>
+  <text class="text" x="90" y="225">텍스트 + 첨부 파일</text>
+  <text class="text" x="90" y="248">session / message 생성</text>
+
+  <rect class="box blue" x="410" y="150" width="280" height="110" rx="14"/>
+  <text class="label" x="440" y="195">2. 입력 패키지 생성</text>
+  <text class="text" x="440" y="225">routing_intent 후보</text>
+  <text class="text" x="440" y="248">input_modalities 정리</text>
+
+  <rect class="box green" x="780" y="130" width="320" height="150" rx="14"/>
+  <text class="label" x="810" y="175">3. Supervisor 분기</text>
+  <text class="text" x="810" y="205">LangGraph 라우팅</text>
+  <text class="text" x="810" y="228">fine / fault / law / vision / objection</text>
+  <text class="text" x="810" y="251">부정확한 질문이면 역질문 준비</text>
+
+  <rect class="box violet" x="1190" y="150" width="360" height="110" rx="14"/>
+  <text class="label" x="1220" y="195">4. 코드테이블 / 상태 조회</text>
+  <text class="text" x="1220" y="225">사건 상태값, 정렬 기준,</text>
+  <text class="text" x="1220" y="248">기본 표시용 값 조회</text>
+
+  <rect class="box amber" x="150" y="430" width="280" height="120" rx="14"/>
+  <text class="label" x="180" y="475">fine_notice_analysis</text>
+  <text class="text" x="180" y="505">고지서 OCR / 감경 / 이의신청</text>
+  <text class="text" x="180" y="528">law_code, violation_text 생성</text>
+
+  <rect class="box amber" x="500" y="430" width="280" height="120" rx="14"/>
+  <text class="label" x="530" y="475">text_ml_case_search</text>
+  <text class="text" x="530" y="505">과실비율 쟁점 / 유사사례</text>
+  <text class="text" x="530" y="528">사고 설명 구조화</text>
+
+  <rect class="box violet" x="850" y="430" width="280" height="120" rx="14"/>
+  <text class="label" x="880" y="475">law_ground_search / RAG</text>
+  <text class="text" x="880" y="505">법령, 판례, chunk, source_ref</text>
+  <text class="text" x="880" y="528">최신 질문이면 최신 데이터 MCP</text>
+
+  <rect class="box amber" x="1200" y="430" width="280" height="120" rx="14"/>
+  <text class="label" x="1230" y="475">vision_media_analysis</text>
+  <text class="text" x="1230" y="505">이미지/영상 분석</text>
+  <text class="text" x="1230" y="528">evidence_candidates 생성</text>
+
+  <rect class="box green" x="520" y="700" width="320" height="130" rx="14"/>
+  <text class="label" x="550" y="745">5. 결과 병합</text>
+  <text class="text" x="550" y="775">Agent result envelope 병합</text>
+  <text class="text" x="550" y="798">리포트 저장, 다운로드 링크 생성</text>
+
+  <rect class="box red" x="930" y="690" width="340" height="150" rx="14"/>
+  <text class="label" x="960" y="735">6. Supervisor 최종 검증 노드</text>
+  <text class="text" x="960" y="765">근거 부족, 금지 표현, 최신성 확인</text>
+  <text class="text" x="960" y="788">재질문 필요 시 상담 다시 호출하기</text>
+  <text class="text" x="960" y="811">사용자 응답용 문구 확정</text>
+
+  <rect class="box blue" x="1360" y="710" width="250" height="110" rx="14"/>
+  <text class="label" x="1390" y="755">7. 응답 반환</text>
+  <text class="text" x="1390" y="785">assistant_message</text>
+  <text class="text" x="1390" y="808">cards / progress / links</text>
+
+  <path class="line" d="M320 205 L410 205"/>
+  <path class="line" d="M690 205 L780 205"/>
+  <path class="line" d="M1100 205 L1190 205"/>
+
+  <path class="line" d="M940 280 L290 430"/>
+  <path class="line" d="M940 280 L640 430"/>
+  <path class="line" d="M940 280 L990 430"/>
+  <path class="line" d="M940 280 L1340 430"/>
+
+  <path class="dash" d="M290 550 L850 490"/>
+  <path class="dash" d="M640 550 L850 550"/>
+  <path class="dash" d="M1340 550 L780 700"/>
+
+  <path class="line" d="M430 490 L520 740"/>
+  <path class="line" d="M780 490 L650 700"/>
+  <path class="line" d="M1130 490 L760 700"/>
+  <path class="line" d="M1480 490 L830 740"/>
+  <path class="line" d="M840 765 L930 765"/>
+  <path class="line" d="M1270 765 L1360 765"/>
+
+  <text class="text" x="60" y="920">핵심 포인트: 내부 처리의 중심은 Supervisor이며, 최종 검증 노드가 추가되어야 회의 요구사항을 만족한다.</text>
+</svg>
