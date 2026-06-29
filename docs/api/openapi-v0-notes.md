@@ -120,18 +120,17 @@ OpenAPI ver0 다음 단계에서 바로 결정하면 좋은 항목은 다음과 
 | 4 | Agent 실행 방식: 동기, 비동기 worker, 혼합 | 진행 상태, retry, timeout, Redis/PostgreSQL 책임이 달라짐 |
 | 5 | `accident_statement` handoff 수신 node | 사고경위서 OCR/문서 인식 흐름이 정해짐 |
 
-## 9. 2026-06-29 output schema intake
+## 9. 2026-06-29 output schema 반영
 
-The 2026-06-29 issue review changed the Agent structured output contract in
-three review-required areas. `docs/api/openapi-v0.yaml` now reflects these as a
-coordination contract before production implementation.
+2026-06-29 이슈 확인 결과 Agent 구조화 output 계약에서 검토가 필요한
+세 영역이 변경되었다. `docs/api/openapi-v0.yaml`에는 운영 구현 전 팀 조율용
+계약으로 먼저 반영한다.
 
-| Issue | OpenAPI change |
+| 이슈 | OpenAPI 반영 내용 |
 |---|---|
-| `#33` | `TextMlCaseSearchResult` accepts object-shaped accident candidates, structured recommended evidence, `insurer_claim_review`, nullable reliability score, and canonical `source_reference` metadata. |
-| `#38`, `#73` | `VisionMediaAnalysisResult` is event-window, core-clip, key-frame, object-change, scene-context, and per-candidate-score oriented. `confidence_label` remains only as a deprecated compatibility field. |
-| `#65` | Added `traffic_accident_confirmation_ocr` and `TrafficAccidentConfirmationOcrResult` for police-issued traffic accident confirmation OCR handoff. |
+| `#33` | `TextMlCaseSearchResult`에 object 형태의 사고 유형 후보, 구조화된 추천 증거, `insurer_claim_review`, nullable reliability score, canonical `source_reference` metadata를 반영한다. |
+| `#38`, `#73` | `VisionMediaAnalysisResult`를 event window, core clip, key frame, object change, scene context, 후보별 score 중심으로 확장한다. `confidence_label`은 deprecated 호환 필드로만 남긴다. |
+| `#65` | 경찰서 발급 교통사고사실확인원 OCR handoff를 위해 `traffic_accident_confirmation_ocr`와 `TrafficAccidentConfirmationOcrResult`를 추가한다. |
 
-Compatibility note: legacy `source_ref` remains in schemas only as a deprecated
-alias because older mock fixtures still contain it. New Agent outputs should
-emit `source_reference`.
+호환성 메모: 기존 mock fixture에 `source_ref`가 남아 있어 schema에는 deprecated
+alias로만 유지한다. 신규 Agent output은 `source_reference`를 반환해야 한다.

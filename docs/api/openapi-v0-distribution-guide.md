@@ -147,13 +147,13 @@ ver1로 넘어갈 때는 아래를 확정해야 한다.
 | 4 | 리포트 목록/상세/이의신청서 전용 API |
 | 5 | 동기/비동기 worker 혼합 방식 |
 
-## 8. 2026-06-29 Agent output schema intake
+## 8. 2026-06-29 Agent output schema 반영
 
-Before implementing Agent outputs, compare each node sample output against the
-latest issue-driven schema updates in `docs/api/openapi-v0.yaml`.
+Agent output을 구현하기 전 각 node sample output을
+`docs/api/openapi-v0.yaml`의 최신 이슈 기반 schema 변경분과 비교한다.
 
-| Issue | Team handoff check |
+| 이슈 | 팀 handoff 확인 사항 |
 |---|---|
-| `#33` | Text/RAG output must use `source_reference` as the canonical evidence pointer and include structured insurer-claim review fields when an insurer claim is provided. |
-| `#38`, `#73` | Vision output should hand off event windows, core clip/key-frame evidence, object-change evidence, scene-context candidates, and per-candidate scores instead of a single generic confidence value. |
-| `#65` | Traffic accident confirmation OCR should use `traffic_accident_confirmation_ocr` and `TrafficAccidentConfirmationOcrResult`; it must not become a fault-judgment node. |
+| `#33` | Text/RAG output은 표준 근거 참조값으로 `source_reference`를 사용한다. 보험사 주장 정보가 있으면 구조화된 `insurer_claim_review` 필드를 포함한다. |
+| `#38`, `#73` | Vision output은 단일 confidence 값이 아니라 event window, core clip/key-frame evidence, object-change evidence, scene-context candidates, 후보별 score를 넘긴다. |
+| `#65` | 교통사고사실확인원 OCR은 `traffic_accident_confirmation_ocr`와 `TrafficAccidentConfirmationOcrResult`를 사용한다. 이 node는 과실 판단 node가 아니다. |
