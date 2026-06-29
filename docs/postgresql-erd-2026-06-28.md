@@ -1,3 +1,9 @@
+> 2026-06-29 alignment: ERD change timing and Supervisor flow ownership are now
+> tracked in `docs/architecture/supervisor-erd-flow-alignment-2026-06-29.md`.
+> The current tables remain the MVP backbone; next changes add auth/session/quota
+> ownership, then AI session / Agent invocation traceability, then DB-backed
+> history events after TTL and permission rules are confirmed.
+
 > 2026-06-29 update: canonical `POST /api/analysis/jobs/` now persists the job boundary plus one `agent_results` row per mock plan execution. Canonical `GET /api/analysis/results/{job_id}/` persists the Supervisor display snapshot to `analysis_display_results`. Canonical `POST /api/reports/` persists report metadata to `reports` with a `mock://reports/{report_id}` artifact placeholder. Canonical report download now checks the `reports` row first and exposes storage metadata headers. Canonical `GET /api/mypage/summary/` now summarizes My Case progress from `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports`. Explicit `/api/mock/...` paths remain sidecar-only. The next persistence target is the real object storage adapter/download authorization path.
 
 # PostgreSQL ERD 초안
