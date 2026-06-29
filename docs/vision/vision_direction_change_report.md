@@ -5,7 +5,7 @@
 | 작성일 | 2026-06-27 |
 | 목적 | Vision/DL POC 진행 중 확인된 비용, 데이터 규모, 구현 난이도, 팀 역할 범위를 반영하여 기존 방향과 수정 방향을 정리한다. |
 | 적용 범위 | RunPod 데이터 적재, 영상 프레임 추출, 이미지 분류 학습 파이프라인, Vision 결과 스키마, 산출물 관리 |
-| 기준 산출물 | `docs/runpod_vision_poc_log.md`, `docs/vision_training_plan.md`, `docs/vision_work_priority_and_issue_mapping.md`, `ai/vision/train_classifier.py`, `etl/extract_training_frames.py` |
+| 기준 산출물 | `docs/vision/runpod_vision_poc_log.md`, `docs/vision/vision_training_plan.md`, `docs/vision/vision_schema_change_report.md`, `ai/vision/train_classifier.py`, `etl/extract_training_frames.py` |
 
 ## 1. 요약
 
@@ -86,9 +86,9 @@
 
 | 파일 | 역할 |
 |---|---|
-| `docs/runpod_vision_poc_log.md` | RunPod 설정부터 POC, 학습 dry-run까지 진행 로그 |
-| `docs/vision_training_plan.md` | 상위 라벨, 샘플링, 학습 모델, 파라미터 기록 기준 |
-| `docs/vision_work_priority_and_issue_mapping.md` | 급한 일/천천히 해도 되는 일/이슈 매핑 |
+| `docs/vision/runpod_vision_poc_log.md` | RunPod 설정부터 POC, 학습 dry-run까지 진행 로그 |
+| `docs/vision/vision_training_plan.md` | 상위 라벨, 샘플링, 학습 모델, 파라미터 기록 기준 |
+| `docs/vision/vision_schema_change_report.md` | 급한 일/천천히 해도 되는 일/이슈 매핑 |
 | `etl/build_classification_manifest.py` | Drive listing에서 classification 후보 manifest 생성 |
 | `etl/sample_classification_dataset.py` | 상위 라벨별 최대 500개 샘플링 및 split 생성 |
 | `etl/download_sampled_media.py` | 샘플링된 영상 다운로드 검증 |
@@ -150,3 +150,4 @@
 수정된 방향은 “큰 모델을 빨리 돌리는 것”이 아니라 “비용을 통제하면서 학습 가능한 데이터 구조를 먼저 고정하는 것”이다.
 
 현재 프로젝트는 단일 영상 POC 단계에서 학습 파이프라인 단계로 넘어갈 수 있는 상태다. 다음 핵심 작업은 RunPod에서 상위 라벨 4개 기준 샘플 데이터 학습을 실행하고, 파라미터별 결과를 기록하는 것이다.
+
