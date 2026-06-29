@@ -600,6 +600,47 @@ class UsageEvent(models.Model):
         return self.usage_event_id
 
 
+class HistoryEvent(models.Model):
+    event_id = models.CharField(max_length=64, unique=True, db_index=True)
+    event_type = models.CharField(max_length=64, db_index=True)
+    event_version = models.CharField(max_length=64, default="history_event.v1")
+    occurred_at = models.DateTimeField(db_index=True)
+    actor_user_id = models.CharField(max_length=128, blank=True, db_index=True)
+    actor_guest_id = models.CharField(max_length=128, blank=True, db_index=True)
+    actor_auth_session_id = models.CharField(max_length=128, blank=True, db_index=True)
+    actor_auth_state = models.CharField(max_length=32, blank=True)
+    subject_session_id = models.CharField(max_length=128, blank=True, db_index=True)
+    subject_message_id = models.CharField(max_length=128, blank=True, db_index=True)
+    subject_job_id = models.CharField(max_length=128, blank=True, db_index=True)
+    subject_report_id = models.CharField(max_length=128, blank=True, db_index=True)
+    source_surface = models.CharField(max_length=64, blank=True)
+    source_api_path = models.CharField(max_length=256, blank=True, db_index=True)
+    source_execution_mode = models.CharField(max_length=64, blank=True, db_index=True)
+    source_node_code = models.CharField(max_length=64, blank=True, db_index=True)
+    status = models.CharField(max_length=32, default="success", db_index=True)
+    summary = models.TextField(blank=True)
+    actor = models.JSONField(default=dict, blank=True)
+    subject = models.JSONField(default=dict, blank=True)
+    source = models.JSONField(default=dict, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    privacy = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "history_events"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["subject_session_id", "occurred_at"], name="hist_evt_session_time_idx"),
+            models.Index(fields=["actor_user_id", "occurred_at"], name="hist_evt_user_time_idx"),
+            models.Index(fields=["actor_guest_id", "occurred_at"], name="hist_evt_guest_time_idx"),
+            models.Index(fields=["subject_job_id", "event_type"], name="hist_evt_job_type_idx"),
+            models.Index(fields=["event_type", "status"], name="hist_evt_type_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.event_id
+
+
 class CodeGroup(TimestampedModel):
     group_code = models.CharField(max_length=64, unique=True, db_index=True)
     name = models.CharField(max_length=120)

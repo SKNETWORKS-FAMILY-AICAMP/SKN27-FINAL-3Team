@@ -271,6 +271,8 @@ paths:
           $ref: "#/components/responses/InvalidRequest"
         "401":
           $ref: "#/components/responses/AuthRequired"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
 
   /api/files/:
     get:
@@ -351,6 +353,8 @@ paths:
           $ref: "#/components/responses/InvalidFile"
         "401":
           $ref: "#/components/responses/AuthRequired"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
 
   /api/files/{attachment_id}/:
     get:
@@ -445,6 +449,8 @@ paths:
           $ref: "#/components/responses/InvalidRequest"
         "401":
           $ref: "#/components/responses/AuthRequired"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
 
   /api/analysis/jobs/{job_id}/:
     get:
@@ -664,6 +670,8 @@ paths:
                   - $ref: "#/components/schemas/ReportActionResponse"
         "401":
           $ref: "#/components/responses/AuthRequired"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
 
   /api/reports/{report_id}/:
     get:
@@ -721,12 +729,18 @@ paths:
             X-Report-Storage-URI:
               schema:
                 type: string
+            X-Report-Access-Decision:
+              schema:
+                type: string
+                enum: [owner_match, session_match, legacy_mock_report]
           content:
             text/plain:
               schema:
                 type: string
         "401":
           $ref: "#/components/responses/AuthRequired"
+        "403":
+          $ref: "#/components/responses/ObjectAccessDenied"
 
   /api/reports/objection-draft/:
     post:
@@ -781,7 +795,7 @@ paths:
       summary: List user history events
       operationId: listHistory
       x-contract-status: confirmed
-      x-review-note: Mock sidecar implementation uses standard-light storage. TTL and DB migration remain review-required.
+      x-review-note: Canonical endpoint는 PostgreSQL `history_events`를 조회하고, 명시적 mock alias는 sidecar-only로 유지한다. TTL은 검토 필요 상태다.
       parameters:
         - $ref: "#/components/parameters/OptionalSessionId"
         - $ref: "#/components/parameters/OptionalGuestId"
@@ -1223,6 +1237,18 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/AuthErrorEnvelope"
+    RateLimitExceeded:
+      description: subject 단위 사용 한도를 초과했다.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RateLimitErrorEnvelope"
+    ObjectAccessDenied:
+      description: 인증 subject가 요청한 report artifact의 소유자가 아니다.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ObjectAccessErrorEnvelope"
     InvalidRequest:
       description: Invalid request or missing required field.
       content:
@@ -1455,6 +1481,58 @@ components:
           items:
             type: string
 
+    UsageMeter:
+      type: object
+      x-contract-status: confirmed
+      description: canonical mock endpoint 호출에 대해 PostgreSQL에 기록된 사용량/쿼터 결과.
+      required: [backend, quota_table, usage_event_table, subject_id, subject_type, scope, allowed, status]
+      properties:
+        backend:
+          type: string
+          enum: [postgresql]
+        tables:
+          type: array
+          items:
+            type: string
+        quota_table:
+          type: string
+          enum: [usage_quotas]
+        usage_event_table:
+          type: string
+          enum: [usage_events]
+        quota_id:
+          type: string
+        usage_event_id:
+          type: string
+        subject_id:
+          type: string
+        subject_type:
+          type: string
+          enum: [anonymous, guest, user]
+        scope:
+          type: string
+          enum: [chat_message, file_upload, agent_run, report_action]
+        quota_key:
+          type: string
+        allowed:
+          type: boolean
+        limit_count:
+          type: integer
+        used_count:
+          type: integer
+        remaining_count:
+          type:
+            - integer
+            - "null"
+        reset_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        status:
+          type: string
+          enum: [allowed, blocked]
+
     MergePolicy:
       type: object
       properties:
@@ -1653,6 +1731,8 @@ components:
         created_at:
           type: string
           format: date-time
+        usage:
+          $ref: "#/components/schemas/UsageMeter"
 
     ChatProgress:
       type: object
@@ -1784,6 +1864,8 @@ components:
             persistence:
               type: object
               additionalProperties: true
+            usage:
+              $ref: "#/components/schemas/UsageMeter"
 
     AgentAttachmentHandoff:
       type: object
@@ -2013,6 +2095,8 @@ components:
               type: array
               items:
                 type: string
+            usage:
+              $ref: "#/components/schemas/UsageMeter"
 
     AnalysisJobEvent:
       type: object
@@ -3310,6 +3394,11 @@ components:
           type: array
           items:
             type: string
+        persistence:
+          type: object
+          additionalProperties: true
+        usage:
+          $ref: "#/components/schemas/UsageMeter"
 
     ReportSummary:
       type: object
@@ -3571,10 +3660,13 @@ components:
           properties:
             backend:
               type: string
-              enum: [mock_sidecar_json]
+              enum: [postgresql, mock_sidecar_json]
             policy:
               type: string
               enum: [standard_light]
+            table:
+              type: string
+              enum: [history_events]
         count:
           type: integer
         events:
@@ -3704,6 +3796,97 @@ components:
                         - malformed_authorization_header
                         - empty_token
 
+    RateLimitErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - type: object
+              required: [contract_version, type, code, usage]
+              properties:
+                contract_version:
+                  type: string
+                  enum: [rate_limit.v1]
+                type:
+                  type: string
+                  enum: [rate_limit]
+                code:
+                  type: string
+                  enum: [rate_limit_exceeded]
+                usage:
+                  $ref: "#/components/schemas/UsageMeter"
+
+    ObjectAccessDecision:
+      type: object
+      x-contract-status: confirmed
+      required: [contract_version, allowed, reason, subject, resource]
+      properties:
+        contract_version:
+          type: string
+          enum: [object_access.v1]
+        allowed:
+          type: boolean
+        reason:
+          type: string
+          enum: [owner_match, owner_mismatch, session_match, session_mismatch, legacy_mock_report]
+        subject:
+          type: object
+          properties:
+            user_id:
+              type:
+                - string
+                - "null"
+            guest_id:
+              type:
+                - string
+                - "null"
+            session_id:
+              type:
+                - string
+                - "null"
+        resource:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [report]
+            report_id:
+              type: string
+            owner_id:
+              type:
+                - string
+                - "null"
+            session_id:
+              type:
+                - string
+                - "null"
+            storage_backend:
+              type: string
+
+    ObjectAccessErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          allOf:
+            - $ref: "#/components/schemas/ApiError"
+            - type: object
+              required: [contract_version, type, code, access]
+              properties:
+                contract_version:
+                  type: string
+                  enum: [object_access.v1]
+                type:
+                  type: string
+                  enum: [object_access]
+                code:
+                  type: string
+                  enum: [object_access_denied]
+                access:
+                  $ref: "#/components/schemas/ObjectAccessDecision"
+
     ApiError:
       type: object
       required: [code, message, status, missing_fields, retryable, required_action]
@@ -3725,6 +3908,8 @@ components:
             - attachment_not_found
             - analysis_job_not_found
             - analysis_result_not_found
+            - rate_limit_exceeded
+            - object_access_denied
         message:
           type: string
         status:
@@ -3737,7 +3922,7 @@ components:
           type: boolean
         required_action:
           type: string
-          enum: [login, none, retry, complete_input]
+          enum: [login, none, retry, complete_input, wait_or_upgrade, login_or_owner_match]
         auth:
           type: object
           additionalProperties: true

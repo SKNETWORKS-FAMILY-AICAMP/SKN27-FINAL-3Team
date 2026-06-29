@@ -16,6 +16,7 @@ from chatbot.models import (
     AnalysisJob,
     AnalysisJobEvent,
     AnalysisJobStatus,
+    AuthEvent,
     AuthSession,
     AuthSessionStatus,
     ChatMessage,
@@ -25,6 +26,7 @@ from chatbot.models import (
     CodeItem,
     GuestIdentity,
     GuestIdentityStatus,
+    HistoryEvent,
     AiSession,
     MessageRole,
     Report,
@@ -63,6 +65,7 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(Subscription._meta.db_table, "subscriptions")
         self.assertEqual(UsageQuota._meta.db_table, "usage_quotas")
         self.assertEqual(UsageEvent._meta.db_table, "usage_events")
+        self.assertEqual(HistoryEvent._meta.db_table, "history_events")
 
     def test_auth_agent_code_and_quota_tables_link_without_replacing_mvp_backbone(self):
         user = UserAccount.objects.create(
@@ -413,6 +416,18 @@ class ChatbotMockApiTests(TestCase):
         self.assertIsNone(body["subject"]["auth_session_id"])
         self.assertEqual(body["session_binding"]["session_id"], "ses_guest_chat")
         self.assertFalse(body["merge_policy"]["auto_merge"])
+        self.assertEqual(body["persistence"]["backend"], "postgresql")
+        self.assertEqual(body["persistence"]["guest_identity_table"], "guest_identities")
+        self.assertEqual(body["persistence"]["auth_events_table"], "auth_events")
+
+        guest = GuestIdentity.objects.get(guest_id="gst_existing")
+        event = AuthEvent.objects.get(event_id=body["persistence"]["event_id"])
+        session = ChatSession.objects.get(session_id="ses_guest_chat")
+        self.assertEqual(guest.status, GuestIdentityStatus.ACTIVE)
+        self.assertEqual(event.guest, guest)
+        self.assertEqual(event.event_type, "guest_session_created")
+        self.assertEqual(session.metadata["auth_context"]["guest_id"], "gst_existing")
+        self.assertEqual(session.metadata["auth_context"]["subject_type"], "guest")
 
     def test_auth_me_reports_authenticated_subject_with_mock_bearer(self):
         response = self.client.get(
@@ -428,6 +443,19 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["subject"]["auth_session_id"], "auth_dev_mock")
         self.assertEqual(body["auth_session"]["verification"], "mock_bearer_shape_only")
         self.assertEqual(body["session_binding"]["session_id"], "ses_auth_me")
+        self.assertEqual(body["persistence"]["auth_session_table"], "auth_sessions")
+
+        user = UserAccount.objects.get(user_id="usr_mock")
+        guest = GuestIdentity.objects.get(guest_id="gst_before_login")
+        auth_session = AuthSession.objects.get(auth_session_id="auth_dev_mock")
+        session = ChatSession.objects.get(session_id="ses_auth_me")
+        event = AuthEvent.objects.get(event_id=body["persistence"]["event_id"])
+        self.assertEqual(auth_session.user, user)
+        self.assertEqual(auth_session.guest, guest)
+        self.assertEqual(auth_session.subject_id, "user:usr_mock")
+        self.assertEqual(event.auth_session, auth_session)
+        self.assertEqual(session.owner_id, "usr_mock")
+        self.assertEqual(session.metadata["auth_context"]["auth_session_id"], "auth_dev_mock")
 
     def test_auth_me_can_report_guest_subject_without_bearer(self):
         response = Client().get("/api/auth/me/", HTTP_X_GUEST_ID="guest_header")
@@ -438,6 +466,14 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["guest"]["guest_id"], "gst_guest_header")
         self.assertEqual(body["subject"]["subject_type"], "guest")
         self.assertFalse(body["subject"]["is_authenticated"])
+        self.assertEqual(body["persistence"]["guest_identity_table"], "guest_identities")
+        self.assertTrue(GuestIdentity.objects.filter(guest_id="gst_guest_header").exists())
+        self.assertTrue(
+            AuthEvent.objects.filter(
+                event_type="auth_me_checked",
+                subject_id="guest:gst_guest_header",
+            ).exists()
+        )
 
     def test_auth_me_reuses_auth_error_header_for_invalid_bearer(self):
         response = Client(HTTP_AUTHORIZATION="Bearer expired").get("/api/auth/me/")
@@ -450,6 +486,36 @@ class ChatbotMockApiTests(TestCase):
         error = response.json()["error"]
         self.assertEqual(error["contract_version"], "auth_error.v1")
         self.assertEqual(error["code"], "token_expired")
+
+    def test_canonical_chat_message_blocks_when_usage_quota_exceeded(self):
+        UsageQuota.objects.create(
+            quota_id="quota_user_usr_mock_chat_message",
+            subject_id="user:usr_mock",
+            scope="chat_message",
+            limit_count=1,
+            used_count=1,
+        )
+
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_quota_blocked",
+                "user_text": "한도 초과 확인",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 429)
+        error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "rate_limit.v1")
+        self.assertEqual(error["code"], "rate_limit_exceeded")
+        self.assertEqual(error["usage"]["scope"], "chat_message")
+        self.assertFalse(ChatMessage.objects.filter(session__session_id="ses_quota_blocked").exists())
+        usage_event = UsageEvent.objects.get(scope="chat_message", subject_id="user:usr_mock")
+        self.assertEqual(usage_event.amount, 0)
+        self.assertEqual(usage_event.metadata["status"], "blocked")
 
     def test_history_endpoint_requires_authorization_header(self):
         response = Client().get("/api/history/")
@@ -501,15 +567,42 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(history_response.status_code, 200)
         body = history_response.json()
         self.assertEqual(body["history_contract"], "history_event.v1")
+        self.assertEqual(body["storage"]["backend"], "postgresql")
         self.assertEqual(body["storage"]["policy"], "standard_light")
+        self.assertEqual(body["storage"]["table"], "history_events")
         events = body["events"]
         self.assertIn("chat_message_created", {event["event_type"] for event in events})
         chat_event = next(event for event in events if event["event_type"] == "chat_message_created")
         self.assertEqual(chat_event["actor"]["guest_id"], "gst_history")
         self.assertEqual(chat_event["subject"]["session_id"], "ses_history_api")
         self.assertFalse(chat_event["privacy"]["contains_user_text"])
+        stored_event = HistoryEvent.objects.get(event_id=chat_event["event_id"])
+        self.assertEqual(stored_event.event_type, "chat_message_created")
+        self.assertEqual(stored_event.subject_session_id, "ses_history_api")
+        self.assertEqual(stored_event.actor_guest_id, "gst_history")
         self.assertNotIn(raw_user_text, json.dumps(events, ensure_ascii=False))
         self.assertNotIn("user_text", json.dumps([event["metadata"] for event in events], ensure_ascii=False))
+
+    def test_explicit_mock_history_endpoint_stays_sidecar_only(self):
+        response = self.client.post(
+            "/api/mock/chat/messages/",
+            data={
+                "session_id": "ses_mock_history",
+                "user_text": "mock history only",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        history_response = self.client.get("/api/mock/history/?session_id=ses_mock_history")
+
+        self.assertEqual(history_response.status_code, 200)
+        body = history_response.json()
+        self.assertEqual(body["storage"]["backend"], "mock_sidecar_json")
+        self.assertIn("chat_message_created", {event["event_type"] for event in body["events"]})
+        self.assertFalse(HistoryEvent.objects.filter(subject_session_id="ses_mock_history").exists())
 
     def test_protected_mock_endpoint_rejects_invalid_mock_token(self):
         response = Client(HTTP_AUTHORIZATION="Bearer invalid").post(
@@ -606,7 +699,8 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(message.metadata["analysis_job_id"], job.job_id)
         self.assertEqual(message.metadata["source"], "canonical_chat_message")
         self.assertEqual(job.session, session)
-        self.assertEqual(job.owner_id, "")
+        self.assertEqual(session.owner_id, "usr_mock")
+        self.assertEqual(job.owner_id, "usr_mock")
         self.assertEqual(job.routing_intent, "objection_request")
         self.assertEqual(job.mock_scenario, "fine_notice")
         self.assertEqual(job.status, AnalysisJobStatus.SUCCESS)
@@ -615,6 +709,10 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job.metadata["assistant_message"], body["assistant_message"])
         self.assertEqual(event.status, AnalysisJobStatus.SUCCESS)
         self.assertEqual(event.metadata["source"], "canonical_chat_message")
+        self.assertEqual(body["usage"]["scope"], "chat_message")
+        self.assertEqual(body["usage"]["usage_event_table"], "usage_events")
+        usage_event = UsageEvent.objects.get(subject_id="user:usr_mock", scope="chat_message")
+        self.assertEqual(usage_event.metadata["status"], "allowed")
 
     def test_agent_nodes_endpoint_returns_registry(self):
         response = self.client.get("/api/mock/agents/nodes/")
@@ -975,6 +1073,8 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job["persistence"]["agent_results_table"], "agent_results")
         self.assertEqual(job["persistence"]["ai_session_table"], "ai_sessions")
         self.assertEqual(job["persistence"]["agent_invocations_table"], "agent_invocations")
+        self.assertEqual(job["usage"]["scope"], "agent_run")
+        self.assertEqual(job["usage"]["usage_event_table"], "usage_events")
         self.assertEqual(
             job["persistence"]["agent_results_saved"],
             len(job["node_execution"]["executions"]),
@@ -1006,6 +1106,12 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(ai_session.metadata["auth_session_id"], "auth_dev_mock")
         self.assertEqual(ai_session.metadata["chat_session_id"], "ses_canonical_job")
         self.assertEqual(ai_session.quota_key, "rate_limit:user:usr_mock:agent_run")
+        usage_event = UsageEvent.objects.filter(
+            subject_id="user:usr_mock",
+            scope="agent_run",
+        ).first()
+        self.assertIsNotNone(usage_event)
+        self.assertEqual(usage_event.metadata["status"], "allowed")
         persisted_invocations = list(persisted_job.agent_invocations.order_by("created_at"))
         self.assertEqual(len(persisted_invocations), len(job["node_execution"]["executions"]))
         self.assertTrue(all(invocation.ai_session == ai_session for invocation in persisted_invocations))
@@ -1194,6 +1300,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(download_response["X-Report-Persistence"], "postgresql")
         self.assertEqual(download_response["X-Report-Storage-Backend"], "mock_placeholder")
         self.assertEqual(download_response["X-Report-Storage-URI"], "mock://reports/rep_canonical_smoke")
+        self.assertEqual(download_response["X-Report-Access-Decision"], "owner_match")
         self.assertIn(
             "Report metadata download for rep_canonical_smoke",
             download_response.content.decode("utf-8"),
@@ -1289,6 +1396,29 @@ class ChatbotMockApiTests(TestCase):
         report_body = response.json()
         self.assertTrue(report_body["download_url"].startswith("/api/mock/reports/"))
         self.assertFalse(Report.objects.filter(report_id="rep_mock_sidecar").exists())
+
+    def test_canonical_report_download_denies_other_owner(self):
+        session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")
+        Report.objects.create(
+            report_id="rep_private_owner",
+            owner_id="usr_mock",
+            session=session,
+            report_type=ReportType.OBJECTION_DRAFT,
+            status=ReportStatus.READY,
+            storage_uri="mock://reports/rep_private_owner",
+            title="Private report",
+        )
+        other_client = Client(HTTP_AUTHORIZATION="Bearer usr_other:any")
+
+        response = other_client.get("/api/reports/rep_private_owner/download/")
+
+        self.assertEqual(response.status_code, 403)
+        error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "object_access.v1")
+        self.assertEqual(error["code"], "object_access_denied")
+        self.assertFalse(error["access"]["allowed"])
+        self.assertEqual(error["access"]["reason"], "owner_mismatch")
+        self.assertEqual(error["access"]["resource"]["report_id"], "rep_private_owner")
 
     def test_report_download_returns_attachment(self):
         response = self.client.get("/api/mock/reports/rep_mock/download/")

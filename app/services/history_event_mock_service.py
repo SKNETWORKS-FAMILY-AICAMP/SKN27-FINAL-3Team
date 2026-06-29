@@ -45,8 +45,35 @@ def record_history_event(
 ) -> dict[str, Any]:
     """Create and persist one standard-light history event."""
 
+    event = build_history_event(
+        event_type=event_type,
+        status=status,
+        summary=summary,
+        actor=actor,
+        subject=subject,
+        source=source,
+        metadata=metadata,
+        privacy=privacy,
+    )
+    _write_event(event)
+    return event
+
+
+def build_history_event(
+    *,
+    event_type: str,
+    status: str,
+    summary: str,
+    actor: dict[str, Any] | None = None,
+    subject: dict[str, Any] | None = None,
+    source: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    privacy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create one standard-light history event payload without choosing storage."""
+
     occurred_at = _now_iso()
-    event = {
+    return {
         "event_id": f"evt_{uuid4().hex[:16]}",
         "event_type": str(event_type),
         "event_version": HISTORY_EVENT_VERSION,
@@ -60,8 +87,6 @@ def record_history_event(
         "privacy": _normalize_privacy(privacy),
         "created_at": occurred_at,
     }
-    _write_event(event)
-    return event
 
 
 def list_history_events(
@@ -78,7 +103,7 @@ def list_history_events(
     events = []
     for event_path in sorted(_history_root().glob("*/*.json")):
         event = _read_event(event_path)
-        if not event or not _event_matches(
+        if not event or not history_event_matches(
             event,
             session_id=session_id,
             user_id=user_id,
@@ -162,6 +187,24 @@ def record_agent_execution_events(
     source: dict[str, Any],
     subject: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    events = build_agent_execution_events(
+        executions,
+        actor=actor,
+        source=source,
+        subject=subject,
+    )
+    for event in events:
+        _write_event(event)
+    return events
+
+
+def build_agent_execution_events(
+    executions: list[dict[str, Any]],
+    *,
+    actor: dict[str, Any],
+    source: dict[str, Any],
+    subject: dict[str, Any],
+) -> list[dict[str, Any]]:
     events = []
     for execution in executions:
         if not isinstance(execution, dict):
@@ -179,7 +222,7 @@ def record_agent_execution_events(
         event_source = dict(source)
         event_source["node_code"] = node_code or event_source.get("node_code")
         events.append(
-            record_history_event(
+            build_history_event(
                 event_type=event_type,
                 status=status,
                 summary=_safe_summary(agent_output.get("summary") or f"{node_code or 'agent'} mock 호출을 기록했습니다."),
@@ -262,7 +305,7 @@ def _normalize_privacy(privacy: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _event_matches(
+def history_event_matches(
     event: dict[str, Any],
     *,
     session_id: str | None,
