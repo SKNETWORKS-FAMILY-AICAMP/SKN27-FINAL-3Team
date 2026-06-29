@@ -225,7 +225,10 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     job = create_analysis_job(body)
     if _is_canonical_mock_request(request):
-        job["persistence"] = persist_analysis_job_execution(body, job)
+        job["persistence"] = persist_analysis_job_execution(
+            _payload_with_request_identity(request, body),
+            job,
+        )
     actor = _history_actor(request, body)
     source = _history_source(request)
     subject = subject_from_payload(
@@ -463,6 +466,39 @@ def _history_actor(request: HttpRequest, payload: dict[str, object] | None = Non
         guest_id_header=request.headers.get("X-Guest-Id"),
         auth_session_id_header=request.headers.get("X-Auth-Session-Id"),
     )
+
+
+def _payload_with_request_identity(
+    request: HttpRequest,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    enriched = dict(payload)
+    auth_context = (
+        dict(payload.get("auth_context"))
+        if isinstance(payload.get("auth_context"), dict)
+        else {}
+    )
+    status, auth_payload = _get_current_auth_subject(
+        authorization_header=request.headers.get("Authorization"),
+        guest_id=request.headers.get("X-Guest-Id") or auth_context.get("guest_id"),
+        session_id=enriched.get("session_id") or auth_context.get("session_id"),
+    )
+    if status < 400:
+        subject = auth_payload.get("subject") if isinstance(auth_payload.get("subject"), dict) else {}
+        for key in ("subject_id", "subject_type", "user_id", "guest_id", "auth_session_id"):
+            value = subject.get(key)
+            if value:
+                auth_context.setdefault(key, value)
+        if subject.get("user_id") and not enriched.get("owner_id") and not enriched.get("user_id"):
+            enriched["user_id"] = subject["user_id"]
+    elif request.headers.get("X-Guest-Id"):
+        auth_context.setdefault("guest_id", request.headers["X-Guest-Id"])
+
+    if request.headers.get("X-Auth-Session-Id"):
+        auth_context.setdefault("auth_session_id", request.headers["X-Auth-Session-Id"])
+    if auth_context:
+        enriched["auth_context"] = auth_context
+    return enriched
 
 
 def _actor_from_auth_me_payload(request: HttpRequest, payload: dict[str, object]) -> dict[str, object]:
