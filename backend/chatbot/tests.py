@@ -961,6 +961,7 @@ class ChatbotMockApiTests(TestCase):
                 "mock_status": "success",
             },
             content_type="application/json",
+            HTTP_X_GUEST_ID="gst_canonical_job",
         )
 
         self.assertEqual(response.status_code, 200)
@@ -972,8 +973,14 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job["persistence"]["backend"], "postgresql")
         self.assertEqual(job["persistence"]["analysis_job_table"], "analysis_jobs")
         self.assertEqual(job["persistence"]["agent_results_table"], "agent_results")
+        self.assertEqual(job["persistence"]["ai_session_table"], "ai_sessions")
+        self.assertEqual(job["persistence"]["agent_invocations_table"], "agent_invocations")
         self.assertEqual(
             job["persistence"]["agent_results_saved"],
+            len(job["node_execution"]["executions"]),
+        )
+        self.assertEqual(
+            job["persistence"]["agent_invocations_saved"],
             len(job["node_execution"]["executions"]),
         )
         self.assertIn(
@@ -982,6 +989,7 @@ class ChatbotMockApiTests(TestCase):
         )
 
         persisted_job = AnalysisJob.objects.get(job_id=job["job_id"])
+        self.assertEqual(persisted_job.owner_id, "usr_mock")
         self.assertEqual(persisted_job.metadata["source"], "canonical_analysis_job")
         self.assertEqual(persisted_job.events.get().metadata["source"], "canonical_analysis_job")
         persisted_results = list(persisted_job.agent_results.order_by("created_at"))
@@ -991,6 +999,25 @@ class ChatbotMockApiTests(TestCase):
         self.assertIn("notice_fields", fine_notice_result.structured_result)
         self.assertEqual(fine_notice_result.raw_output["source"], "mock_node_execution")
         self.assertNotIn("agent_input", fine_notice_result.raw_output)
+        ai_session = AiSession.objects.get(ai_session_id=job["persistence"]["ai_session_id"])
+        self.assertEqual(ai_session.session, persisted_job.session)
+        self.assertEqual(ai_session.user.user_id, "usr_mock")
+        self.assertEqual(ai_session.guest.guest_id, "gst_canonical_job")
+        self.assertEqual(ai_session.metadata["auth_session_id"], "auth_dev_mock")
+        self.assertEqual(ai_session.metadata["chat_session_id"], "ses_canonical_job")
+        self.assertEqual(ai_session.quota_key, "rate_limit:user:usr_mock:agent_run")
+        persisted_invocations = list(persisted_job.agent_invocations.order_by("created_at"))
+        self.assertEqual(len(persisted_invocations), len(job["node_execution"]["executions"]))
+        self.assertTrue(all(invocation.ai_session == ai_session for invocation in persisted_invocations))
+        self.assertTrue(all(invocation.agent_node is not None for invocation in persisted_invocations))
+        self.assertEqual(
+            persisted_invocations[0].metadata["agent_result_id"],
+            persisted_results[0].result_id,
+        )
+        self.assertEqual(
+            AgentNodeDefinition.objects.get(node_code="fine_notice_analysis").owner,
+            "workzion2",
+        )
 
         repeat_response = self.client.post(
             "/api/analysis/jobs/",
@@ -1002,6 +1029,7 @@ class ChatbotMockApiTests(TestCase):
                 "job_id": job["job_id"],
             },
             content_type="application/json",
+            HTTP_X_GUEST_ID="gst_canonical_job",
         )
         self.assertEqual(repeat_response.status_code, 200)
         repeat_job = repeat_response.json()["job"]
@@ -1009,6 +1037,10 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(
             AgentResult.objects.filter(job__job_id=job["job_id"]).count(),
             repeat_job["persistence"]["agent_results_saved"],
+        )
+        self.assertEqual(
+            AgentInvocation.objects.filter(job__job_id=job["job_id"]).count(),
+            repeat_job["persistence"]["agent_invocations_saved"],
         )
 
         detail = self.client.get(f"/api/analysis/jobs/{job['job_id']}/")
@@ -1181,6 +1213,8 @@ class ChatbotMockApiTests(TestCase):
                 "analysis_jobs",
                 "analysis_job_events",
                 "agent_results",
+                "ai_sessions",
+                "agent_invocations",
                 "analysis_display_results",
                 "reports",
             },
@@ -1197,10 +1231,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(case["case_status"], "success")
         self.assertEqual(case["routing_intent"], "objection_request")
         self.assertEqual(case["agent_result_count"], len(job["node_execution"]["executions"]))
+        self.assertEqual(case["agent_invocation_count"], len(job["node_execution"]["executions"]))
         self.assertEqual(
             sum(case["agent_status_counts"].values()),
             case["agent_result_count"],
         )
+        self.assertEqual(
+            sum(case["agent_invocation_status_counts"].values()),
+            case["agent_invocation_count"],
+        )
+        self.assertIn(f"ais_{job['job_id']}", case["ai_session_ids"])
         self.assertGreaterEqual(case["agent_status_counts"]["success"], 1)
         self.assertEqual(case["display_result_id"], result["persistence"]["display_result_id"])
         self.assertEqual(case["report_count"], 1)

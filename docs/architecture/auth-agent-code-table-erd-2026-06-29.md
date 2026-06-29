@@ -85,7 +85,7 @@ erDiagram
 - 실제 JWT 인증 사용자 모델을 강제하지 않는다.
 - 코드 테이블 초기 데이터를 확정하지 않는다.
 - 구독 결제나 실제 과금 enforcement를 구현하지 않는다.
-- Agent 실제 호출 로직을 `agent_invocations`에 바로 연결하지 않는다.
+- 실제 외부 LLM/RAG/OCR 호출의 latency, token, cost 측정은 아직 연결하지 않는다.
 
 ## 6. 다음 구현 순서
 
@@ -93,8 +93,22 @@ erDiagram
    `users`, `guest_identities`, `auth_sessions` 저장을 연결한다.
 2. `owner_id`, `guest_id`, `auth_session_id`를 `chat_sessions.metadata`와 새
    auth table 기준으로 함께 확인한다.
-3. Agent 실행 시 `agent_invocations`에 started/completed/failed 이벤트를 남긴다.
-4. `usage_quotas`, `usage_events`로 비회원/회원/구독 rate limit enforcement를
+3. `usage_quotas`, `usage_events`로 비회원/회원/구독 rate limit enforcement를
    시작한다.
-5. 화면/운영에서 필요한 code group을 확정한 뒤 `code_groups`, `code_items`
+4. 화면/운영에서 필요한 code group을 확정한 뒤 `code_groups`, `code_items`
    초기 데이터를 추가한다.
+
+## 7. 2026-06-29 연결 업데이트
+
+PR `#92` 후속 커밋에서 canonical `POST /api/analysis/jobs/` 저장 경계가
+`agent_results`와 함께 `ai_sessions`, `agent_invocations`, `agent_nodes`까지
+upsert하도록 연결되었다.
+
+- `ai_sessions`는 하나의 `analysis_job` 실행을 논리 AI 실행 단위로 묶고,
+  `auth_session_id`와 `chat_session_id`를 metadata에서 분리해 남긴다.
+- `agent_invocations`는 각 node 실행 attempt의 status, evidence count,
+  limitation count, execution mode, quota key를 저장한다.
+- `agent_nodes`는 mock registry에서 넘어온 node metadata를 DB registry 후보로
+  갱신한다.
+- 반복해서 같은 `job_id`로 canonical analysis job을 저장해도 deterministic id를
+  사용하므로 `agent_results`와 `agent_invocations`가 중복 증가하지 않는다.

@@ -12,8 +12,12 @@ from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
 from chatbot.models import (
+    AgentInvocation,
+    AgentInvocationStatus,
+    AgentNodeDefinition,
     AgentResult,
     AgentResultStatus,
+    AiSession,
     AnalysisDisplayResult,
     AnalysisJob,
     AnalysisJobEvent,
@@ -21,10 +25,14 @@ from chatbot.models import (
     ChatMessage,
     ChatSession,
     ChatSessionStatus,
+    GuestIdentity,
+    GuestIdentityStatus,
     MessageRole,
     Report,
     ReportStatus,
     ReportType,
+    UserAccount,
+    UserAccountStatus,
     UploadedFile,
     UploadedFileStatus,
 )
@@ -240,15 +248,33 @@ def persist_analysis_job_execution(
             },
         )
         _upsert_initial_job_event(job, progress=progress, source="canonical_analysis_job")
-        agent_results = _persist_agent_results(job, job_payload.get("node_execution") or {})
+        node_execution = job_payload.get("node_execution") or {}
+        agent_results = _persist_agent_results(job, node_execution)
+        ai_session = _upsert_ai_session(job, payload=payload, job_payload=job_payload)
+        agent_invocations = _persist_agent_invocations(
+            job,
+            ai_session=ai_session,
+            node_execution=node_execution,
+            agent_results=agent_results,
+        )
 
     return {
         "backend": "postgresql",
-        "tables": [AnalysisJob._meta.db_table, AgentResult._meta.db_table],
+        "tables": [
+            AnalysisJob._meta.db_table,
+            AgentResult._meta.db_table,
+            AiSession._meta.db_table,
+            AgentInvocation._meta.db_table,
+        ],
         "analysis_job_table": AnalysisJob._meta.db_table,
         "agent_results_table": AgentResult._meta.db_table,
+        "ai_session_table": AiSession._meta.db_table,
+        "agent_invocations_table": AgentInvocation._meta.db_table,
         "agent_results_saved": len(agent_results),
+        "agent_invocations_saved": len(agent_invocations),
         "agent_result_ids": [result.result_id for result in agent_results],
+        "agent_invocation_ids": [invocation.invocation_id for invocation in agent_invocations],
+        "ai_session_id": ai_session.ai_session_id,
         "node_codes": [result.node_code for result in agent_results],
         "status": "saved",
     }
@@ -371,7 +397,7 @@ def get_mycase_summary(
 ) -> dict[str, Any]:
     queryset = (
         AnalysisJob.objects.select_related("session", "message")
-        .prefetch_related("events", "agent_results", "reports")
+        .prefetch_related("events", "agent_results", "agent_invocations", "reports")
         .order_by("-updated_at")
     )
     if session_id:
@@ -401,6 +427,8 @@ def get_mycase_summary(
                 AnalysisJob._meta.db_table,
                 AnalysisJobEvent._meta.db_table,
                 AgentResult._meta.db_table,
+                AiSession._meta.db_table,
+                AgentInvocation._meta.db_table,
                 AnalysisDisplayResult._meta.db_table,
                 Report._meta.db_table,
             ],
@@ -599,12 +627,158 @@ def _persist_agent_results(
     return agent_results
 
 
+def _upsert_ai_session(
+    job: AnalysisJob,
+    *,
+    payload: dict[str, Any],
+    job_payload: dict[str, Any],
+) -> AiSession:
+    subject = _ai_subject(payload, job_payload)
+    user = _get_or_create_user_account(subject["user_id"])
+    guest = _get_or_create_guest_identity(subject["guest_id"])
+    quota_key = subject["quota_key"]
+
+    ai_session, _created = AiSession.objects.update_or_create(
+        ai_session_id=_ai_session_id(job.job_id),
+        defaults={
+            "session": job.session,
+            "user": user,
+            "guest": guest,
+            "owner_id": subject["user_id"] or job.owner_id,
+            "status": "active",
+            "routing_intent": job.routing_intent,
+            "quota_key": quota_key,
+            "metadata": {
+                "source": "canonical_analysis_job",
+                "job_id": job.job_id,
+                "subject_id": subject["subject_id"],
+                "subject_type": subject["subject_type"],
+                "auth_session_id": subject["auth_session_id"],
+                "chat_session_id": job.session.session_id,
+                "analysis_plan_id": job.analysis_plan_id,
+            },
+        },
+    )
+    return ai_session
+
+
+def _persist_agent_invocations(
+    job: AnalysisJob,
+    *,
+    ai_session: AiSession,
+    node_execution: dict[str, Any],
+    agent_results: list[AgentResult],
+) -> list[AgentInvocation]:
+    executions = node_execution.get("executions") or []
+    results_by_id = {result.result_id: result for result in agent_results}
+    invocations = []
+
+    for index, execution in enumerate(executions, start=1):
+        if not isinstance(execution, dict):
+            continue
+
+        agent_output = execution.get("agent_output") or {}
+        if not isinstance(agent_output, dict):
+            continue
+
+        node_code = _text(agent_output.get("node_code") or execution.get("node_code"))
+        if not node_code:
+            continue
+
+        result_id = _agent_result_id(job.job_id, node_code, index)
+        agent_result = results_by_id.get(result_id)
+        agent_node = _upsert_agent_node_definition(execution, agent_output)
+        status = _agent_invocation_status(
+            agent_output.get("status"),
+            execution.get("execution_status") or agent_output.get("execution_status"),
+        )
+
+        invocation, _created = AgentInvocation.objects.update_or_create(
+            invocation_id=_agent_invocation_id(job.job_id, node_code, index),
+            defaults={
+                "ai_session": ai_session,
+                "job": job,
+                "agent_node": agent_node,
+                "node_code": node_code,
+                "status": status,
+                "attempt_no": _positive_int_or_default(execution.get("attempt_no"), default=1),
+                "execution_mode": _text(execution.get("execution_mode")),
+                "latency_ms": _positive_int_or_none(execution.get("latency_ms")),
+                "token_count": _positive_int_or_none(execution.get("token_count")),
+                "evidence_count": len(_list_or_empty(agent_output.get("evidence"))),
+                "limitation_count": len(_list_or_empty(agent_output.get("limitations"))),
+                "retryable": status in {
+                    AgentInvocationStatus.FAILED.value,
+                    AgentInvocationStatus.RETRYING.value,
+                },
+                "error_code": _agent_invocation_error_code(agent_output, status),
+                "quota_key": ai_session.quota_key,
+                "metadata": _agent_invocation_metadata(
+                    execution=execution,
+                    agent_output=agent_output,
+                    agent_result=agent_result,
+                ),
+            },
+        )
+        invocations.append(invocation)
+
+    return invocations
+
+
+def _upsert_agent_node_definition(
+    execution: dict[str, Any],
+    agent_output: dict[str, Any],
+) -> AgentNodeDefinition | None:
+    node_code = _text(agent_output.get("node_code") or execution.get("node_code"))
+    if not node_code:
+        return None
+
+    node = execution.get("node") if isinstance(execution.get("node"), dict) else {}
+    adapter_contract = node.get("adapter_contract") if isinstance(node.get("adapter_contract"), dict) else {}
+    agent_node, _created = AgentNodeDefinition.objects.update_or_create(
+        node_code=node_code,
+        defaults={
+            "node_name": _text(agent_output.get("node_name") or node.get("node_name") or node_code),
+            "node_type": _text(agent_output.get("node_type") or node.get("node_type")) or "agent",
+            "owner": _text(agent_output.get("owner") or node.get("owner")),
+            "status": _text(node.get("status")) or "mock_ready",
+            "contract_version": _text(adapter_contract.get("contract_version")) or "agent_adapter.v1",
+            "adapter_key": _text(adapter_contract.get("function_name")),
+            "metadata": {
+                "source": "mock_node_registry",
+                "order": node.get("order"),
+                "description": node.get("description"),
+                "required_inputs": node.get("required_inputs") or [],
+                "produces": node.get("produces") or [],
+                "handoff_to": node.get("handoff_to") or [],
+            },
+        },
+    )
+    return agent_node
+
+
 def _agent_result_id(job_id: str, node_code: str, index: int) -> str:
     readable_id = f"res_{job_id}_{index}_{node_code}"
     if len(readable_id) <= 64:
         return readable_id
     digest = hashlib.sha1(f"{job_id}:{index}:{node_code}".encode("utf-8")).hexdigest()[:16]
     return f"res_{digest}_{index}"
+
+
+def _ai_session_id(job_id: str) -> str:
+    readable_id = f"ais_{job_id}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha1(job_id.encode("utf-8")).hexdigest()[:20]
+    return f"ais_{digest}"
+
+
+def _agent_invocation_id(job_id: str, node_code: str, index: int) -> str:
+    readable_id = f"ainv_{job_id}_{index}_{node_code}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha1(f"{job_id}:{index}:{node_code}".encode("utf-8")).hexdigest()[:16]
+    return f"ainv_{digest}_{index}"
 
 
 def _display_result_id(job_id: str) -> str:
@@ -631,6 +805,112 @@ def _agent_result_status(status: Any) -> str:
     if status_text in {"pending", "running", "blocked"}:
         return AgentResultStatus.PARTIAL
     return AgentResultStatus.SUCCESS
+
+
+def _agent_invocation_status(status: Any, execution_status: Any) -> str:
+    status_text = _text(status) or _text(execution_status)
+    if status_text in {choice.value for choice in AgentInvocationStatus}:
+        return status_text
+    if status_text == "pending":
+        return AgentInvocationStatus.QUEUED
+    if status_text == "running":
+        return AgentInvocationStatus.RUNNING
+    if status_text in {"blocked", "skipped"}:
+        return AgentInvocationStatus.PARTIAL
+    if status_text in {"error", "failed"}:
+        return AgentInvocationStatus.FAILED
+    return AgentInvocationStatus.SUCCESS
+
+
+def _agent_invocation_error_code(agent_output: dict[str, Any], status: str) -> str:
+    if status != AgentInvocationStatus.FAILED.value:
+        return ""
+    return _text(agent_output.get("error_code")) or "mock_agent_failed"
+
+
+def _agent_invocation_metadata(
+    *,
+    execution: dict[str, Any],
+    agent_output: dict[str, Any],
+    agent_result: AgentResult | None,
+) -> dict[str, Any]:
+    plan_step = execution.get("plan_step") if isinstance(execution.get("plan_step"), dict) else {}
+    return {
+        "source": "canonical_analysis_job",
+        "execution_id": execution.get("execution_id"),
+        "agent_result_id": agent_result.result_id if agent_result else None,
+        "plan_step": plan_step,
+        "adapter_context": execution.get("adapter_context") or {},
+        "execution_status": execution.get("execution_status") or agent_output.get("execution_status"),
+        "created_at": agent_output.get("created_at") or execution.get("created_at"),
+    }
+
+
+def _ai_subject(payload: dict[str, Any], job_payload: dict[str, Any]) -> dict[str, str]:
+    auth_context = _dict_or_empty(payload.get("auth_context")) or _dict_or_empty(
+        job_payload.get("auth_context")
+    )
+    user_id = _text(
+        payload.get("owner_id")
+        or payload.get("user_id")
+        or auth_context.get("user_id")
+        or job_payload.get("owner_id")
+        or job_payload.get("user_id")
+    )
+    guest_id = _normalize_guest_id(
+        payload.get("guest_id") or auth_context.get("guest_id") or job_payload.get("guest_id")
+    )
+    auth_session_id = _text(
+        payload.get("auth_session_id")
+        or auth_context.get("auth_session_id")
+        or job_payload.get("auth_session_id")
+    )
+
+    if user_id:
+        subject_type = "user"
+        subject_id = f"user:{user_id}"
+    elif guest_id:
+        subject_type = "guest"
+        subject_id = f"guest:{guest_id}"
+    else:
+        subject_type = "anonymous"
+        subject_id = "anonymous"
+
+    return {
+        "subject_type": subject_type,
+        "subject_id": subject_id,
+        "user_id": user_id,
+        "guest_id": guest_id,
+        "auth_session_id": auth_session_id,
+        "quota_key": f"rate_limit:{subject_id}:agent_run",
+    }
+
+
+def _get_or_create_user_account(user_id: str) -> UserAccount | None:
+    if not user_id:
+        return None
+    user, _created = UserAccount.objects.get_or_create(
+        user_id=user_id,
+        defaults={
+            "display_name": user_id,
+            "status": UserAccountStatus.ACTIVE,
+            "metadata": {"source": "canonical_analysis_job"},
+        },
+    )
+    return user
+
+
+def _get_or_create_guest_identity(guest_id: str) -> GuestIdentity | None:
+    if not guest_id:
+        return None
+    guest, _created = GuestIdentity.objects.get_or_create(
+        guest_id=guest_id,
+        defaults={
+            "status": GuestIdentityStatus.ACTIVE,
+            "metadata": {"source": "canonical_analysis_job"},
+        },
+    )
+    return guest
 
 
 def _agent_result_raw_output(
@@ -748,6 +1028,7 @@ def _case_summary(job: AnalysisJob) -> dict[str, Any]:
     latest_report = reports[0] if reports else None
     latest_event = job.events.order_by("-created_at").first()
     agent_results = list(job.agent_results.all())
+    agent_invocations = list(job.agent_invocations.all())
     next_actions = _case_next_actions(agent_results)
     limitations = _case_limitations(display_result, agent_results)
     summary = _case_display_summary(display_result)
@@ -766,6 +1047,9 @@ def _case_summary(job: AnalysisJob) -> dict[str, Any]:
         "analysis_plan_id": job.analysis_plan_id,
         "agent_result_count": len(agent_results),
         "agent_status_counts": _agent_status_counts(agent_results),
+        "agent_invocation_count": len(agent_invocations),
+        "agent_invocation_status_counts": _agent_invocation_status_counts(agent_invocations),
+        "ai_session_ids": _case_ai_session_ids(agent_invocations),
         "display_result_id": display_result.display_result_id if display_result else None,
         "report_count": len(reports),
         "latest_report_id": latest_report.report_id if latest_report else None,
@@ -831,6 +1115,24 @@ def _agent_status_counts(agent_results: list[AgentResult]) -> dict[str, int]:
     return counts
 
 
+def _agent_invocation_status_counts(agent_invocations: list[AgentInvocation]) -> dict[str, int]:
+    counts = {choice.value: 0 for choice in AgentInvocationStatus}
+    for invocation in agent_invocations:
+        counts[invocation.status] = counts.get(invocation.status, 0) + 1
+    return {status: count for status, count in counts.items() if count}
+
+
+def _case_ai_session_ids(agent_invocations: list[AgentInvocation]) -> list[str]:
+    ai_session_ids = []
+    for invocation in agent_invocations:
+        if not invocation.ai_session_id:
+            continue
+        ai_session_id = invocation.ai_session.ai_session_id
+        if ai_session_id not in ai_session_ids:
+            ai_session_ids.append(ai_session_id)
+    return ai_session_ids
+
+
 def _model_status(status: Any) -> str:
     status_text = _text(status)
     if status_text in {choice.value for choice in UploadedFileStatus}:
@@ -846,6 +1148,22 @@ def _positive_int_or_none(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return number if number >= 0 else None
+
+
+def _positive_int_or_default(value: Any, *, default: int) -> int:
+    number = _positive_int_or_none(value)
+    if number is None or number == 0:
+        return default
+    return number
+
+
+def _normalize_guest_id(value: Any) -> str:
+    text = _text(value)
+    if not text:
+        return ""
+    if text.startswith("gst_"):
+        return text
+    return f"gst_{text}"
 
 
 def _text(value: Any) -> str:

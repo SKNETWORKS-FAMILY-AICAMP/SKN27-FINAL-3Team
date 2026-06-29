@@ -155,7 +155,7 @@ docker run --rm -p 8000:8000 `
 
 ## Analysis job 예시
 
-Canonical `POST /api/analysis/jobs/` persists `analysis_jobs`, an initial `analysis_job_events` row, and one `agent_results` row per mock plan execution. Explicit `/api/mock/analysis/jobs/` remains sidecar-only for regression and smoke checks.
+Canonical `POST /api/analysis/jobs/`는 `analysis_jobs`, 최초 `analysis_job_events`, Agent별 `agent_results`, 논리 실행 단위 `ai_sessions`, Agent 호출 attempt `agent_invocations`를 함께 저장한다. 명시적 `/api/mock/analysis/jobs/`는 회귀 테스트와 smoke check를 위해 sidecar-only로 유지한다.
 
 분석 job은 메시지 1개에서 시작된 `chat_response`, `analysis_plan`, `node_execution`을 `job_id`로 묶는다.
 
@@ -189,7 +189,7 @@ Canonical `GET /api/reports/{report_id}/download/` checks the `reports` table fi
 
 ## My Case summary
 
-Canonical `GET /api/mypage/summary/?session_id=...` returns the Supervisor-facing My Case read model. It reads the persisted PostgreSQL metadata path: `chat_sessions`, `chat_messages`, `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports`.
+Canonical `GET /api/mypage/summary/?session_id=...`는 Supervisor-facing 내 사건 read model을 반환한다. 조회 경로는 PostgreSQL metadata 기준이며 `chat_sessions`, `chat_messages`, `analysis_jobs`, `analysis_job_events`, `agent_results`, `ai_sessions`, `agent_invocations`, `analysis_display_results`, `reports`를 읽는다.
 
 The response includes active case counts, saved report counts, recent analysis count, and compact case rows with agent/result/report linkage. Deadline calculation, real JWT ownership checks, and subscription/rate-limit enforcement remain explicit limitations for the next auth/session pass.
 
