@@ -6,19 +6,36 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 
 from chatbot.models import (
+    AgentFeedbackEvent,
+    AgentInvocation,
+    AgentInvocationStatus,
+    AgentNodeDefinition,
     AgentResult,
     AgentResultStatus,
     AnalysisDisplayResult,
     AnalysisJob,
     AnalysisJobEvent,
     AnalysisJobStatus,
+    AuthSession,
+    AuthSessionStatus,
     ChatMessage,
     ChatSession,
     ChatSessionStatus,
+    CodeGroup,
+    CodeItem,
+    GuestIdentity,
+    GuestIdentityStatus,
+    AiSession,
     MessageRole,
     Report,
     ReportStatus,
     ReportType,
+    Subscription,
+    SubscriptionStatus,
+    UsageEvent,
+    UsageQuota,
+    UserAccount,
+    UserAccountStatus,
     UploadedFile,
     UploadedFileStatus,
 )
@@ -34,6 +51,132 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(AgentResult._meta.db_table, "agent_results")
         self.assertEqual(AnalysisDisplayResult._meta.db_table, "analysis_display_results")
         self.assertEqual(Report._meta.db_table, "reports")
+        self.assertEqual(UserAccount._meta.db_table, "users")
+        self.assertEqual(GuestIdentity._meta.db_table, "guest_identities")
+        self.assertEqual(AuthSession._meta.db_table, "auth_sessions")
+        self.assertEqual(CodeGroup._meta.db_table, "code_groups")
+        self.assertEqual(CodeItem._meta.db_table, "code_items")
+        self.assertEqual(AgentNodeDefinition._meta.db_table, "agent_nodes")
+        self.assertEqual(AiSession._meta.db_table, "ai_sessions")
+        self.assertEqual(AgentInvocation._meta.db_table, "agent_invocations")
+        self.assertEqual(AgentFeedbackEvent._meta.db_table, "agent_feedback_events")
+        self.assertEqual(Subscription._meta.db_table, "subscriptions")
+        self.assertEqual(UsageQuota._meta.db_table, "usage_quotas")
+        self.assertEqual(UsageEvent._meta.db_table, "usage_events")
+
+    def test_auth_agent_code_and_quota_tables_link_without_replacing_mvp_backbone(self):
+        user = UserAccount.objects.create(
+            user_id="usr_identity_foundation",
+            email="tester@example.com",
+            display_name="테스터",
+            status=UserAccountStatus.ACTIVE,
+        )
+        guest = GuestIdentity.objects.create(
+            guest_id="gst_identity_foundation",
+            status=GuestIdentityStatus.ACTIVE,
+        )
+        auth_session = AuthSession.objects.create(
+            auth_session_id="auth_identity_foundation",
+            user=user,
+            guest=guest,
+            subject_type="user",
+            subject_id=f"user:{user.user_id}",
+            status=AuthSessionStatus.ACTIVE,
+        )
+        code_group = CodeGroup.objects.create(
+            group_code="agent_status",
+            name="Agent 상태",
+        )
+        code_item = CodeItem.objects.create(
+            group=code_group,
+            code="success",
+            label="성공",
+            sort_order=10,
+        )
+        subscription = Subscription.objects.create(
+            subscription_id="sub_identity_foundation",
+            user=user,
+            plan_code="free",
+            status=SubscriptionStatus.FREE,
+        )
+        quota = UsageQuota.objects.create(
+            quota_id="quota_identity_foundation",
+            subject_id=f"user:{user.user_id}",
+            scope="agent_run",
+            limit_count=10,
+            used_count=1,
+        )
+        usage = UsageEvent.objects.create(
+            usage_event_id="use_identity_foundation",
+            subject_id=f"user:{user.user_id}",
+            scope="agent_run",
+            quota_key=f"rate_limit:user:{user.user_id}:agent_run",
+        )
+
+        session = ChatSession.objects.create(
+            session_id="ses_identity_foundation",
+            owner_id=user.user_id,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        job = AnalysisJob.objects.create(
+            job_id="job_identity_foundation",
+            session=session,
+            owner_id=user.user_id,
+            routing_intent="fault_ratio",
+            status=AnalysisJobStatus.RUNNING,
+        )
+        agent_node = AgentNodeDefinition.objects.create(
+            node_code="text_ml_case_search",
+            node_name="텍스트 ML/사례 검색",
+            status="active",
+            owner="leejaegang27",
+            contract_version="agent_adapter.v1",
+        )
+        ai_session = AiSession.objects.create(
+            ai_session_id="ais_identity_foundation",
+            session=session,
+            user=user,
+            guest=guest,
+            owner_id=user.user_id,
+            status="active",
+            routing_intent="fault_ratio",
+            quota_key=f"rate_limit:user:{user.user_id}:agent_run",
+        )
+        invocation = AgentInvocation.objects.create(
+            invocation_id="ainv_identity_foundation",
+            ai_session=ai_session,
+            job=job,
+            agent_node=agent_node,
+            node_code=agent_node.node_code,
+            status=AgentInvocationStatus.SUCCESS,
+            execution_mode="mock",
+            evidence_count=1,
+            limitation_count=0,
+        )
+        agent_result = AgentResult.objects.create(
+            result_id="res_identity_foundation",
+            job=job,
+            node_code=agent_node.node_code,
+            node_name=agent_node.node_name,
+            status=AgentResultStatus.SUCCESS,
+            summary="계약 테이블 연결 확인용 결과입니다.",
+        )
+        feedback = AgentFeedbackEvent.objects.create(
+            feedback_id="afb_identity_foundation",
+            invocation=invocation,
+            agent_result=agent_result,
+            feedback_type="useful",
+            rating=5,
+        )
+
+        self.assertEqual(auth_session.user, user)
+        self.assertEqual(code_item.group, code_group)
+        self.assertEqual(subscription.user, user)
+        self.assertEqual(quota.subject_id, f"user:{user.user_id}")
+        self.assertEqual(usage.scope, "agent_run")
+        self.assertEqual(invocation.ai_session, ai_session)
+        self.assertEqual(invocation.agent_node, agent_node)
+        self.assertEqual(feedback.agent_result, agent_result)
 
     def test_storage_foundation_links_session_files_jobs_results_and_reports(self):
         session = ChatSession.objects.create(

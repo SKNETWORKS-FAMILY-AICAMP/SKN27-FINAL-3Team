@@ -68,6 +68,41 @@ class ReportType(models.TextChoices):
     GENERAL = "general", "General"
 
 
+class UserAccountStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    SUSPENDED = "suspended", "Suspended"
+    DELETED = "deleted", "Deleted"
+
+
+class GuestIdentityStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    MERGED = "merged", "Merged"
+    EXPIRED = "expired", "Expired"
+
+
+class AuthSessionStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    REVOKED = "revoked", "Revoked"
+    EXPIRED = "expired", "Expired"
+
+
+class SubscriptionStatus(models.TextChoices):
+    FREE = "free", "Free"
+    TRIAL = "trial", "Trial"
+    ACTIVE = "active", "Active"
+    PAST_DUE = "past_due", "Past due"
+    CANCELED = "canceled", "Canceled"
+
+
+class AgentInvocationStatus(models.TextChoices):
+    QUEUED = "queued", "Queued"
+    RUNNING = "running", "Running"
+    SUCCESS = "success", "Success"
+    PARTIAL = "partial", "Partial"
+    FAILED = "failed", "Failed"
+    RETRYING = "retrying", "Retrying"
+
+
 class ChatSession(TimestampedModel):
     session_id = models.CharField(max_length=64, unique=True, db_index=True)
     owner_id = models.CharField(max_length=128, blank=True, db_index=True)
@@ -351,3 +386,412 @@ class Report(TimestampedModel):
 
     def __str__(self) -> str:
         return self.report_id
+
+
+class UserAccount(TimestampedModel):
+    user_id = models.CharField(max_length=64, unique=True, db_index=True)
+    email = models.EmailField(blank=True, db_index=True)
+    display_name = models.CharField(max_length=120, blank=True)
+    status = models.CharField(
+        max_length=32,
+        choices=UserAccountStatus.choices,
+        default=UserAccountStatus.ACTIVE,
+        db_index=True,
+    )
+    auth_provider = models.CharField(max_length=64, blank=True)
+    provider_subject = models.CharField(max_length=128, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "users"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status"], name="users_status_idx"),
+            models.Index(fields=["email"], name="users_email_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.user_id
+
+
+class GuestIdentity(TimestampedModel):
+    guest_id = models.CharField(max_length=64, unique=True, db_index=True)
+    status = models.CharField(
+        max_length=32,
+        choices=GuestIdentityStatus.choices,
+        default=GuestIdentityStatus.ACTIVE,
+        db_index=True,
+    )
+    merged_user = models.ForeignKey(
+        UserAccount,
+        related_name="merged_guest_identities",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    merge_confirmed_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "guest_identities"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["status"], name="guest_status_idx"),
+            models.Index(fields=["merged_user", "status"], name="guest_user_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.guest_id
+
+
+class AuthSession(TimestampedModel):
+    auth_session_id = models.CharField(max_length=64, unique=True, db_index=True)
+    user = models.ForeignKey(
+        UserAccount,
+        related_name="auth_sessions",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    guest = models.ForeignKey(
+        GuestIdentity,
+        related_name="auth_sessions",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    subject_type = models.CharField(max_length=32, db_index=True)
+    subject_id = models.CharField(max_length=128, db_index=True)
+    status = models.CharField(
+        max_length=32,
+        choices=AuthSessionStatus.choices,
+        default=AuthSessionStatus.ACTIVE,
+        db_index=True,
+    )
+    issued_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "auth_sessions"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["subject_id", "status"], name="auth_subject_status_idx"),
+            models.Index(fields=["user", "status"], name="auth_user_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.auth_session_id
+
+
+class AuthEvent(models.Model):
+    event_id = models.CharField(max_length=64, unique=True, db_index=True)
+    user = models.ForeignKey(
+        UserAccount,
+        related_name="auth_events",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    guest = models.ForeignKey(
+        GuestIdentity,
+        related_name="auth_events",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    auth_session = models.ForeignKey(
+        AuthSession,
+        related_name="events",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    event_type = models.CharField(max_length=64, db_index=True)
+    subject_id = models.CharField(max_length=128, blank=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "auth_events"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["subject_id", "created_at"], name="auth_evt_subject_idx"),
+            models.Index(fields=["event_type"], name="auth_evt_type_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.event_id
+
+
+class Subscription(TimestampedModel):
+    subscription_id = models.CharField(max_length=64, unique=True, db_index=True)
+    user = models.ForeignKey(
+        UserAccount,
+        related_name="subscriptions",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    plan_code = models.CharField(max_length=64, default="free", db_index=True)
+    status = models.CharField(
+        max_length=32,
+        choices=SubscriptionStatus.choices,
+        default=SubscriptionStatus.FREE,
+        db_index=True,
+    )
+    starts_at = models.DateTimeField(null=True, blank=True)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "subscriptions"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["user", "status"], name="sub_user_status_idx"),
+            models.Index(fields=["plan_code", "status"], name="sub_plan_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.subscription_id
+
+
+class UsageQuota(TimestampedModel):
+    quota_id = models.CharField(max_length=64, unique=True, db_index=True)
+    subject_id = models.CharField(max_length=128, db_index=True)
+    scope = models.CharField(max_length=64, db_index=True)
+    limit_count = models.PositiveIntegerField(default=0)
+    used_count = models.PositiveIntegerField(default=0)
+    reset_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "usage_quotas"
+        ordering = ["subject_id", "scope"]
+        indexes = [
+            models.Index(fields=["subject_id", "scope"], name="quota_subject_scope_idx"),
+            models.Index(fields=["reset_at"], name="quota_reset_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.quota_id
+
+
+class UsageEvent(models.Model):
+    usage_event_id = models.CharField(max_length=64, unique=True, db_index=True)
+    subject_id = models.CharField(max_length=128, db_index=True)
+    scope = models.CharField(max_length=64, db_index=True)
+    amount = models.PositiveIntegerField(default=1)
+    quota_key = models.CharField(max_length=160, blank=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "usage_events"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["subject_id", "scope"], name="usage_subject_scope_idx"),
+            models.Index(fields=["quota_key"], name="usage_quota_key_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.usage_event_id
+
+
+class CodeGroup(TimestampedModel):
+    group_code = models.CharField(max_length=64, unique=True, db_index=True)
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "code_groups"
+        ordering = ["group_code"]
+        indexes = [
+            models.Index(fields=["is_active"], name="code_groups_active_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.group_code
+
+
+class CodeItem(TimestampedModel):
+    group = models.ForeignKey(CodeGroup, related_name="items", on_delete=models.CASCADE)
+    code = models.CharField(max_length=64)
+    label = models.CharField(max_length=160)
+    description = models.TextField(blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "code_items"
+        ordering = ["group", "sort_order", "code"]
+        constraints = [
+            models.UniqueConstraint(fields=["group", "code"], name="code_items_group_code_uniq"),
+        ]
+        indexes = [
+            models.Index(fields=["group", "is_active"], name="code_items_group_active_idx"),
+            models.Index(fields=["group", "sort_order"], name="code_items_group_sort_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.group.group_code}:{self.code}"
+
+
+class AgentNodeDefinition(TimestampedModel):
+    node_code = models.CharField(max_length=64, unique=True, db_index=True)
+    node_name = models.CharField(max_length=200)
+    node_type = models.CharField(max_length=64, default="agent", db_index=True)
+    owner = models.CharField(max_length=120, blank=True)
+    status = models.CharField(max_length=64, default="planned", db_index=True)
+    contract_version = models.CharField(max_length=64, blank=True)
+    adapter_key = models.CharField(max_length=120, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "agent_nodes"
+        ordering = ["node_code"]
+        indexes = [
+            models.Index(fields=["status"], name="agent_nodes_status_idx"),
+            models.Index(fields=["owner", "status"], name="agent_nodes_owner_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.node_code
+
+
+class AiSession(TimestampedModel):
+    ai_session_id = models.CharField(max_length=64, unique=True, db_index=True)
+    session = models.ForeignKey(
+        ChatSession,
+        related_name="ai_sessions",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    user = models.ForeignKey(
+        UserAccount,
+        related_name="ai_sessions",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    guest = models.ForeignKey(
+        GuestIdentity,
+        related_name="ai_sessions",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    owner_id = models.CharField(max_length=128, blank=True, db_index=True)
+    status = models.CharField(max_length=32, default="active", db_index=True)
+    routing_intent = models.CharField(max_length=64, blank=True, db_index=True)
+    quota_key = models.CharField(max_length=160, blank=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "ai_sessions"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["owner_id", "status"], name="ai_sess_owner_status_idx"),
+            models.Index(fields=["session", "status"], name="ai_sess_session_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.ai_session_id
+
+
+class AgentInvocation(models.Model):
+    invocation_id = models.CharField(max_length=64, unique=True, db_index=True)
+    ai_session = models.ForeignKey(
+        AiSession,
+        related_name="agent_invocations",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    job = models.ForeignKey(
+        AnalysisJob,
+        related_name="agent_invocations",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    agent_node = models.ForeignKey(
+        AgentNodeDefinition,
+        related_name="invocations",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    node_code = models.CharField(max_length=64, db_index=True)
+    status = models.CharField(
+        max_length=32,
+        choices=AgentInvocationStatus.choices,
+        default=AgentInvocationStatus.QUEUED,
+        db_index=True,
+    )
+    attempt_no = models.PositiveIntegerField(default=1)
+    execution_mode = models.CharField(max_length=64, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    token_count = models.PositiveIntegerField(null=True, blank=True)
+    cost_estimate = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    evidence_count = models.PositiveIntegerField(default=0)
+    limitation_count = models.PositiveIntegerField(default=0)
+    retryable = models.BooleanField(default=False)
+    error_code = models.CharField(max_length=120, blank=True, db_index=True)
+    quota_key = models.CharField(max_length=160, blank=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "agent_invocations"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["job", "node_code"], name="agent_inv_job_node_idx"),
+            models.Index(fields=["ai_session", "status"], name="agent_inv_session_idx"),
+            models.Index(fields=["status"], name="agent_inv_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.invocation_id
+
+
+class AgentFeedbackEvent(models.Model):
+    feedback_id = models.CharField(max_length=64, unique=True, db_index=True)
+    invocation = models.ForeignKey(
+        AgentInvocation,
+        related_name="feedback_events",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    agent_result = models.ForeignKey(
+        AgentResult,
+        related_name="feedback_events",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    feedback_type = models.CharField(max_length=64, db_index=True)
+    rating = models.IntegerField(null=True, blank=True)
+    comment = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "agent_feedback_events"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["invocation", "created_at"], name="agent_fb_inv_idx"),
+            models.Index(fields=["feedback_type"], name="agent_fb_type_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.feedback_id
