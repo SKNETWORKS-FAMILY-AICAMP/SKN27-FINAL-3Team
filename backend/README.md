@@ -175,6 +175,8 @@ Canonical `POST /api/analysis/jobs/` persists `analysis_jobs`, an initial `analy
 
 ## Analysis result display DTO
 
+Canonical `GET /api/analysis/results/{job_id}/` saves the display snapshot to `analysis_display_results` when the matching canonical `analysis_jobs` row exists. Explicit `/api/mock/analysis/results/{job_id}/` remains sidecar-only.
+
 `GET /api/mock/analysis/results/{job_id}/`는 프론트 화면이 바로 사용하는 표시용 결과를 반환한다. Canonical shadow endpoint는 `GET /api/analysis/results/{job_id}/`이며 응답에 `api_surface: "canonical_mock"`, `execution_mode: "mock"`을 포함하고 report/file/job 링크를 `/api/...` 형태로 변환한다.
 
 반환 필드는 `assistant_message`, `progress`, `cards`, `pending_questions`, `attachments`, `report_links`, `evidence`, `agent_results`, `limitations` 중심이다. 디버깅용 원본 묶음인 `analysis_plan`, `node_execution`, `chat_response`는 `GET /api/mock/analysis/jobs/{job_id}/`에서만 조회한다.

@@ -14,6 +14,7 @@ from app.services.attachment_mock_service import (
 from chatbot.models import (
     AgentResult,
     AgentResultStatus,
+    AnalysisDisplayResult,
     AnalysisJob,
     AnalysisJobEvent,
     AnalysisJobStatus,
@@ -250,6 +251,39 @@ def persist_analysis_job_execution(
     }
 
 
+def persist_analysis_display_result(result_payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist the canonical Supervisor display snapshot for an analysis job."""
+
+    job_id = _text(result_payload.get("job_id"))
+    if not job_id:
+        return _display_result_persistence_skipped("missing_job_id")
+
+    job = AnalysisJob.objects.filter(job_id=job_id).first()
+    if job is None:
+        return _display_result_persistence_skipped("analysis_job_not_found")
+
+    display_result, _created = AnalysisDisplayResult.objects.update_or_create(
+        display_result_id=_display_result_id(job.job_id),
+        defaults={
+            "job": job,
+            "assistant_message": _dict_or_empty(result_payload.get("assistant_message")),
+            "progress": _list_or_empty(result_payload.get("progress")),
+            "cards": _list_or_empty(result_payload.get("cards")),
+            "pending_questions": _list_or_empty(result_payload.get("pending_questions")),
+            "attachments": _list_or_empty(result_payload.get("attachments")),
+            "report_links": _list_or_empty(result_payload.get("report_links")),
+            "limitations": _list_or_empty(result_payload.get("limitations")),
+        },
+    )
+
+    return {
+        "backend": "postgresql",
+        "table": AnalysisDisplayResult._meta.db_table,
+        "display_result_id": display_result.display_result_id,
+        "status": "saved",
+    }
+
+
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
     metadata = uploaded_file.metadata or {}
     checks = dict(metadata.get("checks") or {})
@@ -440,6 +474,14 @@ def _agent_result_id(job_id: str, node_code: str, index: int) -> str:
     return f"res_{digest}_{index}"
 
 
+def _display_result_id(job_id: str) -> str:
+    readable_id = f"disp_{job_id}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha1(job_id.encode("utf-8")).hexdigest()[:20]
+    return f"disp_{digest}"
+
+
 def _agent_result_status(status: Any) -> str:
     status_text = _text(status)
     if status_text in {choice.value for choice in AgentResultStatus}:
@@ -470,6 +512,15 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
 
 def _list_or_empty(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _display_result_persistence_skipped(reason: str) -> dict[str, Any]:
+    return {
+        "backend": "postgresql",
+        "table": AnalysisDisplayResult._meta.db_table,
+        "status": "skipped",
+        "reason": reason,
+    }
 
 
 def _model_status(status: Any) -> str:

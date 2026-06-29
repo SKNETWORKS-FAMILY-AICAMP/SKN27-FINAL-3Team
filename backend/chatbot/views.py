@@ -43,6 +43,7 @@ from app.services.history_event_mock_service import (
     subject_from_payload,
 )
 from chatbot.api_response import (
+    canonicalize_mock_paths as _canonicalize_mock_paths,
     is_canonical_mock_request as _is_canonical_mock_request,
     json_response as _json_response,
 )
@@ -54,6 +55,7 @@ from chatbot.request_parsing import (
 from chatbot.repositories import (
     get_uploaded_file,
     list_uploaded_files,
+    persist_analysis_display_result,
     persist_analysis_job_execution,
     persist_chat_message_analysis_boundary,
     register_uploaded_file,
@@ -273,6 +275,9 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
+    if _is_canonical_mock_request(request):
+        result = _canonicalize_mock_paths(result)
+        result["persistence"] = persist_analysis_display_result(result)
     return _json_response(request, {"result": result})
 
 
