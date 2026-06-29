@@ -53,6 +53,7 @@ from chatbot.request_parsing import (
     request_payload as _request_payload,
 )
 from chatbot.repositories import (
+    get_mycase_summary,
     get_report_download_metadata,
     get_uploaded_file,
     list_uploaded_files,
@@ -158,6 +159,17 @@ def history_events(request: HttpRequest) -> JsonResponse:
             ],
         },
     )
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def mypage_summary(request: HttpRequest) -> JsonResponse:
+    owner_id = request.GET.get("owner_id") or request.GET.get("user_id")
+    summary = get_mycase_summary(
+        session_id=request.GET.get("session_id"),
+        owner_id=owner_id,
+        limit=_positive_int(request.GET.get("limit"), default=10),
+    )
+    return _json_response(request, summary)
 
 
 @require_http_methods(["GET", "OPTIONS"])

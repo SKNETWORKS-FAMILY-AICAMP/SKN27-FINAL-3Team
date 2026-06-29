@@ -89,6 +89,7 @@ docker run --rm -p 8000:8000 `
 |---|---|---|
 | `POST` | `/api/auth/guest-session/` | - |
 | `GET` | `/api/auth/me/` | - |
+| `GET` | `/api/mypage/summary/` | - |
 | `GET` | `/api/history/` | `/api/mock/history/` |
 | `POST` | `/api/chat/sessions/` | `/api/mock/chat/sessions/` |
 | `POST` | `/api/chat/messages/` | `/api/mock/chat/messages/` |
@@ -108,6 +109,7 @@ docker run --rm -p 8000:8000 `
 | `GET` | `/api/health/` | backend health와 demo scenario 목록 |
 | `POST` | `/api/auth/guest-session/` | 비회원 `guest_id`, rate limit key, merge policy mock 발급 |
 | `GET` | `/api/auth/me/` | 현재 Bearer/guest identity와 `auth_session_id` 분리 상태 확인 |
+| `GET` | `/api/mypage/summary/` | canonical My Case progress summary from `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports` |
 | `GET` | `/api/history/` | `history_event.v1` 표준-라이트 mock sidecar 이벤트 조회 |
 | `GET` | `/api/mock/chat/scenarios/` | `fine_notice`, `fault_ratio` 시나리오 목록 |
 | `GET` | `/api/mock/attachments/` | session별 mock attachment metadata 목록 |
@@ -184,6 +186,12 @@ Canonical `GET /api/analysis/results/{job_id}/` saves the display snapshot to `a
 Canonical `POST /api/reports/` saves report metadata to `reports` and links it to `analysis_jobs` plus `analysis_display_results` when available. The generated artifact still uses a `mock://reports/{report_id}` placeholder until the object storage adapter is introduced.
 
 Canonical `GET /api/reports/{report_id}/download/` checks the `reports` table first. When metadata exists, the response includes `X-Report-Persistence`, `X-Report-Storage-Backend`, and `X-Report-Storage-URI`; otherwise it falls back to the existing mock text download.
+
+## My Case summary
+
+Canonical `GET /api/mypage/summary/?session_id=...` returns the Supervisor-facing My Case read model. It reads the persisted PostgreSQL metadata path: `chat_sessions`, `chat_messages`, `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports`.
+
+The response includes active case counts, saved report counts, recent analysis count, and compact case rows with agent/result/report linkage. Deadline calculation, real JWT ownership checks, and subscription/rate-limit enforcement remain explicit limitations for the next auth/session pass.
 
 ## Agent adapter 계약
 

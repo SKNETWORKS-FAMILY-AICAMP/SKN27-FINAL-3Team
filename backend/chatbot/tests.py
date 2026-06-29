@@ -314,6 +314,25 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["error"]["code"], "auth_required")
 
+    def test_mypage_summary_endpoint_requires_authorization_header(self):
+        response = Client().get("/api/mypage/summary/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "auth_required")
+
+    def test_mypage_summary_returns_empty_collection_for_session(self):
+        response = self.client.get("/api/mypage/summary/?session_id=ses_empty_mycase")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["api_surface"], "canonical_mock")
+        self.assertEqual(body["storage"]["backend"], "postgresql")
+        self.assertIn("analysis_jobs", body["storage"]["tables"])
+        self.assertEqual(body["active_cases"], 0)
+        self.assertEqual(body["saved_reports"], 0)
+        self.assertEqual(body["recent_analysis_count"], 0)
+        self.assertEqual(body["cases"], [])
+
     def test_history_endpoint_returns_standard_light_session_events(self):
         raw_user_text = "이 고지서 원문은 history metadata에 저장되면 안 됩니다."
         response = self.client.post(
@@ -1004,6 +1023,48 @@ class ChatbotMockApiTests(TestCase):
             "Report metadata download for rep_canonical_smoke",
             download_response.content.decode("utf-8"),
         )
+
+        summary_response = self.client.get(f"/api/mypage/summary/?session_id={session_id}")
+        self.assertEqual(summary_response.status_code, 200)
+        summary_body = summary_response.json()
+        self.assertEqual(summary_body["api_surface"], "canonical_mock")
+        self.assertEqual(summary_body["execution_mode"], "mock")
+        self.assertEqual(summary_body["storage"]["backend"], "postgresql")
+        self.assertEqual(
+            set(summary_body["storage"]["tables"]),
+            {
+                "chat_sessions",
+                "chat_messages",
+                "analysis_jobs",
+                "analysis_job_events",
+                "agent_results",
+                "analysis_display_results",
+                "reports",
+            },
+        )
+        self.assertEqual(summary_body["active_cases"], 0)
+        self.assertEqual(summary_body["due_soon_cases"], 0)
+        self.assertEqual(summary_body["saved_reports"], 1)
+        self.assertEqual(summary_body["recent_analysis_count"], len(summary_body["cases"]))
+        self.assertGreaterEqual(summary_body["recent_analysis_count"], 1)
+        case = next(item for item in summary_body["cases"] if item["job_id"] == job["job_id"])
+        self.assertEqual(case["case_id"], job["job_id"])
+        self.assertEqual(case["job_id"], job["job_id"])
+        self.assertEqual(case["session_id"], session_id)
+        self.assertEqual(case["case_status"], "success")
+        self.assertEqual(case["routing_intent"], "objection_request")
+        self.assertEqual(case["agent_result_count"], len(job["node_execution"]["executions"]))
+        self.assertEqual(
+            sum(case["agent_status_counts"].values()),
+            case["agent_result_count"],
+        )
+        self.assertGreaterEqual(case["agent_status_counts"]["success"], 1)
+        self.assertEqual(case["display_result_id"], result["persistence"]["display_result_id"])
+        self.assertEqual(case["report_count"], 1)
+        self.assertEqual(case["latest_report_id"], report_body["report_id"])
+        self.assertEqual(case["latest_report_status"], ReportStatus.READY)
+        self.assertTrue(case["next_actions"])
+        self.assertTrue(case["limitations"])
 
     def test_analysis_result_endpoint_returns_404_for_missing_job(self):
         response = self.client.get("/api/mock/analysis/results/job_missing/")

@@ -1,4 +1,4 @@
-> 2026-06-29 update: canonical `POST /api/analysis/jobs/` now persists the job boundary plus one `agent_results` row per mock plan execution. Canonical `GET /api/analysis/results/{job_id}/` persists the Supervisor display snapshot to `analysis_display_results`. Canonical `POST /api/reports/` persists report metadata to `reports` with a `mock://reports/{report_id}` artifact placeholder. Canonical report download now checks the `reports` row first and exposes storage metadata headers. Explicit `/api/mock/...` paths remain sidecar-only. The next persistence target is the real object storage adapter/download authorization path.
+> 2026-06-29 update: canonical `POST /api/analysis/jobs/` now persists the job boundary plus one `agent_results` row per mock plan execution. Canonical `GET /api/analysis/results/{job_id}/` persists the Supervisor display snapshot to `analysis_display_results`. Canonical `POST /api/reports/` persists report metadata to `reports` with a `mock://reports/{report_id}` artifact placeholder. Canonical report download now checks the `reports` row first and exposes storage metadata headers. Canonical `GET /api/mypage/summary/` now summarizes My Case progress from `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports`. Explicit `/api/mock/...` paths remain sidecar-only. The next persistence target is the real object storage adapter/download authorization path.
 
 # PostgreSQL ERD 초안
 
@@ -189,7 +189,7 @@ erDiagram
 | 분석 진행 상태 | `POST /api/analysis/jobs/`, `GET /api/analysis/jobs/{job_id}/` | `analysis_jobs`, `analysis_job_events` |
 | 분석 결과 카드 | `GET /api/analysis/results/{job_id}/` | `agent_results`, `analysis_display_results` |
 | 리포트 저장/다운로드 | `POST /api/reports/`, `GET /api/reports/{report_id}/download/` | `reports`, `analysis_display_results` |
-| 마이페이지/이력 | `GET /api/mypage/summary/`, `GET /api/history/` 후보 | `chat_sessions`, `analysis_jobs`, `reports` 집계 |
+| 마이페이지/이력 | `GET /api/mypage/summary/`, `GET /api/history/` | `chat_sessions`, `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, `reports` 집계 |
 
 ## 5. 연결 전 정책
 

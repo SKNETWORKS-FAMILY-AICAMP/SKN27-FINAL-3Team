@@ -22,6 +22,7 @@ MOCK_AUTH_PROTECTED_PREFIXES = (
     "/api/chat/",
     "/api/files/",
     "/api/history/",
+    "/api/mypage/",
     "/api/mock/",
     "/api/reports/",
 )

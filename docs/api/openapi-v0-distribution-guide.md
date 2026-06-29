@@ -103,6 +103,7 @@ Agent output에는 `status`, `summary`, `structured_result`, `evidence`, `next_a
 | `POST` | `/api/agents/plans/run/` | Django, Supervisor, Agent |
 | `POST` | `/api/reports/` | Frontend, Django |
 | `GET` | `/api/reports/{report_id}/download/` | Frontend, Django |
+| `GET` | `/api/mypage/summary/` | Frontend, Django, Supervisor |
 | `GET` | `/api/history/` | Frontend, Django, Supervisor |
 
 ## 5. 아직 구현 금지 항목
@@ -115,7 +116,6 @@ Agent output에는 `status`, `summary`, `structured_result`, `evidence`, `next_a
 | `GET /api/chat/sessions/{session_id}/messages/` | 메시지 원문 조회와 보관 정책 미확정 |
 | `GET /api/reports/`, `GET /api/reports/{report_id}/` | 리포트 목록/상세 DB 연결 미확정 |
 | `POST /api/reports/objection-draft/` | PDF에는 있으나 현재 mock route 없음 |
-| `GET /api/mypage/summary/` | 마이페이지 집계 기준 미확정 |
 | 히스토리 TTL/DB table | 보관 기간, 조회 권한, migration 시점 미확정 |
 
 ## 6. 검증 방법
