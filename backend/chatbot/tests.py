@@ -769,6 +769,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job["status"], "success")
         self.assertEqual(job["analysis_plan"]["input_summary"]["attachment_purposes"], ["fine_notice"])
         self.assertEqual(job["node_execution"]["job_id"], job["job_id"])
+        self.assertFalse(AnalysisJob.objects.filter(job_id=job["job_id"]).exists())
 
         detail = self.client.get(f"/api/mock/analysis/jobs/{job['job_id']}/")
         self.assertEqual(detail.status_code, 200)
@@ -805,9 +806,46 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["api_surface"], "canonical_mock")
         self.assertEqual(body["execution_mode"], "mock")
         self.assertEqual(job["status"], "success")
+        self.assertEqual(job["persistence"]["backend"], "postgresql")
+        self.assertEqual(job["persistence"]["analysis_job_table"], "analysis_jobs")
+        self.assertEqual(job["persistence"]["agent_results_table"], "agent_results")
+        self.assertEqual(
+            job["persistence"]["agent_results_saved"],
+            len(job["node_execution"]["executions"]),
+        )
         self.assertIn(
             "/api/reports",
             {link["endpoint"] for link in job["chat_response"]["report_links"]},
+        )
+
+        persisted_job = AnalysisJob.objects.get(job_id=job["job_id"])
+        self.assertEqual(persisted_job.metadata["source"], "canonical_analysis_job")
+        self.assertEqual(persisted_job.events.get().metadata["source"], "canonical_analysis_job")
+        persisted_results = list(persisted_job.agent_results.order_by("created_at"))
+        self.assertEqual(len(persisted_results), len(job["node_execution"]["executions"]))
+        fine_notice_result = persisted_job.agent_results.get(node_code="fine_notice_analysis")
+        self.assertEqual(fine_notice_result.status, AgentResultStatus.SUCCESS)
+        self.assertIn("notice_fields", fine_notice_result.structured_result)
+        self.assertEqual(fine_notice_result.raw_output["source"], "mock_node_execution")
+        self.assertNotIn("agent_input", fine_notice_result.raw_output)
+
+        repeat_response = self.client.post(
+            "/api/analysis/jobs/",
+            data={
+                "session_id": "ses_canonical_job",
+                "user_text": "repeat same job",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "job_id": job["job_id"],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(repeat_response.status_code, 200)
+        repeat_job = repeat_response.json()["job"]
+        self.assertEqual(repeat_job["job_id"], job["job_id"])
+        self.assertEqual(
+            AgentResult.objects.filter(job__job_id=job["job_id"]).count(),
+            repeat_job["persistence"]["agent_results_saved"],
         )
 
         detail = self.client.get(f"/api/analysis/jobs/{job['job_id']}/")

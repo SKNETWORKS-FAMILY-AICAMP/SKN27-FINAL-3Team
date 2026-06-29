@@ -153,6 +153,8 @@ docker run --rm -p 8000:8000 `
 
 ## Analysis job 예시
 
+Canonical `POST /api/analysis/jobs/` persists `analysis_jobs`, an initial `analysis_job_events` row, and one `agent_results` row per mock plan execution. Explicit `/api/mock/analysis/jobs/` remains sidecar-only for regression and smoke checks.
+
 분석 job은 메시지 1개에서 시작된 `chat_response`, `analysis_plan`, `node_execution`을 `job_id`로 묶는다.
 
 ```json

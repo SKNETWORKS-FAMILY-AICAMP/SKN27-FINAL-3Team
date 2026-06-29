@@ -1,3 +1,5 @@
+> 2026-06-29 update: canonical `POST /api/analysis/jobs/` now persists the job boundary plus one `agent_results` row per mock plan execution. Explicit `/api/mock/analysis/jobs/` remains sidecar-only. The next persistence target is Supervisor display DTO/report storage.
+
 # PostgreSQL ERD 초안
 
 | 항목 | 내용 |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
 from chatbot.models import (
+    AgentResult,
+    AgentResultStatus,
     AnalysisJob,
     AnalysisJobEvent,
     AnalysisJobStatus,
@@ -160,6 +163,93 @@ def persist_chat_message_analysis_boundary(
     }
 
 
+def persist_analysis_job_execution(
+    payload: dict[str, Any],
+    job_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist a canonical analysis job and its agent execution outputs."""
+
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
+    if session is None:
+        raise ValueError("job_payload must include session_id")
+
+    message_id = _text(job_payload.get("message_id"))
+    job_id = _text(job_payload.get("job_id"))
+    if not job_id:
+        raise ValueError("job_payload must include job_id")
+
+    chat_response = job_payload.get("chat_response") or {}
+    analysis_plan = job_payload.get("analysis_plan") or chat_response.get("analysis_plan") or {}
+    progress = {
+        "active_node": job_payload.get("active_node"),
+        "message": job_payload.get("progress_message"),
+    }
+
+    with transaction.atomic():
+        message = None
+        if message_id:
+            message, _message_created = ChatMessage.objects.update_or_create(
+                message_id=message_id,
+                defaults={
+                    "session": session,
+                    "role": MessageRole.USER,
+                    "content": _message_content(payload),
+                    "routing_intent": _text(job_payload.get("routing_intent")),
+                    "metadata": {
+                        "source": "canonical_analysis_job",
+                        "analysis_job_id": job_id,
+                        "mock_scenario": job_payload.get("mock_scenario"),
+                        "response_status": job_payload.get("status"),
+                        "attachments": job_payload.get("attachments", []),
+                        "attachment_resolution": job_payload.get("attachment_resolution", {}),
+                        "raw_payload": _safe_payload(payload),
+                    },
+                },
+            )
+
+        job, _job_created = AnalysisJob.objects.update_or_create(
+            job_id=job_id,
+            defaults={
+                "session": session,
+                "message": message,
+                "owner_id": owner_id or session.owner_id,
+                "routing_intent": _text(job_payload.get("routing_intent")),
+                "mock_scenario": _text(job_payload.get("mock_scenario")),
+                "status": _analysis_job_status(job_payload.get("status")),
+                "active_node": _text(job_payload.get("active_node")),
+                "progress_message": _text(job_payload.get("progress_message")),
+                "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
+                "status_counts": job_payload.get("status_counts") or {},
+                "metadata": {
+                    "source": "canonical_analysis_job",
+                    "analysis_plan": analysis_plan,
+                    "assistant_message": chat_response.get("assistant_message"),
+                    "case_status": chat_response.get("case_status"),
+                    "cards": chat_response.get("cards", []),
+                    "pending_questions": chat_response.get("pending_questions", []),
+                    "report_links": chat_response.get("report_links", []),
+                    "attachments": job_payload.get("attachments", []),
+                    "attachment_resolution": job_payload.get("attachment_resolution", {}),
+                    "limitations": job_payload.get("limitations", []),
+                },
+            },
+        )
+        _upsert_initial_job_event(job, progress=progress, source="canonical_analysis_job")
+        agent_results = _persist_agent_results(job, job_payload.get("node_execution") or {})
+
+    return {
+        "backend": "postgresql",
+        "tables": [AnalysisJob._meta.db_table, AgentResult._meta.db_table],
+        "analysis_job_table": AnalysisJob._meta.db_table,
+        "agent_results_table": AgentResult._meta.db_table,
+        "agent_results_saved": len(agent_results),
+        "agent_result_ids": [result.result_id for result in agent_results],
+        "node_codes": [result.node_code for result in agent_results],
+        "status": "saved",
+    }
+
+
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
     metadata = uploaded_file.metadata or {}
     checks = dict(metadata.get("checks") or {})
@@ -282,6 +372,7 @@ def _upsert_initial_job_event(
     job: AnalysisJob,
     *,
     progress: dict[str, Any],
+    source: str = "canonical_chat_message",
 ) -> None:
     status = job.status
     active_node = _text(progress.get("active_node"))
@@ -293,15 +384,92 @@ def _upsert_initial_job_event(
             status=status,
             active_node=active_node,
             message=message,
-            metadata={"source": "canonical_chat_message"},
+            metadata={"source": source},
         )
         return
 
     first_event.status = status
     first_event.active_node = active_node
     first_event.message = message
-    first_event.metadata = {"source": "canonical_chat_message"}
+    first_event.metadata = {"source": source}
     first_event.save(update_fields=["status", "active_node", "message", "metadata"])
+
+
+def _persist_agent_results(
+    job: AnalysisJob,
+    node_execution: dict[str, Any],
+) -> list[AgentResult]:
+    executions = node_execution.get("executions") or []
+    agent_results = []
+    for index, execution in enumerate(executions, start=1):
+        if not isinstance(execution, dict):
+            continue
+
+        agent_output = execution.get("agent_output") or {}
+        if not isinstance(agent_output, dict):
+            continue
+
+        node_code = _text(agent_output.get("node_code") or execution.get("node_code"))
+        if not node_code:
+            continue
+
+        agent_result, _created = AgentResult.objects.update_or_create(
+            result_id=_agent_result_id(job.job_id, node_code, index),
+            defaults={
+                "job": job,
+                "node_code": node_code,
+                "node_name": _text(agent_output.get("node_name")),
+                "status": _agent_result_status(agent_output.get("status")),
+                "summary": _text(agent_output.get("summary")),
+                "structured_result": _dict_or_empty(agent_output.get("structured_result")),
+                "evidence": _list_or_empty(agent_output.get("evidence")),
+                "next_actions": _list_or_empty(agent_output.get("next_actions")),
+                "limitations": _list_or_empty(agent_output.get("limitations")),
+                "raw_output": _agent_result_raw_output(execution, agent_output),
+            },
+        )
+        agent_results.append(agent_result)
+    return agent_results
+
+
+def _agent_result_id(job_id: str, node_code: str, index: int) -> str:
+    readable_id = f"res_{job_id}_{index}_{node_code}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha1(f"{job_id}:{index}:{node_code}".encode("utf-8")).hexdigest()[:16]
+    return f"res_{digest}_{index}"
+
+
+def _agent_result_status(status: Any) -> str:
+    status_text = _text(status)
+    if status_text in {choice.value for choice in AgentResultStatus}:
+        return status_text
+    if status_text in {"pending", "running", "blocked"}:
+        return AgentResultStatus.PARTIAL
+    return AgentResultStatus.SUCCESS
+
+
+def _agent_result_raw_output(
+    execution: dict[str, Any],
+    agent_output: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "source": "mock_node_execution",
+        "execution_id": execution.get("execution_id"),
+        "execution_mode": execution.get("execution_mode"),
+        "adapter_context": execution.get("adapter_context") or {},
+        "plan_step": execution.get("plan_step") or {},
+        "agent_output": agent_output,
+        "created_at": agent_output.get("created_at") or execution.get("created_at"),
+    }
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list_or_empty(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 def _model_status(status: Any) -> str:

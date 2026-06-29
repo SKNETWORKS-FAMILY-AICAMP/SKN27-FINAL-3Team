@@ -54,6 +54,7 @@ from chatbot.request_parsing import (
 from chatbot.repositories import (
     get_uploaded_file,
     list_uploaded_files,
+    persist_analysis_job_execution,
     persist_chat_message_analysis_boundary,
     register_uploaded_file,
 )
@@ -207,6 +208,8 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
 
     body = _json_body(request)
     job = create_analysis_job(body)
+    if _is_canonical_mock_request(request):
+        job["persistence"] = persist_analysis_job_execution(body, job)
     actor = _history_actor(request, body)
     source = _history_source(request)
     subject = subject_from_payload(
