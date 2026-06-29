@@ -14,6 +14,7 @@ from app.services.attachment_mock_service import (
 from chatbot.models import (
     AgentResult,
     AgentResultStatus,
+    AnalysisDisplayResult,
     AnalysisJob,
     AnalysisJobEvent,
     AnalysisJobStatus,
@@ -21,6 +22,9 @@ from chatbot.models import (
     ChatSession,
     ChatSessionStatus,
     MessageRole,
+    Report,
+    ReportStatus,
+    ReportType,
     UploadedFile,
     UploadedFileStatus,
 )
@@ -250,6 +254,93 @@ def persist_analysis_job_execution(
     }
 
 
+def persist_analysis_display_result(result_payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist the canonical Supervisor display snapshot for an analysis job."""
+
+    job_id = _text(result_payload.get("job_id"))
+    if not job_id:
+        return _display_result_persistence_skipped("missing_job_id")
+
+    job = AnalysisJob.objects.filter(job_id=job_id).first()
+    if job is None:
+        return _display_result_persistence_skipped("analysis_job_not_found")
+
+    display_result, _created = AnalysisDisplayResult.objects.update_or_create(
+        display_result_id=_display_result_id(job.job_id),
+        defaults={
+            "job": job,
+            "assistant_message": _dict_or_empty(result_payload.get("assistant_message")),
+            "progress": _list_or_empty(result_payload.get("progress")),
+            "cards": _list_or_empty(result_payload.get("cards")),
+            "pending_questions": _list_or_empty(result_payload.get("pending_questions")),
+            "attachments": _list_or_empty(result_payload.get("attachments")),
+            "report_links": _list_or_empty(result_payload.get("report_links")),
+            "limitations": _list_or_empty(result_payload.get("limitations")),
+        },
+    )
+
+    return {
+        "backend": "postgresql",
+        "table": AnalysisDisplayResult._meta.db_table,
+        "display_result_id": display_result.display_result_id,
+        "status": "saved",
+    }
+
+
+def persist_report_action(
+    payload: dict[str, Any],
+    report_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist a canonical report action as report metadata."""
+
+    report_id = _text(report_payload.get("report_id"))
+    if not report_id:
+        return _report_persistence_skipped("missing_report_id")
+
+    owner_id = _owner_id(payload)
+    job = AnalysisJob.objects.filter(job_id=_text(payload.get("job_id"))).first()
+    session = job.session if job else _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
+    display_result = _display_result_for_job(job)
+
+    report, _created = Report.objects.update_or_create(
+        report_id=report_id,
+        defaults={
+            "owner_id": owner_id or (job.owner_id if job else "") or (session.owner_id if session else ""),
+            "session": session,
+            "job": job,
+            "display_result": display_result,
+            "report_type": _report_type(payload.get("report_type")),
+            "status": _report_status(report_payload.get("status")),
+            "title": _report_title(payload, report_payload),
+            "storage_uri": _text(payload.get("storage_uri")) or f"mock://reports/{report_id}",
+            "content_summary": _report_content_summary(display_result, report_payload),
+            "content": {
+                "format": _text(payload.get("format")) or "mock_text",
+                "action": _text(payload.get("action")) or "save",
+                "case_id": report_payload.get("case_id"),
+                "download_url": report_payload.get("download_url"),
+            },
+            "metadata": {
+                "source": "canonical_report_action",
+                "action": _text(payload.get("action")) or "save",
+                "mock_status": report_payload.get("status"),
+                "limitations": report_payload.get("limitations", []),
+                "object_storage_status": "mock_placeholder",
+                "raw_payload": _safe_payload(payload),
+            },
+        },
+    )
+
+    return {
+        "backend": "postgresql",
+        "table": Report._meta.db_table,
+        "report_id": report.report_id,
+        "status": "metadata_saved",
+        "storage_uri": report.storage_uri,
+        "object_storage": "mock_placeholder",
+    }
+
+
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
     metadata = uploaded_file.metadata or {}
     checks = dict(metadata.get("checks") or {})
@@ -440,6 +531,23 @@ def _agent_result_id(job_id: str, node_code: str, index: int) -> str:
     return f"res_{digest}_{index}"
 
 
+def _display_result_id(job_id: str) -> str:
+    readable_id = f"disp_{job_id}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha1(job_id.encode("utf-8")).hexdigest()[:20]
+    return f"disp_{digest}"
+
+
+def _display_result_for_job(job: AnalysisJob | None) -> AnalysisDisplayResult | None:
+    if job is None:
+        return None
+    try:
+        return job.display_result
+    except AnalysisDisplayResult.DoesNotExist:
+        return None
+
+
 def _agent_result_status(status: Any) -> str:
     status_text = _text(status)
     if status_text in {choice.value for choice in AgentResultStatus}:
@@ -470,6 +578,65 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
 
 def _list_or_empty(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _display_result_persistence_skipped(reason: str) -> dict[str, Any]:
+    return {
+        "backend": "postgresql",
+        "table": AnalysisDisplayResult._meta.db_table,
+        "status": "skipped",
+        "reason": reason,
+    }
+
+
+def _report_persistence_skipped(reason: str) -> dict[str, Any]:
+    return {
+        "backend": "postgresql",
+        "table": Report._meta.db_table,
+        "status": "skipped",
+        "reason": reason,
+    }
+
+
+def _report_type(value: Any) -> str:
+    report_type = _text(value)
+    if report_type in {choice.value for choice in ReportType}:
+        return report_type
+    return ReportType.OBJECTION_DRAFT
+
+
+def _report_status(value: Any) -> str:
+    status = _text(value)
+    if status in {choice.value for choice in ReportStatus}:
+        return status
+    if status in {"downloaded", "report_saved", "saved", "success"}:
+        return ReportStatus.READY
+    if status == "failed":
+        return ReportStatus.FAILED
+    return ReportStatus.READY
+
+
+def _report_title(payload: dict[str, Any], report_payload: dict[str, Any]) -> str:
+    return (
+        _text(payload.get("title"))
+        or _text(report_payload.get("title"))
+        or _text(payload.get("action"))
+        or "report"
+    )
+
+
+def _report_content_summary(
+    display_result: AnalysisDisplayResult | None,
+    report_payload: dict[str, Any],
+) -> str:
+    if display_result and isinstance(display_result.assistant_message, dict):
+        summary = _text(display_result.assistant_message.get("summary"))
+        if summary:
+            return summary
+        answer = _text(display_result.assistant_message.get("answer"))
+        if answer:
+            return answer[:500]
+    return f"Mock report action result: {_text(report_payload.get('status')) or 'ready'}"
 
 
 def _model_status(status: Any) -> str:

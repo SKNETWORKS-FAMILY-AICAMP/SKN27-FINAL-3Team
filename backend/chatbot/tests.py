@@ -787,6 +787,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertNotIn("analysis_plan", result)
         self.assertNotIn("node_execution", result)
         self.assertNotIn("chat_response", result)
+        self.assertFalse(AnalysisDisplayResult.objects.filter(display_result_id=f"disp_{job['job_id']}").exists())
 
     def test_canonical_analysis_jobs_endpoint_reuses_mock_job_service(self):
         response = self.client.post(
@@ -858,6 +859,9 @@ class ChatbotMockApiTests(TestCase):
         result = result_body["result"]
         self.assertEqual(result_body["api_surface"], "canonical_mock")
         self.assertEqual(result_body["execution_mode"], "mock")
+        self.assertEqual(result["persistence"]["backend"], "postgresql")
+        self.assertEqual(result["persistence"]["table"], "analysis_display_results")
+        self.assertEqual(result["persistence"]["status"], "saved")
         self.assertIn(
             "/api/reports/",
             {link["endpoint"] for link in result["report_links"]},
@@ -866,6 +870,16 @@ class ChatbotMockApiTests(TestCase):
             all(
                 not link["endpoint"].startswith("/api/mock/")
                 for link in result["report_links"]
+            )
+        )
+        display_result = AnalysisDisplayResult.objects.get(job=persisted_job)
+        self.assertEqual(display_result.display_result_id, result["persistence"]["display_result_id"])
+        self.assertEqual(display_result.assistant_message["answer"], result["assistant_message"]["answer"])
+        self.assertEqual(display_result.progress[0]["node_code"], result["progress"][0]["node_code"])
+        self.assertTrue(
+            all(
+                not link["endpoint"].startswith("/api/mock/")
+                for link in display_result.report_links
             )
         )
 
@@ -963,7 +977,20 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(report_response.status_code, 200)
         report_body = report_response.json()
         self.assertEqual(report_body["api_surface"], "canonical_mock")
+        self.assertEqual(report_body["persistence"]["backend"], "postgresql")
+        self.assertEqual(report_body["persistence"]["table"], "reports")
+        self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
+        self.assertEqual(report_body["persistence"]["object_storage"], "mock_placeholder")
         self.assertTrue(report_body["download_url"].startswith("/api/reports/"))
+        report = Report.objects.get(report_id=report_body["report_id"])
+        self.assertEqual(report.job.job_id, job["job_id"])
+        self.assertEqual(report.session.session_id, session_id)
+        self.assertEqual(report.display_result.display_result_id, result["persistence"]["display_result_id"])
+        self.assertEqual(report.status, ReportStatus.READY)
+        self.assertEqual(report.storage_uri, "mock://reports/rep_canonical_smoke")
+        self.assertEqual(report.metadata["source"], "canonical_report_action")
+        self.assertEqual(report.metadata["object_storage_status"], "mock_placeholder")
+        self.assertEqual(report.content["download_url"], report_body["download_url"])
 
         download_response = self.client.get(
             f"/api/reports/{report_body['report_id']}/download/"
@@ -995,6 +1022,22 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertIn(job_id, {job["job_id"] for job in list_response.json()["jobs"]})
         self.assertIn("status", list_response.json()["jobs"][0])
+
+    def test_mock_report_action_stays_sidecar_only(self):
+        response = self.client.post(
+            "/api/mock/reports/",
+            data={
+                "action": "download",
+                "report_id": "rep_mock_sidecar",
+                "job_id": "job_mock_sidecar",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        report_body = response.json()
+        self.assertTrue(report_body["download_url"].startswith("/api/mock/reports/"))
+        self.assertFalse(Report.objects.filter(report_id="rep_mock_sidecar").exists())
 
     def test_report_download_returns_attachment(self):
         response = self.client.get("/api/mock/reports/rep_mock/download/")
