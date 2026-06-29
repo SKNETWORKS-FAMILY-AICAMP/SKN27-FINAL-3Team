@@ -10,6 +10,7 @@ urlpatterns = [
     path("health/", views.health_check, name="health-check"),
     path("auth/guest-session/", views.guest_session, name="auth-guest-session"),
     path("auth/me/", views.auth_me, name="auth-me"),
+    path("mypage/summary/", views.mypage_summary, name="canonical-mypage-summary"),
     path("history/", views.history_events, name="canonical-history-events"),
     path("chat/sessions/", views.create_chat_session, name="canonical-create-chat-session"),
     path("chat/messages/", views.submit_chat_message, name="canonical-submit-chat-message"),

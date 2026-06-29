@@ -756,15 +756,22 @@ paths:
       tags: [MyPage]
       summary: Get MyPage case and activity summary
       operationId: getMyPageSummary
-      x-contract-status: review_required
-      x-review-note: Mentioned in screen/API mapping for history and case progress. Not implemented.
+      x-contract-status: confirmed
+      x-review-note: Canonical mock read model is implemented from PostgreSQL metadata tables. Auth/session ownership and deadline calculations remain review-required.
+      parameters:
+        - $ref: "#/components/parameters/OptionalSessionId"
+        - $ref: "#/components/parameters/OptionalOwnerId"
+        - $ref: "#/components/parameters/OptionalUserId"
+        - $ref: "#/components/parameters/OptionalLimit"
       responses:
         "200":
-          description: Candidate MyPage summary.
+          description: MyPage summary backed by canonical mock persistence.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MyPageSummary"
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/MyPageSummary"
         "401":
           $ref: "#/components/responses/AuthRequired"
 
@@ -2977,8 +2984,20 @@ components:
 
     MyPageSummary:
       type: object
-      x-contract-status: review_required
+      x-contract-status: confirmed
+      required: [storage, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
       properties:
+        storage:
+          type: object
+          required: [backend, tables]
+          properties:
+            backend:
+              type: string
+              enum: [postgresql]
+            tables:
+              type: array
+              items:
+                type: string
         active_cases:
           type: integer
         due_soon_cases:
@@ -2991,23 +3010,81 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CaseSummary"
+        limitations:
+          type: array
+          items:
+            type: string
 
     CaseSummary:
       type: object
+      required:
+        - case_id
+        - job_id
+        - session_id
+        - title
+        - case_status
+        - routing_intent
+        - last_event_at
+        - agent_result_count
+        - agent_status_counts
+        - report_count
+        - next_actions
+        - limitations
       properties:
         case_id:
           type: string
+        job_id:
+          type: string
         session_id:
           type: string
+        message_id:
+          type:
+            - string
+            - "null"
         title:
           type: string
         case_status:
-          type: string
+          $ref: "#/components/schemas/JobStatus"
         routing_intent:
           $ref: "#/components/schemas/RoutingIntent"
+        active_node:
+          type: string
+        progress_message:
+          type: string
         last_event_at:
           type: string
           format: date-time
+        analysis_plan_id:
+          type: string
+        agent_result_count:
+          type: integer
+        agent_status_counts:
+          type: object
+          additionalProperties:
+            type: integer
+        display_result_id:
+          type:
+            - string
+            - "null"
+        report_count:
+          type: integer
+        latest_report_id:
+          type:
+            - string
+            - "null"
+        latest_report_status:
+          type:
+            - string
+            - "null"
+          enum: [draft, generating, ready, failed, deleted, null]
+        next_actions:
+          type: array
+          items:
+            type: string
+        limitations:
+          type: array
+          items:
+            type: string
         next_deadline:
           type: string
           format: date-time

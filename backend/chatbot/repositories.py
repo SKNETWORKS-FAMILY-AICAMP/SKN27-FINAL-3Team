@@ -363,6 +363,60 @@ def get_report_download_metadata(report_id: str) -> dict[str, Any] | None:
     }
 
 
+def get_mycase_summary(
+    *,
+    session_id: str | None = None,
+    owner_id: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    queryset = (
+        AnalysisJob.objects.select_related("session", "message")
+        .prefetch_related("events", "agent_results", "reports")
+        .order_by("-updated_at")
+    )
+    if session_id:
+        queryset = queryset.filter(session__session_id=session_id)
+    if owner_id:
+        queryset = queryset.filter(owner_id=owner_id)
+
+    jobs = list(queryset[: max(limit, 1)])
+    cases = [_case_summary(job) for job in jobs]
+    active_statuses = {
+        AnalysisJobStatus.QUEUED.value,
+        AnalysisJobStatus.RUNNING.value,
+        AnalysisJobStatus.PARTIAL.value,
+    }
+    saved_reports = Report.objects.all()
+    if session_id:
+        saved_reports = saved_reports.filter(session__session_id=session_id)
+    if owner_id:
+        saved_reports = saved_reports.filter(owner_id=owner_id)
+
+    return {
+        "storage": {
+            "backend": "postgresql",
+            "tables": [
+                ChatSession._meta.db_table,
+                ChatMessage._meta.db_table,
+                AnalysisJob._meta.db_table,
+                AnalysisJobEvent._meta.db_table,
+                AgentResult._meta.db_table,
+                AnalysisDisplayResult._meta.db_table,
+                Report._meta.db_table,
+            ],
+        },
+        "active_cases": sum(1 for case in cases if case["case_status"] in active_statuses),
+        "due_soon_cases": 0,
+        "saved_reports": saved_reports.count(),
+        "recent_analysis_count": len(cases),
+        "cases": cases,
+        "limitations": [
+            "deadline calculation is not connected yet; due_soon_cases stays 0.",
+            "authorization is still mock bearer/guest-shape based.",
+        ],
+    }
+
+
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
     metadata = uploaded_file.metadata or {}
     checks = dict(metadata.get("checks") or {})
@@ -686,6 +740,95 @@ def _report_download_body(report: Report, *, storage_backend: str) -> str:
         lines.append("")
         lines.append(report.content_summary)
     return "\n".join(lines) + "\n"
+
+
+def _case_summary(job: AnalysisJob) -> dict[str, Any]:
+    display_result = _display_result_for_job(job)
+    reports = list(job.reports.order_by("-created_at"))
+    latest_report = reports[0] if reports else None
+    latest_event = job.events.order_by("-created_at").first()
+    agent_results = list(job.agent_results.all())
+    next_actions = _case_next_actions(agent_results)
+    limitations = _case_limitations(display_result, agent_results)
+    summary = _case_display_summary(display_result)
+
+    return {
+        "case_id": job.job_id,
+        "job_id": job.job_id,
+        "session_id": job.session.session_id,
+        "message_id": job.message.message_id if job.message_id else None,
+        "title": summary or _case_title(job),
+        "case_status": job.status,
+        "routing_intent": job.routing_intent,
+        "active_node": job.active_node,
+        "progress_message": job.progress_message,
+        "last_event_at": (latest_event.created_at if latest_event else job.updated_at).isoformat(),
+        "analysis_plan_id": job.analysis_plan_id,
+        "agent_result_count": len(agent_results),
+        "agent_status_counts": _agent_status_counts(agent_results),
+        "display_result_id": display_result.display_result_id if display_result else None,
+        "report_count": len(reports),
+        "latest_report_id": latest_report.report_id if latest_report else None,
+        "latest_report_status": latest_report.status if latest_report else None,
+        "next_actions": next_actions,
+        "limitations": limitations,
+    }
+
+
+def _case_title(job: AnalysisJob) -> str:
+    if job.message_id and job.message.content:
+        return job.message.content[:80]
+    if job.routing_intent:
+        return job.routing_intent
+    return job.job_id
+
+
+def _case_display_summary(display_result: AnalysisDisplayResult | None) -> str:
+    if display_result and isinstance(display_result.assistant_message, dict):
+        summary = _text(display_result.assistant_message.get("summary"))
+        if summary:
+            return summary
+        answer = _text(display_result.assistant_message.get("answer"))
+        if answer:
+            return answer[:120]
+    if display_result and isinstance(display_result.cards, list):
+        for card in display_result.cards:
+            if isinstance(card, dict) and card.get("title"):
+                return _text(card.get("title"))
+    return ""
+
+
+def _case_next_actions(agent_results: list[AgentResult]) -> list[Any]:
+    actions = []
+    for result in agent_results:
+        for action in result.next_actions or []:
+            if action not in actions:
+                actions.append(action)
+    return actions[:5]
+
+
+def _case_limitations(
+    display_result: AnalysisDisplayResult | None,
+    agent_results: list[AgentResult],
+) -> list[Any]:
+    limitations = []
+    if display_result:
+        limitations.extend(display_result.limitations or [])
+    for result in agent_results:
+        limitations.extend(result.limitations or [])
+
+    deduped = []
+    for limitation in limitations:
+        if limitation not in deduped:
+            deduped.append(limitation)
+    return deduped[:5]
+
+
+def _agent_status_counts(agent_results: list[AgentResult]) -> dict[str, int]:
+    counts = {AgentResultStatus.SUCCESS: 0, AgentResultStatus.PARTIAL: 0, AgentResultStatus.FAILED: 0}
+    for result in agent_results:
+        counts[result.status] = counts.get(result.status, 0) + 1
+    return counts
 
 
 def _model_status(status: Any) -> str:

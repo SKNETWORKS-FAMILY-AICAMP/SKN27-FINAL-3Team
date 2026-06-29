@@ -44,7 +44,8 @@ The project can still prove the product flow before OCR, RAG, image analysis, an
 10. Report metadata is persisted to `reports`.
 11. Download is requested with `GET /api/reports/{report_id}/download/`.
 12. Canonical download reads `reports.storage_uri` first and falls back to mock text when using `mock://reports/{report_id}`.
-13. History is checked with `GET /api/history/`.
+13. My Case progress is checked with `GET /api/mypage/summary/?session_id={session_id}`.
+14. History is checked with `GET /api/history/`.
 
 ## Storage expectations
 
@@ -57,6 +58,7 @@ The project can still prove the product flow before OCR, RAG, image analysis, an
 | Display output | `analysis_display_results` | One snapshot per analysis job after result fetch |
 | Report | `reports` | Metadata row links to job and display result when available |
 | Download | `reports.storage_uri` | `mock://reports/{report_id}` until object storage is introduced |
+| My Case summary | read model | `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports` are summarized for progress display |
 
 ## Incomplete Agent policy
 
@@ -77,6 +79,7 @@ The persona should not be blocked because an Agent is not production-ready.
 - Agent outputs are traceable through `agent_results`.
 - The screen-facing result is available without exposing raw `analysis_plan`, `node_execution`, or `chat_response` from the result endpoint.
 - Report download uses DB metadata when a `reports` row exists.
+- My Case progress can be reconstructed from PostgreSQL metadata through `GET /api/mypage/summary/`.
 - The response never claims legal success, exact fault ratio, or guaranteed submission outcome.
 - Limitations remain visible whenever OCR/RAG/Vision/LLM behavior is mocked.
 
@@ -84,6 +87,6 @@ The persona should not be blocked because an Agent is not production-ready.
 
 1. Replace `mock://reports/{report_id}` with an object storage adapter boundary.
 2. Add download authorization rules based on `reports.owner_id`, guest identity, and auth session.
-3. Build My Case progress summary from `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports`.
-4. Split guest/member/session/rate-limit policy into enforced middleware or service checks.
+3. Split guest/member/session/rate-limit policy into enforced middleware or service checks.
+4. Add due date/deadline calculation to My Case progress.
 5. Add persona variants for accident photo, blackbox video, law-only question, and report re-download.
