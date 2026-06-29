@@ -5,9 +5,10 @@
 | 작성일 | 2026-06-28 |
 | 설계 브랜치 | `hi20260204-auth-session-policy` |
 | mock 구현 브랜치 | `hi20260204-history-event-mock` |
-| 상태 | 표준-라이트 mock sidecar 구현, 보관 기간과 DB 전환은 사용자 컨펌 필요 |
+| 상태 | 표준-라이트 mock sidecar 구현, 멘토 피드백 반영으로 history log management를 다음 구현 순서에 포함 |
 | 선행 정책 | `docs/architecture/auth-session-policy-2026-06-28.md` |
 | 목적 | 멘토 회의에서 강조된 히스토리 저장/수집을 향후 고도화, 디버깅, 애프터서비스에 쓸 수 있게 이벤트 단위로 설계 |
+| 후속 로드맵 | `docs/architecture/ddd-mas-history-log-roadmap-2026-06-29.md` |
 
 ## 1. 결론
 
@@ -266,4 +267,7 @@ sequenceDiagram
 1. 현재 mock API에 `history_event.v1` 생성 helper를 만든다. 구현됨.
 2. `guest_session_created`, `auth_me_checked`, `chat_message_created`, `analysis_job_created`, `agent_call_completed/partial/failed`, `report_saved/downloaded` 이벤트를 남긴다. 구현됨.
 3. `/api/history/` 조회 mock endpoint를 만든다. 구현됨.
-4. 사용자 컨펌 후 TTL, 조회 권한, `history_events` table migration을 별도 브랜치에서 진행한다.
+4. DDD/MAS roadmap에서 `Observability/History` bounded context를 확정한다. 진행 중.
+5. auth/session/rate-limit skeleton에서 `guest_id`, `auth_session_id`, quota key를 history actor와 연결한다.
+6. AI session/Agent invocation log skeleton에서 Agent 호출 시작/완료/실패/partial event를 구조화한다.
+7. 사용자 컨펌 후 TTL, 조회 권한, `history_events` table migration을 별도 브랜치에서 진행한다.

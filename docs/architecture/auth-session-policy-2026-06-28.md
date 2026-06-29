@@ -4,7 +4,7 @@
 |---|---|
 | 작성일 | 2026-06-28 |
 | 브랜치 | `hi20260204-auth-session-policy` |
-| 상태 | 정책 확정안 v0, 구현 전 상세 히스토리 설계는 별도 컨펌 필요 |
+| 상태 | 정책 확정안 v0, history log management와 quota skeleton을 다음 구현 순서에 포함 |
 | 관련 회의 메모 | 로그인 구현, 로그인 세션 아이디와 비회원 채팅 세션 아이디 구분, 비회원 rate limit, 회원, 히스토리 저장과 수집 |
 | 관련 문서 | `docs/postgresql-erd-2026-06-28.md`, `backend/README.md`, `docs/pm-api-json-schema-spec-2026-06-23.md` |
 
@@ -261,4 +261,5 @@ MVP에서 바로 테이블을 늘릴 수도 있지만, 현재 저장소는 Postg
 1. `GET /api/auth/me/`와 `POST /api/auth/guest-session/` mock API를 프론트에서 연결해본다.
 2. `ChatSession.metadata`에 `guest_id`, `auth_session_id`, `auth_state`를 저장하는 MVP 방식을 검토한다.
 3. 로그인 후 guest session 병합 API의 request/response를 설계한다.
-4. `docs/architecture/history-event-design-2026-06-28.md`의 히스토리 이벤트 저장 단계를 사용자 컨펌 후 구현한다.
+4. `docs/architecture/ddd-mas-history-log-roadmap-2026-06-29.md` 기준으로 history actor와 quota key를 먼저 고정한다.
+5. AI session/Agent invocation log skeleton에서 `auth_session_id`, `guest_id`, `session_id`, `job_id`를 함께 남긴다.

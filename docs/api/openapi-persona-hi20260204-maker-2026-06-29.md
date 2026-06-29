@@ -147,11 +147,11 @@
 
 | 우선 | 작업 | 연결 이슈 |
 |---:|---|---|
-| 1 | Agent 실행 결과를 `agent_results` 저장 경계에 연결 | `#22`, `#29`, `#40`, `#68` |
-| 2 | Supervisor display DTO를 `analysis_display_results`에 저장하거나 DB에서 재구성 | `#29`, `#40`, `#58`, `#68` |
-| 3 | report persistence와 object storage download flow 연결 | `#27`, `#43`, `#58`, `#68` |
-| 4 | Redis progress cache와 PostgreSQL fallback 기준 정리 | `#40`, `#43`, `#68` |
-| 5 | `review_required` endpoint 정책 확정 후 다음 OpenAPI 버전 반영 | `#22`, `#41`, `#68` |
+| 1 | DDD/MAS/history log roadmap 확정 | `#3`, `#29`, `#40`, `#68` |
+| 2 | auth/session/rate-limit MVP skeleton | `#57`, `#68` |
+| 3 | AI session/Agent invocation log skeleton | `#22`, `#29`, `#40`, `#68` |
+| 4 | `history_events` DB 전환, TTL, 조회 권한 결정 | `#3`, `#40`, `#57`, `#68` |
+| 5 | object storage download authorization 연결 | `#27`, `#43`, `#58`, `#68` |
 
 ## 7.1 회의 메모 반영 우선순위
 
@@ -166,6 +166,7 @@
 | 5 | Agent 동기/비동기 기준 | 입력 검증과 plan 생성은 동기, OCR/RAG/이미지/LLM은 비동기 worker 후보로 둔다. |
 | 6 | 사고 장면 샘플과 rule | 실제 Vision 비용 전 mock sample과 품질 rule을 먼저 만든다. |
 | 7 | RAG 사용 이유 | 법령/판례/사례 근거 추적과 재현성을 위해 쓰고, frontier model은 요약/설명에 제한한다. |
+| 8 | DDD/MAS 구분 | DDD는 도메인 경계, MSA는 서비스 분리, MAS는 Supervisor와 Agent 협업 구조로 분리해 설명한다. |
 
 ## 8. 완료 기준
 

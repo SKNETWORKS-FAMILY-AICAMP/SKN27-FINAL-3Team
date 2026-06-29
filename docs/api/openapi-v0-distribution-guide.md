@@ -57,7 +57,8 @@ OpenAPI 안의 확장 필드는 반드시 구분해서 읽는다.
 | 2 | canonical `/api/...` 응답의 `api_surface`, `execution_mode` |
 | 3 | `/api/auth/guest-session/`, `/api/auth/me/` |
 | 4 | `/api/chat/messages/`, `/api/files/`, `/api/analysis/jobs/`, `/api/analysis/results/{job_id}/` |
-| 5 | `/api/history/` standard-light sidecar 조회 |
+| 5 | `/api/mypage/summary/` My Case read model |
+| 6 | `/api/history/` standard-light sidecar 조회 |
 
 `review_required` endpoint는 route를 바로 만들지 않는다. 먼저 정책, 화면 owner, 저장 범위를 확인한다.
 
@@ -71,6 +72,7 @@ Supervisor는 화면 DTO와 Agent 실행 흐름을 본다.
 | `AgentPlanExecution` | 여러 Agent 결과 묶음 |
 | `AnalysisResult` | 프론트가 직접 보는 display output |
 | `HistoryEvent` | 재상담, 진행도, 디버깅에 필요한 표준-라이트 이력 |
+| DDD/MAS roadmap | Agent 실행과 history log management를 어느 bounded context에 둘지 |
 
 화면에는 Agent raw output을 그대로 보내지 않고 `AnalysisResult` 형태로 병합한다.
 

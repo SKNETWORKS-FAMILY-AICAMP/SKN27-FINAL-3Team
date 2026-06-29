@@ -189,7 +189,7 @@ erDiagram
 | 분석 진행 상태 | `POST /api/analysis/jobs/`, `GET /api/analysis/jobs/{job_id}/` | `analysis_jobs`, `analysis_job_events` |
 | 분석 결과 카드 | `GET /api/analysis/results/{job_id}/` | `agent_results`, `analysis_display_results` |
 | 리포트 저장/다운로드 | `POST /api/reports/`, `GET /api/reports/{report_id}/download/` | `reports`, `analysis_display_results` |
-| 마이페이지/이력 | `GET /api/mypage/summary/`, `GET /api/history/` | `chat_sessions`, `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, `reports` 집계 |
+| 마이페이지/이력 | `GET /api/mypage/summary/`, `GET /api/history/` | `chat_sessions`, `chat_messages`, `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, `reports` 집계 |
 
 ## 5. 연결 전 정책
 
@@ -203,13 +203,16 @@ erDiagram
 
 2026-06-28 현재 `POST /api/files/`, `GET /api/files/`, `GET /api/files/{attachment_id}/`는 Django repository를 통해 `uploaded_files`를 사용한다. 파일 byte 저장은 object storage adapter 도입 전까지 기존 mock local storage를 유지하고, DB에는 `attachment_id`, `session_id`, `purpose`, `file_type`, `content_type`, `size_bytes`, `storage_uri`, `agent_handoff`, `metadata`를 저장한다.
 
-`POST /api/chat/messages/`는 mock 응답 shape를 유지하면서 `chat_sessions`, `chat_messages`, `analysis_jobs`, `analysis_job_events`에 상담 메시지와 분석 job 생성 경계를 기록한다. 아직 Agent 실행 결과와 Supervisor display DTO는 DB에서 읽어 응답하지 않고, 다음 단계에서 `agent_results`, `analysis_display_results`, `reports`로 연결한다.
+`POST /api/chat/messages/`는 mock 응답 shape를 유지하면서 `chat_sessions`, `chat_messages`, `analysis_jobs`, `analysis_job_events`에 상담 메시지와 분석 job 생성 경계를 기록한다.
+
+`POST /api/analysis/jobs/`는 mock plan 실행 결과를 `analysis_jobs`, `analysis_job_events`, `agent_results`에 저장한다. `GET /api/analysis/results/{job_id}/`는 화면용 Supervisor display snapshot을 `analysis_display_results`에 저장하고, `POST /api/reports/`와 `GET /api/reports/{report_id}/download/`는 `reports` metadata와 mock artifact download boundary를 사용한다. `GET /api/mypage/summary/`는 이 테이블들을 묶어 My Case read model을 반환한다.
 
 명시적 회귀 테스트 경로인 `/api/mock/attachments/`는 기존 sidecar-only 동작을 유지한다.
 
 ## 7. 남은 구현 순서
 
-1. Agent adapter 실행 결과를 `agent_results`에 저장한다.
-2. Supervisor display DTO를 `analysis_display_results`로 저장하거나, `agent_results`에서 매번 병합할지 결정한다.
-3. `reports`와 object storage download flow를 연결한다.
-4. Redis progress cache와 PostgreSQL fallback을 연결한다.
+1. DDD/MAS 기준으로 ERD를 bounded context별로 재분류한다.
+2. auth/session/rate-limit MVP skeleton에서 `guest_id`, `auth_session_id`, quota key를 연결한다.
+3. AI session/Agent invocation log skeleton으로 Agent 호출 추적성을 강화한다.
+4. `history_events` DB 전환, TTL, 조회 권한을 결정한다.
+5. `reports` object storage adapter와 download authorization을 연결한다.
