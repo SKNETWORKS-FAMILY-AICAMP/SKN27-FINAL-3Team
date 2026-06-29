@@ -183,6 +183,8 @@ Canonical `GET /api/analysis/results/{job_id}/` saves the display snapshot to `a
 
 Canonical `POST /api/reports/` saves report metadata to `reports` and links it to `analysis_jobs` plus `analysis_display_results` when available. The generated artifact still uses a `mock://reports/{report_id}` placeholder until the object storage adapter is introduced.
 
+Canonical `GET /api/reports/{report_id}/download/` checks the `reports` table first. When metadata exists, the response includes `X-Report-Persistence`, `X-Report-Storage-Backend`, and `X-Report-Storage-URI`; otherwise it falls back to the existing mock text download.
+
 ## Agent adapter 계약
 
 `GET /api/mock/agents/nodes/` 응답의 각 node에는 `adapter_contract`가 포함된다. 실제 Agent 구현체는 이 계약의 함수명과 입출력 필드를 맞춘다.

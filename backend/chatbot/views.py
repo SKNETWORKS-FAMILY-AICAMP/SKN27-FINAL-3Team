@@ -53,6 +53,7 @@ from chatbot.request_parsing import (
     request_payload as _request_payload,
 )
 from chatbot.repositories import (
+    get_report_download_metadata,
     get_uploaded_file,
     list_uploaded_files,
     persist_analysis_display_result,
@@ -417,6 +418,21 @@ def report_action(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
+    if _is_canonical_mock_request(request):
+        download = get_report_download_metadata(report_id)
+        if download is not None:
+            response = HttpResponse(
+                download["body"],
+                content_type=download["content_type"],
+            )
+            response["Content-Disposition"] = f'attachment; filename="{download["filename"]}"'
+            response["X-API-Surface"] = "canonical_mock"
+            response["X-Execution-Mode"] = "mock"
+            response["X-Report-Persistence"] = "postgresql"
+            response["X-Report-Storage-Backend"] = download["storage_backend"]
+            response["X-Report-Storage-URI"] = download["storage_uri"]
+            return response
+
     response = HttpResponse(
         f"Mock report download for {report_id}\n",
         content_type="text/plain; charset=utf-8",

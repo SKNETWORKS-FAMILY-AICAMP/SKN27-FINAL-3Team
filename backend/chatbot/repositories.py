@@ -341,6 +341,28 @@ def persist_report_action(
     }
 
 
+def get_report_download_metadata(report_id: str) -> dict[str, Any] | None:
+    report = (
+        Report.objects.select_related("session", "job", "display_result")
+        .filter(report_id=report_id)
+        .first()
+    )
+    if report is None:
+        return None
+
+    storage_uri = report.storage_uri or f"mock://reports/{report.report_id}"
+    storage_backend = _storage_backend(storage_uri)
+    return {
+        "report_id": report.report_id,
+        "filename": f"{report.report_id}.txt",
+        "content_type": "text/plain; charset=utf-8",
+        "storage_uri": storage_uri,
+        "storage_backend": storage_backend,
+        "status": report.status,
+        "body": _report_download_body(report, storage_backend=storage_backend),
+    }
+
+
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
     metadata = uploaded_file.metadata or {}
     checks = dict(metadata.get("checks") or {})
@@ -637,6 +659,33 @@ def _report_content_summary(
         if answer:
             return answer[:500]
     return f"Mock report action result: {_text(report_payload.get('status')) or 'ready'}"
+
+
+def _storage_backend(storage_uri: str) -> str:
+    if storage_uri.startswith("mock://"):
+        return "mock_placeholder"
+    if storage_uri.startswith("s3://"):
+        return "object_storage"
+    if storage_uri.startswith("file://"):
+        return "local_file"
+    return "unknown"
+
+
+def _report_download_body(report: Report, *, storage_backend: str) -> str:
+    lines = [
+        f"Report metadata download for {report.report_id}",
+        f"status: {report.status}",
+        f"storage_backend: {storage_backend}",
+        f"storage_uri: {report.storage_uri}",
+    ]
+    if report.job_id:
+        lines.append(f"job_id: {report.job.job_id}")
+    if report.display_result_id:
+        lines.append(f"display_result_id: {report.display_result.display_result_id}")
+    if report.content_summary:
+        lines.append("")
+        lines.append(report.content_summary)
+    return "\n".join(lines) + "\n"
 
 
 def _model_status(status: Any) -> str:
