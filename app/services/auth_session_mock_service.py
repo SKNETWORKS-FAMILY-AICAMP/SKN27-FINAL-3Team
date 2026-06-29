@@ -49,7 +49,7 @@ def create_guest_session(payload: dict[str, Any] | None = None) -> dict[str, Any
         "rate_limit": _rate_limit_policy(subject_id=f"guest:{guest_id}"),
         "merge_policy": _merge_policy(),
         "limitations": [
-            "Mock guest identity only; no durable guest identity table is created yet.",
+            "Mock guest identity contract; canonical Django endpoint persists the identity preview when available.",
             "Guest TTL and quota values are review-required and not production policy.",
         ],
     }
@@ -102,7 +102,7 @@ def get_current_auth_subject(
             "merge_policy": _merge_policy(),
             "limitations": [
                 "Mock Bearer token validation checks token shape only, not JWT signature.",
-                "auth_session_id is derived from the mock token until a real auth session table exists.",
+                "auth_session_id is derived from the mock token until real JWT session validation is connected.",
             ],
         }
 

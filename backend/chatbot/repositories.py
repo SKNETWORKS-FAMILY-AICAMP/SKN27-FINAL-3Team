@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta, timezone as datetime_timezone
 from pathlib import Path
 from typing import Any
 
 from django.db import transaction
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
+)
+from app.services.history_event_mock_service import (
+    build_agent_execution_events,
+    build_history_event,
 )
 from chatbot.models import (
     AgentInvocation,
@@ -22,15 +29,21 @@ from chatbot.models import (
     AnalysisJob,
     AnalysisJobEvent,
     AnalysisJobStatus,
+    AuthEvent,
+    AuthSession,
+    AuthSessionStatus,
     ChatMessage,
     ChatSession,
     ChatSessionStatus,
     GuestIdentity,
     GuestIdentityStatus,
+    HistoryEvent,
     MessageRole,
     Report,
     ReportStatus,
     ReportType,
+    UsageEvent,
+    UsageQuota,
     UserAccount,
     UserAccountStatus,
     UploadedFile,
@@ -172,6 +185,335 @@ def persist_chat_message_analysis_boundary(
         "message_id": message.message_id,
         "job_id": job.job_id,
         "session_id": session.session_id,
+    }
+
+
+def persist_guest_session_identity(
+    auth_payload: dict[str, Any],
+    *,
+    raw_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist the guest identity preview returned by the auth mock contract."""
+
+    guest_payload = _dict_or_empty(auth_payload.get("guest"))
+    subject = _dict_or_empty(auth_payload.get("subject"))
+    session_binding = _dict_or_empty(auth_payload.get("session_binding"))
+    guest_id = _normalize_guest_id(guest_payload.get("guest_id") or subject.get("guest_id"))
+    if not guest_id:
+        return _auth_persistence_skipped("missing_guest_id")
+
+    subject_id = _text(subject.get("subject_id")) or f"guest:{guest_id}"
+    session_id = _text(session_binding.get("session_id"))
+    expires_at = _datetime_or_none(guest_payload.get("expires_at"))
+
+    with transaction.atomic():
+        guest, _created = GuestIdentity.objects.update_or_create(
+            guest_id=guest_id,
+            defaults={
+                "status": GuestIdentityStatus.ACTIVE,
+                "expires_at": expires_at,
+                "metadata": {
+                    "source": "auth_guest_session",
+                    "auth_state": auth_payload.get("auth_state"),
+                    "ttl_seconds": guest_payload.get("ttl_seconds"),
+                    "policy_status": guest_payload.get("policy_status"),
+                    "merge_policy": auth_payload.get("merge_policy") or {},
+                    "rate_limit": auth_payload.get("rate_limit") or {},
+                },
+            },
+        )
+        chat_session = _bind_chat_session_auth_context(
+            session_id=session_id,
+            owner_id="",
+            auth_context={
+                "auth_state": "guest",
+                "subject_id": subject_id,
+                "subject_type": "guest",
+                "guest_id": guest_id,
+                "auth_session_id": None,
+            },
+        )
+        event = _create_auth_event(
+            event_type="guest_session_created",
+            subject_id=subject_id,
+            guest=guest,
+            metadata={
+                "source": "auth_guest_session",
+                "chat_session_id": chat_session.session_id if chat_session else None,
+                "raw_payload": _safe_payload(raw_payload or {}),
+            },
+        )
+
+    return {
+        "backend": "postgresql",
+        "tables": [
+            GuestIdentity._meta.db_table,
+            AuthEvent._meta.db_table,
+            ChatSession._meta.db_table,
+        ],
+        "guest_identity_table": GuestIdentity._meta.db_table,
+        "auth_events_table": AuthEvent._meta.db_table,
+        "chat_session_table": ChatSession._meta.db_table,
+        "guest_id": guest.guest_id,
+        "event_id": event.event_id,
+        "session_id": chat_session.session_id if chat_session else None,
+        "status": "saved",
+    }
+
+
+def persist_current_auth_subject(
+    auth_payload: dict[str, Any],
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Persist the current auth subject preview used by canonical APIs."""
+
+    subject = _dict_or_empty(auth_payload.get("subject"))
+    subject_id = _text(subject.get("subject_id")) or "anonymous"
+    subject_type = _text(subject.get("subject_type")) or "anonymous"
+    user_id = _text(subject.get("user_id"))
+    guest_id = _normalize_guest_id(subject.get("guest_id"))
+    auth_session_id = _text(subject.get("auth_session_id"))
+
+    with transaction.atomic():
+        user = _get_or_create_user_account(user_id)
+        guest = _get_or_create_guest_identity(guest_id)
+        auth_session = None
+        if auth_session_id:
+            auth_session, _created = AuthSession.objects.update_or_create(
+                auth_session_id=auth_session_id,
+                defaults={
+                    "user": user,
+                    "guest": guest,
+                    "subject_type": subject_type,
+                    "subject_id": subject_id,
+                    "status": AuthSessionStatus.ACTIVE,
+                    "metadata": {
+                        "source": "auth_me",
+                        "auth_state": auth_payload.get("auth_state"),
+                        "verification": _dict_or_empty(auth_payload.get("auth_session")).get(
+                            "verification"
+                        ),
+                        "rate_limit": auth_payload.get("rate_limit") or {},
+                        "merge_policy": auth_payload.get("merge_policy") or {},
+                    },
+                },
+            )
+        chat_session = _bind_chat_session_auth_context(
+            session_id=session_id,
+            owner_id=user_id,
+            auth_context={
+                "auth_state": auth_payload.get("auth_state"),
+                "subject_id": subject_id,
+                "subject_type": subject_type,
+                "user_id": user_id or None,
+                "guest_id": guest_id or None,
+                "auth_session_id": auth_session_id or None,
+            },
+        )
+        event = _create_auth_event(
+            event_type="auth_me_checked",
+            subject_id=subject_id,
+            user=user,
+            guest=guest,
+            auth_session=auth_session,
+            metadata={
+                "source": "auth_me",
+                "auth_state": auth_payload.get("auth_state"),
+                "chat_session_id": chat_session.session_id if chat_session else None,
+            },
+        )
+
+    return {
+        "backend": "postgresql",
+        "tables": [
+            UserAccount._meta.db_table,
+            GuestIdentity._meta.db_table,
+            AuthSession._meta.db_table,
+            AuthEvent._meta.db_table,
+            ChatSession._meta.db_table,
+        ],
+        "user_table": UserAccount._meta.db_table,
+        "guest_identity_table": GuestIdentity._meta.db_table,
+        "auth_session_table": AuthSession._meta.db_table,
+        "auth_events_table": AuthEvent._meta.db_table,
+        "chat_session_table": ChatSession._meta.db_table,
+        "user_id": user.user_id if user else None,
+        "guest_id": guest.guest_id if guest else None,
+        "auth_session_id": auth_session.auth_session_id if auth_session else None,
+        "event_id": event.event_id,
+        "session_id": chat_session.session_id if chat_session else None,
+        "status": "saved",
+    }
+
+
+def record_usage_event(
+    payload: dict[str, Any],
+    *,
+    scope: str,
+    amount: int = 1,
+) -> dict[str, Any]:
+    """Record and enforce a lightweight subject-scoped usage quota."""
+
+    normalized_amount = max(amount, 1)
+    subject = _ai_subject(payload, {})
+    subject_id = subject["subject_id"]
+    subject_type = subject["subject_type"]
+    quota_key = f"rate_limit:{subject_id}:{scope}"
+    now = timezone.now()
+
+    with transaction.atomic():
+        quota, _created = UsageQuota.objects.get_or_create(
+            quota_id=_usage_quota_id(subject_id, scope),
+            defaults={
+                "subject_id": subject_id,
+                "scope": scope,
+                "limit_count": _default_usage_limit(subject_type, scope),
+                "used_count": 0,
+                "reset_at": now + timedelta(days=1),
+                "metadata": {
+                    "source": "canonical_usage_enforcement",
+                    "subject_type": subject_type,
+                    "policy_status": "mock_default",
+                },
+            },
+        )
+        if quota.reset_at and quota.reset_at <= now:
+            quota.used_count = 0
+            quota.reset_at = now + timedelta(days=1)
+
+        projected_count = quota.used_count + normalized_amount
+        allowed = quota.limit_count == 0 or projected_count <= quota.limit_count
+        if allowed:
+            quota.used_count = projected_count
+        quota.save(update_fields=["used_count", "reset_at", "updated_at"])
+
+        usage_event = UsageEvent.objects.create(
+            usage_event_id=_usage_event_id(subject_id, scope),
+            subject_id=subject_id,
+            scope=scope,
+            amount=normalized_amount if allowed else 0,
+            quota_key=quota_key,
+            metadata={
+                "source": "canonical_usage_enforcement",
+                "status": "allowed" if allowed else "blocked",
+                "subject_type": subject_type,
+                "limit_count": quota.limit_count,
+                "used_count": quota.used_count,
+                "requested_amount": normalized_amount,
+                "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
+            },
+        )
+
+    return {
+        "backend": "postgresql",
+        "tables": [UsageQuota._meta.db_table, UsageEvent._meta.db_table],
+        "quota_table": UsageQuota._meta.db_table,
+        "usage_event_table": UsageEvent._meta.db_table,
+        "quota_id": quota.quota_id,
+        "usage_event_id": usage_event.usage_event_id,
+        "subject_id": subject_id,
+        "subject_type": subject_type,
+        "scope": scope,
+        "quota_key": quota_key,
+        "allowed": allowed,
+        "limit_count": quota.limit_count,
+        "used_count": quota.used_count,
+        "remaining_count": max(quota.limit_count - quota.used_count, 0)
+        if quota.limit_count
+        else None,
+        "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
+        "status": "allowed" if allowed else "blocked",
+    }
+
+
+def record_history_event_record(
+    *,
+    event_type: str,
+    status: str,
+    summary: str,
+    actor: dict[str, Any] | None = None,
+    subject: dict[str, Any] | None = None,
+    source: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    privacy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist one standard-light history event in PostgreSQL."""
+
+    event_payload = build_history_event(
+        event_type=event_type,
+        status=status,
+        summary=summary,
+        actor=actor,
+        subject=subject,
+        source=source,
+        metadata=metadata,
+        privacy=privacy,
+    )
+    return history_event_to_api(_upsert_history_event_payload(event_payload))
+
+
+def record_agent_history_event_records(
+    executions: list[dict[str, Any]],
+    *,
+    actor: dict[str, Any],
+    source: dict[str, Any],
+    subject: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Persist standard-light history events for Agent execution envelopes."""
+
+    events = []
+    for event_payload in build_agent_execution_events(
+        executions,
+        actor=actor,
+        source=source,
+        subject=subject,
+    ):
+        events.append(history_event_to_api(_upsert_history_event_payload(event_payload)))
+    return events
+
+
+def list_history_event_records(
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    guest_id: str | None = None,
+    job_id: str | None = None,
+    event_type: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Read history events from PostgreSQL using the public history filters."""
+
+    queryset = HistoryEvent.objects.all()
+    if session_id:
+        queryset = queryset.filter(subject_session_id=session_id)
+    if user_id:
+        queryset = queryset.filter(actor_user_id=user_id)
+    if guest_id:
+        queryset = queryset.filter(actor_guest_id=guest_id)
+    if job_id:
+        queryset = queryset.filter(subject_job_id=job_id)
+    if event_type:
+        queryset = queryset.filter(event_type=event_type)
+
+    rows = list(queryset.order_by("-occurred_at", "-id")[: max(limit, 1)])
+    return [history_event_to_api(event) for event in reversed(rows)]
+
+
+def history_event_to_api(event: HistoryEvent) -> dict[str, Any]:
+    return {
+        "event_id": event.event_id,
+        "event_type": event.event_type,
+        "event_version": event.event_version,
+        "occurred_at": event.occurred_at.isoformat(),
+        "actor": event.actor,
+        "subject": event.subject,
+        "source": event.source,
+        "status": event.status,
+        "summary": event.summary,
+        "metadata": event.metadata,
+        "privacy": event.privacy,
+        "created_at": event.created_at.isoformat(),
     }
 
 
@@ -380,12 +722,59 @@ def get_report_download_metadata(report_id: str) -> dict[str, Any] | None:
     storage_backend = _storage_backend(storage_uri)
     return {
         "report_id": report.report_id,
+        "owner_id": report.owner_id,
+        "session_id": report.session.session_id if report.session_id else None,
+        "job_id": report.job.job_id if report.job_id else None,
         "filename": f"{report.report_id}.txt",
         "content_type": "text/plain; charset=utf-8",
         "storage_uri": storage_uri,
         "storage_backend": storage_backend,
         "status": report.status,
         "body": _report_download_body(report, storage_backend=storage_backend),
+    }
+
+
+def authorize_report_download_metadata(
+    download: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Authorize report metadata download before the object body is returned."""
+
+    auth_context = _dict_or_empty(payload.get("auth_context"))
+    user_id = _owner_id(payload) or _text(auth_context.get("user_id"))
+    guest_id = _normalize_guest_id(payload.get("guest_id") or auth_context.get("guest_id"))
+    session_id = _text(payload.get("session_id") or auth_context.get("session_id"))
+    report_owner_id = _text(download.get("owner_id"))
+    report_session_id = _text(download.get("session_id"))
+
+    allowed = False
+    reason = "owner_mismatch"
+    if report_owner_id:
+        allowed = bool(user_id and user_id == report_owner_id)
+        reason = "owner_match" if allowed else "owner_mismatch"
+    elif report_session_id:
+        allowed = bool(session_id and session_id == report_session_id)
+        reason = "session_match" if allowed else "session_mismatch"
+    else:
+        allowed = True
+        reason = "legacy_mock_report"
+
+    return {
+        "contract_version": "object_access.v1",
+        "allowed": allowed,
+        "reason": reason,
+        "subject": {
+            "user_id": user_id or None,
+            "guest_id": guest_id or None,
+            "session_id": session_id or None,
+        },
+        "resource": {
+            "type": "report",
+            "report_id": download.get("report_id"),
+            "owner_id": report_owner_id or None,
+            "session_id": report_session_id or None,
+            "storage_backend": download.get("storage_backend"),
+        },
     }
 
 
@@ -499,6 +888,58 @@ def _get_or_create_session(session_id: Any, *, owner_id: str) -> ChatSession | N
         session.owner_id = owner_id
         session.save(update_fields=["owner_id", "updated_at"])
     return session
+
+
+def _bind_chat_session_auth_context(
+    *,
+    session_id: str,
+    owner_id: str,
+    auth_context: dict[str, Any],
+) -> ChatSession | None:
+    session = _get_or_create_session(session_id, owner_id=owner_id)
+    if session is None:
+        return None
+
+    metadata = dict(session.metadata or {})
+    existing_auth_context = (
+        metadata.get("auth_context")
+        if isinstance(metadata.get("auth_context"), dict)
+        else {}
+    )
+    existing_auth_context.update(
+        {key: value for key, value in auth_context.items() if value is not None}
+    )
+    metadata["auth_context"] = existing_auth_context
+    metadata.setdefault("created_by", "canonical_auth_session")
+    session.metadata = metadata
+    if owner_id and not session.owner_id:
+        session.owner_id = owner_id
+    session.save(update_fields=["owner_id", "metadata", "updated_at"])
+    return session
+
+
+def _create_auth_event(
+    *,
+    event_type: str,
+    subject_id: str,
+    metadata: dict[str, Any],
+    user: UserAccount | None = None,
+    guest: GuestIdentity | None = None,
+    auth_session: AuthSession | None = None,
+) -> AuthEvent:
+    now = timezone.now()
+    digest = hashlib.sha1(
+        f"{event_type}:{subject_id}:{now.isoformat()}".encode("utf-8")
+    ).hexdigest()[:16]
+    return AuthEvent.objects.create(
+        event_id=f"authevt_{digest}",
+        user=user,
+        guest=guest,
+        auth_session=auth_session,
+        event_type=event_type,
+        subject_id=subject_id,
+        metadata=metadata,
+    )
 
 
 def _metadata_snapshot(
@@ -781,6 +1222,44 @@ def _agent_invocation_id(job_id: str, node_code: str, index: int) -> str:
     return f"ainv_{digest}_{index}"
 
 
+def _usage_quota_id(subject_id: str, scope: str) -> str:
+    readable_id = f"quota_{subject_id.replace(':', '_')}_{scope}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha1(f"{subject_id}:{scope}".encode("utf-8")).hexdigest()[:20]
+    return f"quota_{digest}"
+
+
+def _usage_event_id(subject_id: str, scope: str) -> str:
+    now = timezone.now().isoformat()
+    digest = hashlib.sha1(f"{subject_id}:{scope}:{now}".encode("utf-8")).hexdigest()[:20]
+    return f"use_{digest}"
+
+
+def _default_usage_limit(subject_type: str, scope: str) -> int:
+    policy = {
+        "anonymous": {
+            "chat_message": 2,
+            "file_upload": 1,
+            "agent_run": 1,
+            "report_action": 1,
+        },
+        "guest": {
+            "chat_message": 5,
+            "file_upload": 3,
+            "agent_run": 3,
+            "report_action": 2,
+        },
+        "user": {
+            "chat_message": 100,
+            "file_upload": 30,
+            "agent_run": 30,
+            "report_action": 30,
+        },
+    }
+    return policy.get(subject_type, policy["anonymous"]).get(scope, 10)
+
+
 def _display_result_id(job_id: str) -> str:
     readable_id = f"disp_{job_id}"
     if len(readable_id) <= 64:
@@ -796,6 +1275,42 @@ def _display_result_for_job(job: AnalysisJob | None) -> AnalysisDisplayResult | 
         return job.display_result
     except AnalysisDisplayResult.DoesNotExist:
         return None
+
+
+def _upsert_history_event_payload(event_payload: dict[str, Any]) -> HistoryEvent:
+    actor = _dict_or_empty(event_payload.get("actor"))
+    subject = _dict_or_empty(event_payload.get("subject"))
+    source = _dict_or_empty(event_payload.get("source"))
+    occurred_at = _datetime_or_none(event_payload.get("occurred_at")) or timezone.now()
+
+    event, _created = HistoryEvent.objects.update_or_create(
+        event_id=_text(event_payload.get("event_id")),
+        defaults={
+            "event_type": _text(event_payload.get("event_type")),
+            "event_version": _text(event_payload.get("event_version")) or "history_event.v1",
+            "occurred_at": occurred_at,
+            "actor_user_id": _text(actor.get("user_id")),
+            "actor_guest_id": _text(actor.get("guest_id")),
+            "actor_auth_session_id": _text(actor.get("auth_session_id")),
+            "actor_auth_state": _text(actor.get("auth_state")),
+            "subject_session_id": _text(subject.get("session_id")),
+            "subject_message_id": _text(subject.get("message_id")),
+            "subject_job_id": _text(subject.get("job_id")),
+            "subject_report_id": _text(subject.get("report_id")),
+            "source_surface": _text(source.get("surface")),
+            "source_api_path": _text(source.get("api_path")),
+            "source_execution_mode": _text(source.get("execution_mode")),
+            "source_node_code": _text(source.get("node_code")),
+            "status": _text(event_payload.get("status")) or "success",
+            "summary": _text(event_payload.get("summary")),
+            "actor": actor,
+            "subject": subject,
+            "source": source,
+            "metadata": _dict_or_empty(event_payload.get("metadata")),
+            "privacy": _dict_or_empty(event_payload.get("privacy")),
+        },
+    )
+    return event
 
 
 def _agent_result_status(status: Any) -> str:
@@ -949,6 +1464,20 @@ def _report_persistence_skipped(reason: str) -> dict[str, Any]:
     return {
         "backend": "postgresql",
         "table": Report._meta.db_table,
+        "status": "skipped",
+        "reason": reason,
+    }
+
+
+def _auth_persistence_skipped(reason: str) -> dict[str, Any]:
+    return {
+        "backend": "postgresql",
+        "tables": [
+            UserAccount._meta.db_table,
+            GuestIdentity._meta.db_table,
+            AuthSession._meta.db_table,
+            AuthEvent._meta.db_table,
+        ],
         "status": "skipped",
         "reason": reason,
     }
@@ -1155,6 +1684,18 @@ def _positive_int_or_default(value: Any, *, default: int) -> int:
     if number is None or number == 0:
         return default
     return number
+
+
+def _datetime_or_none(value: Any):
+    text = _text(value)
+    if not text:
+        return None
+    parsed = parse_datetime(text)
+    if parsed is None:
+        return None
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed, timezone=datetime_timezone.utc)
+    return parsed
 
 
 def _normalize_guest_id(value: Any) -> str:

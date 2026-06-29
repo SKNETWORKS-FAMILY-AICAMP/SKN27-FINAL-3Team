@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from django.db import DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -36,9 +37,9 @@ from app.services.chatbot_mock_service import (
 from app.services.history_event_mock_service import (
     HISTORY_EVENT_VERSION,
     actor_from_payload,
-    list_history_events,
-    record_agent_execution_events,
-    record_history_event,
+    list_history_events as list_sidecar_history_events,
+    record_agent_execution_events as record_sidecar_agent_execution_events,
+    record_history_event as record_sidecar_history_event,
     source_from_request,
     subject_from_payload,
 )
@@ -53,14 +54,21 @@ from chatbot.request_parsing import (
     request_payload as _request_payload,
 )
 from chatbot.repositories import (
+    authorize_report_download_metadata,
     get_mycase_summary,
     get_report_download_metadata,
     get_uploaded_file,
+    list_history_event_records,
     list_uploaded_files,
+    persist_current_auth_subject,
     persist_analysis_display_result,
     persist_analysis_job_execution,
     persist_chat_message_analysis_boundary,
+    persist_guest_session_identity,
+    record_agent_history_event_records,
+    record_history_event_record,
     persist_report_action,
+    record_usage_event,
     register_uploaded_file,
 )
 
@@ -86,7 +94,9 @@ def demo_scenarios(_request: HttpRequest) -> JsonResponse:
 def guest_session(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     payload = _create_guest_session(body)
+    payload["persistence"] = persist_guest_session_identity(payload, raw_payload=body)
     _record_history_safely(
+        request,
         event_type="guest_session_created",
         status="success",
         summary="비회원 guest session을 mock 발급했습니다.",
@@ -112,7 +122,13 @@ def auth_me(request: HttpRequest) -> JsonResponse:
         guest_id=request.headers.get("X-Guest-Id") or request.GET.get("guest_id"),
         session_id=request.GET.get("session_id"),
     )
+    if status < 400:
+        payload["persistence"] = persist_current_auth_subject(
+            payload,
+            session_id=request.GET.get("session_id"),
+        )
     _record_history_safely(
+        request,
         event_type="auth_me_checked",
         status="success" if status < 400 else "failed",
         summary="현재 인증 subject를 mock 확인했습니다.",
@@ -135,22 +151,32 @@ def auth_me(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def history_events(request: HttpRequest) -> JsonResponse:
-    events = list_history_events(
-        session_id=request.GET.get("session_id"),
-        user_id=request.GET.get("user_id"),
-        guest_id=request.GET.get("guest_id"),
-        job_id=request.GET.get("job_id"),
-        event_type=request.GET.get("event_type"),
-        limit=_positive_int(request.GET.get("limit"), default=100),
-    )
+    filters = {
+        "session_id": request.GET.get("session_id"),
+        "user_id": request.GET.get("user_id"),
+        "guest_id": request.GET.get("guest_id"),
+        "job_id": request.GET.get("job_id"),
+        "event_type": request.GET.get("event_type"),
+        "limit": _positive_int(request.GET.get("limit"), default=100),
+    }
+    if _is_canonical_mock_request(request):
+        events = list_history_event_records(**filters)
+        storage = {
+            "backend": "postgresql",
+            "policy": "standard_light",
+            "table": "history_events",
+        }
+    else:
+        events = list_sidecar_history_events(**filters)
+        storage = {
+            "backend": "mock_sidecar_json",
+            "policy": "standard_light",
+        }
     return _json_response(
         request,
         {
             "history_contract": HISTORY_EVENT_VERSION,
-            "storage": {
-                "backend": "mock_sidecar_json",
-                "policy": "standard_light",
-            },
+            "storage": storage,
             "count": len(events),
             "events": events,
             "limitations": [
@@ -190,7 +216,12 @@ def attachments(request: HttpRequest) -> JsonResponse:
     payload = _request_payload(request)
     upload_file = _first_upload_file(request)
     if _is_canonical_mock_request(request):
-        attachment = register_uploaded_file(payload, upload_file=upload_file)
+        identity_payload = _payload_with_request_identity(request, payload)
+        usage = record_usage_event(identity_payload, scope="file_upload")
+        if not usage["allowed"]:
+            return _rate_limit_response(request, usage)
+        attachment = register_uploaded_file(identity_payload, upload_file=upload_file)
+        attachment["usage"] = usage
     else:
         attachment = register_mock_attachment(payload, upload_file=upload_file)
     return _json_response(request, {"attachment": attachment})
@@ -223,12 +254,19 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         return _json_response(request, {"jobs": list_analysis_jobs(session_id=request.GET.get("session_id"))})
 
     body = _json_body(request)
-    job = create_analysis_job(body)
+    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
+    usage = None
+    if _is_canonical_mock_request(request):
+        usage = record_usage_event(identity_body, scope="agent_run")
+        if not usage["allowed"]:
+            return _rate_limit_response(request, usage)
+    job = create_analysis_job(identity_body)
     if _is_canonical_mock_request(request):
         job["persistence"] = persist_analysis_job_execution(
-            _payload_with_request_identity(request, body),
+            identity_body,
             job,
         )
+        job["usage"] = usage
     actor = _history_actor(request, body)
     source = _history_source(request)
     subject = subject_from_payload(
@@ -238,6 +276,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         job_id=job.get("job_id"),
     )
     _record_history_safely(
+        request,
         event_type="analysis_job_created",
         status=job.get("status") or "success",
         summary="분석 job을 mock 생성했습니다.",
@@ -253,6 +292,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         },
     )
     _record_agent_events_safely(
+        request,
         job.get("node_execution", {}).get("executions", []),
         actor=actor,
         source=source,
@@ -304,6 +344,7 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     payload = create_session(user_id=body.get("user_id"))
     _record_history_safely(
+        request,
         event_type="chat_session_created",
         status="success",
         summary="채팅 session을 mock 생성했습니다.",
@@ -319,10 +360,18 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def submit_chat_message(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    chat_response = submit_message(body)
+    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
+    usage = None
     if _is_canonical_mock_request(request):
-        persist_chat_message_analysis_boundary(body, chat_response)
+        usage = record_usage_event(identity_body, scope="chat_message")
+        if not usage["allowed"]:
+            return _rate_limit_response(request, usage)
+    chat_response = submit_message(identity_body)
+    if _is_canonical_mock_request(request):
+        persist_chat_message_analysis_boundary(identity_body, chat_response)
+        chat_response["usage"] = usage
     _record_history_safely(
+        request,
         event_type="chat_message_created",
         status=chat_response.get("status") or "success",
         summary="채팅 메시지를 mock 분석 응답으로 처리했습니다.",
@@ -358,6 +407,7 @@ def run_agent_node(request: HttpRequest) -> JsonResponse:
     node_execution = execute_mock_node(body)
     agent_output = node_execution.get("agent_output") or {}
     _record_agent_events_safely(
+        request,
         [node_execution],
         actor=_history_actor(request, body),
         source=_history_source(request, node_code=node_execution.get("node_code")),
@@ -388,6 +438,7 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
     if chat_response:
         response["chat_response"] = chat_response
     _record_agent_events_safely(
+        request,
         response["node_execution"].get("executions", []),
         actor=_history_actor(request, body),
         source=_history_source(request),
@@ -405,11 +456,19 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def report_action(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    report = perform_report_action(body)
+    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
+    usage = None
+    if _is_canonical_mock_request(request):
+        usage = record_usage_event(identity_body, scope="report_action")
+        if not usage["allowed"]:
+            return _rate_limit_response(request, usage)
+    report = perform_report_action(identity_body)
     if _is_canonical_mock_request(request):
         report = _canonicalize_mock_paths(report)
-        report["persistence"] = persist_report_action(body, report)
+        report["persistence"] = persist_report_action(identity_body, report)
+        report["usage"] = usage
     _record_history_safely(
+        request,
         event_type="report_downloaded" if body.get("action") == "download" else "report_saved",
         status=report.get("status") or "success",
         summary="리포트 action을 mock 처리했습니다.",
@@ -436,6 +495,13 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
     if _is_canonical_mock_request(request):
         download = get_report_download_metadata(report_id)
         if download is not None:
+            identity_payload = _payload_with_request_identity(
+                request,
+                {"session_id": request.GET.get("session_id")},
+            )
+            access = authorize_report_download_metadata(download, identity_payload)
+            if not access["allowed"]:
+                return _object_access_denied_response(request, access)
             response = HttpResponse(
                 download["body"],
                 content_type=download["content_type"],
@@ -446,6 +512,7 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             response["X-Report-Persistence"] = "postgresql"
             response["X-Report-Storage-Backend"] = download["storage_backend"]
             response["X-Report-Storage-URI"] = download["storage_uri"]
+            response["X-Report-Access-Decision"] = access["reason"]
             return response
 
     response = HttpResponse(
@@ -501,6 +568,43 @@ def _payload_with_request_identity(
     return enriched
 
 
+def _rate_limit_response(request: HttpRequest, usage: dict[str, object]) -> JsonResponse:
+    required_action = "login" if usage.get("subject_type") in {"anonymous", "guest"} else "wait_or_upgrade"
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "rate_limit.v1",
+                "type": "rate_limit",
+                "code": "rate_limit_exceeded",
+                "status": 429,
+                "message": "요청 한도를 초과했습니다.",
+                "required_action": required_action,
+                "usage": usage,
+            }
+        },
+        status=429,
+    )
+
+
+def _object_access_denied_response(request: HttpRequest, access: dict[str, object]) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "object_access.v1",
+                "type": "object_access",
+                "code": "object_access_denied",
+                "status": 403,
+                "message": "리포트 다운로드 권한이 없습니다.",
+                "required_action": "login_or_owner_match",
+                "access": access,
+            }
+        },
+        status=403,
+    )
+
+
 def _actor_from_auth_me_payload(request: HttpRequest, payload: dict[str, object]) -> dict[str, object]:
     subject = payload.get("subject") if isinstance(payload.get("subject"), dict) else {}
     actor = _history_actor(request, {"guest_id": request.GET.get("guest_id")})
@@ -525,14 +629,17 @@ def _history_source(request: HttpRequest, node_code: str | None = None) -> dict[
     )
 
 
-def _record_history_safely(**kwargs: object) -> dict[str, object] | None:
+def _record_history_safely(request: HttpRequest, **kwargs: object) -> dict[str, object] | None:
     try:
-        return record_history_event(**kwargs)
-    except OSError:
+        if _is_canonical_mock_request(request):
+            return record_history_event_record(**kwargs)
+        return record_sidecar_history_event(**kwargs)
+    except (DatabaseError, OSError):
         return None
 
 
 def _record_agent_events_safely(
+    request: HttpRequest,
     executions: list[dict[str, object]],
     *,
     actor: dict[str, object],
@@ -540,8 +647,11 @@ def _record_agent_events_safely(
     subject: dict[str, object],
 ) -> None:
     try:
-        record_agent_execution_events(executions, actor=actor, source=source, subject=subject)
-    except OSError:
+        if _is_canonical_mock_request(request):
+            record_agent_history_event_records(executions, actor=actor, source=source, subject=subject)
+        else:
+            record_sidecar_agent_execution_events(executions, actor=actor, source=source, subject=subject)
+    except (DatabaseError, OSError):
         return
 
 

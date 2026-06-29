@@ -127,9 +127,9 @@ docker run --rm -p 8000:8000 `
 | `POST` | `/api/mock/reports/` | 리포트 저장/다운로드 action mock |
 | `GET` | `/api/mock/reports/{report_id}/download/` | mock report 다운로드 |
 
-## History event mock
+## History event
 
-`GET /api/history/?session_id=...`는 `backend/media/mock_history_events`의 sidecar JSON 이벤트를 조회한다. 현재 정책은 `standard_light`이며 사용자 원문, OCR 원문, Agent reasoning 전문은 저장하지 않는다.
+Canonical `GET /api/history/?session_id=...`는 PostgreSQL `history_events`의 `history_event.v1` 표준-라이트 이벤트를 조회한다. 명시적 `/api/mock/history/`만 `backend/media/mock_history_events` sidecar JSON을 유지한다. 현재 정책은 `standard_light`이며 사용자 원문, OCR 원문, Agent reasoning 전문은 저장하지 않는다.
 
 테스트나 로컬 실험에서 저장 위치를 분리하려면 `MOCK_HISTORY_EVENT_ROOT` 환경변수를 사용한다.
 
@@ -185,7 +185,11 @@ Canonical `GET /api/analysis/results/{job_id}/` saves the display snapshot to `a
 
 Canonical `POST /api/reports/` saves report metadata to `reports` and links it to `analysis_jobs` plus `analysis_display_results` when available. The generated artifact still uses a `mock://reports/{report_id}` placeholder until the object storage adapter is introduced.
 
-Canonical `GET /api/reports/{report_id}/download/` checks the `reports` table first. When metadata exists, the response includes `X-Report-Persistence`, `X-Report-Storage-Backend`, and `X-Report-Storage-URI`; otherwise it falls back to the existing mock text download.
+Canonical `GET /api/reports/{report_id}/download/`는 `reports` table을 먼저 확인한다. metadata가 있으면 요청 subject와 `reports.owner_id`를 비교해 소유자만 다운로드할 수 있고, 성공 응답에는 `X-Report-Persistence`, `X-Report-Storage-Backend`, `X-Report-Storage-URI`, `X-Report-Access-Decision`을 포함한다. metadata가 없으면 기존 mock text download로 fallback한다.
+
+## Redis status
+
+현재 실행 구성에는 Redis container, Django cache 설정, Redis client가 없다. Redis는 `chat_session_state:{session_id}`, `analysis_job_progress:{job_id}` 같은 짧은 TTL 캐시 후보로만 문서화되어 있으며, 현재 구현은 PostgreSQL `analysis_jobs`, `analysis_job_events`, `usage_events`, `history_events`를 기준 저장소로 사용한다.
 
 ## My Case summary
 
