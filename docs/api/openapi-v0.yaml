@@ -20,7 +20,7 @@ info:
     markdown: docs/pm-api-json-schema-spec-2026-06-23.md
   x-contract-status-policy:
     confirmed: Current mock implementation or stable cross-team JSON contract.
-    review_required: Included for coordination but must be confirmed before production implementation.
+    review_required: 팀 조율을 위해 포함했지만 운영 구현 전 확인이 필요한 계약.
     internal_note: Captured as context only; do not expose as a public product promise.
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
@@ -2214,11 +2214,11 @@ components:
           type: string
         source_reference:
           type: string
-          description: Canonical source pointer used by RAG, OCR, Vision, and Supervisor cards.
+          description: RAG, OCR, Vision, Supervisor card에서 사용하는 canonical source pointer.
         source_ref:
           type: string
           deprecated: true
-          description: Deprecated alias kept only for older mock fixtures; new outputs should use source_reference.
+          description: 기존 mock fixture 호환용 deprecated alias. 신규 output은 source_reference를 사용해야 한다.
         chunk_id:
           type: string
         node_code:
@@ -2575,7 +2575,7 @@ components:
             type: string
         missing_fields:
           type: array
-          description: Optional top-level missing input or extraction fields, used by partial/failed Agent outputs.
+          description: partial/failed Agent output에서 사용하는 선택 top-level 누락 입력 또는 추출 필드.
           items:
             type: string
         created_at:
@@ -2757,7 +2757,7 @@ components:
     TextMlCaseSearchResult:
       type: object
       x-contract-status: review_required
-      x-review-note: Updated from issues #33 and #22 on 2026-06-29. source_reference is canonical; source_ref is a deprecated compatibility alias only.
+      x-review-note: 2026-06-29 기준 #33, #22 내용을 반영했다. source_reference가 canonical이고 source_ref는 deprecated 호환 alias로만 남긴다.
       properties:
         normalized_description:
           type: string
@@ -2903,8 +2903,8 @@ components:
     VisionMediaAnalysisResult:
       type: object
       x-contract-status: review_required
-      x-review-note: Updated from issues #38 and #73 on 2026-06-29. Vision output is event-window, clip, key-frame, and per-candidate-score oriented; do not treat confidence_label as the final confidence contract.
-      x-internal-note: damage_image is an internal Supervisor handoff value, not a public AttachmentPurpose enum in ver0.
+      x-review-note: 2026-06-29 기준 #38, #73 내용을 반영했다. Vision output은 event window, clip, key frame, 후보별 score 중심이며 confidence_label을 최종 confidence 계약으로 보지 않는다.
+      x-internal-note: damage_image는 ver0 public AttachmentPurpose enum이 아니라 Supervisor 내부 handoff 값이다.
       properties:
         media_type:
           type: string
@@ -3105,7 +3105,7 @@ components:
           additionalProperties: true
         processing_artifacts:
           type: object
-          description: References to internal Vision artifacts when surfaced for debugging or Supervisor handoff.
+          description: 디버깅 또는 Supervisor handoff에 노출할 때 사용하는 내부 Vision artifact 참조.
           properties:
             agent_output_json:
               type: string
@@ -3148,7 +3148,7 @@ components:
     TrafficAccidentConfirmationOcrResult:
       type: object
       x-contract-status: review_required
-      x-review-note: Added from issue #65 on 2026-06-29. This schema is for police-issued traffic accident confirmation OCR only, not fault judgment.
+      x-review-note: 2026-06-29 기준 #65에서 추가했다. 경찰서 발급 교통사고사실확인원 OCR 전용 schema이며 과실 판단용이 아니다.
       required: [document_check, extracted_fields, missing_fields]
       properties:
         document_type:

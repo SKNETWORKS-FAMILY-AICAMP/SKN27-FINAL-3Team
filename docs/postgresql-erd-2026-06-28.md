@@ -1,10 +1,10 @@
-> 2026-06-29 alignment: ERD change timing and Supervisor flow ownership are now
-> tracked in `docs/architecture/supervisor-erd-flow-alignment-2026-06-29.md`.
-> The current tables remain the MVP backbone; next changes add auth/session/quota
-> ownership, then AI session / Agent invocation traceability, then DB-backed
-> history events after TTL and permission rules are confirmed.
+> 2026-06-29 정렬 메모: ERD 변경 시점과 Supervisor 흐름 소유권은
+> `docs/architecture/supervisor-erd-flow-alignment-2026-06-29.md`에서 관리한다.
+> 현재 테이블은 MVP 저장 골격으로 유지하고, 다음 변경은 인증/세션/quota
+> 소유권, AI session / Agent invocation 추적성, TTL과 권한 규칙 확정 후
+> DB 기반 history 이벤트 순서로 진행한다.
 
-> 2026-06-29 update: canonical `POST /api/analysis/jobs/` now persists the job boundary plus one `agent_results` row per mock plan execution. Canonical `GET /api/analysis/results/{job_id}/` persists the Supervisor display snapshot to `analysis_display_results`. Canonical `POST /api/reports/` persists report metadata to `reports` with a `mock://reports/{report_id}` artifact placeholder. Canonical report download now checks the `reports` row first and exposes storage metadata headers. Canonical `GET /api/mypage/summary/` now summarizes My Case progress from `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports`. Explicit `/api/mock/...` paths remain sidecar-only. The next persistence target is the real object storage adapter/download authorization path.
+> 2026-06-29 업데이트: canonical `POST /api/analysis/jobs/`는 job 경계와 mock plan 실행별 `agent_results` row를 저장한다. canonical `GET /api/analysis/results/{job_id}/`는 Supervisor display snapshot을 `analysis_display_results`에 저장한다. canonical `POST /api/reports/`는 `mock://reports/{report_id}` artifact placeholder와 함께 report metadata를 `reports`에 저장한다. canonical report download는 먼저 `reports` row를 확인하고 storage metadata header를 노출한다. canonical `GET /api/mypage/summary/`는 `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, `reports`에서 내 사건 진행도를 요약한다. 명시적 `/api/mock/...` 경로는 기존 보조 파일 기반 동작을 유지한다. 다음 persistence 대상은 실제 object storage adapter와 download authorization 경계다.
 
 # PostgreSQL ERD 초안
 
@@ -213,12 +213,12 @@ erDiagram
 
 `POST /api/analysis/jobs/`는 mock plan 실행 결과를 `analysis_jobs`, `analysis_job_events`, `agent_results`에 저장한다. `GET /api/analysis/results/{job_id}/`는 화면용 Supervisor display snapshot을 `analysis_display_results`에 저장하고, `POST /api/reports/`와 `GET /api/reports/{report_id}/download/`는 `reports` metadata와 mock artifact download boundary를 사용한다. `GET /api/mypage/summary/`는 이 테이블들을 묶어 My Case read model을 반환한다.
 
-명시적 회귀 테스트 경로인 `/api/mock/attachments/`는 기존 sidecar-only 동작을 유지한다.
+명시적 회귀 테스트 경로인 `/api/mock/attachments/`는 기존 보조 파일 기반 동작을 유지한다.
 
 ## 7. 남은 구현 순서
 
 1. DDD/MAS 기준으로 ERD를 bounded context별로 재분류한다.
-2. auth/session/rate-limit MVP skeleton에서 `guest_id`, `auth_session_id`, quota key를 연결한다.
-3. AI session/Agent invocation log skeleton으로 Agent 호출 추적성을 강화한다.
+2. 인증/세션/rate limit MVP 뼈대에서 `guest_id`, `auth_session_id`, quota key를 연결한다.
+3. AI session/Agent invocation log 뼈대로 Agent 호출 추적성을 강화한다.
 4. `history_events` DB 전환, TTL, 조회 권한을 결정한다.
 5. `reports` object storage adapter와 download authorization을 연결한다.
