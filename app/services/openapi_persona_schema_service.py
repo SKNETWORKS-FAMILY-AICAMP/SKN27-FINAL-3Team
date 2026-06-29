@@ -65,6 +65,7 @@ PERSONA_CONFIGS: dict[str, dict[str, Any]] = {
             "LawGroundSearchResult",
             "TextMlCaseSearchResult",
             "VisionMediaAnalysisResult",
+            "TrafficAccidentConfirmationOcrResult",
             "ObjectionReportGenerationResult",
             "AgentResultValidationResult",
             "Evidence",

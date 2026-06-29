@@ -43,6 +43,7 @@ def test_agent_pack_contains_adapter_contract_and_node_structured_results():
         "LawGroundSearchResult",
         "TextMlCaseSearchResult",
         "VisionMediaAnalysisResult",
+        "TrafficAccidentConfirmationOcrResult",
         "ObjectionReportGenerationResult",
     } <= set(pack["schemas"])
     assert {endpoint["path"] for endpoint in pack["endpoints"]} >= {
