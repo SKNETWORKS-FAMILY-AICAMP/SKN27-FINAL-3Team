@@ -56,6 +56,35 @@ def test_openapi_v0_exposes_auth_history_and_agent_contracts():
     assert "auth_context" in schemas["ReportActionRequest"]["properties"]
 
 
+def test_openapi_v0_reflects_latest_agent_output_schema_updates():
+    schemas = load_openapi()["components"]["schemas"]
+
+    structured_result_refs = {
+        item["$ref"].split("/")[-1]
+        for item in schemas["AgentAdapterOutput"]["properties"]["structured_result"]["oneOf"]
+        if "$ref" in item
+    }
+
+    assert "traffic_accident_confirmation_ocr" in schemas["NodeCode"]["enum"]
+    assert "TrafficAccidentConfirmationOcrResult" in structured_result_refs
+    assert "missing_fields" in schemas["AgentAdapterOutput"]["properties"]
+
+    text_ml_properties = schemas["TextMlCaseSearchResult"]["properties"]
+    assert text_ml_properties["reliability_score"]["type"] == ["number", "null"]
+    assert "insurer_claim_review" in text_ml_properties
+    assert "missing_fields" in text_ml_properties
+
+    vision_properties = schemas["VisionMediaAnalysisResult"]["properties"]
+    assert "event_window" in vision_properties
+    assert "object_change_evidence" in vision_properties
+    assert "candidate_scores" in vision_properties
+    assert vision_properties["confidence_label"]["deprecated"] is True
+
+    evidence_properties = schemas["Evidence"]["properties"]
+    assert "review_case" in evidence_properties["source_type"]["enum"]
+    assert evidence_properties["source_ref"]["deprecated"] is True
+
+
 def test_openapi_v0_distribution_guide_routes_team_roles():
     guide = read_text(GUIDE_FILE)
 

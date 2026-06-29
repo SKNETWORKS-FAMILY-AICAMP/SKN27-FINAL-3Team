@@ -119,3 +119,19 @@ OpenAPI ver0 다음 단계에서 바로 결정하면 좋은 항목은 다음과 
 | 3 | 히스토리 저장 이벤트 단위 | 멘토님이 강조한 수집/고도화/after-service 설계의 핵심 |
 | 4 | Agent 실행 방식: 동기, 비동기 worker, 혼합 | 진행 상태, retry, timeout, Redis/PostgreSQL 책임이 달라짐 |
 | 5 | `accident_statement` handoff 수신 node | 사고경위서 OCR/문서 인식 흐름이 정해짐 |
+
+## 9. 2026-06-29 output schema intake
+
+The 2026-06-29 issue review changed the Agent structured output contract in
+three review-required areas. `docs/api/openapi-v0.yaml` now reflects these as a
+coordination contract before production implementation.
+
+| Issue | OpenAPI change |
+|---|---|
+| `#33` | `TextMlCaseSearchResult` accepts object-shaped accident candidates, structured recommended evidence, `insurer_claim_review`, nullable reliability score, and canonical `source_reference` metadata. |
+| `#38`, `#73` | `VisionMediaAnalysisResult` is event-window, core-clip, key-frame, object-change, scene-context, and per-candidate-score oriented. `confidence_label` remains only as a deprecated compatibility field. |
+| `#65` | Added `traffic_accident_confirmation_ocr` and `TrafficAccidentConfirmationOcrResult` for police-issued traffic accident confirmation OCR handoff. |
+
+Compatibility note: legacy `source_ref` remains in schemas only as a deprecated
+alias because older mock fixtures still contain it. New Agent outputs should
+emit `source_reference`.

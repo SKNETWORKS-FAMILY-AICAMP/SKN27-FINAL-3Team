@@ -146,3 +146,14 @@ ver1로 넘어갈 때는 아래를 확정해야 한다.
 | 3 | Agent별 실제 sample output |
 | 4 | 리포트 목록/상세/이의신청서 전용 API |
 | 5 | 동기/비동기 worker 혼합 방식 |
+
+## 8. 2026-06-29 Agent output schema intake
+
+Before implementing Agent outputs, compare each node sample output against the
+latest issue-driven schema updates in `docs/api/openapi-v0.yaml`.
+
+| Issue | Team handoff check |
+|---|---|
+| `#33` | Text/RAG output must use `source_reference` as the canonical evidence pointer and include structured insurer-claim review fields when an insurer claim is provided. |
+| `#38`, `#73` | Vision output should hand off event windows, core clip/key-frame evidence, object-change evidence, scene-context candidates, and per-candidate scores instead of a single generic confidence value. |
+| `#65` | Traffic accident confirmation OCR should use `traffic_accident_confirmation_ocr` and `TrafficAccidentConfirmationOcrResult`; it must not become a fault-judgment node. |

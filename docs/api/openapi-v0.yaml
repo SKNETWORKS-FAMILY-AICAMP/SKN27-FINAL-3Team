@@ -2199,12 +2199,26 @@ components:
           type: string
         source_type:
           type: string
+          enum:
+            - user_uploaded_file
+            - fine_rule
+            - law
+            - standard
+            - review_case
+            - precedent
+            - caption_case
+            - vision_result
+            - ocr_document
+            - agent_output
         title:
           type: string
         source_reference:
           type: string
+          description: Canonical source pointer used by RAG, OCR, Vision, and Supervisor cards.
         source_ref:
           type: string
+          deprecated: true
+          description: Deprecated alias kept only for older mock fixtures; new outputs should use source_reference.
         chunk_id:
           type: string
         node_code:
@@ -2255,6 +2269,7 @@ components:
         - law_ground_search
         - text_ml_case_search
         - vision_media_analysis
+        - traffic_accident_confirmation_ocr
         - objection_report_generation
         - agent_result_validation
         - final_response_merge
@@ -2541,6 +2556,7 @@ components:
             - $ref: "#/components/schemas/LawGroundSearchResult"
             - $ref: "#/components/schemas/TextMlCaseSearchResult"
             - $ref: "#/components/schemas/VisionMediaAnalysisResult"
+            - $ref: "#/components/schemas/TrafficAccidentConfirmationOcrResult"
             - $ref: "#/components/schemas/ObjectionReportGenerationResult"
             - $ref: "#/components/schemas/AgentResultValidationResult"
             - type: object
@@ -2555,6 +2571,11 @@ components:
             type: string
         limitations:
           type: array
+          items:
+            type: string
+        missing_fields:
+          type: array
+          description: Optional top-level missing input or extraction fields, used by partial/failed Agent outputs.
           items:
             type: string
         created_at:
@@ -2735,13 +2756,29 @@ components:
 
     TextMlCaseSearchResult:
       type: object
+      x-contract-status: review_required
+      x-review-note: Updated from issues #33 and #22 on 2026-06-29. source_reference is canonical; source_ref is a deprecated compatibility alias only.
       properties:
         normalized_description:
           type: string
         accident_type_candidates:
           type: array
           items:
-            type: string
+            oneOf:
+              - type: string
+              - type: object
+                required: [type]
+                properties:
+                  type:
+                    type: string
+                  reason:
+                    type: string
+                  confidence:
+                    type:
+                      - number
+                      - string
+                      - "null"
+                additionalProperties: true
         issue_tags:
           type: array
           items:
@@ -2754,32 +2791,331 @@ components:
           type: array
           items:
             type: object
+            properties:
+              case_id:
+                type: string
+              title:
+                type: string
+              summary:
+                type: string
+              source_type:
+                type: string
+                enum: [review_case, precedent, caption_case, standard, law]
+              source_reference:
+                type: string
+              source_ref:
+                type: string
+                deprecated: true
+              similarity_score:
+                type:
+                  - number
+                  - "null"
+              reliability_score:
+                type:
+                  - number
+                  - "null"
+              issue_tags:
+                type: array
+                items:
+                  type: string
+              accident_type:
+                type: string
+              matched_facts:
+                type: array
+                items:
+                  type: string
+              different_facts:
+                type: array
+                items:
+                  type: string
+              confidence:
+                type:
+                  - number
+                  - string
+                  - "null"
             additionalProperties: true
         reliability_score:
-          type: number
+          type:
+            - number
+            - "null"
         ratio_range_label:
           type: string
         recommended_evidence:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                required: [title]
+                properties:
+                  title:
+                    type: string
+                  description:
+                    type: string
+                  related_issue:
+                    type: string
+                  priority:
+                    type:
+                      - string
+                      - integer
+                  based_on:
+                    type: array
+                    items:
+                      type: string
+                additionalProperties: true
+        insurer_claim_review:
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                claimed_ratio:
+                  type:
+                    - string
+                    - "null"
+                claim_summary:
+                  type: string
+                comparison_summary:
+                  type: string
+                key_dispute_points:
+                  type: array
+                  items:
+                    type: string
+                needed_evidence:
+                  type: array
+                  items:
+                    type: string
+                limitations:
+                  type: array
+                  items:
+                    type: string
+              additionalProperties: true
+        summary_for_rag:
+          type: string
+        limitations:
+          type: array
+          items:
+            type: string
+        missing_fields:
           type: array
           items:
             type: string
 
     VisionMediaAnalysisResult:
       type: object
+      x-contract-status: review_required
+      x-review-note: Updated from issues #38 and #73 on 2026-06-29. Vision output is event-window, clip, key-frame, and per-candidate-score oriented; do not treat confidence_label as the final confidence contract.
       x-internal-note: damage_image is an internal Supervisor handoff value, not a public AttachmentPurpose enum in ver0.
       properties:
         media_type:
           type: string
+        event_window_start_sec:
+          type:
+            - number
+            - "null"
+        event_window_end_sec:
+          type:
+            - number
+            - "null"
+        priority_score:
+          type:
+            - number
+            - "null"
+        event_window:
+          type: object
+          properties:
+            start_sec:
+              type:
+                - number
+                - "null"
+            end_sec:
+              type:
+                - number
+                - "null"
+            priority_score:
+              type:
+                - number
+                - "null"
+            clip_uri:
+              type: string
+            clip_timestamp_sec:
+              type:
+                - number
+                - "null"
+            source_reference:
+              type: string
+          additionalProperties: true
+        core_clip:
+          type: object
+          properties:
+            clip_uri:
+              type: string
+            start_sec:
+              type:
+                - number
+                - "null"
+            end_sec:
+              type:
+                - number
+                - "null"
+            source_reference:
+              type: string
+          additionalProperties: true
         key_frames:
           type: array
           items:
             type: object
+            properties:
+              frame_role:
+                type: string
+                enum: [before, risk_increasing, peak, after, other]
+              frame_id:
+                type: string
+              frame_uri:
+                type: string
+              timestamp:
+                type: string
+              timestamp_sec:
+                type:
+                  - number
+                  - "null"
+              source_reference:
+                type: string
+              observations:
+                type: array
+                items:
+                  type: string
             additionalProperties: true
         observations:
           type: array
           items:
             type: object
             additionalProperties: true
+        object_observations:
+          type: array
+          items:
+            type: object
+            properties:
+              object_type:
+                type: string
+                enum: [vehicle, pedestrian, two_wheeler, traffic_light, lane, sign, road_object, unknown]
+              label:
+                type: string
+              confidence:
+                type:
+                  - number
+                  - "null"
+              bbox:
+                type: array
+                items:
+                  type: number
+              timestamp_sec:
+                type:
+                  - number
+                  - "null"
+            additionalProperties: true
+        object_change_evidence:
+          type: array
+          items:
+            type: object
+            properties:
+              change_type:
+                type: string
+                enum:
+                  - position_change
+                  - distance_decrease
+                  - bbox_overlap_change
+                  - object_appearance
+                  - object_disappearance
+                  - scene_change
+                  - other
+              description:
+                type: string
+              supporting_key_frames:
+                type: array
+                items:
+                  type: string
+              score:
+                type:
+                  - number
+                  - "null"
+            additionalProperties: true
+        scene_context_candidates:
+          type: array
+          items:
+            type: object
+            properties:
+              context_type:
+                type: string
+                enum: [intersection, crosswalk, traffic_light, parking_lot, lane_change, road_edge, unknown]
+              confidence:
+                type:
+                  - number
+                  - "null"
+              reason:
+                type: string
+            additionalProperties: true
+        user_statement_comparison:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [match_possible, needs_confirmation, cannot_verify_from_video]
+            matched_points:
+              type: array
+              items:
+                type: string
+            uncertain_points:
+              type: array
+              items:
+                type: string
+            cannot_verify_points:
+              type: array
+              items:
+                type: string
+          additionalProperties: true
+        candidate_scores:
+          type: object
+          properties:
+            clip_score:
+              type:
+                - number
+                - "null"
+            videomae_v2_clip_score:
+              type:
+                - number
+                - "null"
+            scene_context_confidence:
+              type:
+                - number
+                - "null"
+            object_detection_confidence:
+              type:
+                - number
+                - "null"
+            supporting_key_frames:
+              type: array
+              items:
+                type: string
+            supporting_timestamps:
+              type: array
+              items:
+                type:
+                  - number
+                  - string
+          additionalProperties: true
+        processing_artifacts:
+          type: object
+          description: References to internal Vision artifacts when surfaced for debugging or Supervisor handoff.
+          properties:
+            agent_output_json:
+              type: string
+            videomae_results_json:
+              type: string
+            final_analysis_json:
+              type: string
+            supervisor_handoff_json:
+              type: string
+          additionalProperties: true
         scene_summary:
           type: string
         detected_objects:
@@ -2797,12 +3133,97 @@ components:
             additionalProperties: true
         confidence_label:
           type: string
+          deprecated: true
         privacy_redaction_required:
           type: boolean
         quality_issues:
           type: array
           items:
             type: string
+        limitations:
+          type: array
+          items:
+            type: string
+
+    TrafficAccidentConfirmationOcrResult:
+      type: object
+      x-contract-status: review_required
+      x-review-note: Added from issue #65 on 2026-06-29. This schema is for police-issued traffic accident confirmation OCR only, not fault judgment.
+      required: [document_check, extracted_fields, missing_fields]
+      properties:
+        document_type:
+          type: string
+          enum: [traffic_accident_confirmation, unknown]
+        message:
+          type: string
+        document_check:
+          type: object
+          required: [is_target_document, document_name, reason]
+          properties:
+            is_target_document:
+              type: boolean
+            document_name:
+              type:
+                - string
+                - "null"
+            reason:
+              type: string
+          additionalProperties: true
+        extracted_fields:
+          type: object
+          properties:
+            receipt_number:
+              type:
+                - string
+                - "null"
+            police_station:
+              type:
+                - string
+                - "null"
+            person_role:
+              type:
+                - string
+                - "null"
+            accident_datetime:
+              type:
+                - string
+                - "null"
+            accident_location:
+              type:
+                - string
+                - "null"
+            accident_type:
+              type:
+                - string
+                - "null"
+            accident_cause:
+              type:
+                - string
+                - "null"
+            damage_summary:
+              type:
+                - string
+                - "null"
+            accident_description:
+              type:
+                - string
+                - "null"
+          additionalProperties: true
+        missing_fields:
+          type: array
+          items:
+            type: string
+        privacy_redaction:
+          type: object
+          properties:
+            redacted_fields:
+              type: array
+              items:
+                type: string
+            original_image_retention:
+              type: string
+              enum: [temporary_only, not_stored, unknown]
+          additionalProperties: true
         limitations:
           type: array
           items:
