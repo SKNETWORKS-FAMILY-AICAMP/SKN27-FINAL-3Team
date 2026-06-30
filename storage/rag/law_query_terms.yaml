@@ -1,7 +1,3 @@
-# 1st MVP query-understanding terms for traffic-law search.
-# These terms are not legal evidence. They only expand vague user language into
-# candidate legal search terms. Official provisions must still come from
-# law_provisions[].
 
 terms:
   - code: personal_mobility

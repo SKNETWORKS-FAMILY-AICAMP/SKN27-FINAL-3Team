@@ -1,5 +1,3 @@
-"""Generate legal embedding artifacts with the OpenAI embeddings API."""
-
 from __future__ import annotations
 
 import argparse

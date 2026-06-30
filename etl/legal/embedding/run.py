@@ -1,5 +1,3 @@
-"""Generate embedding vector artifacts from embedding_inputs.jsonl."""
-
 from __future__ import annotations
 
 import argparse
