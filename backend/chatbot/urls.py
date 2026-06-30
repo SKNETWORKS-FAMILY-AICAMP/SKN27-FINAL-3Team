@@ -9,6 +9,7 @@ from chatbot import views
 urlpatterns = [
     path("health/", views.health_check, name="health-check"),
     path("auth/guest-session/", views.guest_session, name="auth-guest-session"),
+    path("auth/login/", views.auth_login, name="auth-login"),
     path("auth/me/", views.auth_me, name="auth-me"),
     path("mypage/summary/", views.mypage_summary, name="canonical-mypage-summary"),
     path("history/", views.history_events, name="canonical-history-events"),

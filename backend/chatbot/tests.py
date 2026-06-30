@@ -472,6 +472,53 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(session.metadata["auth_context"]["guest_id"], "gst_existing")
         self.assertEqual(session.metadata["auth_context"]["subject_type"], "guest")
 
+    def test_google_login_issues_app_jwt_and_persists_auth_session(self):
+        response = Client().post(
+            "/api/auth/login/",
+            data={
+                "provider": "google",
+                "google_sub": "google-sub-123",
+                "email": "driver@example.com",
+                "display_name": "Driver User",
+                "guest_id": "gst_before_google",
+                "session_id": "ses_google_login",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["api_surface"], "canonical_mock")
+        self.assertEqual(body["contract_version"], "google_auth.v1")
+        self.assertEqual(body["provider"], "google")
+        self.assertEqual(body["token_type"], "Bearer")
+        self.assertTrue(body["access_token"])
+        self.assertEqual(body["subject"]["subject_type"], "user")
+        self.assertEqual(body["subject"]["guest_id"], "gst_before_google")
+        self.assertEqual(body["auth_session"]["verification"], "mock_google_subject")
+        self.assertEqual(body["persistence"]["auth_session_table"], "auth_sessions")
+
+        user = UserAccount.objects.get(user_id=body["subject"]["user_id"])
+        auth_session = AuthSession.objects.get(auth_session_id=body["subject"]["auth_session_id"])
+        session = ChatSession.objects.get(session_id="ses_google_login")
+        self.assertEqual(user.email, "driver@example.com")
+        self.assertEqual(user.display_name, "Driver User")
+        self.assertEqual(user.auth_provider, "google")
+        self.assertEqual(user.provider_subject, "google-sub-123")
+        self.assertEqual(auth_session.user, user)
+        self.assertEqual(auth_session.metadata["verification"], "mock_google_subject")
+        self.assertEqual(session.owner_id, user.user_id)
+
+        auth_me_response = Client(
+            HTTP_AUTHORIZATION=f"Bearer {body['access_token']}",
+            HTTP_X_GUEST_ID="gst_before_google",
+        ).get("/api/auth/me/?session_id=ses_google_login")
+        self.assertEqual(auth_me_response.status_code, 200)
+        auth_me = auth_me_response.json()
+        self.assertEqual(auth_me["subject"]["user_id"], user.user_id)
+        self.assertEqual(auth_me["subject"]["auth_session_id"], auth_session.auth_session_id)
+        self.assertEqual(auth_me["auth_session"]["verification"], "app_jwt_hmac")
+
     def test_auth_me_reports_authenticated_subject_with_mock_bearer(self):
         response = self.client.get(
             "/api/auth/me/?session_id=ses_auth_me",

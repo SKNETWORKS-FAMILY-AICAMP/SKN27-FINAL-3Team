@@ -117,6 +117,41 @@ paths:
                   - $ref: "#/components/schemas/CanonicalMockMeta"
                   - $ref: "#/components/schemas/GuestSessionResponse"
 
+  /api/auth/login/:
+    post:
+      tags: [Auth]
+      summary: Exchange a Google login subject for an app Bearer token
+      operationId: createGoogleLogin
+      security: []
+      x-contract-status: confirmed
+      x-review-note: Local/dev accepts mock Google profile fields while GOOGLE_AUTH_ALLOW_MOCK=1. Production must set GOOGLE_AUTH_ALLOW_MOCK=0 and configure GOOGLE_CLIENT_ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleLoginRequest"
+            examples:
+              mockGoogleLogin:
+                value:
+                  provider: google
+                  google_sub: google-sub-123
+                  email: driver@example.com
+                  display_name: Driver User
+                  guest_id: gst_before_google
+                  session_id: ses_google_login
+      responses:
+        "200":
+          description: App Bearer token and persisted auth subject.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/GoogleLoginResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
   /api/auth/me/:
     get:
       tags: [Auth]
@@ -1337,6 +1372,107 @@ components:
           items:
             type: string
 
+    GoogleLoginRequest:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [google]
+          default: google
+        id_token:
+          type: string
+          description: Google ID token or dev mock token. Required in production verification mode.
+        credential:
+          type: string
+          description: Alias for Google Identity Services credential.
+        google_sub:
+          type: string
+          description: Dev/mock Google subject when GOOGLE_AUTH_ALLOW_MOCK=1.
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        picture:
+          type: string
+        guest_id:
+          type: string
+        session_id:
+          type: string
+
+    GoogleLoginResponse:
+      type: object
+      required: [contract_version, auth_state, provider, access_token, token_type, expires_in, user, subject, auth_session, session_binding, rate_limit, merge_policy, limitations]
+      properties:
+        contract_version:
+          type: string
+          enum: [google_auth.v1]
+        auth_state:
+          type: string
+          enum: [authenticated]
+        provider:
+          type: string
+          enum: [google]
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        guest:
+          oneOf:
+            - $ref: "#/components/schemas/GuestIdentity"
+            - type: "null"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        auth_session:
+          $ref: "#/components/schemas/AuthSession"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        rate_limit:
+          $ref: "#/components/schemas/RateLimitPolicy"
+        merge_policy:
+          $ref: "#/components/schemas/MergePolicy"
+        limitations:
+          type: array
+          items:
+            type: string
+        persistence:
+          type: object
+          additionalProperties: true
+
+    AuthUser:
+      type: object
+      properties:
+        user_id:
+          type: string
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        picture:
+          type: string
+        status:
+          type: string
+        auth_provider:
+          type: string
+          enum: [google]
+        provider_subject:
+          type: string
+        policy_status:
+          type: string
+
     AuthSubjectResponse:
       type: object
       required: [auth_state, subject, rate_limit, merge_policy, limitations]
@@ -1345,18 +1481,9 @@ components:
           type: string
           enum: [anonymous, guest, authenticated]
         user:
-          type:
-            - object
-            - "null"
-          properties:
-            user_id:
-              type: string
-            display_name:
-              type: string
-            status:
-              type: string
-            policy_status:
-              type: string
+          oneOf:
+            - $ref: "#/components/schemas/AuthUser"
+            - type: "null"
         guest:
           oneOf:
             - $ref: "#/components/schemas/GuestIdentity"
@@ -1457,6 +1584,8 @@ components:
         status:
           type: string
         verification:
+          type: string
+        provider:
           type: string
 
     SessionBinding:
@@ -3781,6 +3910,7 @@ components:
           type: string
           enum:
             - guest_session_created
+            - auth_login_completed
             - auth_me_checked
             - chat_session_created
             - chat_message_created

@@ -6,4 +6,4 @@ openai
 psycopg2-binary
 sentence-transformers
 redis==5.0.8
-
+google-auth==2.55.1
