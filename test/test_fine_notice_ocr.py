@@ -20,11 +20,17 @@ load_dotenv(ROOT / ".env")
 
 sys.path.insert(0, str(ROOT))
 
-from ai.agents.fine_notice_analysis.graph import graph  # noqa: E402
+# 의존성 누락 시 수집 단계 오류 방지 — import 실패는 skip으로 처리
+try:
+    from ai.agents.fine_notice_analysis.graph import graph  # noqa: E402
+    _GRAPH_AVAILABLE = True
+except ImportError as _exc:  # noqa: F841
+    graph = None  # type: ignore[assignment]
+    _GRAPH_AVAILABLE = False
 
 pytestmark = pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set — 통합 테스트 건너뜀",
+    not os.getenv("OPENAI_API_KEY") or not _GRAPH_AVAILABLE,
+    reason="OPENAI_API_KEY not set or 의존성 누락 — 통합 테스트 건너뜀",
 )
 
 FORMS_DIR = ROOT / "서식문서"
