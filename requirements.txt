@@ -5,4 +5,5 @@ neo4j
 openai
 psycopg2-binary
 sentence-transformers
+redis==5.0.8
 

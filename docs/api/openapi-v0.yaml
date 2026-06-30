@@ -1514,6 +1514,17 @@ components:
           enum: [chat_message, file_upload, agent_run, report_action]
         quota_key:
           type: string
+        plan_code:
+          type: string
+          enum: [anonymous, guest, free, paid]
+        subscription_id:
+          type:
+            - string
+            - "null"
+        policy_code_item:
+          type: string
+        policy_status:
+          type: string
         allowed:
           type: boolean
         limit_count:
@@ -2097,6 +2108,8 @@ components:
                 type: string
             usage:
               $ref: "#/components/schemas/UsageMeter"
+            progress_cache:
+              $ref: "#/components/schemas/ProgressCacheRead"
 
     AnalysisJobEvent:
       type: object
@@ -2113,6 +2126,72 @@ components:
         created_at:
           type: string
           format: date-time
+
+    ProgressCachePolicy:
+      type: object
+      required: [policy_version, backend, ttl_seconds, fallback, key_patterns, cache_role, stores_raw_user_input, stores_agent_reasoning]
+      properties:
+        policy_version:
+          type: string
+          enum: [progress_cache.v1]
+        backend:
+          type: string
+          enum: [redis, locmem, unknown]
+        ttl_seconds:
+          type: integer
+          minimum: 1
+          default: 300
+        fallback:
+          type: string
+          enum: [postgresql]
+        key_patterns:
+          type: object
+          required: [analysis_job_progress, chat_session_state]
+          properties:
+            analysis_job_progress:
+              type: string
+              example: analysis_job_progress:{job_id}
+            chat_session_state:
+              type: string
+              example: chat_session_state:{session_id}
+        cache_role:
+          type: string
+          enum: [ephemeral_progress_state]
+        stores_raw_user_input:
+          type: boolean
+          enum: [false]
+        stores_agent_reasoning:
+          type: boolean
+          enum: [false]
+
+    ProgressCacheRead:
+      type: object
+      required: [policy_version, backend, key, ttl_seconds, fallback, status, snapshot]
+      properties:
+        policy_version:
+          type: string
+          enum: [progress_cache.v1]
+        backend:
+          type: string
+          enum: [redis, locmem, unknown]
+        key:
+          type: string
+        ttl_seconds:
+          type: integer
+          minimum: 1
+        fallback:
+          type: string
+          enum: [postgresql]
+        status:
+          type: string
+          enum: [cached, hit, miss_fallback, not_found, unavailable, unavailable_fallback, unavailable_not_found]
+        snapshot:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        error:
+          type: string
 
     AnalysisResult:
       type: object
@@ -3495,7 +3574,7 @@ components:
     MyPageSummary:
       type: object
       x-contract-status: confirmed
-      required: [storage, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
+      required: [storage, progress_cache, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
       properties:
         storage:
           type: object
@@ -3508,6 +3587,10 @@ components:
               type: array
               items:
                 type: string
+        progress_cache:
+          $ref: "#/components/schemas/ProgressCachePolicy"
+        session_cache:
+          $ref: "#/components/schemas/ProgressCacheRead"
         active_cases:
           type: integer
         due_soon_cases:
@@ -3649,7 +3732,7 @@ components:
     HistoryEventListResponse:
       type: object
       x-contract-status: confirmed
-      required: [history_contract, storage, count, events, limitations]
+      required: [history_contract, storage, history_policy, after_service_summary, count, events, limitations]
       properties:
         history_contract:
           type: string
@@ -3667,6 +3750,10 @@ components:
             table:
               type: string
               enum: [history_events]
+        history_policy:
+          $ref: "#/components/schemas/HistoryOperatingPolicy"
+        after_service_summary:
+          $ref: "#/components/schemas/HistoryAfterServiceSummary"
         count:
           type: integer
         events:
@@ -3677,6 +3764,89 @@ components:
           type: array
           items:
             type: string
+
+    HistoryOperatingPolicy:
+      type: object
+      x-contract-status: confirmed
+      required: [policy_version, storage_policy, retention, query_scope, metadata_policy, after_service_summary]
+      properties:
+        policy_version:
+          type: string
+          enum: [history_operating_policy.v1]
+        storage_policy:
+          type: string
+          enum: [standard_light]
+        retention:
+          type: object
+          required: [applied_subject_type, applied_days, anonymous_days, guest_days, user_days]
+          properties:
+            applied_subject_type:
+              type: string
+              enum: [anonymous, guest, user]
+            applied_days:
+              type: integer
+            anonymous_days:
+              type: integer
+            guest_days:
+              type: integer
+            user_days:
+              type: integer
+        query_scope:
+          type: object
+          additionalProperties:
+            type: string
+        metadata_policy:
+          type: object
+          required: [mode, allowed_keys, blocked_keys]
+          properties:
+            mode:
+              type: string
+              enum: [allowlist_with_sensitive_key_blocklist]
+            allowed_keys:
+              type: array
+              items:
+                type: string
+            blocked_keys:
+              type: array
+              items:
+                type: string
+        after_service_summary:
+          type: object
+          required: [source, eligible_event_types, excludes]
+          properties:
+            source:
+              type: string
+              enum: [history_events_standard_light]
+            eligible_event_types:
+              type: array
+              items:
+                type: string
+            excludes:
+              type: array
+              items:
+                type: string
+
+    HistoryAfterServiceSummary:
+      type: object
+      x-contract-status: confirmed
+      required: [available, source_event_count, source, summary_basis, excludes_sensitive_payload, status]
+      properties:
+        available:
+          type: boolean
+        source_event_count:
+          type: integer
+        source:
+          type: string
+          enum: [history_events_standard_light]
+        summary_basis:
+          type: array
+          items:
+            type: string
+        excludes_sensitive_payload:
+          type: boolean
+        status:
+          type: string
+          enum: [ready, insufficient_history]
 
     HistoryEventActor:
       type: object
@@ -3830,7 +4000,15 @@ components:
           type: boolean
         reason:
           type: string
-          enum: [owner_match, owner_mismatch, session_match, session_mismatch, legacy_mock_report]
+          enum:
+            - owner_match
+            - owner_mismatch
+            - guest_match
+            - guest_mismatch
+            - session_match
+            - session_mismatch
+            - legacy_mock_report
+            - legacy_unowned_resource
         subject:
           type: object
           properties:
@@ -3851,8 +4029,10 @@ components:
           properties:
             type:
               type: string
-              enum: [report]
+              enum: [report, uploaded_file, uploaded_file_list, mypage, history]
             report_id:
+              type: string
+            attachment_id:
               type: string
             owner_id:
               type:

@@ -55,7 +55,7 @@ def create_analysis_job(payload: dict[str, Any]) -> dict[str, Any]:
         "created_at": created_at,
         "updated_at": _now_iso(),
         "limitations": [
-            "중간발표용 mock analysis job이며 실제 비동기 queue, Redis, DB 저장은 사용하지 않습니다."
+            "중간발표용 mock analysis job입니다. 명시적 mock API는 실제 비동기 queue/Redis/DB 저장을 사용하지 않으며, canonical API는 별도 persistence/cache envelope로 저장 상태를 표시합니다."
         ],
     }
     _write_job(job)

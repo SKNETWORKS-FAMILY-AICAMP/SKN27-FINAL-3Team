@@ -10,6 +10,8 @@ services:
       MOCK_REQUIRE_AUTH: "1"
       DJANGO_SECRET_KEY: "dev-secret"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1]"
+      REDIS_URL: "redis://redis:6379/0"
+      PROGRESS_CACHE_TTL_SECONDS: "300"
     ports:
       - "8000:8000"
 
@@ -57,3 +59,10 @@ volumes:
   neo4j_data:
   neo4j_logs:
 
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    container_name: skn27-demo-redis
+    ports:
+      - "6379:6379"
