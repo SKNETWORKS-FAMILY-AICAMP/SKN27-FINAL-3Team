@@ -19,8 +19,14 @@ services:
     ports:
       - "8000:8000"
 
+  redis:
+    image: redis:7-alpine
+    container_name: skn27-demo-redis
+    ports:
+      - "6379:6379"
+
   postgres:
-    image: pgvector/pgvector:16-pgvector
+    image: pgvector/pgvector:pg16
     container_name: skn27-postgres
     restart: unless-stopped
     ports:
@@ -63,10 +69,4 @@ volumes:
   neo4j_data:
   neo4j_logs:
 
-    depends_on:
-      - redis
-  redis:
-    image: redis:7-alpine
-    container_name: skn27-demo-redis
-    ports:
-      - "6379:6379"
+  redis_data:
