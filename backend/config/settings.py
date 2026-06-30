@@ -30,6 +30,9 @@ OBJECT_STORAGE_PROVIDER = os.environ.get("OBJECT_STORAGE_PROVIDER", "mock_s3")
 OBJECT_STORAGE_BUCKET = os.environ.get("OBJECT_STORAGE_BUCKET", "skn27-demo-object-storage")
 OBJECT_STORAGE_PREFIX = os.environ.get("OBJECT_STORAGE_PREFIX", "canonical")
 OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS = _positive_int_env("OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS", 900)
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_AUTH_ALLOW_MOCK = os.environ.get("GOOGLE_AUTH_ALLOW_MOCK", "1") != "0"
+APP_JWT_SECRET = os.environ.get("APP_JWT_SECRET", SECRET_KEY)
 
 INSTALLED_APPS = [
     "django.contrib.staticfiles",

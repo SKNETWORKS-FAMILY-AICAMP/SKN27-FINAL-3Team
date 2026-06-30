@@ -40,6 +40,7 @@ def test_openapi_v0_exposes_auth_history_and_agent_contracts():
 
     for path in [
         "/api/auth/guest-session/",
+        "/api/auth/login/",
         "/api/auth/me/",
         "/api/chat/messages/",
         "/api/history/",

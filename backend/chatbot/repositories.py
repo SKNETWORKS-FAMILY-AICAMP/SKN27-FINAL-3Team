@@ -424,6 +424,8 @@ def persist_current_auth_subject(
 
     with transaction.atomic():
         user = _get_or_create_user_account(user_id)
+        if user is not None:
+            _update_user_account_from_auth_payload(user, auth_payload)
         guest = _get_or_create_guest_identity(guest_id)
         auth_session = None
         if auth_session_id:
@@ -492,6 +494,47 @@ def persist_current_auth_subject(
         "session_id": chat_session.session_id if chat_session else None,
         "status": "saved",
     }
+
+
+def _update_user_account_from_auth_payload(
+    user: UserAccount,
+    auth_payload: dict[str, Any],
+) -> None:
+    user_payload = _dict_or_empty(auth_payload.get("user"))
+    metadata = dict(user.metadata or {})
+    changed_fields: list[str] = []
+
+    email = _text(user_payload.get("email"))
+    if email and user.email != email:
+        user.email = email
+        changed_fields.append("email")
+
+    display_name = _text(user_payload.get("display_name"))
+    if display_name and user.display_name != display_name:
+        user.display_name = display_name
+        changed_fields.append("display_name")
+
+    auth_provider = _text(user_payload.get("auth_provider") or auth_payload.get("provider"))
+    if auth_provider and user.auth_provider != auth_provider:
+        user.auth_provider = auth_provider
+        changed_fields.append("auth_provider")
+
+    provider_subject = _text(user_payload.get("provider_subject"))
+    if provider_subject and user.provider_subject != provider_subject:
+        user.provider_subject = provider_subject
+        changed_fields.append("provider_subject")
+
+    for key in ("picture", "policy_status"):
+        value = user_payload.get(key)
+        if value is not None and metadata.get(key) != value:
+            metadata[key] = value
+    metadata.setdefault("source", "auth_subject")
+    if metadata != user.metadata:
+        user.metadata = metadata
+        changed_fields.append("metadata")
+
+    if changed_fields:
+        user.save(update_fields=[*sorted(set(changed_fields)), "updated_at"])
 
 
 def record_usage_event(
