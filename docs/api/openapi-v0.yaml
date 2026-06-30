@@ -3660,7 +3660,7 @@ components:
     HistoryEventListResponse:
       type: object
       x-contract-status: confirmed
-      required: [history_contract, storage, count, events, limitations]
+      required: [history_contract, storage, history_policy, after_service_summary, count, events, limitations]
       properties:
         history_contract:
           type: string
@@ -3678,6 +3678,10 @@ components:
             table:
               type: string
               enum: [history_events]
+        history_policy:
+          $ref: "#/components/schemas/HistoryOperatingPolicy"
+        after_service_summary:
+          $ref: "#/components/schemas/HistoryAfterServiceSummary"
         count:
           type: integer
         events:
@@ -3688,6 +3692,89 @@ components:
           type: array
           items:
             type: string
+
+    HistoryOperatingPolicy:
+      type: object
+      x-contract-status: confirmed
+      required: [policy_version, storage_policy, retention, query_scope, metadata_policy, after_service_summary]
+      properties:
+        policy_version:
+          type: string
+          enum: [history_operating_policy.v1]
+        storage_policy:
+          type: string
+          enum: [standard_light]
+        retention:
+          type: object
+          required: [applied_subject_type, applied_days, anonymous_days, guest_days, user_days]
+          properties:
+            applied_subject_type:
+              type: string
+              enum: [anonymous, guest, user]
+            applied_days:
+              type: integer
+            anonymous_days:
+              type: integer
+            guest_days:
+              type: integer
+            user_days:
+              type: integer
+        query_scope:
+          type: object
+          additionalProperties:
+            type: string
+        metadata_policy:
+          type: object
+          required: [mode, allowed_keys, blocked_keys]
+          properties:
+            mode:
+              type: string
+              enum: [allowlist_with_sensitive_key_blocklist]
+            allowed_keys:
+              type: array
+              items:
+                type: string
+            blocked_keys:
+              type: array
+              items:
+                type: string
+        after_service_summary:
+          type: object
+          required: [source, eligible_event_types, excludes]
+          properties:
+            source:
+              type: string
+              enum: [history_events_standard_light]
+            eligible_event_types:
+              type: array
+              items:
+                type: string
+            excludes:
+              type: array
+              items:
+                type: string
+
+    HistoryAfterServiceSummary:
+      type: object
+      x-contract-status: confirmed
+      required: [available, source_event_count, source, summary_basis, excludes_sensitive_payload, status]
+      properties:
+        available:
+          type: boolean
+        source_event_count:
+          type: integer
+        source:
+          type: string
+          enum: [history_events_standard_light]
+        summary_basis:
+          type: array
+          items:
+            type: string
+        excludes_sensitive_payload:
+          type: boolean
+        status:
+          type: string
+          enum: [ready, insufficient_history]
 
     HistoryEventActor:
       type: object

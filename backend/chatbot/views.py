@@ -57,11 +57,13 @@ from chatbot.repositories import (
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
+    build_history_after_service_summary,
     get_chat_session_access_metadata,
     get_mycase_summary,
     get_report_download_metadata,
     get_uploaded_file_access_metadata,
     get_uploaded_file,
+    history_operating_policy,
     list_history_event_records,
     list_uploaded_files,
     persist_current_auth_subject,
@@ -176,23 +178,29 @@ def history_events(request: HttpRequest) -> JsonResponse:
                 filters["user_id"] = subject["user_id"]
             elif subject.get("guest_id"):
                 filters["guest_id"] = subject["guest_id"]
+        filters["subject_type"] = subject.get("subject_type")
         events = list_history_event_records(**filters)
         storage = {
             "backend": "postgresql",
             "policy": "standard_light",
             "table": "history_events",
         }
+        policy = history_operating_policy(subject.get("subject_type"))
     else:
         events = list_sidecar_history_events(**filters)
         storage = {
             "backend": "mock_sidecar_json",
             "policy": "standard_light",
         }
+        policy = history_operating_policy("anonymous")
+    after_service_summary = build_history_after_service_summary(events)
     return _json_response(
         request,
         {
             "history_contract": HISTORY_EVENT_VERSION,
             "storage": storage,
+            "history_policy": policy,
+            "after_service_summary": after_service_summary,
             "count": len(events),
             "events": events,
             "limitations": [
