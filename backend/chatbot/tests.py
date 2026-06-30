@@ -1,9 +1,11 @@
 import json
 import os
 import tempfile
+from datetime import timedelta
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
+from django.utils import timezone
 
 from chatbot.models import (
     AgentFeedbackEvent,
@@ -41,6 +43,7 @@ from chatbot.models import (
     UploadedFile,
     UploadedFileStatus,
 )
+from chatbot.repositories import list_history_event_records, record_history_event_record
 
 
 class ChatbotPersistenceModelTests(TestCase):
@@ -637,6 +640,11 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["storage"]["backend"], "postgresql")
         self.assertEqual(body["storage"]["policy"], "standard_light")
         self.assertEqual(body["storage"]["table"], "history_events")
+        self.assertEqual(body["history_policy"]["policy_version"], "history_operating_policy.v1")
+        self.assertEqual(body["history_policy"]["retention"]["applied_subject_type"], "user")
+        self.assertEqual(body["history_policy"]["retention"]["applied_days"], 365)
+        self.assertTrue(body["after_service_summary"]["available"])
+        self.assertTrue(body["after_service_summary"]["excludes_sensitive_payload"])
         events = body["events"]
         self.assertIn("chat_message_created", {event["event_type"] for event in events})
         chat_event = next(event for event in events if event["event_type"] == "chat_message_created")
@@ -649,6 +657,53 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(stored_event.actor_guest_id, "gst_history")
         self.assertNotIn(raw_user_text, json.dumps(events, ensure_ascii=False))
         self.assertNotIn("user_text", json.dumps([event["metadata"] for event in events], ensure_ascii=False))
+
+    def test_history_endpoint_applies_guest_retention_cutoff(self):
+        old_event = HistoryEvent.objects.create(
+            event_id="evt_old_guest_history",
+            event_type="chat_message_created",
+            event_version="history_event.v1",
+            occurred_at=timezone.now() - timedelta(days=8),
+            actor_guest_id="gst_old_history",
+            actor_auth_state="guest",
+            subject_session_id="ses_old_history",
+            source_execution_mode="canonical_mock",
+            status="success",
+            summary="old guest event",
+            actor={"guest_id": "gst_old_history", "auth_state": "guest"},
+            subject={"session_id": "ses_old_history"},
+            source={"execution_mode": "canonical_mock"},
+            metadata={"routing_intent": "fine_notice"},
+            privacy={"risk_level": "low", "retention_policy": "standard_light"},
+        )
+        self.assertTrue(HistoryEvent.objects.filter(event_id=old_event.event_id).exists())
+        events = list_history_event_records(guest_id="gst_old_history", subject_type="guest")
+
+        self.assertEqual(events, [])
+
+    def test_history_metadata_uses_allowlist_and_sensitive_blocklist(self):
+        event = record_history_event_record(
+            event_type="chat_message_created",
+            status="success",
+            summary="metadata policy check",
+            actor={"user_id": "usr_mock", "auth_state": "authenticated"},
+            subject={"session_id": "ses_metadata_policy"},
+            source={"execution_mode": "canonical_mock"},
+            metadata={
+                "routing_intent": "fine_notice",
+                "user_text": "원문은 저장되면 안 됩니다.",
+                "debug_blob": "internal detail",
+                "merge_policy": {"prompt": "secret prompt", "mode": "manual"},
+            },
+        )
+
+        metadata = event["metadata"]
+        self.assertEqual(metadata["routing_intent"], "fine_notice")
+        self.assertEqual(metadata["merge_policy"], {"mode": "manual"})
+        self.assertNotIn("user_text", metadata)
+        self.assertNotIn("debug_blob", metadata)
+        self.assertIn("debug_blob", metadata["metadata_policy"]["dropped_keys"])
+        self.assertIn("user_text", metadata["metadata_policy"]["dropped_keys"])
 
     def test_history_endpoint_denies_other_guest_query(self):
         other_guest_client = Client(

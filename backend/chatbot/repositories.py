@@ -15,6 +15,7 @@ from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
 from app.services.history_event_mock_service import (
+    SENSITIVE_METADATA_KEYS,
     build_agent_execution_events,
     build_history_event,
 )
@@ -80,6 +81,54 @@ USAGE_POLICY_LIMITS = {
         "agent_run": 120,
         "report_action": 100,
     },
+}
+
+HISTORY_POLICY_VERSION = "history_operating_policy.v1"
+HISTORY_RETENTION_DAYS = {
+    "anonymous": 1,
+    "guest": 7,
+    "user": 365,
+    "authenticated": 365,
+}
+HISTORY_METADATA_ALLOWED_KEYS = {
+    "action",
+    "active_node",
+    "analysis_plan_id",
+    "attachment_count",
+    "card_count",
+    "error_code",
+    "evidence_count",
+    "execution_id",
+    "execution_status",
+    "has_download_url",
+    "http_status",
+    "is_authenticated",
+    "limitation_count",
+    "merge_policy",
+    "metadata_policy",
+    "missing_fields",
+    "mock_scenario",
+    "mock_status",
+    "node_code",
+    "node_name",
+    "pending_fields",
+    "rate_limit_keys",
+    "report_status",
+    "response_status",
+    "routing_intent",
+    "session_status",
+    "status_counts",
+    "subject_type",
+    "ttl_seconds",
+}
+HISTORY_AFTER_SERVICE_EVENT_TYPES = {
+    "analysis_job_created",
+    "agent_call_completed",
+    "agent_call_failed",
+    "agent_call_partial",
+    "chat_message_created",
+    "report_downloaded",
+    "report_saved",
 }
 
 
@@ -544,6 +593,7 @@ def record_history_event_record(
         metadata=metadata,
         privacy=privacy,
     )
+    event_payload["metadata"] = _history_metadata_snapshot(metadata)
     return history_event_to_api(_upsert_history_event_payload(event_payload))
 
 
@@ -574,11 +624,15 @@ def list_history_event_records(
     guest_id: str | None = None,
     job_id: str | None = None,
     event_type: str | None = None,
+    subject_type: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Read history events from PostgreSQL using the public history filters."""
 
     queryset = HistoryEvent.objects.all()
+    retention_days = _history_retention_days(subject_type)
+    if retention_days:
+        queryset = queryset.filter(occurred_at__gte=timezone.now() - timedelta(days=retention_days))
     if session_id:
         queryset = queryset.filter(subject_session_id=session_id)
     if user_id:
@@ -592,6 +646,58 @@ def list_history_event_records(
 
     rows = list(queryset.order_by("-occurred_at", "-id")[: max(limit, 1)])
     return [history_event_to_api(event) for event in reversed(rows)]
+
+
+def history_operating_policy(subject_type: str | None = None) -> dict[str, Any]:
+    normalized_subject_type = _history_subject_type(subject_type)
+    return {
+        "policy_version": HISTORY_POLICY_VERSION,
+        "storage_policy": "standard_light",
+        "retention": {
+            "applied_subject_type": normalized_subject_type,
+            "applied_days": _history_retention_days(normalized_subject_type),
+            "anonymous_days": HISTORY_RETENTION_DAYS["anonymous"],
+            "guest_days": HISTORY_RETENTION_DAYS["guest"],
+            "user_days": HISTORY_RETENTION_DAYS["user"],
+        },
+        "query_scope": {
+            "member": "own_user_history_only",
+            "guest": "own_guest_or_authorized_session_only",
+            "anonymous": "history_query_denied_without_subject",
+        },
+        "metadata_policy": {
+            "mode": "allowlist_with_sensitive_key_blocklist",
+            "allowed_keys": sorted(HISTORY_METADATA_ALLOWED_KEYS),
+            "blocked_keys": sorted(SENSITIVE_METADATA_KEYS),
+        },
+        "after_service_summary": {
+            "source": "history_events_standard_light",
+            "eligible_event_types": sorted(HISTORY_AFTER_SERVICE_EVENT_TYPES),
+            "excludes": ["user_text", "ocr_raw", "agent_reasoning", "raw_output"],
+        },
+    }
+
+
+def build_history_after_service_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    eligible_events = [
+        event
+        for event in events
+        if _text(event.get("event_type")) in HISTORY_AFTER_SERVICE_EVENT_TYPES
+    ]
+    recent_event_types = []
+    for event in eligible_events:
+        event_type = _text(event.get("event_type"))
+        if event_type and event_type not in recent_event_types:
+            recent_event_types.append(event_type)
+
+    return {
+        "available": bool(eligible_events),
+        "source_event_count": len(eligible_events),
+        "source": "history_events_standard_light",
+        "summary_basis": recent_event_types[:8],
+        "excludes_sensitive_payload": True,
+        "status": "ready" if eligible_events else "insufficient_history",
+    }
 
 
 def history_event_to_api(event: HistoryEvent) -> dict[str, Any]:
@@ -1547,11 +1653,61 @@ def _upsert_history_event_payload(event_payload: dict[str, Any]) -> HistoryEvent
             "actor": actor,
             "subject": subject,
             "source": source,
-            "metadata": _dict_or_empty(event_payload.get("metadata")),
+            "metadata": _history_metadata_snapshot(event_payload.get("metadata")),
             "privacy": _dict_or_empty(event_payload.get("privacy")),
         },
     )
     return event
+
+
+def _history_metadata_snapshot(metadata: Any) -> dict[str, Any]:
+    raw_metadata = _dict_or_empty(metadata)
+    sanitized: dict[str, Any] = {}
+    dropped_keys = []
+
+    for key, value in raw_metadata.items():
+        normalized_key = str(key)
+        if (
+            normalized_key not in HISTORY_METADATA_ALLOWED_KEYS
+            or normalized_key.lower() in SENSITIVE_METADATA_KEYS
+        ):
+            dropped_keys.append(normalized_key)
+            continue
+        sanitized[normalized_key] = _strip_sensitive_history_metadata(value)
+
+    if dropped_keys:
+        sanitized["metadata_policy"] = {
+            "policy_version": HISTORY_POLICY_VERSION,
+            "dropped_keys": sorted(dropped_keys),
+        }
+    return sanitized
+
+
+def _strip_sensitive_history_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _strip_sensitive_history_metadata(item)
+            for key, item in value.items()
+            if str(key).lower() not in SENSITIVE_METADATA_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_sensitive_history_metadata(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _history_retention_days(subject_type: str | None) -> int:
+    return HISTORY_RETENTION_DAYS.get(_history_subject_type(subject_type), HISTORY_RETENTION_DAYS["anonymous"])
+
+
+def _history_subject_type(subject_type: str | None) -> str:
+    normalized = _text(subject_type)
+    if normalized == "authenticated":
+        return "user"
+    if normalized in HISTORY_RETENTION_DAYS:
+        return normalized
+    return "anonymous"
 
 
 def _agent_result_status(status: Any) -> str:
