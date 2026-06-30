@@ -1514,6 +1514,17 @@ components:
           enum: [chat_message, file_upload, agent_run, report_action]
         quota_key:
           type: string
+        plan_code:
+          type: string
+          enum: [anonymous, guest, free, paid]
+        subscription_id:
+          type:
+            - string
+            - "null"
+        policy_code_item:
+          type: string
+        policy_status:
+          type: string
         allowed:
           type: boolean
         limit_count:
@@ -3830,7 +3841,15 @@ components:
           type: boolean
         reason:
           type: string
-          enum: [owner_match, owner_mismatch, session_match, session_mismatch, legacy_mock_report]
+          enum:
+            - owner_match
+            - owner_mismatch
+            - guest_match
+            - guest_mismatch
+            - session_match
+            - session_mismatch
+            - legacy_mock_report
+            - legacy_unowned_resource
         subject:
           type: object
           properties:
@@ -3851,8 +3870,10 @@ components:
           properties:
             type:
               type: string
-              enum: [report]
+              enum: [report, uploaded_file, uploaded_file_list, mypage, history]
             report_id:
+              type: string
+            attachment_id:
               type: string
             owner_id:
               type:

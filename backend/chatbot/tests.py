@@ -517,6 +517,61 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(usage_event.amount, 0)
         self.assertEqual(usage_event.metadata["status"], "blocked")
 
+    def test_usage_policy_seeds_free_subscription_and_code_items(self):
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_free_policy",
+                "user_text": "무료 회원 quota 정책 확인",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        usage = response.json()["usage"]
+        self.assertEqual(usage["plan_code"], "free")
+        self.assertEqual(usage["limit_count"], 100)
+        self.assertEqual(usage["policy_code_item"], "usage_quota_policy:free")
+        self.assertTrue(Subscription.objects.filter(user__user_id="usr_mock", plan_code="free").exists())
+        code_item = CodeItem.objects.get(group__group_code="usage_quota_policy", code="free")
+        self.assertEqual(code_item.metadata["limits"]["chat_message"], 100)
+        quota = UsageQuota.objects.get(subject_id="user:usr_mock", scope="chat_message")
+        self.assertEqual(quota.metadata["plan_code"], "free")
+        self.assertEqual(quota.metadata["policy_code_item"], "usage_quota_policy:free")
+
+    def test_usage_policy_uses_paid_subscription_limit(self):
+        user = UserAccount.objects.create(user_id="usr_paid", status=UserAccountStatus.ACTIVE)
+        Subscription.objects.create(
+            subscription_id="sub_paid_policy",
+            user=user,
+            plan_code="paid",
+            status=SubscriptionStatus.ACTIVE,
+        )
+        paid_client = Client(HTTP_AUTHORIZATION="Bearer usr_paid:any")
+
+        response = paid_client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_paid_policy",
+                "user_text": "유료 회원 quota 정책 확인",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        usage = response.json()["usage"]
+        self.assertEqual(usage["plan_code"], "paid")
+        self.assertEqual(usage["subscription_id"], "sub_paid_policy")
+        self.assertEqual(usage["limit_count"], 500)
+        self.assertEqual(usage["policy_code_item"], "usage_quota_policy:paid")
+        usage_event = UsageEvent.objects.get(subject_id="user:usr_paid", scope="chat_message")
+        self.assertEqual(usage_event.metadata["plan_code"], "paid")
+        self.assertEqual(usage_event.metadata["subscription_id"], "sub_paid_policy")
+
     def test_history_endpoint_requires_authorization_header(self):
         response = Client().get("/api/history/")
 
@@ -541,6 +596,18 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["saved_reports"], 0)
         self.assertEqual(body["recent_analysis_count"], 0)
         self.assertEqual(body["cases"], [])
+
+    def test_mypage_summary_denies_other_owner_query(self):
+        other_client = Client(HTTP_AUTHORIZATION="Bearer usr_other:any")
+
+        response = other_client.get("/api/mypage/summary/?owner_id=usr_mock")
+
+        self.assertEqual(response.status_code, 403)
+        error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "object_access.v1")
+        self.assertEqual(error["code"], "object_access_denied")
+        self.assertEqual(error["access"]["reason"], "owner_mismatch")
+        self.assertEqual(error["access"]["resource"]["type"], "mypage")
 
     def test_history_endpoint_returns_standard_light_session_events(self):
         raw_user_text = "이 고지서 원문은 history metadata에 저장되면 안 됩니다."
@@ -582,6 +649,21 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(stored_event.actor_guest_id, "gst_history")
         self.assertNotIn(raw_user_text, json.dumps(events, ensure_ascii=False))
         self.assertNotIn("user_text", json.dumps([event["metadata"] for event in events], ensure_ascii=False))
+
+    def test_history_endpoint_denies_other_guest_query(self):
+        other_guest_client = Client(
+            HTTP_AUTHORIZATION="Bearer dev-mock-token",
+            HTTP_X_GUEST_ID="gst_other",
+        )
+
+        response = other_guest_client.get("/api/history/?guest_id=gst_history_owner")
+
+        self.assertEqual(response.status_code, 403)
+        error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "object_access.v1")
+        self.assertEqual(error["code"], "object_access_denied")
+        self.assertEqual(error["access"]["reason"], "guest_mismatch")
+        self.assertEqual(error["access"]["resource"]["type"], "history")
 
     def test_explicit_mock_history_endpoint_stays_sidecar_only(self):
         response = self.client.post(
@@ -896,7 +978,8 @@ class ChatbotMockApiTests(TestCase):
             },
         )
 
-        response = self.client.get(f"/api/files/{uploaded_file.attachment_id}/")
+        owner_client = Client(HTTP_AUTHORIZATION="Bearer usr_file_detail:any")
+        response = owner_client.get(f"/api/files/{uploaded_file.attachment_id}/")
 
         self.assertEqual(response.status_code, 200)
         attachment = response.json()["attachment"]
@@ -904,6 +987,37 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(attachment["session_id"], session.session_id)
         self.assertEqual(attachment["status"], UploadedFileStatus.READY)
         self.assertEqual(attachment["persistence"]["table"], "uploaded_files")
+
+    def test_canonical_file_detail_denies_other_owner(self):
+        session = ChatSession.objects.create(
+            session_id="ses_private_file",
+            owner_id="usr_file_owner",
+            status=ChatSessionStatus.ACTIVE,
+        )
+        UploadedFile.objects.create(
+            attachment_id="att_private_file",
+            owner_id="usr_file_owner",
+            session=session,
+            purpose="fine_notice",
+            file_type="image",
+            original_filename="notice.jpg",
+            content_type="image/jpeg",
+            size_bytes=2048,
+            storage_uri="mock://metadata/att_private_file",
+            status=UploadedFileStatus.READY,
+            agent_handoff={},
+            metadata={},
+        )
+        other_client = Client(HTTP_AUTHORIZATION="Bearer usr_other:any")
+
+        response = other_client.get("/api/files/att_private_file/")
+
+        self.assertEqual(response.status_code, 403)
+        error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "object_access.v1")
+        self.assertEqual(error["code"], "object_access_denied")
+        self.assertEqual(error["access"]["reason"], "owner_mismatch")
+        self.assertEqual(error["access"]["resource"]["attachment_id"], "att_private_file")
 
     def test_attachment_list_endpoint_filters_by_session(self):
         response = self.client.post(
