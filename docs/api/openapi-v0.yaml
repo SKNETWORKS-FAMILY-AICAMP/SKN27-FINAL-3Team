@@ -729,6 +729,13 @@ paths:
             X-Report-Storage-URI:
               schema:
                 type: string
+            X-Report-Object-Key:
+              schema:
+                type: string
+            X-Report-Object-Policy:
+              schema:
+                type: string
+                enum: [object_storage_adapter.v1]
             X-Report-Access-Decision:
               schema:
                 type: string
@@ -1839,6 +1846,8 @@ components:
           minimum: 0
         storage_uri:
           type: string
+        object_storage:
+          $ref: "#/components/schemas/ObjectStorageReference"
         resolution_status:
           type: string
           enum: [resolved, inline_metadata, unresolved]
@@ -1868,6 +1877,8 @@ components:
               additionalProperties: true
             agent_handoff:
               $ref: "#/components/schemas/AgentAttachmentHandoff"
+            object_storage:
+              $ref: "#/components/schemas/ObjectStorageReference"
             limitations:
               type: array
               items:
@@ -1877,6 +1888,52 @@ components:
               additionalProperties: true
             usage:
               $ref: "#/components/schemas/UsageMeter"
+
+    ObjectStorageReference:
+      type: object
+      required: [policy_version, backend, provider, storage_uri, resource_type, resource_id, status, persistence_state]
+      properties:
+        policy_version:
+          type: string
+          enum: [object_storage_adapter.v1]
+        backend:
+          type: string
+          enum: [object_storage, mock_placeholder, local_file, unknown]
+        provider:
+          type: string
+          enum: [mock_s3, s3, local_file, mock_sidecar, unknown]
+        bucket:
+          type: string
+        key:
+          type: string
+        storage_uri:
+          type: string
+        resource_type:
+          type: string
+          enum: [uploaded_file, report]
+        resource_id:
+          type: string
+        filename:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [metadata_ready, legacy_reference]
+        source_uri:
+          type: string
+        signed_url_ttl_seconds:
+          type: integer
+          minimum: 1
+        writes_binary:
+          type: boolean
+          enum: [false]
+        persistence_state:
+          type: string
+          enum: [metadata_only_adapter]
 
     AgentAttachmentHandoff:
       type: object
@@ -2108,6 +2165,8 @@ components:
                 type: string
             usage:
               $ref: "#/components/schemas/UsageMeter"
+            progress_cache:
+              $ref: "#/components/schemas/ProgressCacheRead"
 
     AnalysisJobEvent:
       type: object
@@ -2124,6 +2183,72 @@ components:
         created_at:
           type: string
           format: date-time
+
+    ProgressCachePolicy:
+      type: object
+      required: [policy_version, backend, ttl_seconds, fallback, key_patterns, cache_role, stores_raw_user_input, stores_agent_reasoning]
+      properties:
+        policy_version:
+          type: string
+          enum: [progress_cache.v1]
+        backend:
+          type: string
+          enum: [redis, locmem, unknown]
+        ttl_seconds:
+          type: integer
+          minimum: 1
+          default: 300
+        fallback:
+          type: string
+          enum: [postgresql]
+        key_patterns:
+          type: object
+          required: [analysis_job_progress, chat_session_state]
+          properties:
+            analysis_job_progress:
+              type: string
+              example: analysis_job_progress:{job_id}
+            chat_session_state:
+              type: string
+              example: chat_session_state:{session_id}
+        cache_role:
+          type: string
+          enum: [ephemeral_progress_state]
+        stores_raw_user_input:
+          type: boolean
+          enum: [false]
+        stores_agent_reasoning:
+          type: boolean
+          enum: [false]
+
+    ProgressCacheRead:
+      type: object
+      required: [policy_version, backend, key, ttl_seconds, fallback, status, snapshot]
+      properties:
+        policy_version:
+          type: string
+          enum: [progress_cache.v1]
+        backend:
+          type: string
+          enum: [redis, locmem, unknown]
+        key:
+          type: string
+        ttl_seconds:
+          type: integer
+          minimum: 1
+        fallback:
+          type: string
+          enum: [postgresql]
+        status:
+          type: string
+          enum: [cached, hit, miss_fallback, not_found, unavailable, unavailable_fallback, unavailable_not_found]
+        snapshot:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        error:
+          type: string
 
     AnalysisResult:
       type: object
@@ -3405,6 +3530,8 @@ components:
           type: array
           items:
             type: string
+        object_storage:
+          $ref: "#/components/schemas/ObjectStorageReference"
         persistence:
           type: object
           additionalProperties: true
@@ -3443,6 +3570,8 @@ components:
             content:
               type: object
               additionalProperties: true
+            object_storage:
+              $ref: "#/components/schemas/ObjectStorageReference"
             download_url:
               type: string
 
@@ -3506,7 +3635,7 @@ components:
     MyPageSummary:
       type: object
       x-contract-status: confirmed
-      required: [storage, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
+      required: [storage, progress_cache, object_storage, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
       properties:
         storage:
           type: object
@@ -3519,6 +3648,37 @@ components:
               type: array
               items:
                 type: string
+        progress_cache:
+          $ref: "#/components/schemas/ProgressCachePolicy"
+        object_storage:
+          type: object
+          required: [policy_version, backend, provider, bucket, prefix, signed_url_ttl_seconds, writes_binary, persistence_state, fallback]
+          properties:
+            policy_version:
+              type: string
+              enum: [object_storage_adapter.v1]
+            backend:
+              type: string
+              enum: [object_storage]
+            provider:
+              type: string
+            bucket:
+              type: string
+            prefix:
+              type: string
+            signed_url_ttl_seconds:
+              type: integer
+            writes_binary:
+              type: boolean
+              enum: [false]
+            persistence_state:
+              type: string
+              enum: [metadata_only_adapter]
+            fallback:
+              type: string
+              enum: [django_response_body]
+        session_cache:
+          $ref: "#/components/schemas/ProgressCacheRead"
         active_cases:
           type: integer
         due_soon_cases:
@@ -3660,7 +3820,7 @@ components:
     HistoryEventListResponse:
       type: object
       x-contract-status: confirmed
-      required: [history_contract, storage, count, events, limitations]
+      required: [history_contract, storage, history_policy, after_service_summary, count, events, limitations]
       properties:
         history_contract:
           type: string
@@ -3678,6 +3838,10 @@ components:
             table:
               type: string
               enum: [history_events]
+        history_policy:
+          $ref: "#/components/schemas/HistoryOperatingPolicy"
+        after_service_summary:
+          $ref: "#/components/schemas/HistoryAfterServiceSummary"
         count:
           type: integer
         events:
@@ -3688,6 +3852,89 @@ components:
           type: array
           items:
             type: string
+
+    HistoryOperatingPolicy:
+      type: object
+      x-contract-status: confirmed
+      required: [policy_version, storage_policy, retention, query_scope, metadata_policy, after_service_summary]
+      properties:
+        policy_version:
+          type: string
+          enum: [history_operating_policy.v1]
+        storage_policy:
+          type: string
+          enum: [standard_light]
+        retention:
+          type: object
+          required: [applied_subject_type, applied_days, anonymous_days, guest_days, user_days]
+          properties:
+            applied_subject_type:
+              type: string
+              enum: [anonymous, guest, user]
+            applied_days:
+              type: integer
+            anonymous_days:
+              type: integer
+            guest_days:
+              type: integer
+            user_days:
+              type: integer
+        query_scope:
+          type: object
+          additionalProperties:
+            type: string
+        metadata_policy:
+          type: object
+          required: [mode, allowed_keys, blocked_keys]
+          properties:
+            mode:
+              type: string
+              enum: [allowlist_with_sensitive_key_blocklist]
+            allowed_keys:
+              type: array
+              items:
+                type: string
+            blocked_keys:
+              type: array
+              items:
+                type: string
+        after_service_summary:
+          type: object
+          required: [source, eligible_event_types, excludes]
+          properties:
+            source:
+              type: string
+              enum: [history_events_standard_light]
+            eligible_event_types:
+              type: array
+              items:
+                type: string
+            excludes:
+              type: array
+              items:
+                type: string
+
+    HistoryAfterServiceSummary:
+      type: object
+      x-contract-status: confirmed
+      required: [available, source_event_count, source, summary_basis, excludes_sensitive_payload, status]
+      properties:
+        available:
+          type: boolean
+        source_event_count:
+          type: integer
+        source:
+          type: string
+          enum: [history_events_standard_light]
+        summary_basis:
+          type: array
+          items:
+            type: string
+        excludes_sensitive_payload:
+          type: boolean
+        status:
+          type: string
+          enum: [ready, insufficient_history]
 
     HistoryEventActor:
       type: object

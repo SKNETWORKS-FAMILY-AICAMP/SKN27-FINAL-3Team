@@ -183,13 +183,19 @@ Canonical `GET /api/analysis/results/{job_id}/` saves the display snapshot to `a
 
 반환 필드는 `assistant_message`, `progress`, `cards`, `pending_questions`, `attachments`, `report_links`, `evidence`, `agent_results`, `limitations` 중심이다. 디버깅용 원본 묶음인 `analysis_plan`, `node_execution`, `chat_response`는 `GET /api/mock/analysis/jobs/{job_id}/`에서만 조회한다.
 
-Canonical `POST /api/reports/` saves report metadata to `reports` and links it to `analysis_jobs` plus `analysis_display_results` when available. The generated artifact still uses a `mock://reports/{report_id}` placeholder until the object storage adapter is introduced.
+Canonical `POST /api/reports/` saves report metadata to `reports` and links it to `analysis_jobs` plus `analysis_display_results` when available. It now wraps the generated artifact in an `object_storage_adapter.v1` envelope and stores an `s3://...` adapter URI while keeping the original mock URI as `source_storage_uri`.
 
-Canonical `GET /api/reports/{report_id}/download/`는 `reports` table을 먼저 확인한다. metadata가 있으면 요청 subject와 `reports.owner_id`를 비교해 소유자만 다운로드할 수 있고, 성공 응답에는 `X-Report-Persistence`, `X-Report-Storage-Backend`, `X-Report-Storage-URI`, `X-Report-Access-Decision`을 포함한다. metadata가 없으면 기존 mock text download로 fallback한다.
+Canonical `GET /api/reports/{report_id}/download/`는 `reports` table을 먼저 확인한다. metadata가 있으면 요청 subject와 `reports.owner_id`를 비교해 소유자만 다운로드할 수 있고, 성공 응답에는 `X-Report-Persistence`, `X-Report-Storage-Backend`, `X-Report-Storage-URI`, `X-Report-Object-Key`, `X-Report-Object-Policy`, `X-Report-Access-Decision`을 포함한다. metadata가 없으면 기존 mock text download로 fallback한다.
 
 ## Redis status
 
-현재 실행 구성에는 Redis container, Django cache 설정, Redis client가 없다. Redis는 `chat_session_state:{session_id}`, `analysis_job_progress:{job_id}` 같은 짧은 TTL 캐시 후보로만 문서화되어 있으며, 현재 구현은 PostgreSQL `analysis_jobs`, `analysis_job_events`, `usage_events`, `history_events`를 기준 저장소로 사용한다.
+Current status: Docker Compose now includes a Redis 7 service and the backend uses
+`REDIS_URL` to switch Django cache to `django.core.cache.backends.redis.RedisCache`.
+When `REDIS_URL` is absent, local tests use `LocMemCache`. Redis stores only short
+TTL progress snapshots for `analysis_job_progress:{job_id}` and
+`chat_session_state:{session_id}`; PostgreSQL remains the fallback source of truth.
+
+Redis는 `chat_session_state:{session_id}`, `analysis_job_progress:{job_id}` 같은 짧은 TTL 캐시로 연결되어 있다. 현재 구현은 PostgreSQL `analysis_jobs`, `analysis_job_events`, `usage_events`, `history_events`를 기준 저장소로 유지하고, Redis miss나 장애 시 PostgreSQL fallback을 사용한다.
 
 ## My Case summary
 

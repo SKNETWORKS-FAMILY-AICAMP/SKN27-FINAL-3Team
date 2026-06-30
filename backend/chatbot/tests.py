@@ -1,9 +1,12 @@
 import json
 import os
 import tempfile
+from datetime import timedelta
 
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
+from django.utils import timezone
 
 from chatbot.models import (
     AgentFeedbackEvent,
@@ -41,6 +44,8 @@ from chatbot.models import (
     UploadedFile,
     UploadedFileStatus,
 )
+from chatbot.repositories import list_history_event_records, record_history_event_record
+from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
 
 
 class ChatbotPersistenceModelTests(TestCase):
@@ -66,6 +71,44 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(UsageQuota._meta.db_table, "usage_quotas")
         self.assertEqual(UsageEvent._meta.db_table, "usage_events")
         self.assertEqual(HistoryEvent._meta.db_table, "history_events")
+
+    def test_progress_cache_recovers_from_postgresql_on_cache_miss(self):
+        cache.clear()
+        session = ChatSession.objects.create(
+            session_id="ses_progress_cache",
+            owner_id="usr_progress_cache",
+            status=ChatSessionStatus.ACTIVE,
+        )
+        AnalysisJob.objects.create(
+            job_id="job_progress_cache",
+            session=session,
+            owner_id="usr_progress_cache",
+            routing_intent="objection_request",
+            status=AnalysisJobStatus.RUNNING,
+            active_node="fine_notice_analysis",
+            progress_message="analysis running",
+            analysis_plan_id="plan_progress_cache",
+            status_counts={"running": 1},
+        )
+
+        progress = read_analysis_job_progress("job_progress_cache")
+        self.assertEqual(progress["status"], "miss_fallback")
+        self.assertEqual(progress["backend"], "locmem")
+        self.assertEqual(progress["fallback"], "postgresql")
+        self.assertEqual(progress["ttl_seconds"], 300)
+        self.assertEqual(progress["key"], "analysis_job_progress:job_progress_cache")
+        self.assertEqual(progress["snapshot"]["status"], AnalysisJobStatus.RUNNING)
+        self.assertEqual(progress["snapshot"]["source_tables"], ["analysis_jobs", "analysis_job_events"])
+
+        cached_progress = read_analysis_job_progress("job_progress_cache")
+        self.assertEqual(cached_progress["status"], "hit")
+        self.assertEqual(cached_progress["snapshot"]["job_id"], "job_progress_cache")
+
+        session_state = read_chat_session_state("ses_progress_cache")
+        self.assertEqual(session_state["status"], "miss_fallback")
+        self.assertEqual(session_state["key"], "chat_session_state:ses_progress_cache")
+        self.assertEqual(session_state["snapshot"]["latest_job_id"], "job_progress_cache")
+        self.assertEqual(session_state["snapshot"]["current_intent"], "objection_request")
 
     def test_auth_agent_code_and_quota_tables_link_without_replacing_mvp_backbone(self):
         user = UserAccount.objects.create(
@@ -637,6 +680,11 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["storage"]["backend"], "postgresql")
         self.assertEqual(body["storage"]["policy"], "standard_light")
         self.assertEqual(body["storage"]["table"], "history_events")
+        self.assertEqual(body["history_policy"]["policy_version"], "history_operating_policy.v1")
+        self.assertEqual(body["history_policy"]["retention"]["applied_subject_type"], "user")
+        self.assertEqual(body["history_policy"]["retention"]["applied_days"], 365)
+        self.assertTrue(body["after_service_summary"]["available"])
+        self.assertTrue(body["after_service_summary"]["excludes_sensitive_payload"])
         events = body["events"]
         self.assertIn("chat_message_created", {event["event_type"] for event in events})
         chat_event = next(event for event in events if event["event_type"] == "chat_message_created")
@@ -649,6 +697,53 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(stored_event.actor_guest_id, "gst_history")
         self.assertNotIn(raw_user_text, json.dumps(events, ensure_ascii=False))
         self.assertNotIn("user_text", json.dumps([event["metadata"] for event in events], ensure_ascii=False))
+
+    def test_history_endpoint_applies_guest_retention_cutoff(self):
+        old_event = HistoryEvent.objects.create(
+            event_id="evt_old_guest_history",
+            event_type="chat_message_created",
+            event_version="history_event.v1",
+            occurred_at=timezone.now() - timedelta(days=8),
+            actor_guest_id="gst_old_history",
+            actor_auth_state="guest",
+            subject_session_id="ses_old_history",
+            source_execution_mode="canonical_mock",
+            status="success",
+            summary="old guest event",
+            actor={"guest_id": "gst_old_history", "auth_state": "guest"},
+            subject={"session_id": "ses_old_history"},
+            source={"execution_mode": "canonical_mock"},
+            metadata={"routing_intent": "fine_notice"},
+            privacy={"risk_level": "low", "retention_policy": "standard_light"},
+        )
+        self.assertTrue(HistoryEvent.objects.filter(event_id=old_event.event_id).exists())
+        events = list_history_event_records(guest_id="gst_old_history", subject_type="guest")
+
+        self.assertEqual(events, [])
+
+    def test_history_metadata_uses_allowlist_and_sensitive_blocklist(self):
+        event = record_history_event_record(
+            event_type="chat_message_created",
+            status="success",
+            summary="metadata policy check",
+            actor={"user_id": "usr_mock", "auth_state": "authenticated"},
+            subject={"session_id": "ses_metadata_policy"},
+            source={"execution_mode": "canonical_mock"},
+            metadata={
+                "routing_intent": "fine_notice",
+                "user_text": "원문은 저장되면 안 됩니다.",
+                "debug_blob": "internal detail",
+                "merge_policy": {"prompt": "secret prompt", "mode": "manual"},
+            },
+        )
+
+        metadata = event["metadata"]
+        self.assertEqual(metadata["routing_intent"], "fine_notice")
+        self.assertEqual(metadata["merge_policy"], {"mode": "manual"})
+        self.assertNotIn("user_text", metadata)
+        self.assertNotIn("debug_blob", metadata)
+        self.assertIn("debug_blob", metadata["metadata_policy"]["dropped_keys"])
+        self.assertIn("user_text", metadata["metadata_policy"]["dropped_keys"])
 
     def test_history_endpoint_denies_other_guest_query(self):
         other_guest_client = Client(
@@ -923,6 +1018,10 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(attachment["purpose"], "fine_notice")
         self.assertEqual(attachment["persistence"]["backend"], "postgresql")
         self.assertEqual(attachment["persistence"]["table"], "uploaded_files")
+        self.assertEqual(attachment["object_storage"]["policy_version"], "object_storage_adapter.v1")
+        self.assertEqual(attachment["object_storage"]["backend"], "object_storage")
+        self.assertEqual(attachment["object_storage"]["resource_type"], "uploaded_file")
+        self.assertTrue(attachment["storage_uri"].startswith("s3://"))
         self.assertEqual(attachment["checks"]["metadata_repository"], "uploaded_files")
 
         uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
@@ -932,11 +1031,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(uploaded_file.content_type, "image/jpeg")
         self.assertEqual(uploaded_file.size_bytes, 2048)
         self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+        self.assertTrue(uploaded_file.storage_uri.startswith("s3://"))
         self.assertEqual(uploaded_file.metadata["mock_status"], "metadata_registered")
+        self.assertEqual(uploaded_file.metadata["object_storage"]["backend"], "object_storage")
+        self.assertEqual(uploaded_file.metadata["source_storage_uri"], f"mock://metadata/{attachment['attachment_id']}")
+        self.assertEqual(uploaded_file.agent_handoff["storage_uri"], uploaded_file.storage_uri)
 
         detail = self.client.get(f"/api/files/{attachment['attachment_id']}/")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["api_surface"], "canonical_mock")
+        self.assertEqual(detail.json()["attachment"]["object_storage"]["backend"], "object_storage")
         self.assertEqual(
             detail.json()["attachment"]["persistence"]["table"],
             "uploaded_files",
@@ -1187,6 +1291,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job["persistence"]["agent_results_table"], "agent_results")
         self.assertEqual(job["persistence"]["ai_session_table"], "ai_sessions")
         self.assertEqual(job["persistence"]["agent_invocations_table"], "agent_invocations")
+        self.assertEqual(job["persistence"]["progress_cache"]["status"], "cached")
+        self.assertEqual(job["persistence"]["progress_cache"]["backend"], "locmem")
+        self.assertEqual(
+            job["persistence"]["progress_cache"]["key"],
+            f"analysis_job_progress:{job['job_id']}",
+        )
+        self.assertEqual(
+            job["persistence"]["session_cache"]["key"],
+            "chat_session_state:ses_canonical_job",
+        )
         self.assertEqual(job["usage"]["scope"], "agent_run")
         self.assertEqual(job["usage"]["usage_event_table"], "usage_events")
         self.assertEqual(
@@ -1265,7 +1379,10 @@ class ChatbotMockApiTests(TestCase):
 
         detail = self.client.get(f"/api/analysis/jobs/{job['job_id']}/")
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(detail.json()["api_surface"], "canonical_mock")
+        detail_body = detail.json()
+        self.assertEqual(detail_body["api_surface"], "canonical_mock")
+        self.assertEqual(detail_body["job"]["progress_cache"]["status"], "hit")
+        self.assertEqual(detail_body["job"]["progress_cache"]["snapshot"]["job_id"], job["job_id"])
 
         result_response = self.client.get(f"/api/analysis/results/{job['job_id']}/")
         self.assertEqual(result_response.status_code, 200)
@@ -1394,17 +1511,22 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(report_body["persistence"]["backend"], "postgresql")
         self.assertEqual(report_body["persistence"]["table"], "reports")
         self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
-        self.assertEqual(report_body["persistence"]["object_storage"], "mock_placeholder")
+        self.assertEqual(report_body["persistence"]["object_storage"]["backend"], "object_storage")
+        self.assertEqual(report_body["object_storage"]["policy_version"], "object_storage_adapter.v1")
+        self.assertEqual(report_body["object_storage"]["resource_type"], "report")
         self.assertTrue(report_body["download_url"].startswith("/api/reports/"))
         report = Report.objects.get(report_id=report_body["report_id"])
         self.assertEqual(report.job.job_id, job["job_id"])
         self.assertEqual(report.session.session_id, session_id)
         self.assertEqual(report.display_result.display_result_id, result["persistence"]["display_result_id"])
         self.assertEqual(report.status, ReportStatus.READY)
-        self.assertEqual(report.storage_uri, "mock://reports/rep_canonical_smoke")
+        self.assertTrue(report.storage_uri.startswith("s3://skn27-demo-object-storage/"))
         self.assertEqual(report.metadata["source"], "canonical_report_action")
-        self.assertEqual(report.metadata["object_storage_status"], "mock_placeholder")
+        self.assertEqual(report.metadata["object_storage_status"], "metadata_ready")
+        self.assertEqual(report.metadata["object_storage"]["backend"], "object_storage")
+        self.assertEqual(report.metadata["source_storage_uri"], "mock://reports/rep_canonical_smoke")
         self.assertEqual(report.content["download_url"], report_body["download_url"])
+        self.assertEqual(report.content["object_storage"]["storage_uri"], report.storage_uri)
 
         download_response = self.client.get(
             f"/api/reports/{report_body['report_id']}/download/"
@@ -1412,13 +1534,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(download_response.status_code, 200)
         self.assertEqual(download_response["X-API-Surface"], "canonical_mock")
         self.assertEqual(download_response["X-Report-Persistence"], "postgresql")
-        self.assertEqual(download_response["X-Report-Storage-Backend"], "mock_placeholder")
-        self.assertEqual(download_response["X-Report-Storage-URI"], "mock://reports/rep_canonical_smoke")
+        self.assertEqual(download_response["X-Report-Storage-Backend"], "object_storage")
+        self.assertEqual(download_response["X-Report-Storage-URI"], report.storage_uri)
+        self.assertEqual(download_response["X-Report-Object-Key"], report.metadata["object_storage"]["key"])
+        self.assertEqual(download_response["X-Report-Object-Policy"], "object_storage_adapter.v1")
         self.assertEqual(download_response["X-Report-Access-Decision"], "owner_match")
         self.assertIn(
             "Report metadata download for rep_canonical_smoke",
             download_response.content.decode("utf-8"),
         )
+        self.assertIn("object_storage_policy: object_storage_adapter.v1", download_response.content.decode("utf-8"))
 
         summary_response = self.client.get(f"/api/mypage/summary/?session_id={session_id}")
         self.assertEqual(summary_response.status_code, 200)
@@ -1426,6 +1551,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(summary_body["api_surface"], "canonical_mock")
         self.assertEqual(summary_body["execution_mode"], "mock")
         self.assertEqual(summary_body["storage"]["backend"], "postgresql")
+        self.assertEqual(summary_body["progress_cache"]["policy_version"], "progress_cache.v1")
+        self.assertEqual(summary_body["progress_cache"]["fallback"], "postgresql")
+        self.assertEqual(summary_body["object_storage"]["policy_version"], "object_storage_adapter.v1")
+        self.assertEqual(summary_body["object_storage"]["backend"], "object_storage")
+        self.assertEqual(
+            summary_body["progress_cache"]["key_patterns"]["analysis_job_progress"],
+            "analysis_job_progress:{job_id}",
+        )
+        self.assertEqual(summary_body["session_cache"]["status"], "hit")
+        self.assertEqual(summary_body["session_cache"]["snapshot"]["session_id"], session_id)
         self.assertEqual(
             set(summary_body["storage"]["tables"]),
             {

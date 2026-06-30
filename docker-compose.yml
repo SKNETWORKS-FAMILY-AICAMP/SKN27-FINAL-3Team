@@ -10,5 +10,18 @@ services:
       MOCK_REQUIRE_AUTH: "1"
       DJANGO_SECRET_KEY: "dev-secret"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1]"
+      REDIS_URL: "redis://redis:6379/0"
+      PROGRESS_CACHE_TTL_SECONDS: "300"
+      OBJECT_STORAGE_PROVIDER: "mock_s3"
+      OBJECT_STORAGE_BUCKET: "skn27-demo-object-storage"
+      OBJECT_STORAGE_PREFIX: "canonical"
+      OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: "900"
     ports:
       - "8000:8000"
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    container_name: skn27-demo-redis
+    ports:
+      - "6379:6379"

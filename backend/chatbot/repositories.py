@@ -15,6 +15,7 @@ from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
 from app.services.history_event_mock_service import (
+    SENSITIVE_METADATA_KEYS,
     build_agent_execution_events,
     build_history_event,
 )
@@ -53,6 +54,17 @@ from chatbot.models import (
     UploadedFile,
     UploadedFileStatus,
 )
+from chatbot.object_storage import (
+    build_report_storage_reference,
+    build_upload_storage_reference,
+    object_storage_policy,
+    storage_reference_from_uri,
+)
+from chatbot.progress_cache import (
+    progress_cache_policy,
+    write_analysis_job_progress,
+    write_chat_session_state,
+)
 
 USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
 USAGE_POLICY_LIMITS = {
@@ -82,6 +94,54 @@ USAGE_POLICY_LIMITS = {
     },
 }
 
+HISTORY_POLICY_VERSION = "history_operating_policy.v1"
+HISTORY_RETENTION_DAYS = {
+    "anonymous": 1,
+    "guest": 7,
+    "user": 365,
+    "authenticated": 365,
+}
+HISTORY_METADATA_ALLOWED_KEYS = {
+    "action",
+    "active_node",
+    "analysis_plan_id",
+    "attachment_count",
+    "card_count",
+    "error_code",
+    "evidence_count",
+    "execution_id",
+    "execution_status",
+    "has_download_url",
+    "http_status",
+    "is_authenticated",
+    "limitation_count",
+    "merge_policy",
+    "metadata_policy",
+    "missing_fields",
+    "mock_scenario",
+    "mock_status",
+    "node_code",
+    "node_name",
+    "pending_fields",
+    "rate_limit_keys",
+    "report_status",
+    "response_status",
+    "routing_intent",
+    "session_status",
+    "status_counts",
+    "subject_type",
+    "ttl_seconds",
+}
+HISTORY_AFTER_SERVICE_EVENT_TYPES = {
+    "analysis_job_created",
+    "agent_call_completed",
+    "agent_call_failed",
+    "agent_call_partial",
+    "chat_message_created",
+    "report_downloaded",
+    "report_saved",
+}
+
 
 def register_uploaded_file(
     payload: dict[str, Any],
@@ -89,8 +149,8 @@ def register_uploaded_file(
 ) -> dict[str, Any]:
     """Register a canonical file upload and persist its metadata in Django DB.
 
-    The byte/object storage path still goes through the mock local storage
-    service until the object-storage adapter is introduced.
+    The mock sidecar remains the local byte source, while the canonical
+    metadata exposes the object-storage adapter URI and fallback envelope.
     """
 
     attachment = register_mock_attachment(payload, upload_file=upload_file)
@@ -106,6 +166,15 @@ def persist_uploaded_file_metadata(
 ) -> dict[str, Any]:
     session = _get_or_create_session(attachment.get("session_id"), owner_id=owner_id)
     metadata = _metadata_snapshot(attachment, raw_payload=raw_payload)
+    object_storage = build_upload_storage_reference(
+        attachment,
+        owner_id=owner_id or (session.owner_id if session else ""),
+    )
+    metadata["source_storage_uri"] = _text(attachment.get("storage_uri"))
+    metadata["object_storage"] = object_storage
+    agent_handoff = dict(attachment.get("agent_handoff") or {})
+    agent_handoff["storage_uri"] = object_storage["storage_uri"]
+    agent_handoff["object_storage"] = object_storage
 
     with transaction.atomic():
         uploaded_file, _created = UploadedFile.objects.update_or_create(
@@ -118,11 +187,11 @@ def persist_uploaded_file_metadata(
                 "original_filename": _text(attachment.get("original_filename")),
                 "content_type": _text(attachment.get("content_type")),
                 "size_bytes": _positive_int_or_none(attachment.get("size_bytes")),
-                "storage_uri": _text(attachment.get("storage_uri")),
+                "storage_uri": object_storage["storage_uri"],
                 "privacy_risk": True,
                 "status": _model_status(attachment.get("status")),
                 "scan_status": "not_started",
-                "agent_handoff": attachment.get("agent_handoff") or {},
+                "agent_handoff": agent_handoff,
                 "metadata": metadata,
             },
         )
@@ -163,13 +232,14 @@ def get_uploaded_file_access_metadata(attachment_id: str) -> dict[str, Any] | No
     if uploaded_file is None:
         return None
     session = uploaded_file.session
+    object_storage = _uploaded_file_object_storage(uploaded_file)
     return {
         "type": "uploaded_file",
         "attachment_id": uploaded_file.attachment_id,
         "owner_id": uploaded_file.owner_id or (session.owner_id if session else ""),
         "session_id": session.session_id if session else "",
         "guest_id": _chat_session_guest_id(session),
-        "storage_backend": _storage_backend(uploaded_file.storage_uri),
+        "storage_backend": object_storage["backend"],
     }
 
 
@@ -253,10 +323,15 @@ def persist_chat_message_analysis_boundary(
         )
         _upsert_initial_job_event(job, progress=progress)
 
+    progress_cache = write_analysis_job_progress(job)
+    session_cache = write_chat_session_state(session, latest_job=job)
+
     return {
         "message_id": message.message_id,
         "job_id": job.job_id,
         "session_id": session.session_id,
+        "progress_cache": progress_cache,
+        "session_cache": session_cache,
     }
 
 
@@ -544,6 +619,7 @@ def record_history_event_record(
         metadata=metadata,
         privacy=privacy,
     )
+    event_payload["metadata"] = _history_metadata_snapshot(metadata)
     return history_event_to_api(_upsert_history_event_payload(event_payload))
 
 
@@ -574,11 +650,15 @@ def list_history_event_records(
     guest_id: str | None = None,
     job_id: str | None = None,
     event_type: str | None = None,
+    subject_type: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Read history events from PostgreSQL using the public history filters."""
 
     queryset = HistoryEvent.objects.all()
+    retention_days = _history_retention_days(subject_type)
+    if retention_days:
+        queryset = queryset.filter(occurred_at__gte=timezone.now() - timedelta(days=retention_days))
     if session_id:
         queryset = queryset.filter(subject_session_id=session_id)
     if user_id:
@@ -592,6 +672,58 @@ def list_history_event_records(
 
     rows = list(queryset.order_by("-occurred_at", "-id")[: max(limit, 1)])
     return [history_event_to_api(event) for event in reversed(rows)]
+
+
+def history_operating_policy(subject_type: str | None = None) -> dict[str, Any]:
+    normalized_subject_type = _history_subject_type(subject_type)
+    return {
+        "policy_version": HISTORY_POLICY_VERSION,
+        "storage_policy": "standard_light",
+        "retention": {
+            "applied_subject_type": normalized_subject_type,
+            "applied_days": _history_retention_days(normalized_subject_type),
+            "anonymous_days": HISTORY_RETENTION_DAYS["anonymous"],
+            "guest_days": HISTORY_RETENTION_DAYS["guest"],
+            "user_days": HISTORY_RETENTION_DAYS["user"],
+        },
+        "query_scope": {
+            "member": "own_user_history_only",
+            "guest": "own_guest_or_authorized_session_only",
+            "anonymous": "history_query_denied_without_subject",
+        },
+        "metadata_policy": {
+            "mode": "allowlist_with_sensitive_key_blocklist",
+            "allowed_keys": sorted(HISTORY_METADATA_ALLOWED_KEYS),
+            "blocked_keys": sorted(SENSITIVE_METADATA_KEYS),
+        },
+        "after_service_summary": {
+            "source": "history_events_standard_light",
+            "eligible_event_types": sorted(HISTORY_AFTER_SERVICE_EVENT_TYPES),
+            "excludes": ["user_text", "ocr_raw", "agent_reasoning", "raw_output"],
+        },
+    }
+
+
+def build_history_after_service_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    eligible_events = [
+        event
+        for event in events
+        if _text(event.get("event_type")) in HISTORY_AFTER_SERVICE_EVENT_TYPES
+    ]
+    recent_event_types = []
+    for event in eligible_events:
+        event_type = _text(event.get("event_type"))
+        if event_type and event_type not in recent_event_types:
+            recent_event_types.append(event_type)
+
+    return {
+        "available": bool(eligible_events),
+        "source_event_count": len(eligible_events),
+        "source": "history_events_standard_light",
+        "summary_basis": recent_event_types[:8],
+        "excludes_sensitive_payload": True,
+        "status": "ready" if eligible_events else "insufficient_history",
+    }
 
 
 def history_event_to_api(event: HistoryEvent) -> dict[str, Any]:
@@ -694,6 +826,9 @@ def persist_analysis_job_execution(
             agent_results=agent_results,
         )
 
+    progress_cache = write_analysis_job_progress(job)
+    session_cache = write_chat_session_state(session, latest_job=job)
+
     return {
         "backend": "postgresql",
         "tables": [
@@ -712,6 +847,8 @@ def persist_analysis_job_execution(
         "agent_invocation_ids": [invocation.invocation_id for invocation in agent_invocations],
         "ai_session_id": ai_session.ai_session_id,
         "node_codes": [result.node_code for result in agent_results],
+        "progress_cache": progress_cache,
+        "session_cache": session_cache,
         "status": "saved",
     }
 
@@ -763,31 +900,43 @@ def persist_report_action(
     job = AnalysisJob.objects.filter(job_id=_text(payload.get("job_id"))).first()
     session = job.session if job else _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
     display_result = _display_result_for_job(job)
+    report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
+    source_storage_uri = _text(payload.get("storage_uri")) or f"mock://reports/{report_id}"
+    object_storage = build_report_storage_reference(
+        report_id=report_id,
+        owner_id=report_owner_id,
+        session_id=session.session_id if session else "",
+        job_id=job.job_id if job else "",
+        source_uri=source_storage_uri,
+    )
 
     report, _created = Report.objects.update_or_create(
         report_id=report_id,
         defaults={
-            "owner_id": owner_id or (job.owner_id if job else "") or (session.owner_id if session else ""),
+            "owner_id": report_owner_id,
             "session": session,
             "job": job,
             "display_result": display_result,
             "report_type": _report_type(payload.get("report_type")),
             "status": _report_status(report_payload.get("status")),
             "title": _report_title(payload, report_payload),
-            "storage_uri": _text(payload.get("storage_uri")) or f"mock://reports/{report_id}",
+            "storage_uri": object_storage["storage_uri"],
             "content_summary": _report_content_summary(display_result, report_payload),
             "content": {
                 "format": _text(payload.get("format")) or "mock_text",
                 "action": _text(payload.get("action")) or "save",
                 "case_id": report_payload.get("case_id"),
                 "download_url": report_payload.get("download_url"),
+                "object_storage": object_storage,
             },
             "metadata": {
                 "source": "canonical_report_action",
                 "action": _text(payload.get("action")) or "save",
                 "mock_status": report_payload.get("status"),
                 "limitations": report_payload.get("limitations", []),
-                "object_storage_status": "mock_placeholder",
+                "object_storage_status": object_storage["status"],
+                "object_storage": object_storage,
+                "source_storage_uri": source_storage_uri,
                 "raw_payload": _safe_payload(payload),
             },
         },
@@ -799,7 +948,7 @@ def persist_report_action(
         "report_id": report.report_id,
         "status": "metadata_saved",
         "storage_uri": report.storage_uri,
-        "object_storage": "mock_placeholder",
+        "object_storage": object_storage,
     }
 
 
@@ -812,19 +961,26 @@ def get_report_download_metadata(report_id: str) -> dict[str, Any] | None:
     if report is None:
         return None
 
-    storage_uri = report.storage_uri or f"mock://reports/{report.report_id}"
-    storage_backend = _storage_backend(storage_uri)
+    object_storage = _report_object_storage(report)
+    storage_uri = object_storage["storage_uri"]
+    storage_backend = object_storage["backend"]
     return {
         "report_id": report.report_id,
         "owner_id": report.owner_id,
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
-        "filename": f"{report.report_id}.txt",
-        "content_type": "text/plain; charset=utf-8",
+        "filename": object_storage.get("filename") or f"{report.report_id}.txt",
+        "content_type": object_storage.get("content_type") or "text/plain; charset=utf-8",
         "storage_uri": storage_uri,
         "storage_backend": storage_backend,
+        "object_storage": object_storage,
+        "object_key": object_storage.get("key", ""),
         "status": report.status,
-        "body": _report_download_body(report, storage_backend=storage_backend),
+        "body": _report_download_body(
+            report,
+            storage_backend=storage_backend,
+            object_storage=object_storage,
+        ),
     }
 
 
@@ -967,6 +1123,8 @@ def get_mycase_summary(
                 Report._meta.db_table,
             ],
         },
+        "progress_cache": progress_cache_policy(),
+        "object_storage": object_storage_policy(),
         "active_cases": sum(1 for case in cases if case["case_status"] in active_statuses),
         "due_soon_cases": 0,
         "saved_reports": saved_reports.count(),
@@ -990,6 +1148,7 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
         else metadata.get("session_id")
     )
     filename = metadata.get("filename") or Path(uploaded_file.original_filename).name
+    object_storage = _uploaded_file_object_storage(uploaded_file)
 
     attachment = {
         "attachment_id": uploaded_file.attachment_id,
@@ -1002,6 +1161,7 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
         "content_type": uploaded_file.content_type,
         "size_bytes": uploaded_file.size_bytes or 0,
         "storage_uri": uploaded_file.storage_uri,
+        "object_storage": object_storage,
         "status": uploaded_file.status,
         "created_at": uploaded_file.created_at.isoformat(),
         "checks": checks,
@@ -1011,9 +1171,25 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
             "backend": "postgresql",
             "table": UploadedFile._meta.db_table,
             "status": "metadata_saved",
+            "object_storage": object_storage,
         },
     }
     return {key: value for key, value in attachment.items() if value is not None}
+
+
+def _uploaded_file_object_storage(uploaded_file: UploadedFile) -> dict[str, Any]:
+    metadata = uploaded_file.metadata if isinstance(uploaded_file.metadata, dict) else {}
+    object_storage = metadata.get("object_storage")
+    if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
+        return dict(object_storage)
+    return storage_reference_from_uri(
+        uploaded_file.storage_uri,
+        resource_type="uploaded_file",
+        resource_id=uploaded_file.attachment_id,
+        filename=Path(uploaded_file.original_filename).name,
+        content_type=uploaded_file.content_type,
+        size_bytes=uploaded_file.size_bytes,
+    )
 
 
 def _get_or_create_session(session_id: Any, *, owner_id: str) -> ChatSession | None:
@@ -1547,11 +1723,61 @@ def _upsert_history_event_payload(event_payload: dict[str, Any]) -> HistoryEvent
             "actor": actor,
             "subject": subject,
             "source": source,
-            "metadata": _dict_or_empty(event_payload.get("metadata")),
+            "metadata": _history_metadata_snapshot(event_payload.get("metadata")),
             "privacy": _dict_or_empty(event_payload.get("privacy")),
         },
     )
     return event
+
+
+def _history_metadata_snapshot(metadata: Any) -> dict[str, Any]:
+    raw_metadata = _dict_or_empty(metadata)
+    sanitized: dict[str, Any] = {}
+    dropped_keys = []
+
+    for key, value in raw_metadata.items():
+        normalized_key = str(key)
+        if (
+            normalized_key not in HISTORY_METADATA_ALLOWED_KEYS
+            or normalized_key.lower() in SENSITIVE_METADATA_KEYS
+        ):
+            dropped_keys.append(normalized_key)
+            continue
+        sanitized[normalized_key] = _strip_sensitive_history_metadata(value)
+
+    if dropped_keys:
+        sanitized["metadata_policy"] = {
+            "policy_version": HISTORY_POLICY_VERSION,
+            "dropped_keys": sorted(dropped_keys),
+        }
+    return sanitized
+
+
+def _strip_sensitive_history_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _strip_sensitive_history_metadata(item)
+            for key, item in value.items()
+            if str(key).lower() not in SENSITIVE_METADATA_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_sensitive_history_metadata(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _history_retention_days(subject_type: str | None) -> int:
+    return HISTORY_RETENTION_DAYS.get(_history_subject_type(subject_type), HISTORY_RETENTION_DAYS["anonymous"])
+
+
+def _history_subject_type(subject_type: str | None) -> str:
+    normalized = _text(subject_type)
+    if normalized == "authenticated":
+        return "user"
+    if normalized in HISTORY_RETENTION_DAYS:
+        return normalized
+    return "anonymous"
 
 
 def _agent_result_status(status: Any) -> str:
@@ -1742,6 +1968,20 @@ def _report_status(value: Any) -> str:
     return ReportStatus.READY
 
 
+def _report_object_storage(report: Report) -> dict[str, Any]:
+    metadata = report.metadata if isinstance(report.metadata, dict) else {}
+    object_storage = metadata.get("object_storage")
+    if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
+        return dict(object_storage)
+    return storage_reference_from_uri(
+        report.storage_uri or f"mock://reports/{report.report_id}",
+        resource_type="report",
+        resource_id=report.report_id,
+        filename=f"{report.report_id}.txt",
+        content_type="text/plain; charset=utf-8",
+    )
+
+
 def _report_title(payload: dict[str, Any], report_payload: dict[str, Any]) -> str:
     return (
         _text(payload.get("title"))
@@ -1765,22 +2005,20 @@ def _report_content_summary(
     return f"Mock report action result: {_text(report_payload.get('status')) or 'ready'}"
 
 
-def _storage_backend(storage_uri: str) -> str:
-    if storage_uri.startswith("mock://"):
-        return "mock_placeholder"
-    if storage_uri.startswith("s3://"):
-        return "object_storage"
-    if storage_uri.startswith("file://"):
-        return "local_file"
-    return "unknown"
-
-
-def _report_download_body(report: Report, *, storage_backend: str) -> str:
+def _report_download_body(
+    report: Report,
+    *,
+    storage_backend: str,
+    object_storage: dict[str, Any] | None = None,
+) -> str:
+    object_storage = object_storage or _report_object_storage(report)
     lines = [
         f"Report metadata download for {report.report_id}",
         f"status: {report.status}",
         f"storage_backend: {storage_backend}",
-        f"storage_uri: {report.storage_uri}",
+        f"storage_uri: {object_storage.get('storage_uri') or report.storage_uri}",
+        f"object_key: {object_storage.get('key') or ''}",
+        f"object_storage_policy: {object_storage.get('policy_version') or ''}",
     ]
     if report.job_id:
         lines.append(f"job_id: {report.job.job_id}")

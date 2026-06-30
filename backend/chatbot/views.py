@@ -57,11 +57,13 @@ from chatbot.repositories import (
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
+    build_history_after_service_summary,
     get_chat_session_access_metadata,
     get_mycase_summary,
     get_report_download_metadata,
     get_uploaded_file_access_metadata,
     get_uploaded_file,
+    history_operating_policy,
     list_history_event_records,
     list_uploaded_files,
     persist_current_auth_subject,
@@ -75,6 +77,7 @@ from chatbot.repositories import (
     record_usage_event,
     register_uploaded_file,
 )
+from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
 
 
 @require_http_methods(["GET", "OPTIONS"])
@@ -176,23 +179,29 @@ def history_events(request: HttpRequest) -> JsonResponse:
                 filters["user_id"] = subject["user_id"]
             elif subject.get("guest_id"):
                 filters["guest_id"] = subject["guest_id"]
+        filters["subject_type"] = subject.get("subject_type")
         events = list_history_event_records(**filters)
         storage = {
             "backend": "postgresql",
             "policy": "standard_light",
             "table": "history_events",
         }
+        policy = history_operating_policy(subject.get("subject_type"))
     else:
         events = list_sidecar_history_events(**filters)
         storage = {
             "backend": "mock_sidecar_json",
             "policy": "standard_light",
         }
+        policy = history_operating_policy("anonymous")
+    after_service_summary = build_history_after_service_summary(events)
     return _json_response(
         request,
         {
             "history_contract": HISTORY_EVENT_VERSION,
             "storage": storage,
+            "history_policy": policy,
+            "after_service_summary": after_service_summary,
             "count": len(events),
             "events": events,
             "limitations": [
@@ -218,6 +227,8 @@ def mypage_summary(request: HttpRequest) -> JsonResponse:
         owner_id=owner_id,
         limit=_positive_int(request.GET.get("limit"), default=10),
     )
+    if _is_canonical_mock_request(request) and request.GET.get("session_id"):
+        summary["session_cache"] = read_chat_session_state(request.GET["session_id"])
     return _json_response(request, summary)
 
 
@@ -353,6 +364,8 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
+    if _is_canonical_mock_request(request):
+        job["progress_cache"] = read_analysis_job_progress(job_id)
     return _json_response(request, {"job": job})
 
 
@@ -504,6 +517,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
     if _is_canonical_mock_request(request):
         report = _canonicalize_mock_paths(report)
         report["persistence"] = persist_report_action(identity_body, report)
+        report["object_storage"] = report["persistence"].get("object_storage")
         report["usage"] = usage
     _record_history_safely(
         request,
@@ -547,6 +561,8 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             response["X-Report-Persistence"] = "postgresql"
             response["X-Report-Storage-Backend"] = download["storage_backend"]
             response["X-Report-Storage-URI"] = download["storage_uri"]
+            response["X-Report-Object-Key"] = download["object_key"]
+            response["X-Report-Object-Policy"] = download["object_storage"].get("policy_version", "")
             response["X-Report-Access-Decision"] = access["reason"]
             return response
 
