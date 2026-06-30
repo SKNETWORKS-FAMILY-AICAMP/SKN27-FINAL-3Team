@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def _default_project_dir() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def _config_dir() -> Path:
@@ -21,7 +21,9 @@ def _load_json(path: Path) -> dict:
         return json.load(file)
 
 
-PIPELINE_SETTINGS = _load_json(Path(os.getenv("FAULT_CASES_PIPELINE_SETTINGS", _config_dir() / "pipeline_settings.json")))
+PIPELINE_SETTINGS = _load_json(
+    Path(os.getenv("FAULT_CASES_CRAWLING_SETTINGS", _config_dir() / "crawling_settings.json"))
+)
 
 SOURCE_TYPE = PIPELINE_SETTINGS["source"]["type"]
 SOURCE_RELIABILITY_SCORE = PIPELINE_SETTINGS["source"]["reliability_score"]

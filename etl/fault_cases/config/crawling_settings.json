@@ -6,7 +6,7 @@
   },
   "paths": {
     "artifacts_dir": "artifacts",
-    "crawled_dir": "crawled",
+    "crawled_dir": "fault_standard_output/crawled",
     "raw_source_dir": "raw_source_files",
     "logs_dir": "logs",
     "manifest_filename": "collection_manifest.jsonl",

@@ -12,7 +12,7 @@ from .setup_browser import ensure_chromium_installed
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Collect fault standard PDFs.")
-    parser.add_argument("--seed-url", help="Source list URL. Defaults to FAULT_CASES_SEED_URL or pipeline_settings.json.")
+    parser.add_argument("--seed-url", help="Source list URL. Defaults to FAULT_CASES_SEED_URL or crawling_settings.json.")
     parser.add_argument("--headed", action="store_true", help="Run browser with a visible window.")
     parser.add_argument("--quiet", action="store_true", help="Disable progress logs.")
     parser.add_argument("--force", action="store_true", help="Download even if manifest already has the target document type.")
