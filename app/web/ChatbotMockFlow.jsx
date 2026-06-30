@@ -1,5 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  buildAuthMeUrl,
+  getJson,
+  joinApiPath,
+  postJson,
+  toCanonicalApiBase,
+} from "./apiClient.js";
+import {
+  buildAuthContext,
+  buildDevGoogleProfile,
+  clearStoredAuthSession,
+  persistAuthSession,
+  readStoredAuthToken,
+  readStoredGoogleProfile,
+} from "./authSession.js";
+
 const MOCK_ATTACHMENTS = [
   {
     attachment_id: "att_0001",
@@ -27,9 +43,6 @@ const AUTH_STATE_LABELS = {
   guest: "비회원",
 };
 
-const AUTH_TOKEN_STORAGE_KEY = "skn27.auth.accessToken";
-const GOOGLE_PROFILE_STORAGE_KEY = "skn27.auth.googleProfile";
-
 export default function ChatbotMockFlow({
   apiBase = "/api",
   authToken = "dev-mock-token",
@@ -39,8 +52,8 @@ export default function ChatbotMockFlow({
   const [guestSession, setGuestSession] = useState(null);
   const [authSubject, setAuthSubject] = useState(null);
   const [authError, setAuthError] = useState(null);
-  const [activeAuthToken, setActiveAuthToken] = useState(() => readStoredValue(AUTH_TOKEN_STORAGE_KEY) || "");
-  const [googleProfile, setGoogleProfile] = useState(() => readStoredJson(GOOGLE_PROFILE_STORAGE_KEY));
+  const [activeAuthToken, setActiveAuthToken] = useState(() => readStoredAuthToken());
+  const [googleProfile, setGoogleProfile] = useState(() => readStoredGoogleProfile());
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState(null);
   const [tokenActionLoading, setTokenActionLoading] = useState(null);
@@ -137,9 +150,8 @@ export default function ChatbotMockFlow({
         }
 
         setActiveAuthToken(nextToken);
-        writeStoredValue(AUTH_TOKEN_STORAGE_KEY, nextToken);
         setGoogleProfile(result?.user || null);
-        writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, result?.user || null);
+        persistAuthSession({ accessToken: nextToken, googleProfile: result?.user || null });
         setGuestSession((current) => ({
           ...(current || {}),
           auth_state: result.auth_state,
@@ -230,9 +242,8 @@ export default function ChatbotMockFlow({
       }
 
       setActiveAuthToken(nextToken);
-      writeStoredValue(AUTH_TOKEN_STORAGE_KEY, nextToken);
       setGoogleProfile(result?.user || null);
-      writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, result?.user || null);
+      persistAuthSession({ accessToken: nextToken, googleProfile: result?.user || null });
       setGuestSession((current) => ({
         ...(current || {}),
         auth_state: result.auth_state,
@@ -257,8 +268,7 @@ export default function ChatbotMockFlow({
 
   async function logout() {
     if (!activeAuthToken) {
-      removeStoredValue(AUTH_TOKEN_STORAGE_KEY);
-      removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+      clearStoredAuthSession();
       setActiveAuthToken("");
       setGoogleProfile(null);
       await refreshAuthSubject({ nextAuthToken: null });
@@ -283,8 +293,7 @@ export default function ChatbotMockFlow({
       );
       const nextGuestId = result?.subject?.guest_id || guestId;
 
-      removeStoredValue(AUTH_TOKEN_STORAGE_KEY);
-      removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+      clearStoredAuthSession();
       setActiveAuthToken("");
       setGoogleProfile(null);
       setAuthSubject(result);
@@ -591,138 +600,6 @@ export default function ChatbotMockFlow({
       )}
     </main>
   );
-}
-
-async function postJson(url, payload, identity = {}) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: buildRequestHeaders(identity, { includeContentType: true }),
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-async function getJson(url, identity = {}) {
-  const response = await fetch(url, {
-    method: "GET",
-    headers: buildRequestHeaders(identity),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-function buildRequestHeaders(
-  { authToken, guestId, authSessionId } = {},
-  { includeContentType = false } = {}
-) {
-  return {
-    ...(includeContentType ? { "Content-Type": "application/json" } : {}),
-    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-    ...(guestId ? { "X-Guest-Id": guestId } : {}),
-    ...(authSessionId ? { "X-Auth-Session-Id": authSessionId } : {}),
-  };
-}
-
-function buildAuthContext({ authState, guestId, authSessionId, sessionId, userId }) {
-  return {
-    auth_state: authState || "anonymous",
-    user_id: userId || null,
-    guest_id: guestId || null,
-    auth_session_id: authSessionId || null,
-    session_id: sessionId || null,
-  };
-}
-
-function buildDevGoogleProfile({ guestId }) {
-  const suffix = String(guestId || "guest").replace(/^gst_/, "") || Date.now();
-  return {
-    google_sub: `dev-google-${suffix}`,
-    email: `driver.${suffix}@example.com`,
-    display_name: "Google Demo User",
-  };
-}
-
-function readStoredValue(key) {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  try {
-    return window.localStorage.getItem(key);
-  } catch (_error) {
-    return null;
-  }
-}
-
-function writeStoredValue(key, value) {
-  if (typeof window === "undefined" || !value) {
-    return;
-  }
-  try {
-    window.localStorage.setItem(key, value);
-  } catch (_error) {
-    // Ignore storage failures; in-memory auth state still works for this session.
-  }
-}
-
-function removeStoredValue(key) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  try {
-    window.localStorage.removeItem(key);
-  } catch (_error) {
-    // Ignore storage failures.
-  }
-}
-
-function readStoredJson(key) {
-  const value = readStoredValue(key);
-  if (!value) {
-    return null;
-  }
-  try {
-    return JSON.parse(value);
-  } catch (_error) {
-    return null;
-  }
-}
-
-function writeStoredJson(key, value) {
-  if (!value) {
-    removeStoredValue(key);
-    return;
-  }
-  writeStoredValue(key, JSON.stringify(value));
-}
-
-function buildAuthMeUrl(apiBase, sessionId) {
-  const url = joinApiPath(apiBase, "auth/me/");
-  if (!sessionId) {
-    return url;
-  }
-  return `${url}?session_id=${encodeURIComponent(sessionId)}`;
-}
-
-function joinApiPath(apiBase, path) {
-  return `${trimTrailingSlash(apiBase)}/${path.replace(/^\/+/, "")}`;
-}
-
-function toCanonicalApiBase(apiBase) {
-  const normalized = trimTrailingSlash(apiBase);
-  return normalized.endsWith("/mock") ? normalized.slice(0, -"/mock".length) : normalized;
-}
-
-function trimTrailingSlash(value) {
-  return String(value || "").replace(/\/+$/, "");
 }
 
 function buildFallbackResponse(payload) {

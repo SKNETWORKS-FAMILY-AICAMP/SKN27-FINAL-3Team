@@ -9,12 +9,17 @@ def read_text(path: Path) -> str:
 
 
 def test_chatbot_mock_flow_connects_auth_session_contract():
-    content = read_text(ROOT / "app" / "web" / "ChatbotMockFlow.jsx")
+    chatbot = read_text(ROOT / "app" / "web" / "ChatbotMockFlow.jsx")
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+    auth_session = read_text(ROOT / "app" / "web" / "authSession.js")
+    content = "\n".join([chatbot, api_client, auth_session])
 
     required_tokens = [
         "auth/guest-session/",
         "auth/login/",
         "auth/me/",
+        "auth/refresh/",
+        "auth/logout/",
         '"X-Guest-Id"',
         '"X-Auth-Session-Id"',
         "auth_context",
@@ -26,12 +31,39 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
         "Google로 계속하기",
         "google.accounts.id",
         "toCanonicalApiBase",
+        "createFrontendApi",
+        "buildRequestHeaders",
+        "persistAuthSession",
+        "clearStoredAuthSession",
     ]
 
     missing = [token for token in required_tokens if token not in content]
     assert missing == []
-    assert 'joinApiPath(apiBase, "chat/messages/")' in content
-    assert 'joinApiPath(apiBase, "reports/")' in content
+    assert 'joinApiPath(apiBase, "chat/messages/")' in api_client
+    assert 'joinApiPath(apiBase, "reports/")' in api_client
+    assert 'from "./apiClient.js"' in chatbot
+    assert 'from "./authSession.js"' in chatbot
+
+
+def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+
+    for token in [
+        "FrontendAppShell",
+        "ChatbotMockFlow",
+        "entry",
+        "chatbot",
+        "mypage",
+        "history",
+        "getMyPageSummary",
+        "listHistoryEvents",
+        "readStoredAuthToken",
+    ]:
+        assert token in shell or token in api_client
+
+    assert "fine-result" not in shell
+    assert "FineResult" not in shell
 
 
 def test_react_mock_flow_doc_mentions_auth_session_headers():
