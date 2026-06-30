@@ -152,6 +152,72 @@ paths:
         "401":
           $ref: "#/components/responses/AuthRequired"
 
+  /api/auth/refresh/:
+    post:
+      tags: [Auth]
+      summary: Rotate a valid app Bearer token
+      operationId: refreshAuthToken
+      x-contract-status: confirmed
+      x-review-note: MVP refresh requires a still-valid app JWT. Separate refresh-token storage and expired-token silent refresh are not enabled.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/AuthSessionIdHeader"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthTokenRefreshRequest"
+            examples:
+              refreshAppToken:
+                value:
+                  guest_id: gst_before_google
+                  session_id: ses_google_login
+      responses:
+        "200":
+          description: Refreshed app Bearer token for the same auth session.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/AuthTokenRefreshResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/auth/logout/:
+    post:
+      tags: [Auth]
+      summary: Revoke the current auth session and clear client auth state
+      operationId: logoutAuthSession
+      x-contract-status: confirmed
+      x-review-note: Stateless JWTs cannot be invalidated after issuance; clients must clear stored tokens while backend marks the auth_session revoked.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/AuthSessionIdHeader"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLogoutRequest"
+            examples:
+              logoutAppToken:
+                value:
+                  guest_id: gst_before_google
+                  session_id: ses_google_login
+      responses:
+        "200":
+          description: Logout result and client clear-token instruction.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/AuthLogoutResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
   /api/auth/me/:
     get:
       tags: [Auth]
@@ -1451,6 +1517,128 @@ components:
           type: object
           additionalProperties: true
 
+    AuthTokenRefreshRequest:
+      type: object
+      properties:
+        guest_id:
+          type: string
+        session_id:
+          type: string
+        access_token:
+          type: string
+          description: Optional body fallback. Prefer Authorization Bearer header.
+
+    AuthTokenRefreshResponse:
+      type: object
+      required: [contract_version, auth_state, provider, access_token, token_type, expires_in, user, subject, auth_session, session_binding, rate_limit, merge_policy, limitations]
+      properties:
+        contract_version:
+          type: string
+          enum: [auth_token_refresh.v1]
+        auth_state:
+          type: string
+          enum: [authenticated]
+        provider:
+          type: string
+          enum: [google]
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        guest:
+          oneOf:
+            - $ref: "#/components/schemas/GuestIdentity"
+            - type: "null"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        auth_session:
+          $ref: "#/components/schemas/AuthSession"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        rate_limit:
+          $ref: "#/components/schemas/RateLimitPolicy"
+        merge_policy:
+          $ref: "#/components/schemas/MergePolicy"
+        limitations:
+          type: array
+          items:
+            type: string
+        persistence:
+          type: object
+          additionalProperties: true
+
+    AuthLogoutRequest:
+      type: object
+      properties:
+        guest_id:
+          type: string
+        session_id:
+          type: string
+        access_token:
+          type: string
+          description: Optional body fallback. Prefer Authorization Bearer header.
+
+    AuthLogoutResponse:
+      type: object
+      required: [contract_version, auth_state, provider, revoked_at, subject, auth_session, session_binding, client_action, limitations]
+      properties:
+        contract_version:
+          type: string
+          enum: [auth_logout.v1]
+        auth_state:
+          type: string
+          enum: [anonymous]
+        provider:
+          type: string
+          enum: [google]
+        revoked_at:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        guest:
+          oneOf:
+            - $ref: "#/components/schemas/GuestIdentity"
+            - type: "null"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        auth_session:
+          $ref: "#/components/schemas/AuthSession"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        client_action:
+          $ref: "#/components/schemas/AuthClientAction"
+        limitations:
+          type: array
+          items:
+            type: string
+        persistence:
+          type: object
+          additionalProperties: true
+
+    AuthClientAction:
+      type: object
+      required: [clear_access_token, clear_google_profile, next_auth_state]
+      properties:
+        clear_access_token:
+          type: boolean
+        clear_google_profile:
+          type: boolean
+        next_auth_state:
+          type: string
+          enum: [anonymous, guest]
+
     AuthUser:
       type: object
       properties:
@@ -1583,10 +1771,18 @@ components:
           type: string
         status:
           type: string
+          enum: [active, revoked, expired]
         verification:
           type: string
         provider:
           type: string
+          enum: [google]
+        refresh_policy:
+          type: string
+          enum: [valid_app_jwt_required]
+        app_jwt_claims:
+          type: object
+          additionalProperties: true
 
     SessionBinding:
       type: object
@@ -3911,6 +4107,8 @@ components:
           enum:
             - guest_session_created
             - auth_login_completed
+            - auth_token_refreshed
+            - auth_logout_completed
             - auth_me_checked
             - chat_session_created
             - chat_message_created
@@ -4180,6 +4378,14 @@ components:
                         - missing_token
                         - invalid_token
                         - expired_token
+                        - app_jwt_required
+                        - unsupported_auth_provider
+                        - google_identity_missing
+                        - invalid_signature
+                        - invalid_claims
+                        - invalid_issuer_or_audience
+                        - invalid_exp
+                        - missing_required_claim
                         - permission_denied
                         - malformed_authorization_header
                         - empty_token

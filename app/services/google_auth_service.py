@@ -17,6 +17,8 @@ APP_JWT_ISSUER = "skn27-demo-auth"
 APP_JWT_AUDIENCE = "skn27-demo-api"
 APP_JWT_TTL_SECONDS = 60 * 60
 GOOGLE_AUTH_CONTRACT_VERSION = "google_auth.v1"
+AUTH_TOKEN_REFRESH_CONTRACT_VERSION = "auth_token_refresh.v1"
+AUTH_LOGOUT_CONTRACT_VERSION = "auth_logout.v1"
 
 
 def create_google_login(payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -115,6 +117,7 @@ def issue_access_token(
     provider_subject: str = "",
     issued_at: datetime | None = None,
     expires_at: datetime | None = None,
+    extra_claims: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     issued_at = issued_at or _now()
     expires_at = expires_at or (issued_at + timedelta(seconds=APP_JWT_TTL_SECONDS))
@@ -130,12 +133,172 @@ def issue_access_token(
         "email": email,
         "name": display_name,
     }
+    if extra_claims:
+        claims.update(extra_claims)
     header = {"alg": APP_JWT_ALGORITHM, "typ": "JWT"}
     signing_input = f"{_b64_json(header)}.{_b64_json(claims)}"
     signature = _b64_bytes(
         hmac.new(_jwt_secret().encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
     )
     return f"{signing_input}.{signature}", claims
+
+
+def create_token_refresh(
+    *,
+    authorization_header: str | None,
+    payload: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Refresh a valid app JWT into a new app JWT for the same auth session."""
+
+    header_value = _text(authorization_header)
+    token = _bearer_token_from_header(authorization_header)
+    if header_value and not token:
+        return 401, build_auth_error("token_invalid", reason="malformed_authorization_header")
+    token = token or _text((payload or {}).get("access_token"))
+    if not token:
+        return 401, build_auth_error("auth_required")
+
+    valid, claims = decode_access_token(token)
+    if not valid:
+        return _auth_error_from_decode_reason(claims)
+
+    issued_at = _now()
+    expires_at = issued_at + timedelta(seconds=APP_JWT_TTL_SECONDS)
+    refreshed_token, refreshed_claims = issue_access_token(
+        user_id=_text(claims.get("sub")),
+        auth_session_id=_text(claims.get("jti")),
+        email=_text(claims.get("email")),
+        display_name=_text(claims.get("name")),
+        provider_subject=_text(claims.get("provider_subject")),
+        issued_at=issued_at,
+        expires_at=expires_at,
+        extra_claims={
+            "refresh_nonce": _digest(f"{token}:{issued_at.isoformat()}", length=12),
+        },
+    )
+    guest_id = _normalize_guest_id((payload or {}).get("guest_id"))
+    session_id = _text((payload or {}).get("session_id")) or None
+
+    return 200, {
+        "contract_version": AUTH_TOKEN_REFRESH_CONTRACT_VERSION,
+        "auth_state": "authenticated",
+        "provider": _text(claims.get("auth_provider")) or "google",
+        "access_token": refreshed_token,
+        "token_type": "Bearer",
+        "expires_in": APP_JWT_TTL_SECONDS,
+        "issued_at": issued_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "user": {
+            "user_id": _text(claims.get("sub")),
+            "email": _text(claims.get("email")),
+            "display_name": _text(claims.get("name")) or "Google user",
+            "status": "active",
+            "auth_provider": _text(claims.get("auth_provider")) or "google",
+            "provider_subject": _text(claims.get("provider_subject")),
+            "policy_status": "app_jwt_refreshed",
+        },
+        "guest": _guest_snapshot(guest_id),
+        "subject": {
+            "subject_id": f"user:{_text(claims.get('sub'))}",
+            "subject_type": "user",
+            "user_id": _text(claims.get("sub")),
+            "guest_id": guest_id,
+            "auth_session_id": _text(claims.get("jti")),
+            "is_authenticated": True,
+        },
+        "auth_session": {
+            "auth_session_id": _text(claims.get("jti")),
+            "jwt_jti": _text(claims.get("jti")),
+            "status": "active",
+            "verification": "app_jwt_hmac",
+            "provider": _text(claims.get("auth_provider")) or "google",
+            "refresh_policy": "valid_app_jwt_required",
+            "app_jwt_claims": {
+                "iss": refreshed_claims["iss"],
+                "aud": refreshed_claims["aud"],
+                "sub": refreshed_claims["sub"],
+                "jti": refreshed_claims["jti"],
+                "exp": refreshed_claims["exp"],
+            },
+        },
+        "session_binding": {
+            "session_id": session_id,
+            "can_bind_to_chat_session": bool(session_id),
+        },
+        "rate_limit": _rate_limit_policy(subject_id=f"user:{_text(claims.get('sub'))}"),
+        "merge_policy": _merge_policy(),
+        "limitations": [
+            "MVP refresh requires a valid app JWT; separate refresh tokens and silent expired-token refresh are not enabled.",
+        ],
+    }
+
+
+def create_logout(
+    *,
+    authorization_header: str | None,
+    payload: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    """Build a logout contract from a valid app JWT."""
+
+    header_value = _text(authorization_header)
+    token = _bearer_token_from_header(authorization_header)
+    if header_value and not token:
+        return 401, build_auth_error("token_invalid", reason="malformed_authorization_header")
+    token = token or _text((payload or {}).get("access_token"))
+    if not token:
+        return 401, build_auth_error("auth_required")
+
+    valid, claims = decode_access_token(token)
+    if not valid:
+        return _auth_error_from_decode_reason(claims)
+
+    revoked_at = _now()
+    guest_id = _normalize_guest_id((payload or {}).get("guest_id"))
+    session_id = _text((payload or {}).get("session_id")) or None
+    user_id = _text(claims.get("sub"))
+    auth_session_id = _text(claims.get("jti"))
+
+    return 200, {
+        "contract_version": AUTH_LOGOUT_CONTRACT_VERSION,
+        "auth_state": "anonymous",
+        "provider": _text(claims.get("auth_provider")) or "google",
+        "revoked_at": revoked_at.isoformat(),
+        "user": {
+            "user_id": user_id,
+            "email": _text(claims.get("email")),
+            "display_name": _text(claims.get("name")) or "Google user",
+            "auth_provider": _text(claims.get("auth_provider")) or "google",
+            "provider_subject": _text(claims.get("provider_subject")),
+        },
+        "guest": _guest_snapshot(guest_id),
+        "subject": {
+            "subject_id": f"user:{user_id}",
+            "subject_type": "user",
+            "user_id": user_id,
+            "guest_id": guest_id,
+            "auth_session_id": auth_session_id,
+            "is_authenticated": False,
+        },
+        "auth_session": {
+            "auth_session_id": auth_session_id,
+            "jwt_jti": auth_session_id,
+            "status": "revoked",
+            "verification": "app_jwt_hmac",
+            "provider": _text(claims.get("auth_provider")) or "google",
+        },
+        "session_binding": {
+            "session_id": session_id,
+            "can_bind_to_chat_session": bool(session_id),
+        },
+        "client_action": {
+            "clear_access_token": True,
+            "clear_google_profile": True,
+            "next_auth_state": "guest" if guest_id else "anonymous",
+        },
+        "limitations": [
+            "Stateless JWTs cannot be invalidated client-side after issuance; backend marks auth_session revoked and clients must clear the token.",
+        ],
+    }
 
 
 def decode_access_token(token: str) -> tuple[bool, dict[str, Any]]:
@@ -166,6 +329,28 @@ def decode_access_token(token: str) -> tuple[bool, dict[str, Any]]:
     if not _text(claims.get("sub")) or not _text(claims.get("jti")):
         return False, {"reason": "missing_required_claim"}
     return True, claims
+
+
+def _bearer_token_from_header(header_value: str | None) -> str:
+    value = _text(header_value)
+    if not value:
+        return ""
+    parts = value.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return ""
+    return parts[1].strip()
+
+
+def _auth_error_from_decode_reason(decoded: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    reason = _text(decoded.get("reason")) or "invalid_app_jwt"
+    if reason == "expired_token":
+        body = build_auth_error("token_expired")
+        return int(body["error"]["status"]), body
+    if reason == "not_app_jwt":
+        body = build_auth_error("token_invalid", reason="app_jwt_required")
+        return int(body["error"]["status"]), body
+    body = build_auth_error("token_invalid", reason=reason)
+    return int(body["error"]["status"]), body
 
 
 def _google_profile_from_payload(payload: dict[str, Any]) -> dict[str, str] | None:

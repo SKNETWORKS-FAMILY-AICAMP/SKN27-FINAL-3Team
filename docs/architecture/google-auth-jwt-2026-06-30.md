@@ -43,7 +43,6 @@ returns the same app Bearer token shape to the rest of the API.
 
 ## Remaining work
 
-1. Frontend Google Identity Services button/callback integration.
-2. Refresh/logout endpoints.
-3. Explicit guest-to-user merge confirmation UI and endpoint.
-4. Secret rotation and production JWT issuer/audience policy.
+1. Explicit guest-to-user merge confirmation UI and endpoint.
+2. Secret rotation and production JWT issuer/audience policy.
+3. Separate refresh-token storage if the MVP valid-access-token refresh policy is not enough.

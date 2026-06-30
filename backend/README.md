@@ -90,6 +90,9 @@ docker run --rm -p 8000:8000 `
 | Method | Canonical path | Mock path |
 |---|---|---|
 | `POST` | `/api/auth/guest-session/` | - |
+| `POST` | `/api/auth/login/` | - |
+| `POST` | `/api/auth/refresh/` | - |
+| `POST` | `/api/auth/logout/` | - |
 | `GET` | `/api/auth/me/` | - |
 | `GET` | `/api/mypage/summary/` | - |
 | `GET` | `/api/history/` | `/api/mock/history/` |
@@ -111,6 +114,8 @@ docker run --rm -p 8000:8000 `
 | `GET` | `/api/health/` | backend health와 demo scenario 목록 |
 | `POST` | `/api/auth/guest-session/` | 비회원 `guest_id`, rate limit key, merge policy mock 발급 |
 | `POST` | `/api/auth/login/` | Google subject를 `users`/`auth_sessions`에 연결하고 app Bearer token 발급 |
+| `POST` | `/api/auth/refresh/` | Rotate a valid app Bearer token for the same `auth_session_id` |
+| `POST` | `/api/auth/logout/` | Revoke the current `auth_session_id` and return client clear-token action |
 | `GET` | `/api/auth/me/` | 현재 Bearer/guest identity와 `auth_session_id` 분리 상태 확인 |
 | `GET` | `/api/mypage/summary/` | canonical My Case progress summary from `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports` |
 | `GET` | `/api/history/` | `history_event.v1` 표준-라이트 mock sidecar 이벤트 조회 |

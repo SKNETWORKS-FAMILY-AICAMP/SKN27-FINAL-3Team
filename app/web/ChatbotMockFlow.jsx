@@ -43,6 +43,8 @@ export default function ChatbotMockFlow({
   const [googleProfile, setGoogleProfile] = useState(() => readStoredJson(GOOGLE_PROFILE_STORAGE_KEY));
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState(null);
+  const [tokenActionLoading, setTokenActionLoading] = useState(null);
+  const [tokenLifecycleError, setTokenLifecycleError] = useState(null);
   const [question, setQuestion] = useState("이 고지서로 이의신청서를 만들 수 있을까요?");
   const [mockStatus, setMockStatus] = useState("success");
   const [response, setResponse] = useState(null);
@@ -119,6 +121,7 @@ export default function ChatbotMockFlow({
     async (googlePayload) => {
       setLoginLoading(true);
       setLoginError(null);
+      setTokenLifecycleError(null);
 
       try {
         const payload = {
@@ -197,6 +200,112 @@ export default function ChatbotMockFlow({
   async function startDevGoogleLogin() {
     const profile = buildDevGoogleProfile({ guestId });
     await completeGoogleLogin(profile);
+  }
+
+  async function refreshAccessToken() {
+    if (!activeAuthToken) {
+      setTokenLifecycleError("No app access token is available.");
+      return null;
+    }
+
+    setTokenActionLoading("refresh");
+    setTokenLifecycleError(null);
+
+    try {
+      const result = await postJson(
+        joinApiPath(authApiBase, "auth/refresh/"),
+        {
+          guest_id: guestId,
+          session_id: sessionId,
+        },
+        {
+          authToken: activeAuthToken,
+          guestId,
+          authSessionId,
+        }
+      );
+      const nextToken = result?.access_token;
+      if (!nextToken) {
+        throw new Error("Token refresh did not return an access token.");
+      }
+
+      setActiveAuthToken(nextToken);
+      writeStoredValue(AUTH_TOKEN_STORAGE_KEY, nextToken);
+      setGoogleProfile(result?.user || null);
+      writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, result?.user || null);
+      setGuestSession((current) => ({
+        ...(current || {}),
+        auth_state: result.auth_state,
+        guest: result.guest || current?.guest || null,
+        subject: result.subject,
+        session_binding: result.session_binding,
+      }));
+      setAuthSubject(result);
+
+      return await refreshAuthSubject({
+        nextAuthToken: nextToken,
+        nextGuestId: result?.subject?.guest_id || guestId,
+        nextSessionId: sessionId,
+      });
+    } catch (error) {
+      setTokenLifecycleError(error.message);
+      return null;
+    } finally {
+      setTokenActionLoading(null);
+    }
+  }
+
+  async function logout() {
+    if (!activeAuthToken) {
+      removeStoredValue(AUTH_TOKEN_STORAGE_KEY);
+      removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+      setActiveAuthToken("");
+      setGoogleProfile(null);
+      await refreshAuthSubject({ nextAuthToken: null });
+      return null;
+    }
+
+    setTokenActionLoading("logout");
+    setTokenLifecycleError(null);
+
+    try {
+      const result = await postJson(
+        joinApiPath(authApiBase, "auth/logout/"),
+        {
+          guest_id: guestId,
+          session_id: sessionId,
+        },
+        {
+          authToken: activeAuthToken,
+          guestId,
+          authSessionId,
+        }
+      );
+      const nextGuestId = result?.subject?.guest_id || guestId;
+
+      removeStoredValue(AUTH_TOKEN_STORAGE_KEY);
+      removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+      setActiveAuthToken("");
+      setGoogleProfile(null);
+      setAuthSubject(result);
+
+      const guest = await postJson(joinApiPath(authApiBase, "auth/guest-session/"), {
+        guest_id: nextGuestId,
+        session_id: sessionId,
+      });
+      setGuestSession(guest);
+
+      return await refreshAuthSubject({
+        nextAuthToken: null,
+        nextGuestId: guest?.guest?.guest_id || nextGuestId,
+        nextSessionId: sessionId,
+      });
+    } catch (error) {
+      setTokenLifecycleError(error.message);
+      return null;
+    } finally {
+      setTokenActionLoading(null);
+    }
   }
 
   async function refreshAuthSubject({
@@ -385,6 +494,24 @@ export default function ChatbotMockFlow({
           <button type="button" onClick={startDevGoogleLogin} disabled={loginLoading}>
             {loginLoading ? "Google 로그인 중" : "Google로 계속하기"}
           </button>
+          {authState === "authenticated" && (
+            <>
+              <button
+                type="button"
+                onClick={refreshAccessToken}
+                disabled={Boolean(tokenActionLoading)}
+              >
+                {tokenActionLoading === "refresh" ? "Refreshing token" : "Refresh token"}
+              </button>
+              <button
+                type="button"
+                onClick={logout}
+                disabled={Boolean(tokenActionLoading)}
+              >
+                {tokenActionLoading === "logout" ? "Logging out" : "Logout"}
+              </button>
+            </>
+          )}
         </div>
         {googleProfile && (
           <p>
@@ -393,6 +520,7 @@ export default function ChatbotMockFlow({
         )}
         {authError && <p role="alert">{authError}</p>}
         {loginError && <p role="alert">{loginError}</p>}
+        {tokenLifecycleError && <p role="alert">{tokenLifecycleError}</p>}
       </section>
 
       {response && (
