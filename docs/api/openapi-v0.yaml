@@ -2108,6 +2108,8 @@ components:
                 type: string
             usage:
               $ref: "#/components/schemas/UsageMeter"
+            progress_cache:
+              $ref: "#/components/schemas/ProgressCacheRead"
 
     AnalysisJobEvent:
       type: object
@@ -2124,6 +2126,72 @@ components:
         created_at:
           type: string
           format: date-time
+
+    ProgressCachePolicy:
+      type: object
+      required: [policy_version, backend, ttl_seconds, fallback, key_patterns, cache_role, stores_raw_user_input, stores_agent_reasoning]
+      properties:
+        policy_version:
+          type: string
+          enum: [progress_cache.v1]
+        backend:
+          type: string
+          enum: [redis, locmem, unknown]
+        ttl_seconds:
+          type: integer
+          minimum: 1
+          default: 300
+        fallback:
+          type: string
+          enum: [postgresql]
+        key_patterns:
+          type: object
+          required: [analysis_job_progress, chat_session_state]
+          properties:
+            analysis_job_progress:
+              type: string
+              example: analysis_job_progress:{job_id}
+            chat_session_state:
+              type: string
+              example: chat_session_state:{session_id}
+        cache_role:
+          type: string
+          enum: [ephemeral_progress_state]
+        stores_raw_user_input:
+          type: boolean
+          enum: [false]
+        stores_agent_reasoning:
+          type: boolean
+          enum: [false]
+
+    ProgressCacheRead:
+      type: object
+      required: [policy_version, backend, key, ttl_seconds, fallback, status, snapshot]
+      properties:
+        policy_version:
+          type: string
+          enum: [progress_cache.v1]
+        backend:
+          type: string
+          enum: [redis, locmem, unknown]
+        key:
+          type: string
+        ttl_seconds:
+          type: integer
+          minimum: 1
+        fallback:
+          type: string
+          enum: [postgresql]
+        status:
+          type: string
+          enum: [cached, hit, miss_fallback, not_found, unavailable, unavailable_fallback, unavailable_not_found]
+        snapshot:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        error:
+          type: string
 
     AnalysisResult:
       type: object
@@ -3506,7 +3574,7 @@ components:
     MyPageSummary:
       type: object
       x-contract-status: confirmed
-      required: [storage, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
+      required: [storage, progress_cache, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
       properties:
         storage:
           type: object
@@ -3519,6 +3587,10 @@ components:
               type: array
               items:
                 type: string
+        progress_cache:
+          $ref: "#/components/schemas/ProgressCachePolicy"
+        session_cache:
+          $ref: "#/components/schemas/ProgressCacheRead"
         active_cases:
           type: integer
         due_soon_cases:

@@ -54,6 +54,11 @@ from chatbot.models import (
     UploadedFile,
     UploadedFileStatus,
 )
+from chatbot.progress_cache import (
+    progress_cache_policy,
+    write_analysis_job_progress,
+    write_chat_session_state,
+)
 
 USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
 USAGE_POLICY_LIMITS = {
@@ -302,10 +307,15 @@ def persist_chat_message_analysis_boundary(
         )
         _upsert_initial_job_event(job, progress=progress)
 
+    progress_cache = write_analysis_job_progress(job)
+    session_cache = write_chat_session_state(session, latest_job=job)
+
     return {
         "message_id": message.message_id,
         "job_id": job.job_id,
         "session_id": session.session_id,
+        "progress_cache": progress_cache,
+        "session_cache": session_cache,
     }
 
 
@@ -800,6 +810,9 @@ def persist_analysis_job_execution(
             agent_results=agent_results,
         )
 
+    progress_cache = write_analysis_job_progress(job)
+    session_cache = write_chat_session_state(session, latest_job=job)
+
     return {
         "backend": "postgresql",
         "tables": [
@@ -818,6 +831,8 @@ def persist_analysis_job_execution(
         "agent_invocation_ids": [invocation.invocation_id for invocation in agent_invocations],
         "ai_session_id": ai_session.ai_session_id,
         "node_codes": [result.node_code for result in agent_results],
+        "progress_cache": progress_cache,
+        "session_cache": session_cache,
         "status": "saved",
     }
 
@@ -1073,6 +1088,7 @@ def get_mycase_summary(
                 Report._meta.db_table,
             ],
         },
+        "progress_cache": progress_cache_policy(),
         "active_cases": sum(1 for case in cases if case["case_status"] in active_statuses),
         "due_soon_cases": 0,
         "saved_reports": saved_reports.count(),

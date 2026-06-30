@@ -77,6 +77,7 @@ from chatbot.repositories import (
     record_usage_event,
     register_uploaded_file,
 )
+from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
 
 
 @require_http_methods(["GET", "OPTIONS"])
@@ -226,6 +227,8 @@ def mypage_summary(request: HttpRequest) -> JsonResponse:
         owner_id=owner_id,
         limit=_positive_int(request.GET.get("limit"), default=10),
     )
+    if _is_canonical_mock_request(request) and request.GET.get("session_id"):
+        summary["session_cache"] = read_chat_session_state(request.GET["session_id"])
     return _json_response(request, summary)
 
 
@@ -361,6 +364,8 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
+    if _is_canonical_mock_request(request):
+        job["progress_cache"] = read_analysis_job_progress(job_id)
     return _json_response(request, {"job": job})
 
 

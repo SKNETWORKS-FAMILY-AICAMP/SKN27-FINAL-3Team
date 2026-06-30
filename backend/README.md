@@ -189,7 +189,13 @@ Canonical `GET /api/reports/{report_id}/download/`는 `reports` table을 먼저 
 
 ## Redis status
 
-현재 실행 구성에는 Redis container, Django cache 설정, Redis client가 없다. Redis는 `chat_session_state:{session_id}`, `analysis_job_progress:{job_id}` 같은 짧은 TTL 캐시 후보로만 문서화되어 있으며, 현재 구현은 PostgreSQL `analysis_jobs`, `analysis_job_events`, `usage_events`, `history_events`를 기준 저장소로 사용한다.
+Current status: Docker Compose now includes a Redis 7 service and the backend uses
+`REDIS_URL` to switch Django cache to `django.core.cache.backends.redis.RedisCache`.
+When `REDIS_URL` is absent, local tests use `LocMemCache`. Redis stores only short
+TTL progress snapshots for `analysis_job_progress:{job_id}` and
+`chat_session_state:{session_id}`; PostgreSQL remains the fallback source of truth.
+
+Redis는 `chat_session_state:{session_id}`, `analysis_job_progress:{job_id}` 같은 짧은 TTL 캐시로 연결되어 있다. 현재 구현은 PostgreSQL `analysis_jobs`, `analysis_job_events`, `usage_events`, `history_events`를 기준 저장소로 유지하고, Redis miss나 장애 시 PostgreSQL fallback을 사용한다.
 
 ## My Case summary
 
