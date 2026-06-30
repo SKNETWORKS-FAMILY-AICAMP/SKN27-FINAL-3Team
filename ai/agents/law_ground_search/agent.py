@@ -107,6 +107,19 @@ def run_law_ground_search(
         output["status"] = "success"
         output["summary"] = f"조문 {len(valid_provisions)}건 검색됨 (관계 확장 포함)"
         output["structured_result"]["law_provisions"] = valid_provisions
+        
+        # Evidence 배열 추출
+        evidence_list = []
+        for prov in valid_provisions:
+            evidence_list.append({
+                "source_ref": prov.get("source_ref"),
+                "chunk_id": prov.get("chunk_id"),
+                "source_name": prov.get("source_name"),
+                "article_no": prov.get("article_no"),
+                "retrieval_score": prov.get("retrieval_score"),
+                "match_reason": prov.get("match_reason")
+            })
+        output["evidence"] = evidence_list
 
     if session and not neo4j_session: 
         session.close()
@@ -118,11 +131,15 @@ def _init_output(agent_input: dict) -> dict:
         "session_id": agent_input.get("session_id"),
         "message_id": agent_input.get("message_id"),
         "job_id": agent_input.get("job_id"),
+        "node_name": "법령 근거 검색",
         "node_code": "law_ground_search",
+        "node_type": "search",
+        "owner": "techshin31",
         "status": "success",
         "summary": "",
         "structured_result": {"law_provisions": []},
         "evidence": [],
+        "next_actions": [],
         "limitations": [],
         "missing_fields": [],
         "created_at": datetime.now().isoformat()
