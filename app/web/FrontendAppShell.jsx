@@ -5,10 +5,10 @@ import { createFrontendApi } from "./apiClient.js";
 import { buildAuthContext, readStoredAuthToken } from "./authSession.js";
 
 const ROUTES = [
-  { id: "entry", label: "Start" },
-  { id: "chatbot", label: "Chatbot" },
-  { id: "mypage", label: "My Case" },
-  { id: "history", label: "History" },
+  { id: "entry", label: "시작" },
+  { id: "chatbot", label: "챗봇" },
+  { id: "mypage", label: "내 사건" },
+  { id: "history", label: "이력" },
 ];
 
 export default function FrontendAppShell({
@@ -39,7 +39,7 @@ export default function FrontendAppShell({
   });
 
   async function bootstrapGuestSession() {
-    setStatusMessage("Loading guest session");
+    setStatusMessage("비회원 세션을 준비하는 중입니다.");
     try {
       const guest = await api.createGuestSession({
         guest_id: guestId,
@@ -47,7 +47,7 @@ export default function FrontendAppShell({
       });
       setGuestId(guest?.guest?.guest_id || "");
       setSessionId(guest?.session_binding?.session_id || sessionId);
-      setStatusMessage("Guest session ready");
+      setStatusMessage("비회원 세션이 준비됐습니다.");
       return guest;
     } catch (error) {
       setStatusMessage(error.message);
@@ -56,11 +56,11 @@ export default function FrontendAppShell({
   }
 
   async function loadMyPageSummary() {
-    setStatusMessage("Loading my case summary");
+    setStatusMessage("내 사건 요약을 불러오는 중입니다.");
     try {
       const summary = await api.getMyPageSummary({ sessionId, identity });
       setMypageSummary(summary);
-      setStatusMessage("My case summary loaded");
+      setStatusMessage("내 사건 요약을 불러왔습니다.");
       return summary;
     } catch (error) {
       setStatusMessage(error.message);
@@ -69,11 +69,11 @@ export default function FrontendAppShell({
   }
 
   async function loadHistoryEvents() {
-    setStatusMessage("Loading history");
+    setStatusMessage("이력을 불러오는 중입니다.");
     try {
       const history = await api.listHistoryEvents({ sessionId, identity });
       setHistoryEvents(history);
-      setStatusMessage("History loaded");
+      setStatusMessage("이력을 불러왔습니다.");
       return history;
     } catch (error) {
       setStatusMessage(error.message);
@@ -84,8 +84,8 @@ export default function FrontendAppShell({
   return (
     <main className="frontend-shell" data-auth-state={authContext.auth_state}>
       <header className="frontend-shell__header">
-        <strong>Traffic Dispute AI</strong>
-        <nav aria-label="Frontend sections">
+        <strong>교통분쟁 AI</strong>
+        <nav aria-label="프론트 화면">
           {ROUTES.map((route) => (
             <button
               aria-current={activeRoute === route.id ? "page" : undefined}
@@ -101,9 +101,9 @@ export default function FrontendAppShell({
 
       {activeRoute === "entry" && (
         <section className="frontend-shell__entry">
-          <h1>Start traffic dispute consultation</h1>
-          <p>Use guest mode for a quick mock flow, or continue with Google inside the chatbot.</p>
-          <label htmlFor="shell-session-id">Session id</label>
+          <h1>교통 과태료와 사고 상담을 한 화면에서 확인합니다</h1>
+          <p>비회원 세션으로 챗봇 mock flow를 시작하고, 내 사건과 이력 API 연결 상태를 확인할 수 있습니다.</p>
+          <label htmlFor="shell-session-id">세션 ID</label>
           <input
             id="shell-session-id"
             onChange={(event) => setSessionId(event.target.value)}
@@ -111,10 +111,10 @@ export default function FrontendAppShell({
             value={sessionId}
           />
           <button onClick={bootstrapGuestSession} type="button">
-            Start guest session
+            비회원 시작
           </button>
           <button onClick={() => setActiveRoute("chatbot")} type="button">
-            Open chatbot
+            챗봇 열기
           </button>
         </section>
       )}
@@ -129,9 +129,9 @@ export default function FrontendAppShell({
 
       {activeRoute === "mypage" && (
         <section className="frontend-shell__mypage">
-          <h2>My Case summary</h2>
+          <h2>내 사건 요약</h2>
           <button onClick={loadMyPageSummary} type="button">
-            Refresh summary
+            요약 새로고침
           </button>
           <dl>
             <div>
@@ -160,9 +160,9 @@ export default function FrontendAppShell({
 
       {activeRoute === "history" && (
         <section className="frontend-shell__history">
-          <h2>History</h2>
+          <h2>상담 이력</h2>
           <button onClick={loadHistoryEvents} type="button">
-            Refresh history
+            이력 새로고침
           </button>
           <ol>
             {historyEvents?.events?.map((event) => (
