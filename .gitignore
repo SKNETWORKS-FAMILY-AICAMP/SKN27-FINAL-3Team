@@ -11,3 +11,7 @@ storage/neo4j/data/
 storage/neo4j/logs/
 storage/neo4j/import/
 storage/neo4j/plugins/
+*.log
+backend/db.sqlite3
+backend/media/
+

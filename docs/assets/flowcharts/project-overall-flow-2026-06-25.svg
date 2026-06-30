@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="860" viewBox="0 0 1600 860" role="img" aria-labelledby="title desc">
+  <title id="title">프로젝트 전반 흐름도</title>
+  <desc id="desc">사용자 입력부터 앱, Supervisor, Agent, ETL, 저장소까지의 전체 프로젝트 흐름</desc>
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 28px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #0f172a; }
+      .label { font: 600 16px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #0f172a; }
+      .text { font: 14px 'Malgun Gothic', 'Noto Sans KR', sans-serif; fill: #334155; }
+      .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; rx: 14; }
+      .blue { fill: #e0f2fe; stroke: #0284c7; }
+      .green { fill: #dcfce7; stroke: #16a34a; }
+      .amber { fill: #fef3c7; stroke: #d97706; }
+      .violet { fill: #ede9fe; stroke: #7c3aed; }
+      .teal { fill: #ccfbf1; stroke: #0f766e; }
+      .line { stroke: #475569; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1600" height="860"/>
+  <text class="title" x="60" y="60">프로젝트 전반 흐름도</text>
+  <text class="text" x="60" y="88">기준: app / ai / etl / storage 책임 분리와 2026-06-25 회의 후속 요구사항 반영</text>
+
+  <rect class="box blue" x="70" y="170" width="220" height="100" rx="14"/>
+  <text class="label" x="100" y="215">사용자</text>
+  <text class="text" x="100" y="245">질문, 파일 업로드,</text>
+  <text class="text" x="100" y="268">리포트 재조회</text>
+
+  <rect class="box blue" x="360" y="150" width="280" height="140" rx="14"/>
+  <text class="label" x="390" y="195">app</text>
+  <text class="text" x="390" y="225">web / api / services / schemas</text>
+  <text class="text" x="390" y="248">로그인, 채팅, 마이페이지,</text>
+  <text class="text" x="390" y="271">리포트 저장/다운로드</text>
+
+  <rect class="box green" x="720" y="150" width="300" height="140" rx="14"/>
+  <text class="label" x="750" y="195">ai / supervisor</text>
+  <text class="text" x="750" y="225">입력 분류, LangGraph 라우팅,</text>
+  <text class="text" x="750" y="248">RAG 호출, 재질문,</text>
+  <text class="text" x="750" y="271">최종 검증 노드</text>
+
+  <rect class="box amber" x="1090" y="110" width="420" height="220" rx="14"/>
+  <text class="label" x="1120" y="150">개별 Agent</text>
+  <text class="text" x="1120" y="185">fine_notice_analysis</text>
+  <text class="text" x="1120" y="210">law_ground_search</text>
+  <text class="text" x="1120" y="235">text_ml_case_search</text>
+  <text class="text" x="1120" y="260">vision_media_analysis</text>
+  <text class="text" x="1120" y="285">objection_report_generation</text>
+
+  <rect class="box teal" x="210" y="470" width="340" height="150" rx="14"/>
+  <text class="label" x="240" y="515">etl</text>
+  <text class="text" x="240" y="545">법령, 과태료 규칙,</text>
+  <text class="text" x="240" y="568">과실비율 사례, Vision manifest</text>
+  <text class="text" x="240" y="591">수집/전처리/적재 준비</text>
+
+  <rect class="box violet" x="690" y="450" width="360" height="190" rx="14"/>
+  <text class="label" x="720" y="495">storage</text>
+  <text class="text" x="720" y="525">PostgreSQL</text>
+  <text class="text" x="720" y="548">Redis</text>
+  <text class="text" x="720" y="571">RAG / Neo4j / 코드테이블</text>
+  <text class="text" x="720" y="594">사건 상태값, 리포트 메타데이터</text>
+  <text class="text" x="720" y="617">기본 정렬: 상태 -> 날짜</text>
+
+  <rect class="box blue" x="1140" y="470" width="300" height="150" rx="14"/>
+  <text class="label" x="1170" y="515">결과 화면</text>
+  <text class="text" x="1170" y="545">채팅 결과</text>
+  <text class="text" x="1170" y="568">마이페이지 / 히스토리</text>
+  <text class="text" x="1170" y="591">리포트 목록 / 다운로드</text>
+
+  <path class="line" d="M290 220 L360 220"/>
+  <path class="line" d="M640 220 L720 220"/>
+  <path class="line" d="M1020 220 L1090 220"/>
+  <path class="line" d="M870 290 L870 450"/>
+  <path class="line" d="M1090 560 L1050 560"/>
+  <path class="line" d="M550 545 L690 545"/>
+  <path class="line" d="M1220 330 L1220 470"/>
+
+  <text class="text" x="124" y="740">핵심 포인트: 사용자 입력은 app에서 받고, supervisor가 라우팅과 최종 검증을 담당하며, etl과 storage가 데이터 근거를 받쳐준다.</text>
+</svg>

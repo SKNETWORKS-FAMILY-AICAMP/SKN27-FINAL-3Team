@@ -466,8 +466,9 @@
 
     .chat-shell {
       display: grid;
-      grid-template-columns: 280px minmax(0, 1fr) 320px;
+      grid-template-columns: minmax(0, 1fr);
       min-height: calc(100vh - 186px);
+      background: #fff;
     }
 
     .conversation-list,
@@ -521,13 +522,15 @@
 
     .chat-main {
       min-width: 0;
+      width: min(100%, 1080px);
+      margin: 0 auto;
       display: grid;
       grid-template-rows: 1fr auto;
       background: #fff;
     }
 
     .messages {
-      padding: 22px;
+      padding: 24px 28px;
       display: grid;
       align-content: start;
       gap: 16px;
@@ -562,14 +565,19 @@
     }
 
     .bubble {
-      width: min(100%, 660px);
+      width: min(100%, 760px);
       padding: 14px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
     }
 
+    .bubble.wide {
+      width: min(100%, 920px);
+    }
+
     .message.user .bubble {
+      width: min(100%, 720px);
       color: #fff;
       border-color: var(--teal);
       background: var(--teal);
@@ -582,6 +590,113 @@
     .bubble strong {
       display: block;
       margin-bottom: 5px;
+    }
+
+    .policy-grid,
+    .inline-panel-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .policy-card,
+    .attachment-inline,
+    .agent-plan,
+    .analysis-status-card,
+    .reporting-summary {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .policy-card {
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .policy-card.is-disabled {
+      background: #f8fafc;
+      color: var(--muted);
+    }
+
+    .policy-card span,
+    .plan-status,
+    .upload-meta,
+    .reporting-summary span {
+      color: var(--subtle);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .attachment-inline,
+    .agent-plan,
+    .analysis-status-card,
+    .reporting-summary {
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .attachment-dropzone {
+      min-height: 112px;
+      border: 1px dashed #b7c2cf;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      background: #fff;
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .upload-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .upload-meta span {
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: #fff;
+    }
+
+    .plan-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .plan-step {
+      min-height: 46px;
+      padding: 9px 10px;
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .plan-index {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--blue);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .plan-step p,
+    .policy-card p,
+    .reporting-summary p {
+      margin: 0;
     }
 
     .result-cards {
@@ -631,6 +746,34 @@
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 10px;
       background: #fff;
+    }
+
+    .input-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .attachment-strip {
+      min-height: 42px;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      border: 1px dashed #b7c2cf;
+      border-radius: 8px;
+      color: var(--muted);
+      background: #fbfcfe;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .upload-chip {
+      padding: 6px 9px;
+      border-radius: 999px;
+      color: var(--ink);
+      background: #fff;
+      border: 1px solid var(--line);
     }
 
     .chat-input textarea {
@@ -995,7 +1138,7 @@
       }
 
       .chat-shell {
-        grid-template-columns: 240px minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
       }
 
       .case-panel {
@@ -1064,6 +1207,8 @@
 
       .trust-row,
       .result-cards,
+      .policy-grid,
+      .inline-panel-grid,
       .report-grid,
       .content-grid,
       .case-panel {
@@ -1201,65 +1346,145 @@
           <div class="screen-header">
             <div class="screen-title">
               <h2>AI 교통 상담</h2>
-              <p>사고 상황, 고지서, 사진과 영상을 한 대화에서 이어서 분석합니다.</p>
+              <p>회원은 명령문과 자료를 함께 제출하고, 비회원은 단순 교통 질문만 상담합니다.</p>
             </div>
             <div class="screen-actions">
               <button class="button" type="button" data-screen="mypage">내 사건 보기</button>
-              <button class="button primary" type="button">자료 추가</button>
+              <button class="button primary" type="button">회원 자료 추가</button>
             </div>
           </div>
 
           <div class="chat-shell">
-            <aside class="conversation-list" aria-label="상담 목록">
-              <div class="section-label">최근 상담</div>
-              <article class="conversation-card active">
-                <strong>어린이보호구역 과태료</strong>
-                <p>고지서 OCR 완료, 의견제출 기한 확인 필요</p>
-                <span class="tag amber">진행 중</span>
-              </article>
-              <article class="conversation-card">
-                <strong>교차로 접촉사고</strong>
-                <p>블랙박스 설명 기반 과실비율 검토</p>
-                <span class="tag green">리포트 저장</span>
-              </article>
-              <article class="conversation-card">
-                <strong>차선 변경 사고</strong>
-                <p>보험사 주장 검토 요청</p>
-                <span class="tag">답변 완료</span>
-              </article>
-            </aside>
-
             <div class="chat-main">
               <div class="messages">
                 <article class="message">
                   <span class="message-avatar">AI</span>
-                  <div class="bubble">
+                  <div class="bubble wide">
                     <strong>어떤 교통 문제를 확인할까요?</strong>
-                    <p>과태료 고지서, 범칙금, 주정차 위반, 교통사고 과실비율 상담을 시작할 수 있습니다. 자료가 있으면 먼저 첨부해 주세요.</p>
+                    <p>먼저 원하는 결과를 문장으로 적어 주세요. 자료가 있는 회원은 고지서, 현장 사진, 블랙박스 영상을 명령문과 함께 제출할 수 있습니다.</p>
+                    <div class="policy-grid">
+                      <div class="policy-card">
+                        <span>회원</span>
+                        <strong>명령문 + 자료 분석</strong>
+                        <p>이미지만 보내는 입력은 받지 않고, 원하는 분석 목적을 함께 확인합니다.</p>
+                      </div>
+                      <div class="policy-card is-disabled">
+                        <span>비회원</span>
+                        <strong>단순 질문만 가능</strong>
+                        <p>사고 분석, 고지서 OCR, 이미지·영상 첨부는 로그인 후 진행합니다.</p>
+                      </div>
+                    </div>
                   </div>
                 </article>
                 <article class="message user">
                   <span class="message-avatar">나</span>
                   <div class="bubble">
                     <strong>어린이보호구역 주정차 과태료가 나왔습니다.</strong>
-                    <p>잠깐 정차했고 표지판이 가려져 있었는지 확인하고 싶습니다.</p>
+                    <p>고지서 사진과 현장 사진을 함께 올렸고, 표지판이 가려져 있었는지 확인해서 이의제기 가능성을 알고 싶습니다.</p>
                   </div>
                 </article>
                 <article class="message">
                   <span class="message-avatar">AI</span>
-                  <div class="bubble">
-                    <strong>먼저 고지서 정보와 현장 자료를 확인하겠습니다.</strong>
-                    <p>처분일, 위반 장소, 의견제출 마감일, 표지판 식별 여부를 확인하면 이의제기 가능성을 정리할 수 있습니다.</p>
-                    <div class="result-cards">
-                      <div class="result-card">
-                        <strong>과태료 고지서 분석</strong>
-                        <p>OCR 결과를 기준으로 처분 내용과 기한을 정리합니다.</p>
-                        <button class="button primary" type="button" data-screen="fine">결과 보기</button>
+                  <div class="bubble wide">
+                    <strong>바로 분석하기 전에 문맥을 먼저 확인하겠습니다.</strong>
+                    <p>첨부 자료가 고지서인지, 사고 현장 사진인지 구분하고 부족한 상황 설명이 있으면 먼저 질문합니다.</p>
+                    <div class="inline-panel-grid">
+                      <div class="attachment-inline">
+                        <strong>첨부 자료</strong>
+                        <div class="attachment-dropzone">고지서 이미지<br>IMG_2481.jpg</div>
+                        <div class="upload-meta">
+                          <span>회원 첨부</span>
+                          <span>명령문 확인됨</span>
+                          <span>고지서 후보</span>
+                          <span>현장 사진 후보</span>
+                        </div>
                       </div>
-                      <div class="result-card">
-                        <strong>사고 과실비율 상담</strong>
-                        <p>사고 설명과 증거 자료로 쟁점을 분류합니다.</p>
-                        <button class="button" type="button" data-screen="fault">상담 열기</button>
+                      <div class="attachment-inline">
+                        <strong>추가 확인 질문</strong>
+                        <p>정차 위치, 정차 시간, 표지판이 가려진 원인, 현장 사진 촬영 시점을 알려 주세요.</p>
+                        <button class="button" type="button">답변 추가</button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+                <article class="message">
+                  <span class="message-avatar">AI</span>
+                  <div class="bubble wide">
+                    <strong>Supervisor가 분석 호출 플랜을 만들었습니다.</strong>
+                    <p>아래 순서로 실행하고, 각 Agent가 사용할 수 없다고 판단한 결과는 Supervisor로 되돌려 추가 질문을 진행합니다.</p>
+                    <div class="agent-plan">
+                      <div class="plan-list">
+                        <div class="plan-step">
+                          <span class="plan-index">1</span>
+                          <div>
+                            <strong>문맥/입력 검증</strong>
+                            <p>명령문과 첨부 자료가 함께 있는지 확인하고 분석 가능 여부를 판단합니다.</p>
+                          </div>
+                          <span class="plan-status">완료</span>
+                        </div>
+                        <div class="plan-step">
+                          <span class="plan-index">2</span>
+                          <div>
+                            <strong>고지서 OCR</strong>
+                            <p>고지서 여부, 처분일, 위반 장소, 의견제출 기한을 확인합니다.</p>
+                          </div>
+                          <span class="plan-status">완료</span>
+                        </div>
+                        <div class="plan-step">
+                          <span class="plan-index">3</span>
+                          <div>
+                            <strong>법령 근거</strong>
+                            <p>OCR 결과의 위반 유형과 법령 후보를 연결합니다.</p>
+                          </div>
+                          <span class="plan-status">확인</span>
+                        </div>
+                        <div class="plan-step">
+                          <span class="plan-index">4</span>
+                          <div>
+                            <strong>현장 사진 검증</strong>
+                            <p>사진이 사고·현장 증거로 사용 가능한지 Agent가 검증합니다.</p>
+                          </div>
+                          <span class="plan-status">대기</span>
+                        </div>
+                        <div class="plan-step">
+                          <span class="plan-index">5</span>
+                          <div>
+                            <strong>초안 생성</strong>
+                            <p>분석 가능한 결과만 모아 이의제기 초안과 리포트 요약을 만듭니다.</p>
+                          </div>
+                          <span class="plan-status">준비</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="analysis-status-card">
+                      <strong>분석 상태</strong>
+                      <div class="status-list">
+                        <div class="status-row"><span><span class="status-dot"></span> 고지서 OCR</span><strong>완료</strong></div>
+                        <div class="status-row"><span><span class="status-dot"></span> 법령 근거</span><strong>확인</strong></div>
+                        <div class="status-row"><span><span class="status-dot wait"></span> 현장 사진</span><strong>대기</strong></div>
+                        <div class="status-row"><span><span class="status-dot wait"></span> 초안 생성</span><strong>준비</strong></div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+                <article class="message">
+                  <span class="message-avatar">AI</span>
+                  <div class="bubble wide">
+                    <strong>리포팅 요약이 준비되었습니다.</strong>
+                    <div class="reporting-summary">
+                      <span>요약</span>
+                      <p>고지서 OCR 결과와 법령 근거는 확인되었고, 표지판 식별 가능성은 현장 사진 검증 후 보완 판단이 필요합니다.</p>
+                      <div class="result-cards">
+                        <div class="result-card">
+                          <strong>과태료 고지서 분석</strong>
+                          <p>처분 내용, 의견제출 기한, 이의제기 쟁점을 정리합니다.</p>
+                          <button class="button primary" type="button" data-screen="fine">리포팅 결과 보기</button>
+                        </div>
+                        <div class="result-card">
+                          <strong>추가 질문 계속하기</strong>
+                          <p>현장 사진 검증 결과가 부족하면 Supervisor가 다시 질문합니다.</p>
+                          <button class="button" type="button">채팅에서 보완</button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1268,33 +1493,23 @@
 
               <div class="quick-row" aria-label="빠른 질문">
                 <button class="quick-chip" type="button" data-screen="fine">고지서 분석하기</button>
-                <button class="quick-chip" type="button" data-screen="fault">과실비율 확인하기</button>
+                <button class="quick-chip" type="button" data-screen="fault">사고 분석 준비</button>
                 <button class="quick-chip" type="button">의견제출서 초안 만들기</button>
-                <button class="quick-chip" type="button">관련 법령 보기</button>
+                <button class="quick-chip" type="button">단순 법령 질문</button>
               </div>
 
               <div class="chat-input">
-                <textarea aria-label="상담 메시지 입력">고지서 사진과 현장 사진을 첨부했습니다. 이의제기 가능성이 있는지 알려주세요.</textarea>
+                <div class="input-stack">
+                  <div class="attachment-strip">
+                    <span class="upload-chip">IMG_2481.jpg</span>
+                    <span class="upload-chip">scene_photo.jpg</span>
+                    <span>회원만 첨부 가능 · 이미지만 전송 불가</span>
+                  </div>
+                  <textarea aria-label="상담 메시지 입력">고지서 사진과 현장 사진을 첨부했습니다. 이의제기 가능성이 있는지 알려주세요.</textarea>
+                </div>
                 <button class="button primary" type="button" data-screen="fine">전송</button>
               </div>
             </div>
-
-            <aside class="case-panel" aria-label="자료와 분석 상태">
-              <article class="upload-card">
-                <strong>첨부 자료</strong>
-                <div class="file-preview">고지서 이미지<br>IMG_2481.jpg</div>
-                <button class="button" type="button">파일 추가</button>
-              </article>
-              <article class="evidence-card">
-                <strong>분석 상태</strong>
-                <div class="status-list">
-                  <div class="status-row"><span><span class="status-dot"></span> 고지서 OCR</span><strong>완료</strong></div>
-                  <div class="status-row"><span><span class="status-dot"></span> 법령 근거</span><strong>확인</strong></div>
-                  <div class="status-row"><span><span class="status-dot wait"></span> 현장 사진</span><strong>대기</strong></div>
-                  <div class="status-row"><span><span class="status-dot wait"></span> 초안 생성</span><strong>준비</strong></div>
-                </div>
-              </article>
-            </aside>
           </div>
         </section>
 

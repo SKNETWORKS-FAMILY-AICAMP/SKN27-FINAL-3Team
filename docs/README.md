@@ -17,11 +17,33 @@
 | 문서 | 목적 |
 |---|---|
 | `wbs-owner-deliverable-plan.md` | WBS, 이슈, 담당자 재배정 기준 |
+| `2026-06-25-meeting-action-summary.md` | 2026-06-25 회의 후속 액션과 챗봇/RAG/리포트 누락 금지 흐름 |
+| `pm-api-json-schema-spec-2026-06-23.md` | Agent/Supervisor/API JSON schema 초안과 화면 표시 계약 |
+| `api/openapi-v0.yaml` | OpenAPI 3.2.0 ver0 API 계약 원본 |
+| `api/openapi-v0-distribution-guide.md` | 팀원별 OpenAPI v0 확인 순서와 구현 금지 항목 |
+| `api/openapi-v0-notes.md` | PDF, 마크다운, 현재 구현 차이와 확정/검토 기준 |
+| `api/openapi-persona-hi20260204-maker-2026-06-29.md` | `hi20260204-maker` persona 기준 confirmed-only 1차 실행 범위 |
+| `architecture/auth-session-policy-2026-06-28.md` | 로그인, 비회원, auth session, 채팅 session 분리 정책 |
+| `architecture/history-event-design-2026-06-28.md` | 히스토리 이벤트 저장, 민감도, 애프터서비스 설계 초안 |
+| `architecture/service-protocol-persona-strategy-2026-06-29.md` | 로그인/비회원/히스토리/구독/ERD/OpenAPI/Agent 실행 전략 |
+| `architecture/ddd-mas-history-log-roadmap-2026-06-29.md` | DDD bounded context, MAS/Agent 실행, history log management 구현 순서 |
+| `architecture/supervisor-erd-flow-alignment-2026-06-29.md` | OpenAPI 출력 스키마 반영 이후 Supervisor 흐름과 ERD 변경 시점 |
+| `architecture/auth-agent-code-table-erd-2026-06-29.md` | 사용자, Agent 실행, code table, quota 운영 전환 ERD |
+| `architecture/end-to-end-persona-walkthrough-2026-06-29.md` | Agent 미완성 상태에서도 전체 persona 흐름과 DB checkpoint를 검증하는 기준 |
+| `schema-ready-implementation-checklist-2026-06-24.md` | schema 수신 직후 mock data, 화면 상태, 검증 착수 기준 |
 | `screen-design-specification.md` | 화면설계서 |
 | `screen-design-ui-ux-flow-guide.md` | UI/UX 흐름 설명 |
 | `deployment-readiness-review-2026-06-22.md` | 배포 준비성 검토 보고서 |
 | `hi20260204-maker-solo-execution-close-check-2026-06-22.md` | PM 단독 처리와 close 가능성 점검 |
 | `hi20260204-maker-collaboration-dependencies-2026-06-22.md` | 협업 의존성 상세 보고서 |
+
+## 흐름도 자산
+
+| 경로 | 목적 |
+|---|---|
+| `assets/flowcharts/project-overall-flow-2026-06-25.svg` | 프로젝트 전체 흐름도 원문 |
+| `assets/flowcharts/user-screen-flow-2026-06-25.svg` | 사용자 화면 흐름도 원문 |
+| `assets/flowcharts/internal-processing-flow-2026-06-25.svg` | 내부 처리 흐름도 원문 |
 
 ## 운영 문서
 
