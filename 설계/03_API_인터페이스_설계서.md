@@ -123,20 +123,20 @@ result = graph.invoke({
 | ocr_error | str\|None | 구조 오류 메시지 (R-08) | 공통 |
 | fine_type | str\|None | "과태료"\|"범칙금"\|"벌금"\|None | 공통 |
 | notice_stage | str\|None | "사전통지"\|"1차 고지서"\|"즉결심판" | 공통 |
-| law_code | str\|None | "도로교통법 제17조" 형식 | ③-2·④ 없음 |
-| violation_text | str\|None | 마스킹된 위반 내용 원문 | ③-2 없음 |
-| violation_datetime | str\|None | 위반 일시 | ③-2 없음 |
-| violation_location | str\|None | 위반 장소 | ③-2 없음 |
+| law_code | str\|None | "도로교통법 제17조" 형식 | ④ 없음 |
+| violation_text | str\|None | 마스킹된 위반 내용 원문 | 없을 수 있음 |
+| violation_datetime | str\|None | 위반 일시 | 없을 수 있음 |
+| violation_location | str\|None | 위반 장소 | 없을 수 있음 |
 | fine_amount | int\|None | 부과 금액 | ④ 미확정 가능 |
 | prepayment_amount | int\|None | 사전납부 금액 (이미지 추출값) | ① 전용. 나머지 None (R-06) |
 | opinion_deadline | str\|None | YYYY-MM-DD. 유형별 의미 다름 | 공통 |
-| payment_deadline_2nd | str\|None | YYYY-MM-DD. 2차 납부기한 (1차+20일 가산) | ③·③-2 유효 |
-| additional_amount | int\|None | 2차 납부 시 가산금액 (fine_amount × 1.2) | ③·③-2 유효 |
-| vehicle_number | str\|None | 마스킹된 차량번호 | ③-2·④ 없음 |
+| payment_deadline_2nd | str\|None | YYYY-MM-DD. 2차 납부기한 (1차+20일 가산) | ③ 전용 |
+| additional_amount | int\|None | 2차 납부 시 가산금액 (fine_amount × 1.2) | ③ 전용 |
+| vehicle_number | str\|None | 마스킹된 차량번호 | ④ 없음 |
 | issuing_authority | str\|None | 발급 기관 | 공통 |
 | demerit_points_base | int\|None | 이번 위반 벌점 | ③ 전용 |
 | demerit_points_accumulated | int\|None | 누적 처분벌점 | ③ 전용 |
-| charge_number | str\|None | 부과번호·관리번호·통고서번호 | ①②③③-2 유효 |
+| charge_number | str\|None | 부과번호·관리번호·통고서번호 | ①②③ 유효 |
 | court_venue | str\|None | 즉결심판 출석 장소 | ④ 전용 |
 | missing_fields | list[str] | 누락 필드 목록 | 공통 |
 
@@ -144,16 +144,15 @@ result = graph.invoke({
 > - ① 과태료 사전통지: 의견제출기한
 > - ② 과태료 고지서: 납부기한 ⚠️ **이의신청 가능 기한(질서위반행위규제법 제20조) = 수령일+60일로 납부기한과 다를 수 있음 — Supervisor 별도 계산 필요**
 > - ③ 범칙금 통고서: 1차 납부기한 (`payment_deadline_2nd`에 2차 납부기한 별도 추출)
-> - ③-2 범칙금 납부고지서: 납부기한 (`payment_deadline_2nd`에 2차 납부기한 별도 추출)
 > - ④ 즉결심판: **출석(예정)일시** (납부기한 아님)
 
 ### 3-3. next_actions 값 목록
 
 | next_actions 값 | 트리거 조건 |
 |----------------|-----------|
-| `"법률 근거 검색 노드 호출"` | ocr_status=success |
-| `"이미지 재업로드 요청"` | ocr_status=degraded(③-2 제외)/partial/failed |
-| `"원처분 통고서 추가 제출 요청"` | ocr_status=degraded + ③-2 범칙금 납부고지서 — 위반 내역이 서식 구조상 없어 이의신청 안내 불가, 원처분 통고서(별지 159호의2) 제출 시 위반 내역 확인 후 안내 가능 |
+| `"법률 근거 검색 노드 호출"` | ocr_status=success + fine_type=과태료 |
+| `"OCR 결과만 반환 — 이의신청 불가"` | ocr_status=success + fine_type=범칙금 (법원행정 영역) |
+| `"이미지 재업로드 요청"` | ocr_status=degraded/partial/failed |
 | `"서비스 범위 외 안내"` | ocr_status=rejected |
 
 ### 3-4. 반환 예시 — ① 과태료 사전통지서
@@ -182,37 +181,6 @@ result = graph.invoke({
         },
         "missing_fields": [],
         "next_actions": ["법률 근거 검색 노드 호출"],
-    }
-}
-```
-
-### 3-5. 반환 예시 — ③-2 범칙금 납부고지서 (degraded)
-
-```python
-{
-    "fine_notice_analysis": {
-        "status": "degraded",
-        "summary": "위반내용 미확인 — 사전통지 OCR degraded",
-        "structured_result": {
-            "ocr_status":       "degraded",
-            "fine_type":        "범칙금",
-            "notice_stage":     "사전통지",
-            "law_code":             None,        # 서식에 없음
-            "violation_text":       None,        # 서식에 없음
-            "violation_datetime":   None,        # 서식에 없음
-            "violation_location":   None,        # 서식에 없음
-            "vehicle_number":       None,        # 서식에 없음
-            "fine_amount":          40000,
-            "charge_number":        "통고서번호",
-            "opinion_deadline":     "2026-07-01",
-            "payment_deadline_2nd": "2026-07-21",
-            "additional_amount":    48000,
-            "missing_fields":   ["law_code", "violation_text", "violation_datetime", "violation_location", "vehicle_number"],
-        },
-        "missing_fields": ["law_code", "violation_text", "violation_datetime", "violation_location", "vehicle_number"],
-        "next_actions": ["원처분 통고서 추가 제출 요청"],
-        # 위반 내역(위반내용·법조·차량번호)이 서식 구조상 없어 이의신청 안내 불가
-        # 원처분 범칙금 납부통고서(별지 159호의2) 제출 시 위반 내역 확인 후 안내 가능
     }
 }
 ```
@@ -256,7 +224,7 @@ raw_text = mask_personal_info(raw_text)
 | 적용법조 | law_code | |
 | 발급기관 | issuing_authority | |
 | 부과번호\|관리번호 | charge_number | |
-| 가산금액 | additional_amount | ③·③-2 전용 |
+| 가산금액 | additional_amount | ③ 전용 |
 | 출석 장소 | court_venue | ④ 전용 |
 
 ### 4-3. fine_type 분류 로직 (_classify_fine_type)

@@ -12,10 +12,8 @@ IMPORTANT_FIELDS: dict[str, list[str]] = {
 
 # 서식 구조상 존재하지 않는 필드 — critical/important 체크에서 제외하여 degraded 처리
 _STRUCTURAL_ABSENT: dict[tuple, set[str]] = {
-    # ③-2 범칙금 납부고지서: violation_text 없음으로 판별
-    ("범칙금", "사전통지", False): {"law_code", "violation_text", "violation_datetime", "violation_location", "vehicle_number"},
     # ④ 즉결심판 출석통지서
-    ("범칙금", "즉결심판"):        {"law_code", "vehicle_number"},
+    ("범칙금", "즉결심판"):  {"law_code", "vehicle_number"},
 }
 
 
@@ -24,16 +22,10 @@ def evaluate_ocr(
     fine_type: str,
     notice_stage: Optional[str] = None,
 ) -> tuple[str, list[str]]:
-    """
-    ocr_status 판정. 구조적 부재 필드는 critical/important에서 제외하여
-    ③-2·④ 가 partial 대신 degraded로 반환되도록 한다.
-    """
+    """ocr_status 판정. ④ 즉결심판의 구조적 부재 필드는 critical/important에서 제외."""
     absent: set[str] = set()
-    if fine_type == "범칙금":
-        if notice_stage == "사전통지" and not fields.get("violation_text"):
-            absent = _STRUCTURAL_ABSENT[("범칙금", "사전통지", False)]
-        elif notice_stage == "즉결심판":
-            absent = _STRUCTURAL_ABSENT[("범칙금", "즉결심판")]
+    if fine_type == "범칙금" and notice_stage == "즉결심판":
+        absent = _STRUCTURAL_ABSENT[("범칙금", "즉결심판")]
 
     critical  = [f for f in CRITICAL_FIELDS.get(fine_type, [])  if f not in absent]
     important = [f for f in IMPORTANT_FIELDS.get(fine_type, []) if f not in absent]

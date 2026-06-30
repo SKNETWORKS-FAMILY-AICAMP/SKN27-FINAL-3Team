@@ -1,6 +1,13 @@
 __pycache__/
 *.py[cod]
 *.log
-
+.env
 backend/db.sqlite3
 backend/media/
+
+# Ponytail Skills
+.agents/
+
+# Documents & Designs
+서식문서/
+설계/

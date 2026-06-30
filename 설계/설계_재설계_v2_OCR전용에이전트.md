@@ -76,7 +76,7 @@ flowchart TD
     FT_REJ --> END_REJ
 
     %% ── 후처리 ───────────────────────────────────────────────────────────────
-    POST_FT["이중 마스킹: resident_number, vehicle_number\nevaluate_ocr(result, fine_type, notice_stage)\n※ ③-2·④ 구조적 부재 필드는 critical 제외 → degraded"]
+    POST_FT["이중 마스킹: resident_number, vehicle_number\nevaluate_ocr(result, fine_type, notice_stage)\n※ ④ 구조적 부재 필드는 critical 제외 → degraded"]
     POST_FT --> EVAL{"ocr_status 판정\n(evaluator.py)"}
     EVAL -->|"critical + important 모두 있음"| ST_OK["ocr_status = success"]
     EVAL -->|"important 일부 누락"| ST_DEG["ocr_status = degraded\nmissing_fields 기록\nnext_actions: 이미지 재업로드 요청"]
@@ -120,19 +120,17 @@ flowchart TD
     KT_ST -->|"1차 고지서"| D2["② 과태료 고지서\n별지 151호 · 152호\n❌ prepayment_amount\n✅ charge_number\n✅ opinion_deadline = 납부기한\n⚠️ 이의신청 기한 = 수령일+60일 별도\n❌ demerit_points"]
 
     DOC_ROUTE -->|범칙금| BJ_ST{"notice_stage?"}
-    BJ_ST -->|사전통지| CHK_VT{"violation_text\n추출됨?"}
-    CHK_VT -->|있음| D3["③ 범칙금 통고서\n별지 159호의2\n✅ demerit_points_base · accumulated\n✅ opinion_deadline = 1차 납부기한\n✅ payment_deadline_2nd = 2차 납부기한\n✅ additional_amount = 가산금액\n✅ charge_number 통고서번호\n❌ prepayment_amount R-06"]
-    CHK_VT -->|"없음 — 미납 독촉서"| D3B["③-2 범칙금 납부고지서\n별지 162호 · 163호\nocr_status = degraded\n❌ violation_text ❌ law_code\n❌ vehicle_number ❌ demerit_points\n✅ charge_number 통고서번호\n✅ opinion_deadline · fine_amount\n✅ payment_deadline_2nd = 2차 납부기한\n✅ additional_amount = 가산금액"]
+    BJ_ST -->|사전통지| D3["③ 범칙금 사전통지\n별지 159호의2·162·163호\n※ 162·163호는 violation_text·demerit_points 없음 (OCR partial 예상)\n✅ opinion_deadline = 1차 납부기한 (159호의2)\n✅ payment_deadline_2nd = 2차 납부기한 (159호의2)\n✅ additional_amount = 가산금액 (159호의2)\n✅ charge_number 통고서번호 (159호의2)\n❌ prepayment_amount R-06\n⚠️ 162·163호: 이의신청 불가 — 법원행정 영역"]
     BJ_ST -->|즉결심판| D4["④ 즉결심판 출석통지서\n별지 168호\n✅ opinion_deadline = 출석 예정일시\n✅ court_venue = 출석 장소\n✅ violation_text · datetime · location\n❌ fine_amount 심판 전 미확정\n❌ law_code 구조적 부재 → evaluate_ocr에서 critical 제외\n❌ vehicle_number 구조적 부재 → evaluate_ocr에서 critical 제외"]
 
     %% ── 최종 출력 ────────────────────────────────────────────────────────────
-    D1 & D2 & D3 & D4 --> ENV_OK["FineNoticeEnvelope 조립\nstatus / summary / structured_result\nmissing_fields / next_actions\nagent_results 누적"]
-    D3B --> ENV_DEG["FineNoticeEnvelope 조립\nstatus = degraded\nmissing_fields: law_code, violation_text,\nviolation_datetime, violation_location, vehicle_number\nnext_actions: 원처분 통고서 추가 제출 요청"]
-    ENV_OK --> END_OK
-    ENV_DEG --> END_DEG
+    D1 & D2 --> ENV_OK_KT["FineNoticeEnvelope 조립\nstatus / summary / structured_result\nmissing_fields\nnext_actions: 법률 근거 검색 노드 호출 (success)\n               이미지 재업로드 요청 (degraded)\nagent_results 누적"]
+    D3 & D4 --> ENV_OK_BJ["FineNoticeEnvelope 조립\nstatus / summary / structured_result\nmissing_fields\nnext_actions: OCR 결과만 반환 — 이의신청 불가 (success)\n               이미지 재업로드 요청 (degraded)\nagent_results 누적"]
+    ENV_OK_KT --> END_KT
+    ENV_OK_BJ --> END_BJ
 
-    END_OK(["END ✅ success / degraded / partial\nSupervisor → 이의신청서 Agent 판단"])
-    END_DEG(["END ⚠️ degraded\n③-2: 위반 내역 없음 → 원처분 통고서 추가 제출 요청"])
+    END_KT(["END ✅ 과태료\nSupervisor → 이의신청서 Agent 판단"])
+    END_BJ(["END ✅ 범칙금\nOCR 결과만 반환\n이의신청 불가 — 법원행정 영역"])
     END_PART(["END ⚠️ partial\nSupervisor → 고지서 이미지 재업로드 요청"])
     END_FAIL(["END ❌ failed\nSupervisor → 고지서 이미지 재업로드 요청"])
     END_REJ(["END 🚫 rejected\nSupervisor → 서비스 범위 외 안내"])
@@ -176,12 +174,9 @@ flowchart TD
 | ① | 과태료 | 사전통지 | 별지 154호, 155호의2 | ✅ |
 | ② | 과태료 | 1차 고지서 | 별지 151호, 152호 | ✅ |
 | ③ | 범칙금 | 사전통지 (통고서) | 별지 159호의2 | ✅ |
-| ③-2 | 범칙금 | 사전통지 (납부고지서) | 별지 162호, 163호 | ❌ 없음 |
 | ④ | 범칙금 | 즉결심판 | 별지 168호 출석통지서 | ✅ |
 
-> ⚠️ **별지 162·163호 (범칙금 납부고지서)**: 위반내용·위반일시·차량번호가 서식에 없음.  
-> 미납 독촉용 은행 고지서이며, 통고서번호로 원처분(별지 159호의2) 참조해야 함.  
-> → `violation_text`, `law_code` 추출 불가 → `ocr_status=degraded` 로 처리, `missing_fields`에 기록
+> ⚠️ **별지 162·163호 (범칙금 납부고지서)**: 서비스 범위 외. 범칙금 불복은 법원행정 영역이므로 이 서식에 대한 별도 처리 로직을 제공하지 않는다.
 
 ---
 
@@ -263,35 +258,6 @@ flowchart TD
 
 ---
 
-### ③-2 범칙금 납부고지서 (별지 162호·163호) — 위반내용 없음
-
-```json
-{
-  "fine_type": "범칙금",
-  "notice_stage": "사전통지",
-  "law_code": null,
-  "violation_text": null,
-  "violation_datetime": null,
-  "violation_location": null,
-  "fine_amount": 40000,
-  "prepayment_amount": null,
-  "charge_number": "통고서번호",
-  "opinion_deadline": "2026-07-01",
-  "payment_deadline_2nd": "2026-07-21",
-  "additional_amount": 48000,
-  "issuing_authority": "강남경찰서",
-  "vehicle_number": null,
-  "demerit_points_base": null,
-  "demerit_points_accumulated": null,
-  "ocr_status": "degraded",
-  "missing_fields": ["law_code", "violation_text", "violation_datetime", "violation_location", "vehicle_number"]
-}
-```
-
-**특징**: 미납 독촉용 서식으로 위반 내역(위반내용·법조·차량번호 등)이 구조적으로 없어 이의신청 안내 불가. 이의신청 자체는 가능(범칙금 [1단계] 창 내)하나 구체적 안내를 위해 원처분 통고서(별지 159호의2) 추가 제출 요청 필요.
-
----
-
 ### ④ 즉결심판 출석통지서 (별지 168호)
 
 ```json
@@ -314,7 +280,7 @@ flowchart TD
 }
 ```
 
-**특징**: `opinion_deadline` = **출석(예정)일시**, `fine_amount` 없음 (심판 전), `law_code`·`vehicle_number` 서식 구조상 없음 → critical miss가 아닌 **degraded** 처리 (③-2와 동일 예외 규칙)
+**특징**: `opinion_deadline` = **출석(예정)일시**, `fine_amount` 없음 (심판 전), `law_code`·`vehicle_number` 서식 구조상 없음 → critical miss가 아닌 **degraded** 처리
 
 > ⚠️ **별지 167호 (즉결심판청구서)**: 경찰 → 법원 내부 문서로 일반인 발부 대상 아님. 사용자가 가져올 경우 처리 가능하나 우선순위 낮음.
 
@@ -322,20 +288,20 @@ flowchart TD
 
 ### 유형별 필드 비교표
 
-| 필드 | ① 과태료 사전통지 | ② 과태료 고지서 | ③ 범칙금 통고서 | ③-2 범칙금 납부고지서 | ④ 즉결심판 |
-|------|:-----------------:|:---------------:|:---------------:|:--------------------:|:----------:|
-| `law_code` | ✅ | ✅ | ✅ | ❌ 구조적 부재 | ❌ 구조적 부재 |
-| `violation_text` | ✅ | ✅ | ✅ | ❌ 없음 | ✅ |
-| `violation_datetime` | ✅ | ✅ | ✅ | ❌ 없음 | ✅ |
-| `vehicle_number` | ✅ | ✅ | ✅ | ❌ 구조적 부재 | ❌ 구조적 부재 |
-| `fine_amount` | ✅ | ✅ | ✅ | ✅ | ❌ 미확정 |
-| `opinion_deadline` | ✅ 의견제출기한 | ✅ 납부기한 ⚠️ | ✅ 1차 납부기한 | ✅ 납부기한 | ✅ 출석기일 |
-| `payment_deadline_2nd` | ❌ | ❌ | ✅ 2차 납부기한 | ✅ 2차 납부기한 | ❌ |
-| `additional_amount` | ❌ | ❌ | ✅ 가산금액 | ✅ 가산금액 | ❌ |
-| `prepayment_amount` | ✅ | ❌ | ❌ | ❌ | ❌ |
-| `charge_number` | ✅ | ✅ | ✅ 통고서번호 | ✅ 통고서번호 | ❌ |
-| `court_venue` | ❌ | ❌ | ❌ | ❌ | ✅ 출석 장소 |
-| `demerit_points_*` | ❌ | ❌ | ✅ | ❌ | ❌ |
+| 필드 | ① 과태료 사전통지 | ② 과태료 고지서 | ③ 범칙금 통고서 | ④ 즉결심판 |
+|------|:-----------------:|:---------------:|:---------------:|:----------:|
+| `law_code` | ✅ | ✅ | ✅ | ❌ 구조적 부재 |
+| `violation_text` | ✅ | ✅ | ✅ | ✅ |
+| `violation_datetime` | ✅ | ✅ | ✅ | ✅ |
+| `vehicle_number` | ✅ | ✅ | ✅ | ❌ 구조적 부재 |
+| `fine_amount` | ✅ | ✅ | ✅ | ❌ 미확정 |
+| `opinion_deadline` | ✅ 의견제출기한 | ✅ 납부기한 ⚠️ | ✅ 1차 납부기한 | ✅ 출석기일 |
+| `payment_deadline_2nd` | ❌ | ❌ | ✅ 2차 납부기한 | ❌ |
+| `additional_amount` | ❌ | ❌ | ✅ 가산금액 | ❌ |
+| `prepayment_amount` | ✅ | ❌ | ❌ | ❌ |
+| `charge_number` | ✅ | ✅ | ✅ 통고서번호 | ❌ |
+| `court_venue` | ❌ | ❌ | ❌ | ✅ 출석 장소 |
+| `demerit_points_*` | ❌ | ❌ | ✅ | ❌ |
 
 ### 서비스 범위 외 / 분류 불가
 
@@ -368,6 +334,9 @@ flowchart TD
 | `FINE_RULES` dict | reduction_rule_node 제거에 따라 불필요 |
 | `VIOLATION_DOCUMENTS` dict | evidence_package_node 제거에 따라 불필요 |
 | `decision.py` | Supervisor 이관 |
+| ③-2 분기 로직 (`CHK_VT` → `D3B` → `ENV_DEG`) | 범칙금은 법원행정 영역 — 미납 독촉장 별도 처리 불필요 |
+| `_STRUCTURAL_ABSENT[("범칙금", "사전통지", False)]` | ③-2 경로 제거에 따라 불필요 |
+| `_D3B_MISSING` 상수 | 동일 이유 |
 
 ---
 
@@ -388,7 +357,9 @@ flowchart TD
 - 이의 가능 여부 판단 (`opinion_deadline` vs `today`)
 - 감경률 계산 및 사전납부금액 안내
 - 필요 서류 체크리스트 제공
-- 이의신청서 생성 Agent 호출
+- 이의신청서 생성 Agent 호출 (**과태료 전용** — 범칙금은 법원행정 영역으로 이의신청서 생성 불가)
+
+> ⚠️ **범칙금 불복 절차**: 범칙금은 행정 이의신청 대상이 아님. 납부기한 내 미납 시 즉결심판(지방법원)으로 자동 회부되며, 즉결심판 출석 후 법원에서만 다툴 수 있음. 본 서비스는 범칙금 고지서 OCR·분류 결과만 반환하고 이후 대응은 제공하지 않는다.
 
 ---
 
@@ -398,4 +369,4 @@ flowchart TD
 |------|------|
 | `ocr_status` Literal | `"rejected"` 코드 반영 필요 (설계 확정) |
 | `prepayment_amount` | 이미지에 인쇄된 값만 추출 — 계산 없음 (확정) |
-| `additional_amount` (가산금액) | ③·③-2 스키마 추가 확정 — 서식 인쇄값 그대로 추출 |
+| `additional_amount` (가산금액) | ③ 스키마 추가 확정 — 서식 인쇄값 그대로 추출 |

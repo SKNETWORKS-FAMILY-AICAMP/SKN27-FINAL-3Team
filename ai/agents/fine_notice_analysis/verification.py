@@ -13,8 +13,6 @@ VALID_COMBINATIONS: set[tuple[str, str]] = {
 
 _LAW_CODE_RE = re.compile(r".+(법|규칙|령|조례|규정).+제\d+조")
 
-_D3B_MISSING = ["law_code", "violation_text", "violation_datetime", "violation_location", "vehicle_number"]
-
 
 def _structured_from_state(state: FineNoticeState, ocr_status: str) -> dict:
     return {
@@ -76,22 +74,16 @@ def confidence_verification_node(state: FineNoticeState) -> dict:
     # format_errors 있으면 partial로 오버라이드 (VFAIL 경로)
     ocr_status = "partial" if format_errors else state.get("ocr_status", "success")
 
-    # ③-2: 범칙금 사전통지 + violation_text 없음 → ENV_DEG (degraded 고정)
-    if fine_type == "범칙금" and notice_stage == "사전통지" and not state.get("violation_text"):
-        structured = _structured_from_state(state, "degraded")
-        summary    = "위반내용 미확인 — 사전통지 OCR degraded (별지 162·163호)"
-        env = make_envelope("degraded", structured, _D3B_MISSING,
-                            ["원처분 통고서 추가 제출 요청"], summary)
-        return {
-            "ocr_status":    "degraded",
-            "format_errors": format_errors,
-            "agent_results": update_agent_results(state, env),
-        }
+    # ENV_OK_KT (과태료) vs ENV_OK_BJ (범칙금) — next_actions 분기
+    if ocr_status == "success" and fine_type == "과태료":
+        next_actions = ["법률 근거 검색 노드 호출"]         # END_KT: 이의신청서 Agent 판단
+    elif ocr_status == "success" and fine_type == "범칙금":
+        next_actions = ["OCR 결과만 반환 — 이의신청 불가"]  # END_BJ: 법원행정 영역
+    else:
+        next_actions = ["이미지 재업로드 요청"]
 
-    # 일반 케이스 (①②③④) → ENV_OK
-    next_actions = ["법률 근거 검색 노드 호출"] if ocr_status == "success" else ["이미지 재업로드 요청"]
     violation_text = state.get("violation_text") or ""
-    summary = f"{violation_text[:20] or '내용 미확인'} — {notice_stage} OCR {ocr_status}"
+    summary = f"{fine_type} {violation_text[:20] or '내용 미확인'} — {notice_stage} OCR {ocr_status}"
 
     structured = _structured_from_state(state, ocr_status)
     env = make_envelope(ocr_status, structured, missing, next_actions, summary)
