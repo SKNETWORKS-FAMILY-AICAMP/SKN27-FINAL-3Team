@@ -26,6 +26,10 @@ ALLOWED_HOSTS = [
 ]
 REDIS_URL = os.environ.get("REDIS_URL")
 PROGRESS_CACHE_TTL_SECONDS = _positive_int_env("PROGRESS_CACHE_TTL_SECONDS", 300)
+OBJECT_STORAGE_PROVIDER = os.environ.get("OBJECT_STORAGE_PROVIDER", "mock_s3")
+OBJECT_STORAGE_BUCKET = os.environ.get("OBJECT_STORAGE_BUCKET", "skn27-demo-object-storage")
+OBJECT_STORAGE_PREFIX = os.environ.get("OBJECT_STORAGE_PREFIX", "canonical")
+OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS = _positive_int_env("OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS", 900)
 
 INSTALLED_APPS = [
     "django.contrib.staticfiles",

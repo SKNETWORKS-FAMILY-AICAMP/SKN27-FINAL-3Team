@@ -729,6 +729,13 @@ paths:
             X-Report-Storage-URI:
               schema:
                 type: string
+            X-Report-Object-Key:
+              schema:
+                type: string
+            X-Report-Object-Policy:
+              schema:
+                type: string
+                enum: [object_storage_adapter.v1]
             X-Report-Access-Decision:
               schema:
                 type: string
@@ -1839,6 +1846,8 @@ components:
           minimum: 0
         storage_uri:
           type: string
+        object_storage:
+          $ref: "#/components/schemas/ObjectStorageReference"
         resolution_status:
           type: string
           enum: [resolved, inline_metadata, unresolved]
@@ -1868,6 +1877,8 @@ components:
               additionalProperties: true
             agent_handoff:
               $ref: "#/components/schemas/AgentAttachmentHandoff"
+            object_storage:
+              $ref: "#/components/schemas/ObjectStorageReference"
             limitations:
               type: array
               items:
@@ -1877,6 +1888,52 @@ components:
               additionalProperties: true
             usage:
               $ref: "#/components/schemas/UsageMeter"
+
+    ObjectStorageReference:
+      type: object
+      required: [policy_version, backend, provider, storage_uri, resource_type, resource_id, status, persistence_state]
+      properties:
+        policy_version:
+          type: string
+          enum: [object_storage_adapter.v1]
+        backend:
+          type: string
+          enum: [object_storage, mock_placeholder, local_file, unknown]
+        provider:
+          type: string
+          enum: [mock_s3, s3, local_file, mock_sidecar, unknown]
+        bucket:
+          type: string
+        key:
+          type: string
+        storage_uri:
+          type: string
+        resource_type:
+          type: string
+          enum: [uploaded_file, report]
+        resource_id:
+          type: string
+        filename:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [metadata_ready, legacy_reference]
+        source_uri:
+          type: string
+        signed_url_ttl_seconds:
+          type: integer
+          minimum: 1
+        writes_binary:
+          type: boolean
+          enum: [false]
+        persistence_state:
+          type: string
+          enum: [metadata_only_adapter]
 
     AgentAttachmentHandoff:
       type: object
@@ -3473,6 +3530,8 @@ components:
           type: array
           items:
             type: string
+        object_storage:
+          $ref: "#/components/schemas/ObjectStorageReference"
         persistence:
           type: object
           additionalProperties: true
@@ -3511,6 +3570,8 @@ components:
             content:
               type: object
               additionalProperties: true
+            object_storage:
+              $ref: "#/components/schemas/ObjectStorageReference"
             download_url:
               type: string
 
@@ -3574,7 +3635,7 @@ components:
     MyPageSummary:
       type: object
       x-contract-status: confirmed
-      required: [storage, progress_cache, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
+      required: [storage, progress_cache, object_storage, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
       properties:
         storage:
           type: object
@@ -3589,6 +3650,33 @@ components:
                 type: string
         progress_cache:
           $ref: "#/components/schemas/ProgressCachePolicy"
+        object_storage:
+          type: object
+          required: [policy_version, backend, provider, bucket, prefix, signed_url_ttl_seconds, writes_binary, persistence_state, fallback]
+          properties:
+            policy_version:
+              type: string
+              enum: [object_storage_adapter.v1]
+            backend:
+              type: string
+              enum: [object_storage]
+            provider:
+              type: string
+            bucket:
+              type: string
+            prefix:
+              type: string
+            signed_url_ttl_seconds:
+              type: integer
+            writes_binary:
+              type: boolean
+              enum: [false]
+            persistence_state:
+              type: string
+              enum: [metadata_only_adapter]
+            fallback:
+              type: string
+              enum: [django_response_body]
         session_cache:
           $ref: "#/components/schemas/ProgressCacheRead"
         active_cases:

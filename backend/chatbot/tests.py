@@ -1018,6 +1018,10 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(attachment["purpose"], "fine_notice")
         self.assertEqual(attachment["persistence"]["backend"], "postgresql")
         self.assertEqual(attachment["persistence"]["table"], "uploaded_files")
+        self.assertEqual(attachment["object_storage"]["policy_version"], "object_storage_adapter.v1")
+        self.assertEqual(attachment["object_storage"]["backend"], "object_storage")
+        self.assertEqual(attachment["object_storage"]["resource_type"], "uploaded_file")
+        self.assertTrue(attachment["storage_uri"].startswith("s3://"))
         self.assertEqual(attachment["checks"]["metadata_repository"], "uploaded_files")
 
         uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
@@ -1027,11 +1031,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(uploaded_file.content_type, "image/jpeg")
         self.assertEqual(uploaded_file.size_bytes, 2048)
         self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+        self.assertTrue(uploaded_file.storage_uri.startswith("s3://"))
         self.assertEqual(uploaded_file.metadata["mock_status"], "metadata_registered")
+        self.assertEqual(uploaded_file.metadata["object_storage"]["backend"], "object_storage")
+        self.assertEqual(uploaded_file.metadata["source_storage_uri"], f"mock://metadata/{attachment['attachment_id']}")
+        self.assertEqual(uploaded_file.agent_handoff["storage_uri"], uploaded_file.storage_uri)
 
         detail = self.client.get(f"/api/files/{attachment['attachment_id']}/")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["api_surface"], "canonical_mock")
+        self.assertEqual(detail.json()["attachment"]["object_storage"]["backend"], "object_storage")
         self.assertEqual(
             detail.json()["attachment"]["persistence"]["table"],
             "uploaded_files",
@@ -1502,17 +1511,22 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(report_body["persistence"]["backend"], "postgresql")
         self.assertEqual(report_body["persistence"]["table"], "reports")
         self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
-        self.assertEqual(report_body["persistence"]["object_storage"], "mock_placeholder")
+        self.assertEqual(report_body["persistence"]["object_storage"]["backend"], "object_storage")
+        self.assertEqual(report_body["object_storage"]["policy_version"], "object_storage_adapter.v1")
+        self.assertEqual(report_body["object_storage"]["resource_type"], "report")
         self.assertTrue(report_body["download_url"].startswith("/api/reports/"))
         report = Report.objects.get(report_id=report_body["report_id"])
         self.assertEqual(report.job.job_id, job["job_id"])
         self.assertEqual(report.session.session_id, session_id)
         self.assertEqual(report.display_result.display_result_id, result["persistence"]["display_result_id"])
         self.assertEqual(report.status, ReportStatus.READY)
-        self.assertEqual(report.storage_uri, "mock://reports/rep_canonical_smoke")
+        self.assertTrue(report.storage_uri.startswith("s3://skn27-demo-object-storage/"))
         self.assertEqual(report.metadata["source"], "canonical_report_action")
-        self.assertEqual(report.metadata["object_storage_status"], "mock_placeholder")
+        self.assertEqual(report.metadata["object_storage_status"], "metadata_ready")
+        self.assertEqual(report.metadata["object_storage"]["backend"], "object_storage")
+        self.assertEqual(report.metadata["source_storage_uri"], "mock://reports/rep_canonical_smoke")
         self.assertEqual(report.content["download_url"], report_body["download_url"])
+        self.assertEqual(report.content["object_storage"]["storage_uri"], report.storage_uri)
 
         download_response = self.client.get(
             f"/api/reports/{report_body['report_id']}/download/"
@@ -1520,13 +1534,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(download_response.status_code, 200)
         self.assertEqual(download_response["X-API-Surface"], "canonical_mock")
         self.assertEqual(download_response["X-Report-Persistence"], "postgresql")
-        self.assertEqual(download_response["X-Report-Storage-Backend"], "mock_placeholder")
-        self.assertEqual(download_response["X-Report-Storage-URI"], "mock://reports/rep_canonical_smoke")
+        self.assertEqual(download_response["X-Report-Storage-Backend"], "object_storage")
+        self.assertEqual(download_response["X-Report-Storage-URI"], report.storage_uri)
+        self.assertEqual(download_response["X-Report-Object-Key"], report.metadata["object_storage"]["key"])
+        self.assertEqual(download_response["X-Report-Object-Policy"], "object_storage_adapter.v1")
         self.assertEqual(download_response["X-Report-Access-Decision"], "owner_match")
         self.assertIn(
             "Report metadata download for rep_canonical_smoke",
             download_response.content.decode("utf-8"),
         )
+        self.assertIn("object_storage_policy: object_storage_adapter.v1", download_response.content.decode("utf-8"))
 
         summary_response = self.client.get(f"/api/mypage/summary/?session_id={session_id}")
         self.assertEqual(summary_response.status_code, 200)
@@ -1536,6 +1553,8 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(summary_body["storage"]["backend"], "postgresql")
         self.assertEqual(summary_body["progress_cache"]["policy_version"], "progress_cache.v1")
         self.assertEqual(summary_body["progress_cache"]["fallback"], "postgresql")
+        self.assertEqual(summary_body["object_storage"]["policy_version"], "object_storage_adapter.v1")
+        self.assertEqual(summary_body["object_storage"]["backend"], "object_storage")
         self.assertEqual(
             summary_body["progress_cache"]["key_patterns"]["analysis_job_progress"],
             "analysis_job_progress:{job_id}",

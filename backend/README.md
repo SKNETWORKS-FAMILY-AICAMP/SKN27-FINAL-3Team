@@ -183,9 +183,9 @@ Canonical `GET /api/analysis/results/{job_id}/` saves the display snapshot to `a
 
 반환 필드는 `assistant_message`, `progress`, `cards`, `pending_questions`, `attachments`, `report_links`, `evidence`, `agent_results`, `limitations` 중심이다. 디버깅용 원본 묶음인 `analysis_plan`, `node_execution`, `chat_response`는 `GET /api/mock/analysis/jobs/{job_id}/`에서만 조회한다.
 
-Canonical `POST /api/reports/` saves report metadata to `reports` and links it to `analysis_jobs` plus `analysis_display_results` when available. The generated artifact still uses a `mock://reports/{report_id}` placeholder until the object storage adapter is introduced.
+Canonical `POST /api/reports/` saves report metadata to `reports` and links it to `analysis_jobs` plus `analysis_display_results` when available. It now wraps the generated artifact in an `object_storage_adapter.v1` envelope and stores an `s3://...` adapter URI while keeping the original mock URI as `source_storage_uri`.
 
-Canonical `GET /api/reports/{report_id}/download/`는 `reports` table을 먼저 확인한다. metadata가 있으면 요청 subject와 `reports.owner_id`를 비교해 소유자만 다운로드할 수 있고, 성공 응답에는 `X-Report-Persistence`, `X-Report-Storage-Backend`, `X-Report-Storage-URI`, `X-Report-Access-Decision`을 포함한다. metadata가 없으면 기존 mock text download로 fallback한다.
+Canonical `GET /api/reports/{report_id}/download/`는 `reports` table을 먼저 확인한다. metadata가 있으면 요청 subject와 `reports.owner_id`를 비교해 소유자만 다운로드할 수 있고, 성공 응답에는 `X-Report-Persistence`, `X-Report-Storage-Backend`, `X-Report-Storage-URI`, `X-Report-Object-Key`, `X-Report-Object-Policy`, `X-Report-Access-Decision`을 포함한다. metadata가 없으면 기존 mock text download로 fallback한다.
 
 ## Redis status
 
