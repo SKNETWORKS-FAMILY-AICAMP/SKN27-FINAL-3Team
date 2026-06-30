@@ -28,11 +28,14 @@
 
 - `POST /api/chat/messages`를 우선 호출한다. 필요하면 `apiBase="/api/mock"` prop으로 명시적 mock endpoint도 호출할 수 있다.
 - 화면 시작 시 `POST /api/auth/guest-session/`으로 비회원 `guest_id`를 받고, `GET /api/auth/me/`로 현재 subject를 확인한다.
+- Google 로그인은 `POST /api/auth/login/`으로 app Bearer token을 받은 뒤 `GET /api/auth/me/`로 `authenticated` subject를 다시 확인한다.
 - API가 연결되지 않아도 프론트 fallback mock으로 화면 상태를 확인할 수 있다.
 - 리포트 저장/다운로드 action은 `POST /api/reports`를 우선 호출한다.
 - Django mock backend가 `MOCK_REQUIRE_AUTH=1`일 때도 호출할 수 있도록 기본 `Authorization: Bearer dev-mock-token` 헤더를 붙인다.
+- 로그인 성공 후에는 `localStorage`에 저장한 app Bearer token을 이후 `Authorization` 헤더에 사용한다.
 - 이후 채팅/리포트 요청에는 `X-Guest-Id`, `X-Auth-Session-Id` header와 `auth_context` body를 함께 싣는다.
-- UI에서는 `guest_id`, `auth_session_id`, `chat_session_id`를 분리해서 확인한다.
+- `auth_context`에는 `auth_state`, `user_id`, `guest_id`, `auth_session_id`, `session_id`를 함께 싣는다.
+- UI에서는 `guest_id`, `user_id`, `auth_session_id`, `chat_session_id`를 분리해서 확인한다.
 - 실제 LLM, Agent, RAG 호출은 포함하지 않는다.
 
 ## 4. 검증 필요
