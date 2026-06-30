@@ -1,3 +1,9 @@
 Django==5.2.14
+PyYAML
+numpy
+neo4j
+openai
+psycopg2-binary
+sentence-transformers
 redis==5.0.8
 

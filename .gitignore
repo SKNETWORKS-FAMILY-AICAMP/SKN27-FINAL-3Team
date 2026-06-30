@@ -1,5 +1,16 @@
+.env
+.env.*
+!.env.example
+.venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+tmp/law_ingestion*/
+output/law_ingestion/
+storage/neo4j/data/
+storage/neo4j/logs/
+storage/neo4j/import/
+storage/neo4j/plugins/
 *.log
 .env
 backend/db.sqlite3
