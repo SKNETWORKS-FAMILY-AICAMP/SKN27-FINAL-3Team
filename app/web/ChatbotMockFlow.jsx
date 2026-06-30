@@ -58,7 +58,9 @@ export default function ChatbotMockFlow({
   const [loginError, setLoginError] = useState(null);
   const [tokenActionLoading, setTokenActionLoading] = useState(null);
   const [tokenLifecycleError, setTokenLifecycleError] = useState(null);
-  const [question, setQuestion] = useState("이 고지서로 이의신청서를 만들 수 있을까요?");
+  const [question, setQuestion] = useState(
+    "과태료 고지서를 받았습니다. 이의신청서를 만들 수 있을까요?"
+  );
   const [mockStatus, setMockStatus] = useState("success");
   const [response, setResponse] = useState(null);
   const [report, setReport] = useState(null);
@@ -103,10 +105,24 @@ export default function ChatbotMockFlow({
 
         setGuestSession(guest);
 
-        const subject = await getJson(buildAuthMeUrl(authApiBase, sessionId), {
-          authToken: activeAuthToken || null,
-          guestId: guest?.guest?.guest_id,
-        });
+        let subject = null;
+        try {
+          subject = await getJson(buildAuthMeUrl(authApiBase, sessionId), {
+            authToken: activeAuthToken || null,
+            guestId: guest?.guest?.guest_id,
+          });
+        } catch (subjectError) {
+          if (!activeAuthToken) {
+            throw subjectError;
+          }
+
+          clearStoredAuthSession();
+          setActiveAuthToken("");
+          setGoogleProfile(null);
+          subject = await getJson(buildAuthMeUrl(authApiBase, sessionId), {
+            guestId: guest?.guest?.guest_id,
+          });
+        }
         if (cancelled) {
           return;
         }
@@ -128,7 +144,7 @@ export default function ChatbotMockFlow({
     return () => {
       cancelled = true;
     };
-  }, [authApiBase, activeAuthToken]);
+  }, [authApiBase, activeAuthToken, sessionId]);
 
   const completeGoogleLogin = useCallback(
     async (googlePayload) => {
@@ -216,7 +232,7 @@ export default function ChatbotMockFlow({
 
   async function refreshAccessToken() {
     if (!activeAuthToken) {
-      setTokenLifecycleError("No app access token is available.");
+      setTokenLifecycleError("사용 가능한 앱 access token이 없습니다.");
       return null;
     }
 
@@ -379,7 +395,8 @@ export default function ChatbotMockFlow({
   async function submitMockMessage() {
     setLoading(true);
     setReport(null);
-    const { activeSessionId, activeGuestId, activeAuthSessionId, activeAuthState, activeUserId } = await ensureSession();
+    const { activeSessionId, activeGuestId, activeAuthSessionId, activeAuthState, activeUserId } =
+      await ensureSession();
     const activeAuthContext = buildAuthContext({
       authState: activeAuthState,
       guestId: activeGuestId,
@@ -421,7 +438,7 @@ export default function ChatbotMockFlow({
       case_id: `case_mock_${Date.now()}`,
       status: action === "download" ? "downloaded" : "report_saved",
       download_url: action === "download" ? "/api/reports/mock/download" : null,
-      limitations: ["프론트엔드 fallback mock 결과입니다."],
+      limitations: ["프론트 fallback mock 결과입니다."],
     };
 
     try {
@@ -453,6 +470,10 @@ export default function ChatbotMockFlow({
   return (
     <main className="chatbot-mock">
       <section className="chatbot-mock__composer">
+        <div className="section-heading">
+          <span>상담 입력</span>
+          <strong>Mock 챗봇 플로우</strong>
+        </div>
         <label htmlFor="mock-question">질문</label>
         <textarea
           id="mock-question"
@@ -461,7 +482,7 @@ export default function ChatbotMockFlow({
           rows={4}
         />
 
-        <label htmlFor="mock-status">Mock 상태</label>
+        <label htmlFor="mock-status">응답 상태</label>
         <select
           id="mock-status"
           value={mockStatus}
@@ -479,7 +500,10 @@ export default function ChatbotMockFlow({
       </section>
 
       <section className="chatbot-mock__identity" aria-live="polite">
-        <strong>{authLoading ? "인증 확인 중" : AUTH_STATE_LABELS[authState] || authState}</strong>
+        <div className="section-heading">
+          <span>인증 상태</span>
+          <strong>{authLoading ? "확인 중" : AUTH_STATE_LABELS[authState] || authState}</strong>
+        </div>
         <dl>
           <div>
             <dt>guest_id</dt>
@@ -510,21 +534,22 @@ export default function ChatbotMockFlow({
                 onClick={refreshAccessToken}
                 disabled={Boolean(tokenActionLoading)}
               >
-                {tokenActionLoading === "refresh" ? "Refreshing token" : "Refresh token"}
+                {tokenActionLoading === "refresh" ? "갱신 중" : "토큰 갱신"}
               </button>
               <button
                 type="button"
                 onClick={logout}
                 disabled={Boolean(tokenActionLoading)}
               >
-                {tokenActionLoading === "logout" ? "Logging out" : "Logout"}
+                {tokenActionLoading === "logout" ? "로그아웃 중" : "로그아웃"}
               </button>
             </>
           )}
         </div>
         {googleProfile && (
           <p>
-            {googleProfile.display_name || "Google user"} {googleProfile.email ? `(${googleProfile.email})` : ""}
+            {googleProfile.display_name || "Google user"}{" "}
+            {googleProfile.email ? `(${googleProfile.email})` : ""}
           </p>
         )}
         {authError && <p role="alert">{authError}</p>}
@@ -576,7 +601,11 @@ export default function ChatbotMockFlow({
             <button type="button" onClick={() => runReportAction("save")} disabled={!canRunReportAction}>
               리포트 저장
             </button>
-            <button type="button" onClick={() => runReportAction("download")} disabled={!canRunReportAction}>
+            <button
+              type="button"
+              onClick={() => runReportAction("download")}
+              disabled={!canRunReportAction}
+            >
               다운로드
             </button>
           </div>
@@ -621,20 +650,20 @@ function buildFallbackResponse(payload) {
       analysis_plan: buildFallbackAnalysisPlan({ status: "failed" }),
       cards: [],
       report_links: [],
-      limitations: ["지원 형식의 고지서 이미지, PDF, 설명 텍스트를 다시 입력해 주세요."],
+      limitations: ["지원되는 형식의 고지서 이미지, PDF, 설명 텍스트를 다시 입력해 주세요."],
     };
   }
 
   if (status === "partial") {
     return {
       ...common,
-      assistant_message: "일부 결과만 확인되었습니다. 추가 정보가 필요합니다.",
+      assistant_message: "일부 결과만 확인했습니다. 추가 정보가 필요합니다.",
       progress: { status: "partial", message: "필수 입력 보완이 필요합니다." },
       analysis_plan: buildFallbackAnalysisPlan({ status: "partial" }),
       pending_questions: [
         {
           field: "user_facts",
-          question: "이의신청 사유와 당시 상황을 한두 문장으로 보완해 주세요.",
+          question: "이의신청 사유와 당시 상황을 두세 문장으로 보완해 주세요.",
         },
       ],
       cards: [
@@ -646,21 +675,24 @@ function buildFallbackResponse(payload) {
         },
       ],
       report_links: [],
-      limitations: ["필수 입력이 부족해 리포트 초안 생성은 보류되었습니다."],
+      limitations: ["필수 입력이 부족해 리포트 초안 생성은 보류했습니다."],
     };
   }
 
   return {
     ...common,
     assistant_message: "고지서 내용과 관련 법령 근거 후보를 확인했습니다.",
-    progress: { status: status === "pending" ? "pending" : "success", message: "분석 결과를 표시할 수 있습니다." },
+    progress: {
+      status: status === "pending" ? "pending" : "success",
+      message: "분석 결과를 표시할 수 있습니다.",
+    },
     analysis_plan: buildFallbackAnalysisPlan({ status }),
     cards: [
       {
         card_type: "fine_notice",
         title: "고지서 분석",
         status: "success",
-        summary: "과태료 고지서로 추정되며 의견제출 기한 확인이 필요합니다.",
+        summary: "과태료 고지서로 추정되며 이의신청 기한 확인이 필요합니다.",
       },
       {
         card_type: "law_ground",
@@ -690,11 +722,10 @@ function buildFallbackAnalysisPlan({ status }) {
       "fine_notice_analysis",
       "law_ground_search",
       "objection_report_generation",
-    ].map((node_code, index) => ({
+    ].map((nodeCode, index) => ({
       order: index + 1,
-      node_code,
+      node_code: nodeCode,
       status: stepStatuses[index],
     })),
   };
 }
-
