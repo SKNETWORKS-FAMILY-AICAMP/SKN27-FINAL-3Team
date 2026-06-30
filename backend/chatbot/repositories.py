@@ -437,6 +437,9 @@ def persist_current_auth_subject(
                     "subject_type": subject_type,
                     "subject_id": subject_id,
                     "status": AuthSessionStatus.ACTIVE,
+                    "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
+                    "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
+                    "revoked_at": None,
                     "metadata": {
                         "source": "auth_me",
                         "auth_state": auth_payload.get("auth_state"),
@@ -490,6 +493,173 @@ def persist_current_auth_subject(
         "user_id": user.user_id if user else None,
         "guest_id": guest.guest_id if guest else None,
         "auth_session_id": auth_session.auth_session_id if auth_session else None,
+        "event_id": event.event_id,
+        "session_id": chat_session.session_id if chat_session else None,
+        "status": "saved",
+    }
+
+
+def persist_auth_token_refresh(
+    auth_payload: dict[str, Any],
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    subject = _dict_or_empty(auth_payload.get("subject"))
+    user_id = _text(subject.get("user_id"))
+    guest_id = _normalize_guest_id(subject.get("guest_id"))
+    auth_session_id = _text(subject.get("auth_session_id"))
+    if not user_id or not auth_session_id:
+        return _auth_persistence_skipped("missing_refresh_subject")
+
+    with transaction.atomic():
+        user = _get_or_create_user_account(user_id)
+        if user is not None:
+            _update_user_account_from_auth_payload(user, auth_payload)
+        guest = _get_or_create_guest_identity(guest_id)
+        auth_session, _created = AuthSession.objects.update_or_create(
+            auth_session_id=auth_session_id,
+            defaults={
+                "user": user,
+                "guest": guest,
+                "subject_type": "user",
+                "subject_id": f"user:{user_id}",
+                "status": AuthSessionStatus.ACTIVE,
+                "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
+                "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
+                "revoked_at": None,
+                "metadata": {
+                    "source": "auth_refresh",
+                    "auth_state": auth_payload.get("auth_state"),
+                    "verification": _dict_or_empty(auth_payload.get("auth_session")).get("verification"),
+                    "refresh_policy": _dict_or_empty(auth_payload.get("auth_session")).get("refresh_policy"),
+                    "rate_limit": auth_payload.get("rate_limit") or {},
+                },
+            },
+        )
+        chat_session = _bind_chat_session_auth_context(
+            session_id=session_id,
+            owner_id=user_id,
+            auth_context={
+                "auth_state": auth_payload.get("auth_state"),
+                "subject_id": f"user:{user_id}",
+                "subject_type": "user",
+                "user_id": user_id,
+                "guest_id": guest_id or None,
+                "auth_session_id": auth_session_id,
+            },
+        )
+        event = _create_auth_event(
+            event_type="auth_token_refreshed",
+            subject_id=f"user:{user_id}",
+            user=user,
+            guest=guest,
+            auth_session=auth_session,
+            metadata={
+                "source": "auth_refresh",
+                "auth_state": auth_payload.get("auth_state"),
+                "chat_session_id": chat_session.session_id if chat_session else None,
+                "expires_at": auth_payload.get("expires_at"),
+            },
+        )
+
+    return {
+        "backend": "postgresql",
+        "tables": [
+            UserAccount._meta.db_table,
+            GuestIdentity._meta.db_table,
+            AuthSession._meta.db_table,
+            AuthEvent._meta.db_table,
+            ChatSession._meta.db_table,
+        ],
+        "auth_session_table": AuthSession._meta.db_table,
+        "auth_events_table": AuthEvent._meta.db_table,
+        "chat_session_table": ChatSession._meta.db_table,
+        "user_id": user.user_id if user else None,
+        "guest_id": guest.guest_id if guest else None,
+        "auth_session_id": auth_session.auth_session_id,
+        "auth_session_status": auth_session.status,
+        "event_id": event.event_id,
+        "session_id": chat_session.session_id if chat_session else None,
+        "status": "saved",
+    }
+
+
+def persist_auth_logout(
+    auth_payload: dict[str, Any],
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    subject = _dict_or_empty(auth_payload.get("subject"))
+    user_id = _text(subject.get("user_id"))
+    guest_id = _normalize_guest_id(subject.get("guest_id"))
+    auth_session_id = _text(subject.get("auth_session_id"))
+    if not user_id or not auth_session_id:
+        return _auth_persistence_skipped("missing_logout_subject")
+
+    revoked_at = _datetime_or_none(auth_payload.get("revoked_at")) or timezone.now()
+    with transaction.atomic():
+        user = _get_or_create_user_account(user_id)
+        if user is not None:
+            _update_user_account_from_auth_payload(user, auth_payload)
+        guest = _get_or_create_guest_identity(guest_id)
+        auth_session, _created = AuthSession.objects.update_or_create(
+            auth_session_id=auth_session_id,
+            defaults={
+                "user": user,
+                "guest": guest,
+                "subject_type": "user",
+                "subject_id": f"user:{user_id}",
+                "status": AuthSessionStatus.REVOKED,
+                "revoked_at": revoked_at,
+                "metadata": {
+                    "source": "auth_logout",
+                    "auth_state": "anonymous",
+                    "client_action": auth_payload.get("client_action") or {},
+                },
+            },
+        )
+        chat_session = _bind_chat_session_auth_context(
+            session_id=session_id,
+            owner_id=user_id,
+            auth_context={
+                "auth_state": "guest" if guest_id else "anonymous",
+                "subject_id": f"user:{user_id}",
+                "subject_type": "user",
+                "user_id": user_id,
+                "guest_id": guest_id or None,
+                "auth_session_id": auth_session_id,
+            },
+        )
+        event = _create_auth_event(
+            event_type="auth_logout_completed",
+            subject_id=f"user:{user_id}",
+            user=user,
+            guest=guest,
+            auth_session=auth_session,
+            metadata={
+                "source": "auth_logout",
+                "auth_state": "anonymous",
+                "chat_session_id": chat_session.session_id if chat_session else None,
+                "revoked_at": revoked_at.isoformat(),
+            },
+        )
+
+    return {
+        "backend": "postgresql",
+        "tables": [
+            UserAccount._meta.db_table,
+            GuestIdentity._meta.db_table,
+            AuthSession._meta.db_table,
+            AuthEvent._meta.db_table,
+            ChatSession._meta.db_table,
+        ],
+        "auth_session_table": AuthSession._meta.db_table,
+        "auth_events_table": AuthEvent._meta.db_table,
+        "chat_session_table": ChatSession._meta.db_table,
+        "user_id": user.user_id if user else None,
+        "guest_id": guest.guest_id if guest else None,
+        "auth_session_id": auth_session.auth_session_id,
+        "auth_session_status": auth_session.status,
         "event_id": event.event_id,
         "session_id": chat_session.session_id if chat_session else None,
         "status": "saved",

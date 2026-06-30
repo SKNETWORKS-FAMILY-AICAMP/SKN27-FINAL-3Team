@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const MOCK_ATTACHMENTS = [
   {
@@ -27,21 +27,36 @@ const AUTH_STATE_LABELS = {
   guest: "비회원",
 };
 
-export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-mock-token" }) {
+const AUTH_TOKEN_STORAGE_KEY = "skn27.auth.accessToken";
+const GOOGLE_PROFILE_STORAGE_KEY = "skn27.auth.googleProfile";
+
+export default function ChatbotMockFlow({
+  apiBase = "/api",
+  authToken = "dev-mock-token",
+  googleClientId = "",
+}) {
   const [sessionId, setSessionId] = useState(null);
   const [guestSession, setGuestSession] = useState(null);
   const [authSubject, setAuthSubject] = useState(null);
   const [authError, setAuthError] = useState(null);
+  const [activeAuthToken, setActiveAuthToken] = useState(() => readStoredValue(AUTH_TOKEN_STORAGE_KEY) || "");
+  const [googleProfile, setGoogleProfile] = useState(() => readStoredJson(GOOGLE_PROFILE_STORAGE_KEY));
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState(null);
+  const [tokenActionLoading, setTokenActionLoading] = useState(null);
+  const [tokenLifecycleError, setTokenLifecycleError] = useState(null);
   const [question, setQuestion] = useState("이 고지서로 이의신청서를 만들 수 있을까요?");
   const [mockStatus, setMockStatus] = useState("success");
   const [response, setResponse] = useState(null);
   const [report, setReport] = useState(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [loading, setLoading] = useState(false);
+  const googleButtonRef = useRef(null);
 
   const authApiBase = useMemo(() => toCanonicalApiBase(apiBase), [apiBase]);
   const guestId = authSubject?.subject?.guest_id || guestSession?.guest?.guest_id || null;
   const authSessionId = authSubject?.subject?.auth_session_id || null;
+  const userId = authSubject?.subject?.user_id || authSubject?.user?.user_id || null;
   const authState = authSubject?.auth_state || guestSession?.auth_state || "anonymous";
   const progressStatus = response?.progress?.status || "pending";
   const analysisSteps = response?.analysis_plan?.steps || [];
@@ -50,12 +65,12 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
   const requestPayload = useMemo(
     () => ({
       session_id: sessionId,
-      auth_context: buildAuthContext({ authState, guestId, authSessionId, sessionId }),
+      auth_context: buildAuthContext({ authState, guestId, authSessionId, sessionId, userId }),
       user_text: question,
       attachments: MOCK_ATTACHMENTS,
       mock_status: mockStatus,
     }),
-    [authSessionId, authState, guestId, mockStatus, question, sessionId]
+    [authSessionId, authState, guestId, mockStatus, question, sessionId, userId]
   );
 
   useEffect(() => {
@@ -76,7 +91,7 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
         setGuestSession(guest);
 
         const subject = await getJson(buildAuthMeUrl(authApiBase, sessionId), {
-          authToken,
+          authToken: activeAuthToken || null,
           guestId: guest?.guest?.guest_id,
         });
         if (cancelled) {
@@ -100,11 +115,206 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
     return () => {
       cancelled = true;
     };
-  }, [authApiBase, authToken]);
+  }, [authApiBase, activeAuthToken]);
 
-  async function refreshAuthSubject({ nextGuestId = guestId, nextSessionId = sessionId } = {}) {
+  const completeGoogleLogin = useCallback(
+    async (googlePayload) => {
+      setLoginLoading(true);
+      setLoginError(null);
+      setTokenLifecycleError(null);
+
+      try {
+        const payload = {
+          provider: "google",
+          guest_id: guestId,
+          session_id: sessionId,
+          ...googlePayload,
+        };
+        const result = await postJson(joinApiPath(authApiBase, "auth/login/"), payload);
+        const nextToken = result?.access_token;
+        if (!nextToken) {
+          throw new Error("Google login did not return an access token.");
+        }
+
+        setActiveAuthToken(nextToken);
+        writeStoredValue(AUTH_TOKEN_STORAGE_KEY, nextToken);
+        setGoogleProfile(result?.user || null);
+        writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, result?.user || null);
+        setGuestSession((current) => ({
+          ...(current || {}),
+          auth_state: result.auth_state,
+          guest: result.guest || current?.guest || null,
+          subject: result.subject,
+          session_binding: result.session_binding,
+        }));
+        setAuthSubject(result);
+
+        const verifiedSubject = await getJson(buildAuthMeUrl(authApiBase, sessionId), {
+          authToken: nextToken,
+          guestId: result?.subject?.guest_id || guestId,
+          authSessionId: result?.subject?.auth_session_id,
+        });
+        setAuthSubject(verifiedSubject);
+        setAuthError(null);
+        return verifiedSubject;
+      } catch (error) {
+        setLoginError(error.message);
+        throw error;
+      } finally {
+        setLoginLoading(false);
+      }
+    },
+    [authApiBase, guestId, sessionId]
+  );
+
+  const handleGoogleCredentialResponse = useCallback(
+    async (credentialResponse) => {
+      await completeGoogleLogin({
+        credential: credentialResponse?.credential,
+      });
+    },
+    [completeGoogleLogin]
+  );
+
+  useEffect(() => {
+    if (
+      !googleClientId
+      || !googleButtonRef.current
+      || typeof window === "undefined"
+      || !window.google?.accounts?.id
+    ) {
+      return;
+    }
+
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: handleGoogleCredentialResponse,
+    });
+    window.google.accounts.id.renderButton(googleButtonRef.current, {
+      size: "large",
+      text: "continue_with",
+      theme: "outline",
+    });
+  }, [googleClientId, handleGoogleCredentialResponse]);
+
+  async function startDevGoogleLogin() {
+    const profile = buildDevGoogleProfile({ guestId });
+    await completeGoogleLogin(profile);
+  }
+
+  async function refreshAccessToken() {
+    if (!activeAuthToken) {
+      setTokenLifecycleError("No app access token is available.");
+      return null;
+    }
+
+    setTokenActionLoading("refresh");
+    setTokenLifecycleError(null);
+
+    try {
+      const result = await postJson(
+        joinApiPath(authApiBase, "auth/refresh/"),
+        {
+          guest_id: guestId,
+          session_id: sessionId,
+        },
+        {
+          authToken: activeAuthToken,
+          guestId,
+          authSessionId,
+        }
+      );
+      const nextToken = result?.access_token;
+      if (!nextToken) {
+        throw new Error("Token refresh did not return an access token.");
+      }
+
+      setActiveAuthToken(nextToken);
+      writeStoredValue(AUTH_TOKEN_STORAGE_KEY, nextToken);
+      setGoogleProfile(result?.user || null);
+      writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, result?.user || null);
+      setGuestSession((current) => ({
+        ...(current || {}),
+        auth_state: result.auth_state,
+        guest: result.guest || current?.guest || null,
+        subject: result.subject,
+        session_binding: result.session_binding,
+      }));
+      setAuthSubject(result);
+
+      return await refreshAuthSubject({
+        nextAuthToken: nextToken,
+        nextGuestId: result?.subject?.guest_id || guestId,
+        nextSessionId: sessionId,
+      });
+    } catch (error) {
+      setTokenLifecycleError(error.message);
+      return null;
+    } finally {
+      setTokenActionLoading(null);
+    }
+  }
+
+  async function logout() {
+    if (!activeAuthToken) {
+      removeStoredValue(AUTH_TOKEN_STORAGE_KEY);
+      removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+      setActiveAuthToken("");
+      setGoogleProfile(null);
+      await refreshAuthSubject({ nextAuthToken: null });
+      return null;
+    }
+
+    setTokenActionLoading("logout");
+    setTokenLifecycleError(null);
+
+    try {
+      const result = await postJson(
+        joinApiPath(authApiBase, "auth/logout/"),
+        {
+          guest_id: guestId,
+          session_id: sessionId,
+        },
+        {
+          authToken: activeAuthToken,
+          guestId,
+          authSessionId,
+        }
+      );
+      const nextGuestId = result?.subject?.guest_id || guestId;
+
+      removeStoredValue(AUTH_TOKEN_STORAGE_KEY);
+      removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+      setActiveAuthToken("");
+      setGoogleProfile(null);
+      setAuthSubject(result);
+
+      const guest = await postJson(joinApiPath(authApiBase, "auth/guest-session/"), {
+        guest_id: nextGuestId,
+        session_id: sessionId,
+      });
+      setGuestSession(guest);
+
+      return await refreshAuthSubject({
+        nextAuthToken: null,
+        nextGuestId: guest?.guest?.guest_id || nextGuestId,
+        nextSessionId: sessionId,
+      });
+    } catch (error) {
+      setTokenLifecycleError(error.message);
+      return null;
+    } finally {
+      setTokenActionLoading(null);
+    }
+  }
+
+  async function refreshAuthSubject({
+    nextAuthToken = activeAuthToken,
+    nextGuestId = guestId,
+    nextSessionId = sessionId,
+  } = {}) {
     const subject = await getJson(buildAuthMeUrl(authApiBase, nextSessionId), {
-      authToken,
+      authToken: nextAuthToken,
       guestId: nextGuestId,
     });
     setAuthSubject(subject);
@@ -153,18 +363,20 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
       activeGuestId,
       activeAuthSessionId,
       activeAuthState,
+      activeUserId: authSubject?.subject?.user_id || authSubject?.user?.user_id || null,
     };
   }
 
   async function submitMockMessage() {
     setLoading(true);
     setReport(null);
-    const { activeSessionId, activeGuestId, activeAuthSessionId, activeAuthState } = await ensureSession();
+    const { activeSessionId, activeGuestId, activeAuthSessionId, activeAuthState, activeUserId } = await ensureSession();
     const activeAuthContext = buildAuthContext({
       authState: activeAuthState,
       guestId: activeGuestId,
       authSessionId: activeAuthSessionId,
       sessionId: activeSessionId,
+      userId: activeUserId,
     });
     const messagePayload = {
       ...requestPayload,
@@ -178,7 +390,7 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
         joinApiPath(apiBase, "chat/messages/"),
         messagePayload,
         {
-          authToken,
+          authToken: activeAuthToken || authToken,
           guestId: activeGuestId,
           authSessionId: activeAuthSessionId,
         }
@@ -214,10 +426,11 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
             guestId,
             authSessionId,
             sessionId: response.session_id,
+            userId,
           }),
         },
         {
-          authToken,
+          authToken: activeAuthToken || authToken,
           guestId,
           authSessionId,
         }
@@ -268,11 +481,46 @@ export default function ChatbotMockFlow({ apiBase = "/api", authToken = "dev-moc
             <dd>{authSessionId || "-"}</dd>
           </div>
           <div>
+            <dt>user_id</dt>
+            <dd>{userId || "-"}</dd>
+          </div>
+          <div>
             <dt>chat_session_id</dt>
             <dd>{sessionId || "-"}</dd>
           </div>
         </dl>
+        <div className="chatbot-mock__login-actions">
+          {googleClientId && <div ref={googleButtonRef} />}
+          <button type="button" onClick={startDevGoogleLogin} disabled={loginLoading}>
+            {loginLoading ? "Google 로그인 중" : "Google로 계속하기"}
+          </button>
+          {authState === "authenticated" && (
+            <>
+              <button
+                type="button"
+                onClick={refreshAccessToken}
+                disabled={Boolean(tokenActionLoading)}
+              >
+                {tokenActionLoading === "refresh" ? "Refreshing token" : "Refresh token"}
+              </button>
+              <button
+                type="button"
+                onClick={logout}
+                disabled={Boolean(tokenActionLoading)}
+              >
+                {tokenActionLoading === "logout" ? "Logging out" : "Logout"}
+              </button>
+            </>
+          )}
+        </div>
+        {googleProfile && (
+          <p>
+            {googleProfile.display_name || "Google user"} {googleProfile.email ? `(${googleProfile.email})` : ""}
+          </p>
+        )}
         {authError && <p role="alert">{authError}</p>}
+        {loginError && <p role="alert">{loginError}</p>}
+        {tokenLifecycleError && <p role="alert">{tokenLifecycleError}</p>}
       </section>
 
       {response && (
@@ -384,13 +632,76 @@ function buildRequestHeaders(
   };
 }
 
-function buildAuthContext({ authState, guestId, authSessionId, sessionId }) {
+function buildAuthContext({ authState, guestId, authSessionId, sessionId, userId }) {
   return {
     auth_state: authState || "anonymous",
+    user_id: userId || null,
     guest_id: guestId || null,
     auth_session_id: authSessionId || null,
     session_id: sessionId || null,
   };
+}
+
+function buildDevGoogleProfile({ guestId }) {
+  const suffix = String(guestId || "guest").replace(/^gst_/, "") || Date.now();
+  return {
+    google_sub: `dev-google-${suffix}`,
+    email: `driver.${suffix}@example.com`,
+    display_name: "Google Demo User",
+  };
+}
+
+function readStoredValue(key) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    return window.localStorage.getItem(key);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeStoredValue(key, value) {
+  if (typeof window === "undefined" || !value) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (_error) {
+    // Ignore storage failures; in-memory auth state still works for this session.
+  }
+}
+
+function removeStoredValue(key) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(key);
+  } catch (_error) {
+    // Ignore storage failures.
+  }
+}
+
+function readStoredJson(key) {
+  const value = readStoredValue(key);
+  if (!value) {
+    return null;
+  }
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeStoredJson(key, value) {
+  if (!value) {
+    removeStoredValue(key);
+    return;
+  }
+  writeStoredValue(key, JSON.stringify(value));
 }
 
 function buildAuthMeUrl(apiBase, sessionId) {

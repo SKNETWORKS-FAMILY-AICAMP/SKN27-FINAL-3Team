@@ -28,7 +28,11 @@ from app.services.auth_session_mock_service import (
     get_current_auth_subject as _get_current_auth_subject,
 )
 from app.services.auth_error_contract import build_www_authenticate_header
-from app.services.google_auth_service import create_google_login as _create_google_login
+from app.services.google_auth_service import (
+    create_google_login as _create_google_login,
+    create_logout as _create_logout,
+    create_token_refresh as _create_token_refresh,
+)
 from app.services.chatbot_mock_service import (
     create_session,
     list_demo_scenarios,
@@ -68,6 +72,8 @@ from chatbot.repositories import (
     list_history_event_records,
     list_uploaded_files,
     persist_current_auth_subject,
+    persist_auth_logout,
+    persist_auth_token_refresh,
     persist_analysis_display_result,
     persist_analysis_job_execution,
     persist_chat_message_analysis_boundary,
@@ -138,6 +144,82 @@ def auth_login(request: HttpRequest) -> JsonResponse:
         event_type="auth_login_completed",
         status="success" if status < 400 else "failed",
         summary="Google login boundary was processed.",
+        actor=_actor_from_auth_me_payload(request, payload),
+        subject=subject_from_payload({"session_id": body.get("session_id")}),
+        source=_history_source(request),
+        metadata={
+            "http_status": status,
+            "provider": payload.get("provider"),
+            "subject_type": (payload.get("subject") or {}).get("subject_type")
+            if isinstance(payload.get("subject"), dict)
+            else None,
+            "error_code": (payload.get("error") or {}).get("code")
+            if isinstance(payload.get("error"), dict)
+            else None,
+        },
+    )
+    response = _json_response(request, payload, status=status)
+    if status in {401, 403} and isinstance(payload.get("error"), dict):
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+    return response
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def auth_refresh(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request)
+    status, payload = _create_token_refresh(
+        authorization_header=request.headers.get("Authorization"),
+        payload=body,
+    )
+    if status < 400:
+        payload["persistence"] = persist_auth_token_refresh(
+            payload,
+            session_id=body.get("session_id"),
+        )
+    _record_history_safely(
+        request,
+        event_type="auth_token_refreshed",
+        status="success" if status < 400 else "failed",
+        summary="App auth token refresh boundary was processed.",
+        actor=_actor_from_auth_me_payload(request, payload),
+        subject=subject_from_payload({"session_id": body.get("session_id")}),
+        source=_history_source(request),
+        metadata={
+            "http_status": status,
+            "provider": payload.get("provider"),
+            "subject_type": (payload.get("subject") or {}).get("subject_type")
+            if isinstance(payload.get("subject"), dict)
+            else None,
+            "error_code": (payload.get("error") or {}).get("code")
+            if isinstance(payload.get("error"), dict)
+            else None,
+        },
+    )
+    response = _json_response(request, payload, status=status)
+    if status in {401, 403} and isinstance(payload.get("error"), dict):
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+    return response
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def auth_logout(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request)
+    status, payload = _create_logout(
+        authorization_header=request.headers.get("Authorization"),
+        payload=body,
+    )
+    if status < 400:
+        payload["persistence"] = persist_auth_logout(
+            payload,
+            session_id=body.get("session_id"),
+        )
+    _record_history_safely(
+        request,
+        event_type="auth_logout_completed",
+        status="success" if status < 400 else "failed",
+        summary="App auth logout boundary was processed.",
         actor=_actor_from_auth_me_payload(request, payload),
         subject=subject_from_payload({"session_id": body.get("session_id")}),
         source=_history_source(request),
