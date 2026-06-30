@@ -23,9 +23,7 @@ def evaluate_ocr(
     notice_stage: Optional[str] = None,
 ) -> tuple[str, list[str]]:
     """ocr_status 판정. ④ 즉결심판의 구조적 부재 필드는 critical/important에서 제외."""
-    absent: set[str] = set()
-    if fine_type == "범칙금" and notice_stage == "즉결심판":
-        absent = _STRUCTURAL_ABSENT[("범칙금", "즉결심판")]
+    absent: set[str] = _STRUCTURAL_ABSENT.get((fine_type, notice_stage), set())
 
     critical  = [f for f in CRITICAL_FIELDS.get(fine_type, [])  if f not in absent]
     important = [f for f in IMPORTANT_FIELDS.get(fine_type, []) if f not in absent]

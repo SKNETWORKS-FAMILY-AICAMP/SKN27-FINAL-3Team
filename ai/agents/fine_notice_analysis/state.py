@@ -23,8 +23,8 @@ class FineNoticeState(TypedDict, total=False):
     fine_amount:                Optional[int]
     prepayment_amount:          Optional[int]    # 과태료 사전통지만 유효 (R-06)
     opinion_deadline:           Optional[str]    # YYYY-MM-DD (R-04)
-    payment_deadline_2nd:       Optional[str]    # YYYY-MM-DD, ③·③-2 전용
-    additional_amount:          Optional[int]    # ③·③-2 전용, fine_amount × 1.2
+    payment_deadline_2nd:       Optional[str]    # YYYY-MM-DD, ③ 전용
+    additional_amount:          Optional[int]    # ③ 전용, fine_amount × 1.2
     issuing_authority:          Optional[str]
     vehicle_number:             Optional[str]    # 마스킹됨
     demerit_points_base:        Optional[int]    # 범칙금 전용
