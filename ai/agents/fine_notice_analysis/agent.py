@@ -112,7 +112,7 @@ def ocr_node(state: FineNoticeState) -> dict:
 
     # ── base64 디코딩 ─────────────────────────────────────────────────
     try:
-        raw_bytes = base64.b64decode(notice_image)
+        raw_bytes = base64.b64decode(notice_image, validate=True)
     except Exception:
         err = "이미지 디코딩 실패 — 올바른 파일을 다시 업로드해 주세요."
         env = make_envelope("failed", {"ocr_status": "failed", "ocr_error": err}, [], ["이미지 재업로드 요청"])

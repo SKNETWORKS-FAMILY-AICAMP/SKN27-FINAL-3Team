@@ -174,9 +174,18 @@ def test_ocr_rejects_missing_image():
     assert result["ocr_error"] == "이미지 없음"
 
 
-def test_ocr_rejects_invalid_base64():
-    """잘못된 base64 문자열 → failed envelope 반환 (GPT 호출 불필요)."""
+def test_ocr_rejects_invalid_base64_pdf():
+    """잘못된 base64 (PDF) → failed envelope 반환 (GPT 호출 불필요)."""
     result = graph.invoke({"notice_image": "!!!invalid-base64!!!", "notice_mime_type": "application/pdf"})
+    assert result["ocr_status"] == "failed"
+    assert "재업로드" in (result.get("ocr_error") or "")
+    envelope = result.get("agent_results", {}).get("fine_notice_analysis", {})
+    assert "이미지 재업로드 요청" in (envelope.get("next_actions") or [])
+
+
+def test_ocr_rejects_invalid_base64_jpeg():
+    """잘못된 base64 (JPEG) → failed envelope 반환 (GPT 호출 불필요)."""
+    result = graph.invoke({"notice_image": "!!!invalid-base64!!!", "notice_mime_type": "image/jpeg"})
     assert result["ocr_status"] == "failed"
     assert "재업로드" in (result.get("ocr_error") or "")
     envelope = result.get("agent_results", {}).get("fine_notice_analysis", {})
