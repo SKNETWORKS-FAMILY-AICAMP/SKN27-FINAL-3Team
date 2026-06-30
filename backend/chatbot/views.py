@@ -517,6 +517,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
     if _is_canonical_mock_request(request):
         report = _canonicalize_mock_paths(report)
         report["persistence"] = persist_report_action(identity_body, report)
+        report["object_storage"] = report["persistence"].get("object_storage")
         report["usage"] = usage
     _record_history_safely(
         request,
@@ -560,6 +561,8 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             response["X-Report-Persistence"] = "postgresql"
             response["X-Report-Storage-Backend"] = download["storage_backend"]
             response["X-Report-Storage-URI"] = download["storage_uri"]
+            response["X-Report-Object-Key"] = download["object_key"]
+            response["X-Report-Object-Policy"] = download["object_storage"].get("policy_version", "")
             response["X-Report-Access-Decision"] = access["reason"]
             return response
 
