@@ -110,13 +110,26 @@ def ocr_node(state: FineNoticeState) -> dict:
             "agent_results": update_agent_results(state, env),
         }
 
+    # ── base64 디코딩 ─────────────────────────────────────────────────
+    try:
+        raw_bytes = base64.b64decode(notice_image)
+    except Exception:
+        err = "이미지 디코딩 실패 — 올바른 파일을 다시 업로드해 주세요."
+        env = make_envelope("failed", {"ocr_status": "failed", "ocr_error": err}, [], ["이미지 재업로드 요청"])
+        return {"ocr_status": "failed", "ocr_error": err, "notice_image": None,
+                "agent_results": update_agent_results(state, env)}
+
     # ── PDF 변환 ───────────────────────────────────────────────────────
-    raw_bytes = base64.b64decode(notice_image)
     if notice_mime_type == "application/pdf":
         try:
             pages = _pdf_to_images(raw_bytes)
         except ValueError:
             err = "PDF 페이지 초과"
+            env = make_envelope("failed", {"ocr_status": "failed", "ocr_error": err}, [], ["이미지 재업로드 요청"])
+            return {"ocr_status": "failed", "ocr_error": err, "notice_image": None,
+                    "agent_results": update_agent_results(state, env)}
+        except Exception:
+            err = "PDF 파일이 손상되었습니다. 다시 업로드해 주세요."
             env = make_envelope("failed", {"ocr_status": "failed", "ocr_error": err}, [], ["이미지 재업로드 요청"])
             return {"ocr_status": "failed", "ocr_error": err, "notice_image": None,
                     "agent_results": update_agent_results(state, env)}
