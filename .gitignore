@@ -12,6 +12,13 @@ storage/neo4j/logs/
 storage/neo4j/import/
 storage/neo4j/plugins/
 *.log
+.env
 backend/db.sqlite3
 backend/media/
 
+# Ponytail Skills
+.agents/
+
+# Documents & Designs
+서식문서/
+설계/
