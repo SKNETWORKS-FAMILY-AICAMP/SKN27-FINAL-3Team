@@ -3,6 +3,7 @@ import os
 import tempfile
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.utils import timezone
@@ -44,6 +45,7 @@ from chatbot.models import (
     UploadedFileStatus,
 )
 from chatbot.repositories import list_history_event_records, record_history_event_record
+from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
 
 
 class ChatbotPersistenceModelTests(TestCase):
@@ -69,6 +71,44 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(UsageQuota._meta.db_table, "usage_quotas")
         self.assertEqual(UsageEvent._meta.db_table, "usage_events")
         self.assertEqual(HistoryEvent._meta.db_table, "history_events")
+
+    def test_progress_cache_recovers_from_postgresql_on_cache_miss(self):
+        cache.clear()
+        session = ChatSession.objects.create(
+            session_id="ses_progress_cache",
+            owner_id="usr_progress_cache",
+            status=ChatSessionStatus.ACTIVE,
+        )
+        AnalysisJob.objects.create(
+            job_id="job_progress_cache",
+            session=session,
+            owner_id="usr_progress_cache",
+            routing_intent="objection_request",
+            status=AnalysisJobStatus.RUNNING,
+            active_node="fine_notice_analysis",
+            progress_message="analysis running",
+            analysis_plan_id="plan_progress_cache",
+            status_counts={"running": 1},
+        )
+
+        progress = read_analysis_job_progress("job_progress_cache")
+        self.assertEqual(progress["status"], "miss_fallback")
+        self.assertEqual(progress["backend"], "locmem")
+        self.assertEqual(progress["fallback"], "postgresql")
+        self.assertEqual(progress["ttl_seconds"], 300)
+        self.assertEqual(progress["key"], "analysis_job_progress:job_progress_cache")
+        self.assertEqual(progress["snapshot"]["status"], AnalysisJobStatus.RUNNING)
+        self.assertEqual(progress["snapshot"]["source_tables"], ["analysis_jobs", "analysis_job_events"])
+
+        cached_progress = read_analysis_job_progress("job_progress_cache")
+        self.assertEqual(cached_progress["status"], "hit")
+        self.assertEqual(cached_progress["snapshot"]["job_id"], "job_progress_cache")
+
+        session_state = read_chat_session_state("ses_progress_cache")
+        self.assertEqual(session_state["status"], "miss_fallback")
+        self.assertEqual(session_state["key"], "chat_session_state:ses_progress_cache")
+        self.assertEqual(session_state["snapshot"]["latest_job_id"], "job_progress_cache")
+        self.assertEqual(session_state["snapshot"]["current_intent"], "objection_request")
 
     def test_auth_agent_code_and_quota_tables_link_without_replacing_mvp_backbone(self):
         user = UserAccount.objects.create(
@@ -1242,6 +1282,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job["persistence"]["agent_results_table"], "agent_results")
         self.assertEqual(job["persistence"]["ai_session_table"], "ai_sessions")
         self.assertEqual(job["persistence"]["agent_invocations_table"], "agent_invocations")
+        self.assertEqual(job["persistence"]["progress_cache"]["status"], "cached")
+        self.assertEqual(job["persistence"]["progress_cache"]["backend"], "locmem")
+        self.assertEqual(
+            job["persistence"]["progress_cache"]["key"],
+            f"analysis_job_progress:{job['job_id']}",
+        )
+        self.assertEqual(
+            job["persistence"]["session_cache"]["key"],
+            "chat_session_state:ses_canonical_job",
+        )
         self.assertEqual(job["usage"]["scope"], "agent_run")
         self.assertEqual(job["usage"]["usage_event_table"], "usage_events")
         self.assertEqual(
@@ -1320,7 +1370,10 @@ class ChatbotMockApiTests(TestCase):
 
         detail = self.client.get(f"/api/analysis/jobs/{job['job_id']}/")
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(detail.json()["api_surface"], "canonical_mock")
+        detail_body = detail.json()
+        self.assertEqual(detail_body["api_surface"], "canonical_mock")
+        self.assertEqual(detail_body["job"]["progress_cache"]["status"], "hit")
+        self.assertEqual(detail_body["job"]["progress_cache"]["snapshot"]["job_id"], job["job_id"])
 
         result_response = self.client.get(f"/api/analysis/results/{job['job_id']}/")
         self.assertEqual(result_response.status_code, 200)
@@ -1481,6 +1534,14 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(summary_body["api_surface"], "canonical_mock")
         self.assertEqual(summary_body["execution_mode"], "mock")
         self.assertEqual(summary_body["storage"]["backend"], "postgresql")
+        self.assertEqual(summary_body["progress_cache"]["policy_version"], "progress_cache.v1")
+        self.assertEqual(summary_body["progress_cache"]["fallback"], "postgresql")
+        self.assertEqual(
+            summary_body["progress_cache"]["key_patterns"]["analysis_job_progress"],
+            "analysis_job_progress:{job_id}",
+        )
+        self.assertEqual(summary_body["session_cache"]["status"], "hit")
+        self.assertEqual(summary_body["session_cache"]["snapshot"]["session_id"], session_id)
         self.assertEqual(
             set(summary_body["storage"]["tables"]),
             {
