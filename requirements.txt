@@ -15,7 +15,7 @@ python-dotenv
 typing_extensions
 
 
-#########재강############
+#########재강#######
 beautifulsoup4>=4.12,<5
 playwright>=1.49,<2
 requests>=2.32,<3
