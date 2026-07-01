@@ -13,4 +13,11 @@ langgraph
 PyMuPDF
 python-dotenv
 typing_extensions
->>>>>>> 8674cbb5c880e9f2d5821723e5756bd925171671
+
+
+#########재강############
+beautifulsoup4>=4.12,<5
+playwright>=1.49,<2
+requests>=2.32,<3
+PyMuPDF>=1.25,<2
+pdfplumber>=0.11,<1
