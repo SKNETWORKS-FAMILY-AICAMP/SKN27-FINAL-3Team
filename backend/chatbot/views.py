@@ -29,6 +29,7 @@ from app.services.auth_session_mock_service import (
 )
 from app.services.auth_error_contract import build_www_authenticate_header
 from app.services.google_auth_service import (
+    create_google_code_login as _create_google_code_login,
     create_google_login as _create_google_login,
     create_logout as _create_logout,
     create_token_refresh as _create_token_refresh,
@@ -63,6 +64,7 @@ from chatbot.repositories import (
     authorize_resource_access,
     authorize_report_download_metadata,
     build_history_after_service_summary,
+    conversation_save_state_from_payload,
     get_chat_session_access_metadata,
     get_mycase_summary,
     get_report_download_metadata,
@@ -71,6 +73,7 @@ from chatbot.repositories import (
     history_operating_policy,
     list_history_event_records,
     list_uploaded_files,
+    mark_conversation_save_state,
     persist_current_auth_subject,
     persist_auth_logout,
     persist_auth_token_refresh,
@@ -153,6 +156,44 @@ def auth_login(request: HttpRequest) -> JsonResponse:
             "subject_type": (payload.get("subject") or {}).get("subject_type")
             if isinstance(payload.get("subject"), dict)
             else None,
+            "error_code": (payload.get("error") or {}).get("code")
+            if isinstance(payload.get("error"), dict)
+            else None,
+        },
+    )
+    response = _json_response(request, payload, status=status)
+    if status in {401, 403} and isinstance(payload.get("error"), dict):
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+    return response
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def auth_google_code(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request)
+    status, payload = _create_google_code_login(
+        body,
+        request_headers=dict(request.headers.items()),
+    )
+    if status < 400:
+        payload["persistence"] = persist_current_auth_subject(
+            payload,
+            session_id=body.get("session_id"),
+        )
+    _strip_private_oauth_payload(payload)
+    _record_history_safely(
+        request,
+        event_type="auth_google_code_completed",
+        status="success" if status < 400 else "failed",
+        summary="Google Authorization Code Flow boundary was processed.",
+        actor=_actor_from_auth_me_payload(request, payload),
+        subject=subject_from_payload({"session_id": body.get("session_id")}),
+        source=_history_source(request),
+        metadata={
+            "http_status": status,
+            "provider": payload.get("provider"),
+            "auth_mode": payload.get("auth_mode"),
+            "google": payload.get("google") or {},
             "error_code": (payload.get("error") or {}).get("code")
             if isinstance(payload.get("error"), dict)
             else None,
@@ -536,8 +577,29 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         if not usage["allowed"]:
             return _rate_limit_response(request, usage)
     chat_response = submit_message(identity_body)
+    conversation_save_state = conversation_save_state_from_payload(identity_body)
+    node_execution = None
     if _is_canonical_mock_request(request):
-        persist_chat_message_analysis_boundary(identity_body, chat_response)
+        persistence_seed = persist_chat_message_analysis_boundary(identity_body, chat_response)
+        execution_payload = {
+            **identity_body,
+            "job_id": persistence_seed["job_id"],
+            "session_id": chat_response.get("session_id"),
+            "message_id": chat_response.get("message_id"),
+            "attachments": chat_response.get("attachments", []),
+        }
+        node_execution = execute_mock_plan(chat_response.get("analysis_plan") or {}, execution_payload)
+        persistence = persist_chat_message_analysis_boundary(
+            identity_body,
+            chat_response,
+            node_execution=node_execution,
+        )
+        conversation_save_state = persistence["conversation_save_state"]
+        chat_response["persistence"] = persistence
+        chat_response["supervisor_execution"] = _supervisor_execution_response(
+            node_execution,
+            persistence=persistence,
+        )
         chat_response["usage"] = usage
     _record_history_safely(
         request,
@@ -556,6 +618,8 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             "mock_scenario": chat_response.get("mock_scenario"),
             "mock_status": body.get("mock_status"),
             "response_status": chat_response.get("status"),
+            "conversation_save_state": conversation_save_state,
+            "conversation_save_policy": "conversation_save_policy.v1",
             "attachment_count": len(chat_response.get("attachments", [])),
             "card_count": len(chat_response.get("cards", [])),
             "pending_fields": [
@@ -567,6 +631,44 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         privacy={"risk_level": "medium"},
     )
     return _json_response(request, chat_response)
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def update_chat_save_state(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request)
+    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
+    session_id = str(body.get("session_id") or identity_body.get("session_id") or "")
+
+    if _is_canonical_mock_request(request):
+        access = _authorize_session_query(session_id, identity_body, resource_type="chat_save_state")
+        if not access["allowed"]:
+            return _object_access_denied_response(request, access)
+
+    subject = access_subject_from_payload(identity_body)["subject"]
+    save_state = conversation_save_state_from_payload(body, default="pending")
+    result = mark_conversation_save_state(
+        session_id=session_id,
+        save_state=save_state,
+        owner_id=str(subject.get("user_id") or ""),
+        guest_id=str(subject.get("guest_id") or ""),
+        raw_payload=body,
+    )
+    if result.get("conversation_save_state") == "saved":
+        _record_history_safely(
+            request,
+            event_type="conversation_saved",
+            status="success",
+            summary="Conversation was promoted to My Page history after user consent.",
+            actor=_history_actor(request, body),
+            subject=subject_from_payload(body, session_id=session_id),
+            source=_history_source(request),
+            metadata={
+                "conversation_save_state": "saved",
+                "conversation_save_policy": "conversation_save_policy.v1",
+            },
+        )
+    return _json_response(request, {"conversation_save": result})
 
 
 @csrf_exempt
@@ -606,6 +708,16 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
     }
     if chat_response:
         response["chat_response"] = chat_response
+    if _is_canonical_mock_request(request):
+        job_payload = _agent_plan_job_payload(body, response)
+        if job_payload.get("session_id"):
+            response["persistence"] = persist_analysis_job_execution(body, job_payload)
+        else:
+            response["persistence"] = {
+                "backend": "postgresql",
+                "status": "skipped",
+                "reason": "missing_session_id",
+            }
     _record_agent_events_safely(
         request,
         response["node_execution"].get("executions", []),
@@ -847,6 +959,10 @@ def _object_access_denied_response(request: HttpRequest, access: dict[str, objec
     )
 
 
+def _strip_private_oauth_payload(payload: dict[str, object]) -> None:
+    payload.pop("_private_oauth_tokens", None)
+
+
 def _actor_from_auth_me_payload(request: HttpRequest, payload: dict[str, object]) -> dict[str, object]:
     subject = payload.get("subject") if isinstance(payload.get("subject"), dict) else {}
     actor = _history_actor(request, {"guest_id": request.GET.get("guest_id")})
@@ -871,9 +987,90 @@ def _history_source(request: HttpRequest, node_code: str | None = None) -> dict[
     )
 
 
+def _agent_plan_job_payload(body: dict[str, object], response: dict[str, object]) -> dict[str, object]:
+    node_execution = response.get("node_execution") if isinstance(response.get("node_execution"), dict) else {}
+    chat_response = response.get("chat_response") if isinstance(response.get("chat_response"), dict) else {}
+    analysis_plan = response.get("analysis_plan") if isinstance(response.get("analysis_plan"), dict) else {}
+    message_id = str(node_execution.get("message_id") or chat_response.get("message_id") or body.get("message_id") or "")
+    plan_id = str(node_execution.get("plan_id") or analysis_plan.get("plan_id") or body.get("analysis_plan_id") or "")
+    job_id = str(body.get("job_id") or "")
+    if not job_id and message_id.startswith("msg_"):
+        job_id = f"job_{message_id.removeprefix('msg_')}"
+    if not job_id and plan_id.startswith("plan_"):
+        job_id = f"job_{plan_id.removeprefix('plan_')}"
+    if not job_id:
+        job_id = "job_agent_plan"
+
+    progress = chat_response.get("progress") if isinstance(chat_response.get("progress"), dict) else {}
+    status = str(chat_response.get("status") or progress.get("status") or "success")
+    return {
+        **body,
+        "job_id": job_id,
+        "session_id": node_execution.get("session_id") or chat_response.get("session_id") or body.get("session_id"),
+        "message_id": message_id,
+        "routing_intent": chat_response.get("routing_intent") or analysis_plan.get("routing_intent"),
+        "mock_scenario": chat_response.get("mock_scenario") or body.get("mock_scenario"),
+        "status": status,
+        "active_node": progress.get("active_node") or "agent_result_validation",
+        "progress_message": progress.get("message") or "Supervisor plan execution completed.",
+        "analysis_plan_id": plan_id,
+        "analysis_plan": analysis_plan,
+        "chat_response": chat_response,
+        "node_execution": node_execution,
+        "status_counts": node_execution.get("status_counts") or {},
+        "attachments": chat_response.get("attachments") or body.get("attachments") or [],
+    }
+
+
+def _supervisor_execution_response(
+    node_execution: dict[str, object] | None,
+    *,
+    persistence: dict[str, object],
+) -> dict[str, object]:
+    node_execution = node_execution or {}
+    node_results = []
+    for execution in node_execution.get("executions", []):
+        if not isinstance(execution, dict):
+            continue
+        agent_output = execution.get("agent_output") if isinstance(execution.get("agent_output"), dict) else {}
+        node_results.append(
+            {
+                "execution_id": execution.get("execution_id"),
+                "node_code": agent_output.get("node_code") or execution.get("node_code"),
+                "node_name": agent_output.get("node_name"),
+                "node_type": agent_output.get("node_type"),
+                "owner": agent_output.get("owner"),
+                "status": agent_output.get("status"),
+                "summary": agent_output.get("summary"),
+                "structured_result": agent_output.get("structured_result") or {},
+                "evidence": agent_output.get("evidence") or [],
+                "next_actions": agent_output.get("next_actions") or [],
+                "limitations": agent_output.get("limitations") or [],
+            }
+        )
+
+    return {
+        "contract_version": "supervisor_execution.v1",
+        "orchestration_mode": "background_session",
+        "execution_mode": node_execution.get("execution_mode") or "mock",
+        "job_id": persistence.get("job_id") or node_execution.get("job_id"),
+        "ai_session_id": persistence.get("ai_session_id"),
+        "plan_id": node_execution.get("plan_id"),
+        "session_id": node_execution.get("session_id"),
+        "message_id": node_execution.get("message_id"),
+        "status_counts": node_execution.get("status_counts") or {},
+        "agent_results_saved": persistence.get("agent_results_saved", 0),
+        "agent_invocations_saved": persistence.get("agent_invocations_saved", 0),
+        "node_results": node_results,
+    }
+
+
 def _record_history_safely(request: HttpRequest, **kwargs: object) -> dict[str, object] | None:
     try:
         if _is_canonical_mock_request(request):
+            metadata = kwargs.get("metadata")
+            if isinstance(metadata, dict) and metadata.get("conversation_save_state") in {"pending", "session_only"}:
+                return None
             return record_history_event_record(**kwargs)
         return record_sidecar_history_event(**kwargs)
     except (DatabaseError, OSError):

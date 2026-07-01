@@ -2,7 +2,12 @@ import { useMemo, useState } from "react";
 
 import ChatbotMockFlow from "./ChatbotMockFlow.jsx";
 import { createFrontendApi } from "./apiClient.js";
-import { buildAuthContext, readStoredAuthToken } from "./authSession.js";
+import {
+  buildAuthContext,
+  buildGoogleLoginPayload,
+  persistAuthSession,
+  readStoredAuthToken,
+} from "./authSession.js";
 
 const ROUTES = [
   { id: "entry", label: "서비스 안내" },
@@ -23,11 +28,10 @@ const FALLBACK_ANALYSIS_CARDS = [
 
 export default function FrontendAppShell({
   apiBase = "/api",
-  authToken = "dev-mock-token",
+  authToken = "",
   googleClientId = "",
 }) {
   void ChatbotMockFlow;
-  void googleClientId;
 
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
   const [activeRoute, setActiveRoute] = useState("entry");
@@ -39,11 +43,15 @@ export default function FrontendAppShell({
   const [question, setQuestion] = useState("");
   const [submittedQuestion, setSubmittedQuestion] = useState("");
   const [analysisResponse, setAnalysisResponse] = useState(null);
+  const [activeAuthToken, setActiveAuthToken] = useState(() => readStoredAuthToken());
+  const [savePromptVisible, setSavePromptVisible] = useState(false);
+  const [saveDecision, setSaveDecision] = useState("undecided");
   const [statusMessage, setStatusMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSavingConversation, setIsSavingConversation] = useState(false);
 
   const identity = {
-    authToken: readStoredAuthToken() || authToken,
+    authToken: activeAuthToken || authToken,
     guestId,
     authSessionId,
   };
@@ -63,7 +71,7 @@ export default function FrontendAppShell({
     : [];
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
-    setStatusMessage("비회원 상담을 준비하고 있습니다.");
+    setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 임시 세션을 준비하고 있습니다.");
     try {
       const guest = await api.createGuestSession({
         guest_id: guestId,
@@ -73,7 +81,7 @@ export default function FrontendAppShell({
       const nextSessionId = guest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;
       setGuestId(nextGuestId);
       setSessionId(nextSessionId);
-      setStatusMessage("비회원 상담을 시작할 수 있습니다. 자료 분석은 Google 로그인 후 이어서 진행합니다.");
+      setStatusMessage("임시 상담을 시작했습니다. 상세 분석이나 이력 저장이 필요해질 때 Google 로그인을 안내합니다.");
       setActiveRoute(nextRoute);
       return { guestId: nextGuestId, sessionId: nextSessionId };
     } catch (error) {
@@ -93,11 +101,12 @@ export default function FrontendAppShell({
     setStatusMessage("상담 내용을 정리하고 있습니다.");
     setSubmittedQuestion(trimmedQuestion);
 
-    const activeSession =
-      sessionId || (await bootstrapGuestSession("chatbot"))?.sessionId || `ses_web_${Date.now()}`;
+    const guestSessionResult = sessionId ? null : await bootstrapGuestSession("chatbot");
+    const activeSession = sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
+    const activeGuestId = guestId || guestSessionResult?.guestId || "";
     const activeAuthContext = buildAuthContext({
       authState: authContext.auth_state,
-      guestId,
+      guestId: activeGuestId,
       authSessionId,
       sessionId: activeSession,
       userId: null,
@@ -108,22 +117,104 @@ export default function FrontendAppShell({
         {
           session_id: activeSession,
           auth_context: activeAuthContext,
+          conversation_save_state: authSessionId ? "saved" : "pending",
           user_text: trimmedQuestion,
           attachments: [],
           mock_status: "success",
         },
-        identity
+        {
+          ...identity,
+          guestId: activeGuestId,
+          authSessionId,
+        }
       );
       setAnalysisResponse(result);
-      setStatusMessage("상담 응답을 받았습니다.");
+      setSavePromptVisible(!authSessionId);
+      setSaveDecision(authSessionId ? "saved" : "undecided");
+      setStatusMessage(
+        authSessionId
+          ? "상담 응답을 받았습니다. 이 상담은 로그인 계정에 연결됩니다."
+          : "상담 응답을 받았습니다. 조금 더 진행한 뒤 저장 여부를 선택할 수 있습니다."
+      );
     } catch (_error) {
       setAnalysisResponse({
         cards: FALLBACK_ANALYSIS_CARDS,
       });
+      setSavePromptVisible(!authSessionId);
       setStatusMessage("응답을 불러오지 못해 접수 상태만 표시합니다.");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function saveConversationAfterLogin() {
+    setIsSavingConversation(true);
+    setStatusMessage("Google 로그인 후 현재 상담을 내 사건 이력에 연결하고 있습니다.");
+    try {
+      const guestSessionResult = sessionId ? null : await bootstrapGuestSession("chatbot");
+      const activeSessionId = sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
+      const activeGuestId = guestId || guestSessionResult?.guestId || "";
+      const loginPayload = {
+        guest_id: activeGuestId,
+        session_id: activeSessionId,
+        ...(await buildGoogleLoginPayload({ googleClientId, guestId: activeGuestId })),
+      };
+      const loginResult = await api.loginWithGoogleCode(loginPayload);
+      const nextToken = loginResult?.access_token || "";
+      const subject = loginResult?.subject || {};
+
+      setActiveAuthToken(nextToken);
+      setAuthSessionId(subject.auth_session_id || "");
+      setGuestId(subject.guest_id || activeGuestId);
+      setSessionId(activeSessionId);
+      persistAuthSession({ accessToken: nextToken, googleProfile: loginResult?.user || null });
+      const nextIdentity = {
+        authToken: nextToken,
+        authSessionId: subject.auth_session_id || "",
+        guestId: subject.guest_id || activeGuestId,
+      };
+      await api.updateConversationSaveState(
+        {
+          session_id: activeSessionId,
+          conversation_save_state: "saved",
+          conversation_save_source: "google_login_save_prompt",
+        },
+        nextIdentity
+      );
+      const summary = await api.getMyPageSummary({ identity: nextIdentity, sessionId: activeSessionId });
+      setMypageSummary(summary);
+      setActiveRoute("mypage");
+
+      setSaveDecision("saved");
+      setSavePromptVisible(false);
+      setStatusMessage("현재 상담을 Google 계정 기준 내 사건 이력에 저장했습니다.");
+    } catch (_error) {
+      setStatusMessage("로그인 또는 저장 연결에 실패했습니다. 상담은 현재 임시 세션에서 계속 진행할 수 있습니다.");
+    } finally {
+      setIsSavingConversation(false);
+    }
+  }
+
+  async function keepConversationTemporary() {
+    setSaveDecision("session_only");
+    setSavePromptVisible(false);
+    if (sessionId) {
+      try {
+        await api.updateConversationSaveState(
+          {
+            session_id: sessionId,
+            conversation_save_state: "session_only",
+            conversation_save_source: "user_declined_save_prompt",
+          },
+          identity
+        );
+      } catch (_error) {
+        // Local UI state still reflects the user's choice if the API update is unavailable.
+      }
+    }
+    setStatusMessage(
+      "이번 상담은 임시 세션으로만 계속 진행합니다. 저장하지 않으면 내 사건 이력에는 표시하지 않습니다."
+    );
   }
 
   async function loadMyPageSummary() {
@@ -227,18 +318,23 @@ export default function FrontendAppShell({
 
         <main className="workspace" aria-live="polite">
           {activeRoute === "entry" && (
-            <EntryScreen
+            <EntryScreenV2
               onGuestStart={() => bootstrapGuestSession("chatbot")}
-              onOpenChat={() => setActiveRoute("chatbot")}
+              onOpenChat={() => bootstrapGuestSession("chatbot")}
             />
           )}
 
           {activeRoute === "chatbot" && (
-            <ChatScreen
+            <ChatScreenV2
               analysisCards={analysisCards}
               isSubmitting={isSubmitting}
+              isSavingConversation={isSavingConversation}
+              onKeepTemporary={keepConversationTemporary}
+              onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
               question={question}
+              saveDecision={saveDecision}
+              savePromptVisible={savePromptVisible}
               setQuestion={setQuestion}
               statusMessage={statusMessage}
               submittedQuestion={submittedQuestion}
@@ -445,6 +541,224 @@ function ChatScreen({
               <textarea
                 aria-label="상담 메시지 입력"
                 placeholder="교통사고, 고지서, 보험 분쟁 등 확인할 내용을 입력해 주세요."
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+              />
+            </div>
+            <button className="button primary" type="button" onClick={onSubmit} disabled={isSubmitting}>
+              {isSubmitting ? "정리 중" : "전송"}
+            </button>
+          </div>
+
+          {statusMessage && (
+            <p className="status-message inside" role="status">
+              {statusMessage}
+            </p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function EntryScreenV2({ onGuestStart, onOpenChat }) {
+  return (
+    <section className="entry-screen">
+      <div className="entry-copy">
+        <span className="eyebrow">로그인 없이 먼저 상담</span>
+        <h1>당황한 순간에는 가입보다 질문이 먼저입니다.</h1>
+        <p className="lead">
+          사고 상황, 과태료 고지서, 보험사 설명을 바로 적어 주세요. 대화가 충분히 진행된 뒤
+          이력 저장이나 추가 자료 분석이 필요할 때 Google 로그인을 안내합니다.
+        </p>
+        <div className="hero-actions">
+          <button className="button primary large" type="button" onClick={onOpenChat}>
+            바로 상담 시작
+          </button>
+          <button className="button large" type="button" onClick={onGuestStart}>
+            비회원 세션 만들기
+          </button>
+        </div>
+        <p className="entry-note">
+          저장을 선택하지 않으면 현재 상담은 임시 세션 기준으로만 유지하고, 마이페이지 이력으로 넘기지 않습니다.
+        </p>
+      </div>
+
+      <div className="entry-panel">
+        <div className="panel-topline">
+          <span>상담 흐름</span>
+          <strong>Chat first</strong>
+        </div>
+        <div className="flow-stack">
+          <div className="flow-step active">
+            <span>1</span>
+            <div>
+              <strong>질문부터 시작</strong>
+              <p>로그인 화면으로 막지 않고 게스트 상담 세션을 먼저 엽니다.</p>
+            </div>
+          </div>
+          <div className="flow-step">
+            <span>2</span>
+            <div>
+              <strong>상담 진행</strong>
+              <p>상황 정리, 필요한 자료, 다음 행동을 먼저 안내합니다.</p>
+            </div>
+          </div>
+          <div className="flow-step">
+            <span>3</span>
+            <div>
+              <strong>저장 여부 선택</strong>
+              <p>로그인 후 저장하면 마이페이지 이력으로 연결하고, 아니면 임시로 둡니다.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChatScreenV2({
+  analysisCards,
+  isSavingConversation,
+  isSubmitting,
+  onKeepTemporary,
+  onSaveConversation,
+  onSubmit,
+  question,
+  saveDecision,
+  savePromptVisible,
+  setQuestion,
+  statusMessage,
+  submittedQuestion,
+}) {
+  const hasConversation = Boolean(submittedQuestion);
+  const quickQuestions = [
+    "과태료 고지서를 받았는데 이의제기 가능성을 봐줘",
+    "교통사고 과실비율에서 쟁점이 될 부분을 정리해줘",
+    "보험사 설명이 맞는지 확인하려면 어떤 자료가 필요해?",
+    "블랙박스와 사진을 나중에 올리면 어떤 분석이 가능해?",
+  ];
+
+  return (
+    <section className="screen">
+      <div className="screen-header">
+        <div className="screen-title">
+          <h2>AI 교통 상담</h2>
+          <p>로그인 없이 먼저 이야기하고, 저장이나 정밀 분석이 필요해질 때 계정을 연결합니다.</p>
+        </div>
+        <div className="screen-actions">
+          <button className="button" type="button" onClick={onKeepTemporary}>
+            이번 세션만 유지
+          </button>
+          <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
+            {isSavingConversation ? "연결 중" : "Google 로그인 후 저장"}
+          </button>
+        </div>
+      </div>
+
+      <div className="chat-shell">
+        <div className="conversation-list">
+          <div className="section-label">현재 상담</div>
+          <div className="empty-panel">
+            <strong>{hasConversation ? "게스트 상담 진행 중" : "아직 대화가 없습니다."}</strong>
+            <p>
+              {hasConversation
+                ? "저장 선택 전까지는 임시 세션 상담으로 다룹니다."
+                : "질문을 입력하면 이 영역에 상담 맥락이 쌓입니다."}
+            </p>
+          </div>
+        </div>
+
+        <div className="chat-main">
+          <div className="messages">
+            {!hasConversation && (
+              <section className="chat-empty-state" aria-label="상담 시작">
+                <span className="eyebrow">비회원 상담</span>
+                <h3>지금 가장 급한 상황부터 적어 주세요.</h3>
+                <p>
+                  사고 직후라면 장소, 시간, 상대방 주장, 고지서 내용처럼 기억나는 것만 적어도 됩니다.
+                  로그인과 자료 업로드는 상담이 진행된 뒤 필요한 시점에 안내합니다.
+                </p>
+              </section>
+            )}
+
+            {hasConversation && (
+              <>
+                <article className="message user">
+                  <span className="message-avatar">나</span>
+                  <div className="bubble">
+                    <p>{submittedQuestion}</p>
+                  </div>
+                </article>
+
+                <article className="message">
+                  <span className="message-avatar">AI</span>
+                  <div className="bubble wide">
+                    <strong>상담 내용을 기준으로 확인 가능한 항목을 정리했습니다.</strong>
+                    <p>
+                      아래 결과는 현재 입력만 기준으로 한 1차 정리입니다. 추가 자료 분석이나 이력 저장이 필요하면
+                      Google 로그인 후 현재 상담을 사건 이력으로 연결할 수 있습니다.
+                    </p>
+                    {analysisCards.length > 0 && (
+                      <div className="result-cards">
+                        {analysisCards.map((card) => (
+                          <div className="result-card" key={`${card.card_type}-${card.title}`}>
+                            <span className={card.status === "success" ? "tag green" : "tag amber"}>
+                              {card.card_type}
+                            </span>
+                            <strong>{card.title}</strong>
+                            <p>{card.summary}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              </>
+            )}
+          </div>
+
+          {savePromptVisible && (
+            <section className="save-choice-panel" aria-label="상담 저장 선택">
+              <div>
+                <span className="eyebrow">저장 선택</span>
+                <strong>이 상담을 마이페이지 이력에 저장할까요?</strong>
+                <p>저장하면 Google 계정에 연결하고, 저장하지 않으면 PostgreSQL 이력 전환 없이 임시 상담으로 유지합니다.</p>
+              </div>
+              <div className="save-choice-actions">
+                <button className="button" type="button" onClick={onKeepTemporary}>
+                  저장하지 않기
+                </button>
+                <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
+                  {isSavingConversation ? "저장 중" : "로그인 후 저장"}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {saveDecision === "session_only" && (
+            <section className="save-choice-panel is-muted" aria-label="임시 상담 유지">
+              <strong>이번 상담은 임시 세션으로 유지합니다.</strong>
+              <p>나중에 저장이 필요해지면 Google 로그인 후 다시 연결할 수 있습니다.</p>
+            </section>
+          )}
+
+          <div className="quick-row" aria-label="빠른 질문">
+            {quickQuestions.map((item) => (
+              <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
+                {item}
+              </button>
+            ))}
+          </div>
+
+          <div className="chat-input">
+            <div className="input-stack">
+              <div className="attachment-strip">
+                <span>자료 업로드와 정밀 분석은 상담 중 필요한 시점에 로그인 후 진행합니다.</span>
+              </div>
+              <textarea
+                aria-label="상담 메시지 입력"
+                placeholder="사고 상황, 고지서 내용, 보험사 설명처럼 지금 기억나는 내용을 입력해 주세요."
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
               />

@@ -2,6 +2,7 @@ from app.services.auth_session_mock_service import (
     create_guest_session,
     get_current_auth_subject,
 )
+from app.services.google_auth_service import create_google_login
 
 
 def test_create_guest_session_separates_guest_and_chat_session_ids():
@@ -58,3 +59,19 @@ def test_auth_me_reuses_auth_error_contract_for_invalid_bearer():
     assert status == 401
     assert payload["error"]["contract_version"] == "auth_error.v1"
     assert payload["error"]["code"] == "token_expired"
+
+
+def test_google_login_rejects_mock_profile_when_mock_google_auth_disabled(monkeypatch):
+    monkeypatch.setenv("GOOGLE_AUTH_ALLOW_MOCK", "0")
+
+    status, payload = create_google_login(
+        {
+            "provider": "google",
+            "google_sub": "dev-google-subject",
+            "email": "driver@example.com",
+        }
+    )
+
+    assert status == 401
+    assert payload["error"]["code"] == "token_invalid"
+    assert payload["error"]["auth"]["reason"] == "google_identity_missing"

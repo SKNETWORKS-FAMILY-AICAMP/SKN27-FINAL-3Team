@@ -8,7 +8,7 @@ createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <FrontendAppShell
       apiBase="/api"
-      authToken="dev-mock-token"
+      authToken={import.meta.env.VITE_DEV_AUTH_TOKEN || ""}
       googleClientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || ""}
     />
   </React.StrictMode>
