@@ -43,7 +43,7 @@ OpenAPI는 API 계약을 사람이 읽는 문서가 아니라, 프론트엔드, 
 | `accident_statement` | 없음 | 첨부 purpose와 테스트에 존재 | 검토 표시 포함 |
 | `blackbox_video`, `insurance_record` | 없음 | mock 첨부 service에 존재 | 검토 표시 포함 |
 | `damage_image` | 없음 | Vision handoff 내부 매핑 메모 | 내부메모, public enum 미반영 |
-| 마이페이지/이력 | 후보로 언급 | 아직 Django endpoint 없음 | 검토 endpoint로 포함 |
+| 마이페이지/이력 | 후보로 언급 | `GET /api/mypage/summary/`, `GET /api/history/` canonical mock 구현 | 확정, deadline/실소유권 정책은 검토 |
 | 이의신청서 전용 API | `POST /api/reports/objection-draft/` | 현재 Django route 없음, `/api/reports/` mock action만 있음 | 검토 endpoint로 포함 |
 
 ## 4. 현재 확정으로 둔 범위
@@ -65,6 +65,7 @@ OpenAPI는 API 계약을 사람이 읽는 문서가 아니라, 프론트엔드, 
 - `POST /api/agents/plans/run/`
 - `POST /api/reports/`
 - `GET /api/reports/{report_id}/download/`
+- `GET /api/mypage/summary/`
 - `GET /api/history/`
 - 명시적 `/api/mock/...` alias
 - `auth_error.v1`
@@ -81,7 +82,6 @@ OpenAPI는 API 계약을 사람이 읽는 문서가 아니라, 프론트엔드, 
 | `GET /api/chat/sessions/{session_id}/messages/` | 메시지 이력 조회 API 필요 여부와 권한 정책 미확정 |
 | `GET /api/reports/`, `GET /api/reports/{report_id}/` | 리포트 목록/상세 화면은 필요하지만 현재 다운로드/mock action 중심 |
 | `POST /api/reports/objection-draft/` | PDF에는 있지만 현재 Django route 없음 |
-| `GET /api/mypage/summary/` | 마이페이지 집계 화면은 필요하지만 현재 Django route 없음 |
 | 히스토리 TTL/보관 기간 | `/api/history/` mock 조회는 구현됐지만 비회원 TTL, 회원 보관 기간, DB table 전환은 미확정 |
 | 비회원 session 정책 | TTL, rate limit, 파일 보관, 로그인 전후 session merge가 갈림 |
 | `accident_statement` 수신 node | 첨부 목적은 존재하지만 실제 담당 node와 output schema가 미확정 |
@@ -119,3 +119,18 @@ OpenAPI ver0 다음 단계에서 바로 결정하면 좋은 항목은 다음과 
 | 3 | 히스토리 저장 이벤트 단위 | 멘토님이 강조한 수집/고도화/after-service 설계의 핵심 |
 | 4 | Agent 실행 방식: 동기, 비동기 worker, 혼합 | 진행 상태, retry, timeout, Redis/PostgreSQL 책임이 달라짐 |
 | 5 | `accident_statement` handoff 수신 node | 사고경위서 OCR/문서 인식 흐름이 정해짐 |
+
+## 9. 2026-06-29 output schema 반영
+
+2026-06-29 이슈 확인 결과 Agent 구조화 output 계약에서 검토가 필요한
+세 영역이 변경되었다. `docs/api/openapi-v0.yaml`에는 운영 구현 전 팀 조율용
+계약으로 먼저 반영한다.
+
+| 이슈 | OpenAPI 반영 내용 |
+|---|---|
+| `#33` | `TextMlCaseSearchResult`에 object 형태의 사고 유형 후보, 구조화된 추천 증거, `insurer_claim_review`, nullable reliability score, canonical `source_reference` metadata를 반영한다. |
+| `#38`, `#73` | `VisionMediaAnalysisResult`를 event window, core clip, key frame, object change, scene context, 후보별 score 중심으로 확장한다. `confidence_label`은 deprecated 호환 필드로만 남긴다. |
+| `#65` | 경찰서 발급 교통사고사실확인원 OCR handoff를 위해 `traffic_accident_confirmation_ocr`와 `TrafficAccidentConfirmationOcrResult`를 추가한다. |
+
+호환성 메모: 기존 mock fixture에 `source_ref`가 남아 있어 schema에는 deprecated
+alias로만 유지한다. 신규 Agent output은 `source_reference`를 반환해야 한다.

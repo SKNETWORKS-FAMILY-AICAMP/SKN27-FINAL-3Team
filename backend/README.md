@@ -58,6 +58,8 @@ docker run --rm -p 8000:8000 `
 
 현재 mock API는 실제 JWT 서명 검증은 수행하지 않는다. 대신 `MOCK_REQUIRE_AUTH=1`을 기본값으로 두고 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. 토큰이 없거나 형식이 맞지 않으면 운영 전환 때 사용할 `auth_error.v1` envelope와 `WWW-Authenticate` header로 `401`을 반환한다.
 
+`POST /api/auth/login/`은 Google 로그인 1차 경계를 제공한다. 로컬/테스트에서는 `GOOGLE_AUTH_ALLOW_MOCK=1`로 `google_sub`, `email`, `display_name` mock profile을 받아 app Bearer token을 발급하고, `users`, `auth_sessions`, `auth_events`에 저장한다. 운영 전환 시 `GOOGLE_AUTH_ALLOW_MOCK=0`, `GOOGLE_CLIENT_ID`, `google-auth` 기반 Google ID token 검증으로 같은 endpoint를 강화한다.
+
 공개 endpoint는 `GET /api/health/`, `GET /api/mock/chat/scenarios/`로 제한한다. 운영 전환 시에는 같은 middleware 위치에서 실제 JWT 검증 또는 DRF authentication layer로 교체하고, 권한 부족은 같은 envelope의 `forbidden`/`403`으로 반환한다.
 
 인증 실패 응답 예시:
@@ -88,7 +90,11 @@ docker run --rm -p 8000:8000 `
 | Method | Canonical path | Mock path |
 |---|---|---|
 | `POST` | `/api/auth/guest-session/` | - |
+| `POST` | `/api/auth/login/` | - |
+| `POST` | `/api/auth/refresh/` | - |
+| `POST` | `/api/auth/logout/` | - |
 | `GET` | `/api/auth/me/` | - |
+| `GET` | `/api/mypage/summary/` | - |
 | `GET` | `/api/history/` | `/api/mock/history/` |
 | `POST` | `/api/chat/sessions/` | `/api/mock/chat/sessions/` |
 | `POST` | `/api/chat/messages/` | `/api/mock/chat/messages/` |
@@ -107,7 +113,11 @@ docker run --rm -p 8000:8000 `
 |---|---|---|
 | `GET` | `/api/health/` | backend health와 demo scenario 목록 |
 | `POST` | `/api/auth/guest-session/` | 비회원 `guest_id`, rate limit key, merge policy mock 발급 |
+| `POST` | `/api/auth/login/` | Google subject를 `users`/`auth_sessions`에 연결하고 app Bearer token 발급 |
+| `POST` | `/api/auth/refresh/` | Rotate a valid app Bearer token for the same `auth_session_id` |
+| `POST` | `/api/auth/logout/` | Revoke the current `auth_session_id` and return client clear-token action |
 | `GET` | `/api/auth/me/` | 현재 Bearer/guest identity와 `auth_session_id` 분리 상태 확인 |
+| `GET` | `/api/mypage/summary/` | canonical My Case progress summary from `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports` |
 | `GET` | `/api/history/` | `history_event.v1` 표준-라이트 mock sidecar 이벤트 조회 |
 | `GET` | `/api/mock/chat/scenarios/` | `fine_notice`, `fault_ratio` 시나리오 목록 |
 | `GET` | `/api/mock/attachments/` | session별 mock attachment metadata 목록 |
@@ -125,9 +135,9 @@ docker run --rm -p 8000:8000 `
 | `POST` | `/api/mock/reports/` | 리포트 저장/다운로드 action mock |
 | `GET` | `/api/mock/reports/{report_id}/download/` | mock report 다운로드 |
 
-## History event mock
+## History event
 
-`GET /api/history/?session_id=...`는 `backend/media/mock_history_events`의 sidecar JSON 이벤트를 조회한다. 현재 정책은 `standard_light`이며 사용자 원문, OCR 원문, Agent reasoning 전문은 저장하지 않는다.
+Canonical `GET /api/history/?session_id=...`는 PostgreSQL `history_events`의 `history_event.v1` 표준-라이트 이벤트를 조회한다. 명시적 `/api/mock/history/`만 `backend/media/mock_history_events` sidecar JSON을 유지한다. 현재 정책은 `standard_light`이며 사용자 원문, OCR 원문, Agent reasoning 전문은 저장하지 않는다.
 
 테스트나 로컬 실험에서 저장 위치를 분리하려면 `MOCK_HISTORY_EVENT_ROOT` 환경변수를 사용한다.
 
@@ -153,7 +163,7 @@ docker run --rm -p 8000:8000 `
 
 ## Analysis job 예시
 
-Canonical `POST /api/analysis/jobs/` persists `analysis_jobs`, an initial `analysis_job_events` row, and one `agent_results` row per mock plan execution. Explicit `/api/mock/analysis/jobs/` remains sidecar-only for regression and smoke checks.
+Canonical `POST /api/analysis/jobs/`는 `analysis_jobs`, 최초 `analysis_job_events`, Agent별 `agent_results`, 논리 실행 단위 `ai_sessions`, Agent 호출 attempt `agent_invocations`를 함께 저장한다. 명시적 `/api/mock/analysis/jobs/`는 회귀 테스트와 smoke check를 위해 sidecar-only로 유지한다.
 
 분석 job은 메시지 1개에서 시작된 `chat_response`, `analysis_plan`, `node_execution`을 `job_id`로 묶는다.
 
@@ -175,9 +185,31 @@ Canonical `POST /api/analysis/jobs/` persists `analysis_jobs`, an initial `analy
 
 ## Analysis result display DTO
 
+Canonical `GET /api/analysis/results/{job_id}/` saves the display snapshot to `analysis_display_results` when the matching canonical `analysis_jobs` row exists. Explicit `/api/mock/analysis/results/{job_id}/` remains sidecar-only.
+
 `GET /api/mock/analysis/results/{job_id}/`는 프론트 화면이 바로 사용하는 표시용 결과를 반환한다. Canonical shadow endpoint는 `GET /api/analysis/results/{job_id}/`이며 응답에 `api_surface: "canonical_mock"`, `execution_mode: "mock"`을 포함하고 report/file/job 링크를 `/api/...` 형태로 변환한다.
 
 반환 필드는 `assistant_message`, `progress`, `cards`, `pending_questions`, `attachments`, `report_links`, `evidence`, `agent_results`, `limitations` 중심이다. 디버깅용 원본 묶음인 `analysis_plan`, `node_execution`, `chat_response`는 `GET /api/mock/analysis/jobs/{job_id}/`에서만 조회한다.
+
+Canonical `POST /api/reports/` saves report metadata to `reports` and links it to `analysis_jobs` plus `analysis_display_results` when available. It now wraps the generated artifact in an `object_storage_adapter.v1` envelope and stores an `s3://...` adapter URI while keeping the original mock URI as `source_storage_uri`.
+
+Canonical `GET /api/reports/{report_id}/download/`는 `reports` table을 먼저 확인한다. metadata가 있으면 요청 subject와 `reports.owner_id`를 비교해 소유자만 다운로드할 수 있고, 성공 응답에는 `X-Report-Persistence`, `X-Report-Storage-Backend`, `X-Report-Storage-URI`, `X-Report-Object-Key`, `X-Report-Object-Policy`, `X-Report-Access-Decision`을 포함한다. metadata가 없으면 기존 mock text download로 fallback한다.
+
+## Redis status
+
+Current status: Docker Compose now includes a Redis 7 service and the backend uses
+`REDIS_URL` to switch Django cache to `django.core.cache.backends.redis.RedisCache`.
+When `REDIS_URL` is absent, local tests use `LocMemCache`. Redis stores only short
+TTL progress snapshots for `analysis_job_progress:{job_id}` and
+`chat_session_state:{session_id}`; PostgreSQL remains the fallback source of truth.
+
+Redis는 `chat_session_state:{session_id}`, `analysis_job_progress:{job_id}` 같은 짧은 TTL 캐시로 연결되어 있다. 현재 구현은 PostgreSQL `analysis_jobs`, `analysis_job_events`, `usage_events`, `history_events`를 기준 저장소로 유지하고, Redis miss나 장애 시 PostgreSQL fallback을 사용한다.
+
+## My Case summary
+
+Canonical `GET /api/mypage/summary/?session_id=...`는 Supervisor-facing 내 사건 read model을 반환한다. 조회 경로는 PostgreSQL metadata 기준이며 `chat_sessions`, `chat_messages`, `analysis_jobs`, `analysis_job_events`, `agent_results`, `ai_sessions`, `agent_invocations`, `analysis_display_results`, `reports`를 읽는다.
+
+The response includes active case counts, saved report counts, recent analysis count, and compact case rows with agent/result/report linkage. Deadline calculation, real JWT ownership checks, and subscription/rate-limit enforcement remain explicit limitations for the next auth/session pass.
 
 ## Agent adapter 계약
 

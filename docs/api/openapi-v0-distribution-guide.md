@@ -57,7 +57,8 @@ OpenAPI 안의 확장 필드는 반드시 구분해서 읽는다.
 | 2 | canonical `/api/...` 응답의 `api_surface`, `execution_mode` |
 | 3 | `/api/auth/guest-session/`, `/api/auth/me/` |
 | 4 | `/api/chat/messages/`, `/api/files/`, `/api/analysis/jobs/`, `/api/analysis/results/{job_id}/` |
-| 5 | `/api/history/` standard-light sidecar 조회 |
+| 5 | `/api/mypage/summary/` My Case read model |
+| 6 | `/api/history/` standard-light sidecar 조회 |
 
 `review_required` endpoint는 route를 바로 만들지 않는다. 먼저 정책, 화면 owner, 저장 범위를 확인한다.
 
@@ -71,6 +72,7 @@ Supervisor는 화면 DTO와 Agent 실행 흐름을 본다.
 | `AgentPlanExecution` | 여러 Agent 결과 묶음 |
 | `AnalysisResult` | 프론트가 직접 보는 display output |
 | `HistoryEvent` | 재상담, 진행도, 디버깅에 필요한 표준-라이트 이력 |
+| DDD/MAS roadmap | Agent 실행과 history log management를 어느 bounded context에 둘지 |
 
 화면에는 Agent raw output을 그대로 보내지 않고 `AnalysisResult` 형태로 병합한다.
 
@@ -103,6 +105,7 @@ Agent output에는 `status`, `summary`, `structured_result`, `evidence`, `next_a
 | `POST` | `/api/agents/plans/run/` | Django, Supervisor, Agent |
 | `POST` | `/api/reports/` | Frontend, Django |
 | `GET` | `/api/reports/{report_id}/download/` | Frontend, Django |
+| `GET` | `/api/mypage/summary/` | Frontend, Django, Supervisor |
 | `GET` | `/api/history/` | Frontend, Django, Supervisor |
 
 ## 5. 아직 구현 금지 항목
@@ -115,7 +118,6 @@ Agent output에는 `status`, `summary`, `structured_result`, `evidence`, `next_a
 | `GET /api/chat/sessions/{session_id}/messages/` | 메시지 원문 조회와 보관 정책 미확정 |
 | `GET /api/reports/`, `GET /api/reports/{report_id}/` | 리포트 목록/상세 DB 연결 미확정 |
 | `POST /api/reports/objection-draft/` | PDF에는 있으나 현재 mock route 없음 |
-| `GET /api/mypage/summary/` | 마이페이지 집계 기준 미확정 |
 | 히스토리 TTL/DB table | 보관 기간, 조회 권한, migration 시점 미확정 |
 
 ## 6. 검증 방법
@@ -144,3 +146,14 @@ ver1로 넘어갈 때는 아래를 확정해야 한다.
 | 3 | Agent별 실제 sample output |
 | 4 | 리포트 목록/상세/이의신청서 전용 API |
 | 5 | 동기/비동기 worker 혼합 방식 |
+
+## 8. 2026-06-29 Agent output schema 반영
+
+Agent output을 구현하기 전 각 node sample output을
+`docs/api/openapi-v0.yaml`의 최신 이슈 기반 schema 변경분과 비교한다.
+
+| 이슈 | 팀 handoff 확인 사항 |
+|---|---|
+| `#33` | Text/RAG output은 표준 근거 참조값으로 `source_reference`를 사용한다. 보험사 주장 정보가 있으면 구조화된 `insurer_claim_review` 필드를 포함한다. |
+| `#38`, `#73` | Vision output은 단일 confidence 값이 아니라 event window, core clip/key-frame evidence, object-change evidence, scene-context candidates, 후보별 score를 넘긴다. |
+| `#65` | 교통사고사실확인원 OCR은 `traffic_accident_confirmation_ocr`와 `TrafficAccidentConfirmationOcrResult`를 사용한다. 이 node는 과실 판단 node가 아니다. |

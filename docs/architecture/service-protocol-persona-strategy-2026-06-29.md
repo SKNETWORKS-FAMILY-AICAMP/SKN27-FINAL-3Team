@@ -4,7 +4,7 @@
 |---|---|
 | 작성일 | 2026-06-29 |
 | 작성자 | `hi20260204-maker` 중심 실행 메모 |
-| 기준 문서 | `docs/api/openapi-v0.yaml`, `docs/api/openapi-persona-hi20260204-maker-2026-06-29.md`, `docs/architecture/auth-session-policy-2026-06-28.md`, `docs/architecture/history-event-design-2026-06-28.md`, `docs/postgresql-erd-2026-06-28.md` |
+| 기준 문서 | `docs/api/openapi-v0.yaml`, `docs/api/openapi-persona-hi20260204-maker-2026-06-29.md`, `docs/architecture/auth-session-policy-2026-06-28.md`, `docs/architecture/history-event-design-2026-06-28.md`, `docs/architecture/ddd-mas-history-log-roadmap-2026-06-29.md`, `docs/postgresql-erd-2026-06-28.md` |
 | 목적 | 로그인/비회원/히스토리/구독/ERD/OpenAPI/Agent 실행 방식을 하나의 실행 전략으로 묶는다. |
 | 제외 | MCP, 외부 유료 API 실호출, 실제 RAG/LLM/이미지 생성 비용 발생 작업 |
 
@@ -88,7 +88,7 @@ rate limit key는 아래 기준으로 설계한다.
 | Knowledge/RAG | `source_documents`, `rag_chunks`, `retrieval_events`, `law_sources`, `case_sources` | 법령/판례/사례 근거와 재현성 |
 | History/After-service | `history_events`, `follow_up_cases` | 애프터서비스, 재상담, 운영 분석 |
 
-초기에는 하나의 Django app 안에서 시작해도 된다. 복잡도가 커질 때 DDD 기준으로 bounded context를 나누고, 필요하면 MSA로 분리한다.
+초기에는 하나의 Django app 안에서 시작해도 된다. 복잡도가 커질 때 DDD 기준으로 bounded context를 나누고, 필요하면 MSA로 분리한다. Agent 실행 구조는 여러 Agent를 Supervisor가 조율하는 MAS로 본다.
 
 ## 6. OpenAPI를 프로토콜 기준으로 쓰는 법
 
@@ -116,10 +116,11 @@ POST /api/agents/plans/run/
 GET  /api/analysis/results/{job_id}/
 POST /api/reports/
 GET  /api/reports/{report_id}/download/
+GET  /api/mypage/summary/
 GET  /api/history/
 ```
 
-마이페이지, report 목록/상세, 이의신청서 전용 API는 `review_required`로 유지하고 정책 확정 후 다음 버전에 넣는다.
+report 목록/상세, 이의신청서 전용 API는 `review_required`로 유지하고 정책 확정 후 다음 버전에 넣는다.
 
 ### 6.1 참고 자료 배포 방식
 
@@ -163,7 +164,7 @@ GET  /api/history/
 
 ## 8. 내 사건 진행도
 
-내 사건 화면의 현재 진행도는 `analysis_jobs`, `analysis_job_events`, `history_events`, `reports`에서 재구성한다.
+내 사건 화면의 현재 진행도는 `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, `reports`, `history_events`에서 재구성한다.
 
 | 상태 | 기준 데이터 |
 |---|---|
@@ -295,8 +296,8 @@ Agent 호출은 반드시 추적 가능해야 한다.
 
 | 우선 | 작업 | 이유 |
 |---:|---|---|
-| 1 | `agent_results` 저장 연결 | Agent 호출/피드백 로그와 display DTO의 출발점 |
-| 2 | `analysis_display_results` 저장 또는 재구성 방식 결정 | 내 사건 진행도와 결과 재조회 |
-| 3 | `history_events` DB 전환 여부 결정 | 애프터서비스와 운영 분석 |
-| 4 | rate limit/subscription policy 초안 추가 | 비회원/회원/구독 구분 |
+| 1 | DDD/MAS/history log roadmap 확정 | ERD 재분류와 멘토 피드백 반영 |
+| 2 | auth/session/rate-limit MVP skeleton | 비회원/회원/구독, AI 호출 비용 기준 |
+| 3 | AI session/Agent invocation log skeleton | 누가 어떤 사건에서 어떤 Agent를 호출했는지 추적 |
+| 4 | `history_events` DB 전환 여부 결정 | 애프터서비스, 운영 분석, 조회 권한 |
 | 5 | 사고 장면 mock sample과 rule 추가 | Vision 비용 없이 품질 기준 검증 |

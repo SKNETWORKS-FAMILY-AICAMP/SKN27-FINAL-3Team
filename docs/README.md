@@ -26,6 +26,10 @@
 | `architecture/auth-session-policy-2026-06-28.md` | 로그인, 비회원, auth session, 채팅 session 분리 정책 |
 | `architecture/history-event-design-2026-06-28.md` | 히스토리 이벤트 저장, 민감도, 애프터서비스 설계 초안 |
 | `architecture/service-protocol-persona-strategy-2026-06-29.md` | 로그인/비회원/히스토리/구독/ERD/OpenAPI/Agent 실행 전략 |
+| `architecture/ddd-mas-history-log-roadmap-2026-06-29.md` | DDD bounded context, MAS/Agent 실행, history log management 구현 순서 |
+| `architecture/supervisor-erd-flow-alignment-2026-06-29.md` | OpenAPI 출력 스키마 반영 이후 Supervisor 흐름과 ERD 변경 시점 |
+| `architecture/auth-agent-code-table-erd-2026-06-29.md` | 사용자, Agent 실행, code table, quota 운영 전환 ERD |
+| `architecture/end-to-end-persona-walkthrough-2026-06-29.md` | Agent 미완성 상태에서도 전체 persona 흐름과 DB checkpoint를 검증하는 기준 |
 | `schema-ready-implementation-checklist-2026-06-24.md` | schema 수신 직후 mock data, 화면 상태, 검증 착수 기준 |
 | `screen-design-specification.md` | 화면설계서 |
 | `screen-design-ui-ux-flow-guide.md` | UI/UX 흐름 설명 |

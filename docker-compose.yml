@@ -10,5 +10,65 @@ services:
       MOCK_REQUIRE_AUTH: "1"
       DJANGO_SECRET_KEY: "dev-secret"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1]"
+      REDIS_URL: "redis://redis:6379/0"
+      PROGRESS_CACHE_TTL_SECONDS: "300"
+      OBJECT_STORAGE_PROVIDER: "mock_s3"
+      OBJECT_STORAGE_BUCKET: "skn27-demo-object-storage"
+      OBJECT_STORAGE_PREFIX: "canonical"
+      OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: "900"
+      GOOGLE_AUTH_ALLOW_MOCK: "1"
+      GOOGLE_CLIENT_ID: ""
     ports:
       - "8000:8000"
+
+  postgres:
+    image: pgvector/pgvector:16-pgvector
+    container_name: skn27-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-law_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-law_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: ${NEO4J_IMAGE:-neo4j:5-community}
+    container_name: skn27-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-change-me}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512m
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-change-me} 'RETURN 1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:
+
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    container_name: skn27-demo-redis
+    ports:
+      - "6379:6379"

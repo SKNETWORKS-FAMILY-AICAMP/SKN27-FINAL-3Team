@@ -1,33 +1,26 @@
 .env
+.env.*
+!.env.example
+.venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
+tmp/law_ingestion*/
+output/law_ingestion/
+storage/neo4j/data/
+storage/neo4j/logs/
+storage/neo4j/import/
+storage/neo4j/plugins/
+*.log
+.env
+backend/db.sqlite3
+backend/media/
+app/web/node_modules/
+app/web/dist/
 
-# Model weights
-*.pt
-*.pth
-*.onnx
+# Ponytail Skills
+.agents/
 
-# Vision raw data and generated artifacts
-storage/vision/raw/*
-storage/vision/processed/*
-storage/vision/outputs/*
-storage/vision/models/*
-
-!storage/vision/raw/.gitkeep
-!storage/vision/processed/.gitkeep
-!storage/vision/outputs/.gitkeep
-!storage/vision/models/.gitkeep
-
-# Generated manifests from Drive/listing/sample jobs
-storage/vision/manifests/*.csv
-storage/vision/manifests/drive_listing_*.json
-!storage/vision/manifests/.gitkeep
-
-# Classification datasets and generated manifests
-storage/vision/datasets/classification/manifests/*.csv
-storage/vision/datasets/classification/raw_videos/*
-storage/vision/datasets/classification/frames/*
-
-!storage/vision/datasets/classification/manifests/.gitkeep
-!storage/vision/datasets/classification/raw_videos/.gitkeep
-!storage/vision/datasets/classification/frames/.gitkeep
+# Documents & Designs
+서식문서/
+설계/

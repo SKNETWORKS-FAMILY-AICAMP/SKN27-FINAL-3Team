@@ -7,6 +7,15 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-change-before-deploy")
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 MOCK_REQUIRE_AUTH = os.environ.get("MOCK_REQUIRE_AUTH", "1") != "0"
@@ -15,6 +24,15 @@ ALLOWED_HOSTS = [
     for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
     if host.strip()
 ]
+REDIS_URL = os.environ.get("REDIS_URL")
+PROGRESS_CACHE_TTL_SECONDS = _positive_int_env("PROGRESS_CACHE_TTL_SECONDS", 300)
+OBJECT_STORAGE_PROVIDER = os.environ.get("OBJECT_STORAGE_PROVIDER", "mock_s3")
+OBJECT_STORAGE_BUCKET = os.environ.get("OBJECT_STORAGE_BUCKET", "skn27-demo-object-storage")
+OBJECT_STORAGE_PREFIX = os.environ.get("OBJECT_STORAGE_PREFIX", "canonical")
+OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS = _positive_int_env("OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS", 900)
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_AUTH_ALLOW_MOCK = os.environ.get("GOOGLE_AUTH_ALLOW_MOCK", "1") != "0"
+APP_JWT_SECRET = os.environ.get("APP_JWT_SECRET", SECRET_KEY)
 
 INSTALLED_APPS = [
     "django.contrib.staticfiles",
@@ -38,6 +56,21 @@ DATABASES = {
         "NAME": BASE_DIR / "db.sqlite3",
     }
 }
+
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "skn27-progress-cache",
+        }
+    }
 
 LANGUAGE_CODE = "ko-kr"
 TIME_ZONE = "Asia/Seoul"
