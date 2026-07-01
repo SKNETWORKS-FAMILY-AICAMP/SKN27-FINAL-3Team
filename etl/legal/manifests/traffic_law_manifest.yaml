@@ -1,0 +1,272 @@
+sources:
+  - source_id: road_traffic_act
+    source_name: 도로교통법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 도로교통법
+    enabled: true
+    priority: 1
+
+  - source_id: road_traffic_act_enforcement_decree
+    source_name: 도로교통법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 도로교통법 시행령
+    enabled: true
+    priority: 1
+
+  - source_id: road_traffic_act_enforcement_rule
+    source_name: 도로교통법 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 도로교통법 시행규칙
+    enabled: true
+    priority: 1
+
+  - source_id: traffic_accident_special_cases_act
+    source_name: 교통사고처리 특례법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 교통사고처리 특례법
+    enabled: true
+    priority: 2
+
+  - source_id: traffic_accident_special_cases_act_enforcement_decree
+    source_name: 교통사고처리 특례법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 교통사고처리 특례법 시행령
+    enabled: true
+    priority: 2
+
+  - source_id: aggravated_punishment_specific_crimes_act
+    source_name: 특정범죄 가중처벌 등에 관한 법률
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 특정범죄 가중처벌 등에 관한 법률
+    enabled: true
+    priority: 3
+
+  - source_id: aggravated_punishment_specific_crimes_act_enforcement_decree
+    source_name: 특정범죄 가중처벌 등에 관한 법률 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 특정범죄 가중처벌 등에 관한 법률 시행령
+    enabled: true
+    priority: 3
+
+  - source_id: road_act
+    source_name: 도로법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 도로법
+    enabled: true
+    priority: 4
+
+  - source_id: road_act_enforcement_decree
+    source_name: 도로법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 도로법 시행령
+    enabled: true
+    priority: 4
+
+  - source_id: road_act_enforcement_rule
+    source_name: 도로법 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 도로법 시행규칙
+    enabled: true
+    priority: 4
+
+  - source_id: motor_vehicle_management_act
+    source_name: 자동차관리법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 자동차관리법
+    enabled: true
+    priority: 5
+
+  - source_id: motor_vehicle_management_act_enforcement_decree
+    source_name: 자동차관리법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 자동차관리법 시행령
+    enabled: true
+    priority: 5
+
+  - source_id: motor_vehicle_management_act_enforcement_rule
+    source_name: 자동차관리법 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 자동차관리법 시행규칙
+    enabled: true
+    priority: 5
+
+  - source_id: traffic_safety_act
+    source_name: 교통안전법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 교통안전법
+    enabled: true
+    priority: 6
+
+  - source_id: traffic_safety_act_enforcement_decree
+    source_name: 교통안전법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 교통안전법 시행령
+    enabled: true
+    priority: 6
+
+  - source_id: traffic_safety_act_enforcement_rule
+    source_name: 교통안전법 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 교통안전법 시행규칙
+    enabled: true
+    priority: 6
+
+  - source_id: passenger_transport_service_act
+    source_name: 여객자동차 운수사업법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 여객자동차 운수사업법
+    enabled: true
+    priority: 7
+
+  - source_id: passenger_transport_service_act_enforcement_decree
+    source_name: 여객자동차 운수사업법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 여객자동차 운수사업법 시행령
+    enabled: true
+    priority: 7
+
+  - source_id: passenger_transport_service_act_enforcement_rule
+    source_name: 여객자동차 운수사업법 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 여객자동차 운수사업법 시행규칙
+    enabled: true
+    priority: 7
+
+  - source_id: trucking_transport_business_act
+    source_name: 화물자동차 운수사업법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 화물자동차 운수사업법
+    enabled: true
+    priority: 8
+
+  - source_id: trucking_transport_business_act_enforcement_decree
+    source_name: 화물자동차 운수사업법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 화물자동차 운수사업법 시행령
+    enabled: true
+    priority: 8
+
+  - source_id: trucking_transport_business_act_enforcement_rule
+    source_name: 화물자동차 운수사업법 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 화물자동차 운수사업법 시행규칙
+    enabled: true
+    priority: 8
+
+  - source_id: mobility_disadvantaged_persons_act
+    source_name: 교통약자의 이동편의 증진법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 교통약자의 이동편의 증진법
+    enabled: true
+    priority: 9
+
+  - source_id: mobility_disadvantaged_persons_act_enforcement_decree
+    source_name: 교통약자의 이동편의 증진법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 교통약자의 이동편의 증진법 시행령
+    enabled: true
+    priority: 9
+
+  - source_id: mobility_disadvantaged_persons_act_enforcement_rule
+    source_name: 교통약자의 이동편의 증진법 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 교통약자의 이동편의 증진법 시행규칙
+    enabled: true
+    priority: 9
+
+  - source_id: bicycle_use_promotion_act
+    source_name: 자전거 이용 활성화에 관한 법률
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 자전거 이용 활성화에 관한 법률
+    enabled: true
+    priority: 10
+
+  - source_id: bicycle_use_promotion_act_enforcement_decree
+    source_name: 자전거 이용 활성화에 관한 법률 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 자전거 이용 활성화에 관한 법률 시행령
+    enabled: true
+    priority: 10
+
+  - source_id: bicycle_use_promotion_act_enforcement_rule
+    source_name: 자전거 이용 활성화에 관한 법률 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 자전거 이용 활성화에 관한 법률 시행규칙
+    enabled: true
+    priority: 10
+
+  - source_id: public_transport_promotion_act
+    source_name: 대중교통의 육성 및 이용촉진에 관한 법률
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 대중교통의 육성 및 이용촉진에 관한 법률
+    enabled: true
+    priority: 11
+
+  - source_id: public_transport_promotion_act_enforcement_decree
+    source_name: 대중교통의 육성 및 이용촉진에 관한 법률 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 대중교통의 육성 및 이용촉진에 관한 법률 시행령
+    enabled: true
+    priority: 11
+
+  - source_id: public_transport_promotion_act_enforcement_rule
+    source_name: 대중교통의 육성 및 이용촉진에 관한 법률 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 대중교통의 육성 및 이용촉진에 관한 법률 시행규칙
+    enabled: true
+    priority: 11
+
+  - source_id: urban_traffic_improvement_promotion_act
+    source_name: 도시교통정비 촉진법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 도시교통정비 촉진법
+    enabled: true
+    priority: 12
+
+  - source_id: urban_traffic_improvement_promotion_act_enforcement_decree
+    source_name: 도시교통정비 촉진법 시행령
+    source_type: enforcement_decree
+    provider: law_go_kr
+    provider_source_id: 도시교통정비 촉진법 시행령
+    enabled: true
+    priority: 12
+
+  - source_id: urban_traffic_improvement_promotion_act_enforcement_rule
+    source_name: 도시교통정비 촉진법 시행규칙
+    source_type: enforcement_rule
+    provider: law_go_kr
+    provider_source_id: 도시교통정비 촉진법 시행규칙
+    enabled: true
+    priority: 12

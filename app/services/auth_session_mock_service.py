@@ -7,7 +7,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from app.services.auth_error_contract import is_valid_mock_bearer_header
+from app.services.auth_error_contract import build_auth_error, is_valid_mock_bearer_header
+from app.services.google_auth_service import decode_access_token
 
 
 MOCK_GUEST_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -69,6 +70,54 @@ def get_current_auth_subject(
             return int(error_body["error"]["status"]), error_body
 
         token = authorization_header.strip().split()[1]
+        app_jwt_valid, app_jwt_claims = decode_access_token(token)
+        if not app_jwt_valid and token.count(".") == 2:
+            reason = str(app_jwt_claims.get("reason") or "invalid_app_jwt")
+            if reason == "expired_token":
+                return 401, build_auth_error("token_expired")
+            if reason != "not_app_jwt":
+                return 401, build_auth_error("token_invalid", reason=reason)
+        if app_jwt_valid:
+            user_id = str(app_jwt_claims["sub"])
+            auth_session_id = str(app_jwt_claims["jti"])
+            return 200, {
+                "auth_state": "authenticated",
+                "user": {
+                    "user_id": user_id,
+                    "email": app_jwt_claims.get("email"),
+                    "display_name": app_jwt_claims.get("name") or "Google user",
+                    "status": "active",
+                    "auth_provider": app_jwt_claims.get("auth_provider") or "google",
+                    "provider_subject": app_jwt_claims.get("provider_subject"),
+                    "policy_status": "app_jwt_verified",
+                },
+                "guest": _guest_snapshot(guest_id),
+                "subject": {
+                    "subject_id": f"user:{user_id}",
+                    "subject_type": "user",
+                    "user_id": user_id,
+                    "guest_id": _normalize_guest_id(guest_id),
+                    "auth_session_id": auth_session_id,
+                    "is_authenticated": True,
+                },
+                "auth_session": {
+                    "auth_session_id": auth_session_id,
+                    "jwt_jti": auth_session_id,
+                    "status": "active",
+                    "verification": "app_jwt_hmac",
+                    "provider": app_jwt_claims.get("auth_provider") or "google",
+                },
+                "session_binding": {
+                    "session_id": _text(session_id) or None,
+                    "can_bind_to_chat_session": bool(session_id),
+                },
+                "rate_limit": _rate_limit_policy(subject_id=f"user:{user_id}"),
+                "merge_policy": _merge_policy(),
+                "limitations": [
+                    "App JWT is verified locally; Google ID token verification happens at the login boundary.",
+                ],
+            }
+
         auth_session_id = _auth_session_id_for_token(token)
         user_id = _user_id_for_token(token)
         return 200, {

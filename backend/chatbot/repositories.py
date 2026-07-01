@@ -15,6 +15,7 @@ from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
 from app.services.history_event_mock_service import (
+    SENSITIVE_METADATA_KEYS,
     build_agent_execution_events,
     build_history_event,
 )
@@ -35,6 +36,8 @@ from chatbot.models import (
     ChatMessage,
     ChatSession,
     ChatSessionStatus,
+    CodeGroup,
+    CodeItem,
     GuestIdentity,
     GuestIdentityStatus,
     HistoryEvent,
@@ -42,6 +45,8 @@ from chatbot.models import (
     Report,
     ReportStatus,
     ReportType,
+    Subscription,
+    SubscriptionStatus,
     UsageEvent,
     UsageQuota,
     UserAccount,
@@ -49,6 +54,93 @@ from chatbot.models import (
     UploadedFile,
     UploadedFileStatus,
 )
+from chatbot.object_storage import (
+    build_report_storage_reference,
+    build_upload_storage_reference,
+    object_storage_policy,
+    storage_reference_from_uri,
+)
+from chatbot.progress_cache import (
+    progress_cache_policy,
+    write_analysis_job_progress,
+    write_chat_session_state,
+)
+
+USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
+USAGE_POLICY_LIMITS = {
+    "anonymous": {
+        "chat_message": 2,
+        "file_upload": 1,
+        "agent_run": 1,
+        "report_action": 1,
+    },
+    "guest": {
+        "chat_message": 5,
+        "file_upload": 3,
+        "agent_run": 3,
+        "report_action": 2,
+    },
+    "free": {
+        "chat_message": 100,
+        "file_upload": 30,
+        "agent_run": 30,
+        "report_action": 30,
+    },
+    "paid": {
+        "chat_message": 500,
+        "file_upload": 100,
+        "agent_run": 120,
+        "report_action": 100,
+    },
+}
+
+HISTORY_POLICY_VERSION = "history_operating_policy.v1"
+HISTORY_RETENTION_DAYS = {
+    "anonymous": 1,
+    "guest": 7,
+    "user": 365,
+    "authenticated": 365,
+}
+HISTORY_METADATA_ALLOWED_KEYS = {
+    "action",
+    "active_node",
+    "analysis_plan_id",
+    "attachment_count",
+    "card_count",
+    "error_code",
+    "evidence_count",
+    "execution_id",
+    "execution_status",
+    "has_download_url",
+    "http_status",
+    "is_authenticated",
+    "limitation_count",
+    "merge_policy",
+    "metadata_policy",
+    "missing_fields",
+    "mock_scenario",
+    "mock_status",
+    "node_code",
+    "node_name",
+    "pending_fields",
+    "rate_limit_keys",
+    "report_status",
+    "response_status",
+    "routing_intent",
+    "session_status",
+    "status_counts",
+    "subject_type",
+    "ttl_seconds",
+}
+HISTORY_AFTER_SERVICE_EVENT_TYPES = {
+    "analysis_job_created",
+    "agent_call_completed",
+    "agent_call_failed",
+    "agent_call_partial",
+    "chat_message_created",
+    "report_downloaded",
+    "report_saved",
+}
 
 
 def register_uploaded_file(
@@ -57,8 +149,8 @@ def register_uploaded_file(
 ) -> dict[str, Any]:
     """Register a canonical file upload and persist its metadata in Django DB.
 
-    The byte/object storage path still goes through the mock local storage
-    service until the object-storage adapter is introduced.
+    The mock sidecar remains the local byte source, while the canonical
+    metadata exposes the object-storage adapter URI and fallback envelope.
     """
 
     attachment = register_mock_attachment(payload, upload_file=upload_file)
@@ -74,6 +166,15 @@ def persist_uploaded_file_metadata(
 ) -> dict[str, Any]:
     session = _get_or_create_session(attachment.get("session_id"), owner_id=owner_id)
     metadata = _metadata_snapshot(attachment, raw_payload=raw_payload)
+    object_storage = build_upload_storage_reference(
+        attachment,
+        owner_id=owner_id or (session.owner_id if session else ""),
+    )
+    metadata["source_storage_uri"] = _text(attachment.get("storage_uri"))
+    metadata["object_storage"] = object_storage
+    agent_handoff = dict(attachment.get("agent_handoff") or {})
+    agent_handoff["storage_uri"] = object_storage["storage_uri"]
+    agent_handoff["object_storage"] = object_storage
 
     with transaction.atomic():
         uploaded_file, _created = UploadedFile.objects.update_or_create(
@@ -86,11 +187,11 @@ def persist_uploaded_file_metadata(
                 "original_filename": _text(attachment.get("original_filename")),
                 "content_type": _text(attachment.get("content_type")),
                 "size_bytes": _positive_int_or_none(attachment.get("size_bytes")),
-                "storage_uri": _text(attachment.get("storage_uri")),
+                "storage_uri": object_storage["storage_uri"],
                 "privacy_risk": True,
                 "status": _model_status(attachment.get("status")),
                 "scan_status": "not_started",
-                "agent_handoff": attachment.get("agent_handoff") or {},
+                "agent_handoff": agent_handoff,
                 "metadata": metadata,
             },
         )
@@ -98,10 +199,16 @@ def persist_uploaded_file_metadata(
     return uploaded_file_to_api(uploaded_file)
 
 
-def list_uploaded_files(session_id: str | None = None) -> list[dict[str, Any]]:
+def list_uploaded_files(
+    session_id: str | None = None,
+    *,
+    owner_id: str | None = None,
+) -> list[dict[str, Any]]:
     queryset = UploadedFile.objects.select_related("session").order_by("-created_at")
     if session_id:
         queryset = queryset.filter(session__session_id=session_id)
+    if owner_id is not None:
+        queryset = queryset.filter(owner_id=owner_id)
     return [uploaded_file_to_api(uploaded_file) for uploaded_file in queryset]
 
 
@@ -114,6 +221,41 @@ def get_uploaded_file(attachment_id: str) -> dict[str, Any] | None:
     if uploaded_file is None:
         return None
     return uploaded_file_to_api(uploaded_file)
+
+
+def get_uploaded_file_access_metadata(attachment_id: str) -> dict[str, Any] | None:
+    uploaded_file = (
+        UploadedFile.objects.select_related("session")
+        .filter(attachment_id=attachment_id)
+        .first()
+    )
+    if uploaded_file is None:
+        return None
+    session = uploaded_file.session
+    object_storage = _uploaded_file_object_storage(uploaded_file)
+    return {
+        "type": "uploaded_file",
+        "attachment_id": uploaded_file.attachment_id,
+        "owner_id": uploaded_file.owner_id or (session.owner_id if session else ""),
+        "session_id": session.session_id if session else "",
+        "guest_id": _chat_session_guest_id(session),
+        "storage_backend": object_storage["backend"],
+    }
+
+
+def get_chat_session_access_metadata(session_id: str | None) -> dict[str, Any] | None:
+    normalized_session_id = _text(session_id)
+    if not normalized_session_id:
+        return None
+    session = ChatSession.objects.filter(session_id=normalized_session_id).first()
+    if session is None:
+        return None
+    return {
+        "type": "chat_session",
+        "session_id": session.session_id,
+        "owner_id": session.owner_id,
+        "guest_id": _chat_session_guest_id(session),
+    }
 
 
 def persist_chat_message_analysis_boundary(
@@ -181,10 +323,15 @@ def persist_chat_message_analysis_boundary(
         )
         _upsert_initial_job_event(job, progress=progress)
 
+    progress_cache = write_analysis_job_progress(job)
+    session_cache = write_chat_session_state(session, latest_job=job)
+
     return {
         "message_id": message.message_id,
         "job_id": job.job_id,
         "session_id": session.session_id,
+        "progress_cache": progress_cache,
+        "session_cache": session_cache,
     }
 
 
@@ -277,6 +424,8 @@ def persist_current_auth_subject(
 
     with transaction.atomic():
         user = _get_or_create_user_account(user_id)
+        if user is not None:
+            _update_user_account_from_auth_payload(user, auth_payload)
         guest = _get_or_create_guest_identity(guest_id)
         auth_session = None
         if auth_session_id:
@@ -288,6 +437,9 @@ def persist_current_auth_subject(
                     "subject_type": subject_type,
                     "subject_id": subject_id,
                     "status": AuthSessionStatus.ACTIVE,
+                    "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
+                    "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
+                    "revoked_at": None,
                     "metadata": {
                         "source": "auth_me",
                         "auth_state": auth_payload.get("auth_state"),
@@ -347,6 +499,214 @@ def persist_current_auth_subject(
     }
 
 
+def persist_auth_token_refresh(
+    auth_payload: dict[str, Any],
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    subject = _dict_or_empty(auth_payload.get("subject"))
+    user_id = _text(subject.get("user_id"))
+    guest_id = _normalize_guest_id(subject.get("guest_id"))
+    auth_session_id = _text(subject.get("auth_session_id"))
+    if not user_id or not auth_session_id:
+        return _auth_persistence_skipped("missing_refresh_subject")
+
+    with transaction.atomic():
+        user = _get_or_create_user_account(user_id)
+        if user is not None:
+            _update_user_account_from_auth_payload(user, auth_payload)
+        guest = _get_or_create_guest_identity(guest_id)
+        auth_session, _created = AuthSession.objects.update_or_create(
+            auth_session_id=auth_session_id,
+            defaults={
+                "user": user,
+                "guest": guest,
+                "subject_type": "user",
+                "subject_id": f"user:{user_id}",
+                "status": AuthSessionStatus.ACTIVE,
+                "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
+                "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
+                "revoked_at": None,
+                "metadata": {
+                    "source": "auth_refresh",
+                    "auth_state": auth_payload.get("auth_state"),
+                    "verification": _dict_or_empty(auth_payload.get("auth_session")).get("verification"),
+                    "refresh_policy": _dict_or_empty(auth_payload.get("auth_session")).get("refresh_policy"),
+                    "rate_limit": auth_payload.get("rate_limit") or {},
+                },
+            },
+        )
+        chat_session = _bind_chat_session_auth_context(
+            session_id=session_id,
+            owner_id=user_id,
+            auth_context={
+                "auth_state": auth_payload.get("auth_state"),
+                "subject_id": f"user:{user_id}",
+                "subject_type": "user",
+                "user_id": user_id,
+                "guest_id": guest_id or None,
+                "auth_session_id": auth_session_id,
+            },
+        )
+        event = _create_auth_event(
+            event_type="auth_token_refreshed",
+            subject_id=f"user:{user_id}",
+            user=user,
+            guest=guest,
+            auth_session=auth_session,
+            metadata={
+                "source": "auth_refresh",
+                "auth_state": auth_payload.get("auth_state"),
+                "chat_session_id": chat_session.session_id if chat_session else None,
+                "expires_at": auth_payload.get("expires_at"),
+            },
+        )
+
+    return {
+        "backend": "postgresql",
+        "tables": [
+            UserAccount._meta.db_table,
+            GuestIdentity._meta.db_table,
+            AuthSession._meta.db_table,
+            AuthEvent._meta.db_table,
+            ChatSession._meta.db_table,
+        ],
+        "auth_session_table": AuthSession._meta.db_table,
+        "auth_events_table": AuthEvent._meta.db_table,
+        "chat_session_table": ChatSession._meta.db_table,
+        "user_id": user.user_id if user else None,
+        "guest_id": guest.guest_id if guest else None,
+        "auth_session_id": auth_session.auth_session_id,
+        "auth_session_status": auth_session.status,
+        "event_id": event.event_id,
+        "session_id": chat_session.session_id if chat_session else None,
+        "status": "saved",
+    }
+
+
+def persist_auth_logout(
+    auth_payload: dict[str, Any],
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    subject = _dict_or_empty(auth_payload.get("subject"))
+    user_id = _text(subject.get("user_id"))
+    guest_id = _normalize_guest_id(subject.get("guest_id"))
+    auth_session_id = _text(subject.get("auth_session_id"))
+    if not user_id or not auth_session_id:
+        return _auth_persistence_skipped("missing_logout_subject")
+
+    revoked_at = _datetime_or_none(auth_payload.get("revoked_at")) or timezone.now()
+    with transaction.atomic():
+        user = _get_or_create_user_account(user_id)
+        if user is not None:
+            _update_user_account_from_auth_payload(user, auth_payload)
+        guest = _get_or_create_guest_identity(guest_id)
+        auth_session, _created = AuthSession.objects.update_or_create(
+            auth_session_id=auth_session_id,
+            defaults={
+                "user": user,
+                "guest": guest,
+                "subject_type": "user",
+                "subject_id": f"user:{user_id}",
+                "status": AuthSessionStatus.REVOKED,
+                "revoked_at": revoked_at,
+                "metadata": {
+                    "source": "auth_logout",
+                    "auth_state": "anonymous",
+                    "client_action": auth_payload.get("client_action") or {},
+                },
+            },
+        )
+        chat_session = _bind_chat_session_auth_context(
+            session_id=session_id,
+            owner_id=user_id,
+            auth_context={
+                "auth_state": "guest" if guest_id else "anonymous",
+                "subject_id": f"user:{user_id}",
+                "subject_type": "user",
+                "user_id": user_id,
+                "guest_id": guest_id or None,
+                "auth_session_id": auth_session_id,
+            },
+        )
+        event = _create_auth_event(
+            event_type="auth_logout_completed",
+            subject_id=f"user:{user_id}",
+            user=user,
+            guest=guest,
+            auth_session=auth_session,
+            metadata={
+                "source": "auth_logout",
+                "auth_state": "anonymous",
+                "chat_session_id": chat_session.session_id if chat_session else None,
+                "revoked_at": revoked_at.isoformat(),
+            },
+        )
+
+    return {
+        "backend": "postgresql",
+        "tables": [
+            UserAccount._meta.db_table,
+            GuestIdentity._meta.db_table,
+            AuthSession._meta.db_table,
+            AuthEvent._meta.db_table,
+            ChatSession._meta.db_table,
+        ],
+        "auth_session_table": AuthSession._meta.db_table,
+        "auth_events_table": AuthEvent._meta.db_table,
+        "chat_session_table": ChatSession._meta.db_table,
+        "user_id": user.user_id if user else None,
+        "guest_id": guest.guest_id if guest else None,
+        "auth_session_id": auth_session.auth_session_id,
+        "auth_session_status": auth_session.status,
+        "event_id": event.event_id,
+        "session_id": chat_session.session_id if chat_session else None,
+        "status": "saved",
+    }
+
+
+def _update_user_account_from_auth_payload(
+    user: UserAccount,
+    auth_payload: dict[str, Any],
+) -> None:
+    user_payload = _dict_or_empty(auth_payload.get("user"))
+    metadata = dict(user.metadata or {})
+    changed_fields: list[str] = []
+
+    email = _text(user_payload.get("email"))
+    if email and user.email != email:
+        user.email = email
+        changed_fields.append("email")
+
+    display_name = _text(user_payload.get("display_name"))
+    if display_name and user.display_name != display_name:
+        user.display_name = display_name
+        changed_fields.append("display_name")
+
+    auth_provider = _text(user_payload.get("auth_provider") or auth_payload.get("provider"))
+    if auth_provider and user.auth_provider != auth_provider:
+        user.auth_provider = auth_provider
+        changed_fields.append("auth_provider")
+
+    provider_subject = _text(user_payload.get("provider_subject"))
+    if provider_subject and user.provider_subject != provider_subject:
+        user.provider_subject = provider_subject
+        changed_fields.append("provider_subject")
+
+    for key in ("picture", "policy_status"):
+        value = user_payload.get(key)
+        if value is not None and metadata.get(key) != value:
+            metadata[key] = value
+    metadata.setdefault("source", "auth_subject")
+    if metadata != user.metadata:
+        user.metadata = metadata
+        changed_fields.append("metadata")
+
+    if changed_fields:
+        user.save(update_fields=[*sorted(set(changed_fields)), "updated_at"])
+
+
 def record_usage_event(
     payload: dict[str, Any],
     *,
@@ -360,6 +720,7 @@ def record_usage_event(
     subject_id = subject["subject_id"]
     subject_type = subject["subject_type"]
     quota_key = f"rate_limit:{subject_id}:{scope}"
+    policy = _usage_policy_for_subject(subject, scope=scope)
     now = timezone.now()
 
     with transaction.atomic():
@@ -368,16 +729,30 @@ def record_usage_event(
             defaults={
                 "subject_id": subject_id,
                 "scope": scope,
-                "limit_count": _default_usage_limit(subject_type, scope),
+                "limit_count": policy["limit_count"],
                 "used_count": 0,
                 "reset_at": now + timedelta(days=1),
                 "metadata": {
-                    "source": "canonical_usage_enforcement",
+                    "source": "canonical_usage_policy",
                     "subject_type": subject_type,
-                    "policy_status": "mock_default",
+                    "plan_code": policy["plan_code"],
+                    "subscription_id": policy["subscription_id"],
+                    "policy_code_item": policy["policy_code_item"],
+                    "policy_status": policy["policy_status"],
+                    "policy_managed": True,
                 },
             },
         )
+        if not _created and quota.metadata.get("policy_managed"):
+            quota.metadata = {
+                **quota.metadata,
+                "subject_type": subject_type,
+                "plan_code": policy["plan_code"],
+                "subscription_id": policy["subscription_id"],
+                "policy_code_item": policy["policy_code_item"],
+                "policy_status": policy["policy_status"],
+            }
+            quota.limit_count = policy["limit_count"]
         if quota.reset_at and quota.reset_at <= now:
             quota.used_count = 0
             quota.reset_at = now + timedelta(days=1)
@@ -386,7 +761,7 @@ def record_usage_event(
         allowed = quota.limit_count == 0 or projected_count <= quota.limit_count
         if allowed:
             quota.used_count = projected_count
-        quota.save(update_fields=["used_count", "reset_at", "updated_at"])
+        quota.save(update_fields=["limit_count", "used_count", "reset_at", "metadata", "updated_at"])
 
         usage_event = UsageEvent.objects.create(
             usage_event_id=_usage_event_id(subject_id, scope),
@@ -398,6 +773,9 @@ def record_usage_event(
                 "source": "canonical_usage_enforcement",
                 "status": "allowed" if allowed else "blocked",
                 "subject_type": subject_type,
+                "plan_code": policy["plan_code"],
+                "subscription_id": policy["subscription_id"],
+                "policy_code_item": policy["policy_code_item"],
                 "limit_count": quota.limit_count,
                 "used_count": quota.used_count,
                 "requested_amount": normalized_amount,
@@ -416,6 +794,10 @@ def record_usage_event(
         "subject_type": subject_type,
         "scope": scope,
         "quota_key": quota_key,
+        "plan_code": policy["plan_code"],
+        "subscription_id": policy["subscription_id"],
+        "policy_code_item": policy["policy_code_item"],
+        "policy_status": policy["policy_status"],
         "allowed": allowed,
         "limit_count": quota.limit_count,
         "used_count": quota.used_count,
@@ -450,6 +832,7 @@ def record_history_event_record(
         metadata=metadata,
         privacy=privacy,
     )
+    event_payload["metadata"] = _history_metadata_snapshot(metadata)
     return history_event_to_api(_upsert_history_event_payload(event_payload))
 
 
@@ -480,11 +863,15 @@ def list_history_event_records(
     guest_id: str | None = None,
     job_id: str | None = None,
     event_type: str | None = None,
+    subject_type: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Read history events from PostgreSQL using the public history filters."""
 
     queryset = HistoryEvent.objects.all()
+    retention_days = _history_retention_days(subject_type)
+    if retention_days:
+        queryset = queryset.filter(occurred_at__gte=timezone.now() - timedelta(days=retention_days))
     if session_id:
         queryset = queryset.filter(subject_session_id=session_id)
     if user_id:
@@ -498,6 +885,58 @@ def list_history_event_records(
 
     rows = list(queryset.order_by("-occurred_at", "-id")[: max(limit, 1)])
     return [history_event_to_api(event) for event in reversed(rows)]
+
+
+def history_operating_policy(subject_type: str | None = None) -> dict[str, Any]:
+    normalized_subject_type = _history_subject_type(subject_type)
+    return {
+        "policy_version": HISTORY_POLICY_VERSION,
+        "storage_policy": "standard_light",
+        "retention": {
+            "applied_subject_type": normalized_subject_type,
+            "applied_days": _history_retention_days(normalized_subject_type),
+            "anonymous_days": HISTORY_RETENTION_DAYS["anonymous"],
+            "guest_days": HISTORY_RETENTION_DAYS["guest"],
+            "user_days": HISTORY_RETENTION_DAYS["user"],
+        },
+        "query_scope": {
+            "member": "own_user_history_only",
+            "guest": "own_guest_or_authorized_session_only",
+            "anonymous": "history_query_denied_without_subject",
+        },
+        "metadata_policy": {
+            "mode": "allowlist_with_sensitive_key_blocklist",
+            "allowed_keys": sorted(HISTORY_METADATA_ALLOWED_KEYS),
+            "blocked_keys": sorted(SENSITIVE_METADATA_KEYS),
+        },
+        "after_service_summary": {
+            "source": "history_events_standard_light",
+            "eligible_event_types": sorted(HISTORY_AFTER_SERVICE_EVENT_TYPES),
+            "excludes": ["user_text", "ocr_raw", "agent_reasoning", "raw_output"],
+        },
+    }
+
+
+def build_history_after_service_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    eligible_events = [
+        event
+        for event in events
+        if _text(event.get("event_type")) in HISTORY_AFTER_SERVICE_EVENT_TYPES
+    ]
+    recent_event_types = []
+    for event in eligible_events:
+        event_type = _text(event.get("event_type"))
+        if event_type and event_type not in recent_event_types:
+            recent_event_types.append(event_type)
+
+    return {
+        "available": bool(eligible_events),
+        "source_event_count": len(eligible_events),
+        "source": "history_events_standard_light",
+        "summary_basis": recent_event_types[:8],
+        "excludes_sensitive_payload": True,
+        "status": "ready" if eligible_events else "insufficient_history",
+    }
 
 
 def history_event_to_api(event: HistoryEvent) -> dict[str, Any]:
@@ -600,6 +1039,9 @@ def persist_analysis_job_execution(
             agent_results=agent_results,
         )
 
+    progress_cache = write_analysis_job_progress(job)
+    session_cache = write_chat_session_state(session, latest_job=job)
+
     return {
         "backend": "postgresql",
         "tables": [
@@ -618,6 +1060,8 @@ def persist_analysis_job_execution(
         "agent_invocation_ids": [invocation.invocation_id for invocation in agent_invocations],
         "ai_session_id": ai_session.ai_session_id,
         "node_codes": [result.node_code for result in agent_results],
+        "progress_cache": progress_cache,
+        "session_cache": session_cache,
         "status": "saved",
     }
 
@@ -669,31 +1113,43 @@ def persist_report_action(
     job = AnalysisJob.objects.filter(job_id=_text(payload.get("job_id"))).first()
     session = job.session if job else _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
     display_result = _display_result_for_job(job)
+    report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
+    source_storage_uri = _text(payload.get("storage_uri")) or f"mock://reports/{report_id}"
+    object_storage = build_report_storage_reference(
+        report_id=report_id,
+        owner_id=report_owner_id,
+        session_id=session.session_id if session else "",
+        job_id=job.job_id if job else "",
+        source_uri=source_storage_uri,
+    )
 
     report, _created = Report.objects.update_or_create(
         report_id=report_id,
         defaults={
-            "owner_id": owner_id or (job.owner_id if job else "") or (session.owner_id if session else ""),
+            "owner_id": report_owner_id,
             "session": session,
             "job": job,
             "display_result": display_result,
             "report_type": _report_type(payload.get("report_type")),
             "status": _report_status(report_payload.get("status")),
             "title": _report_title(payload, report_payload),
-            "storage_uri": _text(payload.get("storage_uri")) or f"mock://reports/{report_id}",
+            "storage_uri": object_storage["storage_uri"],
             "content_summary": _report_content_summary(display_result, report_payload),
             "content": {
                 "format": _text(payload.get("format")) or "mock_text",
                 "action": _text(payload.get("action")) or "save",
                 "case_id": report_payload.get("case_id"),
                 "download_url": report_payload.get("download_url"),
+                "object_storage": object_storage,
             },
             "metadata": {
                 "source": "canonical_report_action",
                 "action": _text(payload.get("action")) or "save",
                 "mock_status": report_payload.get("status"),
                 "limitations": report_payload.get("limitations", []),
-                "object_storage_status": "mock_placeholder",
+                "object_storage_status": object_storage["status"],
+                "object_storage": object_storage,
+                "source_storage_uri": source_storage_uri,
                 "raw_payload": _safe_payload(payload),
             },
         },
@@ -705,7 +1161,7 @@ def persist_report_action(
         "report_id": report.report_id,
         "status": "metadata_saved",
         "storage_uri": report.storage_uri,
-        "object_storage": "mock_placeholder",
+        "object_storage": object_storage,
     }
 
 
@@ -718,19 +1174,26 @@ def get_report_download_metadata(report_id: str) -> dict[str, Any] | None:
     if report is None:
         return None
 
-    storage_uri = report.storage_uri or f"mock://reports/{report.report_id}"
-    storage_backend = _storage_backend(storage_uri)
+    object_storage = _report_object_storage(report)
+    storage_uri = object_storage["storage_uri"]
+    storage_backend = object_storage["backend"]
     return {
         "report_id": report.report_id,
         "owner_id": report.owner_id,
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
-        "filename": f"{report.report_id}.txt",
-        "content_type": "text/plain; charset=utf-8",
+        "filename": object_storage.get("filename") or f"{report.report_id}.txt",
+        "content_type": object_storage.get("content_type") or "text/plain; charset=utf-8",
         "storage_uri": storage_uri,
         "storage_backend": storage_backend,
+        "object_storage": object_storage,
+        "object_key": object_storage.get("key", ""),
         "status": report.status,
-        "body": _report_download_body(report, storage_backend=storage_backend),
+        "body": _report_download_body(
+            report,
+            storage_backend=storage_backend,
+            object_storage=object_storage,
+        ),
     }
 
 
@@ -740,40 +1203,91 @@ def authorize_report_download_metadata(
 ) -> dict[str, Any]:
     """Authorize report metadata download before the object body is returned."""
 
+    resource = {
+        "type": "report",
+        "report_id": download.get("report_id"),
+        "owner_id": download.get("owner_id"),
+        "session_id": download.get("session_id"),
+        "storage_backend": download.get("storage_backend"),
+    }
+    return authorize_resource_access(resource, payload)
+
+
+def access_subject_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     auth_context = _dict_or_empty(payload.get("auth_context"))
     user_id = _owner_id(payload) or _text(auth_context.get("user_id"))
     guest_id = _normalize_guest_id(payload.get("guest_id") or auth_context.get("guest_id"))
     session_id = _text(payload.get("session_id") or auth_context.get("session_id"))
-    report_owner_id = _text(download.get("owner_id"))
-    report_session_id = _text(download.get("session_id"))
+    auth_session_id = _text(payload.get("auth_session_id") or auth_context.get("auth_session_id"))
+
+    if user_id:
+        subject_type = "user"
+        subject_id = f"user:{user_id}"
+    elif guest_id:
+        subject_type = "guest"
+        subject_id = f"guest:{guest_id}"
+    else:
+        subject_type = "anonymous"
+        subject_id = "anonymous"
+
+    return {
+        "subject": {
+            "subject_id": subject_id,
+            "subject_type": subject_type,
+            "user_id": user_id or None,
+            "guest_id": guest_id or None,
+            "session_id": session_id or None,
+            "auth_session_id": auth_session_id or None,
+        },
+    }
+
+
+def authorize_resource_access(
+    resource: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Authorize a canonical resource using the normalized mock auth subject."""
+
+    subject = access_subject_from_payload(payload)["subject"]
+    user_id = _text(subject.get("user_id"))
+    guest_id = _normalize_guest_id(subject.get("guest_id"))
+    session_id = _text(subject.get("session_id"))
+    resource_owner_id = _text(resource.get("owner_id"))
+    resource_guest_id = _normalize_guest_id(resource.get("guest_id"))
+    resource_session_id = _text(resource.get("session_id"))
 
     allowed = False
     reason = "owner_mismatch"
-    if report_owner_id:
-        allowed = bool(user_id and user_id == report_owner_id)
+    if resource_owner_id:
+        allowed = bool(user_id and user_id == resource_owner_id)
         reason = "owner_match" if allowed else "owner_mismatch"
-    elif report_session_id:
-        allowed = bool(session_id and session_id == report_session_id)
+    elif resource_guest_id:
+        allowed = bool(guest_id and guest_id == resource_guest_id)
+        reason = "guest_match" if allowed else "guest_mismatch"
+    elif resource_session_id:
+        allowed = bool(session_id and session_id == resource_session_id)
         reason = "session_match" if allowed else "session_mismatch"
     else:
         allowed = True
-        reason = "legacy_mock_report"
+        reason = "legacy_unowned_resource"
 
     return {
         "contract_version": "object_access.v1",
         "allowed": allowed,
         "reason": reason,
-        "subject": {
-            "user_id": user_id or None,
-            "guest_id": guest_id or None,
-            "session_id": session_id or None,
-        },
+        "subject": subject,
         "resource": {
-            "type": "report",
-            "report_id": download.get("report_id"),
-            "owner_id": report_owner_id or None,
-            "session_id": report_session_id or None,
-            "storage_backend": download.get("storage_backend"),
+            key: value
+            for key, value in {
+                "type": resource.get("type"),
+                "report_id": resource.get("report_id"),
+                "attachment_id": resource.get("attachment_id"),
+                "session_id": resource_session_id or None,
+                "owner_id": resource_owner_id or None,
+                "guest_id": resource_guest_id or None,
+                "storage_backend": resource.get("storage_backend"),
+            }.items()
+            if value is not None
         },
     }
 
@@ -822,6 +1336,8 @@ def get_mycase_summary(
                 Report._meta.db_table,
             ],
         },
+        "progress_cache": progress_cache_policy(),
+        "object_storage": object_storage_policy(),
         "active_cases": sum(1 for case in cases if case["case_status"] in active_statuses),
         "due_soon_cases": 0,
         "saved_reports": saved_reports.count(),
@@ -845,6 +1361,7 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
         else metadata.get("session_id")
     )
     filename = metadata.get("filename") or Path(uploaded_file.original_filename).name
+    object_storage = _uploaded_file_object_storage(uploaded_file)
 
     attachment = {
         "attachment_id": uploaded_file.attachment_id,
@@ -857,6 +1374,7 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
         "content_type": uploaded_file.content_type,
         "size_bytes": uploaded_file.size_bytes or 0,
         "storage_uri": uploaded_file.storage_uri,
+        "object_storage": object_storage,
         "status": uploaded_file.status,
         "created_at": uploaded_file.created_at.isoformat(),
         "checks": checks,
@@ -866,9 +1384,25 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
             "backend": "postgresql",
             "table": UploadedFile._meta.db_table,
             "status": "metadata_saved",
+            "object_storage": object_storage,
         },
     }
     return {key: value for key, value in attachment.items() if value is not None}
+
+
+def _uploaded_file_object_storage(uploaded_file: UploadedFile) -> dict[str, Any]:
+    metadata = uploaded_file.metadata if isinstance(uploaded_file.metadata, dict) else {}
+    object_storage = metadata.get("object_storage")
+    if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
+        return dict(object_storage)
+    return storage_reference_from_uri(
+        uploaded_file.storage_uri,
+        resource_type="uploaded_file",
+        resource_id=uploaded_file.attachment_id,
+        filename=Path(uploaded_file.original_filename).name,
+        content_type=uploaded_file.content_type,
+        size_bytes=uploaded_file.size_bytes,
+    )
 
 
 def _get_or_create_session(session_id: Any, *, owner_id: str) -> ChatSession | None:
@@ -916,6 +1450,14 @@ def _bind_chat_session_auth_context(
         session.owner_id = owner_id
     session.save(update_fields=["owner_id", "metadata", "updated_at"])
     return session
+
+
+def _chat_session_guest_id(session: ChatSession | None) -> str:
+    if session is None:
+        return ""
+    metadata = session.metadata if isinstance(session.metadata, dict) else {}
+    auth_context = metadata.get("auth_context") if isinstance(metadata.get("auth_context"), dict) else {}
+    return _normalize_guest_id(auth_context.get("guest_id"))
 
 
 def _create_auth_event(
@@ -1236,28 +1778,116 @@ def _usage_event_id(subject_id: str, scope: str) -> str:
     return f"use_{digest}"
 
 
-def _default_usage_limit(subject_type: str, scope: str) -> int:
-    policy = {
-        "anonymous": {
-            "chat_message": 2,
-            "file_upload": 1,
-            "agent_run": 1,
-            "report_action": 1,
-        },
-        "guest": {
-            "chat_message": 5,
-            "file_upload": 3,
-            "agent_run": 3,
-            "report_action": 2,
-        },
-        "user": {
-            "chat_message": 100,
-            "file_upload": 30,
-            "agent_run": 30,
-            "report_action": 30,
-        },
+def _usage_policy_for_subject(subject: dict[str, str], *, scope: str) -> dict[str, Any]:
+    plan_code = _usage_plan_code(subject)
+    code_item = _ensure_usage_policy_code_item(plan_code)
+    limits = _dict_or_empty(code_item.metadata.get("limits"))
+    limit_count = _positive_int_or_none(limits.get(scope))
+    if limit_count is None:
+        limit_count = _default_usage_limit(plan_code, scope)
+    subscription = _active_subscription_for_subject(subject)
+    return {
+        "plan_code": plan_code,
+        "subscription_id": subscription.subscription_id if subscription else None,
+        "policy_code_item": f"{USAGE_POLICY_GROUP_CODE}:{code_item.code}",
+        "policy_status": _text(code_item.metadata.get("policy_status")) or "seeded_default",
+        "limit_count": limit_count,
     }
-    return policy.get(subject_type, policy["anonymous"]).get(scope, 10)
+
+
+def _usage_plan_code(subject: dict[str, str]) -> str:
+    subject_type = subject["subject_type"]
+    if subject_type == "anonymous":
+        return "anonymous"
+    if subject_type == "guest":
+        return "guest"
+
+    subscription = _active_subscription_for_subject(subject)
+    if subscription:
+        return subscription.plan_code
+    user = _get_or_create_user_account(subject["user_id"])
+    if user is not None:
+        _ensure_default_free_subscription(user)
+    return "free"
+
+
+def _active_subscription_for_subject(subject: dict[str, str]) -> Subscription | None:
+    user_id = subject.get("user_id")
+    if not user_id:
+        return None
+    user = _get_or_create_user_account(user_id)
+    if user is None:
+        return None
+    return (
+        Subscription.objects.filter(
+            user=user,
+            status__in=[
+                SubscriptionStatus.ACTIVE,
+                SubscriptionStatus.TRIAL,
+                SubscriptionStatus.FREE,
+            ],
+        )
+        .order_by("-updated_at")
+        .first()
+    )
+
+
+def _ensure_default_free_subscription(user: UserAccount) -> Subscription:
+    subscription_id = f"sub_free_{user.user_id}"
+    subscription, _created = Subscription.objects.get_or_create(
+        subscription_id=subscription_id,
+        defaults={
+            "user": user,
+            "plan_code": "free",
+            "status": SubscriptionStatus.FREE,
+            "metadata": {
+                "source": "canonical_usage_policy",
+                "policy_status": "seeded_default",
+            },
+        },
+    )
+    return subscription
+
+
+def _ensure_usage_policy_code_item(plan_code: str) -> CodeItem:
+    group, _created = CodeGroup.objects.get_or_create(
+        group_code=USAGE_POLICY_GROUP_CODE,
+        defaults={
+            "name": "Usage quota policy",
+            "description": "Subject plan to API usage quota defaults.",
+            "metadata": {"source": "canonical_usage_policy"},
+        },
+    )
+    defaults = USAGE_POLICY_LIMITS.get(plan_code, USAGE_POLICY_LIMITS["anonymous"])
+    code_item, created = CodeItem.objects.get_or_create(
+        group=group,
+        code=plan_code,
+        defaults={
+            "label": f"{plan_code} usage policy",
+            "description": "Seeded API usage policy. 운영 정책 확정 전 기본값입니다.",
+            "is_active": True,
+            "metadata": {
+                "source": "canonical_usage_policy",
+                "policy_status": "seeded_default",
+                "limits": defaults,
+            },
+        },
+    )
+    if created:
+        return code_item
+    metadata = dict(code_item.metadata or {})
+    metadata.setdefault("source", "canonical_usage_policy")
+    metadata.setdefault("policy_status", "seeded_default")
+    metadata.setdefault("limits", defaults)
+    if metadata != code_item.metadata:
+        code_item.metadata = metadata
+        code_item.save(update_fields=["metadata", "updated_at"])
+    return code_item
+
+
+def _default_usage_limit(subject_type: str, scope: str) -> int:
+    policy = USAGE_POLICY_LIMITS.get(subject_type, USAGE_POLICY_LIMITS["anonymous"])
+    return policy.get(scope, 10)
 
 
 def _display_result_id(job_id: str) -> str:
@@ -1306,11 +1936,61 @@ def _upsert_history_event_payload(event_payload: dict[str, Any]) -> HistoryEvent
             "actor": actor,
             "subject": subject,
             "source": source,
-            "metadata": _dict_or_empty(event_payload.get("metadata")),
+            "metadata": _history_metadata_snapshot(event_payload.get("metadata")),
             "privacy": _dict_or_empty(event_payload.get("privacy")),
         },
     )
     return event
+
+
+def _history_metadata_snapshot(metadata: Any) -> dict[str, Any]:
+    raw_metadata = _dict_or_empty(metadata)
+    sanitized: dict[str, Any] = {}
+    dropped_keys = []
+
+    for key, value in raw_metadata.items():
+        normalized_key = str(key)
+        if (
+            normalized_key not in HISTORY_METADATA_ALLOWED_KEYS
+            or normalized_key.lower() in SENSITIVE_METADATA_KEYS
+        ):
+            dropped_keys.append(normalized_key)
+            continue
+        sanitized[normalized_key] = _strip_sensitive_history_metadata(value)
+
+    if dropped_keys:
+        sanitized["metadata_policy"] = {
+            "policy_version": HISTORY_POLICY_VERSION,
+            "dropped_keys": sorted(dropped_keys),
+        }
+    return sanitized
+
+
+def _strip_sensitive_history_metadata(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _strip_sensitive_history_metadata(item)
+            for key, item in value.items()
+            if str(key).lower() not in SENSITIVE_METADATA_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_sensitive_history_metadata(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _history_retention_days(subject_type: str | None) -> int:
+    return HISTORY_RETENTION_DAYS.get(_history_subject_type(subject_type), HISTORY_RETENTION_DAYS["anonymous"])
+
+
+def _history_subject_type(subject_type: str | None) -> str:
+    normalized = _text(subject_type)
+    if normalized == "authenticated":
+        return "user"
+    if normalized in HISTORY_RETENTION_DAYS:
+        return normalized
+    return "anonymous"
 
 
 def _agent_result_status(status: Any) -> str:
@@ -1501,6 +2181,20 @@ def _report_status(value: Any) -> str:
     return ReportStatus.READY
 
 
+def _report_object_storage(report: Report) -> dict[str, Any]:
+    metadata = report.metadata if isinstance(report.metadata, dict) else {}
+    object_storage = metadata.get("object_storage")
+    if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
+        return dict(object_storage)
+    return storage_reference_from_uri(
+        report.storage_uri or f"mock://reports/{report.report_id}",
+        resource_type="report",
+        resource_id=report.report_id,
+        filename=f"{report.report_id}.txt",
+        content_type="text/plain; charset=utf-8",
+    )
+
+
 def _report_title(payload: dict[str, Any], report_payload: dict[str, Any]) -> str:
     return (
         _text(payload.get("title"))
@@ -1524,22 +2218,20 @@ def _report_content_summary(
     return f"Mock report action result: {_text(report_payload.get('status')) or 'ready'}"
 
 
-def _storage_backend(storage_uri: str) -> str:
-    if storage_uri.startswith("mock://"):
-        return "mock_placeholder"
-    if storage_uri.startswith("s3://"):
-        return "object_storage"
-    if storage_uri.startswith("file://"):
-        return "local_file"
-    return "unknown"
-
-
-def _report_download_body(report: Report, *, storage_backend: str) -> str:
+def _report_download_body(
+    report: Report,
+    *,
+    storage_backend: str,
+    object_storage: dict[str, Any] | None = None,
+) -> str:
+    object_storage = object_storage or _report_object_storage(report)
     lines = [
         f"Report metadata download for {report.report_id}",
         f"status: {report.status}",
         f"storage_backend: {storage_backend}",
-        f"storage_uri: {report.storage_uri}",
+        f"storage_uri: {object_storage.get('storage_uri') or report.storage_uri}",
+        f"object_key: {object_storage.get('key') or ''}",
+        f"object_storage_policy: {object_storage.get('policy_version') or ''}",
     ]
     if report.job_id:
         lines.append(f"job_id: {report.job.job_id}")

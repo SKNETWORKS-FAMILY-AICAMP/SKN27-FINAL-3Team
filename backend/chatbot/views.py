@@ -28,6 +28,11 @@ from app.services.auth_session_mock_service import (
     get_current_auth_subject as _get_current_auth_subject,
 )
 from app.services.auth_error_contract import build_www_authenticate_header
+from app.services.google_auth_service import (
+    create_google_login as _create_google_login,
+    create_logout as _create_logout,
+    create_token_refresh as _create_token_refresh,
+)
 from app.services.chatbot_mock_service import (
     create_session,
     list_demo_scenarios,
@@ -54,13 +59,21 @@ from chatbot.request_parsing import (
     request_payload as _request_payload,
 )
 from chatbot.repositories import (
+    access_subject_from_payload,
+    authorize_resource_access,
     authorize_report_download_metadata,
+    build_history_after_service_summary,
+    get_chat_session_access_metadata,
     get_mycase_summary,
     get_report_download_metadata,
+    get_uploaded_file_access_metadata,
     get_uploaded_file,
+    history_operating_policy,
     list_history_event_records,
     list_uploaded_files,
     persist_current_auth_subject,
+    persist_auth_logout,
+    persist_auth_token_refresh,
     persist_analysis_display_result,
     persist_analysis_job_execution,
     persist_chat_message_analysis_boundary,
@@ -71,6 +84,7 @@ from chatbot.repositories import (
     record_usage_event,
     register_uploaded_file,
 )
+from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
 
 
 @require_http_methods(["GET", "OPTIONS"])
@@ -115,6 +129,117 @@ def guest_session(request: HttpRequest) -> JsonResponse:
     return _json_response(request, payload)
 
 
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def auth_login(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request)
+    status, payload = _create_google_login(body)
+    if status < 400:
+        payload["persistence"] = persist_current_auth_subject(
+            payload,
+            session_id=body.get("session_id"),
+        )
+    _record_history_safely(
+        request,
+        event_type="auth_login_completed",
+        status="success" if status < 400 else "failed",
+        summary="Google login boundary was processed.",
+        actor=_actor_from_auth_me_payload(request, payload),
+        subject=subject_from_payload({"session_id": body.get("session_id")}),
+        source=_history_source(request),
+        metadata={
+            "http_status": status,
+            "provider": payload.get("provider"),
+            "subject_type": (payload.get("subject") or {}).get("subject_type")
+            if isinstance(payload.get("subject"), dict)
+            else None,
+            "error_code": (payload.get("error") or {}).get("code")
+            if isinstance(payload.get("error"), dict)
+            else None,
+        },
+    )
+    response = _json_response(request, payload, status=status)
+    if status in {401, 403} and isinstance(payload.get("error"), dict):
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+    return response
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def auth_refresh(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request)
+    status, payload = _create_token_refresh(
+        authorization_header=request.headers.get("Authorization"),
+        payload=body,
+    )
+    if status < 400:
+        payload["persistence"] = persist_auth_token_refresh(
+            payload,
+            session_id=body.get("session_id"),
+        )
+    _record_history_safely(
+        request,
+        event_type="auth_token_refreshed",
+        status="success" if status < 400 else "failed",
+        summary="App auth token refresh boundary was processed.",
+        actor=_actor_from_auth_me_payload(request, payload),
+        subject=subject_from_payload({"session_id": body.get("session_id")}),
+        source=_history_source(request),
+        metadata={
+            "http_status": status,
+            "provider": payload.get("provider"),
+            "subject_type": (payload.get("subject") or {}).get("subject_type")
+            if isinstance(payload.get("subject"), dict)
+            else None,
+            "error_code": (payload.get("error") or {}).get("code")
+            if isinstance(payload.get("error"), dict)
+            else None,
+        },
+    )
+    response = _json_response(request, payload, status=status)
+    if status in {401, 403} and isinstance(payload.get("error"), dict):
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+    return response
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def auth_logout(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request)
+    status, payload = _create_logout(
+        authorization_header=request.headers.get("Authorization"),
+        payload=body,
+    )
+    if status < 400:
+        payload["persistence"] = persist_auth_logout(
+            payload,
+            session_id=body.get("session_id"),
+        )
+    _record_history_safely(
+        request,
+        event_type="auth_logout_completed",
+        status="success" if status < 400 else "failed",
+        summary="App auth logout boundary was processed.",
+        actor=_actor_from_auth_me_payload(request, payload),
+        subject=subject_from_payload({"session_id": body.get("session_id")}),
+        source=_history_source(request),
+        metadata={
+            "http_status": status,
+            "provider": payload.get("provider"),
+            "subject_type": (payload.get("subject") or {}).get("subject_type")
+            if isinstance(payload.get("subject"), dict)
+            else None,
+            "error_code": (payload.get("error") or {}).get("code")
+            if isinstance(payload.get("error"), dict)
+            else None,
+        },
+    )
+    response = _json_response(request, payload, status=status)
+    if status in {401, 403} and isinstance(payload.get("error"), dict):
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+    return response
+
+
 @require_http_methods(["GET", "OPTIONS"])
 def auth_me(request: HttpRequest) -> JsonResponse:
     status, payload = _get_current_auth_subject(
@@ -151,6 +276,13 @@ def auth_me(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def history_events(request: HttpRequest) -> JsonResponse:
+    identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+    if _is_canonical_mock_request(request):
+        access = _authorize_history_query(request, identity_payload)
+        if not access["allowed"]:
+            return _object_access_denied_response(request, access)
+
+    subject = access_subject_from_payload(identity_payload)["subject"]
     filters = {
         "session_id": request.GET.get("session_id"),
         "user_id": request.GET.get("user_id"),
@@ -160,23 +292,34 @@ def history_events(request: HttpRequest) -> JsonResponse:
         "limit": _positive_int(request.GET.get("limit"), default=100),
     }
     if _is_canonical_mock_request(request):
+        if not any(filters.get(key) for key in ("session_id", "user_id", "guest_id", "job_id")):
+            if subject.get("user_id"):
+                filters["user_id"] = subject["user_id"]
+            elif subject.get("guest_id"):
+                filters["guest_id"] = subject["guest_id"]
+        filters["subject_type"] = subject.get("subject_type")
         events = list_history_event_records(**filters)
         storage = {
             "backend": "postgresql",
             "policy": "standard_light",
             "table": "history_events",
         }
+        policy = history_operating_policy(subject.get("subject_type"))
     else:
         events = list_sidecar_history_events(**filters)
         storage = {
             "backend": "mock_sidecar_json",
             "policy": "standard_light",
         }
+        policy = history_operating_policy("anonymous")
+    after_service_summary = build_history_after_service_summary(events)
     return _json_response(
         request,
         {
             "history_contract": HISTORY_EVENT_VERSION,
             "storage": storage,
+            "history_policy": policy,
+            "after_service_summary": after_service_summary,
             "count": len(events),
             "events": events,
             "limitations": [
@@ -189,12 +332,21 @@ def history_events(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def mypage_summary(request: HttpRequest) -> JsonResponse:
-    owner_id = request.GET.get("owner_id") or request.GET.get("user_id")
+    identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+    if _is_canonical_mock_request(request):
+        access = _authorize_mypage_query(request, identity_payload)
+        if not access["allowed"]:
+            return _object_access_denied_response(request, access)
+
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    owner_id = request.GET.get("owner_id") or request.GET.get("user_id") or subject.get("user_id")
     summary = get_mycase_summary(
         session_id=request.GET.get("session_id"),
         owner_id=owner_id,
         limit=_positive_int(request.GET.get("limit"), default=10),
     )
+    if _is_canonical_mock_request(request) and request.GET.get("session_id"):
+        summary["session_cache"] = read_chat_session_state(request.GET["session_id"])
     return _json_response(request, summary)
 
 
@@ -208,7 +360,16 @@ def agent_nodes(request: HttpRequest) -> JsonResponse:
 def attachments(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
         if _is_canonical_mock_request(request):
-            attachments_payload = list_uploaded_files(session_id=request.GET.get("session_id"))
+            identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+            access = _authorize_session_query(request.GET.get("session_id"), identity_payload, resource_type="uploaded_file_list")
+            if not access["allowed"]:
+                return _object_access_denied_response(request, access)
+            subject = access_subject_from_payload(identity_payload)["subject"]
+            owner_id = subject.get("user_id")
+            attachments_payload = list_uploaded_files(
+                session_id=request.GET.get("session_id"),
+                owner_id=owner_id if owner_id else None,
+            )
         else:
             attachments_payload = list_mock_attachments(session_id=request.GET.get("session_id"))
         return _json_response(request, {"attachments": attachments_payload})
@@ -230,6 +391,12 @@ def attachments(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "OPTIONS"])
 def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
     if _is_canonical_mock_request(request):
+        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+        access_metadata = get_uploaded_file_access_metadata(attachment_id)
+        if access_metadata is not None:
+            access = authorize_resource_access(access_metadata, identity_payload)
+            if not access["allowed"]:
+                return _object_access_denied_response(request, access)
         attachment = get_uploaded_file(attachment_id)
     else:
         attachment = get_mock_attachment(attachment_id)
@@ -315,6 +482,8 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
+    if _is_canonical_mock_request(request):
+        job["progress_cache"] = read_analysis_job_progress(job_id)
     return _json_response(request, {"job": job})
 
 
@@ -466,6 +635,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
     if _is_canonical_mock_request(request):
         report = _canonicalize_mock_paths(report)
         report["persistence"] = persist_report_action(identity_body, report)
+        report["object_storage"] = report["persistence"].get("object_storage")
         report["usage"] = usage
     _record_history_safely(
         request,
@@ -495,10 +665,7 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
     if _is_canonical_mock_request(request):
         download = get_report_download_metadata(report_id)
         if download is not None:
-            identity_payload = _payload_with_request_identity(
-                request,
-                {"session_id": request.GET.get("session_id")},
-            )
+            identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
             access = authorize_report_download_metadata(download, identity_payload)
             if not access["allowed"]:
                 return _object_access_denied_response(request, access)
@@ -512,6 +679,8 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             response["X-Report-Persistence"] = "postgresql"
             response["X-Report-Storage-Backend"] = download["storage_backend"]
             response["X-Report-Storage-URI"] = download["storage_uri"]
+            response["X-Report-Object-Key"] = download["object_key"]
+            response["X-Report-Object-Policy"] = download["object_storage"].get("policy_version", "")
             response["X-Report-Access-Decision"] = access["reason"]
             return response
 
@@ -566,6 +735,79 @@ def _payload_with_request_identity(
     if auth_context:
         enriched["auth_context"] = auth_context
     return enriched
+
+
+def _request_access_payload(
+    request: HttpRequest,
+    *,
+    session_id: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    if session_id:
+        payload["session_id"] = session_id
+    return _payload_with_request_identity(request, payload)
+
+
+def _authorize_mypage_query(
+    request: HttpRequest,
+    identity_payload: dict[str, object],
+) -> dict[str, object]:
+    requested_owner = request.GET.get("owner_id") or request.GET.get("user_id")
+    if requested_owner:
+        return authorize_resource_access(
+            {"type": "mypage", "owner_id": requested_owner},
+            identity_payload,
+        )
+    return _authorize_session_query(request.GET.get("session_id"), identity_payload, resource_type="mypage")
+
+
+def _authorize_history_query(
+    request: HttpRequest,
+    identity_payload: dict[str, object],
+) -> dict[str, object]:
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    requested_user_id = request.GET.get("user_id")
+    if requested_user_id:
+        return authorize_resource_access(
+            {"type": "history", "owner_id": requested_user_id},
+            identity_payload,
+        )
+
+    requested_guest_id = request.GET.get("guest_id")
+    if requested_guest_id:
+        return authorize_resource_access(
+            {"type": "history", "guest_id": requested_guest_id},
+            identity_payload,
+        )
+
+    session_access = _authorize_session_query(
+        request.GET.get("session_id"),
+        identity_payload,
+        resource_type="history",
+    )
+    if not session_access["allowed"]:
+        return session_access
+
+    if not any(request.GET.get(key) for key in ("session_id", "job_id", "event_type")):
+        if subject.get("user_id") or subject.get("guest_id"):
+            return session_access
+        return authorize_resource_access({"type": "history", "owner_id": "__authenticated_subject_required__"}, identity_payload)
+    return session_access
+
+
+def _authorize_session_query(
+    session_id: str | None,
+    identity_payload: dict[str, object],
+    *,
+    resource_type: str,
+) -> dict[str, object]:
+    if not session_id:
+        return authorize_resource_access({"type": resource_type}, identity_payload)
+    session_access = get_chat_session_access_metadata(session_id)
+    if session_access is None:
+        return authorize_resource_access({"type": resource_type, "session_id": session_id}, identity_payload)
+    session_access["type"] = resource_type
+    return authorize_resource_access(session_access, identity_payload)
 
 
 def _rate_limit_response(request: HttpRequest, usage: dict[str, object]) -> JsonResponse:

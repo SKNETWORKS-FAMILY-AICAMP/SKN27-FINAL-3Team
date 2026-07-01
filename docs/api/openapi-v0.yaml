@@ -117,6 +117,107 @@ paths:
                   - $ref: "#/components/schemas/CanonicalMockMeta"
                   - $ref: "#/components/schemas/GuestSessionResponse"
 
+  /api/auth/login/:
+    post:
+      tags: [Auth]
+      summary: Exchange a Google login subject for an app Bearer token
+      operationId: createGoogleLogin
+      security: []
+      x-contract-status: confirmed
+      x-review-note: Local/dev accepts mock Google profile fields while GOOGLE_AUTH_ALLOW_MOCK=1. Production must set GOOGLE_AUTH_ALLOW_MOCK=0 and configure GOOGLE_CLIENT_ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleLoginRequest"
+            examples:
+              mockGoogleLogin:
+                value:
+                  provider: google
+                  google_sub: google-sub-123
+                  email: driver@example.com
+                  display_name: Driver User
+                  guest_id: gst_before_google
+                  session_id: ses_google_login
+      responses:
+        "200":
+          description: App Bearer token and persisted auth subject.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/GoogleLoginResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/auth/refresh/:
+    post:
+      tags: [Auth]
+      summary: Rotate a valid app Bearer token
+      operationId: refreshAuthToken
+      x-contract-status: confirmed
+      x-review-note: MVP refresh requires a still-valid app JWT. Separate refresh-token storage and expired-token silent refresh are not enabled.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/AuthSessionIdHeader"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthTokenRefreshRequest"
+            examples:
+              refreshAppToken:
+                value:
+                  guest_id: gst_before_google
+                  session_id: ses_google_login
+      responses:
+        "200":
+          description: Refreshed app Bearer token for the same auth session.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/AuthTokenRefreshResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
+  /api/auth/logout/:
+    post:
+      tags: [Auth]
+      summary: Revoke the current auth session and clear client auth state
+      operationId: logoutAuthSession
+      x-contract-status: confirmed
+      x-review-note: Stateless JWTs cannot be invalidated after issuance; clients must clear stored tokens while backend marks the auth_session revoked.
+      parameters:
+        - $ref: "#/components/parameters/GuestIdHeader"
+        - $ref: "#/components/parameters/AuthSessionIdHeader"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLogoutRequest"
+            examples:
+              logoutAppToken:
+                value:
+                  guest_id: gst_before_google
+                  session_id: ses_google_login
+      responses:
+        "200":
+          description: Logout result and client clear-token instruction.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CanonicalMockMeta"
+                  - $ref: "#/components/schemas/AuthLogoutResponse"
+        "401":
+          $ref: "#/components/responses/AuthRequired"
+
   /api/auth/me/:
     get:
       tags: [Auth]
@@ -729,6 +830,13 @@ paths:
             X-Report-Storage-URI:
               schema:
                 type: string
+            X-Report-Object-Key:
+              schema:
+                type: string
+            X-Report-Object-Policy:
+              schema:
+                type: string
+                enum: [object_storage_adapter.v1]
             X-Report-Access-Decision:
               schema:
                 type: string
@@ -1330,6 +1438,229 @@ components:
           items:
             type: string
 
+    GoogleLoginRequest:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [google]
+          default: google
+        id_token:
+          type: string
+          description: Google ID token or dev mock token. Required in production verification mode.
+        credential:
+          type: string
+          description: Alias for Google Identity Services credential.
+        google_sub:
+          type: string
+          description: Dev/mock Google subject when GOOGLE_AUTH_ALLOW_MOCK=1.
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        picture:
+          type: string
+        guest_id:
+          type: string
+        session_id:
+          type: string
+
+    GoogleLoginResponse:
+      type: object
+      required: [contract_version, auth_state, provider, access_token, token_type, expires_in, user, subject, auth_session, session_binding, rate_limit, merge_policy, limitations]
+      properties:
+        contract_version:
+          type: string
+          enum: [google_auth.v1]
+        auth_state:
+          type: string
+          enum: [authenticated]
+        provider:
+          type: string
+          enum: [google]
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        guest:
+          oneOf:
+            - $ref: "#/components/schemas/GuestIdentity"
+            - type: "null"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        auth_session:
+          $ref: "#/components/schemas/AuthSession"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        rate_limit:
+          $ref: "#/components/schemas/RateLimitPolicy"
+        merge_policy:
+          $ref: "#/components/schemas/MergePolicy"
+        limitations:
+          type: array
+          items:
+            type: string
+        persistence:
+          type: object
+          additionalProperties: true
+
+    AuthTokenRefreshRequest:
+      type: object
+      properties:
+        guest_id:
+          type: string
+        session_id:
+          type: string
+        access_token:
+          type: string
+          description: Optional body fallback. Prefer Authorization Bearer header.
+
+    AuthTokenRefreshResponse:
+      type: object
+      required: [contract_version, auth_state, provider, access_token, token_type, expires_in, user, subject, auth_session, session_binding, rate_limit, merge_policy, limitations]
+      properties:
+        contract_version:
+          type: string
+          enum: [auth_token_refresh.v1]
+        auth_state:
+          type: string
+          enum: [authenticated]
+        provider:
+          type: string
+          enum: [google]
+        access_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+        issued_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        guest:
+          oneOf:
+            - $ref: "#/components/schemas/GuestIdentity"
+            - type: "null"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        auth_session:
+          $ref: "#/components/schemas/AuthSession"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        rate_limit:
+          $ref: "#/components/schemas/RateLimitPolicy"
+        merge_policy:
+          $ref: "#/components/schemas/MergePolicy"
+        limitations:
+          type: array
+          items:
+            type: string
+        persistence:
+          type: object
+          additionalProperties: true
+
+    AuthLogoutRequest:
+      type: object
+      properties:
+        guest_id:
+          type: string
+        session_id:
+          type: string
+        access_token:
+          type: string
+          description: Optional body fallback. Prefer Authorization Bearer header.
+
+    AuthLogoutResponse:
+      type: object
+      required: [contract_version, auth_state, provider, revoked_at, subject, auth_session, session_binding, client_action, limitations]
+      properties:
+        contract_version:
+          type: string
+          enum: [auth_logout.v1]
+        auth_state:
+          type: string
+          enum: [anonymous]
+        provider:
+          type: string
+          enum: [google]
+        revoked_at:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        guest:
+          oneOf:
+            - $ref: "#/components/schemas/GuestIdentity"
+            - type: "null"
+        subject:
+          $ref: "#/components/schemas/AuthSubject"
+        auth_session:
+          $ref: "#/components/schemas/AuthSession"
+        session_binding:
+          $ref: "#/components/schemas/SessionBinding"
+        client_action:
+          $ref: "#/components/schemas/AuthClientAction"
+        limitations:
+          type: array
+          items:
+            type: string
+        persistence:
+          type: object
+          additionalProperties: true
+
+    AuthClientAction:
+      type: object
+      required: [clear_access_token, clear_google_profile, next_auth_state]
+      properties:
+        clear_access_token:
+          type: boolean
+        clear_google_profile:
+          type: boolean
+        next_auth_state:
+          type: string
+          enum: [anonymous, guest]
+
+    AuthUser:
+      type: object
+      properties:
+        user_id:
+          type: string
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        picture:
+          type: string
+        status:
+          type: string
+        auth_provider:
+          type: string
+          enum: [google]
+        provider_subject:
+          type: string
+        policy_status:
+          type: string
+
     AuthSubjectResponse:
       type: object
       required: [auth_state, subject, rate_limit, merge_policy, limitations]
@@ -1338,18 +1669,9 @@ components:
           type: string
           enum: [anonymous, guest, authenticated]
         user:
-          type:
-            - object
-            - "null"
-          properties:
-            user_id:
-              type: string
-            display_name:
-              type: string
-            status:
-              type: string
-            policy_status:
-              type: string
+          oneOf:
+            - $ref: "#/components/schemas/AuthUser"
+            - type: "null"
         guest:
           oneOf:
             - $ref: "#/components/schemas/GuestIdentity"
@@ -1449,8 +1771,18 @@ components:
           type: string
         status:
           type: string
+          enum: [active, revoked, expired]
         verification:
           type: string
+        provider:
+          type: string
+          enum: [google]
+        refresh_policy:
+          type: string
+          enum: [valid_app_jwt_required]
+        app_jwt_claims:
+          type: object
+          additionalProperties: true
 
     SessionBinding:
       type: object
@@ -1513,6 +1845,17 @@ components:
           type: string
           enum: [chat_message, file_upload, agent_run, report_action]
         quota_key:
+          type: string
+        plan_code:
+          type: string
+          enum: [anonymous, guest, free, paid]
+        subscription_id:
+          type:
+            - string
+            - "null"
+        policy_code_item:
+          type: string
+        policy_status:
           type: string
         allowed:
           type: boolean
@@ -1828,6 +2171,8 @@ components:
           minimum: 0
         storage_uri:
           type: string
+        object_storage:
+          $ref: "#/components/schemas/ObjectStorageReference"
         resolution_status:
           type: string
           enum: [resolved, inline_metadata, unresolved]
@@ -1857,6 +2202,8 @@ components:
               additionalProperties: true
             agent_handoff:
               $ref: "#/components/schemas/AgentAttachmentHandoff"
+            object_storage:
+              $ref: "#/components/schemas/ObjectStorageReference"
             limitations:
               type: array
               items:
@@ -1866,6 +2213,52 @@ components:
               additionalProperties: true
             usage:
               $ref: "#/components/schemas/UsageMeter"
+
+    ObjectStorageReference:
+      type: object
+      required: [policy_version, backend, provider, storage_uri, resource_type, resource_id, status, persistence_state]
+      properties:
+        policy_version:
+          type: string
+          enum: [object_storage_adapter.v1]
+        backend:
+          type: string
+          enum: [object_storage, mock_placeholder, local_file, unknown]
+        provider:
+          type: string
+          enum: [mock_s3, s3, local_file, mock_sidecar, unknown]
+        bucket:
+          type: string
+        key:
+          type: string
+        storage_uri:
+          type: string
+        resource_type:
+          type: string
+          enum: [uploaded_file, report]
+        resource_id:
+          type: string
+        filename:
+          type: string
+        content_type:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum: [metadata_ready, legacy_reference]
+        source_uri:
+          type: string
+        signed_url_ttl_seconds:
+          type: integer
+          minimum: 1
+        writes_binary:
+          type: boolean
+          enum: [false]
+        persistence_state:
+          type: string
+          enum: [metadata_only_adapter]
 
     AgentAttachmentHandoff:
       type: object
@@ -2097,6 +2490,8 @@ components:
                 type: string
             usage:
               $ref: "#/components/schemas/UsageMeter"
+            progress_cache:
+              $ref: "#/components/schemas/ProgressCacheRead"
 
     AnalysisJobEvent:
       type: object
@@ -2113,6 +2508,72 @@ components:
         created_at:
           type: string
           format: date-time
+
+    ProgressCachePolicy:
+      type: object
+      required: [policy_version, backend, ttl_seconds, fallback, key_patterns, cache_role, stores_raw_user_input, stores_agent_reasoning]
+      properties:
+        policy_version:
+          type: string
+          enum: [progress_cache.v1]
+        backend:
+          type: string
+          enum: [redis, locmem, unknown]
+        ttl_seconds:
+          type: integer
+          minimum: 1
+          default: 300
+        fallback:
+          type: string
+          enum: [postgresql]
+        key_patterns:
+          type: object
+          required: [analysis_job_progress, chat_session_state]
+          properties:
+            analysis_job_progress:
+              type: string
+              example: analysis_job_progress:{job_id}
+            chat_session_state:
+              type: string
+              example: chat_session_state:{session_id}
+        cache_role:
+          type: string
+          enum: [ephemeral_progress_state]
+        stores_raw_user_input:
+          type: boolean
+          enum: [false]
+        stores_agent_reasoning:
+          type: boolean
+          enum: [false]
+
+    ProgressCacheRead:
+      type: object
+      required: [policy_version, backend, key, ttl_seconds, fallback, status, snapshot]
+      properties:
+        policy_version:
+          type: string
+          enum: [progress_cache.v1]
+        backend:
+          type: string
+          enum: [redis, locmem, unknown]
+        key:
+          type: string
+        ttl_seconds:
+          type: integer
+          minimum: 1
+        fallback:
+          type: string
+          enum: [postgresql]
+        status:
+          type: string
+          enum: [cached, hit, miss_fallback, not_found, unavailable, unavailable_fallback, unavailable_not_found]
+        snapshot:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        error:
+          type: string
 
     AnalysisResult:
       type: object
@@ -3394,6 +3855,8 @@ components:
           type: array
           items:
             type: string
+        object_storage:
+          $ref: "#/components/schemas/ObjectStorageReference"
         persistence:
           type: object
           additionalProperties: true
@@ -3432,6 +3895,8 @@ components:
             content:
               type: object
               additionalProperties: true
+            object_storage:
+              $ref: "#/components/schemas/ObjectStorageReference"
             download_url:
               type: string
 
@@ -3495,7 +3960,7 @@ components:
     MyPageSummary:
       type: object
       x-contract-status: confirmed
-      required: [storage, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
+      required: [storage, progress_cache, object_storage, active_cases, due_soon_cases, saved_reports, recent_analysis_count, cases, limitations]
       properties:
         storage:
           type: object
@@ -3508,6 +3973,37 @@ components:
               type: array
               items:
                 type: string
+        progress_cache:
+          $ref: "#/components/schemas/ProgressCachePolicy"
+        object_storage:
+          type: object
+          required: [policy_version, backend, provider, bucket, prefix, signed_url_ttl_seconds, writes_binary, persistence_state, fallback]
+          properties:
+            policy_version:
+              type: string
+              enum: [object_storage_adapter.v1]
+            backend:
+              type: string
+              enum: [object_storage]
+            provider:
+              type: string
+            bucket:
+              type: string
+            prefix:
+              type: string
+            signed_url_ttl_seconds:
+              type: integer
+            writes_binary:
+              type: boolean
+              enum: [false]
+            persistence_state:
+              type: string
+              enum: [metadata_only_adapter]
+            fallback:
+              type: string
+              enum: [django_response_body]
+        session_cache:
+          $ref: "#/components/schemas/ProgressCacheRead"
         active_cases:
           type: integer
         due_soon_cases:
@@ -3610,6 +4106,9 @@ components:
           type: string
           enum:
             - guest_session_created
+            - auth_login_completed
+            - auth_token_refreshed
+            - auth_logout_completed
             - auth_me_checked
             - chat_session_created
             - chat_message_created
@@ -3649,7 +4148,7 @@ components:
     HistoryEventListResponse:
       type: object
       x-contract-status: confirmed
-      required: [history_contract, storage, count, events, limitations]
+      required: [history_contract, storage, history_policy, after_service_summary, count, events, limitations]
       properties:
         history_contract:
           type: string
@@ -3667,6 +4166,10 @@ components:
             table:
               type: string
               enum: [history_events]
+        history_policy:
+          $ref: "#/components/schemas/HistoryOperatingPolicy"
+        after_service_summary:
+          $ref: "#/components/schemas/HistoryAfterServiceSummary"
         count:
           type: integer
         events:
@@ -3677,6 +4180,89 @@ components:
           type: array
           items:
             type: string
+
+    HistoryOperatingPolicy:
+      type: object
+      x-contract-status: confirmed
+      required: [policy_version, storage_policy, retention, query_scope, metadata_policy, after_service_summary]
+      properties:
+        policy_version:
+          type: string
+          enum: [history_operating_policy.v1]
+        storage_policy:
+          type: string
+          enum: [standard_light]
+        retention:
+          type: object
+          required: [applied_subject_type, applied_days, anonymous_days, guest_days, user_days]
+          properties:
+            applied_subject_type:
+              type: string
+              enum: [anonymous, guest, user]
+            applied_days:
+              type: integer
+            anonymous_days:
+              type: integer
+            guest_days:
+              type: integer
+            user_days:
+              type: integer
+        query_scope:
+          type: object
+          additionalProperties:
+            type: string
+        metadata_policy:
+          type: object
+          required: [mode, allowed_keys, blocked_keys]
+          properties:
+            mode:
+              type: string
+              enum: [allowlist_with_sensitive_key_blocklist]
+            allowed_keys:
+              type: array
+              items:
+                type: string
+            blocked_keys:
+              type: array
+              items:
+                type: string
+        after_service_summary:
+          type: object
+          required: [source, eligible_event_types, excludes]
+          properties:
+            source:
+              type: string
+              enum: [history_events_standard_light]
+            eligible_event_types:
+              type: array
+              items:
+                type: string
+            excludes:
+              type: array
+              items:
+                type: string
+
+    HistoryAfterServiceSummary:
+      type: object
+      x-contract-status: confirmed
+      required: [available, source_event_count, source, summary_basis, excludes_sensitive_payload, status]
+      properties:
+        available:
+          type: boolean
+        source_event_count:
+          type: integer
+        source:
+          type: string
+          enum: [history_events_standard_light]
+        summary_basis:
+          type: array
+          items:
+            type: string
+        excludes_sensitive_payload:
+          type: boolean
+        status:
+          type: string
+          enum: [ready, insufficient_history]
 
     HistoryEventActor:
       type: object
@@ -3792,6 +4378,14 @@ components:
                         - missing_token
                         - invalid_token
                         - expired_token
+                        - app_jwt_required
+                        - unsupported_auth_provider
+                        - google_identity_missing
+                        - invalid_signature
+                        - invalid_claims
+                        - invalid_issuer_or_audience
+                        - invalid_exp
+                        - missing_required_claim
                         - permission_denied
                         - malformed_authorization_header
                         - empty_token
@@ -3830,7 +4424,15 @@ components:
           type: boolean
         reason:
           type: string
-          enum: [owner_match, owner_mismatch, session_match, session_mismatch, legacy_mock_report]
+          enum:
+            - owner_match
+            - owner_mismatch
+            - guest_match
+            - guest_mismatch
+            - session_match
+            - session_mismatch
+            - legacy_mock_report
+            - legacy_unowned_resource
         subject:
           type: object
           properties:
@@ -3851,8 +4453,10 @@ components:
           properties:
             type:
               type: string
-              enum: [report]
+              enum: [report, uploaded_file, uploaded_file_list, mypage, history]
             report_id:
+              type: string
+            attachment_id:
               type: string
             owner_id:
               type:
