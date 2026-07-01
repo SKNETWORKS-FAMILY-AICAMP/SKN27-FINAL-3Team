@@ -25,10 +25,10 @@
 | 구분 | 기존 방향 | 수정 방향 | 변경 이유 | 다음 액션 |
 |---|---|---|---|---|
 | 데이터 적재 | Google Drive 전체 데이터를 RunPod로 바로 다운로드 | Drive listing 기반 manifest를 먼저 생성하고, 필요한 샘플만 다운로드 | 전체 데이터 용량과 Drive 폴더 구조 때문에 무작정 다운로드하면 비용과 시간이 커짐 | `classification_manifest.csv` 기준으로 샘플 단위 다운로드 유지 |
-| RunPod 사용 | RunPod에서 바로 분석과 학습 진행 | 로컬에서 코드와 dry-run을 검증한 뒤 RunPod GPU 사용 | GPU 비용 절감, 오류를 로컬에서 먼저 제거 가능 | 로컬 dry-run 완료 후 `sample_500_coarse_manifest.csv` 기준 RunPod 학습 |
+| RunPod 사용 | RunPod에서 바로 분석과 학습 진행 | 로컬에서 코드와 dry-run을 검증한 뒤 RunPod GPU 사용 | GPU 비용 절감, 오류를 로컬에서 먼저 제거 가능 | 로컬 dry-run 완료 후 `sample_700_coarse_manifest.csv` 기준 RunPod 학습 |
 | 영상 처리 | 영상 원본을 학습 데이터로 직접 사용 | 영상에서 대표 프레임을 추출해 이미지 분류 데이터셋으로 사용 | 영상 모델은 비용과 복잡도가 높음. 초기 baseline은 이미지 분류가 더 빠름 | `etl/extract_training_frames.py`로 frame-level manifest 확장 |
-| 라벨 기준 | AI-Hub 세부 카테고리를 그대로 사용 | 상위 라벨 4개로 단순화: 차대차, 차대보행자, 차대이륜차, 차대자전거 | 세부 라벨은 불균형이 심하고 초기 성능 검증이 어려움 | coarse label 기준 500개 샘플링 유지 |
-| 샘플링 전략 | 전체 15,823건을 바로 학습에 사용 | 카테고리별 최대 500개 랜덤 샘플링 후 train/val/test 분할 | 데이터 규모를 통제하면서 baseline 성능 확인 가능 | label별 500개 프레임 추출 후 첫 GPU 학습 |
+| 라벨 기준 | AI-Hub 세부 카테고리를 그대로 사용 | 상위 라벨 4개로 단순화: 차대차, 차대보행자, 차대이륜차, 차대자전거 | 세부 라벨은 불균형이 심하고 초기 성능 검증이 어려움 | coarse label 기준 700개 샘플링 유지 |
+| 샘플링 전략 | 전체 15,823건을 바로 학습에 사용 | 카테고리별 최대 700개 랜덤 샘플링 후 train/val/test 분할 | 데이터 규모를 통제하면서 baseline 성능 확인 가능 | label별 700개 영상에서 프레임 추출 후 첫 GPU 학습 |
 | 단일 영상 POC | 단일 영상 분석을 계속 반복 | 단일 영상 POC는 검증 완료로 보고 학습 파이프라인으로 이동 | 단일 영상 반복은 학습 목표와 직접 연결되지 않음 | 이후 단일 영상은 데모/검증 예시로만 유지 |
 | 객체 탐지 | YOLO를 전체 Vision 모델처럼 사용 | YOLO는 bbox, confidence, 시각화, evidence 후보 생성용으로 제한 | 사고 유형 분류와 객체 탐지는 목적이 다름 | 분류 모델은 ResNet18/EfficientNet 계열로 별도 진행 |
 | VideoMAE 활용 | 바로 사고 판단 모델로 사용 | pretrained VideoMAE는 clip-level action hint로만 사용하고, 최종 판단은 하지 않음 | Kinetics 라벨은 사고 도메인 라벨이 아니므로 과실비율/법적 책임 판단에 부적합 | `ai/vision/videomae_infer.py`, `ai/vision/merge_analysis.py`로 보조 결과만 병합 |
@@ -76,7 +76,7 @@
   - 차대보행자: 763
   - 차대이륜차: 1,928
   - 차대자전거: 855
-- 카테고리별 최대 500개 샘플링 manifest 생성 완료
+- 카테고리별 최대 700개 샘플링 manifest 생성 완료
 - 라벨별 1개씩 dry-run 다운로드 완료
 - 라벨별 1개 영상에서 각 5장씩 프레임 추출 완료
 - 총 20장 기준 `frame_manifest_dryrun.csv` 생성 완료
@@ -90,7 +90,7 @@
 | `docs/vision/vision_training_plan.md` | 상위 라벨, 샘플링, 학습 모델, 파라미터 기록 기준 |
 | `docs/vision/vision_schema_change_report.md` | 급한 일/천천히 해도 되는 일/이슈 매핑 |
 | `etl/build_classification_manifest.py` | Drive listing에서 classification 후보 manifest 생성 |
-| `etl/sample_classification_dataset.py` | 상위 라벨별 최대 500개 샘플링 및 split 생성 |
+| `etl/sample_classification_dataset.py` | 상위 라벨별 최대 700개 샘플링 및 split 생성 |
 | `etl/download_sampled_media.py` | 샘플링된 영상 다운로드 검증 |
 | `etl/extract_training_frames.py` | 영상에서 학습용 프레임 추출 및 frame manifest 생성 |
 | `etl/utils.py` | ETL 공통 CSV/파일명 helper |
@@ -106,11 +106,11 @@
 
 ### 5.1 바로 진행할 일
 
-1. 라벨별 5~10개 영상으로 dry-run 범위 확장
-2. `frames_per_video` 값을 1, 3, 5로 바꿔 frame manifest 차이 확인
-3. 로컬에서 학습 코드가 계속 정상 종료되는지 확인
-4. RunPod에서 `sample_500_coarse_manifest.csv` 기준 다운로드/프레임 추출 실행
-5. RunPod GPU에서 ResNet18 pretrained + freeze backbone 기준 첫 학습 실행
+1. RunPod에서 라벨별 700개 학습 결과를 기준으로 파라미터 비교
+2. `freeze_backbone`, `learning_rate`, `epochs` 조합을 순차 비교
+3. 필요 시 `frames_per_video` 값을 8에서 16으로 늘려 비교
+4. RunPod에서 `sample_700_coarse_manifest.csv` 기준 다운로드/프레임 추출 실행
+5. RunPod GPU에서 ResNet18 baseline 실험 결과를 기록
 
 ### 5.2 RunPod 학습 시 우선 기록할 파라미터
 
@@ -141,9 +141,7 @@
 
 ## 6. 주의할 점
 
-현재 20장짜리 dry-run 결과의 정확도는 모델 성능으로 해석하면 안 된다. 이 단계의 목적은 학습 코드가 manifest를 읽고, 이미지를 불러오고, class mapping을 만들고, 학습 루프를 끝까지 통과하는지 확인하는 것이다.
-
-실제 성능 판단은 최소한 카테고리별 500개 샘플링 데이터에서 대표 프레임을 추출한 뒤 RunPod GPU 학습 결과를 보고 판단해야 한다.
+20장짜리 dry-run 결과는 모델 성능으로 해석하지 않는다. 실제 성능 판단은 라벨별 700개 영상에서 추출한 frame manifest와 RunPod GPU 학습 결과를 기준으로 본다.
 
 ## 7. 결론
 

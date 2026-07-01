@@ -44,6 +44,9 @@ Encrypt volume: OFF
 
 `Encrypt volume`은 샘플 데이터 기준으로는 끄고 진행했다. 실제 사고 사진, 개인정보, 보험 민감 데이터가 포함될 경우에는 켜는 것이 좋다.
 
+전체 데이터 학습용 RunPod 선택 기준은 `docs/vision/vision_training_plan.md`의 "RunPod 학습용 Pod 선택 기준" 섹션에 별도로 정리한다. POC는 50~100GB 기준이지만, 라벨별 700개 학습은 영상 다운로드와 프레임 추출을 포함하므로 200GB 이상 디스크와 24GB 이상 VRAM GPU를 우선 권장한다.
+
+
 ## 3. RunPod 접속 방식
 
 RunPod Pod가 Running 상태가 된 뒤 `HTTP Services`에서 Jupyter Notebook에 접속했다.
@@ -915,7 +918,7 @@ val_accuracy: 0.200000
 
 ```text
 라벨별 5~10개 영상으로 dry-run 규모를 한 번 더 키운 뒤,
-RunPod에서 sample_500_coarse_manifest.csv 기반 학습으로 확장한다.
+RunPod에서 sample_700_coarse_manifest.csv 기반 학습으로 확장한다.
 ```
 
 <!-- 2026-06-29-videomae-final-analysis -->
@@ -989,4 +992,3 @@ raw media check
 ```
 
 단, VideoMAE 추론은 `transformers`와 pretrained model download가 필요하므로 최초 실행 시 시간이 더 걸릴 수 있다.
-

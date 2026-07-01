@@ -1,6 +1,6 @@
-﻿"""Check whether raw image and video files are readable.
+"""Validate raw image and video readability before running Vision steps.
 
-This verifies local/RunPod storage before running the Vision pipeline.
+Use this first on RunPod/local storage to catch missing files or broken media.
 """
 from pathlib import Path
 

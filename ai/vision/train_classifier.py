@@ -1,10 +1,11 @@
 ﻿"""Train a frame-level accident type classifier from a manifest CSV.
 
-This script is intentionally small and parameterized for local dry-run first.
-Use frame_manifest_dryrun.csv to verify the training loop before paying for GPU time.
+The first baseline is ResNet18 over extracted frames. RunPod training uses a
+fixed seed and recorded config so experiments can be compared later.
 """
 from pathlib import Path
 import argparse
+import os
 import csv
 import json
 import random
@@ -16,6 +17,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
+from tqdm.auto import tqdm
 
 
 DEFAULT_MANIFEST_PATH = Path(
@@ -69,12 +71,27 @@ class FrameClassificationDataset(Dataset):
         return image_tensor, label_tensor
 
 
-def set_seed(seed: int) -> None:
+def set_seed(seed: int, deterministic: bool) -> None:
+    os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+    if deterministic:
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except TypeError:
+            torch.use_deterministic_algorithms(True)
+
+
+def seed_worker(worker_id: int) -> None:
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 def filter_valid_rows(rows: list[dict], root_dir: Path, label_column: str) -> list[dict]:
@@ -162,13 +179,16 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
+    epoch: int,
+    show_progress: bool,
 ) -> tuple[float, float]:
     model.train()
     total_loss = 0.0
     correct = 0
     total = 0
 
-    for images, labels in dataloader:
+    batches = tqdm(dataloader, desc=f"epoch {epoch} train", leave=False) if show_progress else dataloader
+    for images, labels in batches:
         images = images.to(device)
         labels = labels.to(device)
 
@@ -182,6 +202,11 @@ def train_one_epoch(
         total_loss += loss.item() * batch_size
         correct += (outputs.argmax(dim=1) == labels).sum().item()
         total += batch_size
+        if show_progress:
+            batches.set_postfix(
+                loss=f"{total_loss / max(total, 1):.4f}",
+                acc=f"{correct / max(total, 1):.4f}",
+            )
 
     return total_loss / max(total, 1), correct / max(total, 1)
 
@@ -192,6 +217,9 @@ def evaluate(
     dataloader: DataLoader | None,
     criterion: nn.Module,
     device: torch.device,
+    stage: str,
+    epoch: int,
+    show_progress: bool,
 ) -> tuple[float | None, float | None]:
     if dataloader is None:
         return None, None
@@ -201,7 +229,8 @@ def evaluate(
     correct = 0
     total = 0
 
-    for images, labels in dataloader:
+    batches = tqdm(dataloader, desc=f"epoch {epoch} {stage}", leave=False) if show_progress else dataloader
+    for images, labels in batches:
         images = images.to(device)
         labels = labels.to(device)
         outputs = model(images)
@@ -211,6 +240,11 @@ def evaluate(
         total_loss += loss.item() * batch_size
         correct += (outputs.argmax(dim=1) == labels).sum().item()
         total += batch_size
+        if show_progress:
+            batches.set_postfix(
+                loss=f"{total_loss / max(total, 1):.4f}",
+                acc=f"{correct / max(total, 1):.4f}",
+            )
 
     if total == 0:
         return None, None
@@ -226,6 +260,7 @@ def make_loader(
     batch_size: int,
     num_workers: int,
     train: bool,
+    seed: int,
 ) -> DataLoader | None:
     if not rows:
         return None
@@ -236,11 +271,15 @@ def make_loader(
         label_column=label_column,
         transform=build_transform(image_size, train=train),
     )
+    generator = torch.Generator()
+    generator.manual_seed(seed)
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=train,
         num_workers=num_workers,
+        generator=generator,
+        worker_init_fn=seed_worker,
     )
 
 
@@ -291,7 +330,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--val-ratio-if-missing", type=float, default=0.25)
     parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--show-progress", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--pretrained", action="store_true")
     parser.add_argument("--freeze-backbone", action="store_true")
@@ -300,7 +341,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    set_seed(args.seed)
+    set_seed(args.seed, args.deterministic)
 
     rows = read_csv(args.manifest)
     rows = filter_valid_rows(rows, args.root_dir, args.label_column)
@@ -327,6 +368,7 @@ def main() -> None:
         args.batch_size,
         args.num_workers,
         train=True,
+        seed=args.seed,
     )
     val_loader = make_loader(
         val_rows,
@@ -337,6 +379,7 @@ def main() -> None:
         args.batch_size,
         args.num_workers,
         train=False,
+        seed=args.seed + 1,
     )
     test_loader = make_loader(
         test_rows,
@@ -347,6 +390,7 @@ def main() -> None:
         args.batch_size,
         args.num_workers,
         train=False,
+        seed=args.seed + 2,
     )
 
     if train_loader is None:
@@ -363,9 +407,11 @@ def main() -> None:
     print(f"rows: train={len(train_rows)} val={len(val_rows)} test={len(test_rows)}")
 
     for epoch in range(1, args.epochs + 1):
-        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
-        val_loss, val_acc = evaluate(model, val_loader, criterion, device)
-        test_loss, test_acc = evaluate(model, test_loader, criterion, device)
+        train_loss, train_acc = train_one_epoch(
+            model, train_loader, criterion, optimizer, device, epoch, args.show_progress
+        )
+        val_loss, val_acc = evaluate(model, val_loader, criterion, device, "val", epoch, args.show_progress)
+        test_loss, test_acc = evaluate(model, test_loader, criterion, device, "test", epoch, args.show_progress)
 
         history_row = {
             "epoch": str(epoch),
@@ -395,6 +441,8 @@ def main() -> None:
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "seed": args.seed,
+        "deterministic": args.deterministic,
+        "show_progress": args.show_progress,
         "device": str(device),
         "num_classes": len(label_to_index),
         "train_rows": len(train_rows),
@@ -407,4 +455,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 

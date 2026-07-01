@@ -1,6 +1,7 @@
-﻿"""Run YOLO baseline detection on extracted key frames.
+"""Run YOLO baseline detection on extracted key frames.
 
-Outputs per-frame class, confidence, and bbox JSON for schema conversion.
+This step produces object class, confidence, and bbox evidence. It is used as
+visual evidence, not as a legal/fault-ratio decision model.
 """
 from pathlib import Path
 import json

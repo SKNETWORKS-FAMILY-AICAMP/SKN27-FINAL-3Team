@@ -1,6 +1,7 @@
-﻿"""Build a sample attachment/evidence link for one uploaded image.
+"""Create a sample attachment/evidence link JSON for one image.
 
-PM purpose stays evidence/accident_scene; damage_image is only an internal analysis mode.
+Photos are treated as stored evidence attachments first; automatic damage
+analysis is a later Vision mode.
 """
 from pathlib import Path
 import json

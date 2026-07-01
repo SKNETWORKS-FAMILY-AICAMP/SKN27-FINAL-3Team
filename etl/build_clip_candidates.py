@@ -1,7 +1,7 @@
-﻿"""Build clip candidate JSON from the latest Vision Agent output.
+"""Build VideoMAE comparison clip candidates from final Vision evidence.
 
-Short videos are kept as one full-context clip. Longer videos use event-window
-candidates from agent_output_*.json. No model inference happens here.
+Short videos are kept whole; longer videos use event-window evidence to choose
+small clips for clip-level inference.
 """
 from pathlib import Path
 import argparse

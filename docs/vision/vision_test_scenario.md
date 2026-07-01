@@ -282,7 +282,7 @@
 | 목적 | 상위 라벨 기준 학습 데이터 manifest와 frame-level manifest를 검증한다. |
 | 사전 조건 | Drive listing 또는 sample manifest 존재 |
 | 실행 명령 | `python etl/sample_classification_dataset.py`, `python etl/extract_training_frames.py` |
-| 기대 결과 | `sample_500_coarse_manifest.csv`, `frame_manifest_*.csv` 생성 |
+| 기대 결과 | `sample_700_coarse_manifest.csv`, `frame_manifest_train_700_f8.csv` 생성 |
 | 확인 기준 | coarse label, split, frame_path, file_exists 필드 확인 |
 
 ---
@@ -380,3 +380,4 @@ python ai/vision/build_supervisor_handoff.py
 4. 법률/판례/RAG Agent에 넘기면 안 되는 확정 판단이 포함되지 않았는가
 5. 후속 Agent로 넘길 handoff 구조가 명확한가
 ```
+

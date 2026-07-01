@@ -1,6 +1,7 @@
-﻿"""Sample classification candidates per coarse label and assign train/val/test splits.
+"""Sample the classification manifest into coarse accident labels.
 
-Reads classification_manifest.csv, keeps up to N items per coarse_label, and writes a reproducible sampled manifest.
+The current training plan uses four top-level labels and a fixed split so the
+same sample can be reused across experiments.
 """
 from pathlib import Path
 import argparse
@@ -14,7 +15,7 @@ DEFAULT_INPUT_PATH = Path(
     "storage/vision/datasets/classification/manifests/classification_manifest.csv"
 )
 DEFAULT_OUTPUT_PATH = Path(
-    "storage/vision/datasets/classification/manifests/sample_500_coarse_manifest.csv"
+    "storage/vision/datasets/classification/manifests/sample_700_coarse_manifest.csv"
 )
 DEFAULT_LABEL_COLUMN = "coarse_label"
 
@@ -152,7 +153,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
     parser.add_argument("--label-column", default=DEFAULT_LABEL_COLUMN)
-    parser.add_argument("--per-label", type=int, default=500)
+    parser.add_argument("--per-label", type=int, default=700)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-ratio", type=float, default=0.7)
     parser.add_argument("--val-ratio", type=float, default=0.2)

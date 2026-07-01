@@ -1,7 +1,7 @@
-﻿"""Extract fixed-size frame sequences for VideoMAE comparison POC.
+"""Sample 16 frames per extracted clip for VideoMAE inference.
 
-Reads extracted clip metadata, samples 16 frames per clip by default, and writes a
-manifest that can be used by a later VideoMAE inference/fine-tuning script.
+The output manifest is the lightweight bridge between mp4 clips and the
+pretrained VideoMAE model.
 """
 from pathlib import Path
 import argparse

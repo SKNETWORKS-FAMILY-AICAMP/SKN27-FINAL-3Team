@@ -1,8 +1,7 @@
-﻿"""Run pretrained VideoMAE inference on sampled clip frames.
+"""Run pretrained VideoMAE inference on sampled clip frames.
 
-This is a comparison POC, not accident-specific training. It reads the
-VideoMAE input manifest produced by ``etl/extract_videomae_frames.py`` and
-stores top-k action predictions per clip.
+This is a comparison POC only. VideoMAE adds clip-level action hints to the
+final analysis, but it does not replace the accident classifier.
 """
 from pathlib import Path
 import argparse
@@ -16,8 +15,8 @@ try:
     from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
 except ImportError as exc:  # pragma: no cover - runtime guidance
     raise SystemExit(
-        "Missing dependency: transformers. Install it on RunPod with: "
-        "pip install transformers"
+        "Missing dependency: transformers. Install dependencies with: "
+        "pip install -r requirements.txt"
     ) from exc
 
 

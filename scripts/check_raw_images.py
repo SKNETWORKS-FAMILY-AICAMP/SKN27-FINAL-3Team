@@ -1,6 +1,7 @@
-﻿"""Check whether raw sample image files can be opened.
+"""Validate that raw image files can be opened by Pillow.
 
-Used at the first ingestion stage after Google Drive download.
+Kept for early image-only ingestion checks; check_raw_media.py is the broader
+image/video validator.
 """
 from pathlib import Path
 from PIL import Image

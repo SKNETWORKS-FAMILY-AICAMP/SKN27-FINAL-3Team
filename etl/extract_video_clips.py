@@ -1,6 +1,7 @@
-﻿"""Extract short mp4 clips from clip candidate JSON.
+"""Cut event candidate clips from the source accident video.
 
-Uses OpenCV only. The clips are for local review and VideoMAE comparison POC.
+The clip manifest records exact time ranges and output paths for later frame
+sampling or manual review.
 """
 from pathlib import Path
 import argparse

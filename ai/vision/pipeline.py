@@ -1,6 +1,7 @@
-﻿"""Extract representative key frames from one raw video.
+"""Extract representative key frames from a raw accident video.
 
-Current POC uses uniform sampling and writes frame metadata JSON.
+This is the first Vision POC step: read one video, sample frames, and write
+metadata for later detection/schema conversion.
 """
 from pathlib import Path
 import json

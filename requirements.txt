@@ -1,10 +1,8 @@
-Django==5.2.14
-
-
+﻿Django==5.2.14
 numpy
 opencv-python
 pillow
 gdown
 ultralytics
 transformers
-transformers
+imageio-ffmpeg

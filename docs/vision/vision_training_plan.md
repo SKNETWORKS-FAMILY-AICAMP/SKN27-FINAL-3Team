@@ -11,7 +11,7 @@
 - Google Drive와 RunPod/로컬 연동 가능 여부 확인
 - AI-Hub 영상 데이터의 카테고리별 폴더 구조 확인
 - 영상 원본 전체 수집보다 프레임 캡처 기반 이미지 학습 데이터셋을 우선 구성
-- 각 카테고리별 최대 500개 랜덤 샘플링 전략 수립
+- 각 카테고리별 최대 700개 랜덤 샘플링 전략 수립
 - 사전학습 모델 기반 분류 학습 파이프라인 준비
 - 학습 시 파라미터, freezing 여부, 비교 모델, epoch별 결과 기록
 
@@ -106,7 +106,7 @@ Ai_Hub/Train/TS_차대차_영상_회전교차로: 266
 ```text
 1. Drive listing JSON 생성
 2. listing JSON에서 category, source_path, drive_url 추출
-3. 카테고리별 최대 500개 랜덤 샘플링
+3. 카테고리별 최대 700개 랜덤 샘플링
 4. 샘플링된 항목만 다운로드
 5. 영상에서 대표 프레임 추출
 6. 프레임 이미지를 학습 데이터로 사용
@@ -119,15 +119,15 @@ Ai_Hub/Train/TS_차대차_영상_회전교차로: 266
 기본 전략:
 
 ```text
-각 카테고리별 최대 500개 랜덤 추출
+각 카테고리별 최대 700개 랜덤 추출
 seed 고정: 42
-카테고리 파일 수가 500개 미만이면 가능한 전체 사용
+카테고리 파일 수가 700개 미만이면 가능한 전체 사용
 ```
 
 예시:
 
 ```text
-TS_차대차_영상_직선도로: 5500개 중 500개 추출
+TS_차대차_영상_직선도로: 5500개 중 최대 700개 추출
 TS_차대차_영상_회전교차로: 266개 전체 사용
 TS_차대이륜차_영상_회전교차로: 3개 전체 사용
 ```
@@ -135,7 +135,7 @@ TS_차대이륜차_영상_회전교차로: 3개 전체 사용
 주의:
 
 - 카테고리별 원본 수 편차가 매우 크다.
-- 500개 미만 카테고리는 oversampling 여부를 추후 결정한다.
+- 700개 미만 카테고리는 가능한 전체를 사용하고, oversampling 여부는 추후 결정한다.
 - 첫 학습은 class imbalance를 기록하고 진행한다.
 - 이후 weighted sampler 또는 class weight 적용 여부를 비교한다.
 
@@ -249,7 +249,7 @@ RunPod는 아래 준비가 끝난 뒤 사용한다.
 
 ```text
 1. Drive listing manifest 생성 완료
-2. 카테고리별 500개 샘플링 manifest 생성 완료
+2. 카테고리별 700개 샘플링 manifest 생성 완료
 3. 샘플 다운로드 코드 준비 완료
 4. 프레임 추출 코드 준비 완료
 5. train_classifier.py dry-run 완료
@@ -274,7 +274,7 @@ build_classification_manifest.py
 - drive_listing_aihub.json을 읽어 학습 후보 manifest 생성
 
 sample_classification_dataset.py
-- 카테고리별 최대 500개 랜덤 샘플링
+- 카테고리별 최대 700개 랜덤 샘플링
 - train/val/test split 부여
 
 train_classifier.py
@@ -345,12 +345,12 @@ etl/sample_classification_dataset.py
 
 ```text
 classification_manifest.csv 읽기
-카테고리별 최대 500개 랜덤 샘플링
+카테고리별 최대 700개 랜덤 샘플링
 train/val/test = 70/20/10 split 부여
-sample_500_manifest.csv 생성
+sample_700_coarse_manifest.csv 생성
 ```
 
-## 14. 카테고리별 500개 샘플링 결과
+## 14. 카테고리별 700개 샘플링 기준
 
 생성 파일:
 
@@ -368,14 +368,14 @@ python etl\sample_classification_dataset.py
 생성 결과:
 
 ```text
-storage/vision/datasets/classification/manifests/sample_500_manifest.csv
-storage/vision/datasets/classification/manifests/sample_500_manifest_summary.csv
+storage/vision/datasets/classification/manifests/sample_700_coarse_manifest.csv
+storage/vision/datasets/classification/manifests/sample_700_coarse_manifest_summary.csv
 ```
 
 샘플링 기준:
 
 ```text
-per_category: 500
+per_category: 700
 seed: 42
 train/val/test: 70/20/10
 ```
@@ -390,9 +390,9 @@ split_counts: {'train': 4530, 'val': 1291, 'test': 660}
 
 해석:
 
-- 총 24개 카테고리에서 최대 500개씩 샘플링했다.
-- 500개 이상 보유한 카테고리는 500개만 랜덤 추출했다.
-- 500개 미만 카테고리는 가능한 전체를 사용했다.
+- 상위 라벨 4개 기준으로 최대 700개씩 샘플링한다.
+- 700개 이상 보유한 상위 라벨은 700개만 랜덤 추출한다.
+- 700개 미만 라벨은 가능한 전체를 사용한다.
 - 일부 카테고리는 원본 수가 매우 적다. 예: `TS_차대이륜차_영상_회전교차로`는 3개뿐이다.
 - 현재는 class imbalance를 그대로 기록하고 진행한다.
 - 이후 필요 시 oversampling, class weight, weighted sampler를 비교한다.
@@ -464,33 +464,33 @@ TS_차대자전거_영상_직선도로 → coarse_label=차대자전거
 실행 결과:
 
 ```text
-output_path: storage/vision/datasets/classification/manifests/sample_500_coarse_manifest.csv
-summary_path: storage/vision/datasets/classification/manifests/sample_500_coarse_manifest_summary.csv
-sampled_rows: 2000
+output_path: storage/vision/datasets/classification/manifests/sample_700_coarse_manifest.csv
+summary_path: storage/vision/datasets/classification/manifests/sample_700_coarse_manifest_summary.csv
+sampled_rows: 2800
 label_count: 4
-split_counts: {'train': 1400, 'val': 400, 'test': 200}
+split_counts: {'train': 1956, 'val': 560, 'test': 284}
 ```
 
 상위 라벨별 원본/샘플 수:
 
 ```text
-차대보행자: original=763, sampled=500, train=350, val=100, test=50
-차대이륜차: original=1928, sampled=500, train=350, val=100, test=50
-차대자전거: original=855, sampled=500, train=350, val=100, test=50
-차대차: original=12277, sampled=500, train=350, val=100, test=50
+차대보행자: original=763, sampled=700, train=489, val=140, test=71
+차대이륜차: original=1928, sampled=700, train=489, val=140, test=71
+차대자전거: original=855, sampled=700, train=489, val=140, test=71
+차대차: original=12277, sampled=700, train=489, val=140, test=71
 ```
 
 결론:
 
 ```text
-1차 학습은 sample_500_coarse_manifest.csv 기준으로 진행한다.
+1차 본 학습은 sample_700_coarse_manifest.csv 기준으로 진행한다.
 세부 24개 카테고리는 2차 실험 또는 성능 안정화 이후 검토한다.
 ```
 
 다음 단계:
 
 ```text
-1. sample_500_coarse_manifest.csv 기준으로 일부만 dry-run 다운로드
+1. sample_700_coarse_manifest.csv 기준으로 다운로드
 2. 다운로드한 영상에서 대표 프레임 추출
 3. frame-level classification manifest 생성
 4. ResNet18 baseline 학습 코드 준비
@@ -506,7 +506,7 @@ etl/download_sampled_media.py
 
 목적:
 
-- `sample_500_coarse_manifest.csv` 전체 2,000개를 바로 받지 않는다.
+- `sample_700_coarse_manifest.csv` 전체 2,800개를 RunPod에서 받는다.
 - 먼저 상위 라벨별 1개씩만 다운로드해 Drive URL, 저장 경로, 파일명 정책을 검증한다.
 
 실행:
@@ -615,7 +615,7 @@ extract_status_counts: {'extracted': 20}
 1. frame_manifest_dryrun.csv를 읽는 classification Dataset 구현
 2. ResNet18 baseline train_classifier.py 작성
 3. 로컬에서 20장 기준 overfit/dry-run 확인
-4. RunPod에서 sample_500_coarse_manifest.csv 기반 다운로드·프레임 추출·학습 실행
+4. RunPod에서 sample_700_coarse_manifest.csv 기반 다운로드·프레임 추출·학습 실행
 ```
 
 ## 14. Classifier baseline dry-run 결과
@@ -674,7 +674,105 @@ frame-level manifest -> Dataset -> DataLoader -> ResNet18 -> loss 계산 -> opti
 ```text
 1. 라벨별 5~10개 영상으로 dry-run 규모 확대
 2. frames_per_video 1/3/5 비교
-3. RunPod에서 sample_500_coarse_manifest.csv 기준 다운로드·프레임 추출
+3. RunPod에서 sample_700_coarse_manifest.csv 기준 다운로드·프레임 추출
 4. ResNet18 pretrained + freeze_backbone 기준 첫 GPU 학습
 5. training_history, run_config, class_mapping을 실험별로 비교
 ```
+
+## 23. RunPod 학습용 Pod 선택 기준
+
+이번 단계는 단일 영상 POC가 아니라 라벨별 700개, 총 2,800개 영상 기반 학습이다. 따라서 RunPod 선택 기준은 POC 기준과 분리한다.
+
+### 23.1 실행 목표
+
+```text
+sample_700_coarse_manifest.csv
+-> 라벨별 700개 영상 다운로드
+-> 영상 1개당 8프레임 추출
+-> frame_manifest_train_700_f8.csv 생성
+-> ResNet18 pretrained baseline 학습
+-> training_history.csv / model.pt / run_config.json 저장
+```
+
+예상 프레임 수:
+
+```text
+2,800 videos * 8 frames = 최대 22,400 training frames
+```
+
+### 23.2 권장 Pod 기준
+
+| 항목 | 권장 기준 | 이유 |
+|---|---|---|
+| GPU 개수 | 1개 | ResNet18 baseline 첫 학습은 multi-GPU가 필요하지 않음 |
+| GPU VRAM | 최소 16GB, 권장 24GB 이상 | batch size 32, image size 224 기준 안정적 실행 |
+| GPU 후보 | RTX A5000, RTX 4090, A40, L40 계열 | 비용 대비 단일 GPU 학습에 적합 |
+| 피해야 할 선택 | 너무 저렴한 VRAM 8GB 이하 GPU | batch size 조정이 필요하고 학습 실패 가능성 증가 |
+| Pod template | Runpod PyTorch 2.4.0 또는 PyTorch/CUDA 포함 템플릿 | torch/torchvision/CUDA 환경 준비 시간 단축 |
+| GPU count | 1 | 비용 절감, 현재 코드가 단일 GPU 기준 |
+| Pricing | On-Demand | 실험 후 stop 가능, 장기 예약 불필요 |
+| Jupyter Notebook | ON | `vision_training_runpod_full_pipeline.ipynb` 실행 및 결과 확인용 |
+| SSH Terminal | 가능하면 ON | 압축 해제, 용량 확인, 긴 로그 확인에 유용 |
+| Disk | 최소 150GB, 권장 200GB 이상 | 2,800개 영상 + 추출 프레임 + 모델 결과 저장 필요 |
+| Encrypt volume | 샘플/공개 데이터는 OFF 가능, 민감 데이터는 ON | 실제 사고/개인정보 포함 시 보안 필요 |
+
+### 23.3 현재 추천 설정
+
+```text
+Pod template: Runpod Pytorch 2.4.0
+Image: runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+GPU count: 1
+GPU class: VRAM 24GB 이상이면 우선 선택
+Pricing: On-Demand
+Start Jupyter notebook: ON
+SSH terminal access: ON 가능 시 ON
+Disk: 200GB 이상 권장
+```
+
+### 23.4 비용 절감 기준
+
+- 전체 2,800개 학습 전에는 코드와 manifest가 로컬에서 검증되어 있어야 한다.
+- RunPod에서는 `scripts/vision_training_runpod_full_pipeline.ipynb`를 기준으로 실행한다.
+- 학습 완료 후 아래 산출물을 확인하면 Pod를 stop한다.
+
+```text
+storage/vision/datasets/classification/manifests/train_700_download_manifest.csv
+storage/vision/datasets/classification/manifests/frame_manifest_train_700_f8.csv
+storage/vision/models/classification/vision_cls_*/model.pt
+storage/vision/models/classification/vision_cls_*/training_history.csv
+storage/vision/models/classification/vision_cls_*/run_config.json
+```
+
+### 23.5 RunPod에서 실행할 노트북
+
+```text
+/workspace/SKN27-FINAL-3Team/scripts/vision_training_runpod_full_pipeline.ipynb
+```
+
+Run All 실행 순서:
+
+```text
+requirements 설치
+-> sample_700_coarse_manifest.csv 확인
+-> 2,800개 영상 다운로드
+-> 8프레임 추출
+-> ResNet18 baseline 학습
+-> training_history/model/run_config 확인
+```
+
+### 23.6 재현성 고정 기준
+
+동일 데이터와 동일 파라미터로 학습했을 때 결과 비교가 가능하도록 아래 값을 고정한다.
+
+| 항목 | 고정값/기준 | 반영 위치 |
+|---|---|---|
+| seed | 42 | `train_classifier.py --seed 42`, `vision_training_runpod_full_pipeline.ipynb` |
+| batch size | 32 | RunPod 학습 노트북의 `BATCH_SIZE` |
+| frames per video | 8 | RunPod 학습 노트북의 `FRAMES_PER_VIDEO` |
+| image size | 224 | RunPod 학습 노트북의 `IMAGE_SIZE` |
+| learning rate | 0.001 | RunPod 학습 노트북의 `LEARNING_RATE` |
+| deterministic | True | `--deterministic` 옵션 |
+| DataLoader shuffle | seed 기반 generator 사용 | `train_classifier.py` |
+| CUDA/CUDNN | deterministic 설정 적용 | `train_classifier.py` |
+
+주의: GPU/CUDA 연산은 환경과 라이브러리 버전에 따라 완전한 bit-level 동일성을 보장하지 못할 수 있다. 그래도 seed, DataLoader generator, deterministic 옵션을 고정해 실험 간 변동을 최소화한다.

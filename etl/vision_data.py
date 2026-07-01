@@ -1,6 +1,7 @@
-﻿"""Create the first sample image manifest from storage/vision/raw.
+"""Create a small raw-media manifest for ingestion validation.
 
-This records file existence and image readability for ingestion POC.
+This early POC manifest checks whether files exist and can be read before any
+model pipeline is executed.
 """
 from pathlib import Path
 import csv

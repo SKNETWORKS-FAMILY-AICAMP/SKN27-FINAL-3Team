@@ -1,7 +1,7 @@
-﻿"""Merge YOLO/bbox agent output with VideoMAE clip inference.
+"""Merge Vision Agent output and VideoMAE hints into final analysis JSON.
 
-This keeps the existing Vision Agent output unchanged and adds VideoMAE as a
-supplementary video-understanding section for report/RAG comparison.
+This file keeps detailed evidence and model observations together before a
+smaller Supervisor handoff payload is built.
 """
 from pathlib import Path
 import argparse

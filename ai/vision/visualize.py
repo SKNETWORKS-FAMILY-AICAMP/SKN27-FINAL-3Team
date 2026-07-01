@@ -1,6 +1,7 @@
-﻿"""Draw detected object bounding boxes on key frame images.
+"""Draw detected object bounding boxes on key-frame images.
 
-Generated images are for visual QA, reports, and POC validation.
+The generated images are for review, presentation, and evidence inspection;
+they are not used as training inputs.
 """
 from pathlib import Path
 import json

@@ -1,6 +1,7 @@
-﻿"""Build AI-Hub training candidate manifest from a Google Drive listing.
+"""Build the full classification candidate manifest from Drive listing JSON.
 
-The script does not download data; it converts Drive paths into fine/coarse label rows.
+This turns nested AI-Hub Drive metadata into flat rows that can be sampled and
+used by the training pipeline.
 """
 from pathlib import Path
 import argparse

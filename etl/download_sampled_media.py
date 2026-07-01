@@ -1,7 +1,7 @@
-﻿"""Download a small subset of sampled Drive media for local dry-run validation.
+"""Download sampled training videos from Google Drive into local/RunPod storage.
 
-Reads sample_500_coarse_manifest.csv and downloads only N items per coarse_label.
-Use this before downloading thousands of videos on RunPod.
+Rows keep download_status and local_path so failed or already-downloaded files
+can be inspected without guessing.
 """
 from pathlib import Path
 import argparse
@@ -14,7 +14,7 @@ from utils import read_csv, safe_name, write_csv
 
 
 DEFAULT_INPUT_PATH = Path(
-    "storage/vision/datasets/classification/manifests/sample_500_coarse_manifest.csv"
+    "storage/vision/datasets/classification/manifests/sample_700_coarse_manifest.csv"
 )
 DEFAULT_OUTPUT_PATH = Path(
     "storage/vision/datasets/classification/manifests/dryrun_download_manifest.csv"
@@ -63,10 +63,17 @@ def download_file(url: str, output_path: Path) -> None:
         shutil.copyfileobj(response, f)
 
 
+def progress_prefix(index: int, total: int) -> str:
+    percent = (index / total * 100) if total else 100
+    return f"[{index}/{total}] {percent:5.1f}%"
+
+
 def download_rows(rows: list[dict], download_dir: Path, label_column: str, no_download: bool) -> list[dict]:
     results = []
+    total = len(rows)
 
-    for row in rows:
+    for index, row in enumerate(rows, start=1):
+        prefix = progress_prefix(index, total)
         output_path = local_video_path(row, download_dir, label_column)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -82,7 +89,7 @@ def download_rows(rows: list[dict], download_dir: Path, label_column: str, no_do
             copied["download_status"] = "exists"
             copied["file_exists"] = "True"
             results.append(copied)
-            print(f"exists: {output_path}")
+            print(f"{prefix} exists: {output_path}", flush=True)
             continue
 
         url = row.get("drive_url", "")
@@ -90,17 +97,19 @@ def download_rows(rows: list[dict], download_dir: Path, label_column: str, no_do
             copied["download_status"] = "missing_url"
             copied["file_exists"] = "False"
             results.append(copied)
-            print(f"missing_url: {row.get('asset_id')}")
+            print(f"{prefix} missing_url: {row.get('asset_id')}", flush=True)
             continue
 
-        print(f"download: {row.get('asset_id')} {row.get(label_column)} -> {output_path}")
+        print(f"{prefix} download: {row.get('asset_id')} {row.get(label_column)} -> {output_path}", flush=True)
         try:
             download_file(url, output_path)
             copied["download_status"] = "downloaded"
             copied["file_exists"] = str(output_path.exists())
+            print(f"{prefix} done: {output_path.name}", flush=True)
         except Exception as exc:
             copied["download_status"] = f"failed: {exc}"
             copied["file_exists"] = str(output_path.exists())
+            print(f"{prefix} failed: {row.get('asset_id')} {exc}", flush=True)
 
         results.append(copied)
 

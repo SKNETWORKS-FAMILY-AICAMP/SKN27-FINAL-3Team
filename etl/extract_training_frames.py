@@ -1,7 +1,7 @@
-﻿"""Extract representative training frames from sampled classification videos.
+"""Extract frame-level classification samples from downloaded videos.
 
-Reads a video-level manifest, extracts a fixed number of frames per video,
-and writes a frame-level manifest that can be consumed by image classifiers.
+Each video contributes a fixed number of evenly spaced frames, producing the
+manifest consumed by ai/vision/train_classifier.py.
 """
 from pathlib import Path
 import argparse

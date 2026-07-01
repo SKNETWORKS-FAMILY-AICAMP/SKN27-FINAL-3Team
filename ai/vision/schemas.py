@@ -1,8 +1,7 @@
-﻿"""Convert detection output into a Vision Agent event-evidence output.
+"""Convert detection output into Vision Agent event/evidence JSON.
 
-The agent does not decide fault, liability, or the final accident type. It turns
-key-frame detections into event-window candidates, visual evidence, and grounded
-summary text for RAG/report agents.
+The agent summarizes visual observations and candidate event windows. Fault,
+liability, and final accident type stay unresolved for downstream agents.
 """
 from pathlib import Path
 import json
