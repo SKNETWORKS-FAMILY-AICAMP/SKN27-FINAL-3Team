@@ -1,0 +1,7 @@
+{
+  "source_file": "230630_자동차사고_과실비율_인정기준_최종.pdf",
+  "rule_json_count": 201,
+  "expected_rule_count": 201,
+  "output_rule_root_dir": "C:\\dev\\project\\SKN27-FINAL-3Team\\etl\\fault_cases\\artifacts\\fault_standard_output\\preprocessed\\2023_official_auto_accident_rulebook\\04_accident_type_fault_ratio_standards",
+  "created_at": "2026-07-01T13:26:19"
+}

@@ -1,0 +1,997 @@
+{
+  "metadata": {
+    "rule_id": "pm_auto_2021_도표08",
+    "source_type": "fault_standard",
+    "source_subtype": "pm_auto_2021",
+    "source_reliability": "official_standard",
+    "source_file": "!!210624_PM대자동차사고과실비율비정형기준_송부(2021).pdf",
+    "published_year": 2021,
+    "preprocessing_version": "pm_auto_2021_v1.0",
+    "file_hash": "6947e77a656ab1fc94ee58305b5dacb303e1ef753dbaca20d324c6672528d477",
+    "page_start": 23,
+    "page_end": 23,
+    "page_count_checked": true,
+    "missing_pages": []
+  },
+  "hierarchy": {
+    "document_title": "PM 대 자동차 사고 과실비율 비정형 기준",
+    "section_no": "5",
+    "section_title": "세부유형별 과실비율 적용기준",
+    "category_no": "02",
+    "category_title": "신호기 없는 교차로 사고",
+    "chart_no": 8,
+    "chart_ref": "도표08",
+    "section_path": [
+      "PM 대 자동차 사고 과실비율 비정형 기준",
+      "세부유형별 과실비율 적용기준",
+      "신호기 없는 교차로 사고",
+      "도표08 대로 직진 대 소로 직진 사고"
+    ]
+  },
+  "rule_identity": {
+    "chart_no": 8,
+    "chart_code": "도표08",
+    "rule_title": "대로 직진 대 소로 직진 사고",
+    "rule_title_clean": "대로직진대소로직진사고",
+    "rule_type": "pm_vs_vehicle",
+    "chart_group": "unsignalized_intersection",
+    "has_related_charts": true,
+    "related_chart_refs": [
+      "도표07",
+      "도표09"
+    ],
+    "has_scenarios": false,
+    "scenario_count": 0
+  },
+  "applicability": {
+    "applies_to": "car_vs_pm_accident",
+    "pm_must_be_riding": true,
+    "pm_dismounted_excluded": true,
+    "pm_legal_definition_required": true,
+    "pm_speed_limit_condition": "25km/h 이상 운행 시 전동기가 작동하지 않음",
+    "pm_weight_condition": "30kg 미만",
+    "included_pm_examples": [
+      "전동킥보드",
+      "전동외륜보드",
+      "전동이륜평행차",
+      "전동스케이트보드"
+    ],
+    "excluded_cases": [
+      "PM을 끌고 가는 경우"
+    ]
+  },
+  "accident_classification": {
+    "accident_group": "신호기 없는 교차로 사고",
+    "accident_subgroup": "기타",
+    "collision_pattern": "other",
+    "movement_relation": "unknown",
+    "violation_actor": "none",
+    "primary_violation": "none",
+    "priority_basis": "main_road",
+    "is_signalized": false,
+    "is_unsignalized": false,
+    "is_intersection_case": false,
+    "is_crossing_case": false,
+    "is_lane_change_case": false,
+    "is_rear_end_case": false
+  },
+  "parties": [
+    {
+      "party_id": "party_pm_auto_2021_도표08_A",
+      "rule_id": "pm_auto_2021_도표08",
+      "party_key": "A",
+      "party_label": "PM A",
+      "party_type": "pm",
+      "movement": "직진",
+      "signal_state": null,
+      "road_position": "대로",
+      "lane_position": null,
+      "direction_relation": null,
+      "entry_timing": null,
+      "violation_type": null,
+      "raw_text": "PM A : 대로 직진",
+      "action_summary": "대로 직진"
+    },
+    {
+      "party_id": "party_pm_auto_2021_도표08_B",
+      "rule_id": "pm_auto_2021_도표08",
+      "party_key": "B",
+      "party_label": "자동차 B",
+      "party_type": "car",
+      "movement": "직진",
+      "signal_state": null,
+      "road_position": "소로",
+      "lane_position": null,
+      "direction_relation": null,
+      "entry_timing": null,
+      "violation_type": null,
+      "raw_text": "자동차 B : 소로 직진",
+      "action_summary": "소로 직진"
+    }
+  ],
+  "pm_context": {
+    "pm_party_key": "A",
+    "pm_action": "대로 직진",
+    "pm_road_position": "대로",
+    "pm_lane_position": null,
+    "pm_signal_state": null,
+    "pm_riding_state": "riding",
+    "pm_near_bicycle_road": false,
+    "pm_left_side_travel": false,
+    "pm_sidewalk_travel": false,
+    "pm_crosswalk_travel": false,
+    "pm_bicycle_crossing_travel": false,
+    "pm_centerline_violation": false,
+    "pm_one_way_violation": false,
+    "pm_lane_change": false,
+    "pm_rear_end": false,
+    "pm_sudden_entry": false,
+    "pm_noticeability_issue": false,
+    "pm_vulnerability_basis": "PM은 자동차 대비 충돌 시 전도 및 피해 확대 위험이 큼"
+  },
+  "vehicle_context": {
+    "car_party_key": "B",
+    "car_action": "소로 직진",
+    "car_signal_state": null,
+    "car_road_position": "대로",
+    "car_lane_change": false,
+    "car_door_opening": false,
+    "car_rear_end": false,
+    "car_entering_bicycle_road": false,
+    "car_entering_from_non_road": false,
+    "car_notice_duty_basis": "PM과 충돌 시 피해 확대 위험을 고려한 주의의무"
+  },
+  "road_context": {
+    "road_area": "교차로",
+    "intersection_type": null,
+    "road_width_relation": "main_vs_side_road",
+    "has_signal": false,
+    "has_bicycle_road": false,
+    "has_bicycle_crossing": false,
+    "has_crosswalk": false,
+    "has_sidewalk": false,
+    "has_centerline": false,
+    "has_one_way": false
+  },
+  "signal_context": {
+    "is_signalized": false,
+    "is_unsignalized": false,
+    "pm_signal_state": null,
+    "car_signal_state": null,
+    "pedestrian_signal_state": null,
+    "bicycle_signal_rule_applied": false,
+    "signal_priority_basis": null
+  },
+  "base_fault": {
+    "base_fault_type": "pair_ratio",
+    "party_a_ratio": 10,
+    "party_b_ratio": 90,
+    "party_a_ratio_alt": null,
+    "party_b_ratio_alt": null,
+    "normalized_ratio": "10:90",
+    "raw_text": "기본\nA 10 : B 90\n과실",
+    "heavier_fault_party": "B",
+    "is_one_sided_fault": false,
+    "scenario_required": false
+  },
+  "rule_scenarios": [],
+  "adjustment_factors": [
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_001",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "A",
+      "target_party_type": "pm",
+      "factor_name": "야간·기타 시야장애",
+      "factor_category": "visibility",
+      "delta": 5,
+      "delta_direction": "increase",
+      "raw_delta": "+5",
+      "raw_text": "야간·기타 시야장애 +5",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": false,
+        "pm_left_side_travel": false,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": true,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": true,
+      "is_car_specific_factor": false
+    },
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_002",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "A",
+      "target_party_type": "pm",
+      "factor_name": "좌측통행",
+      "factor_category": "left_side_travel",
+      "delta": 5,
+      "delta_direction": "increase",
+      "raw_delta": "+5",
+      "raw_text": "A 좌측통행 +5",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": false,
+        "pm_left_side_travel": true,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": false,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": true,
+      "is_car_specific_factor": false
+    },
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_003",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "A",
+      "target_party_type": "pm",
+      "factor_name": "인근에 자전거도로가 있는 경우",
+      "factor_category": "near_bicycle_road",
+      "delta": 5,
+      "delta_direction": "increase",
+      "raw_delta": "+5",
+      "raw_text": "A 인근에 자전거도로가 있는 경우 +5",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": true,
+        "pm_left_side_travel": false,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": false,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": true,
+      "is_car_specific_factor": false
+    },
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_004",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "A",
+      "target_party_type": "pm",
+      "factor_name": "현저한 과실",
+      "factor_category": "severe_fault",
+      "delta": 10,
+      "delta_direction": "increase",
+      "raw_delta": "+10",
+      "raw_text": "A 현저한 과실 +10",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": false,
+        "pm_left_side_travel": false,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": false,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": false,
+      "is_car_specific_factor": false
+    },
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_005",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "A",
+      "target_party_type": "pm",
+      "factor_name": "중과실",
+      "factor_category": "severe_fault",
+      "delta": 20,
+      "delta_direction": "increase",
+      "raw_delta": "+20",
+      "raw_text": "A 중과실 +20",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": false,
+        "pm_left_side_travel": false,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": false,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": false,
+      "is_car_specific_factor": false
+    },
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_006",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "A",
+      "target_party_type": "pm",
+      "factor_name": "명확한 선진입",
+      "factor_category": "first_entry",
+      "delta": -10,
+      "delta_direction": "decrease",
+      "raw_delta": "-10",
+      "raw_text": "A 명확한 선진입 -10",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": false,
+        "pm_left_side_travel": false,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": false,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": false,
+      "is_car_specific_factor": false
+    },
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_007",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "B",
+      "target_party_type": "car",
+      "factor_name": "현저한 과실",
+      "factor_category": "severe_fault",
+      "delta": 10,
+      "delta_direction": "increase",
+      "raw_delta": "+10",
+      "raw_text": "B 현저한 과실 +10",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": false,
+        "pm_left_side_travel": false,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": false,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": false,
+      "is_car_specific_factor": false
+    },
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_008",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "B",
+      "target_party_type": "car",
+      "factor_name": "중과실",
+      "factor_category": "severe_fault",
+      "delta": 20,
+      "delta_direction": "increase",
+      "raw_delta": "+20",
+      "raw_text": "B 중과실 +20",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": false,
+        "pm_left_side_travel": false,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": false,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": false,
+      "is_car_specific_factor": false
+    },
+    {
+      "adjustment_id": "adj_pm_auto_2021_도표08_009",
+      "rule_id": "pm_auto_2021_도표08",
+      "target_party_key": "B",
+      "target_party_type": "car",
+      "factor_name": "명확한 선진입",
+      "factor_category": "first_entry",
+      "delta": -10,
+      "delta_direction": "decrease",
+      "raw_delta": "-10",
+      "raw_text": "B 명확한 선진입 -10",
+      "condition_text": null,
+      "condition_context": {
+        "near_bicycle_road": false,
+        "pm_left_side_travel": false,
+        "pm_sidewalk_travel": false,
+        "night_or_visibility_issue": false,
+        "crossing_prohibited": false,
+        "residential_commercial_school_area": false,
+        "car_brake_light_failure": false,
+        "car_door_opening": false
+      },
+      "explanation_text": null,
+      "is_pm_specific_factor": false,
+      "is_car_specific_factor": false
+    }
+  ],
+  "adjustment_condition_context": {
+    "rule_id": "pm_auto_2021_도표08",
+    "near_bicycle_road": true,
+    "pm_left_side_travel": true,
+    "pm_sidewalk_travel": false,
+    "night_or_visibility_issue": true,
+    "crossing_prohibited": false,
+    "residential_commercial_school_area": false,
+    "car_brake_light_failure": false,
+    "car_door_opening": false,
+    "condition_factor_count": 3
+  },
+  "blocks": [
+    {
+      "block_id": "block_pm_auto_2021_도표08_001",
+      "rule_id": "pm_auto_2021_도표08",
+      "block_type": "adjustment_factor_table",
+      "block_order": 1,
+      "block_title": "수정요소 A B",
+      "raw_text": "야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10",
+      "clean_text": "야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10",
+      "structured_text": "야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10"
+    }
+  ],
+  "law_refs": [],
+  "reference_cases": [],
+  "review_cases": [],
+  "texts": {
+    "raw_text": "도표 08 대로 직진 대(대) 소로 직진 사고\n기본\nA 10 : B 90\n과실\n사고 PM A : 대로 직진\n상황 자동차 B : 소로 직진\n수정요소 A B\n야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10",
+    "clean_text": "도표 08 대로 직진 대(대) 소로 직진 사고\n기본\nA 10 : B 90\n과실\n사고 PM A : 대로 직진\n상황 자동차 B : 소로 직진\n수정요소 A B\n야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10",
+    "structured_text": "도표 08 대로 직진 대(대) 소로 직진 사고\n기본\nA 10 : B 90\n과실\n사고\nPM A : 대로 직진\n상황\n자동차 B : 소로 직진\n수정요소 A B\n야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10"
+  },
+  "cleaning_quality": {
+    "page_noise_removed": true,
+    "header_footer_removed": true,
+    "vertical_label_repaired": true,
+    "ratio_expression_normalized": true,
+    "pm_terms_normalized": true,
+    "special_symbols_preserved": [
+      "+",
+      "-",
+      ":",
+      "A",
+      "B",
+      "PM"
+    ],
+    "uncertain_terms": [],
+    "needs_manual_review": false
+  },
+  "parse_quality": {
+    "parse_status": "valid",
+    "page_count_checked": true,
+    "missing_pages": [],
+    "chart_code_detected": true,
+    "title_detected": true,
+    "pm_party_detected": true,
+    "car_party_detected": true,
+    "base_fault_detected": true,
+    "adjustment_factor_detected": true,
+    "law_ref_detected": false,
+    "reference_case_detected": false,
+    "review_case_detected": false,
+    "block_split_success": true,
+    "rule_scenario_detected": false,
+    "adjustment_condition_context_detected": true,
+    "quality_flags": [
+      "adjustment_condition_context_detected",
+      "shared_rule_group_attached"
+    ],
+    "needs_manual_review_reason": []
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_pm_auto_2021_도표08_001",
+      "rule_id": "pm_auto_2021_도표08",
+      "block_id": "block_pm_auto_2021_도표08_001",
+      "chunk_type": "adjustment_factor_table",
+      "chunk_text": "야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10",
+      "chart_no": 8,
+      "chart_code": "도표08",
+      "rule_title": "대로 직진 대 소로 직진 사고",
+      "party_a_ratio": 10,
+      "party_b_ratio": 90,
+      "accident_group": "신호기 없는 교차로 사고",
+      "accident_subgroup": "기타",
+      "pm_party_key": "A",
+      "pm_action": "대로 직진",
+      "accident_tags": [
+        "신호기 없는 교차로 사고",
+        "기타",
+        "other",
+        "none",
+        "대로"
+      ],
+      "source_reliability": "official_standard"
+    }
+  ],
+  "shared_rule_group": {
+    "shared_group_id": "pm_auto_2021_shared_08_09",
+    "group_title": "신호기 없는 교차로 사고 - 대로 소로 직진",
+    "member_chart_refs": [
+      "도표08",
+      "도표09"
+    ],
+    "source_rule_id": "pm_auto_2021_도표09",
+    "shared_block_count": 8,
+    "shared_law_ref_count": 2,
+    "shared_chunk_count": 12,
+    "sharing_strategy": "auto_detected_shared_rule_group",
+    "sharing_reason": {
+      "should_share": true,
+      "same_chart_group": true,
+      "left_evidence_score": 2,
+      "right_evidence_score": 22,
+      "title_similarity": 1.0,
+      "same_accident_group": true,
+      "reason": "adjacent_rule_uses_shared_evidence"
+    },
+    "shared_blocks": [
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_block_id": "block_pm_auto_2021_도표09_001",
+        "block_type": "base_fault",
+        "block_order": 1,
+        "block_title": "기본과실",
+        "raw_text": "해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.\n[관련법규]\n도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "clean_text": "해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.\n[관련법규]\n도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "structured_text": "해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.\n[관련법규]\n도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳"
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_block_id": "block_pm_auto_2021_도표09_002",
+        "block_type": "party_condition",
+        "block_order": 2,
+        "block_title": "사고상황",
+        "raw_text": ":\n- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.\n기본과실 해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.\n[관련법규]\n도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "clean_text": ":\n- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.\n기본과실 해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.\n[관련법규]\n도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "structured_text": ":\n- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.\n기본과실 해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.\n[관련법규]\n도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳"
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_block_id": "block_pm_auto_2021_도표09_003",
+        "block_type": "adjustment_factor_table",
+        "block_order": 3,
+        "block_title": "수정요소 A B",
+        "raw_text": "야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10",
+        "clean_text": "야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10",
+        "structured_text": "야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10"
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_block_id": "block_pm_auto_2021_도표09_004",
+        "block_type": "rule_explanation",
+        "block_order": 4,
+        "block_title": "[도표해설]",
+        "raw_text": "사고상황 :\n- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.\n기본과실 해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.",
+        "clean_text": "사고상황 :\n- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.\n기본과실 해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.",
+        "structured_text": "사고상황 :\n- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.\n기본과실 해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다."
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_block_id": "block_pm_auto_2021_도표09_005",
+        "block_type": "related_law",
+        "block_order": 5,
+        "block_title": "[관련법규]",
+        "raw_text": "도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "clean_text": "도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "structured_text": "도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳"
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_block_id": "block_pm_auto_2021_도표09_006",
+        "block_type": "accident_situation",
+        "block_order": 6,
+        "block_title": "사고상황",
+        "raw_text": "- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.",
+        "clean_text": "- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.",
+        "structured_text": "- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다."
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_block_id": "block_pm_auto_2021_도표09_007",
+        "block_type": "base_fault_explanation",
+        "block_order": 7,
+        "block_title": "기본과실 해설",
+        "raw_text": "- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.",
+        "clean_text": "- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.",
+        "structured_text": "- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다."
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_block_id": "block_pm_auto_2021_도표09_008",
+        "block_type": "adjustment_explanation",
+        "block_order": 8,
+        "block_title": "수정요소 적용 해설",
+        "raw_text": "- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.",
+        "clean_text": "- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.",
+        "structured_text": "- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다."
+      }
+    ],
+    "shared_law_refs": [
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_law_ref_id": "law_pm_auto_2021_도표09_001",
+        "law_name": "도로교통법",
+        "article": "26조",
+        "paragraph": null,
+        "item": null,
+        "raw_text": "도로교통법 제26조",
+        "context": "도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려",
+        "law_role": "intersection"
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_law_ref_id": "law_pm_auto_2021_도표09_002",
+        "law_name": "도로교통법",
+        "article": "31조",
+        "paragraph": null,
+        "item": null,
+        "raw_text": "도로교통법 제31조",
+        "context": "하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳",
+        "law_role": "intersection"
+      }
+    ],
+    "shared_chunks": [
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_001",
+        "chunk_type": "base_fault",
+        "chunk_order": null,
+        "text": "해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "base_fault",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_002",
+        "chunk_type": "base_fault",
+        "chunk_order": null,
+        "text": "선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.\n[관련법규]\n도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "base_fault",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_003",
+        "chunk_type": "base_fault",
+        "chunk_order": null,
+        "text": "하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "base_fault",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_004",
+        "chunk_type": "party_condition",
+        "chunk_order": null,
+        "text": ":\n- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.\n기본과실 해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "party_condition",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_005",
+        "chunk_type": "party_condition",
+        "chunk_order": null,
+        "text": "선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.\n[관련법규]\n도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "party_condition",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_006",
+        "chunk_type": "party_condition",
+        "chunk_order": null,
+        "text": "하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "party_condition",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_007",
+        "chunk_type": "adjustment_factor_table",
+        "chunk_order": null,
+        "text": "야간·기타 시야장애 +5\nA 좌측통행 +5\nA 인근에 자전거도로가 있는 경우 +5\nA 현저한 과실 +10\nA 중과실 +20\nA 명확한 선진입 -10\nB 현저한 과실 +10\nB 중과실 +20\nB 명확한 선진입 -10",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "adjustment_factor_table",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_008",
+        "chunk_type": "rule_explanation",
+        "chunk_order": null,
+        "text": "사고상황 :\n- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.\n기본과실 해설 :\n- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.\n수정요소 적용 해설 :\n- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "rule_explanation",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_009",
+        "chunk_type": "related_law",
+        "chunk_order": null,
+        "text": "도로교통법 제26조(교통정리가 없는 교차로에서의 양보운전)\n➀ 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 이미 교차\n로에 들어가 있는 다른 차가 있을 때에는 그 차에 진로를 양보하여야 한다.\n2 교통정리를 하고 있지 아니하는 교차로에 들어가려고 하는 차의 운전자는 그 차가\n통행하고 있는 도로의 폭보다 교차하는 도로의 폭이 넓은 경우에는 서행하여야 하며, 폭\n이 넓은 도로로부터 교차로에 들어가려고 하는 차가 있을 때에는 그 차에 진로를 양보\n하여야한다.\n도로교통법 제31조(서행 또는 일시정지할 장소)\n➀ 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 서\n행하여야 한다.\n1. 교통정리를 하고 있지 아니하는 교차로\n2 모든 차 또는 노면전차의 운전자는 다음 각 호의 어느 하나에 해당하는 곳에서는 일\n시정지하여야 한다.\n1. 교통정리를 하고 있지 아니하고 좌우를 확인할 수 없거나 교통이 빈번한 교차로\n2. 지방경찰청장이 도로에서의 위험을 방지하고 교통의 안전과 원할한 소통을 확보하기\n위하여 필요하다고 인정하여 안전표지로 지정한 곳",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "related_law",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_010",
+        "chunk_type": "accident_situation",
+        "chunk_order": null,
+        "text": "- 도표 07: 신호기에 의해 교통정리가 이루어지고 있지 않은 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 PM과 소로를 이용하여 교차로에 진입하\n여 직진하는 자동차가 충돌한 사고이다.\n- 도표 08: 신호기에 의해 교통정리가 이루어지고 있지 않는 다른 폭의 교차로에서 대\n로를 이용하여 교차로에 진입하여 직진하는 자동차와 소로를 이용하여 교차로에 진입\n하여 직진하는 PM이 충돌한 사고이다.",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "accident_situation",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_011",
+        "chunk_type": "base_fault_explanation",
+        "chunk_order": null,
+        "text": "- 도표 08: 신호기가 없는 다른 폭의 교차로의 경우 도로교통법 제26조 제2항에 따라\n대로를 진행하는 PM에게 우선권이 인정되고, 소로에서 진입하는 자동차가 대로를\n통행하는 PM과 사고가 발생한 경우 가해의 위험성이 현저히 높은 자동차의 교차로\n통행방법 위반 과실을 보다 중하게 평가하여 양측의 기본과실을 10:90으로 정한다.\n\n- 도표 09 : 대로에서 진행하는 자동차는 소로에서 진입하려는 차량이 일시정지하여\n진로를 양보할 것으로 신뢰하며 진행하므로 대·소로 우선권은 엄격히 준수되어야 하\n는 점을 고려하되 PM은 통상 자동차에 비하여 저속으로 운행하므로 자동차로서는\n이를 발견하여 사고의 발생을 회피할 수 있다는 점 및 PM은 상대방 차량에 대한 가\n해의 위험성이 현저히 낮다는 점을 감안하여 양측의 기본과실을 60:40으로 정하였\n다.",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "base_fault_explanation",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      },
+      {
+        "shared_group_id": "pm_auto_2021_shared_08_09",
+        "source_rule_id": "pm_auto_2021_도표09",
+        "source_chunk_id": "chunk_pm_auto_2021_도표09_012",
+        "chunk_type": "adjustment_explanation",
+        "chunk_order": null,
+        "text": "- 야간이거나 전조등 불량 등 자동차가 PM을 미리 발견하기 어려운 사정이 있는 경우\nPM의 과실을 5% 가산한다.\n-‘자전거도로’라 함은 자전거이용 활성화에 관한 법률 제3조의 규정에 의하여 설치된 도\n로로서, 자전거전용도로, 자전거보행자 겸용도로 그리고 자전거 우선도로로 나뉜다. 인\n근에 자전거도로가 있는 경우에는 이곳에서 PM을 운행하여야 하므로 A의 과실을 5%\n가산한다.\n- 신호기 없는 교차로이므로 모든 차량은 서행하여야 할 것이나 서행하지 않은 경우에\n는 과속 정도에 따라 양 차량 모두 현저한 과실 또는 중과실을 인정한다.\n-\n- 도로교통법 제26조 제1항에 의하면 교차로에 우선 진입한 차량은 다른 차량보다 교차\n로의 통행우선권이 있는데, PM(또는 자동차)의 선진입 정도가 명확한 경우에만 선진\n입 수정요소를 적용하여 PM(또는 자동차)의 과실을 10% 감산하다.",
+        "metadata": {
+          "chart_no": 9,
+          "chart_code": "도표09",
+          "rule_title": "소로 직진 대 대로 직진 사고",
+          "chunk_type": "adjustment_explanation",
+          "accident_group": "신호기 없는 교차로 사고",
+          "accident_subgroup": "기타",
+          "party_a_ratio": 60,
+          "party_b_ratio": 40,
+          "pm_party_key": "A",
+          "pm_action": "소로 직진",
+          "accident_tags": [
+            "신호기 없는 교차로 사고",
+            "기타",
+            "other",
+            "none",
+            "자전거도로"
+          ],
+          "source_reliability": "official_standard"
+        }
+      }
+    ]
+  },
+  "shared_rule_group_member": {
+    "shared_group_id": "pm_auto_2021_shared_08_09",
+    "rule_id": "pm_auto_2021_도표08",
+    "chart_no": 8,
+    "chart_code": "도표08",
+    "member_order": 1,
+    "uses_shared_explanation": true,
+    "uses_shared_law_refs": true,
+    "uses_shared_chunks": true
+  }
+}

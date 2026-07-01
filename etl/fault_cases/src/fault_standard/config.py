@@ -38,6 +38,27 @@ POSITIVE_KEYWORD_SCORES = SCORING_CONFIG["positive_keywords"]
 NEGATIVE_KEYWORD_SCORES = SCORING_CONFIG["negative_keywords"]
 
 
+########## 전처리 관련 설정 ##########
+def get_fault_cases_root() -> Path:
+    return _default_project_dir()
+
+
+def get_artifacts_dir() -> Path:
+    return get_fault_cases_root() / PIPELINE_SETTINGS["paths"]["artifacts_dir"]
+
+
+def get_crawled_dir() -> Path:
+    return get_artifacts_dir() / PIPELINE_SETTINGS["paths"]["crawled_dir"]
+
+
+def get_preprocessed_dir() -> Path:
+    return get_artifacts_dir() / PIPELINE_SETTINGS["paths"]["preprocessed_dir"]
+
+
+def get_raw_source_dir() -> Path:
+    return get_crawled_dir() / PIPELINE_SETTINGS["paths"]["raw_source_dir"]
+
+
 @dataclass
 class PipelineConfig:
     """Runtime paths and browser settings for collection/validation."""

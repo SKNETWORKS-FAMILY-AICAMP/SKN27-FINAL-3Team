@@ -1,0 +1,4 @@
+{
+  "extractor": "pymupdf",
+  "expected_page_count": 76
+}
