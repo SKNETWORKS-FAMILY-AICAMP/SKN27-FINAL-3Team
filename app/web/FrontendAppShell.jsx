@@ -305,14 +305,14 @@ function EntryScreen({ onGuestStart, onOpenChat }) {
         <div className="phone-frame">
           <div className="phone-head">
             <strong>AI 교통 상담</strong>
-            <span className="tag green">온라인</span>
+            <span className="tag green">대기 중</span>
           </div>
           <div className="phone-body">
-            <div className="preview-bubble">과태료 고지서와 차량 정차 위치 사진을 올려주세요.</div>
-            <div className="preview-bubble answer">어린이보호구역 주정차 위반 고지서를 받았어요.</div>
+            <div className="preview-bubble">새 상담이 준비되었습니다.</div>
+            <div className="preview-bubble answer">질문 입력 전</div>
             <div className="preview-result">
-              <strong>분석 준비 완료</strong>
-              <p>고지서 OCR, 위반 장소, 의견제출 기한을 먼저 확인합니다.</p>
+              <strong>자료 분석 대기</strong>
+              <p>로그인 후 고지서, 현장 사진, 블랙박스 자료를 연결합니다.</p>
               <button className="button primary" type="button" onClick={onOpenChat}>
                 상담 화면 열기
               </button>
@@ -444,7 +444,7 @@ function ChatScreen({
               </div>
               <textarea
                 aria-label="상담 메시지 입력"
-                placeholder="예: 어린이보호구역 과태료 고지서를 받았는데 의견제출 전에 무엇을 확인해야 하나요?"
+                placeholder="교통사고, 고지서, 보험 분쟁 등 확인할 내용을 입력해 주세요."
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
               />
