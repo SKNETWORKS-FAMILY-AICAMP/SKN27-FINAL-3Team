@@ -152,7 +152,7 @@ def ocr_node(state: FineNoticeState) -> dict:
                     "agent_results": update_agent_results(state, env)}
         image_blocks = _build_image_blocks(pages)
     else:
-        image_blocks = _build_image_blocks([(notice_image, notice_mime_type)])
+        image_blocks = _build_image_blocks([(_cleaned, notice_mime_type)])
 
     # ── GPT 호출 ───────────────────────────────────────────────────────
     try:
