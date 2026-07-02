@@ -21,6 +21,9 @@ app/web/dist/
 # Ponytail Skills
 .agents/
 
+# Claude Code local settings (personal permission prefs, not shared config)
+.claude/
+
 # Documents & Designs
 서식문서/
 설계/
