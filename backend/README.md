@@ -58,6 +58,8 @@ docker run --rm -p 8000:8000 `
 
 현재 mock API는 실제 JWT 서명 검증은 수행하지 않는다. 대신 `MOCK_REQUIRE_AUTH=1`을 기본값으로 두고 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. 토큰이 없거나 형식이 맞지 않으면 운영 전환 때 사용할 `auth_error.v1` envelope와 `WWW-Authenticate` header로 `401`을 반환한다.
 
+`POST /api/auth/login/`은 Google 로그인 1차 경계를 제공한다. 로컬/테스트에서는 `GOOGLE_AUTH_ALLOW_MOCK=1`로 `google_sub`, `email`, `display_name` mock profile을 받아 app Bearer token을 발급하고, `users`, `auth_sessions`, `auth_events`에 저장한다. 운영 전환 시 `GOOGLE_AUTH_ALLOW_MOCK=0`, `GOOGLE_CLIENT_ID`, `google-auth` 기반 Google ID token 검증으로 같은 endpoint를 강화한다.
+
 공개 endpoint는 `GET /api/health/`, `GET /api/mock/chat/scenarios/`로 제한한다. 운영 전환 시에는 같은 middleware 위치에서 실제 JWT 검증 또는 DRF authentication layer로 교체하고, 권한 부족은 같은 envelope의 `forbidden`/`403`으로 반환한다.
 
 인증 실패 응답 예시:
@@ -88,6 +90,9 @@ docker run --rm -p 8000:8000 `
 | Method | Canonical path | Mock path |
 |---|---|---|
 | `POST` | `/api/auth/guest-session/` | - |
+| `POST` | `/api/auth/login/` | - |
+| `POST` | `/api/auth/refresh/` | - |
+| `POST` | `/api/auth/logout/` | - |
 | `GET` | `/api/auth/me/` | - |
 | `GET` | `/api/mypage/summary/` | - |
 | `GET` | `/api/history/` | `/api/mock/history/` |
@@ -108,6 +113,9 @@ docker run --rm -p 8000:8000 `
 |---|---|---|
 | `GET` | `/api/health/` | backend health와 demo scenario 목록 |
 | `POST` | `/api/auth/guest-session/` | 비회원 `guest_id`, rate limit key, merge policy mock 발급 |
+| `POST` | `/api/auth/login/` | Google subject를 `users`/`auth_sessions`에 연결하고 app Bearer token 발급 |
+| `POST` | `/api/auth/refresh/` | Rotate a valid app Bearer token for the same `auth_session_id` |
+| `POST` | `/api/auth/logout/` | Revoke the current `auth_session_id` and return client clear-token action |
 | `GET` | `/api/auth/me/` | 현재 Bearer/guest identity와 `auth_session_id` 분리 상태 확인 |
 | `GET` | `/api/mypage/summary/` | canonical My Case progress summary from `analysis_jobs`, `analysis_job_events`, `agent_results`, `analysis_display_results`, and `reports` |
 | `GET` | `/api/history/` | `history_event.v1` 표준-라이트 mock sidecar 이벤트 조회 |

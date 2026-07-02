@@ -472,6 +472,179 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(session.metadata["auth_context"]["guest_id"], "gst_existing")
         self.assertEqual(session.metadata["auth_context"]["subject_type"], "guest")
 
+    def test_google_login_issues_app_jwt_and_persists_auth_session(self):
+        response = Client().post(
+            "/api/auth/login/",
+            data={
+                "provider": "google",
+                "google_sub": "google-sub-123",
+                "email": "driver@example.com",
+                "display_name": "Driver User",
+                "guest_id": "gst_before_google",
+                "session_id": "ses_google_login",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["api_surface"], "canonical_mock")
+        self.assertEqual(body["contract_version"], "google_auth.v1")
+        self.assertEqual(body["provider"], "google")
+        self.assertEqual(body["token_type"], "Bearer")
+        self.assertTrue(body["access_token"])
+        self.assertEqual(body["subject"]["subject_type"], "user")
+        self.assertEqual(body["subject"]["guest_id"], "gst_before_google")
+        self.assertEqual(body["auth_session"]["verification"], "mock_google_subject")
+        self.assertEqual(body["persistence"]["auth_session_table"], "auth_sessions")
+
+        user = UserAccount.objects.get(user_id=body["subject"]["user_id"])
+        auth_session = AuthSession.objects.get(auth_session_id=body["subject"]["auth_session_id"])
+        session = ChatSession.objects.get(session_id="ses_google_login")
+        self.assertEqual(user.email, "driver@example.com")
+        self.assertEqual(user.display_name, "Driver User")
+        self.assertEqual(user.auth_provider, "google")
+        self.assertEqual(user.provider_subject, "google-sub-123")
+        self.assertEqual(auth_session.user, user)
+        self.assertEqual(auth_session.metadata["verification"], "mock_google_subject")
+        self.assertEqual(session.owner_id, user.user_id)
+
+        auth_me_response = Client(
+            HTTP_AUTHORIZATION=f"Bearer {body['access_token']}",
+            HTTP_X_GUEST_ID="gst_before_google",
+        ).get("/api/auth/me/?session_id=ses_google_login")
+        self.assertEqual(auth_me_response.status_code, 200)
+        auth_me = auth_me_response.json()
+        self.assertEqual(auth_me["subject"]["user_id"], user.user_id)
+        self.assertEqual(auth_me["subject"]["auth_session_id"], auth_session.auth_session_id)
+        self.assertEqual(auth_me["auth_session"]["verification"], "app_jwt_hmac")
+
+    def test_auth_refresh_issues_app_jwt_and_keeps_auth_session_active(self):
+        login_response = Client().post(
+            "/api/auth/login/",
+            data={
+                "provider": "google",
+                "google_sub": "google-sub-refresh",
+                "email": "refresh.driver@example.com",
+                "display_name": "Refresh Driver",
+                "guest_id": "gst_refresh_before_login",
+                "session_id": "ses_token_refresh",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(login_response.status_code, 200)
+        login = login_response.json()
+
+        response = Client(HTTP_AUTHORIZATION=f"Bearer {login['access_token']}").post(
+            "/api/auth/refresh/",
+            data={
+                "guest_id": "gst_refresh_before_login",
+                "session_id": "ses_token_refresh",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["contract_version"], "auth_token_refresh.v1")
+        self.assertEqual(body["auth_state"], "authenticated")
+        self.assertEqual(body["token_type"], "Bearer")
+        self.assertTrue(body["access_token"])
+        self.assertNotEqual(body["access_token"], login["access_token"])
+        self.assertEqual(body["subject"]["auth_session_id"], login["subject"]["auth_session_id"])
+        self.assertEqual(body["auth_session"]["status"], "active")
+        self.assertEqual(body["auth_session"]["refresh_policy"], "valid_app_jwt_required")
+        self.assertEqual(body["persistence"]["auth_session_status"], AuthSessionStatus.ACTIVE)
+
+        auth_session = AuthSession.objects.get(auth_session_id=body["subject"]["auth_session_id"])
+        self.assertEqual(auth_session.status, AuthSessionStatus.ACTIVE)
+        self.assertIsNone(auth_session.revoked_at)
+        self.assertIsNotNone(auth_session.issued_at)
+        self.assertIsNotNone(auth_session.expires_at)
+        self.assertEqual(auth_session.metadata["source"], "auth_refresh")
+        self.assertTrue(
+            AuthEvent.objects.filter(
+                event_type="auth_token_refreshed",
+                auth_session=auth_session,
+            ).exists()
+        )
+
+        auth_me_response = Client(
+            HTTP_AUTHORIZATION=f"Bearer {body['access_token']}",
+            HTTP_X_GUEST_ID="gst_refresh_before_login",
+        ).get("/api/auth/me/?session_id=ses_token_refresh")
+        self.assertEqual(auth_me_response.status_code, 200)
+        auth_me = auth_me_response.json()
+        self.assertEqual(auth_me["subject"]["auth_session_id"], auth_session.auth_session_id)
+        self.assertEqual(auth_me["subject"]["user_id"], body["subject"]["user_id"])
+
+    def test_auth_refresh_rejects_non_app_jwt_bearer(self):
+        response = Client(HTTP_AUTHORIZATION="Bearer dev-mock-token").post(
+            "/api/auth/refresh/",
+            data={"guest_id": "gst_refresh_invalid", "session_id": "ses_refresh_invalid"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(
+            response["WWW-Authenticate"],
+            'Bearer error="token_invalid", error_description="app_jwt_required"',
+        )
+        error = response.json()["error"]
+        self.assertEqual(error["contract_version"], "auth_error.v1")
+        self.assertEqual(error["code"], "token_invalid")
+        self.assertEqual(error["auth"]["reason"], "app_jwt_required")
+
+    def test_auth_logout_revokes_auth_session_and_returns_client_action(self):
+        login_response = Client().post(
+            "/api/auth/login/",
+            data={
+                "provider": "google",
+                "google_sub": "google-sub-logout",
+                "email": "logout.driver@example.com",
+                "display_name": "Logout Driver",
+                "guest_id": "gst_logout_before_login",
+                "session_id": "ses_token_logout",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(login_response.status_code, 200)
+        login = login_response.json()
+
+        response = Client(HTTP_AUTHORIZATION=f"Bearer {login['access_token']}").post(
+            "/api/auth/logout/",
+            data={
+                "guest_id": "gst_logout_before_login",
+                "session_id": "ses_token_logout",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["contract_version"], "auth_logout.v1")
+        self.assertEqual(body["auth_state"], "anonymous")
+        self.assertFalse(body["subject"]["is_authenticated"])
+        self.assertEqual(body["auth_session"]["status"], "revoked")
+        self.assertEqual(body["client_action"]["clear_access_token"], True)
+        self.assertEqual(body["client_action"]["clear_google_profile"], True)
+        self.assertEqual(body["client_action"]["next_auth_state"], "guest")
+        self.assertEqual(body["persistence"]["auth_session_status"], AuthSessionStatus.REVOKED)
+
+        auth_session = AuthSession.objects.get(auth_session_id=body["subject"]["auth_session_id"])
+        self.assertEqual(auth_session.status, AuthSessionStatus.REVOKED)
+        self.assertIsNotNone(auth_session.revoked_at)
+        self.assertEqual(auth_session.metadata["source"], "auth_logout")
+        self.assertTrue(auth_session.metadata["client_action"]["clear_access_token"])
+        self.assertTrue(
+            AuthEvent.objects.filter(
+                event_type="auth_logout_completed",
+                auth_session=auth_session,
+            ).exists()
+        )
+        session = ChatSession.objects.get(session_id="ses_token_logout")
+        self.assertEqual(session.metadata["auth_context"]["auth_state"], "guest")
+
     def test_auth_me_reports_authenticated_subject_with_mock_bearer(self):
         response = self.client.get(
             "/api/auth/me/?session_id=ses_auth_me",
