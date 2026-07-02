@@ -31,8 +31,20 @@ OBJECT_STORAGE_BUCKET = os.environ.get("OBJECT_STORAGE_BUCKET", "skn27-demo-obje
 OBJECT_STORAGE_PREFIX = os.environ.get("OBJECT_STORAGE_PREFIX", "canonical")
 OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS = _positive_int_env("OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS", 900)
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_POPUP_REDIRECT_URI = os.environ.get("GOOGLE_POPUP_REDIRECT_URI", "")
+GOOGLE_TOKEN_ENDPOINT = os.environ.get("GOOGLE_TOKEN_ENDPOINT", "https://oauth2.googleapis.com/token")
+GOOGLE_USERINFO_ENDPOINT = os.environ.get(
+    "GOOGLE_USERINFO_ENDPOINT",
+    "https://openidconnect.googleapis.com/v1/userinfo",
+)
 GOOGLE_AUTH_ALLOW_MOCK = os.environ.get("GOOGLE_AUTH_ALLOW_MOCK", "1") != "0"
+APP_AUTH_ALLOW_MOCK_BEARER = os.environ.get(
+    "APP_AUTH_ALLOW_MOCK_BEARER",
+    "1" if GOOGLE_AUTH_ALLOW_MOCK else "0",
+) != "0"
 APP_JWT_SECRET = os.environ.get("APP_JWT_SECRET", SECRET_KEY)
+OAUTH_TOKEN_SECRET = os.environ.get("OAUTH_TOKEN_SECRET", APP_JWT_SECRET)
 
 INSTALLED_APPS = [
     "django.contrib.staticfiles",

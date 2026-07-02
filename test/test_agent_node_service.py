@@ -138,6 +138,87 @@ def test_agent_output_validator_reports_adapter_contract_errors():
     assert "summary" in validation["missing_fields"]
 
 
+def test_hi_owned_agent_output_sample_validates_without_touching_other_agents():
+    output = {
+        "session_id": "ses_hi_contract",
+        "message_id": "msg_hi_contract",
+        "job_id": "job_hi_contract",
+        "node_name": "Objection report generation",
+        "node_code": "objection_report_generation",
+        "node_type": "agent",
+        "owner": "hi20260204-maker",
+        "status": "partial",
+        "summary": "Draft report structure is ready, but final user facts still need confirmation.",
+        "structured_result": {
+            "recipient_agency": "mock agency",
+            "document_title": "Objection draft",
+            "case_summary": "User facts and notice analysis are merged into a draft report.",
+            "grounds": ["User-provided facts require final confirmation."],
+            "attachment_list": ["fine_notice_image", "user_evidence"],
+            "disclaimer": "This draft does not guarantee submission acceptance or disposition change.",
+        },
+        "evidence": [
+            {
+                "source_type": "user_uploaded_file",
+                "title": "Fine notice attachment",
+                "source_reference": "att_hi_contract",
+                "metadata": {"purpose": "fine_notice"},
+                "confidence": None,
+            }
+        ],
+        "next_actions": ["confirm_user_facts", "review_report_draft"],
+        "limitations": ["Final legal review and user confirmation are still required."],
+        "created_at": "2026-07-01T00:00:00+00:00",
+    }
+
+    validation = validate_agent_output_envelope(
+        output,
+        expected_node_code="objection_report_generation",
+    )
+
+    assert validation["valid"]
+    assert output["owner"] == "hi20260204-maker"
+
+
+def test_hi_owned_supervisor_validation_sample_validates_as_internal_boundary():
+    output = {
+        "session_id": "ses_hi_supervisor",
+        "message_id": "msg_hi_supervisor",
+        "job_id": "job_hi_supervisor",
+        "node_name": "Agent result validation",
+        "node_code": "agent_result_validation",
+        "node_type": "supervisor_internal",
+        "owner": "hi20260204-maker",
+        "status": "success",
+        "summary": "Agent envelopes were checked before display DTO merge.",
+        "structured_result": {
+            "checked_contract_fields": [
+                "node_code",
+                "status",
+                "summary",
+                "structured_result",
+                "evidence",
+                "limitations",
+            ],
+            "rejected_results": [],
+            "merge_ready": True,
+        },
+        "evidence": [],
+        "next_actions": ["merge_display_dto"],
+        "limitations": [],
+        "created_at": "2026-07-01T00:00:00+00:00",
+    }
+
+    validation = validate_agent_output_envelope(
+        output,
+        expected_node_code="agent_result_validation",
+    )
+
+    assert validation["valid"]
+    assert output["node_type"] == "supervisor_internal"
+    assert output["owner"] == "hi20260204-maker"
+
+
 def test_agent_contract_validators_report_malformed_collections():
     input_validation = validate_agent_input_envelope(
         {

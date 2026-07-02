@@ -19,17 +19,16 @@ def search_laws(
     model_id: str | None = None,
     device: str = "cpu",
     top_k: int = 5,
+    temporal_basis: dict = None,
+    scope: dict = None,
 ) -> list[dict]:
     if top_k <= 0:
         return []
 
-    # 1. Load chunks
-    chunks = {row["chunk_id"]: row for row in read_jsonl(chunks_path)}
+    # PostgreSQL schema enforces vector(1024)
+    embedding_metadata = {"embedding_provider": provider, "embedding_dimensions": 1024}
 
-    # 2. Read embedding metadata without materializing all vectors.
-    embedding_metadata = read_first_embedding_metadata(Path(embeddings_path))
-
-    # 3. Generate query vector
+    # Generate query vector
     if provider == "sentence-transformers":
         query_vector = embed_query_with_sentence_transformers(
             query,
@@ -45,30 +44,85 @@ def search_laws(
     else:
         raise ValueError(f"Unsupported provider: {provider}")
 
-    # 4. Compute cosine similarity and keep only top_k results in memory.
-    top_results = []
-    sequence = 0
-    for emb in read_jsonl_iter(embeddings_path):
-        chunk_id = emb["chunk_id"]
-        chunk = chunks.get(chunk_id)
-        if not chunk:
-            continue
-        vector = emb["embedding_vector"]
-        if not vector or len(vector) != len(query_vector):
-            continue
-        # Dot product
-        score = sum(q * v for q, v in zip(query_vector, vector))
-        result = {**chunk, "score": round(score, 6)}
-        heap_item = (score, sequence, result)
-        sequence += 1
-        if len(top_results) < top_k:
-            heappush(top_results, heap_item)
-        elif score > top_results[0][0]:
-            heappop(top_results)
-            heappush(top_results, heap_item)
+    # Query PostgreSQL with pgvector
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    import os
 
-    # 5. Sort and return top_k
-    return [item[2] for item in sorted(top_results, key=lambda row: row[0], reverse=True)]
+    db_host = os.environ.get("POSTGRES_HOST", "localhost")
+    db_port = os.environ.get("POSTGRES_PORT", "5432")
+    db_user = os.environ.get("POSTGRES_USER", "postgres")
+    db_password = os.environ.get("POSTGRES_PASSWORD", "change-me")
+    db_name = os.environ.get("POSTGRES_DB", "law_db")
+
+    top_results = []
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(
+            host=db_host,
+            port=db_port,
+            user=db_user,
+            password=db_password,
+            dbname=db_name
+        )
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        
+        # Temporal basis handling
+        temporal_basis = temporal_basis or {}
+        mode = temporal_basis.get("mode", "latest")
+        effective_at = temporal_basis.get("effective_at")
+        
+        if mode == "latest" and not effective_at:
+            from datetime import date
+            effective_at = date.today().isoformat()
+        
+        # pgvector uses <=> for cosine distance. Similarity = 1 - distance
+        query_sql = """
+            SELECT 
+                c.chunk_id, c.source_name, c.source_type, c.article_no, c.appendix_no, 
+                c.provision_text, c.source_url,
+                1 - (e.embedding_vector <=> %s::vector) AS score
+            FROM law_embeddings e
+            JOIN law_chunks c ON e.chunk_id = c.chunk_id
+            WHERE e.embedding_provider = %s
+        """
+        vector_str = "[" + ",".join(map(str, query_vector)) + "]"
+        params = [vector_str, provider]
+        
+        if effective_at:
+            query_sql += " AND (c.enforce_date <= %s OR c.enforce_date IS NULL)"
+            query_sql += " AND (c.expire_date >= %s OR c.expire_date IS NULL)"
+            params.extend([effective_at, effective_at])
+            
+        scope = scope or {}
+        allowed_sources = scope.get("allowed_source_types")
+        if allowed_sources:
+            query_sql += " AND c.source_type = ANY(%s)"
+            params.append(allowed_sources)
+            
+        query_sql += " ORDER BY e.embedding_vector <=> %s::vector LIMIT %s;"
+        params.extend([vector_str, top_k])
+        
+        cur.execute(query_sql, params)
+        
+        rows = cur.fetchall()
+        for row in rows:
+            res = dict(row)
+            res["score"] = round(res["score"], 6)
+            top_results.append(res)
+            
+    except Exception as e:
+        print(f"[Error] PostgreSQL vector search failed: {e}")
+        return []
+    finally:
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
+
+    return top_results
 
 
 def read_first_embedding_metadata(embeddings_path: Path) -> dict:
@@ -81,6 +135,12 @@ def infer_embedding_model(embedding_metadata: dict) -> str:
     model = embedding_metadata.get("embedding_model")
     if model:
         return model
+    
+    # Fallback if model is not in metadata
+    provider = embedding_metadata.get("embedding_provider")
+    if provider == "openai":
+        return "text-embedding-3-large"  # or small, but we will pass dimensions anyway
+        
     raise ValueError("model_id is required when embeddings do not include embedding_model")
 
 
@@ -88,6 +148,12 @@ def infer_embedding_dimensions(embedding_metadata: dict) -> int:
     dimensions = embedding_metadata.get("embedding_dimensions")
     if dimensions:
         return int(dimensions)
+    
+    # Fallback to checking the length of the actual vector
+    vector = embedding_metadata.get("embedding_vector")
+    if vector and isinstance(vector, list):
+        return len(vector)
+        
     raise ValueError("embedding_dimensions is required for OpenAI query embedding")
 
 
