@@ -302,6 +302,75 @@ p {
   font-size: 17px;
 }
 
+.entry-note {
+  max-width: 620px;
+  padding: 12px 14px;
+  border: 1px solid #bddbd6;
+  border-radius: 8px;
+  color: var(--teal-dark);
+  background: var(--green-soft);
+  font-weight: 800;
+}
+
+.entry-panel {
+  padding: 34px;
+  display: grid;
+  align-content: center;
+  gap: 18px;
+  background: #eef4f7;
+}
+
+.panel-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--subtle);
+  font-weight: 900;
+}
+
+.panel-topline strong {
+  color: var(--teal-dark);
+}
+
+.flow-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.flow-step {
+  min-height: 108px;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.flow-step > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--blue);
+  font-weight: 900;
+}
+
+.flow-step.active {
+  border-color: #bddbd6;
+  background: var(--green-soft);
+}
+
+.flow-step strong {
+  display: block;
+  margin-bottom: 5px;
+}
+
 .trust-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -677,6 +746,36 @@ p {
   background: var(--green-soft);
 }
 
+.save-choice-panel {
+  margin: 0 22px 14px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid #bddbd6;
+  border-radius: 8px;
+  background: var(--green-soft);
+}
+
+.save-choice-panel strong {
+  display: block;
+  margin: 5px 0;
+}
+
+.save-choice-panel.is-muted {
+  grid-template-columns: 1fr;
+  border-color: var(--line);
+  background: #fbfcfe;
+}
+
+.save-choice-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .chat-input {
   padding: 14px 22px 20px;
   display: grid;
@@ -1006,7 +1105,16 @@ p {
   .inline-panel-grid,
   .result-cards,
   .summary-grid,
-  .chat-input {
+  .chat-input,
+  .save-choice-panel {
     grid-template-columns: 1fr;
+  }
+
+  .save-choice-actions {
+    justify-content: stretch;
+  }
+
+  .save-choice-actions .button {
+    width: 100%;
   }
 }
