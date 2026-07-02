@@ -285,6 +285,38 @@ class TestRiskClassificationNode:
         result = risk_classification_node({"user_appeal_reason": reason})
         assert result["risk_trigger_category"] == "A_제3자운전주장"
 
+    def test_카테고리A가_B보다_우선(self):
+        reason = "다른 사람이 운전했는데 범칙금으로 전환해주세요"
+        result = risk_classification_node({"user_appeal_reason": reason})
+        assert result["risk_trigger_category"] == "A_제3자운전주장"
+
+    def test_카테고리B가_C보다_우선(self):
+        reason = "범칙금으로 전환해주세요, 응급환자를 이송하다가 위반했습니다"
+        result = risk_classification_node({"user_appeal_reason": reason})
+        assert result["risk_trigger_category"] == "B_명시적전환요청"
+
+    def test_2단계_LLM_마크다운코드펜스로_감싼_응답도_파싱(self):
+        """LLM이 프롬프트 지시(순수 JSON만 반환)를 어기고 ```json 코드펜스로
+        감싸 응답해도, 정규식 폴백으로 JSON을 추출해 정상 처리해야 한다."""
+        wrapped = '```json\n{"category": "A", "confidence": "high", "rationale": "코드펜스 응답"}\n```'
+        patcher = _patch_openai(wrapped)
+        try:
+            result = risk_classification_node({"user_appeal_reason": "동생이 잠깐 몰고 나갔었습니다"})
+            assert result["risk_flag"] is True
+            assert result["risk_trigger_category"] == "A_제3자운전주장"
+        finally:
+            patcher.stop()
+
+    def test_2단계_LLM_category도_JSON도_전혀_없으면_예외전파_후_위험폴백(self):
+        """중괄호 자체가 없어 정규식 폴백도 실패하면 예외가 그대로 올라가고,
+        risk_classification_node의 최상위 except가 이를 위험 쪽으로 흡수해야 한다."""
+        patcher = _patch_openai("죄송합니다, 판단할 수 없습니다.")
+        try:
+            result = risk_classification_node({"user_appeal_reason": "애매한 사유"})
+            assert result["risk_flag"] is True
+        finally:
+            patcher.stop()
+
     def test_2단계_LLM_category있으면_위험(self):
         patcher = _patch_openai('{"category": "A", "confidence": "high", "rationale": "x"}')
         try:
@@ -371,6 +403,31 @@ class TestMeritClassificationNode:
         finally:
             patcher.stop()
 
+    def test_마크다운코드펜스로_감싼_응답도_파싱(self):
+        """LLM이 프롬프트 지시(순수 JSON만 반환)를 어기고 ```json 코드펜스로
+        감싸 응답해도, 정규식 폴백으로 JSON을 추출해 정상 처리해야 한다."""
+        wrapped = '```json\n{"merit": "강함", "merit_basis": "코드펜스 응답"}\n```'
+        patcher = _patch_openai(wrapped)
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit"] == "강함"
+        finally:
+            patcher.stop()
+
+    def test_JSON도_전혀_없으면_예외전파_후_보류폴백(self):
+        """중괄호 자체가 없어 정규식 폴백도 실패하면 예외가 그대로 올라가고,
+        merit_classification_node의 최상위 except가 이를 "보류"로 흡수해야 한다."""
+        patcher = _patch_openai("죄송합니다, 판단할 수 없습니다.")
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit"] == "보류"
+        finally:
+            patcher.stop()
+
 
 # ── verdict_node (DATA-003 §4) ───────────────────────────────────────────────
 
@@ -413,6 +470,17 @@ class TestGuideGenerationNode:
         }
         result = guide_generation_node(state)
         assert "출석 예정일시" in result["guide"]["timeline"]
+
+    def test_타임라인_과태료_notice_stage_없으면_사전통지로_취급(self):
+        """_timeline_text는 `1차 고지서`만 별도 분기하고 그 외(None 포함)는 전부
+        "사전통지" 취급하는 catch-all이다 — notice_stage가 비어 있어도 크래시 없이
+        의견제출기한 문구로 대체된다는 현재 동작을 명시적으로 고정해둔다."""
+        state = {
+            "fine_type": "과태료", "notice_stage": None,
+            "opinion_deadline": _iso(8), "judgment_status": "success",
+        }
+        result = guide_generation_node(state)
+        assert "의견제출기한" in result["guide"]["timeline"]
 
     def test_타임라인_범칙금_사전통지(self):
         state = {

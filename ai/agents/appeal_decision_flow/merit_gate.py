@@ -15,6 +15,7 @@ def _call_llm_merit(reason: str, law_context: str) -> dict:
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=256,
+        temperature=0,
         messages=[{
             "role": "user",
             "content": MERIT_CLASSIFICATION_PROMPT.format(reason=reason, law_context=law_context),

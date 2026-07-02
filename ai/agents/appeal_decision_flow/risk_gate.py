@@ -44,6 +44,7 @@ def _call_llm_classifier(reason: str) -> dict:
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=256,
+        temperature=0,
         messages=[{"role": "user", "content": RISK_CLASSIFICATION_PROMPT.format(reason=reason)}],
     )
     raw = response.choices[0].message.content.strip()
