@@ -6,6 +6,7 @@ services:
     image: skn27-demo-backend
     container_name: skn27-demo-backend
     environment:
+      PYTHONUTF8: "1"
       DJANGO_DEBUG: "1"
       MOCK_REQUIRE_AUTH: "1"
       DJANGO_SECRET_KEY: "dev-secret"
@@ -77,6 +78,7 @@ services:
       - .:/app
     command: python -m etl.legal.run_pipeline --client offline --provider openai --embedding-output law_embeddings_openai.jsonl --db-load
     environment:
+      PYTHONUTF8: "1"
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
