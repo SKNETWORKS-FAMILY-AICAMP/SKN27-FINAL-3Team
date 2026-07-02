@@ -13,6 +13,17 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
         ...payload,
       });
     },
+    loginWithGoogleCode(payload = {}) {
+      return postJson(
+        joinApiPath(authApiBase, "auth/google/code/"),
+        {
+          provider: "google",
+          ...payload,
+        },
+        {},
+        { extraHeaders: { "X-Requested-With": "XmlHttpRequest" } }
+      );
+    },
     getCurrentAuthSubject({ sessionId, identity } = {}) {
       return getJson(buildAuthMeUrl(authApiBase, sessionId), identity);
     },
@@ -24,6 +35,9 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     },
     submitChatMessage(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/messages/"), payload, identity);
+    },
+    updateConversationSaveState(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "chat/save-state/"), payload, identity);
     },
     runReportAction(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "reports/"), payload, identity);
@@ -42,10 +56,13 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
   };
 }
 
-export async function postJson(url, payload, identity = {}) {
+export async function postJson(url, payload, identity = {}, options = {}) {
   const response = await fetch(url, {
     method: "POST",
-    headers: buildRequestHeaders(identity, { includeContentType: true }),
+    headers: {
+      ...buildRequestHeaders(identity, { includeContentType: true }),
+      ...(options.extraHeaders || {}),
+    },
     body: JSON.stringify(payload || {}),
   });
 

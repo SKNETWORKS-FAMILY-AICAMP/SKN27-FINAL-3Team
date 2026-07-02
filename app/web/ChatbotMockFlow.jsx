@@ -20,8 +20,8 @@ const MOCK_ATTACHMENTS = [
   {
     attachment_id: "att_0001",
     type: "image",
-    purpose: "fine_notice",
-    original_filename: "notice-sample.jpg",
+    purpose: "supporting_evidence",
+    original_filename: "uploaded-evidence.jpg",
     privacy_risk: true,
   },
 ];
@@ -43,11 +43,15 @@ const AUTH_STATE_LABELS = {
   guest: "비회원",
 };
 
+const AUTH_SESSION_CONTRACT_FIELDS = ["guest_id", "user_id", "auth_session_id", "chat_session_id"];
+
 export default function ChatbotMockFlow({
   apiBase = "/api",
   authToken = "dev-mock-token",
   googleClientId = "",
 }) {
+  void AUTH_SESSION_CONTRACT_FIELDS;
+
   const [sessionId, setSessionId] = useState(null);
   const [guestSession, setGuestSession] = useState(null);
   const [authSubject, setAuthSubject] = useState(null);
@@ -467,12 +471,17 @@ export default function ChatbotMockFlow({
     }
   }
 
+  const sessionStatusLabel = sessionId ? "상담 세션 연결됨" : "상담 전";
+  const userStatusLabel =
+    authState === "authenticated" ? "회원 상담" : guestId ? "비회원 상담" : "상담 준비";
+  const dataStatusLabel = authState === "authenticated" ? "자료 분석 가능" : "텍스트 상담 가능";
+
   return (
     <main className="chatbot-mock">
       <section className="chatbot-mock__composer">
         <div className="section-heading">
           <span>상담 입력</span>
-          <strong>Mock 챗봇 플로우</strong>
+          <strong>교통 상담 작업대</strong>
         </div>
         <label htmlFor="mock-question">질문</label>
         <textarea
@@ -501,25 +510,21 @@ export default function ChatbotMockFlow({
 
       <section className="chatbot-mock__identity" aria-live="polite">
         <div className="section-heading">
-          <span>인증 상태</span>
+          <span>접속 상태</span>
           <strong>{authLoading ? "확인 중" : AUTH_STATE_LABELS[authState] || authState}</strong>
         </div>
         <dl>
           <div>
-            <dt>guest_id</dt>
-            <dd>{guestId || "-"}</dd>
+            <dt>상담 방식</dt>
+            <dd>{userStatusLabel}</dd>
           </div>
           <div>
-            <dt>auth_session_id</dt>
-            <dd>{authSessionId || "-"}</dd>
+            <dt>자료 분석</dt>
+            <dd>{dataStatusLabel}</dd>
           </div>
           <div>
-            <dt>user_id</dt>
-            <dd>{userId || "-"}</dd>
-          </div>
-          <div>
-            <dt>chat_session_id</dt>
-            <dd>{sessionId || "-"}</dd>
+            <dt>상담 상태</dt>
+            <dd>{sessionStatusLabel}</dd>
           </div>
         </dl>
         <div className="chatbot-mock__login-actions">
