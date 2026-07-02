@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from chatbot.models import (
@@ -32,9 +32,11 @@ from chatbot.models import (
     HistoryEvent,
     AiSession,
     MessageRole,
+    OAuthConnection,
     Report,
     ReportStatus,
     ReportType,
+    SocialAccount,
     Subscription,
     SubscriptionStatus,
     UsageEvent,
@@ -59,6 +61,8 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(AnalysisDisplayResult._meta.db_table, "analysis_display_results")
         self.assertEqual(Report._meta.db_table, "reports")
         self.assertEqual(UserAccount._meta.db_table, "users")
+        self.assertEqual(SocialAccount._meta.db_table, "social_accounts")
+        self.assertEqual(OAuthConnection._meta.db_table, "oauth_connections")
         self.assertEqual(GuestIdentity._meta.db_table, "guest_identities")
         self.assertEqual(AuthSession._meta.db_table, "auth_sessions")
         self.assertEqual(CodeGroup._meta.db_table, "code_groups")
@@ -364,6 +368,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(response["Access-Control-Allow-Origin"], "*")
         self.assertIn("Authorization", response["Access-Control-Allow-Headers"])
         self.assertIn("X-Guest-Id", response["Access-Control-Allow-Headers"])
+        self.assertIn("X-Requested-With", response["Access-Control-Allow-Headers"])
 
     def test_public_mock_endpoints_do_not_require_authorization_header(self):
         public_client = Client()
@@ -406,6 +411,70 @@ class ChatbotMockApiTests(TestCase):
         error = response.json()["error"]
         self.assertEqual(error["code"], "auth_required")
         self.assertEqual(error["auth"]["reason"], "missing_token")
+
+    def test_guest_can_submit_canonical_chat_without_bearer_token(self):
+        response = Client(HTTP_X_GUEST_ID="gst_chat_first").post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_guest_chat_first",
+                "conversation_save_state": "pending",
+                "user_text": "로그인 전에 상담부터 진행합니다.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["persistence"]["conversation_save_state"], "pending")
+        self.assertEqual(body["supervisor_execution"]["orchestration_mode"], "background_session")
+        self.assertGreater(body["supervisor_execution"]["agent_invocations_saved"], 0)
+        self.assertTrue(
+            AgentInvocation.objects.filter(job__session__session_id="ses_guest_chat_first").exists()
+        )
+
+    @override_settings(GOOGLE_AUTH_ALLOW_MOCK=False, APP_AUTH_ALLOW_MOCK_BEARER=False)
+    def test_real_auth_mode_rejects_legacy_dev_mock_bearer(self):
+        response = Client(HTTP_AUTHORIZATION="Bearer dev-mock-token").post(
+            "/api/chat/messages/",
+            data={"session_id": "ses_real_auth_only", "user_text": "hello"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "token_invalid")
+        self.assertEqual(error["auth"]["reason"], "app_jwt_required")
+
+    @override_settings(APP_AUTH_ALLOW_MOCK_BEARER=False)
+    def test_real_auth_mode_accepts_backend_app_jwt(self):
+        login_response = Client().post(
+            "/api/auth/login/",
+            data={
+                "provider": "google",
+                "google_sub": "google-sub-real-mode",
+                "email": "real.mode@example.com",
+                "display_name": "Real Mode",
+                "session_id": "ses_real_app_jwt",
+            },
+            content_type="application/json",
+        )
+        token = login_response.json()["access_token"]
+
+        response = Client(HTTP_AUTHORIZATION=f"Bearer {token}").post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_real_app_jwt",
+                "user_text": "app JWT로 상담을 진행합니다.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["supervisor_execution"]["orchestration_mode"], "background_session")
 
     def test_protected_endpoint_rejects_malformed_authorization_header(self):
         response = Client(HTTP_AUTHORIZATION="Token dev-mock-token").post(
@@ -518,6 +587,72 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(auth_me["subject"]["user_id"], user.user_id)
         self.assertEqual(auth_me["subject"]["auth_session_id"], auth_session.auth_session_id)
         self.assertEqual(auth_me["auth_session"]["verification"], "app_jwt_hmac")
+
+    def test_google_code_login_persists_social_account_and_oauth_connection(self):
+        response = Client().post(
+            "/api/auth/google/code/",
+            data={
+                "provider": "google",
+                "code": "mock_google_code:code-login",
+                "purpose": "LOGIN",
+                "scope": "openid email profile",
+                "email": "code.driver@example.com",
+                "display_name": "Code Driver",
+                "guest_id": "gst_google_code",
+                "session_id": "ses_google_code",
+            },
+            content_type="application/json",
+            HTTP_X_REQUESTED_WITH="XmlHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["contract_version"], "google_auth_code.v1")
+        self.assertEqual(body["auth_mode"], "authorization_code_mock")
+        self.assertEqual(body["google"]["connected"], True)
+        self.assertEqual(body["google"]["oauth_connection"]["token_storage"], "backend_only")
+        self.assertNotIn("_private_oauth_tokens", body)
+        self.assertNotIn("mock_google_refresh", json.dumps(body["google"]))
+        self.assertNotIn("refresh_token_encrypted", json.dumps(body["google"]))
+        self.assertTrue(body["access_token"])
+        self.assertEqual(body["persistence"]["social_account_table"], "social_accounts")
+        self.assertEqual(body["persistence"]["oauth_connection_table"], "oauth_connections")
+
+        user = UserAccount.objects.get(user_id=body["subject"]["user_id"])
+        social_account = SocialAccount.objects.get(user=user, provider="google")
+        oauth_connection = OAuthConnection.objects.get(user=user, provider="google")
+        auth_session = AuthSession.objects.get(auth_session_id=body["subject"]["auth_session_id"])
+        self.assertEqual(user.email, "code.driver@example.com")
+        self.assertEqual(user.display_name, "Code Driver")
+        self.assertEqual(social_account.provider_user_id, user.provider_subject)
+        self.assertEqual(social_account.email, "code.driver@example.com")
+        self.assertEqual(oauth_connection.granted_scopes, "openid email profile")
+        self.assertTrue(oauth_connection.access_token_encrypted.startswith("v1."))
+        self.assertTrue(oauth_connection.refresh_token_encrypted.startswith("v1."))
+        self.assertNotIn("mock_google_refresh", oauth_connection.refresh_token_encrypted)
+        self.assertEqual(auth_session.metadata["google"]["token_storage"], "backend_only")
+        self.assertTrue(
+            AuthEvent.objects.filter(
+                event_type="auth_google_code_completed",
+                auth_session=auth_session,
+            ).exists()
+        )
+
+    def test_google_code_login_requires_popup_csrf_header(self):
+        response = Client().post(
+            "/api/auth/google/code/",
+            data={
+                "provider": "google",
+                "code": "mock_google_code:missing-header",
+                "session_id": "ses_google_code_missing_header",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "forbidden")
+        self.assertEqual(error["auth"]["reason"], "invalid_google_code_request_header")
 
     def test_auth_refresh_issues_app_jwt_and_keeps_auth_session_active(self):
         login_response = Client().post(
@@ -1057,12 +1192,100 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job.analysis_plan_id, body["analysis_plan"]["plan_id"])
         self.assertEqual(job.metadata["analysis_plan"]["plan_id"], body["analysis_plan"]["plan_id"])
         self.assertEqual(job.metadata["assistant_message"], body["assistant_message"])
+        self.assertEqual(body["supervisor_execution"]["orchestration_mode"], "background_session")
+        self.assertEqual(body["supervisor_execution"]["job_id"], job.job_id)
+        self.assertEqual(
+            body["supervisor_execution"]["agent_results_saved"],
+            len(body["supervisor_execution"]["node_results"]),
+        )
+        self.assertEqual(
+            body["supervisor_execution"]["agent_invocations_saved"],
+            len(body["supervisor_execution"]["node_results"]),
+        )
+        self.assertEqual(job.agent_results.count(), len(body["analysis_plan"]["steps"]))
+        self.assertEqual(job.agent_invocations.count(), len(body["analysis_plan"]["steps"]))
+        self.assertTrue(AiSession.objects.filter(ai_session_id=body["supervisor_execution"]["ai_session_id"]).exists())
+        self.assertIn("supervisor_execution", job.metadata)
+        self.assertNotIn("agent_input", job.metadata["supervisor_execution"])
         self.assertEqual(event.status, AnalysisJobStatus.SUCCESS)
         self.assertEqual(event.metadata["source"], "canonical_chat_message")
         self.assertEqual(body["usage"]["scope"], "chat_message")
         self.assertEqual(body["usage"]["usage_event_table"], "usage_events")
         usage_event = UsageEvent.objects.get(subject_id="user:usr_mock", scope="chat_message")
         self.assertEqual(usage_event.metadata["status"], "allowed")
+
+    def test_pending_conversation_is_not_promoted_to_history_or_mypage(self):
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_pending_save",
+                "conversation_save_state": "pending",
+                "user_text": "로그인 전에 먼저 상담만 진행합니다.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["persistence"]["conversation_save_state"], "pending")
+        self.assertFalse(HistoryEvent.objects.filter(subject_session_id="ses_pending_save").exists())
+
+        mypage_response = self.client.get("/api/mypage/summary/?session_id=ses_pending_save")
+        self.assertEqual(mypage_response.status_code, 200)
+        self.assertEqual(mypage_response.json()["cases"], [])
+
+        history_response = self.client.get("/api/history/?session_id=ses_pending_save")
+        self.assertEqual(history_response.status_code, 200)
+        self.assertEqual(history_response.json()["events"], [])
+
+    def test_saved_conversation_state_promotes_pending_case_to_history_and_mypage(self):
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_save_after_login",
+                "conversation_save_state": "pending",
+                "user_text": "이 상담은 나중에 저장할 예정입니다.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        message_body = message_response.json()
+        job_id = message_body["persistence"]["job_id"]
+
+        save_response = self.client.post(
+            "/api/chat/save-state/",
+            data={
+                "session_id": "ses_save_after_login",
+                "conversation_save_state": "saved",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(save_response.status_code, 200)
+        save_body = save_response.json()["conversation_save"]
+        self.assertEqual(save_body["conversation_save_state"], "saved")
+        self.assertGreaterEqual(save_body["analysis_jobs_updated"], 1)
+
+        job = AnalysisJob.objects.get(job_id=job_id)
+        self.assertEqual(job.metadata["conversation_save_state"], "saved")
+        session = ChatSession.objects.get(session_id="ses_save_after_login")
+        self.assertEqual(session.metadata["conversation_save_state"], "saved")
+
+        mypage_response = self.client.get("/api/mypage/summary/?session_id=ses_save_after_login")
+        self.assertEqual(mypage_response.status_code, 200)
+        cases = mypage_response.json()["cases"]
+        self.assertIn(job_id, {case["job_id"] for case in cases})
+
+        history_response = self.client.get("/api/history/?session_id=ses_save_after_login")
+        self.assertEqual(history_response.status_code, 200)
+        self.assertIn(
+            "conversation_saved",
+            {event["event_type"] for event in history_response.json()["events"]},
+        )
 
     def test_agent_nodes_endpoint_returns_registry(self):
         response = self.client.get("/api/mock/agents/nodes/")

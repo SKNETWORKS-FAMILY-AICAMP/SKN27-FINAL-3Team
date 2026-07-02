@@ -414,6 +414,72 @@ class UserAccount(TimestampedModel):
         return self.user_id
 
 
+class SocialAccount(TimestampedModel):
+    social_account_id = models.CharField(max_length=64, unique=True, db_index=True)
+    user = models.ForeignKey(
+        UserAccount,
+        related_name="social_accounts",
+        on_delete=models.CASCADE,
+    )
+    provider = models.CharField(max_length=30, db_index=True)
+    provider_user_id = models.CharField(max_length=255, db_index=True)
+    email = models.EmailField(blank=True, db_index=True)
+    email_verified = models.BooleanField(default=False)
+    connected_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "social_accounts"
+        ordering = ["-connected_at", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "provider_user_id"],
+                name="social_accounts_provider_user_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "provider"], name="soc_acc_user_provider_idx"),
+            models.Index(fields=["email"], name="social_accounts_email_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.provider}:{self.provider_user_id}"
+
+
+class OAuthConnection(TimestampedModel):
+    connection_id = models.CharField(max_length=64, unique=True, db_index=True)
+    user = models.ForeignKey(
+        UserAccount,
+        related_name="oauth_connections",
+        on_delete=models.CASCADE,
+    )
+    provider = models.CharField(max_length=30, db_index=True)
+    access_token_encrypted = models.TextField(blank=True)
+    refresh_token_encrypted = models.TextField(blank=True)
+    token_type = models.CharField(max_length=50, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    granted_scopes = models.TextField(blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "oauth_connections"
+        ordering = ["-updated_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "provider"],
+                name="oauth_connections_user_provider_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["provider", "revoked_at"], name="oauth_conn_provider_rev_idx"),
+            models.Index(fields=["user", "provider"], name="oauth_conn_user_provider_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}:{self.provider}"
+
+
 class GuestIdentity(TimestampedModel):
     guest_id = models.CharField(max_length=64, unique=True, db_index=True)
     status = models.CharField(

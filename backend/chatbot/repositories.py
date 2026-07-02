@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+import hmac
 from datetime import timedelta, timezone as datetime_timezone
 from pathlib import Path
 from typing import Any
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -42,11 +45,13 @@ from chatbot.models import (
     GuestIdentityStatus,
     HistoryEvent,
     MessageRole,
+    OAuthConnection,
     Report,
     ReportStatus,
     ReportType,
     Subscription,
     SubscriptionStatus,
+    SocialAccount,
     UsageEvent,
     UsageQuota,
     UserAccount,
@@ -95,6 +100,8 @@ USAGE_POLICY_LIMITS = {
 }
 
 HISTORY_POLICY_VERSION = "history_operating_policy.v1"
+CONVERSATION_SAVE_POLICY_VERSION = "conversation_save_policy.v1"
+CONVERSATION_SAVE_STATES = {"pending", "saved", "session_only"}
 HISTORY_RETENTION_DAYS = {
     "anonymous": 1,
     "guest": 7,
@@ -107,6 +114,8 @@ HISTORY_METADATA_ALLOWED_KEYS = {
     "analysis_plan_id",
     "attachment_count",
     "card_count",
+    "conversation_save_policy",
+    "conversation_save_state",
     "error_code",
     "evidence_count",
     "execution_id",
@@ -138,6 +147,7 @@ HISTORY_AFTER_SERVICE_EVENT_TYPES = {
     "agent_call_failed",
     "agent_call_partial",
     "chat_message_created",
+    "conversation_saved",
     "report_downloaded",
     "report_saved",
 }
@@ -258,9 +268,90 @@ def get_chat_session_access_metadata(session_id: str | None) -> dict[str, Any] |
     }
 
 
+def conversation_save_state_from_payload(
+    payload: dict[str, Any],
+    *,
+    default: str = "saved",
+) -> str:
+    auth_context = _dict_or_empty(payload.get("auth_context"))
+    raw_state = _text(
+        payload.get("conversation_save_state")
+        or payload.get("save_state")
+        or payload.get("save_decision")
+        or auth_context.get("conversation_save_state")
+        or auth_context.get("save_state")
+    ).lower()
+    aliases = {
+        "": default,
+        "defer": "pending",
+        "deferred": "pending",
+        "pending": "pending",
+        "undecided": "pending",
+        "save": "saved",
+        "saved": "saved",
+        "session": "session_only",
+        "session_only": "session_only",
+        "temporary": "session_only",
+        "temp": "session_only",
+        "not_saved": "session_only",
+        "skip": "session_only",
+    }
+    normalized = aliases.get(raw_state, raw_state)
+    return normalized if normalized in CONVERSATION_SAVE_STATES else default
+
+
+def mark_conversation_save_state(
+    *,
+    session_id: str,
+    save_state: str,
+    owner_id: str = "",
+    guest_id: str = "",
+    raw_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_session_id = _text(session_id)
+    normalized_state = conversation_save_state_from_payload(
+        {"conversation_save_state": save_state},
+        default="pending",
+    )
+    if not normalized_session_id:
+        return _conversation_save_state_result("skipped", normalized_state, reason="missing_session_id")
+
+    session = ChatSession.objects.filter(session_id=normalized_session_id).first()
+    if session is None:
+        return _conversation_save_state_result("skipped", normalized_state, reason="session_not_found")
+
+    with transaction.atomic():
+        session.metadata = _metadata_with_conversation_save_state(
+            session.metadata,
+            normalized_state,
+            raw_payload=raw_payload,
+        )
+        if normalized_state == "saved" and owner_id and not session.owner_id:
+            session.owner_id = owner_id
+        session.save(update_fields=["owner_id", "metadata", "updated_at"])
+
+        messages_updated = _update_session_message_save_state(session, normalized_state)
+        jobs_updated = _update_session_job_save_state(session, normalized_state, owner_id=owner_id)
+        history_events_updated = _update_session_history_save_state(session.session_id, normalized_state)
+
+    session_cache = write_chat_session_state(session)
+    return {
+        **_conversation_save_state_result("updated", normalized_state),
+        "session_id": session.session_id,
+        "owner_id": session.owner_id or None,
+        "guest_id": guest_id or _chat_session_guest_id(session) or None,
+        "chat_messages_updated": messages_updated,
+        "analysis_jobs_updated": jobs_updated,
+        "history_events_updated": history_events_updated,
+        "session_cache": session_cache,
+    }
+
+
 def persist_chat_message_analysis_boundary(
     payload: dict[str, Any],
     chat_response: dict[str, Any],
+    *,
+    node_execution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist the canonical chat message and its analysis-job boundary."""
 
@@ -268,6 +359,14 @@ def persist_chat_message_analysis_boundary(
     session = _get_or_create_session(chat_response.get("session_id"), owner_id=owner_id)
     if session is None:
         raise ValueError("chat_response must include session_id")
+
+    conversation_save_state = conversation_save_state_from_payload(payload)
+    session.metadata = _metadata_with_conversation_save_state(
+        session.metadata,
+        conversation_save_state,
+        raw_payload=payload,
+    )
+    session.save(update_fields=["metadata", "updated_at"])
 
     message_id = _text(chat_response.get("message_id"))
     analysis_plan = chat_response.get("analysis_plan") or {}
@@ -288,6 +387,8 @@ def persist_chat_message_analysis_boundary(
                     "mock_scenario": chat_response.get("mock_scenario"),
                     "mock_status": payload.get("mock_status"),
                     "response_status": chat_response.get("status"),
+                    "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+                    "conversation_save_state": conversation_save_state,
                     "attachments": chat_response.get("attachments", []),
                     "attachment_resolution": chat_response.get("attachment_resolution", {}),
                     "raw_payload": _safe_payload(payload),
@@ -318,10 +419,41 @@ def persist_chat_message_analysis_boundary(
                     "attachments": chat_response.get("attachments", []),
                     "attachment_resolution": chat_response.get("attachment_resolution", {}),
                     "limitations": chat_response.get("limitations", []),
+                    "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+                    "conversation_save_state": conversation_save_state,
                 },
             },
         )
         _upsert_initial_job_event(job, progress=progress)
+        agent_results: list[AgentResult] = []
+        agent_invocations: list[AgentInvocation] = []
+        ai_session: AiSession | None = None
+        if node_execution:
+            job.status_counts = node_execution.get("status_counts") or job.status_counts
+            job.metadata = {
+                **_dict_or_empty(job.metadata),
+                "supervisor_execution": _node_execution_summary(node_execution),
+            }
+            job.save(update_fields=["status_counts", "metadata", "updated_at"])
+            agent_results = _persist_agent_results(job, node_execution)
+            ai_session = _upsert_ai_session(
+                job,
+                payload=payload,
+                job_payload={
+                    **chat_response,
+                    "job_id": job.job_id,
+                    "session_id": session.session_id,
+                    "message_id": message.message_id,
+                    "owner_id": owner_id or session.owner_id,
+                    "auth_context": _dict_or_empty(payload.get("auth_context")),
+                },
+            )
+            agent_invocations = _persist_agent_invocations(
+                job,
+                ai_session=ai_session,
+                node_execution=node_execution,
+                agent_results=agent_results,
+            )
 
     progress_cache = write_analysis_job_progress(job)
     session_cache = write_chat_session_state(session, latest_job=job)
@@ -330,6 +462,13 @@ def persist_chat_message_analysis_boundary(
         "message_id": message.message_id,
         "job_id": job.job_id,
         "session_id": session.session_id,
+        "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+        "conversation_save_state": conversation_save_state,
+        "supervisor_execution": _node_execution_summary(node_execution or {}),
+        "agent_results_saved": len(agent_results),
+        "agent_invocations_saved": len(agent_invocations),
+        "ai_session_id": ai_session.ai_session_id if ai_session else None,
+        "node_codes": [result.node_code for result in agent_results],
         "progress_cache": progress_cache,
         "session_cache": session_cache,
     }
@@ -421,6 +560,8 @@ def persist_current_auth_subject(
     user_id = _text(subject.get("user_id"))
     guest_id = _normalize_guest_id(subject.get("guest_id"))
     auth_session_id = _text(subject.get("auth_session_id"))
+    auth_source = "auth_google_code" if auth_payload.get("contract_version") == "google_auth_code.v1" else "auth_me"
+    auth_event_type = "auth_google_code_completed" if auth_source == "auth_google_code" else "auth_me_checked"
 
     with transaction.atomic():
         user = _get_or_create_user_account(user_id)
@@ -441,16 +582,18 @@ def persist_current_auth_subject(
                     "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
                     "revoked_at": None,
                     "metadata": {
-                        "source": "auth_me",
+                        "source": auth_source,
                         "auth_state": auth_payload.get("auth_state"),
                         "verification": _dict_or_empty(auth_payload.get("auth_session")).get(
                             "verification"
                         ),
+                        "google": _safe_google_connection_metadata(auth_payload),
                         "rate_limit": auth_payload.get("rate_limit") or {},
                         "merge_policy": auth_payload.get("merge_policy") or {},
                     },
                 },
             )
+        google_persistence = _upsert_google_oauth_subject(user, auth_payload)
         chat_session = _bind_chat_session_auth_context(
             session_id=session_id,
             owner_id=user_id,
@@ -464,35 +607,45 @@ def persist_current_auth_subject(
             },
         )
         event = _create_auth_event(
-            event_type="auth_me_checked",
+            event_type=auth_event_type,
             subject_id=subject_id,
             user=user,
             guest=guest,
             auth_session=auth_session,
             metadata={
-                "source": "auth_me",
+                "source": auth_source,
                 "auth_state": auth_payload.get("auth_state"),
                 "chat_session_id": chat_session.session_id if chat_session else None,
+                "google": _safe_google_connection_metadata(auth_payload),
             },
         )
 
+    tables = [
+        UserAccount._meta.db_table,
+        GuestIdentity._meta.db_table,
+        AuthSession._meta.db_table,
+        AuthEvent._meta.db_table,
+        ChatSession._meta.db_table,
+    ]
+    for table_name in google_persistence.get("tables", []):
+        if table_name not in tables:
+            tables.append(table_name)
+
     return {
         "backend": "postgresql",
-        "tables": [
-            UserAccount._meta.db_table,
-            GuestIdentity._meta.db_table,
-            AuthSession._meta.db_table,
-            AuthEvent._meta.db_table,
-            ChatSession._meta.db_table,
-        ],
+        "tables": tables,
         "user_table": UserAccount._meta.db_table,
         "guest_identity_table": GuestIdentity._meta.db_table,
         "auth_session_table": AuthSession._meta.db_table,
         "auth_events_table": AuthEvent._meta.db_table,
         "chat_session_table": ChatSession._meta.db_table,
+        "social_account_table": google_persistence.get("social_account_table"),
+        "oauth_connection_table": google_persistence.get("oauth_connection_table"),
         "user_id": user.user_id if user else None,
         "guest_id": guest.guest_id if guest else None,
         "auth_session_id": auth_session.auth_session_id if auth_session else None,
+        "social_account_id": google_persistence.get("social_account_id"),
+        "oauth_connection_id": google_persistence.get("oauth_connection_id"),
         "event_id": event.event_id,
         "session_id": chat_session.session_id if chat_session else None,
         "status": "saved",
@@ -707,6 +860,174 @@ def _update_user_account_from_auth_payload(
         user.save(update_fields=[*sorted(set(changed_fields)), "updated_at"])
 
 
+def _upsert_google_oauth_subject(
+    user: UserAccount | None,
+    auth_payload: dict[str, Any],
+) -> dict[str, Any]:
+    if user is None:
+        return _google_oauth_persistence_skipped("missing_user")
+
+    google = _dict_or_empty(auth_payload.get("google"))
+    social_payload = _dict_or_empty(google.get("social_account"))
+    oauth_payload = _dict_or_empty(google.get("oauth_connection"))
+    private_tokens = _dict_or_empty(auth_payload.get("_private_oauth_tokens"))
+    provider = _text(
+        social_payload.get("provider")
+        or oauth_payload.get("provider")
+        or private_tokens.get("provider")
+        or auth_payload.get("provider")
+    ).lower()
+    if provider != "google":
+        return _google_oauth_persistence_skipped("not_google_code_flow")
+
+    provider_user_id = _text(social_payload.get("provider_user_id") or user.provider_subject)
+    if not provider_user_id:
+        return _google_oauth_persistence_skipped("missing_provider_user_id")
+
+    now = timezone.now()
+    social_account_id = f"soc_google_{hashlib.sha256(provider_user_id.encode('utf-8')).hexdigest()[:16]}"
+    social_account, _social_created = SocialAccount.objects.update_or_create(
+        provider=provider,
+        provider_user_id=provider_user_id,
+        defaults={
+            "social_account_id": social_account_id,
+            "user": user,
+            "email": _text(social_payload.get("email") or user.email),
+            "email_verified": bool(social_payload.get("email_verified")),
+            "connected_at": now,
+            "metadata": {
+                "source": "google_auth_code",
+                "policy": "provider_user_id_is_google_sub",
+            },
+        },
+    )
+    if not google.get("connected") and not private_tokens:
+        return {
+            "backend": "postgresql",
+            "tables": [SocialAccount._meta.db_table],
+            "social_account_table": SocialAccount._meta.db_table,
+            "oauth_connection_table": None,
+            "social_account_id": social_account.social_account_id,
+            "oauth_connection_id": None,
+            "status": "saved",
+        }
+
+    existing_connection = OAuthConnection.objects.filter(user=user, provider=provider).first()
+    granted_scopes = _normalize_scope_text(
+        private_tokens.get("granted_scopes")
+        or oauth_payload.get("granted_scopes")
+        or google.get("granted_scopes")
+    )
+    access_token = _text(private_tokens.get("access_token"))
+    refresh_token = _text(private_tokens.get("refresh_token"))
+    access_token_encrypted = (
+        _protect_oauth_secret(access_token)
+        if access_token
+        else (existing_connection.access_token_encrypted if existing_connection else "")
+    )
+    refresh_token_encrypted = (
+        _protect_oauth_secret(refresh_token)
+        if refresh_token
+        else (existing_connection.refresh_token_encrypted if existing_connection else "")
+    )
+    connection_id = (
+        existing_connection.connection_id
+        if existing_connection
+        else f"oauth_google_{hashlib.sha256(user.user_id.encode('utf-8')).hexdigest()[:16]}"
+    )
+    oauth_connection, _oauth_created = OAuthConnection.objects.update_or_create(
+        user=user,
+        provider=provider,
+        defaults={
+            "connection_id": connection_id,
+            "access_token_encrypted": access_token_encrypted,
+            "refresh_token_encrypted": refresh_token_encrypted,
+            "token_type": _text(private_tokens.get("token_type")) or "Bearer",
+            "expires_at": _datetime_or_none(private_tokens.get("expires_at") or oauth_payload.get("expires_at")),
+            "granted_scopes": granted_scopes,
+            "revoked_at": _datetime_or_none(oauth_payload.get("revoked_at")),
+            "metadata": {
+                "source": "google_auth_code",
+                "purpose": _text(private_tokens.get("purpose") or google.get("purpose")) or "LOGIN",
+                "has_access_token": bool(access_token_encrypted),
+                "has_refresh_token": bool(refresh_token_encrypted),
+                "token_storage": "backend_only",
+                "scope_policy": "incremental_authorization",
+            },
+        },
+    )
+
+    return {
+        "backend": "postgresql",
+        "tables": [SocialAccount._meta.db_table, OAuthConnection._meta.db_table],
+        "social_account_table": SocialAccount._meta.db_table,
+        "oauth_connection_table": OAuthConnection._meta.db_table,
+        "social_account_id": social_account.social_account_id,
+        "oauth_connection_id": oauth_connection.connection_id,
+        "status": "saved",
+    }
+
+
+def _safe_google_connection_metadata(auth_payload: dict[str, Any]) -> dict[str, Any]:
+    google = _dict_or_empty(auth_payload.get("google"))
+    if not google:
+        return {}
+    return {
+        "connected": bool(google.get("connected")),
+        "purpose": _text(google.get("purpose")),
+        "granted_scopes": _list_or_empty(google.get("granted_scopes")),
+        "connection_policy": _text(google.get("connection_policy")),
+        "token_storage": _text(_dict_or_empty(google.get("oauth_connection")).get("token_storage")),
+    }
+
+
+def _google_oauth_persistence_skipped(reason: str) -> dict[str, Any]:
+    return {
+        "backend": "postgresql",
+        "tables": [SocialAccount._meta.db_table, OAuthConnection._meta.db_table],
+        "social_account_table": SocialAccount._meta.db_table,
+        "oauth_connection_table": OAuthConnection._meta.db_table,
+        "status": "skipped",
+        "reason": reason,
+    }
+
+
+def _normalize_scope_text(value: Any) -> str:
+    if isinstance(value, list):
+        return " ".join(_text(item) for item in value if _text(item))
+    return " ".join(_text(value).split())
+
+
+def _protect_oauth_secret(value: str) -> str:
+    if not value:
+        return ""
+    plaintext = value.encode("utf-8")
+    secret = _oauth_token_secret().encode("utf-8")
+    nonce = hashlib.sha256(f"{timezone.now().timestamp()}:{value}".encode("utf-8")).digest()[:16]
+    key_stream = _hmac_stream(secret, nonce, len(plaintext))
+    ciphertext = bytes(byte ^ key_stream[index] for index, byte in enumerate(plaintext))
+    tag = hmac.new(secret, nonce + ciphertext, hashlib.sha256).digest()[:16]
+    return "v1." + base64.urlsafe_b64encode(nonce + tag + ciphertext).decode("ascii").rstrip("=")
+
+
+def _hmac_stream(secret: bytes, nonce: bytes, length: int) -> bytes:
+    chunks: list[bytes] = []
+    counter = 0
+    while sum(len(chunk) for chunk in chunks) < length:
+        chunks.append(hmac.new(secret, nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest())
+        counter += 1
+    return b"".join(chunks)[:length]
+
+
+def _oauth_token_secret() -> str:
+    return (
+        _text(getattr(settings, "OAUTH_TOKEN_SECRET", ""))
+        or _text(getattr(settings, "APP_JWT_SECRET", ""))
+        or _text(getattr(settings, "SECRET_KEY", ""))
+        or "dev-only-change-before-deploy"
+    )
+
+
 def record_usage_event(
     payload: dict[str, Any],
     *,
@@ -883,7 +1204,12 @@ def list_history_event_records(
     if event_type:
         queryset = queryset.filter(event_type=event_type)
 
-    rows = list(queryset.order_by("-occurred_at", "-id")[: max(limit, 1)])
+    candidate_rows = list(queryset.order_by("-occurred_at", "-id")[: max(limit, 1) * 3])
+    rows = [
+        event
+        for event in candidate_rows
+        if _conversation_is_saved_metadata(event.metadata)
+    ][: max(limit, 1)]
     return [history_event_to_api(event) for event in reversed(rows)]
 
 
@@ -1308,7 +1634,12 @@ def get_mycase_summary(
     if owner_id:
         queryset = queryset.filter(owner_id=owner_id)
 
-    jobs = list(queryset[: max(limit, 1)])
+    candidate_jobs = list(queryset[: max(limit, 1) * 3])
+    jobs = [
+        job
+        for job in candidate_jobs
+        if _conversation_is_saved_for_job(job)
+    ][: max(limit, 1)]
     cases = [_case_summary(job) for job in jobs]
     active_statuses = {
         AnalysisJobStatus.QUEUED.value,
@@ -1320,6 +1651,9 @@ def get_mycase_summary(
         saved_reports = saved_reports.filter(session__session_id=session_id)
     if owner_id:
         saved_reports = saved_reports.filter(owner_id=owner_id)
+
+    report_rows = list(saved_reports.select_related("session"))
+    saved_report_count = sum(1 for report in report_rows if _conversation_is_saved_for_report(report))
 
     return {
         "storage": {
@@ -1340,9 +1674,14 @@ def get_mycase_summary(
         "object_storage": object_storage_policy(),
         "active_cases": sum(1 for case in cases if case["case_status"] in active_statuses),
         "due_soon_cases": 0,
-        "saved_reports": saved_reports.count(),
+        "saved_reports": saved_report_count,
         "recent_analysis_count": len(cases),
         "cases": cases,
+        "conversation_save_policy": {
+            "policy_version": CONVERSATION_SAVE_POLICY_VERSION,
+            "saved_state": "saved",
+            "hidden_states": ["pending", "session_only"],
+        },
         "limitations": [
             "deadline calculation is not connected yet; due_soon_cases stays 0.",
             "authorization is still mock bearer/guest-shape based.",
@@ -1422,6 +1761,107 @@ def _get_or_create_session(session_id: Any, *, owner_id: str) -> ChatSession | N
         session.owner_id = owner_id
         session.save(update_fields=["owner_id", "updated_at"])
     return session
+
+
+def _conversation_save_state_result(status: str, save_state: str, *, reason: str | None = None) -> dict[str, Any]:
+    result = {
+        "backend": "postgresql",
+        "policy_version": CONVERSATION_SAVE_POLICY_VERSION,
+        "status": status,
+        "conversation_save_state": save_state,
+    }
+    if reason:
+        result["reason"] = reason
+    return result
+
+
+def _metadata_with_conversation_save_state(
+    metadata: Any,
+    save_state: str,
+    *,
+    raw_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    next_metadata = dict(metadata or {})
+    next_metadata["conversation_save_policy"] = CONVERSATION_SAVE_POLICY_VERSION
+    next_metadata["conversation_save_state"] = save_state
+    if raw_payload:
+        auth_context = raw_payload.get("auth_context") if isinstance(raw_payload.get("auth_context"), dict) else {}
+        if auth_context:
+            existing_auth_context = (
+                next_metadata.get("auth_context")
+                if isinstance(next_metadata.get("auth_context"), dict)
+                else {}
+            )
+            next_metadata["auth_context"] = {
+                **existing_auth_context,
+                **{key: value for key, value in auth_context.items() if value is not None},
+            }
+        next_metadata.setdefault("conversation_save_source", _conversation_save_source(raw_payload))
+    return next_metadata
+
+
+def _conversation_save_source(payload: dict[str, Any]) -> str:
+    if payload.get("conversation_save_source"):
+        return _text(payload.get("conversation_save_source"))
+    if payload.get("provider") == "google":
+        return "auth_login"
+    if payload.get("save_state") or payload.get("conversation_save_state"):
+        return "save_state_endpoint"
+    return "chat_message"
+
+
+def _conversation_is_saved_for_job(job: AnalysisJob) -> bool:
+    state = _conversation_metadata_state(job.metadata)
+    if state:
+        return state == "saved"
+    return _conversation_is_saved_metadata(job.session.metadata if job.session_id else {})
+
+
+def _conversation_is_saved_for_report(report: Report) -> bool:
+    state = _conversation_metadata_state(report.metadata)
+    if state:
+        return state == "saved"
+    return _conversation_is_saved_metadata(report.session.metadata if report.session_id else {})
+
+
+def _conversation_is_saved_metadata(metadata: Any) -> bool:
+    state = _conversation_metadata_state(metadata)
+    return state not in {"pending", "session_only"}
+
+
+def _conversation_metadata_state(metadata: Any) -> str:
+    return _text(_dict_or_empty(metadata).get("conversation_save_state"))
+
+
+def _update_session_message_save_state(session: ChatSession, save_state: str) -> int:
+    updated = 0
+    for message in ChatMessage.objects.filter(session=session):
+        message.metadata = _metadata_with_conversation_save_state(message.metadata, save_state)
+        message.save(update_fields=["metadata"])
+        updated += 1
+    return updated
+
+
+def _update_session_job_save_state(session: ChatSession, save_state: str, *, owner_id: str = "") -> int:
+    updated = 0
+    for job in AnalysisJob.objects.filter(session=session):
+        job.metadata = _metadata_with_conversation_save_state(job.metadata, save_state)
+        update_fields = ["metadata", "updated_at"]
+        if save_state == "saved" and owner_id and not job.owner_id:
+            job.owner_id = owner_id
+            update_fields.append("owner_id")
+        job.save(update_fields=update_fields)
+        updated += 1
+    return updated
+
+
+def _update_session_history_save_state(session_id: str, save_state: str) -> int:
+    updated = 0
+    for event in HistoryEvent.objects.filter(subject_session_id=session_id):
+        event.metadata = _metadata_with_conversation_save_state(event.metadata, save_state)
+        event.save(update_fields=["metadata"])
+        updated += 1
+    return updated
 
 
 def _bind_chat_session_auth_context(
@@ -1544,6 +1984,41 @@ def _analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int
         status = _text(step.get("status")) or "unknown"
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _node_execution_summary(node_execution: dict[str, Any]) -> dict[str, Any]:
+    if not node_execution:
+        return {
+            "contract_version": "supervisor_execution.v1",
+            "orchestration_mode": "not_recorded",
+            "node_codes": [],
+        }
+
+    executions = [
+        execution
+        for execution in node_execution.get("executions", [])
+        if isinstance(execution, dict)
+    ]
+    node_codes = []
+    for execution in executions:
+        agent_output = execution.get("agent_output") if isinstance(execution.get("agent_output"), dict) else {}
+        node_code = _text(agent_output.get("node_code") or execution.get("node_code"))
+        if node_code and node_code not in node_codes:
+            node_codes.append(node_code)
+
+    return {
+        "contract_version": "supervisor_execution.v1",
+        "orchestration_mode": "background_session",
+        "execution_mode": _text(node_execution.get("execution_mode")) or "mock",
+        "job_id": _text(node_execution.get("job_id")) or None,
+        "plan_id": _text(node_execution.get("plan_id")) or None,
+        "session_id": _text(node_execution.get("session_id")) or None,
+        "message_id": _text(node_execution.get("message_id")) or None,
+        "status_counts": _dict_or_empty(node_execution.get("status_counts")),
+        "completed_node_codes": _list_or_empty(node_execution.get("completed_node_codes")),
+        "node_codes": node_codes,
+        "node_count": len(executions),
+    }
 
 
 def _upsert_initial_job_event(
