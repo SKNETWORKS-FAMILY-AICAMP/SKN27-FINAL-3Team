@@ -14,6 +14,7 @@ terms:
       - 전동 스쿠터
       - 전동 휠
       - 퀵보드
+      - 킥라니
     search_terms:
       - 개인형 이동장치
       - 원동기장치자전거
@@ -166,9 +167,24 @@ terms:
       - 신호 무시
       - 정지선
       - 빨간불 무시
+      - 노란불 통과
     search_terms:
       - 신호위반
       - 신호기
+      - 정지선
+      - 범칙금
+      - 도로교통법
+
+  - code: intersection_passage_violation
+    type: violation_type
+    canonical: 교차로 통행방법 위반
+    user_terms:
+      - 꼬리물기
+      - 교차로 막기
+      - 앞차 따라가기
+      - 길막
+    search_terms:
+      - 교차로 통행방법
       - 정지선
       - 범칙금
       - 도로교통법

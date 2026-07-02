@@ -4,10 +4,15 @@ def validate_input_envelope(context: dict[str, Any]) -> dict[str, Any]:
     """
     Handoff Input(Temporal) 검증
     """
+    import re
     errors = []
     temporal = context.get("temporal_basis", {})
-    if temporal.get("mode") == "as_of" and not temporal.get("effective_at"):
-        errors.append("temporal_basis가 'as_of'이나 effective_at이 누락되었습니다.")
+    if temporal.get("mode") == "as_of":
+        effective_at = temporal.get("effective_at")
+        if not effective_at:
+            errors.append("temporal_basis가 'as_of'이나 effective_at이 누락되었습니다.")
+        elif not re.match(r"^\d{4}-\d{2}-\d{2}$", str(effective_at)):
+            errors.append(f"effective_at 형식이 올바르지 않습니다(YYYY-MM-DD): {effective_at}")
         
     return {"valid": len(errors) == 0, "errors": errors}
 
@@ -22,15 +27,7 @@ def validate_and_filter_provisions(
     valid_provisions = []
     
     # 순수 법령 도메인 내에서의 허용 범위만 검사 (판례/뉴스 등 타 도메인 검사 제외)
-    allowed_sources = scope.get("allowed_source_types", [])
-    
     for prov in provisions:
-        source_type = prov.get("source_type")
-        
-        # 1. 허용된 법령 종류(법률, 시행령 등) 필터링
-        if allowed_sources and source_type not in allowed_sources:
-            continue
-            
         # 2. 필수 필드 누락 검사 (원문 및 출처 URL 필수)
         if not prov.get("provision_text") or not prov.get("source_url"):
             limitations.append(f"필수 필드(원문 또는 URL) 누락으로 제거됨: {prov.get('chunk_id')}")

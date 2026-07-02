@@ -1,4 +1,4 @@
-import os
+import os
 from datetime import datetime
 from typing import Any, Protocol
 from .query_understanding import process_query
@@ -7,19 +7,21 @@ from .rule_guard import validate_input_envelope, validate_and_filter_provisions
 
 class LLMExtractor(Protocol):
     def extract_legal_keywords(self, text: str) -> list[str]: ...
+    def format_api_response(self, provisions: list, input_context: dict) -> dict: ...
+
+_neo4j_driver = None
 
 def _get_neo4j_session():
     """환경변수 기반 Neo4j 세션 생성기"""
+    global _neo4j_driver
     try:
-        from neo4j import GraphDatabase
-        uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-        user = os.environ.get("NEO4J_USER", "neo4j")
-        password = os.environ.get("NEO4J_PASSWORD", "password")
-        driver = GraphDatabase.driver(uri, auth=(user, password))
-        return driver.session()
-    except ImportError:
-        print("[Warning] neo4j 패키지가 설치되지 않았습니다. GraphRAG 기능이 비활성화됩니다.")
-        return None
+        if _neo4j_driver is None:
+            from neo4j import GraphDatabase
+            uri = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+            user = os.environ.get("NEO4J_USER", "neo4j")
+            password = os.environ.get("NEO4J_PASSWORD", "password")
+            _neo4j_driver = GraphDatabase.driver(uri, auth=(user, password))
+        return _neo4j_driver.session()
     except Exception as e:
         print(f"[Warning] Neo4j 연결 실패: {e}")
         return None
@@ -60,6 +62,7 @@ def run_law_ground_search(
 
     if not qp_result.searchability:
         output["status"] = "failed"
+        output["summary"] = "질의가 입력되지 않았습니다."
         output["missing_fields"] = qp_result.missing_fields
         if session: session.close()
         return output
@@ -68,8 +71,18 @@ def run_law_ground_search(
     temporal_basis = input_context.get("temporal_basis", {})
     scope = input_context.get("scope", {})
     
+    query_text = qp_result.boosted_query
+    used_llm_fallback = False
+
+    if not qp_result.hint_terms and llm_extractor:
+        fallback_keywords = llm_extractor.extract_legal_keywords(qp_result.original_query)
+        used_llm_fallback = True
+        if fallback_keywords:
+            output["limitations"].append("Hint Graph 검색어 없음: LLM 키워드 추출로 1차 검색을 보강했습니다.")
+            query_text = " ".join(fallback_keywords)
+
     raw_provisions = search_law_provisions(
-        query_text=qp_result.boosted_query,
+        query_text=query_text,
         article_refs=qp_result.article_refs,
         temporal_basis=temporal_basis,
         scope=scope,
@@ -82,9 +95,10 @@ def run_law_ground_search(
     if not conf_res["is_confident"]:
         output["limitations"].append(f"1차 검색 신뢰도 부족: {conf_res['reason']}")
         
-        if llm_extractor:
+        if llm_extractor and not used_llm_fallback:
             fallback_keywords = llm_extractor.extract_legal_keywords(qp_result.original_query)
             if fallback_keywords:
+                used_llm_fallback = True
                 output["limitations"].append("LLM Fallback 검색 가동됨.")
                 fallback_query = " ".join(fallback_keywords)
                 raw_provisions = search_law_provisions(
@@ -98,15 +112,23 @@ def run_law_ground_search(
     # 5. Rule Guard 필터링
     valid_provisions, limitations = validate_and_filter_provisions(raw_provisions, scope)
     output["limitations"].extend(limitations)
+    final_conf_res = evaluate_confidence(valid_provisions)
 
     # 6. 결과 구성
     if not valid_provisions:
-        output["status"] = "partial"
+        output["status"] = "empty"
         output["summary"] = "검색 조건에 맞는 유효한 조문이 없습니다."
     else:
         output["status"] = "success"
         output["summary"] = f"조문 {len(valid_provisions)}건 검색됨 (관계 확장 포함)"
+        
+        if llm_extractor:
+            api_result = llm_extractor.format_api_response(valid_provisions, input_context)
+            if api_result:
+                output["structured_result"].update(api_result)
+        
         output["structured_result"]["law_provisions"] = valid_provisions
+        
         
         # Evidence 배열 추출
         evidence_list = []
@@ -115,11 +137,24 @@ def run_law_ground_search(
                 "source_ref": prov.get("source_ref"),
                 "chunk_id": prov.get("chunk_id"),
                 "source_name": prov.get("source_name"),
+                "source_type": prov.get("source_type"),
                 "article_no": prov.get("article_no"),
-                "retrieval_score": prov.get("retrieval_score"),
+                "appendix_no": prov.get("appendix_no"),
+                "article_title": prov.get("article_title"),
+                "source_url": prov.get("source_url"),
+                "retrieval_score": prov.get("retrieval_score") or prov.get("score"),
                 "match_reason": prov.get("match_reason")
             })
         output["evidence"] = evidence_list
+        if not final_conf_res["is_confident"]:
+            if used_llm_fallback:
+                output["status"] = "failed"
+                output["summary"] = "LLM 재검색까지 시도했으나 유효한 신뢰도를 확보하지 못했습니다."
+                output["limitations"].append(f"최종 검색 신뢰도 부족(2회 연속 실패): {final_conf_res['reason']}")
+            else:
+                output["status"] = "partial"
+                output["summary"] = f"조문 {len(valid_provisions)}건 검색됨. 다만 신뢰도가 낮아 추가 확인이 필요합니다."
+                output["limitations"].append(f"최종 검색 신뢰도 부족: {final_conf_res['reason']}")
 
     if session and not neo4j_session: 
         session.close()
