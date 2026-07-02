@@ -4,10 +4,10 @@
 | 항목 | 값 |
 |------|-----|
 | 문서 번호 | API-004 |
-| 버전 | v3.4 |
+| 버전 | v3.5 |
 | 작성일 | 2026-07-02 (최초 작성 2026-07-01) |
 | 근거 문서 | ARCH-001 v4.0, DATA-003 v3.9, 설계 정리 문서 v20 |
-| 변경 요약 | v2.0 → v3.0: 출력 페이로드에 `law_code_verified` 필드 복원 (경량 검증). 입력 페이로드·재호출 시나리오는 변경 없음 — `LDB_CHECK`는 Supervisor 왕복을 유발하지 않으므로 `law_code_reverification_attempted` 같은 재호출용 입력 필드는 되살아나지 않았다. v3.0 → v3.1: 입력 페이로드에 기한 기산일(수령일) 필드가 빠져있음을 미결 사항으로 표시 (ARCH-001 §9-3 참고). v3.1 → v3.2: 미결 사항 해소 — `notice_received_date`를 `user_appeal_reason`과 동일하게 Supervisor 공급 필드로 확정, 케이스 A·B 예시 페이로드 갱신. v3.2 → v3.3 (최종 검수): 근거 문서 버전 표기가 ARCH-001/DATA-003/설계 정리 문서 최신본과 어긋나 있던 것 동기화, `law_code` 주석에 위반유형 판별 용도 추가, 출력 페이로드에 `risk_trigger_category` 필드 추가. v3.3 → v3.4: 1차 고지서 경로 순서 오류 수정 반영 — `deadline_gate_node`가 필드 확인보다 먼저 실행될 수 없다는 문제 해소에 따라, 1차 고지서의 `input_required` 응답은 `computed_deadline`/`deadline_passed` 없이 `law_code_verified`만 포함하도록 출력 스키마 주석 정정. |
+| 변경 요약 | v2.0 → v3.0: 출력 페이로드에 `law_code_verified` 필드 복원 (경량 검증). 입력 페이로드·재호출 시나리오는 변경 없음 — `LDB_CHECK`는 Supervisor 왕복을 유발하지 않으므로 `law_code_reverification_attempted` 같은 재호출용 입력 필드는 되살아나지 않았다. v3.0 → v3.1: 입력 페이로드에 기한 기산일(수령일) 필드가 빠져있음을 미결 사항으로 표시 (ARCH-001 §9-3 참고). v3.1 → v3.2: 미결 사항 해소 — `notice_received_date`를 `user_appeal_reason`과 동일하게 Supervisor 공급 필드로 확정, 케이스 A·B 예시 페이로드 갱신. v3.2 → v3.3 (최종 검수): 근거 문서 버전 표기가 ARCH-001/DATA-003/설계 정리 문서 최신본과 어긋나 있던 것 동기화, `law_code` 주석에 위반유형 판별 용도 추가, 출력 페이로드에 `risk_trigger_category` 필드 추가. v3.3 → v3.4: 1차 고지서 경로 순서 오류 수정 반영 — `deadline_gate_node`가 필드 확인보다 먼저 실행될 수 없다는 문제 해소에 따라, 1차 고지서의 `input_required` 응답은 `computed_deadline`/`deadline_passed` 없이 `law_code_verified`만 포함하도록 출력 스키마 주석 정정. v3.4 → v3.5: 구현 중 발견 — §4 status×next_actions 표가 사전통지·1차 고지서를 한 행에 뭉뚱그려 "이의신청 사유"로만 안내하고 있었음. 사전통지는 법적으로 "의견제출"이라 별도 행으로 분리하고 문구를 "의견제출 사유"로 정정. |
 
 ---
 
@@ -139,8 +139,13 @@ Agent(`fine_notice_analysis`)의 envelope 포맷(`make_envelope()`)을 그대로
 |---|---|---|
 | `"success"` | 전체 파이프라인 정상 완료 | `["판정 결과 및 가이드 사용자 안내"]` |
 | `"denied"` | `deadline_passed=true` | `["기한 경과 안내, 타임라인 정보만 제공"]` |
-| `"input_required"` | `user_appeal_reason` 또는 `notice_received_date`(1차 고지서만 해당)가 None | `["Supervisor가 사용자에게 이의신청 사유·수령일 질문 후 재호출"]` |
+| `"input_required"` (사전통지) | `user_appeal_reason`이 None | `["Supervisor가 사용자에게 의견제출 사유 질문 후 재호출"]` |
+| `"input_required"` (1차 고지서) | `user_appeal_reason` 또는 `notice_received_date`가 None | `["Supervisor가 사용자에게 이의신청 사유·수령일 질문 후 재호출"]` |
 | `"not_applicable"` | `fine_type="범칙금"` | `["OCR 결과 기반 절차 안내만 제공 — 이의신청서 생성 불가"]` |
+
+> **용어 구분**: 사전통지는 법적으로 "의견제출"(질서위반행위규제법 제16조)이지 "이의신청"이
+> 아니다 — 정식 이의제기는 1차 고지서 단계부터다. Supervisor가 사용자에게 보내는 재질문
+> 문구도 단계별로 정확한 절차명을 써야 혼동을 안 준다 (ARCH-001 §5-3).
 
 > v1.0에 있던 `"law_code_unverified"`(재확인 1회 요청)와 `"unable_to_verify"`(재확인 실패, 판단
 > 종료)는 law_code 하드블록 제거와 함께 삭제됐다.
