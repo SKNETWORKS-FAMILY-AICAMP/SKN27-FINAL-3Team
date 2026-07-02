@@ -24,38 +24,29 @@ def _dispatch_node(state: AppealJudgmentState) -> dict:
 
 
 def _entry_route(state: AppealJudgmentState) -> str:
-    """fine_type 분기 + notice_stage별 노드 순서 분기 (ARCH-001 §9-7).
+    """fine_type 분기.
 
-    사전통지: opinion_deadline이 OCR 필드라 deadline_gate_node를 바로 실행 가능
-    (기존 순서 유지). 1차 고지서: notice_received_date가 Supervisor 공급 필드라
-    deadline_gate_node를 바로 실행할 수 없으므로, law_code_check_node부터
-    시작한다 (v20 순서 수정의 실제 구현 지점).
+    (v22) notice_stage와 무관하게 과태료는 항상 deadline_gate_node부터 시작한다.
+    v20에서는 1차 고지서만 순서를 바꿨었는데(law_code_check → reason_intake →
+    deadline), 그건 notice_received_date 없이는 deadline_gate_node 실행 자체가
+    불가능하다는 전제 때문이었다. 이제 notice_received_date가 더 이상 하드
+    블로커가 아니고(reason_intake_node 참고) deadline_gate_node가 없는 값을
+    방어적으로 처리하므로, 그 전제 자체가 사라져 순서를 다시 통일했다.
     """
     if state.get("fine_type") == "범칙금":
         return "not_applicable_node"
-    if state.get("notice_stage") == "1차 고지서":
-        return "law_code_check_node"
     return "deadline_gate_node"
 
 
 def _route_after_deadline(state: AppealJudgmentState) -> str:
     if state.get("deadline_passed"):
         return "deny_node"
-    if state.get("notice_stage") == "1차 고지서":
-        # 1차 고지서 경로: law_code_check_node·reason_intake_node를 이미 거쳐온
-        # 상태이므로(§9-7), 곧바로 RG ∥ MG로 진입한다.
-        return "dispatch_node"
-    # 사전통지 경로: 기존 순서대로 law_code_check_node로 이어간다.
     return "law_code_check_node"
 
 
 def _route_after_reason_intake(state: AppealJudgmentState) -> str:
     if state.get("judgment_status") == "input_required":
         return END
-    if state.get("notice_stage") == "1차 고지서":
-        # 1차 고지서 경로: 이제서야 필드가 확보됐으니 기한을 계산한다.
-        return "deadline_gate_node"
-    # 사전통지 경로: deadline_gate_node를 이미 거쳐왔으므로 곧바로 진입한다.
     return "dispatch_node"
 
 

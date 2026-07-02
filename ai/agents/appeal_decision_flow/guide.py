@@ -64,9 +64,21 @@ def _timeline_text(state: AppealJudgmentState) -> str:
 
     if fine_type == "과태료" and notice_stage == "1차 고지서":
         computed_deadline = state.get("computed_deadline")
+        if computed_deadline is None:
+            # (v22) notice_received_date가 없어도 판정 자체는 진행하지만, 법정
+            # 이의제기 마감은 계산할 수 없다 — "승산만 궁금한" 사용자를 막지 않는
+            # 대신 여기서 명확하게 경고한다.
+            return (
+                "⚠️ 고지서 수령일을 알려주지 않아 법정 이의제기 마감(수령일+60일, "
+                "질서위반행위규제법 제20조)을 계산할 수 없습니다. 고지서에 인쇄된 "
+                f"납부기한({opinion_deadline or '확인 불가'})은 법정 이의제기 마감과 "
+                "다른 값입니다 — 수령일을 모른 채 이의제기를 진행하면 법정 기한을 "
+                "넘겨 불복 기회를 잃을 수 있으니, 정확한 기한이 필요하면 수령일을 "
+                "알려주세요."
+            )
         return (
             f"법정 이의제기 마감(수령일+60일, 질서위반행위규제법 제20조): "
-            f"{computed_deadline or '계산 불가'}. 고지서에 인쇄된 납부기한"
+            f"{computed_deadline}. 고지서에 인쇄된 납부기한"
             f"({opinion_deadline or '확인 불가'})과는 다른 값이니 혼동하지 마세요 — "
             "두 날짜 모두 지키지 못하면 각각 다른 불이익(납부기한 초과 시 가산금, "
             "이의제기 기한 초과 시 불복 기회 상실)이 발생합니다."
@@ -89,6 +101,49 @@ def _timeline_text(state: AppealJudgmentState) -> str:
     )
 
 
+# ── RG × MG 6칸 조합 매트릭스 (DATA-003 §4) ────────────────────────────
+# merit=강함 & risk=true는 카테고리(A/B vs C)에 따라 조건부/무조건 톤이 갈리므로
+# 별도 분기한다. 그 외 5칸은 고정 문구.
+_TONE_SAFE = {
+    "강함": "이 사유는 인정 가능성이 높고 신원노출 위험도 없는 조합입니다 — 안심하고 진행해도 됩니다.",
+    "보류": "판단은 애매하지만 위험은 없는 조합입니다 — 증거를 보강해서 진행을 검토해보세요.",
+    "낮음": "인정되기는 어려워 보이지만 위험은 없는 조합입니다 — 기대치를 낮춰서 참고하세요.",
+}
+_TONE_RISKY_NON_STRONG = {
+    "보류": "판단도 애매하고 위험도 있는 조합입니다 — 가장 신중한 접근이 필요하며, 필요하면 "
+           "전문가 상담을 권합니다.",
+    "낮음": "승산도 낮고 위험까지 있는 조합입니다 — 진행 자체를 재고해보시길 권합니다.",
+}
+_TONE_STRONG_CONDITIONAL = (
+    "이 사유는 조건부 위험입니다 — 사유가 받아들여지면 과태료 처분 자체가 "
+    "면제되어 위험이 실현되지 않지만, 받아들여지지 않으면 이미 운전자 신원이 "
+    "드러난 상태라 범칙금으로 전환될 수 있습니다. 표현을 다듬어도 사실관계 "
+    "자체를 바꾸지 않는 한 이 위험은 없어지지 않습니다."
+)
+_TONE_STRONG_UNCONDITIONAL = (
+    "이 사유는 신원을 특정하는 진술을 포함하고 있어, 절차가 진행되면 성공·"
+    "실패와 무관하게 범칙금 전환으로 이어질 위험이 있습니다."
+)
+
+
+def _merit_risk_tone(state: AppealJudgmentState) -> str | None:
+    merit = state.get("merit")
+    if merit not in ("강함", "보류", "낮음"):
+        return None  # not_applicable/denied 경로 — MG가 실행되지 않아 merit이 없음
+
+    if not state.get("risk_flag"):
+        return _TONE_SAFE[merit]
+
+    if merit != "강함":
+        return _TONE_RISKY_NON_STRONG[merit]
+
+    # merit=강함 & risk=true: 카테고리 C만 조건부, 그 외(A/B, 또는 LLM 예외로
+    # 카테고리를 알 수 없는 경우)는 안전 쪽으로 단정하지 않고 무조건 위험으로 취급
+    if state.get("risk_trigger_category") == "C_본인운전인정형":
+        return _TONE_STRONG_CONDITIONAL
+    return _TONE_STRONG_UNCONDITIONAL
+
+
 def _disclaimer_text(state: AppealJudgmentState) -> str:
     parts = [
         "본 판단은 법률자문이 아니며 참고용입니다. 절차의 세부 운영(특히 온라인 접수 "
@@ -105,19 +160,9 @@ def _disclaimer_text(state: AppealJudgmentState) -> str:
     elif state.get("law_code_verified") is True:
         parts.append("이의신청서에 인용될 법조항은 법령DB로 확인됐습니다.")
 
-    if state.get("risk_flag"):
-        if state.get("risk_trigger_category") == "C_본인운전인정형":
-            parts.append(
-                "이 사유는 조건부 위험입니다 — 사유가 받아들여지면 과태료 처분 자체가 "
-                "면제되어 위험이 실현되지 않지만, 받아들여지지 않으면 이미 운전자 신원이 "
-                "드러난 상태라 범칙금으로 전환될 수 있습니다. 표현을 다듬어도 사실관계 "
-                "자체를 바꾸지 않는 한 이 위험은 없어지지 않습니다."
-            )
-        else:
-            parts.append(
-                "이 사유는 신원을 특정하는 진술을 포함하고 있어, 절차가 진행되면 성공·"
-                "실패와 무관하게 범칙금 전환으로 이어질 위험이 있습니다."
-            )
+    tone = _merit_risk_tone(state)
+    if tone:
+        parts.append(tone)
 
     return "\n\n".join(parts)
 
@@ -162,7 +207,14 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
     notice_stage_label = state.get("notice_stage") or "미확인"
     summary = f"{fine_type_label} {notice_stage_label} — {judgment_status}"
 
-    env = make_envelope(judgment_status, structured, [], next_actions, summary)
+    # (v22) 판정은 완료됐지만 notice_received_date가 없어 법정 기한을 못 구한
+    # 경우, missing_fields로 남겨 Supervisor가 "정확한 기한을 원하면 수령일을
+    # 알려달라"고 후속 안내할 수 있게 한다 — 판정 자체를 막지는 않는다.
+    missing_fields = []
+    if state.get("notice_stage") == "1차 고지서" and not state.get("notice_received_date"):
+        missing_fields.append("notice_received_date")
+
+    env = make_envelope(judgment_status, structured, missing_fields, next_actions, summary)
 
     return {
         "guide":         guide,
