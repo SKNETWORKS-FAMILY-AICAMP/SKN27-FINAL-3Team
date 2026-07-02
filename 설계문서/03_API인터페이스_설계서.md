@@ -4,10 +4,10 @@
 | 항목 | 값 |
 |------|-----|
 | 문서 번호 | API-004 |
-| 버전 | v3.0 |
-| 작성일 | 2026-07-01 |
-| 근거 문서 | ARCH-001 v3.0, DATA-003 v3.0, 설계 정리 문서 v13 |
-| 변경 요약 | v2.0 → v3.0: 출력 페이로드에 `law_code_verified` 필드 복원 (경량 검증). 입력 페이로드·재호출 시나리오는 변경 없음 — `LDB_CHECK`는 Supervisor 왕복을 유발하지 않으므로 `law_code_reverification_attempted` 같은 재호출용 입력 필드는 되살아나지 않았다. |
+| 버전 | v3.4 |
+| 작성일 | 2026-07-02 (최초 작성 2026-07-01) |
+| 근거 문서 | ARCH-001 v4.0, DATA-003 v3.9, 설계 정리 문서 v20 |
+| 변경 요약 | v2.0 → v3.0: 출력 페이로드에 `law_code_verified` 필드 복원 (경량 검증). 입력 페이로드·재호출 시나리오는 변경 없음 — `LDB_CHECK`는 Supervisor 왕복을 유발하지 않으므로 `law_code_reverification_attempted` 같은 재호출용 입력 필드는 되살아나지 않았다. v3.0 → v3.1: 입력 페이로드에 기한 기산일(수령일) 필드가 빠져있음을 미결 사항으로 표시 (ARCH-001 §9-3 참고). v3.1 → v3.2: 미결 사항 해소 — `notice_received_date`를 `user_appeal_reason`과 동일하게 Supervisor 공급 필드로 확정, 케이스 A·B 예시 페이로드 갱신. v3.2 → v3.3 (최종 검수): 근거 문서 버전 표기가 ARCH-001/DATA-003/설계 정리 문서 최신본과 어긋나 있던 것 동기화, `law_code` 주석에 위반유형 판별 용도 추가, 출력 페이로드에 `risk_trigger_category` 필드 추가. v3.3 → v3.4: 1차 고지서 경로 순서 오류 수정 반영 — `deadline_gate_node`가 필드 확인보다 먼저 실행될 수 없다는 문제 해소에 따라, 1차 고지서의 `input_required` 응답은 `computed_deadline`/`deadline_passed` 없이 `law_code_verified`만 포함하도록 출력 스키마 주석 정정. |
 
 ---
 
@@ -32,14 +32,17 @@ Agent(`fine_notice_analysis`)의 envelope 포맷(`make_envelope()`)을 그대로
     "opinion_deadline":       "2026-07-20",   # 인쇄된 납부기한
     "payment_deadline_2nd":   None,
     "issuing_authority":      "○○구청",       # 가이드에 그대로 노출만, 판별하지 않음
-    "law_code":                "도로교통법 제17조 제1항",  # disclaimer용으로만 참조
+    "law_code":                "도로교통법 제17조 제1항",  # (v3.7) 용도 2가지: disclaimer 조건부 문구 +
+                                                          # MG 위반유형(주정차/비주정차) 판별 라우팅 신호
 
     # Supervisor가 별도로 수집해 함께 전달 (OCR 결과에 없는 값)
-    "user_appeal_reason": None,   # 아직 안 물어봤으면 None
+    "user_appeal_reason": None,          # 아직 안 물어봤으면 None
+    "notice_received_date": None,        # (v3.2) user_appeal_reason과 동일하게 Supervisor가 물어서 공급.
+                                          # 1차 고지서 기산일(수령일+60일) 계산에 사용. 아직 안 물어봤으면 None
 }
 ```
 
-### 2-2. 케이스 B — `input_required` 이후 재호출 (사유 확보)
+### 2-2. 케이스 B — `input_required` 이후 재호출 (사유·수령일 확보)
 
 ```python
 {
@@ -47,8 +50,20 @@ Agent(`fine_notice_analysis`)의 envelope 포맷(`make_envelope()`)을 그대로
     "fine_type": "과태료", "notice_stage": "1차 고지서", ...,
 
     "user_appeal_reason": "표지판이 나뭇가지에 가려져 안 보였습니다",
+    "notice_received_date": "2026-05-15",   # (v3.2) 사유와 함께 한 번에 재질문·확보
 }
 ```
+
+> **(v3.2)** `reason_intake_node`가 `user_appeal_reason`뿐 아니라 `notice_received_date`도 함께
+> 누락 여부를 확인하고, 필요하면 Supervisor에 두 값을 한 번에 재질문 요청한다 — 재호출 횟수가
+> 늘어나지 않는다.
+
+> **(v3.3, 최종 검수) 1차 고지서 경로는 `input_required`가 `law_code_check_node`보다 먼저 계산되지
+> 않는다.** `notice_received_date`가 없으면 기한 계산(`deadline_gate_node`) 자체가 불가능해서,
+> 1차 고지서 경로는 필드 확인(`reason_intake_node`)이 `deadline_gate_node`보다 먼저 실행되도록
+> 순서가 바뀌었다 (ARCH-001 §9-7). `law_code_check_node`는 `law_code`가 OCR 필드라 그보다도
+> 먼저 실행되므로, 1차 고지서의 `input_required` 응답에도 `law_code_verified`는 포함되지만
+> `computed_deadline`은 이 시점엔 계산 전이라 포함되지 않는다 — §3 출력 스키마 참고.
 
 > **v1.0 대비 변경**: `law_code_reverification_attempted` 필드와 그에 따른 "케이스 C(법조항 재확인
 > 재호출)"가 v2.0에서 전부 제거됐다. law_code 검증 자체를 하지 않으므로 재확인 요청 시나리오가
@@ -75,11 +90,16 @@ Agent(`fine_notice_analysis`)의 envelope 포맷(`make_envelope()`)을 그대로
         "merit":                 str | None,   # "강함" | "보류" | "낮음"
         "risk_flag":             bool | None,
         "risk_confidence":       float | None,
+        "risk_trigger_category": str | None,  # (v3.7) "A_제3자운전주장" | "B_명시적전환요청" |
+                                               # "C_본인운전인정형" | None — guide의 disclaimer가
+                                               # 조건부/무조건 위험 프레이밍 중 뭘 쓸지 결정하는 데 사용
 
-        # 항상 포함
+        # 계산된 시점부터 포함 — (v3.3) 1차 고지서의 input_required 응답은 예외: deadline_gate_node가
+        # 아직 실행 전이라 이 두 필드는 None (§2 케이스 A/B 사이 참고, ARCH-001 §9-7)
         "computed_deadline":     str | None,   # YYYY-MM-DD
         "deadline_passed":       bool | None,
-        "law_code_verified":     bool | None,  # (v3.0 복원) LDB_CHECK 결과, 실패해도 판정은 진행됨
+        "law_code_verified":     bool | None,  # (v3.0 복원) LDB_CHECK 결과, 실패해도 판정은 진행됨.
+                                               # law_code는 OCR 필드라 두 경로 모두 항상 포함됨
 
         "guide": {
             "timeline":      str,   # ①
@@ -106,6 +126,10 @@ Agent(`fine_notice_analysis`)의 envelope 포맷(`make_envelope()`)을 그대로
   필드가 아니라 **단순 참/거짓 하나**로만 복원했다. 실패 원인(정규화 실패 vs 조회 실패)을 구분하던
   v1.0의 세밀함은 되살리지 않았다 — 어차피 판정을 막지 않고 disclaimer 문구만 바꾸는 용도라, 원인
   구분까지는 필요 없다고 판단.
+- **v3.3에서 추가**: `risk_trigger_category` — 카테고리 A(제3자 운전 주장)·B(명시적 전환 요청)가
+  카테고리 C(본인 운전 인정형)와 혼합 매치될 때, `guide.disclaimer`가 조건부 프레이밍("성공 시
+  무위험/실패 시 전환 위험")을 잘못 적용하는 걸 막기 위한 필드다. A 또는 B가 매치되면 이 값이
+  우선 기록되고, `guide_generation_node`는 이때 조건부 문구 대신 무조건 위험 경고를 쓴다.
 
 ---
 
@@ -115,7 +139,7 @@ Agent(`fine_notice_analysis`)의 envelope 포맷(`make_envelope()`)을 그대로
 |---|---|---|
 | `"success"` | 전체 파이프라인 정상 완료 | `["판정 결과 및 가이드 사용자 안내"]` |
 | `"denied"` | `deadline_passed=true` | `["기한 경과 안내, 타임라인 정보만 제공"]` |
-| `"input_required"` | `user_appeal_reason`이 None | `["Supervisor가 사용자에게 이의신청 사유 질문 후 재호출"]` |
+| `"input_required"` | `user_appeal_reason` 또는 `notice_received_date`(1차 고지서만 해당)가 None | `["Supervisor가 사용자에게 이의신청 사유·수령일 질문 후 재호출"]` |
 | `"not_applicable"` | `fine_type="범칙금"` | `["OCR 결과 기반 절차 안내만 제공 — 이의신청서 생성 불가"]` |
 
 > v1.0에 있던 `"law_code_unverified"`(재확인 1회 요청)와 `"unable_to_verify"`(재확인 실패, 판단
@@ -125,7 +149,7 @@ Agent(`fine_notice_analysis`)의 envelope 포맷(`make_envelope()`)을 그대로
 
 ## 5. Supervisor 연동 시나리오 (v2.0에서 단순화, v3.0도 동일)
 
-### 5-1. 정상 흐름 (사유 재질문 1회 포함)
+### 5-1. 정상 흐름 (재질문 1회 포함, 1차 고지서 케이스)
 
 ```mermaid
 sequenceDiagram
@@ -137,14 +161,17 @@ sequenceDiagram
     U->>SV: 고지서 이미지 업로드
     SV->>OCR: notice_image
     OCR-->>SV: agent_results[fine_notice_analysis] (status=success)
-    SV->>AJ: OCR 필드 (user_appeal_reason=None)
+    SV->>AJ: OCR 필드 (user_appeal_reason=None, notice_received_date=None)
     AJ-->>SV: status=input_required
-    SV->>U: "이의신청 사유가 무엇인가요?"
-    U->>SV: 사유 입력
-    SV->>AJ: OCR 필드 + user_appeal_reason
+    SV->>U: "이의신청 사유와 고지서 수령일이 무엇인가요?"
+    U->>SV: 사유 + 수령일 입력
+    SV->>AJ: OCR 필드 + user_appeal_reason + notice_received_date
     AJ-->>SV: status=success + guide + 판정
     SV->>U: 판정 결과 + 가이드 안내
 ```
+
+> **(v3.2)** 사전통지·즉결심판 단계는 `opinion_deadline` 필드를 그대로 쓰므로
+> `notice_received_date`가 필요 없다 — 재질문 범위는 1차 고지서 케이스에만 해당한다.
 
 > **v1.0 대비 변경**: law_code 재확인 실패 시나리오(2차 호출 → `unable_to_verify` → 판단 종료)가
 > v2.0에서 완전히 제거됐다. 이제 Agent 호출은 최대 2회(최초 + 사유 재질문)로 끝난다.

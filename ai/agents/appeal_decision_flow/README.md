@@ -26,6 +26,10 @@ OCR 에이전트가 추출한 고지서 정보를 바탕으로 **이의신청 �
 ## 🔄 전체 실행 파이프라인 요약
 1. **분기 처리:** 범칙금 문서일 경우 판정을 생략하고 즉결심판 절차 가이드만 제공. 과태료일 경우 다음 단계로 진행.
 2. **기한 도과 체크:** 이의제기 기한이 지났다면 즉시 '불가' 판정 후 조기 종료.
+   - ⚠️ `notice_stage`에 따라 이 체크가 실행되는 **순서가 다릅니다** — 사전통지는 OCR 필드만으로
+     바로 계산 가능하지만, 1차 고지서는 `notice_received_date`(수령일, Supervisor 공급 필드)가
+     있어야 계산 가능해서 사유·수령일 확인이 기한 체크보다 먼저 실행됩니다. 상세는 설계문서
+     `01_아키텍처_설계서.md` §9-7 참고.
 3. **병렬 판정 (RG & MG):** 이의 사유를 바탕으로 리스크(신원 노출 위험)와 승산(인용 가능성)을 동시에 판별.
 4. **최종 가이드 조립:** 
    - ① 타임라인 안내 
@@ -35,3 +39,24 @@ OCR 에이전트가 추출한 고지서 정보를 바탕으로 **이의신청 �
    - ⑤ 벌점·전과 오해 정정 
    - ⑥ 법률자문 아님 (Disclaimer)
    위 6가지 가이드를 결합하여 최종 응답을 반환합니다.
+
+## 📂 파일 구조
+
+`fine_notice_analysis`(OCR 에이전트)의 파일당 단일 책임 패턴을 그대로 재사용합니다. 상세 매핑
+근거는 `설계문서/01_아키텍처_설계서.md` §10이 정본입니다.
+
+| 파일 | 역할 |
+|---|---|
+| `state.py` | `AppealJudgmentState` + 열거형 (`JudgmentStatus`, `MeritLevel` 등) |
+| `law_refs.py` | MG·RG 참조 법조문 원문 상수 (142조/제7조/제14조/제160조4항1호 등). **MVP 하드코딩 대상** — 나중에 팀 법령DB API로 교체 시 이 파일만 손대면 됨 |
+| `deadline.py` | `deadline_gate_node` |
+| `law_code_check.py` | `law_code_check_node` (`LDB_CHECK`). MVP: `law_code_verified` 항상 `True` 스텁 |
+| `reason_intake.py` | `reason_intake_node` — notice_stage에 따라 확인하는 필드가 다름(사전통지: 사유만, 1차 고지서: 사유+수령일) |
+| `risk_gate.py` | `risk_classification_node` (RG) — 도난 예외(0단계) → 카테고리 A/B/C(1단계) → LLM(2단계) |
+| `merit_gate.py` | `merit_classification_node` (MG) — notice_stage×위반유형별 참조 법조문 선택 후 LLM 판단 |
+| `verdict.py` | `verdict_node` (E) — RG×MG 매트릭스 |
+| `guide.py` | `guide_generation_node` (G) — ①~⑥ 가이드 조립 |
+| `prompts.py` | RG 2단계·MG LLM 프롬프트 |
+| `utils.py` | `make_envelope` 등 공용 헬퍼 (OCR 에이전트와 동일 패턴) |
+| `graph.py` | `StateGraph` 조립 — notice_stage별 조건부 라우팅(순서 차이 포함)이 여기 집중됨 |
+| `__init__.py` | `graph` export |
