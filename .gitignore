@@ -17,7 +17,6 @@ backend/db.sqlite3
 backend/media/
 app/web/node_modules/
 app/web/dist/
-requirements.txt
 # Ponytail Skills
 .agents/
 

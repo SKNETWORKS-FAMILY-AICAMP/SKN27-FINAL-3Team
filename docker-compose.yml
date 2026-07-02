@@ -20,9 +20,11 @@ services:
       GOOGLE_CLIENT_ID: ""
     ports:
       - "8000:8000"
+    depends_on:
+      - redis
 
   postgres:
-    image: pgvector/pgvector:16-pgvector
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
     container_name: skn27-postgres
     restart: unless-stopped
     ports:
@@ -60,15 +62,13 @@ services:
       timeout: 5s
       retries: 5
 
-volumes:
-  postgres_data:
-  neo4j_data:
-  neo4j_logs:
-
-    depends_on:
-      - redis
   redis:
     image: redis:7-alpine
     container_name: skn27-demo-redis
     ports:
       - "6379:6379"
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:

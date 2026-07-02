@@ -1,9 +1,0 @@
-{
-  "source_file": "210107_2020년_비정형사고_과실비율_기준.pdf",
-  "summary_row_count": 23,
-  "detail_rule_count": 23,
-  "expected_rule_count": 23,
-  "rule_json_count": 23,
-  "output_rule_dir": "C:\\dev\\project\\SKN27-FINAL-3Team\\etl\\fault_cases\\artifacts\\fault_standard_output\\preprocessed\\2020_nontypical_accident_rulebook\\02_detailed_fault_ratio_standards",
-  "created_at": "2026-07-01T13:26:45"
-}
