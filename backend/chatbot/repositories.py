@@ -11,6 +11,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -28,6 +29,8 @@ from chatbot.models import (
     AgentNodeDefinition,
     AgentResult,
     AgentResultStatus,
+    AgentWorkItem,
+    AgentWorkItemStatus,
     AiSession,
     AnalysisDisplayResult,
     AnalysisJob,
@@ -46,6 +49,7 @@ from chatbot.models import (
     HistoryEvent,
     MessageRole,
     OAuthConnection,
+    RetrievalEvent,
     Report,
     ReportStatus,
     ReportType,
@@ -64,6 +68,8 @@ from chatbot.object_storage import (
     build_upload_storage_reference,
     object_storage_policy,
     storage_reference_from_uri,
+    write_object,
+    write_object_from_source_uri,
 )
 from chatbot.progress_cache import (
     progress_cache_policy,
@@ -180,8 +186,17 @@ def persist_uploaded_file_metadata(
         attachment,
         owner_id=owner_id or (session.owner_id if session else ""),
     )
+    object_storage_write = write_object_from_source_uri(
+        object_storage,
+        fallback_payload=attachment,
+    )
+    object_storage["write_result"] = object_storage_write
+    object_storage["status"] = object_storage_write["status"]
+    object_storage["writes_binary"] = object_storage_write["writes_binary"]
+    object_storage["persistence_state"] = object_storage_write["persistence_state"]
     metadata["source_storage_uri"] = _text(attachment.get("storage_uri"))
     metadata["object_storage"] = object_storage
+    metadata["object_storage_write"] = object_storage_write
     agent_handoff = dict(attachment.get("agent_handoff") or {})
     agent_handoff["storage_uri"] = object_storage["storage_uri"]
     agent_handoff["object_storage"] = object_storage
@@ -454,6 +469,9 @@ def persist_chat_message_analysis_boundary(
                 node_execution=node_execution,
                 agent_results=agent_results,
             )
+            retrieval_events_saved = RetrievalEvent.objects.filter(job=job).count()
+        else:
+            retrieval_events_saved = 0
 
     progress_cache = write_analysis_job_progress(job)
     session_cache = write_chat_session_state(session, latest_job=job)
@@ -467,6 +485,7 @@ def persist_chat_message_analysis_boundary(
         "supervisor_execution": _node_execution_summary(node_execution or {}),
         "agent_results_saved": len(agent_results),
         "agent_invocations_saved": len(agent_invocations),
+        "retrieval_events_saved": retrieval_events_saved,
         "ai_session_id": ai_session.ai_session_id if ai_session else None,
         "node_codes": [result.node_code for result in agent_results],
         "progress_cache": progress_cache,
@@ -1354,7 +1373,12 @@ def persist_analysis_job_execution(
                 },
             },
         )
-        _upsert_initial_job_event(job, progress=progress, source="canonical_analysis_job")
+        _upsert_initial_job_event(
+            job,
+            progress=progress,
+            source="canonical_analysis_job",
+            overwrite_existing=not bool(_text(job_payload.get("work_item_id"))),
+        )
         node_execution = job_payload.get("node_execution") or {}
         agent_results = _persist_agent_results(job, node_execution)
         ai_session = _upsert_ai_session(job, payload=payload, job_payload=job_payload)
@@ -1364,6 +1388,7 @@ def persist_analysis_job_execution(
             node_execution=node_execution,
             agent_results=agent_results,
         )
+        retrieval_events_saved = RetrievalEvent.objects.filter(job=job).count()
 
     progress_cache = write_analysis_job_progress(job)
     session_cache = write_chat_session_state(session, latest_job=job)
@@ -1375,13 +1400,16 @@ def persist_analysis_job_execution(
             AgentResult._meta.db_table,
             AiSession._meta.db_table,
             AgentInvocation._meta.db_table,
+            RetrievalEvent._meta.db_table,
         ],
         "analysis_job_table": AnalysisJob._meta.db_table,
         "agent_results_table": AgentResult._meta.db_table,
         "ai_session_table": AiSession._meta.db_table,
         "agent_invocations_table": AgentInvocation._meta.db_table,
+        "retrieval_events_table": RetrievalEvent._meta.db_table,
         "agent_results_saved": len(agent_results),
         "agent_invocations_saved": len(agent_invocations),
+        "retrieval_events_saved": retrieval_events_saved,
         "agent_result_ids": [result.result_id for result in agent_results],
         "agent_invocation_ids": [invocation.invocation_id for invocation in agent_invocations],
         "ai_session_id": ai_session.ai_session_id,
@@ -1390,6 +1418,222 @@ def persist_analysis_job_execution(
         "session_cache": session_cache,
         "status": "saved",
     }
+
+
+def enqueue_analysis_job_work(
+    payload: dict[str, Any],
+    job_payload: dict[str, Any],
+    *,
+    max_attempts: int = 2,
+) -> dict[str, Any]:
+    """Persist a queued worker item without executing the agent plan inline."""
+
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
+    if session is None:
+        raise ValueError("job_payload must include session_id")
+
+    job_id = _text(job_payload.get("job_id"))
+    if not job_id:
+        raise ValueError("job_payload must include job_id")
+
+    message_id = _text(job_payload.get("message_id"))
+    chat_response = _dict_or_empty(job_payload.get("chat_response"))
+    analysis_plan = _dict_or_empty(job_payload.get("analysis_plan") or chat_response.get("analysis_plan"))
+    active_node = _text(job_payload.get("active_node")) or _analysis_plan_first_node(analysis_plan)
+    progress_message = _text(job_payload.get("progress_message")) or "Agent worker item queued."
+    work_item_id = _agent_work_item_id(job_id)
+
+    with transaction.atomic():
+        message = None
+        if message_id:
+            message, _message_created = ChatMessage.objects.update_or_create(
+                message_id=message_id,
+                defaults={
+                    "session": session,
+                    "role": MessageRole.USER,
+                    "content": _message_content(payload),
+                    "routing_intent": _text(job_payload.get("routing_intent")),
+                    "metadata": {
+                        "source": "canonical_analysis_job_queue",
+                        "analysis_job_id": job_id,
+                        "mock_scenario": job_payload.get("mock_scenario"),
+                        "response_status": AgentWorkItemStatus.QUEUED.value,
+                        "attachments": job_payload.get("attachments", []),
+                        "attachment_resolution": job_payload.get("attachment_resolution", {}),
+                        "raw_payload": _safe_payload(payload),
+                    },
+                },
+            )
+
+        job, _job_created = AnalysisJob.objects.update_or_create(
+            job_id=job_id,
+            defaults={
+                "session": session,
+                "message": message,
+                "owner_id": owner_id or session.owner_id,
+                "routing_intent": _text(job_payload.get("routing_intent")),
+                "mock_scenario": _text(job_payload.get("mock_scenario")),
+                "status": AnalysisJobStatus.QUEUED.value,
+                "active_node": active_node,
+                "progress_message": progress_message,
+                "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
+                "status_counts": _analysis_plan_status_counts(analysis_plan),
+                "metadata": {
+                    "source": "canonical_analysis_job_queue",
+                    "analysis_plan": analysis_plan,
+                    "assistant_message": chat_response.get("assistant_message"),
+                    "case_status": chat_response.get("case_status"),
+                    "cards": chat_response.get("cards", []),
+                    "pending_questions": chat_response.get("pending_questions", []),
+                    "report_links": chat_response.get("report_links", []),
+                    "attachments": job_payload.get("attachments", []),
+                    "attachment_resolution": job_payload.get("attachment_resolution", {}),
+                    "limitations": job_payload.get("limitations", []),
+                    "work_queue": {
+                        "contract_version": "agent_worker_queue.v1",
+                        "work_item_id": work_item_id,
+                        "status": AgentWorkItemStatus.QUEUED.value,
+                    },
+                },
+            },
+        )
+        _append_analysis_job_event(
+            job,
+            status=AnalysisJobStatus.QUEUED.value,
+            active_node=active_node,
+            message=progress_message,
+            source="agent_worker_queue",
+            metadata={"work_item_id": work_item_id},
+        )
+        work_item, _work_item_created = AgentWorkItem.objects.update_or_create(
+            work_item_id=work_item_id,
+            defaults={
+                "job": job,
+                "ai_session": None,
+                "status": AgentWorkItemStatus.QUEUED.value,
+                "attempt_no": 0,
+                "max_attempts": max(1, _positive_int_or_default(max_attempts, default=2)),
+                "locked_at": None,
+                "started_at": None,
+                "completed_at": None,
+                "next_run_at": timezone.now(),
+                "payload": {
+                    "contract_version": "agent_worker_queue.v1",
+                    "persistence_mode": "analysis_job",
+                    "request_payload": _json_compatible(payload),
+                    "job_payload": _json_compatible(
+                        {
+                            **job_payload,
+                            "status": AnalysisJobStatus.QUEUED.value,
+                            "active_node": active_node,
+                            "progress_message": progress_message,
+                            "node_execution": {},
+                        }
+                    ),
+                    "execution_payload": _json_compatible(
+                        {
+                            **payload,
+                            "job_id": job_id,
+                            "session_id": session.session_id,
+                            "message_id": message_id,
+                            "attachments": job_payload.get("attachments", []),
+                        }
+                    ),
+                    "analysis_plan": _json_compatible(analysis_plan),
+                },
+                "result": {},
+                "error_code": "",
+                "metadata": {
+                    "source": "canonical_analysis_job_queue",
+                    "job_id": job_id,
+                    "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
+                },
+            },
+        )
+
+    progress_cache = write_analysis_job_progress(job)
+    session_cache = write_chat_session_state(session, latest_job=job)
+    return {
+        "backend": "postgresql",
+        "status": AgentWorkItemStatus.QUEUED.value,
+        "execution_mode": "async_worker",
+        "tables": [AnalysisJob._meta.db_table, AgentWorkItem._meta.db_table],
+        "analysis_job_table": AnalysisJob._meta.db_table,
+        "agent_work_items_table": AgentWorkItem._meta.db_table,
+        "job_id": job.job_id,
+        "work_item_id": work_item.work_item_id,
+        "work_item_status": work_item.status,
+        "progress_cache": progress_cache,
+        "session_cache": session_cache,
+    }
+
+
+def process_agent_work_items(*, limit: int = 1, stale_after_seconds: int | None = None) -> dict[str, Any]:
+    """Run queued agent work items once, using the DB row as the worker boundary."""
+
+    now = timezone.now()
+    normalized_limit = max(1, min(_positive_int_or_default(limit, default=1), 50))
+    stale_requeued = _requeue_stale_agent_work_items(
+        now=now,
+        stale_after_seconds=stale_after_seconds,
+    )
+    work_items = list(
+        AgentWorkItem.objects.select_related("job", "job__session", "ai_session")
+        .filter(
+            status__in=[
+                AgentWorkItemStatus.QUEUED.value,
+                AgentWorkItemStatus.RETRYING.value,
+            ]
+        )
+        .filter(Q(next_run_at__isnull=True) | Q(next_run_at__lte=now))
+        .order_by("created_at")[:normalized_limit]
+    )
+
+    results = [process_agent_work_item(work_item.work_item_id) for work_item in work_items]
+    return {
+        "backend": "postgresql",
+        "contract_version": "agent_worker_queue.v1",
+        "requested_limit": normalized_limit,
+        "stale_requeued": len(stale_requeued),
+        "processed": len([item for item in results if item.get("status") != "skipped"]),
+        "work_items": results,
+        "stale_work_items": stale_requeued,
+    }
+
+
+def process_agent_work_item(work_item_id: str) -> dict[str, Any]:
+    normalized_work_item_id = _text(work_item_id)
+    if not normalized_work_item_id:
+        return _agent_work_item_skipped("missing_work_item_id")
+
+    claimed = _claim_agent_work_item(normalized_work_item_id)
+    if not claimed["claimed"]:
+        return claimed
+
+    try:
+        work_item = AgentWorkItem.objects.select_related("job", "job__session").get(
+            work_item_id=normalized_work_item_id
+        )
+        node_execution = _execute_agent_work_item_plan(work_item)
+        final_status = _analysis_job_status_from_node_execution(node_execution)
+        completed_job_payload = _completed_job_payload_for_work_item(
+            work_item,
+            node_execution=node_execution,
+            final_status=final_status,
+        )
+        persistence = persist_analysis_job_execution(
+            _dict_or_empty(work_item.payload.get("request_payload")),
+            completed_job_payload,
+        )
+        return _complete_agent_work_item(
+            normalized_work_item_id,
+            final_status=final_status,
+            node_execution=node_execution,
+            persistence=persistence,
+        )
+    except Exception as exc:  # pragma: no cover - exercised through retry smoke tests.
+        return _fail_agent_work_item(normalized_work_item_id, exc)
 
 
 def persist_analysis_display_result(result_payload: dict[str, Any]) -> dict[str, Any]:
@@ -1448,6 +1692,20 @@ def persist_report_action(
         job_id=job.job_id if job else "",
         source_uri=source_storage_uri,
     )
+    object_storage_write = write_object(
+        object_storage,
+        _report_object_body_for_write(payload, report_payload),
+        metadata={
+            "report_id": report_id,
+            "action": _text(payload.get("action")) or "save",
+            "session_id": session.session_id if session else "",
+            "job_id": job.job_id if job else "",
+        },
+    )
+    object_storage["write_result"] = object_storage_write
+    object_storage["status"] = object_storage_write["status"]
+    object_storage["writes_binary"] = object_storage_write["writes_binary"]
+    object_storage["persistence_state"] = object_storage_write["persistence_state"]
 
     report, _created = Report.objects.update_or_create(
         report_id=report_id,
@@ -1475,6 +1733,7 @@ def persist_report_action(
                 "limitations": report_payload.get("limitations", []),
                 "object_storage_status": object_storage["status"],
                 "object_storage": object_storage,
+                "object_storage_write": object_storage_write,
                 "source_storage_uri": source_storage_uri,
                 "raw_payload": _safe_payload(payload),
             },
@@ -1715,6 +1974,9 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
         "storage_uri": uploaded_file.storage_uri,
         "object_storage": object_storage,
         "status": uploaded_file.status,
+        "scan_status": uploaded_file.scan_status,
+        "privacy_risk": uploaded_file.privacy_risk,
+        "scan_result": metadata.get("scan_result"),
         "created_at": uploaded_file.created_at.isoformat(),
         "checks": checks,
         "agent_handoff": uploaded_file.agent_handoff or {},
@@ -1948,6 +2210,16 @@ def _safe_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _json_compatible(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    return _text(value)
+
+
 def _owner_id(payload: dict[str, Any]) -> str:
     return _text(payload.get("owner_id") or payload.get("user_id"))
 
@@ -1986,6 +2258,17 @@ def _analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int
     return counts
 
 
+def _analysis_plan_first_node(analysis_plan: dict[str, Any]) -> str:
+    steps = analysis_plan.get("steps") or []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        node_code = _text(step.get("node_code"))
+        if node_code:
+            return node_code
+    return ""
+
+
 def _node_execution_summary(node_execution: dict[str, Any]) -> dict[str, Any]:
     if not node_execution:
         return {
@@ -2021,11 +2304,89 @@ def _node_execution_summary(node_execution: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _analysis_job_status_from_node_execution(node_execution: dict[str, Any]) -> str:
+    executions = [
+        execution
+        for execution in node_execution.get("executions", [])
+        if isinstance(execution, dict)
+    ]
+    if not executions:
+        return AnalysisJobStatus.FAILED.value
+
+    counts = _dict_or_empty(node_execution.get("status_counts"))
+    failed = int(counts.get("failed") or 0)
+    partial = int(counts.get("partial") or 0)
+    success = int(counts.get("success") or 0)
+    if failed and not success and not partial:
+        return AnalysisJobStatus.FAILED.value
+    if failed or partial:
+        return AnalysisJobStatus.PARTIAL.value
+    return AnalysisJobStatus.SUCCESS.value
+
+
+def _final_node_from_execution(node_execution: dict[str, Any]) -> str:
+    completed = _list_or_empty(node_execution.get("completed_node_codes"))
+    if completed:
+        return _text(completed[-1])
+    executions = [
+        execution
+        for execution in node_execution.get("executions", [])
+        if isinstance(execution, dict)
+    ]
+    if not executions:
+        return ""
+    last_execution = executions[-1]
+    agent_output = last_execution.get("agent_output") if isinstance(last_execution.get("agent_output"), dict) else {}
+    return _text(agent_output.get("node_code") or last_execution.get("node_code"))
+
+
+def _worker_completion_message(final_status: str) -> str:
+    if final_status == AnalysisJobStatus.SUCCESS.value:
+        return "Agent worker item completed."
+    if final_status == AnalysisJobStatus.PARTIAL.value:
+        return "Agent worker item completed with partial results."
+    return "Agent worker item failed."
+
+
+def _agent_worker_retry_backoff(work_item: AgentWorkItem) -> timedelta:
+    base_seconds = _agent_worker_setting("AGENT_WORKER_RETRY_BACKOFF_SECONDS", 60)
+    max_seconds = _agent_worker_setting("AGENT_WORKER_RETRY_BACKOFF_MAX_SECONDS", 900)
+    multiplier = 2 ** max(0, work_item.attempt_no - 1)
+    return timedelta(seconds=min(base_seconds * multiplier, max_seconds))
+
+
+def _agent_worker_setting(name: str, default: int) -> int:
+    return _positive_int_or_default(getattr(settings, name, default), default=default)
+
+
+def _agent_work_item_skipped(
+    reason: str,
+    *,
+    work_item_id: str = "",
+    current_status: str = "",
+    next_run_at: Any = None,
+) -> dict[str, Any]:
+    result = {
+        "backend": "postgresql",
+        "status": "skipped",
+        "claimed": False,
+        "reason": reason,
+    }
+    if work_item_id:
+        result["work_item_id"] = work_item_id
+    if current_status:
+        result["current_status"] = current_status
+    if next_run_at:
+        result["next_run_at"] = next_run_at
+    return result
+
+
 def _upsert_initial_job_event(
     job: AnalysisJob,
     *,
     progress: dict[str, Any],
     source: str = "canonical_chat_message",
+    overwrite_existing: bool = True,
 ) -> None:
     status = job.status
     active_node = _text(progress.get("active_node"))
@@ -2041,11 +2402,430 @@ def _upsert_initial_job_event(
         )
         return
 
+    if not overwrite_existing:
+        return
+
     first_event.status = status
     first_event.active_node = active_node
     first_event.message = message
     first_event.metadata = {"source": source}
     first_event.save(update_fields=["status", "active_node", "message", "metadata"])
+
+
+def _append_analysis_job_event(
+    job: AnalysisJob,
+    *,
+    status: str,
+    active_node: str = "",
+    message: str = "",
+    source: str,
+    metadata: dict[str, Any] | None = None,
+) -> AnalysisJobEvent:
+    event_metadata = dict(metadata or {})
+    event_metadata["source"] = source
+    return AnalysisJobEvent.objects.create(
+        job=job,
+        status=_analysis_job_status(status),
+        active_node=_text(active_node),
+        message=_text(message),
+        metadata=event_metadata,
+    )
+
+
+def _requeue_stale_agent_work_items(
+    *,
+    now,
+    stale_after_seconds: int | None = None,
+) -> list[dict[str, Any]]:
+    stale_after = _positive_int_or_default(
+        stale_after_seconds,
+        default=_agent_worker_setting("AGENT_WORKER_STALE_AFTER_SECONDS", 900),
+    )
+    cutoff = now - timedelta(seconds=stale_after)
+    requeued: list[dict[str, Any]] = []
+
+    with transaction.atomic():
+        stale_items = list(
+            AgentWorkItem.objects.select_for_update()
+            .select_related("job", "job__session")
+            .filter(
+                status=AgentWorkItemStatus.RUNNING.value,
+                locked_at__isnull=False,
+                locked_at__lte=cutoff,
+            )
+            .order_by("locked_at")[:50]
+        )
+        for work_item in stale_items:
+            job = work_item.job
+            can_retry = work_item.attempt_no < work_item.max_attempts
+            work_item.status = (
+                AgentWorkItemStatus.RETRYING.value
+                if can_retry
+                else AgentWorkItemStatus.FAILED.value
+            )
+            work_item.locked_at = None
+            work_item.completed_at = None if can_retry else now
+            work_item.next_run_at = now if can_retry else None
+            work_item.error_code = "worker_lock_timeout"
+            work_item.result = {
+                "error_code": "worker_lock_timeout",
+                "message": f"Agent worker lock exceeded {stale_after} seconds.",
+                "retryable": can_retry,
+                "stale_after_seconds": stale_after,
+            }
+            work_item.save(
+                update_fields=[
+                    "status",
+                    "locked_at",
+                    "completed_at",
+                    "next_run_at",
+                    "error_code",
+                    "result",
+                    "updated_at",
+                ]
+            )
+            job_status = AnalysisJobStatus.RUNNING.value if can_retry else AnalysisJobStatus.FAILED.value
+            message = (
+                "Agent worker lock expired; item was requeued."
+                if can_retry
+                else "Agent worker lock expired; item failed."
+            )
+            _update_job_worker_state(
+                job,
+                status=job_status,
+                active_node=job.active_node,
+                progress_message=message,
+                work_item=work_item,
+            )
+            _append_analysis_job_event(
+                job,
+                status=job_status,
+                active_node=job.active_node,
+                message=message,
+                source="agent_worker_queue",
+                metadata={
+                    "work_item_id": work_item.work_item_id,
+                    "attempt_no": work_item.attempt_no,
+                    "error_code": "worker_lock_timeout",
+                    "retryable": can_retry,
+                    "stale_after_seconds": stale_after,
+                },
+            )
+            requeued.append(
+                {
+                    "work_item_id": work_item.work_item_id,
+                    "job_id": job.job_id,
+                    "status": work_item.status,
+                    "retryable": can_retry,
+                    "attempt_no": work_item.attempt_no,
+                    "max_attempts": work_item.max_attempts,
+                }
+            )
+
+    for item in requeued:
+        job = AnalysisJob.objects.select_related("session").filter(job_id=item["job_id"]).first()
+        if job is not None:
+            write_analysis_job_progress(job)
+            write_chat_session_state(job.session, latest_job=job)
+    return requeued
+
+
+def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
+    with transaction.atomic():
+        work_item = (
+            AgentWorkItem.objects.select_for_update()
+            .select_related("job", "job__session")
+            .filter(work_item_id=work_item_id)
+            .first()
+        )
+        if work_item is None:
+            return _agent_work_item_skipped("work_item_not_found", work_item_id=work_item_id)
+        if work_item.status not in {
+            AgentWorkItemStatus.QUEUED.value,
+            AgentWorkItemStatus.RETRYING.value,
+        }:
+            return _agent_work_item_skipped(
+                "work_item_not_queued",
+                work_item_id=work_item.work_item_id,
+                current_status=work_item.status,
+            )
+
+        now = timezone.now()
+        if work_item.next_run_at and work_item.next_run_at > now:
+            return _agent_work_item_skipped(
+                "work_item_not_ready",
+                work_item_id=work_item.work_item_id,
+                current_status=work_item.status,
+                next_run_at=work_item.next_run_at,
+            )
+
+        work_item.status = AgentWorkItemStatus.RUNNING.value
+        work_item.attempt_no += 1
+        work_item.locked_at = now
+        work_item.started_at = work_item.started_at or now
+        work_item.completed_at = None
+        work_item.next_run_at = None
+        work_item.error_code = ""
+        work_item.save(
+            update_fields=[
+                "status",
+                "attempt_no",
+                "locked_at",
+                "started_at",
+                "completed_at",
+                "next_run_at",
+                "error_code",
+                "updated_at",
+            ]
+        )
+
+        job = work_item.job
+        active_node = _analysis_plan_first_node(_dict_or_empty(work_item.payload.get("analysis_plan")))
+        _update_job_worker_state(
+            job,
+            status=AnalysisJobStatus.RUNNING.value,
+            active_node=active_node or job.active_node,
+            progress_message="Agent worker item is running.",
+            work_item=work_item,
+        )
+        _append_analysis_job_event(
+            job,
+            status=AnalysisJobStatus.RUNNING.value,
+            active_node=active_node or job.active_node,
+            message="Agent worker item is running.",
+            source="agent_worker_queue",
+            metadata={"work_item_id": work_item.work_item_id, "attempt_no": work_item.attempt_no},
+        )
+
+    progress_cache = write_analysis_job_progress(job)
+    write_chat_session_state(job.session, latest_job=job)
+    return {
+        "backend": "postgresql",
+        "status": AgentWorkItemStatus.RUNNING.value,
+        "claimed": True,
+        "work_item_id": work_item.work_item_id,
+        "job_id": job.job_id,
+        "attempt_no": work_item.attempt_no,
+        "progress_cache": progress_cache,
+    }
+
+
+def _execute_agent_work_item_plan(work_item: AgentWorkItem) -> dict[str, Any]:
+    from app.services.agent_node_service import execute_mock_plan
+
+    queue_payload = _dict_or_empty(work_item.payload)
+    analysis_plan = _dict_or_empty(queue_payload.get("analysis_plan"))
+    job_payload = _dict_or_empty(queue_payload.get("job_payload"))
+    execution_payload = _dict_or_empty(queue_payload.get("execution_payload"))
+    execution_payload.setdefault("job_id", work_item.job.job_id)
+    execution_payload.setdefault("session_id", work_item.job.session.session_id)
+    execution_payload.setdefault("message_id", _text(job_payload.get("message_id")))
+    return execute_mock_plan(analysis_plan, execution_payload)
+
+
+def _completed_job_payload_for_work_item(
+    work_item: AgentWorkItem,
+    *,
+    node_execution: dict[str, Any],
+    final_status: str,
+) -> dict[str, Any]:
+    queue_payload = _dict_or_empty(work_item.payload)
+    job_payload = _dict_or_empty(queue_payload.get("job_payload"))
+    analysis_plan = _dict_or_empty(queue_payload.get("analysis_plan") or job_payload.get("analysis_plan"))
+    return {
+        **job_payload,
+        "job_id": work_item.job.job_id,
+        "session_id": work_item.job.session.session_id,
+        "message_id": _text(job_payload.get("message_id")),
+        "status": final_status,
+        "active_node": _final_node_from_execution(node_execution),
+        "progress_message": _worker_completion_message(final_status),
+        "analysis_plan": analysis_plan,
+        "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
+        "node_execution": node_execution,
+        "status_counts": _dict_or_empty(node_execution.get("status_counts")),
+        "work_item_id": work_item.work_item_id,
+    }
+
+
+def _complete_agent_work_item(
+    work_item_id: str,
+    *,
+    final_status: str,
+    node_execution: dict[str, Any],
+    persistence: dict[str, Any],
+) -> dict[str, Any]:
+    with transaction.atomic():
+        work_item = (
+            AgentWorkItem.objects.select_for_update()
+            .select_related("job", "job__session")
+            .get(work_item_id=work_item_id)
+        )
+        job = work_item.job
+        ai_session = AiSession.objects.filter(ai_session_id=persistence.get("ai_session_id")).first()
+        work_item.ai_session = ai_session
+        work_item.status = (
+            AgentWorkItemStatus.FAILED.value
+            if final_status == AnalysisJobStatus.FAILED.value
+            else AgentWorkItemStatus.SUCCESS.value
+        )
+        work_item.completed_at = timezone.now()
+        work_item.locked_at = None
+        work_item.next_run_at = None
+        work_item.error_code = ""
+        work_item.result = {
+            "final_status": final_status,
+            "node_execution": _node_execution_summary(node_execution),
+            "persistence": {
+                "agent_results_saved": persistence.get("agent_results_saved", 0),
+                "agent_invocations_saved": persistence.get("agent_invocations_saved", 0),
+                "retrieval_events_saved": persistence.get("retrieval_events_saved", 0),
+            },
+        }
+        work_item.save(
+            update_fields=[
+                "ai_session",
+                "status",
+                "completed_at",
+                "locked_at",
+                "next_run_at",
+                "error_code",
+                "result",
+                "updated_at",
+            ]
+        )
+        _update_job_worker_state(
+            job,
+            status=final_status,
+            active_node=_final_node_from_execution(node_execution),
+            progress_message=_worker_completion_message(final_status),
+            work_item=work_item,
+        )
+        _append_analysis_job_event(
+            job,
+            status=final_status,
+            active_node=job.active_node,
+            message=_worker_completion_message(final_status),
+            source="agent_worker_queue",
+            metadata={"work_item_id": work_item.work_item_id, "attempt_no": work_item.attempt_no},
+        )
+
+    progress_cache = write_analysis_job_progress(job)
+    session_cache = write_chat_session_state(job.session, latest_job=job)
+    return {
+        "backend": "postgresql",
+        "status": work_item.status,
+        "job_status": final_status,
+        "work_item_id": work_item.work_item_id,
+        "job_id": job.job_id,
+        "attempt_no": work_item.attempt_no,
+        "progress_cache": progress_cache,
+        "session_cache": session_cache,
+        "persistence": persistence,
+    }
+
+
+def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
+    error_code = exc.__class__.__name__
+    with transaction.atomic():
+        work_item = (
+            AgentWorkItem.objects.select_for_update()
+            .select_related("job", "job__session")
+            .filter(work_item_id=work_item_id)
+            .first()
+        )
+        if work_item is None:
+            return _agent_work_item_skipped("work_item_not_found", work_item_id=work_item_id)
+
+        job = work_item.job
+        can_retry = work_item.attempt_no < work_item.max_attempts
+        work_item.status = (
+            AgentWorkItemStatus.RETRYING.value
+            if can_retry
+            else AgentWorkItemStatus.FAILED.value
+        )
+        work_item.locked_at = None
+        work_item.completed_at = None if can_retry else timezone.now()
+        retry_after = _agent_worker_retry_backoff(work_item) if can_retry else None
+        work_item.next_run_at = timezone.now() + retry_after if retry_after else None
+        work_item.error_code = error_code
+        work_item.result = {
+            "error_code": error_code,
+            "message": _text(exc),
+            "retryable": can_retry,
+            "retry_after_seconds": int(retry_after.total_seconds()) if retry_after else 0,
+        }
+        work_item.save(
+            update_fields=[
+                "status",
+                "locked_at",
+                "completed_at",
+                "next_run_at",
+                "error_code",
+                "result",
+                "updated_at",
+            ]
+        )
+        job_status = AnalysisJobStatus.RUNNING.value if can_retry else AnalysisJobStatus.FAILED.value
+        _update_job_worker_state(
+            job,
+            status=job_status,
+            active_node=job.active_node,
+            progress_message="Agent worker item will retry." if can_retry else "Agent worker item failed.",
+            work_item=work_item,
+        )
+        _append_analysis_job_event(
+            job,
+            status=job_status,
+            active_node=job.active_node,
+            message="Agent worker item will retry." if can_retry else "Agent worker item failed.",
+            source="agent_worker_queue",
+            metadata={
+                "work_item_id": work_item.work_item_id,
+                "attempt_no": work_item.attempt_no,
+                "error_code": error_code,
+                "retryable": can_retry,
+            },
+        )
+
+    progress_cache = write_analysis_job_progress(job)
+    write_chat_session_state(job.session, latest_job=job)
+    return {
+        "backend": "postgresql",
+        "status": work_item.status,
+        "job_status": job.status,
+        "work_item_id": work_item.work_item_id,
+        "job_id": job.job_id,
+        "attempt_no": work_item.attempt_no,
+        "error_code": error_code,
+        "retryable": can_retry,
+        "progress_cache": progress_cache,
+    }
+
+
+def _update_job_worker_state(
+    job: AnalysisJob,
+    *,
+    status: str,
+    active_node: str,
+    progress_message: str,
+    work_item: AgentWorkItem,
+) -> None:
+    metadata = _dict_or_empty(job.metadata)
+    metadata["work_queue"] = {
+        **_dict_or_empty(metadata.get("work_queue")),
+        "contract_version": "agent_worker_queue.v1",
+        "work_item_id": work_item.work_item_id,
+        "status": work_item.status,
+        "attempt_no": work_item.attempt_no,
+        "max_attempts": work_item.max_attempts,
+        "next_run_at": work_item.next_run_at.isoformat() if work_item.next_run_at else None,
+    }
+    job.status = _analysis_job_status(status)
+    job.active_node = _text(active_node)
+    job.progress_message = _text(progress_message)
+    job.metadata = metadata
+    job.save(update_fields=["status", "active_node", "progress_message", "metadata", "updated_at"])
 
 
 def _persist_agent_results(
@@ -2150,6 +2930,7 @@ def _persist_agent_invocations(
             agent_output.get("status"),
             execution.get("execution_status") or agent_output.get("execution_status"),
         )
+        now = timezone.now()
 
         invocation, _created = AgentInvocation.objects.update_or_create(
             invocation_id=_agent_invocation_id(job.job_id, node_code, index),
@@ -2161,6 +2942,8 @@ def _persist_agent_invocations(
                 "status": status,
                 "attempt_no": _positive_int_or_default(execution.get("attempt_no"), default=1),
                 "execution_mode": _text(execution.get("execution_mode")),
+                "started_at": now,
+                "completed_at": None if status == AgentInvocationStatus.RUNNING.value else now,
                 "latency_ms": _positive_int_or_none(execution.get("latency_ms")),
                 "token_count": _positive_int_or_none(execution.get("token_count")),
                 "evidence_count": len(_list_or_empty(agent_output.get("evidence"))),
@@ -2175,8 +2958,16 @@ def _persist_agent_invocations(
                     execution=execution,
                     agent_output=agent_output,
                     agent_result=agent_result,
+                    final_status=status,
                 ),
             },
+        )
+        _persist_retrieval_event_for_invocation(
+            job=job,
+            invocation=invocation,
+            execution=execution,
+            agent_output=agent_output,
+            agent_result=agent_result,
         )
         invocations.append(invocation)
 
@@ -2237,6 +3028,14 @@ def _agent_invocation_id(job_id: str, node_code: str, index: int) -> str:
         return readable_id
     digest = hashlib.sha1(f"{job_id}:{index}:{node_code}".encode("utf-8")).hexdigest()[:16]
     return f"ainv_{digest}_{index}"
+
+
+def _agent_work_item_id(job_id: str) -> str:
+    readable_id = f"awork_{job_id}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha1(job_id.encode("utf-8")).hexdigest()[:20]
+    return f"awork_{digest}"
 
 
 def _usage_quota_id(subject_id: str, scope: str) -> str:
@@ -2503,17 +3302,114 @@ def _agent_invocation_metadata(
     execution: dict[str, Any],
     agent_output: dict[str, Any],
     agent_result: AgentResult | None,
+    final_status: str,
 ) -> dict[str, Any]:
     plan_step = execution.get("plan_step") if isinstance(execution.get("plan_step"), dict) else {}
     return {
         "source": "canonical_analysis_job",
+        "orchestration_policy": "sync_worker_progress.v1",
+        "queue_runtime": "inline_sync",
         "execution_id": execution.get("execution_id"),
         "agent_result_id": agent_result.result_id if agent_result else None,
         "plan_step": plan_step,
         "adapter_context": execution.get("adapter_context") or {},
         "execution_status": execution.get("execution_status") or agent_output.get("execution_status"),
+        "status_timeline": _agent_invocation_status_timeline(final_status),
         "created_at": agent_output.get("created_at") or execution.get("created_at"),
     }
+
+
+def _persist_retrieval_event_for_invocation(
+    *,
+    job: AnalysisJob,
+    invocation: AgentInvocation,
+    execution: dict[str, Any],
+    agent_output: dict[str, Any],
+    agent_result: AgentResult | None,
+) -> RetrievalEvent | None:
+    if invocation.node_code != "law_ground_search":
+        return None
+
+    structured_result = _dict_or_empty(agent_output.get("structured_result"))
+    retrieval = _dict_or_empty(structured_result.get("retrieval"))
+    matched_laws = _list_or_empty(structured_result.get("matched_laws"))
+    source_refs = [
+        _text(item.get("source_reference"))
+        for item in matched_laws
+        if isinstance(item, dict) and _text(item.get("source_reference"))
+    ]
+    if not source_refs:
+        source_refs = [
+            _text(item.get("source_reference"))
+            for item in _list_or_empty(agent_output.get("evidence"))
+            if isinstance(item, dict) and _text(item.get("source_reference"))
+        ]
+    query_text = _text(retrieval.get("query")) or _law_ground_query_from_execution(execution)
+    event, _created = RetrievalEvent.objects.update_or_create(
+        retrieval_event_id=_retrieval_event_id(job.job_id, invocation.invocation_id),
+        defaults={
+            "job": job,
+            "invocation": invocation,
+            "query_text": query_text,
+            "query_type": _text(retrieval.get("backend")) or "mock_or_semantic",
+            "top_k": _positive_int_or_default(retrieval.get("top_k"), default=len(source_refs)),
+            "result_count": _positive_int_or_default(retrieval.get("result_count"), default=len(source_refs)),
+            "source_refs": source_refs,
+            "filters": {"node_code": invocation.node_code, "source_type": "law"},
+            "latency_ms": _positive_int_or_none(retrieval.get("latency_ms")),
+            "metadata": {
+                "source": "agent_invocation_persistence",
+                "retrieval_contract_version": retrieval.get("contract_version"),
+                "retrieval_status": retrieval.get("status"),
+                "retrieval_backend": retrieval.get("backend"),
+                "retrieval_quality": structured_result.get("retrieval_quality"),
+                "fallback_from": retrieval.get("fallback_from"),
+                "attempted_backends": retrieval.get("attempted_backends") or [],
+                "embedding": retrieval.get("embedding") or {},
+                "sql_tables": retrieval.get("sql_tables") or [],
+                "agent_result_id": agent_result.result_id if agent_result else None,
+                "execution_id": execution.get("execution_id"),
+            },
+        },
+    )
+    return event
+
+
+def _agent_invocation_status_timeline(final_status: str) -> list[dict[str, str]]:
+    timeline = [
+        {"status": AgentInvocationStatus.QUEUED.value, "stage": "scheduled"},
+        {"status": AgentInvocationStatus.RUNNING.value, "stage": "worker_started"},
+    ]
+    if final_status == AgentInvocationStatus.QUEUED.value:
+        return timeline[:1]
+    if final_status == AgentInvocationStatus.RUNNING.value:
+        return timeline
+    timeline.append({"status": final_status, "stage": "worker_finished"})
+    if final_status == AgentInvocationStatus.FAILED.value:
+        timeline.append({"status": AgentInvocationStatus.RETRYING.value, "stage": "retryable_review"})
+    return timeline
+
+
+def _law_ground_query_from_execution(execution: dict[str, Any]) -> str:
+    agent_input = _dict_or_empty(execution.get("agent_input"))
+    context = _dict_or_empty(agent_input.get("context"))
+    supervisor = _dict_or_empty(context.get("supervisor_handoff"))
+    for package in _list_or_empty(supervisor.get("agent_input_packages")):
+        if not isinstance(package, dict) or package.get("node_code") != "law_ground_search":
+            continue
+        payload = _dict_or_empty(package.get("payload"))
+        query = payload.get("search_query") or payload.get("violation_text")
+        if query:
+            return _text(query)
+    return _text(agent_input.get("user_text"))
+
+
+def _retrieval_event_id(job_id: str, invocation_id: str) -> str:
+    readable_id = f"retr_{job_id}_{invocation_id}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha1(f"{job_id}:{invocation_id}".encode("utf-8")).hexdigest()[:20]
+    return f"retr_{digest}"
 
 
 def _ai_subject(payload: dict[str, Any], job_payload: dict[str, Any]) -> dict[str, str]:
@@ -2715,6 +3611,20 @@ def _report_download_body(
     if report.content_summary:
         lines.append("")
         lines.append(report.content_summary)
+    return "\n".join(lines) + "\n"
+
+
+def _report_object_body_for_write(
+    payload: dict[str, Any],
+    report_payload: dict[str, Any],
+) -> str:
+    lines = [
+        f"Report object for {report_payload.get('report_id')}",
+        f"action: {_text(payload.get('action')) or 'save'}",
+        f"status: {_text(report_payload.get('status'))}",
+        f"title: {_text(payload.get('title'))}",
+        f"case_id: {_text(report_payload.get('case_id'))}",
+    ]
     return "\n".join(lines) + "\n"
 
 

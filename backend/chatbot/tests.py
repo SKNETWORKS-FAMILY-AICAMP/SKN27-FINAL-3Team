@@ -2,12 +2,19 @@ import json
 import os
 import tempfile
 from datetime import timedelta
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
 
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from app.services.agent_node_service import execute_mock_node
+from app.services.persona_catalog_service import list_demo_personas
 from chatbot.models import (
     AgentFeedbackEvent,
     AgentInvocation,
@@ -15,6 +22,8 @@ from chatbot.models import (
     AgentNodeDefinition,
     AgentResult,
     AgentResultStatus,
+    AgentWorkItem,
+    AgentWorkItemStatus,
     AnalysisDisplayResult,
     AnalysisJob,
     AnalysisJobEvent,
@@ -33,9 +42,12 @@ from chatbot.models import (
     AiSession,
     MessageRole,
     OAuthConnection,
+    RagChunk,
+    RetrievalEvent,
     Report,
     ReportStatus,
     ReportType,
+    SourceDocument,
     SocialAccount,
     Subscription,
     SubscriptionStatus,
@@ -46,8 +58,19 @@ from chatbot.models import (
     UploadedFile,
     UploadedFileStatus,
 )
-from chatbot.repositories import list_history_event_records, record_history_event_record
+from config.env_loader import load_django_env_file
+from chatbot.readiness import build_production_readiness_report
+from chatbot.repositories import (
+    list_history_event_records,
+    process_agent_work_item,
+    process_agent_work_items,
+    record_history_event_record,
+)
 from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
+
+
+def fixture_value(*parts):
+    return "".join(parts)
 
 
 class ChatbotPersistenceModelTests(TestCase):
@@ -70,11 +93,97 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(AgentNodeDefinition._meta.db_table, "agent_nodes")
         self.assertEqual(AiSession._meta.db_table, "ai_sessions")
         self.assertEqual(AgentInvocation._meta.db_table, "agent_invocations")
+        self.assertEqual(SourceDocument._meta.db_table, "source_documents")
+        self.assertEqual(RagChunk._meta.db_table, "rag_chunks")
+        self.assertEqual(RetrievalEvent._meta.db_table, "retrieval_events")
+        self.assertEqual(AgentWorkItem._meta.db_table, "agent_work_items")
         self.assertEqual(AgentFeedbackEvent._meta.db_table, "agent_feedback_events")
         self.assertEqual(Subscription._meta.db_table, "subscriptions")
         self.assertEqual(UsageQuota._meta.db_table, "usage_quotas")
         self.assertEqual(UsageEvent._meta.db_table, "usage_events")
         self.assertEqual(HistoryEvent._meta.db_table, "history_events")
+
+    def test_knowledge_rag_tables_link_source_chunks_and_retrieval_events(self):
+        source = SourceDocument.objects.create(
+            source_document_id="src_road_traffic_act",
+            source_type="law",
+            source_name="Road Traffic Act",
+            source_url="https://example.test/law",
+            metadata={"source": "unit_test"},
+        )
+        chunk = RagChunk.objects.create(
+            chunk_id="rag_road_traffic_act_article_32",
+            source_document=source,
+            source_id="road_traffic_act",
+            source_type="law",
+            chunk_type="article",
+            title="Stopping and parking restriction",
+            article_no="Article 32",
+            content="Emergency stopping near a school zone may require supporting evidence.",
+            normalized_text="school zone emergency stopping supporting evidence",
+            domain_tags=["fine_notice", "school_zone"],
+        )
+        job = AnalysisJob.objects.create(
+            job_id="job_rag_foundation",
+            session=ChatSession.objects.create(session_id="ses_rag_foundation"),
+            status=AnalysisJobStatus.RUNNING,
+        )
+        event = RetrievalEvent.objects.create(
+            retrieval_event_id="retr_rag_foundation",
+            job=job,
+            query_text="school zone stopping fine",
+            query_type="django_rag_tables",
+            top_k=3,
+            result_count=1,
+            source_refs=[chunk.chunk_id],
+        )
+
+        self.assertEqual(chunk.source_document, source)
+        self.assertEqual(event.source_refs, ["rag_road_traffic_act_article_32"])
+
+    def test_law_ground_search_reads_django_rag_chunks_when_available(self):
+        source = SourceDocument.objects.create(
+            source_document_id="src_school_zone_rule",
+            source_type="law",
+            source_name="Road Traffic Act",
+            source_url="https://example.test/school-zone",
+        )
+        RagChunk.objects.create(
+            chunk_id="rag_school_zone_emergency_stop",
+            source_document=source,
+            source_id="road_traffic_act",
+            source_type="law",
+            chunk_type="article",
+            title="School zone emergency stopping",
+            article_no="Article 32",
+            content="Emergency stopping in a school zone should be checked with evidence.",
+            normalized_text="school zone emergency stopping evidence fine notice",
+            domain_tags=["school_zone", "fine_notice"],
+        )
+
+        execution = execute_mock_node(
+            {
+                "node_code": "law_ground_search",
+                "search_query": "school zone emergency stopping fine",
+            }
+        )
+        structured_result = execution["agent_output"]["structured_result"]
+
+        self.assertEqual(structured_result["retrieval_quality"], "django_rag_tables")
+        self.assertEqual(
+            structured_result["matched_laws"][0]["source_reference"],
+            "rag_school_zone_emergency_stop",
+        )
+        self.assertEqual(structured_result["retrieval"]["status"], "ready")
+        self.assertEqual(structured_result["retrieval"]["backend"], "django_rag_tables")
+        self.assertEqual(
+            structured_result["retrieval"]["attempted_backends"][0]["backend"],
+            "postgres_pgvector",
+        )
+        self.assertEqual(
+            structured_result["retrieval"]["attempted_backends"][0]["status"],
+            "disabled",
+        )
 
     def test_progress_cache_recovers_from_postgresql_on_cache_miss(self):
         cache.clear()
@@ -331,6 +440,391 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(report.content["format"], "text")
 
 
+class ProductionReadinessTests(TestCase):
+    def test_env_loader_reads_explicit_file_without_overriding_process_env(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / ".env.production"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "SKN27_TEST_ENV_FILE_VALUE=from-file",
+                        "SKN27_TEST_ENV_EXISTING=from-file",
+                        "export SKN27_TEST_ENV_EXPORTED=from-export",
+                        "SKN27_TEST_ENV_QUOTED='quoted value'",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            previous_existing = os.environ.get("SKN27_TEST_ENV_EXISTING")
+            previous_keys = {
+                key: os.environ.get(key)
+                for key in (
+                    "SKN27_TEST_ENV_FILE_VALUE",
+                    "SKN27_TEST_ENV_EXISTING",
+                    "SKN27_TEST_ENV_EXPORTED",
+                    "SKN27_TEST_ENV_QUOTED",
+                )
+            }
+            try:
+                os.environ["SKN27_TEST_ENV_EXISTING"] = "from-process"
+                result = load_django_env_file(Path(temp_dir), env_file=env_path)
+
+                self.assertTrue(result["loaded"])
+                self.assertEqual(os.environ["SKN27_TEST_ENV_FILE_VALUE"], "from-file")
+                self.assertEqual(os.environ["SKN27_TEST_ENV_EXISTING"], "from-process")
+                self.assertEqual(os.environ["SKN27_TEST_ENV_EXPORTED"], "from-export")
+                self.assertEqual(os.environ["SKN27_TEST_ENV_QUOTED"], "quoted value")
+                self.assertNotIn("SKN27_TEST_ENV_EXISTING", result["loaded_keys"])
+            finally:
+                for key, previous_value in previous_keys.items():
+                    if previous_value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = previous_value
+                if previous_existing is None:
+                    os.environ.pop("SKN27_TEST_ENV_EXISTING", None)
+                else:
+                    os.environ["SKN27_TEST_ENV_EXISTING"] = previous_existing
+
+    def test_readiness_report_flags_default_development_settings(self):
+        report = build_production_readiness_report(include_database=False)
+
+        self.assertEqual(report["contract_version"], "production_readiness.v1")
+        self.assertEqual(report["status"], "fail")
+        failing_checks = {check["name"] for check in report["checks"] if check["status"] == "fail"}
+        self.assertIn("django_security", failing_checks)
+        self.assertIn("google_oauth", failing_checks)
+
+    @override_settings(
+        DEBUG=False,
+        SECRET_KEY=("prod-secret-key-prod-secret-key-123456"),
+        ALLOWED_HOSTS=["app.legaldrive.test"],
+        DJANGO_DATABASE_ENGINE="postgres",
+        GOOGLE_AUTH_ALLOW_MOCK=False,
+        APP_AUTH_ALLOW_MOCK_BEARER=False,
+        GOOGLE_CLIENT_ID="google-client-id",
+        GOOGLE_CLIENT_SECRET=("google-client-secret"),
+        GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
+        APP_JWT_SECRET=("app-jwt-secret-app-jwt-secret-123456"),
+        OAUTH_TOKEN_SECRET=("oauth-token-secret-oauth-token-123456"),
+        REDIS_URL="redis://redis:6379/0",
+        SUPERVISOR_LLM_ENABLED=False,
+        LEGAL_RAG_VECTOR_ENABLED=False,
+        OBJECT_STORAGE_PROVIDER="mock_s3",
+        OBJECT_STORAGE_BUCKET="bucket",
+    )
+    def test_readiness_report_allows_non_blocking_warnings_for_optional_services(self):
+        report = build_production_readiness_report(include_database=False)
+
+        self.assertEqual(report["status"], "warn")
+        self.assertEqual(report["summary"]["fail"], 0)
+        warning_checks = {check["name"] for check in report["checks"] if check["status"] == "warn"}
+        self.assertIn("supervisor_llm", warning_checks)
+        self.assertIn("legal_rag", warning_checks)
+        self.assertIn("object_storage", warning_checks)
+
+    @override_settings(
+        DEBUG=False,
+        SECRET_KEY=("replace-with-django-secret-key-from-secret-manager"),
+        ALLOWED_HOSTS=["app.example.com"],
+        DJANGO_DATABASE_ENGINE="postgres",
+        GOOGLE_AUTH_ALLOW_MOCK=False,
+        APP_AUTH_ALLOW_MOCK_BEARER=False,
+        GOOGLE_CLIENT_ID="replace-with-google-oauth-web-client-id",
+        GOOGLE_CLIENT_SECRET=fixture_value("replace-with-google", "-oauth-client-secret"),
+        GOOGLE_POPUP_REDIRECT_URI="https://app.example.com",
+        APP_JWT_SECRET=("replace-with-app-jwt-secret-from-secret-manager"),
+        OAUTH_TOKEN_SECRET=("replace-with-oauth-token-secret-from-secret-manager"),
+        REDIS_URL="redis://redis:6379/0",
+        SUPERVISOR_LLM_ENABLED=True,
+        SUPERVISOR_LLM_API_KEY=fixture_value("replace-with-supervisor", "-llm-api-key"),
+        LEGAL_RAG_VECTOR_ENABLED=False,
+        FILE_SCAN_PROVIDER="clamav",
+        FILE_SCAN_CLAMAV_HOST="clamav",
+        OBJECT_STORAGE_PROVIDER="s3",
+        OBJECT_STORAGE_BUCKET="bucket",
+    )
+    def test_readiness_report_rejects_template_placeholders(self):
+        report = build_production_readiness_report(include_database=False)
+
+        checks = {check["name"]: check for check in report["checks"]}
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(checks["django_security"]["status"], "fail")
+        self.assertEqual(checks["google_oauth"]["status"], "fail")
+        self.assertEqual(checks["supervisor_llm"]["status"], "fail")
+        self.assertTrue(
+            any("placeholders" in detail["message"] for detail in checks["google_oauth"]["details"])
+        )
+
+    @override_settings(
+        DEBUG=False,
+        SECRET_KEY=("prod-secret-key-prod-secret-key-123456"),
+        ALLOWED_HOSTS=["app.legaldrive.test"],
+        DJANGO_DATABASE_ENGINE="postgres",
+        GOOGLE_AUTH_ALLOW_MOCK=False,
+        APP_AUTH_ALLOW_MOCK_BEARER=False,
+        GOOGLE_CLIENT_ID="google-client-id.apps.googleusercontent.com",
+        GOOGLE_CLIENT_SECRET=("google-client-secret-realistic-value"),
+        GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
+        APP_JWT_SECRET=("app-jwt-secret-app-jwt-secret-123456"),
+        OAUTH_TOKEN_SECRET=("oauth-token-secret-oauth-token-123456"),
+        REDIS_URL="redis://redis:6379/0",
+        SUPERVISOR_LLM_ENABLED=True,
+        SUPERVISOR_LLM_MODEL="gpt-5.4-mini",
+        SUPERVISOR_LLM_API_KEY="",
+        OPENAI_API_KEY=fixture_value("openai", "-api-key-realistic-value"),
+        LEGAL_RAG_VECTOR_ENABLED=False,
+        FILE_SCAN_PROVIDER="clamav",
+        FILE_SCAN_CLAMAV_HOST="clamav",
+        OBJECT_STORAGE_PROVIDER="s3",
+        OBJECT_STORAGE_BUCKET="bucket",
+        OBJECT_STORAGE_ACCESS_KEY_ID="access-key-realistic-value",
+        OBJECT_STORAGE_SECRET_ACCESS_KEY=fixture_value("secret-key", "-realistic-value"),
+    )
+    def test_readiness_report_allows_openai_key_fallback_for_supervisor(self):
+        report = build_production_readiness_report(include_database=False)
+
+        checks = {check["name"]: check for check in report["checks"]}
+        self.assertEqual(checks["supervisor_llm"]["status"], "pass")
+
+    @override_settings(
+        OBJECT_STORAGE_PROVIDER="s3",
+        OBJECT_STORAGE_BUCKET="bucket",
+        OBJECT_STORAGE_PREFIX="canonical",
+        FILE_SCAN_PROVIDER="clamav",
+        FILE_SCAN_CLAMAV_HOST="clamav",
+    )
+    def test_readiness_report_requires_boto3_for_s3_provider(self):
+        with patch("chatbot.readiness.importlib.util.find_spec", return_value=None):
+            report = build_production_readiness_report(include_database=False)
+
+        checks = {check["name"]: check for check in report["checks"]}
+        self.assertEqual(checks["object_storage"]["status"], "fail")
+        self.assertTrue(
+            any("boto3 package is required" in detail["message"] for detail in checks["object_storage"]["details"])
+        )
+
+    @override_settings(
+        LEGAL_RAG_VECTOR_ENABLED=True,
+        LEGAL_RAG_QUERY_EMBEDDING_PROVIDER="sentence-transformers",
+        LEGAL_RAG_QUERY_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
+    )
+    def test_readiness_report_requires_sentence_transformers_for_vector_rag(self):
+        def fake_find_spec(name):
+            if name == "sentence_transformers":
+                return None
+            return object()
+
+        with patch("chatbot.readiness.importlib.util.find_spec", side_effect=fake_find_spec):
+            report = build_production_readiness_report(include_database=False)
+
+        checks = {check["name"]: check for check in report["checks"]}
+        self.assertEqual(checks["legal_rag"]["status"], "fail")
+        self.assertTrue(
+            any("sentence-transformers package is not installed" in detail["message"] for detail in checks["legal_rag"]["details"])
+        )
+
+    def test_readiness_management_command_outputs_json(self):
+        output = StringIO()
+
+        call_command(
+            "check_production_readiness",
+            "--skip-database",
+            "--format",
+            "json",
+            stdout=output,
+        )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "production_readiness.v1")
+        self.assertIn(body["status"], {"pass", "warn", "fail"})
+
+    @override_settings(
+        DJANGO_DATABASE_ENGINE="postgres",
+        LEGAL_RAG_VECTOR_ENABLED=True,
+        LEGAL_RAG_QUERY_EMBEDDING_PROVIDER="sentence-transformers",
+        LEGAL_RAG_QUERY_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
+        REDIS_URL="redis://redis:6379/0",
+    )
+    def test_readiness_report_handles_database_introspection_errors(self):
+        class BrokenIntrospection:
+            def table_names(self):
+                raise RuntimeError("failed to resolve host postgres")
+
+        class BrokenConnection:
+            vendor = "postgresql"
+            introspection = BrokenIntrospection()
+
+        with patch("chatbot.readiness.connection", BrokenConnection()):
+            report = build_production_readiness_report(include_database=True)
+
+        checks = {check["name"]: check for check in report["checks"]}
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(checks["database"]["status"], "fail")
+        self.assertEqual(checks["legal_rag"]["status"], "fail")
+        self.assertEqual(checks["worker_queue"]["status"], "fail")
+        self.assertTrue(
+            any("Database connection or introspection failed" in detail["message"] for detail in checks["database"]["details"])
+        )
+        self.assertTrue(
+            any("database introspection failed" in detail["message"] for detail in checks["legal_rag"]["details"])
+        )
+        self.assertTrue(
+            any("database introspection failed" in detail["message"] for detail in checks["worker_queue"]["details"])
+        )
+
+    @override_settings(SUPERVISOR_LLM_ENABLED=False)
+    def test_supervisor_llm_smoke_command_outputs_sanitized_json(self):
+        output = StringIO()
+
+        call_command(
+            "smoke_supervisor_llm",
+            "--require-slot-state",
+            "--format",
+            "json",
+            stdout=output,
+        )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "supervisor_llm_smoke.v1")
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["supervisor_llm"]["status"], "disabled")
+        self.assertTrue(body["slot_state"]["valid"])
+        self.assertEqual(body["slot_state"]["slot_contract_version"], "slot_filling_state.v1")
+        self.assertNotIn("api_key", json.dumps(body))
+
+    @override_settings(
+        GOOGLE_AUTH_ALLOW_MOCK=False,
+        GOOGLE_CLIENT_ID="google-client-id.apps.googleusercontent.com",
+        GOOGLE_CLIENT_SECRET=("google-client-secret-realistic-value"),
+        GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
+    )
+    def test_google_oauth_smoke_command_outputs_sanitized_config_json(self):
+        output = StringIO()
+
+        call_command(
+            "smoke_google_oauth_code",
+            "--format",
+            "json",
+            stdout=output,
+        )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "google_oauth_code_smoke.v1")
+        self.assertEqual(body["status"], "pass")
+        self.assertTrue(body["config"]["ready"])
+        self.assertNotIn("google-client-secret", json.dumps(body))
+
+    def test_object_storage_smoke_command_requires_binary_write(self):
+        output = StringIO()
+
+        with tempfile.TemporaryDirectory() as object_root, override_settings(
+            OBJECT_STORAGE_PROVIDER="mock_s3",
+            OBJECT_STORAGE_BUCKET="bucket",
+            OBJECT_STORAGE_PREFIX="canonical",
+            OBJECT_STORAGE_LOCAL_ROOT=object_root,
+        ):
+            call_command(
+                "smoke_object_storage",
+                "--require-binary",
+                "--format",
+                "json",
+                stdout=output,
+            )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "object_storage_smoke.v1")
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["policy"]["provider"], "mock_s3")
+        self.assertTrue(body["policy"]["writes_binary"])
+        self.assertEqual(body["policy"]["persistence_state"], "binary_adapter")
+        self.assertEqual(body["upload_write"]["status"], "written")
+        self.assertEqual(body["report_write"]["status"], "written")
+
+    def test_file_scan_smoke_command_requires_clean_scan(self):
+        output = StringIO()
+
+        call_command(
+            "smoke_file_scan",
+            "--require-clean",
+            "--format",
+            "json",
+            stdout=output,
+        )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "file_scan_smoke.v1")
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["scan_status"], "clean")
+
+    @override_settings(FILE_SCAN_PROVIDER="clamav", FILE_SCAN_CLAMAV_HOST="clamav")
+    def test_file_scan_smoke_supports_clamav_provider_clean_scan(self):
+        output = StringIO()
+
+        with patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[]):
+            call_command(
+                "smoke_file_scan",
+                "--attachment-id",
+                "att_file_scan_clamav_clean",
+                "--require-clean",
+                "--format",
+                "json",
+                stdout=output,
+            )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["scanner"], "clamav")
+        self.assertEqual(body["scan_status"], "clean")
+
+    @override_settings(FILE_SCAN_PROVIDER="clamav", FILE_SCAN_CLAMAV_HOST="clamav")
+    def test_file_scan_smoke_fails_closed_when_provider_reports_unavailable(self):
+        finding = {
+            "category": "scanner",
+            "code": "scanner_unavailable",
+            "severity": "critical",
+            "message": "Configured file scan provider could not scan the uploaded file.",
+            "provider": "clamav",
+            "reason": "connection_failed",
+        }
+
+        with patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[finding]):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "smoke_file_scan",
+                    "--attachment-id",
+                    "att_file_scan_clamav_unavailable",
+                    "--require-clean",
+                    "--format",
+                    "json",
+                    stdout=StringIO(),
+                )
+
+        uploaded_file = UploadedFile.objects.get(attachment_id="att_file_scan_clamav_unavailable")
+        self.assertEqual(uploaded_file.status, UploadedFileStatus.REJECTED)
+        self.assertEqual(uploaded_file.scan_status, "rejected")
+        self.assertEqual(uploaded_file.metadata["scan_result"]["findings"][0]["reason"], "connection_failed")
+
+    def test_persona_catalog_smoke_command_covers_all_demo_personas(self):
+        output = StringIO()
+
+        call_command("smoke_persona_catalog", "--format", "json", stdout=output)
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["persona_count"], 5)
+        self.assertEqual(
+            {run["persona_id"] for run in body["runs"]},
+            {
+                "school_zone_fine_notice_parent",
+                "accident_scene_photo_driver",
+                "blackbox_video_fault_driver",
+                "traffic_law_question_citizen",
+                "saved_report_returning_user",
+            },
+        )
+
+
 class ChatbotMockApiTests(TestCase):
     def setUp(self):
         self.client = Client(HTTP_AUTHORIZATION="Bearer dev-mock-token")
@@ -353,7 +847,11 @@ class ChatbotMockApiTests(TestCase):
         self.assertTrue(body["ok"])
         self.assertEqual(
             {item["scenario"] for item in body["available_scenarios"]},
-            {"fine_notice", "fault_ratio"},
+            {"fine_notice", "fault_ratio", "law_question", "report_redownload"},
+        )
+        self.assertIn(
+            "school_zone_fine_notice_parent",
+            {item["persona_id"] for item in body["available_personas"]},
         )
 
     def test_cors_preflight_allows_authorization_header_for_mock_jwt_flow(self):
@@ -378,6 +876,7 @@ class ChatbotMockApiTests(TestCase):
 
         self.assertEqual(health_response.status_code, 200)
         self.assertEqual(scenarios_response.status_code, 200)
+        self.assertIn("personas", scenarios_response.json())
 
     def test_protected_mock_endpoint_requires_authorization_header(self):
         response = Client().post(
@@ -433,6 +932,142 @@ class ChatbotMockApiTests(TestCase):
         self.assertTrue(
             AgentInvocation.objects.filter(job__session__session_id="ses_guest_chat_first").exists()
         )
+
+    def test_guest_persona_smoke_can_register_file_and_preview_report_without_bearer_token(self):
+        guest_client = Client(HTTP_X_GUEST_ID="gst_persona_smoke")
+        session_id = "ses_guest_persona_smoke"
+
+        file_response = guest_client.post(
+            "/api/files/",
+            data={
+                "session_id": session_id,
+                "purpose": "accident_scene",
+                "filename": "guest-scene.txt",
+                "content_type": "text/plain",
+                "size_bytes": 0,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(file_response.status_code, 200)
+        attachment = file_response.json()["attachment"]
+        call_command("process_uploaded_file_scans", "--limit", "1", stdout=StringIO())
+
+        message_response = guest_client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "conversation_save_state": "pending",
+                "user_text": "신호 없는 교차로 사고 사진이 있고 과실비율을 알고 싶습니다.",
+                "persona_id": "accident_scene_photo_driver",
+                "attachments": [{"attachment_id": attachment["attachment_id"]}],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        message_body = message_response.json()
+        job_id = message_body["supervisor_execution"]["job_id"]
+        self.assertEqual(message_body["persona_run"]["persona"]["persona_id"], "accident_scene_photo_driver")
+
+        report_response = guest_client.post(
+            "/api/reports/",
+            data={
+                "action": "preview",
+                "report_id": "rep_guest_persona_smoke",
+                "job_id": job_id,
+                "session_id": session_id,
+                "report_type": "general",
+                "title": "비회원 persona smoke 리포트",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        report_body = report_response.json()
+        self.assertEqual(report_body["status"], "preview_ready")
+        self.assertEqual(report_body["persistence"]["table"], "reports")
+        self.assertEqual(report_body["persistence"]["status"], "skipped")
+        self.assertEqual(report_body["persistence"]["reason"], "preview_not_persisted")
+        self.assertFalse(Report.objects.filter(report_id="rep_guest_persona_smoke").exists())
+
+    def test_guest_report_save_and_download_actions_require_login(self):
+        guest_client = Client(HTTP_X_GUEST_ID="gst_report_action_guard")
+
+        for action in ("save", "download"):
+            with self.subTest(action=action):
+                response = guest_client.post(
+                    "/api/reports/",
+                    data={
+                        "action": action,
+                        "report_id": f"rep_guest_guard_{action}",
+                        "session_id": "ses_guest_report_guard",
+                    },
+                    content_type="application/json",
+                )
+
+                self.assertEqual(response.status_code, 403)
+                error = response.json()["error"]
+                self.assertEqual(error["code"], "login_required")
+                self.assertEqual(error["required_action"], "login")
+                self.assertEqual(error["policy_version"], "report_action_policy.v1")
+                self.assertEqual(error["subject"]["subject_type"], "guest")
+                self.assertFalse(Report.objects.filter(report_id=f"rep_guest_guard_{action}").exists())
+
+        download_response = guest_client.get("/api/reports/rep_guest_guard_download/download/")
+        self.assertEqual(download_response.status_code, 403)
+        download_error = download_response.json()["error"]
+        self.assertEqual(download_error["code"], "login_required")
+        self.assertEqual(download_error["action"], "report_download")
+
+    def test_guest_cannot_promote_conversation_to_saved_state(self):
+        guest_client = Client(HTTP_X_GUEST_ID="gst_save_state_guard")
+        message_response = guest_client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_guest_save_state_guard",
+                "conversation_save_state": "pending",
+                "user_text": "로그인 전 상담은 저장 대기 상태입니다.",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+
+        save_response = guest_client.post(
+            "/api/chat/save-state/",
+            data={
+                "session_id": "ses_guest_save_state_guard",
+                "conversation_save_state": "saved",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(save_response.status_code, 403)
+        error = save_response.json()["error"]
+        self.assertEqual(error["code"], "login_required")
+        self.assertEqual(error["action"], "conversation_save")
+        self.assertEqual(error["policy_version"], "conversation_save_policy.v1")
+        session = ChatSession.objects.get(session_id="ses_guest_save_state_guard")
+        self.assertEqual(session.metadata["conversation_save_state"], "pending")
+
+    def test_expired_guest_identity_is_rejected_before_state_changes(self):
+        GuestIdentity.objects.create(
+            guest_id="gst_expired_guard",
+            status=GuestIdentityStatus.ACTIVE,
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        response = Client(HTTP_X_GUEST_ID="gst_expired_guard").post(
+            "/api/chat/save-state/",
+            data={
+                "session_id": "ses_expired_guest_guard",
+                "conversation_save_state": "pending",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "guest_session_invalid")
+        self.assertEqual(error["required_action"], "refresh_guest_session")
+        self.assertEqual(error["reason"], "guest_expired")
 
     @override_settings(GOOGLE_AUTH_ALLOW_MOCK=False, APP_AUTH_ALLOW_MOCK_BEARER=False)
     def test_real_auth_mode_rejects_legacy_dev_mock_bearer(self):
@@ -653,6 +1288,67 @@ class ChatbotMockApiTests(TestCase):
         error = response.json()["error"]
         self.assertEqual(error["code"], "forbidden")
         self.assertEqual(error["auth"]["reason"], "invalid_google_code_request_header")
+
+    @override_settings(
+        GOOGLE_AUTH_ALLOW_MOCK=False,
+        GOOGLE_CLIENT_ID="real-google-client",
+        GOOGLE_CLIENT_SECRET="x",
+        GOOGLE_POPUP_REDIRECT_URI="http://127.0.0.1:5173",
+    )
+    def test_google_code_login_mock_off_uses_backend_token_exchange(self):
+        class FakeGoogleResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "access_token": "real_google_access_token",
+                        "refresh_token": "real_google_refresh_token",
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                        "scope": "openid email profile",
+                        "profile": {
+                            "sub": "real-google-sub",
+                            "email": "real.driver@example.com",
+                            "email_verified": True,
+                            "display_name": "Real Driver",
+                            "verification": "google_token_exchange_smoke",
+                        },
+                    }
+                ).encode("utf-8")
+
+        with patch("app.services.google_auth_service.urllib_request.urlopen", return_value=FakeGoogleResponse()):
+            response = Client().post(
+                "/api/auth/google/code/",
+                data={
+                    "provider": "google",
+                    "code": "real-auth-code",
+                    "purpose": "LOGIN",
+                    "scope": "openid email profile",
+                    "guest_id": "gst_real_google_code",
+                    "session_id": "ses_real_google_code",
+                    "redirect_uri": "http://127.0.0.1:5173",
+                },
+                content_type="application/json",
+                HTTP_X_REQUESTED_WITH="XmlHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["auth_mode"], "authorization_code")
+        self.assertEqual(body["user"]["email"], "real.driver@example.com")
+        self.assertNotIn("_private_oauth_tokens", body)
+        self.assertNotIn("real_google_refresh_token", json.dumps(body))
+
+        user = UserAccount.objects.get(user_id=body["subject"]["user_id"])
+        oauth_connection = OAuthConnection.objects.get(user=user, provider="google")
+        self.assertTrue(oauth_connection.access_token_encrypted.startswith("v1."))
+        self.assertNotIn("real_google_access_token", oauth_connection.access_token_encrypted)
+        self.assertNotIn("real_google_refresh_token", oauth_connection.refresh_token_encrypted)
 
     def test_auth_refresh_issues_app_jwt_and_keeps_auth_session_active(self):
         login_response = Client().post(
@@ -1214,6 +1910,67 @@ class ChatbotMockApiTests(TestCase):
         usage_event = UsageEvent.objects.get(subject_id="user:usr_mock", scope="chat_message")
         self.assertEqual(usage_event.metadata["status"], "allowed")
 
+    def test_canonical_chat_message_covers_all_demo_personas_before_real_agents(self):
+        for persona in list_demo_personas():
+            with self.subTest(persona_id=persona["persona_id"]):
+                session_id = f"ses_persona_{persona['persona_id']}"
+                response = self.client.post(
+                    "/api/chat/messages/",
+                    data={
+                        "session_id": session_id,
+                        "conversation_save_state": "pending",
+                        "user_text": persona["sample_user_text"],
+                        "persona_id": persona["persona_id"],
+                    },
+                    content_type="application/json",
+                )
+
+                self.assertEqual(response.status_code, 200)
+                body = response.json()
+                expected_nodes = set(persona["expected_nodes"])
+
+                self.assertEqual(body["api_surface"], "canonical_mock")
+                self.assertEqual(body["execution_mode"], "mock")
+                self.assertEqual(body["status"], "success")
+                self.assertEqual(body["mock_scenario"], persona["scenario"])
+                self.assertEqual(body["routing_intent"], persona["routing_intent"])
+                self.assertEqual(body["persona_run"]["persona"]["persona_id"], persona["persona_id"])
+                self.assertEqual(body["analysis_plan"]["persona_id"], persona["persona_id"])
+                self.assertGreaterEqual(
+                    {step["node_code"] for step in body["analysis_plan"]["steps"]},
+                    expected_nodes,
+                )
+                self.assertEqual(body["reporting_payload"]["contract_version"], "reporting_payload.v1")
+                self.assertEqual(bool(body["report_links"]), persona["report_action_ready"])
+
+                job = AnalysisJob.objects.get(job_id=body["persistence"]["job_id"])
+                self.assertEqual(job.session.session_id, session_id)
+                self.assertEqual(job.mock_scenario, persona["scenario"])
+                self.assertGreaterEqual(
+                    set(job.agent_results.values_list("node_code", flat=True)),
+                    expected_nodes,
+                )
+                self.assertGreaterEqual(
+                    set(job.agent_invocations.values_list("node_code", flat=True)),
+                    expected_nodes,
+                )
+
+                if persona["report_action_ready"]:
+                    report_response = self.client.post(
+                        "/api/reports/",
+                        data={
+                            "action": "download",
+                            "report_id": f"rep_{persona['persona_id']}",
+                            "job_id": job.job_id,
+                            "session_id": session_id,
+                        },
+                        content_type="application/json",
+                    )
+                    self.assertEqual(report_response.status_code, 200)
+                    report_body = report_response.json()
+                    self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
+                    self.assertEqual(report_body["persistence"]["table"], Report._meta.db_table)
+
     def test_pending_conversation_is_not_promoted_to_history_or_mypage(self):
         response = self.client.post(
             "/api/chat/messages/",
@@ -1364,6 +2121,157 @@ class ChatbotMockApiTests(TestCase):
             },
         )
 
+    def test_canonical_agent_plan_can_queue_and_process_worker_item(self):
+        queue_response = self.client.post(
+            "/api/agents/plans/run/",
+            data={
+                "session_id": "ses_worker_queue",
+                "user_text": "Queue this fine notice analysis for the worker.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "execution_mode": "async_worker",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(queue_response.status_code, 200)
+        queued = queue_response.json()
+        self.assertEqual(queued["node_execution"]["status"], "queued")
+        self.assertEqual(queued["persistence"]["status"], AgentWorkItemStatus.QUEUED)
+        work_item_id = queued["work_item"]["work_item_id"]
+        work_item = AgentWorkItem.objects.get(work_item_id=work_item_id)
+        job = AnalysisJob.objects.get(job_id=queued["work_item"]["job_id"])
+        self.assertEqual(work_item.status, AgentWorkItemStatus.QUEUED)
+        self.assertEqual(job.status, AnalysisJobStatus.QUEUED)
+        self.assertEqual(job.events.first().status, AnalysisJobStatus.QUEUED)
+        self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], AnalysisJobStatus.QUEUED)
+
+        process_response = self.client.post(
+            "/api/agents/work-items/process/",
+            data={"limit": 1},
+            content_type="application/json",
+        )
+
+        self.assertEqual(process_response.status_code, 200)
+        processed = process_response.json()
+        self.assertEqual(processed["processed"], 1)
+        work_item.refresh_from_db()
+        job.refresh_from_db()
+        self.assertEqual(work_item.status, AgentWorkItemStatus.SUCCESS)
+        self.assertIn(job.status, {AnalysisJobStatus.SUCCESS, AnalysisJobStatus.PARTIAL})
+        self.assertGreater(job.agent_invocations.count(), 0)
+        self.assertGreater(job.agent_results.count(), 0)
+        event_statuses = list(job.events.values_list("status", flat=True))
+        self.assertIn(AnalysisJobStatus.QUEUED, event_statuses)
+        self.assertIn(AnalysisJobStatus.RUNNING, event_statuses)
+        self.assertIn(job.status, event_statuses)
+        progress = read_analysis_job_progress(job.job_id)
+        self.assertEqual(progress["snapshot"]["status"], job.status)
+        self.assertEqual(progress["snapshot"]["active_node"], job.active_node)
+
+    def test_agent_worker_management_command_processes_queued_item(self):
+        queue_response = self.client.post(
+            "/api/agents/plans/run/",
+            data={
+                "session_id": "ses_worker_command",
+                "user_text": "Queue this job for the management command.",
+                "mock_scenario": "fault_ratio",
+                "mock_status": "success",
+                "execution_mode": "async_worker",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(queue_response.status_code, 200)
+        work_item_id = queue_response.json()["work_item"]["work_item_id"]
+
+        call_command("process_agent_work_items", "--limit", "1", stdout=StringIO())
+
+        work_item = AgentWorkItem.objects.get(work_item_id=work_item_id)
+        self.assertEqual(work_item.status, AgentWorkItemStatus.SUCCESS)
+        self.assertIn(work_item.job.status, {AnalysisJobStatus.SUCCESS, AnalysisJobStatus.PARTIAL})
+
+    @override_settings(AGENT_WORKER_RETRY_BACKOFF_SECONDS=7, AGENT_WORKER_RETRY_BACKOFF_MAX_SECONDS=30)
+    def test_agent_worker_retries_failed_item_with_backoff(self):
+        queue_response = self.client.post(
+            "/api/agents/plans/run/",
+            data={
+                "session_id": "ses_worker_retry",
+                "user_text": "Queue this job and force a worker failure.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "execution_mode": "async_worker",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(queue_response.status_code, 200)
+        work_item_id = queue_response.json()["work_item"]["work_item_id"]
+
+        with patch("app.services.agent_node_service.execute_mock_plan", side_effect=RuntimeError("boom")):
+            result = process_agent_work_items(limit=1)
+
+        self.assertEqual(result["processed"], 1)
+        work_item = AgentWorkItem.objects.get(work_item_id=work_item_id)
+        self.assertEqual(work_item.status, AgentWorkItemStatus.RETRYING)
+        self.assertEqual(work_item.attempt_no, 1)
+        self.assertEqual(work_item.error_code, "RuntimeError")
+        self.assertEqual(work_item.result["retry_after_seconds"], 7)
+        self.assertIsNotNone(work_item.next_run_at)
+        self.assertGreater(work_item.next_run_at, timezone.now())
+        self.assertEqual(work_item.job.status, AnalysisJobStatus.RUNNING)
+
+        retry_result = process_agent_work_item(work_item.work_item_id)
+        self.assertEqual(retry_result["status"], "skipped")
+        self.assertEqual(retry_result["reason"], "work_item_not_ready")
+
+    def test_agent_worker_reclaims_stale_running_item(self):
+        queue_response = self.client.post(
+            "/api/agents/plans/run/",
+            data={
+                "session_id": "ses_worker_stale",
+                "user_text": "Queue this job and simulate worker death.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "execution_mode": "async_worker",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(queue_response.status_code, 200)
+        work_item_id = queue_response.json()["work_item"]["work_item_id"]
+        work_item = AgentWorkItem.objects.get(work_item_id=work_item_id)
+        work_item.status = AgentWorkItemStatus.RUNNING
+        work_item.attempt_no = 1
+        work_item.max_attempts = 1
+        work_item.locked_at = timezone.now() - timedelta(seconds=120)
+        work_item.save(update_fields=["status", "attempt_no", "max_attempts", "locked_at", "updated_at"])
+
+        result = process_agent_work_items(limit=1, stale_after_seconds=30)
+
+        self.assertEqual(result["stale_requeued"], 1)
+        self.assertEqual(result["processed"], 0)
+        work_item.refresh_from_db()
+        self.assertEqual(work_item.status, AgentWorkItemStatus.FAILED)
+        self.assertEqual(work_item.error_code, "worker_lock_timeout")
+        self.assertIsNone(work_item.locked_at)
+        self.assertIsNotNone(work_item.completed_at)
+        self.assertEqual(work_item.job.status, AnalysisJobStatus.FAILED)
+
+    def test_agent_worker_management_command_can_run_bounded_loop(self):
+        output = StringIO()
+
+        call_command(
+            "process_agent_work_items",
+            "--loop",
+            "--max-loops",
+            "1",
+            "--sleep-seconds",
+            "1",
+            stdout=output,
+        )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["loop_iteration"], 1)
+        self.assertEqual(body["contract_version"], "agent_worker_queue.v1")
+
     def test_attachment_upload_endpoint_returns_metadata_and_handoff(self):
         upload = SimpleUploadedFile(
             "fine_notice.jpg",
@@ -1418,6 +2326,8 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(attachment["object_storage"]["backend"], "object_storage")
         self.assertEqual(attachment["object_storage"]["resource_type"], "uploaded_file")
         self.assertTrue(attachment["storage_uri"].startswith("s3://"))
+        self.assertEqual(attachment["scan_status"], "not_started")
+        self.assertTrue(attachment["privacy_risk"])
         self.assertEqual(attachment["checks"]["metadata_repository"], "uploaded_files")
 
         uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
@@ -1427,6 +2337,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(uploaded_file.content_type, "image/jpeg")
         self.assertEqual(uploaded_file.size_bytes, 2048)
         self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+        self.assertEqual(uploaded_file.scan_status, "not_started")
         self.assertTrue(uploaded_file.storage_uri.startswith("s3://"))
         self.assertEqual(uploaded_file.metadata["mock_status"], "metadata_registered")
         self.assertEqual(uploaded_file.metadata["object_storage"]["backend"], "object_storage")
@@ -1448,6 +2359,101 @@ class ChatbotMockApiTests(TestCase):
             attachment["attachment_id"],
             {item["attachment_id"] for item in list_response.json()["attachments"]},
         )
+
+    def test_canonical_files_endpoint_accepts_multipart_file_upload(self):
+        upload = SimpleUploadedFile(
+            "dashcam.mp4",
+            b"mock video bytes",
+            content_type="video/mp4",
+        )
+
+        response = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": "ses_canonical_upload",
+                "purpose": "blackbox_video",
+                "file": upload,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        attachment = response.json()["attachment"]
+        self.assertEqual(attachment["status"], UploadedFileStatus.UPLOADED)
+        self.assertEqual(attachment["purpose"], "blackbox_video")
+        self.assertEqual(attachment["type"], "video")
+        self.assertEqual(attachment["content_type"], "video/mp4")
+        self.assertEqual(attachment["original_filename"], "dashcam.mp4")
+        self.assertGreater(attachment["size_bytes"], 0)
+        self.assertTrue(attachment["storage_uri"].startswith("s3://"))
+
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
+        self.assertEqual(uploaded_file.session.session_id, "ses_canonical_upload")
+        self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+        self.assertEqual(uploaded_file.scan_status, "not_started")
+        self.assertEqual(uploaded_file.metadata["mock_status"], "uploaded")
+        self.assertTrue(uploaded_file.metadata["source_storage_uri"].startswith("mock://uploads/"))
+
+    def test_file_scan_command_marks_upload_ready_for_agent_handoff(self):
+        response = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": "ses_scan_ready",
+                "purpose": "fine_notice",
+                "filename": "notice-clean.txt",
+                "content_type": "text/plain",
+                "size_bytes": 128,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        attachment_id = response.json()["attachment"]["attachment_id"]
+
+        output = StringIO()
+        call_command("process_uploaded_file_scans", "--limit", "1", "--format", "json", stdout=output)
+        batch = json.loads(output.getvalue())
+        self.assertEqual(batch["contract_version"], "file_scan_batch.v1")
+        self.assertEqual(batch["processed"], 1)
+        self.assertEqual(batch["clean"], 1)
+
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment_id)
+        self.assertEqual(uploaded_file.status, UploadedFileStatus.READY)
+        self.assertEqual(uploaded_file.scan_status, "clean")
+        self.assertEqual(uploaded_file.metadata["scan_result"]["contract_version"], "file_scan_result.v1")
+        self.assertEqual(uploaded_file.agent_handoff["scan_status"], "clean")
+
+    def test_chat_message_blocks_unscanned_attachment_from_agent_payload(self):
+        file_response = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": "ses_scan_blocked",
+                "purpose": "fine_notice",
+                "filename": "notice-waiting.txt",
+                "content_type": "text/plain",
+                "size_bytes": 128,
+            },
+            content_type="application/json",
+        )
+        attachment_id = file_response.json()["attachment"]["attachment_id"]
+
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_scan_blocked",
+                "user_text": "이 첨부를 근거로 이의신청을 준비해줘.",
+                "attachments": [{"attachment_id": attachment_id}],
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(message_response.status_code, 200)
+        body = message_response.json()
+        self.assertEqual(body["attachments"], [])
+        self.assertEqual(body["blocked_attachments"][0]["attachment_id"], attachment_id)
+        self.assertEqual(body["blocked_attachments"][0]["required_action"], "wait_for_file_scan")
+        self.assertEqual(body["attachment_scan_policy"]["blocked_count"], 1)
+        for package in body["analysis_plan"]["agent_input_packages"]:
+            self.assertEqual(package["payload"]["attachments"], [])
+            self.assertEqual(package["payload"]["blocked_attachments"][0]["attachment_id"], attachment_id)
 
     def test_canonical_file_detail_reads_uploaded_file_repository(self):
         session = ChatSession.objects.create(
@@ -1740,10 +2746,28 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(len(persisted_invocations), len(job["node_execution"]["executions"]))
         self.assertTrue(all(invocation.ai_session == ai_session for invocation in persisted_invocations))
         self.assertTrue(all(invocation.agent_node is not None for invocation in persisted_invocations))
+        self.assertTrue(
+            all(
+                invocation.metadata["status_timeline"][0]["status"] == AgentInvocationStatus.QUEUED
+                for invocation in persisted_invocations
+            )
+        )
+        self.assertTrue(
+            all(
+                AgentInvocationStatus.RUNNING
+                in {item["status"] for item in invocation.metadata["status_timeline"]}
+                for invocation in persisted_invocations
+            )
+        )
         self.assertEqual(
             persisted_invocations[0].metadata["agent_result_id"],
             persisted_results[0].result_id,
         )
+        law_invocation = persisted_job.agent_invocations.get(node_code="law_ground_search")
+        retrieval_event = RetrievalEvent.objects.get(invocation=law_invocation)
+        self.assertEqual(retrieval_event.job, persisted_job)
+        self.assertEqual(retrieval_event.filters["source_type"], "law")
+        self.assertGreaterEqual(retrieval_event.result_count, 0)
         self.assertEqual(
             AgentNodeDefinition.objects.get(node_code="fine_notice_analysis").owner,
             "workzion2",
@@ -1834,6 +2858,7 @@ class ChatbotMockApiTests(TestCase):
         )
         self.assertEqual(file_response.status_code, 200)
         attachment = file_response.json()["attachment"]
+        call_command("process_uploaded_file_scans", "--limit", "1", stdout=StringIO())
 
         message_payload = {
             "session_id": session_id,
@@ -1918,7 +2943,8 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(report.status, ReportStatus.READY)
         self.assertTrue(report.storage_uri.startswith("s3://skn27-demo-object-storage/"))
         self.assertEqual(report.metadata["source"], "canonical_report_action")
-        self.assertEqual(report.metadata["object_storage_status"], "metadata_ready")
+        self.assertEqual(report.metadata["object_storage_status"], "written")
+        self.assertTrue(report.metadata["object_storage_write"]["writes_binary"])
         self.assertEqual(report.metadata["object_storage"]["backend"], "object_storage")
         self.assertEqual(report.metadata["source_storage_uri"], "mock://reports/rep_canonical_smoke")
         self.assertEqual(report.content["download_url"], report_body["download_url"])

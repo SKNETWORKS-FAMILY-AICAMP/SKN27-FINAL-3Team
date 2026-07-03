@@ -2,18 +2,36 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
 from app.services.attachment_mock_service import resolve_attachment_references
+from app.services.persona_catalog_service import (
+    DEFAULT_PERSONA_ID,
+    default_demo_persona,
+    demo_persona_ids,
+    get_demo_persona,
+    list_demo_personas,
+)
+from app.services.supervisor_llm_service import (
+    build_analysis_plan_with_optional_llm,
+    build_supervisor_state_with_optional_llm,
+)
 
 
 SCENARIO_INTENTS = {
     "fine_notice": "objection_request",
     "fault_ratio": "fault_ratio",
+    "law_question": "law_question",
+    "report_redownload": "report_redownload",
 }
+
+DEMO_PERSONA_ID = DEFAULT_PERSONA_ID
+
+DEMO_PERSONA_RUN: dict[str, Any] = default_demo_persona()
 
 
 MOCK_SCENARIO_RESULTS: dict[str, dict[str, dict[str, Any]]] = {
@@ -248,6 +266,8 @@ def list_demo_scenarios() -> list[dict[str, str]]:
     return [
         {"scenario": "fine_notice", "label": "과태료/이의신청 mock 흐름"},
         {"scenario": "fault_ratio", "label": "과실비율 mock 흐름"},
+        {"scenario": "law_question", "label": "법령 근거 질문 mock 흐름"},
+        {"scenario": "report_redownload", "label": "저장 리포트 재다운로드 mock 흐름"},
     ]
 
 
@@ -259,15 +279,44 @@ def create_session(user_id: str | None = None) -> dict[str, Any]:
         "status": "draft",
         "created_at": _now_iso(),
         "available_scenarios": list_demo_scenarios(),
+        "available_personas": list_demo_personas(),
     }
 
 
 def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
     payload = resolve_attachment_references(payload)
-    scenario = payload.get("mock_scenario") or _infer_scenario(payload)
-    requested_status = payload.get("mock_status") or _infer_status(payload)
+    persona_run = _persona_run_for_payload(payload)
+    scenario = payload.get("mock_scenario") or (
+        persona_run.get("scenario") if persona_run else _infer_scenario(payload)
+    )
+    if persona_run:
+        scenario = persona_run["scenario"]
+    supervisor_state = build_supervisor_state_with_optional_llm(
+        payload=payload,
+        scenario=scenario,
+        fallback_builder=_build_supervisor_conversation_state,
+    )
+    requested_status = payload.get("mock_status") or (
+        "success"
+        if persona_run
+        else _infer_status(
+            payload,
+            scenario=scenario,
+            supervisor_state=supervisor_state,
+        )
+    )
     scenario_fixtures = MOCK_SCENARIO_RESULTS.get(scenario, MOCK_SCENARIO_RESULTS["fine_notice"])
     fixture = deepcopy(scenario_fixtures.get(requested_status, scenario_fixtures["success"]))
+    if persona_run:
+        _apply_persona_run(fixture, persona_run)
+    else:
+        _apply_supervisor_conversation_state(
+            fixture,
+            supervisor_state=supervisor_state,
+            scenario=scenario,
+            requested_status=requested_status,
+            use_dynamic_sequence=not bool(payload.get("mock_status")),
+        )
     _append_attachment_resolution_limitations(fixture, payload)
     message_id = f"msg_{uuid4().hex[:12]}"
     session_id = payload.get("session_id") or f"ses_{uuid4().hex[:12]}"
@@ -281,6 +330,8 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
             "status": fixture["progress"]["status"],
             "created_at": _now_iso(),
             "attachments": deepcopy(payload.get("attachments", [])),
+            "blocked_attachments": deepcopy(payload.get("blocked_attachments", [])),
+            "attachment_scan_policy": deepcopy(payload.get("attachment_scan_policy", {})),
             "attachment_resolution": deepcopy(payload.get("attachment_resolution", {})),
             "analysis_plan": build_analysis_plan(
                 scenario=scenario,
@@ -290,10 +341,706 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
                 message_id=message_id,
                 routing_intent=routing_intent,
                 pending_questions=fixture.get("pending_questions", []),
+                supervisor_state=fixture.get("supervisor_state") or supervisor_state,
+                persona_run=persona_run,
             ),
         }
     )
     return fixture
+
+
+def _persona_run_for_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    persona_id = str(payload.get("persona_id") or "").strip()
+    user_text = str(payload.get("user_text") or "")
+    wants_persona = persona_id in demo_persona_ids() or any(
+        keyword in user_text for keyword in ("페르소나", "데모", "샘플 상담", "끝까지 진행")
+    )
+    if not wants_persona:
+        return None
+
+    persona_run = get_demo_persona(persona_id) or default_demo_persona()
+    persona_run["requested_by"] = {
+        "user_text": user_text,
+        "persona_id": persona_id or DEMO_PERSONA_ID,
+    }
+    return persona_run
+
+
+def _apply_persona_run(fixture: dict[str, Any], persona_run: dict[str, Any]) -> None:
+    persona = persona_run["persona"]
+    snapshot = persona_run["case_snapshot"]
+    fixture["assistant_message"] = (
+        f"{persona['name']} 님 사례로 상담을 끝까지 시뮬레이션했습니다. "
+        f"현재 단계는 {persona_run['progress_label']}"
+    )
+    fixture["case_status"] = f"persona_{persona_run['stage']}"
+    fixture["persona_run"] = persona_run
+    fixture["supervisor_state"] = _persona_supervisor_state(persona_run)
+    fixture["reporting_payload"] = _persona_reporting_payload(persona_run)
+    fixture.setdefault("structured_result", {})
+    fixture["structured_result"].update(
+        {
+            "persona_id": persona["persona_id"],
+            "persona_name": persona["name"],
+            "case_type": persona["case_type"],
+            "notice_type": snapshot.get("notice_type"),
+            "scenario": persona_run["scenario"],
+            "routing_intent": persona_run["routing_intent"],
+            "expected_nodes": deepcopy(persona_run["expected_nodes"]),
+            "report_action_ready": bool(persona_run.get("report_action_ready")),
+            "case_snapshot": deepcopy(snapshot),
+        }
+    )
+    fixture["cards"] = deepcopy(persona_run["cards"]) + fixture.get("cards", [])
+    fixture["pending_questions"] = deepcopy(persona_run.get("pending_questions", []))
+    if not persona_run.get("report_action_ready"):
+        fixture["report_links"] = []
+    fixture.setdefault("limitations", [])
+    fixture["limitations"].append(
+        "페르소나 상담은 실제 Agent 실행 전 화면/대화 흐름 검증용 시뮬레이션입니다."
+    )
+
+
+def _persona_supervisor_state(persona_run: dict[str, Any]) -> dict[str, Any]:
+    snapshot = persona_run["case_snapshot"]
+    packages = [
+        _agent_input_package(
+            node_code,
+            _owner_for_persona_node(node_code),
+            {
+                "persona_id": persona_run["persona"]["persona_id"],
+                "scenario": persona_run["scenario"],
+                "case_snapshot": deepcopy(snapshot),
+                "sample_user_text": persona_run["sample_user_text"],
+            },
+            [],
+        )
+        for node_code in persona_run["expected_nodes"]
+    ]
+    pending_questions = deepcopy(persona_run.get("pending_questions", []))
+    return {
+        "contract_version": "supervisor_conversation_state.v1",
+        "scenario": persona_run["scenario"],
+        "stage": persona_run["stage"],
+        "conversation_turn_count": len(persona_run.get("turns", [])),
+        "conversation_summary": persona_run["progress_label"],
+        "collected_facts": _persona_collected_facts(snapshot),
+        "missing_fields": [],
+        "next_questions": pending_questions,
+        "agent_input_packages": packages,
+        "reporting_payload": _persona_reporting_payload(persona_run),
+        "llm": {
+            "status": "persona_fixture",
+            "reason": "real_agents_not_connected",
+            "provider": "mock_contract",
+            "model": "persona_catalog",
+        },
+    }
+
+
+def _persona_reporting_payload(persona_run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contract_version": "reporting_payload.v1",
+        "scenario": persona_run["scenario"],
+        "stage": persona_run["stage"],
+        "title": f"{persona_run['persona']['case_type']} 리포트",
+        "summary": persona_run["progress_label"],
+        "sections": [
+            {
+                "title": "페르소나",
+                "items": [
+                    {
+                        "field": "persona",
+                        "label": persona_run["persona"]["name"],
+                        "value": persona_run["persona"]["goal"],
+                    }
+                ],
+            },
+            {
+                "title": "사건 스냅샷",
+                "items": _persona_collected_facts(persona_run["case_snapshot"]),
+            },
+            {
+                "title": "Agent 전달 입력",
+                "items": [
+                    {
+                        "node_code": node_code,
+                        "owner": _owner_for_persona_node(node_code),
+                        "status": "ready",
+                        "missing_fields": [],
+                    }
+                    for node_code in persona_run["expected_nodes"]
+                ],
+            },
+        ],
+    }
+
+
+def _persona_collected_facts(snapshot: dict[str, Any]) -> list[dict[str, str]]:
+    labels = {
+        "notice_type": "유형",
+        "notice_amount": "금액",
+        "notice_received_at": "고지 수령일",
+        "incident_at": "일시",
+        "location": "장소",
+        "claimed_fact": "주장",
+        "user_context": "사용자 맥락",
+    }
+    return [
+        {"field": field, "label": labels.get(field, field), "value": str(value)}
+        for field, value in snapshot.items()
+        if value
+    ]
+
+
+def _owner_for_persona_node(node_code: str) -> str:
+    return {
+        "input_context_validation": "hi20260204-maker",
+        "fine_notice_analysis": "workzion2",
+        "law_ground_search": "techshin31",
+        "objection_report_generation": "hi20260204-maker",
+        "text_ml_case_search": "leejaegang27",
+        "vision_media_analysis": "ohjuheecode",
+        "agent_result_validation": "hi20260204-maker",
+    }.get(node_code, "hi20260204-maker")
+
+
+def _apply_supervisor_conversation_state(
+    fixture: dict[str, Any],
+    *,
+    supervisor_state: dict[str, Any],
+    scenario: str,
+    requested_status: str,
+    use_dynamic_sequence: bool,
+) -> None:
+    fixture["supervisor_state"] = supervisor_state
+    fixture["reporting_payload"] = supervisor_state["reporting_payload"]
+    fixture.setdefault("structured_result", {})
+    fixture["structured_result"].update(
+        {
+            "supervisor_stage": supervisor_state["stage"],
+            "collected_facts": supervisor_state["collected_facts"],
+            "missing_fields": supervisor_state["missing_fields"],
+            "agent_input_packages": supervisor_state["agent_input_packages"],
+        }
+    )
+    fixture["cards"] = _supervisor_cards(supervisor_state, scenario) + fixture.get("cards", [])
+
+    if not use_dynamic_sequence:
+        return
+
+    if supervisor_state["stage"] == "need_more_input" and requested_status != "success":
+        first_question = supervisor_state["next_questions"][0]["question"]
+        fixture["assistant_message"] = (
+            "지금까지 대화를 Supervisor가 Agent 입력 스키마 초안으로 정리했습니다. "
+            f"다음 분석으로 넘기기 전에 확인이 필요합니다. {first_question}"
+        )
+        fixture["case_status"] = "needs_more_input"
+        fixture["pending_questions"] = deepcopy(supervisor_state["next_questions"])
+        fixture["report_links"] = []
+        fixture["progress"] = {
+            "status": "partial",
+            "active_node": "missing_input_question",
+            "message": "Supervisor가 부족 입력을 확인하고 역질문을 생성했습니다.",
+        }
+        return
+
+    fixture["assistant_message"] = (
+        "대화 내용을 Supervisor가 Agent 입력 스키마로 정리했고, "
+        "각 Agent 결과 envelope를 리포팅 화면에 반영할 수 있는 형태로 병합했습니다."
+    )
+    fixture["case_status"] = "analysis_completed"
+    fixture["pending_questions"] = deepcopy(supervisor_state["next_questions"])
+    fixture["progress"] = {
+        "status": fixture.get("progress", {}).get("status", "success"),
+        "active_node": "final_response_merge",
+        "message": "Supervisor handoff와 reporting payload가 준비되었습니다.",
+    }
+
+
+def _build_supervisor_conversation_state(
+    payload: dict[str, Any],
+    scenario: str,
+) -> dict[str, Any]:
+    turns = _conversation_turns(payload)
+    conversation_text = _conversation_text_from_turns(turns)
+    facts = _extract_supervisor_facts(conversation_text, payload, scenario)
+    missing_fields = _missing_fields_for_conversation(scenario, facts)
+    slot_state = _slot_state_for_facts(
+        scenario=scenario,
+        facts=facts,
+        turns=turns,
+        missing_fields=missing_fields,
+    )
+    next_questions = _next_questions_for_missing_fields(scenario, missing_fields)
+    agent_input_packages = _agent_input_packages_for_scenario(
+        scenario,
+        facts=facts,
+        payload=payload,
+        missing_fields=missing_fields,
+        slot_state=slot_state,
+    )
+    stage = "agent_execution_ready" if not missing_fields else "need_more_input"
+    collected_facts = _collected_fact_items(facts, slot_state=slot_state)
+
+    return {
+        "contract_version": "supervisor_conversation.v1",
+        "stage": stage,
+        "conversation_turn_count": len(turns),
+        "conversation_summary": _conversation_summary(conversation_text, scenario),
+        "slot_state": slot_state,
+        "collected_facts": collected_facts,
+        "missing_fields": missing_fields,
+        "next_questions": next_questions,
+        "agent_input_packages": agent_input_packages,
+        "reporting_payload": _reporting_payload(
+            scenario=scenario,
+            stage=stage,
+            facts=facts,
+            missing_fields=missing_fields,
+            agent_input_packages=agent_input_packages,
+            slot_state=slot_state,
+        ),
+    }
+
+
+def _conversation_turns(payload: dict[str, Any]) -> list[dict[str, str]]:
+    turns: list[dict[str, str]] = []
+    raw_turns = payload.get("conversation_history")
+    if isinstance(raw_turns, list):
+        for item in raw_turns:
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or item.get("message") or "").strip()
+            if not content:
+                continue
+            role = str(item.get("role") or "user")
+            turns.append({"role": role, "content": content})
+
+    user_text = str(payload.get("user_text") or "").strip()
+    if user_text and (not turns or turns[-1]["content"] != user_text):
+        turns.append({"role": "user", "content": user_text})
+    return turns
+
+
+def _conversation_text(payload: dict[str, Any]) -> str:
+    return _conversation_text_from_turns(_conversation_turns(payload))
+
+
+def _conversation_text_from_turns(turns: list[dict[str, str]]) -> str:
+    return "\n".join(turn["content"] for turn in turns if turn.get("content"))
+
+
+def _extract_supervisor_facts(
+    conversation_text: str,
+    payload: dict[str, Any],
+    scenario: str,
+) -> dict[str, Any]:
+    attachments = payload.get("attachments", [])
+    facts: dict[str, Any] = {
+        "scenario": scenario,
+        "raw_conversation": conversation_text,
+        "attachments": deepcopy(attachments),
+        "attachment_count": len(attachments),
+        "evidence_status": _evidence_status(conversation_text, attachments),
+    }
+
+    if scenario == "law_question":
+        facts.update(
+            {
+                "law_query": _sentence_with_keywords(
+                    conversation_text,
+                    ("법령", "조문", "근거", "도로교통법", "시행령", "의견제출", "과태료"),
+                ),
+                "violation_text": _sentence_with_keywords(
+                    conversation_text,
+                    ("정차", "주차", "위반", "단속", "과태료", "범칙금", "사고"),
+                ),
+            }
+        )
+        return facts
+
+    if scenario == "report_redownload":
+        facts.update(
+            {
+                "report_request": _sentence_with_keywords(
+                    conversation_text,
+                    ("리포트", "보고서", "다운로드", "내려받", "저장", "내 사건"),
+                ),
+            }
+        )
+        return facts
+
+    if scenario == "fault_ratio":
+        facts.update(
+            {
+                "accident_context": _sentence_with_keywords(
+                    conversation_text,
+                    ("사고", "접촉", "충돌", "보험", "과실", "교차로", "차로"),
+                ),
+                "road_context": _sentence_with_keywords(
+                    conversation_text,
+                    ("교차로", "신호", "차로", "횡단보도", "주차장", "도로"),
+                ),
+                "movement_context": _sentence_with_keywords(
+                    conversation_text,
+                    ("직진", "좌회전", "우회전", "진입", "정차", "후진", "차선"),
+                ),
+            }
+        )
+        return facts
+
+    facts.update(
+        {
+            "notice_or_disposition": _sentence_with_keywords(
+                conversation_text,
+                ("고지서", "과태료", "범칙금", "통지서", "납부", "위반"),
+            ),
+            "notice_amount": _extract_amount(conversation_text),
+            "incident_at": _extract_datetime_hint(conversation_text),
+            "location": _sentence_with_keywords(
+                conversation_text,
+                ("학교", "보호구역", "도로", "앞", "교차로", "차로", "구역"),
+            ),
+            "user_facts": _sentence_with_keywords(
+                conversation_text,
+                ("때문", "갑자기", "비상", "정차", "구토", "아파", "억울", "사유"),
+            ),
+        }
+    )
+    return facts
+
+
+def _missing_fields_for_conversation(
+    scenario: str,
+    facts: dict[str, Any],
+) -> list[dict[str, str]]:
+    if scenario == "law_question":
+        checks = [
+            ("law_query", "법령 질문"),
+        ]
+    elif scenario == "report_redownload":
+        checks = [
+            ("report_request", "리포트 재다운로드 요청"),
+        ]
+    elif scenario == "fault_ratio":
+        checks = [
+            ("accident_context", "사고 상황"),
+            ("movement_context", "각 차량 진행 방향"),
+            ("evidence_status", "블랙박스·사진·보험 접수 등 증빙 보유 여부"),
+        ]
+    else:
+        checks = [
+            ("notice_or_disposition", "고지서 또는 처분 내용"),
+            ("user_facts", "이의제기 사유와 당시 상황"),
+            ("evidence_status", "고지서·블랙박스·영수증 등 증빙 보유 여부"),
+        ]
+
+    return [
+        {"field": field, "label": label}
+        for field, label in checks
+        if not facts.get(field)
+    ]
+
+
+def _next_questions_for_missing_fields(
+    scenario: str,
+    missing_fields: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    fine_questions = {
+        "notice_or_disposition": "고지서에 적힌 위반 일시, 장소, 금액 또는 처분명을 알려 주세요.",
+        "user_facts": "이의제기를 하고 싶은 이유와 당시 상황을 한두 문장으로 알려 주세요.",
+        "evidence_status": "고지서 사진, 블랙박스, 영수증, 통화기록처럼 갖고 있는 자료가 있나요?",
+    }
+    fault_questions = {
+        "accident_context": "사고 장소와 어떤 상황에서 부딪혔는지 먼저 설명해 주세요.",
+        "movement_context": "내 차와 상대 차가 각각 직진, 좌회전, 진입, 정차 중 무엇을 하고 있었나요?",
+        "evidence_status": "블랙박스 원본, 현장 사진, 보험사 접수 내역 중 보유한 자료가 있나요?",
+    }
+    law_questions = {
+        "law_query": "확인하려는 법령 근거나 위반 내용을 한 문장으로 알려 주세요.",
+    }
+    report_questions = {
+        "report_request": "다시 내려받을 리포트나 사건을 식별할 수 있는 정보를 알려 주세요.",
+    }
+    if scenario == "fault_ratio":
+        question_map = fault_questions
+    elif scenario == "law_question":
+        question_map = law_questions
+    elif scenario == "report_redownload":
+        question_map = report_questions
+    else:
+        question_map = fine_questions
+    return [
+        {
+            "field": item["field"],
+            "question": question_map.get(item["field"], f"{item['label']} 정보를 보완해 주세요."),
+        }
+        for item in missing_fields
+    ]
+
+
+def _agent_input_packages_for_scenario(
+    scenario: str,
+    *,
+    facts: dict[str, Any],
+    payload: dict[str, Any],
+    missing_fields: list[dict[str, str]],
+    slot_state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    missing_codes = {item["field"] for item in missing_fields}
+    common_payload = {
+        "conversation_summary": _conversation_summary(facts.get("raw_conversation", ""), scenario),
+        "collected_facts": _compact_facts(facts),
+        "slot_state": deepcopy(slot_state),
+        "slot_contract_version": slot_state.get("contract_version"),
+        "attachments": deepcopy(payload.get("attachments", [])),
+        "blocked_attachments": deepcopy(payload.get("blocked_attachments", [])),
+        "attachment_scan_policy": deepcopy(payload.get("attachment_scan_policy", {})),
+        "raw_user_text": payload.get("user_text"),
+    }
+
+    if scenario == "law_question":
+        return [
+            _agent_input_package(
+                "input_context_validation",
+                "hi20260204-maker",
+                common_payload,
+                [],
+            ),
+            _agent_input_package(
+                "law_ground_search",
+                "techshin31",
+                {
+                    **common_payload,
+                    "search_query": facts.get("law_query"),
+                    "violation_text": facts.get("violation_text") or facts.get("law_query"),
+                },
+                ["law_query"] if "law_query" in missing_codes else [],
+            ),
+            _agent_input_package(
+                "agent_result_validation",
+                "hi20260204-maker",
+                {**common_payload, "expected_agent_results": ["law_ground_search"]},
+                [],
+            ),
+        ]
+
+    if scenario == "report_redownload":
+        return [
+            _agent_input_package(
+                "input_context_validation",
+                "hi20260204-maker",
+                common_payload,
+                [],
+            ),
+            _agent_input_package(
+                "agent_result_validation",
+                "hi20260204-maker",
+                {
+                    **common_payload,
+                    "expected_agent_results": [],
+                    "report_request": facts.get("report_request"),
+                },
+                ["report_request"] if "report_request" in missing_codes else [],
+            ),
+        ]
+
+    if scenario == "fault_ratio":
+        return [
+            _agent_input_package(
+                "input_context_validation",
+                "hi20260204-maker",
+                common_payload,
+                [],
+            ),
+            _agent_input_package(
+                "text_ml_case_search",
+                "leejaegang27",
+                {
+                    **common_payload,
+                    "query_text": facts.get("raw_conversation"),
+                    "accident_context": facts.get("accident_context"),
+                    "road_context": facts.get("road_context"),
+                    "movement_context": facts.get("movement_context"),
+                    "evidence_status": facts.get("evidence_status"),
+                },
+                [field for field in ("accident_context", "movement_context") if field in missing_codes],
+            ),
+            _agent_input_package(
+                "law_ground_search",
+                "techshin31",
+                {
+                    **common_payload,
+                    "search_query": "교통사고 과실비율 판단 기준",
+                    "violation_text": facts.get("accident_context"),
+                },
+                ["accident_context"] if "accident_context" in missing_codes else [],
+            ),
+            _agent_input_package(
+                "agent_result_validation",
+                "hi20260204-maker",
+                {**common_payload, "expected_agent_results": ["text_ml_case_search", "law_ground_search"]},
+                [],
+            ),
+        ]
+
+    return [
+        _agent_input_package(
+            "input_context_validation",
+            "hi20260204-maker",
+            common_payload,
+            [],
+        ),
+        _agent_input_package(
+            "fine_notice_analysis",
+            "workzion2",
+            {
+                **common_payload,
+                "notice_text": facts.get("notice_or_disposition"),
+                "notice_amount": facts.get("notice_amount"),
+                "incident_at": facts.get("incident_at"),
+                "location": facts.get("location"),
+                "user_facts": facts.get("user_facts"),
+                "evidence_status": facts.get("evidence_status"),
+            },
+            [field for field in ("notice_or_disposition", "evidence_status") if field in missing_codes],
+        ),
+        _agent_input_package(
+            "law_ground_search",
+            "techshin31",
+            {
+                **common_payload,
+                "search_query": _law_search_query_for_fine_notice(facts),
+                "violation_text": facts.get("notice_or_disposition"),
+                "location_context": facts.get("location"),
+            },
+            ["notice_or_disposition"] if "notice_or_disposition" in missing_codes else [],
+        ),
+        _agent_input_package(
+            "objection_report_generation",
+            "hi20260204-maker",
+            {
+                **common_payload,
+                "draft_goal": "의견제출서 또는 이의신청서 초안",
+                "notice_analysis_result_ref": "fine_notice_analysis",
+                "law_ground_result_ref": "law_ground_search",
+                "user_facts": facts.get("user_facts"),
+                "evidence_status": facts.get("evidence_status"),
+            },
+            [field for field in ("user_facts", "evidence_status") if field in missing_codes],
+        ),
+        _agent_input_package(
+            "agent_result_validation",
+            "hi20260204-maker",
+            {
+                **common_payload,
+                "expected_agent_results": [
+                    "fine_notice_analysis",
+                    "law_ground_search",
+                    "objection_report_generation",
+                ],
+            },
+            [],
+        ),
+    ]
+
+
+def _agent_input_package(
+    node_code: str,
+    owner: str,
+    payload: dict[str, Any],
+    missing_fields: list[str],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "agent_input_schema.v1",
+        "node_code": node_code,
+        "owner": owner,
+        "status": "waiting_for_fields" if missing_fields else "ready",
+        "missing_fields": missing_fields,
+        "payload": payload,
+    }
+
+
+def _reporting_payload(
+    *,
+    scenario: str,
+    stage: str,
+    facts: dict[str, Any],
+    missing_fields: list[dict[str, str]],
+    agent_input_packages: list[dict[str, Any]],
+    slot_state: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "contract_version": "reporting_payload.v1",
+        "scenario": scenario,
+        "stage": stage,
+        "title": "Supervisor 상담 분석 리포트",
+        "summary": _conversation_summary(facts.get("raw_conversation", ""), scenario),
+        "sections": [
+            {
+                "title": "수집된 사실관계",
+                "items": _collected_fact_items(facts, slot_state=slot_state),
+            },
+            {
+                "title": "Slot filling 상태",
+                "items": _slot_state_items(slot_state),
+            },
+            {
+                "title": "역질문 필요 항목",
+                "items": missing_fields,
+            },
+            {
+                "title": "Agent 전달 입력",
+                "items": [
+                    {
+                        "node_code": package["node_code"],
+                        "owner": package["owner"],
+                        "status": package["status"],
+                        "missing_fields": package["missing_fields"],
+                    }
+                    for package in agent_input_packages
+                ],
+            },
+        ],
+    }
+
+
+def _supervisor_cards(
+    supervisor_state: dict[str, Any],
+    scenario: str,
+) -> list[dict[str, Any]]:
+    ready_count = sum(
+        1 for item in supervisor_state["agent_input_packages"] if item["status"] == "ready"
+    )
+    total_count = len(supervisor_state["agent_input_packages"])
+    return [
+        {
+            "card_type": "supervisor_summary",
+            "title": "Supervisor 대화 분석",
+            "status": "success" if supervisor_state["stage"] == "agent_execution_ready" else "partial",
+            "summary": supervisor_state["conversation_summary"],
+            "evidence_refs": [],
+        },
+        {
+            "card_type": "agent_input_schema",
+            "title": "Agent 입력 스키마",
+            "status": "success" if ready_count == total_count else "partial",
+            "summary": f"{total_count}개 노드 중 {ready_count}개 입력 패키지가 바로 실행 가능한 상태입니다.",
+            "evidence_refs": [],
+        },
+        {
+            "card_type": "reporting_preview",
+            "title": "프론트 리포팅 반영",
+            "status": "success" if not supervisor_state["missing_fields"] else "partial",
+            "summary": (
+                "리포팅 화면에 Supervisor 요약, Agent 입력, 결과 상태를 표시할 payload를 생성했습니다."
+                if scenario
+                else "리포팅 payload를 생성했습니다."
+            ),
+            "evidence_refs": [],
+        },
+    ]
 
 
 def build_analysis_plan(
@@ -305,12 +1052,21 @@ def build_analysis_plan(
     message_id: str,
     routing_intent: str,
     pending_questions: list[dict[str, Any]],
+    supervisor_state: dict[str, Any] | None = None,
+    persona_run: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create the Supervisor call plan that precedes mock Agent execution."""
 
-    steps = _plan_steps_for_scenario(scenario, requested_status)
+    steps = (
+        _plan_steps_for_persona(persona_run, requested_status)
+        if persona_run
+        else _plan_steps_for_scenario(scenario, requested_status)
+    )
     blocked_reason = _plan_blocked_reason(requested_status, pending_questions)
-    return {
+    supervisor_state = supervisor_state or {}
+    missing_fields = deepcopy(supervisor_state.get("missing_fields", []))
+    agent_input_packages = deepcopy(supervisor_state.get("agent_input_packages", []))
+    fallback_plan = {
         "plan_id": f"plan_{uuid4().hex[:12]}",
         "session_id": session_id,
         "message_id": message_id,
@@ -319,20 +1075,37 @@ def build_analysis_plan(
             "has_user_command": bool(payload.get("user_text")),
             "modalities": _input_modalities(payload),
             "attachment_purposes": _attachment_purposes(payload),
+            "conversation_turn_count": supervisor_state.get("conversation_turn_count", 0),
+            "collected_fact_count": len(supervisor_state.get("collected_facts", [])),
+            "missing_fields": missing_fields,
         },
         "required_inputs": _required_inputs_for_scenario(scenario),
+        "persona_id": persona_run["persona"]["persona_id"] if persona_run else None,
         "pending_questions": deepcopy(pending_questions),
+        "agent_input_packages": agent_input_packages,
         "steps": steps,
         "blocked_reason": blocked_reason,
         "limitations": [
             "중간발표용 mock analysis_plan이며 실제 LangGraph 실행 계획은 아닙니다."
         ],
     }
+    return build_analysis_plan_with_optional_llm(
+        payload=payload,
+        scenario=scenario,
+        requested_status=requested_status,
+        fallback_plan=fallback_plan,
+        supervisor_state=supervisor_state,
+    )
 
 
 def perform_report_action(payload: dict[str, Any]) -> dict[str, Any]:
-    action = payload.get("action", "save")
-    status = "downloaded" if action == "download" else "report_saved"
+    action = str(payload.get("action") or "save").lower()
+    if action == "download":
+        status = "downloaded"
+    elif action in {"preview", "prepare"}:
+        status = "preview_ready"
+    else:
+        status = "report_saved"
     report_id = payload.get("report_id") or f"rep_{uuid4().hex[:12]}"
     return {
         "report_id": report_id,
@@ -344,23 +1117,360 @@ def perform_report_action(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _infer_status(payload: dict[str, Any]) -> str:
-    if not payload.get("user_text") and not payload.get("attachments"):
+def _infer_status(
+    payload: dict[str, Any],
+    *,
+    scenario: str | None = None,
+    supervisor_state: dict[str, Any] | None = None,
+) -> str:
+    if not payload.get("user_text") and not payload.get("attachments") and not payload.get("conversation_history"):
         return "failed"
     if payload.get("needs_more_input"):
+        return "partial"
+    if supervisor_state and supervisor_state.get("missing_fields"):
         return "partial"
     return "success"
 
 
 def _infer_scenario(payload: dict[str, Any]) -> str:
-    text = str(payload.get("user_text") or "")
-    if "과실" in text or "사고" in text or "블랙박스" in text:
+    text = _conversation_text(payload)
+    if "리포트" in text or "다운로드" in text or "내려받" in text or "내 사건" in text:
+        return "report_redownload"
+    if "법령" in text or "조문" in text or "근거" in text or "도로교통법" in text:
+        return "law_question"
+    if "고지서" in text or "과태료" in text or "범칙금" in text or "이의" in text:
+        return "fine_notice"
+    if "과실" in text or "사고" in text or "접촉" in text or "충돌" in text:
         return "fault_ratio"
     return "fine_notice"
 
 
-def _plan_steps_for_scenario(scenario: str, requested_status: str) -> list[dict[str, Any]]:
+def _slot_labels() -> dict[str, str]:
+    return {
+        "notice_or_disposition": "고지/처분 내용",
+        "notice_amount": "금액",
+        "incident_at": "일시",
+        "location": "장소",
+        "user_facts": "사용자 주장",
+        "accident_context": "사고 상황",
+        "road_context": "도로/신호 맥락",
+        "movement_context": "차량 진행 방향",
+        "evidence_status": "증빙 보유 여부",
+        "law_query": "법령 질문",
+        "violation_text": "위반/사건 내용",
+        "report_request": "리포트 요청",
+    }
+
+
+def _collected_fact_items(
+    facts: dict[str, Any],
+    *,
+    slot_state: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    labels = _slot_labels()
+    slots = slot_state.get("slots", {}) if isinstance(slot_state, dict) else {}
+    items = []
+    for field, label in labels.items():
+        value = facts.get(field)
+        if value:
+            item: dict[str, Any] = {"field": field, "label": label, "value": str(value)}
+            slot = slots.get(field) if isinstance(slots, dict) else None
+            if isinstance(slot, dict):
+                item["confidence"] = slot.get("confidence")
+                item["source"] = slot.get("source")
+                item["editable"] = slot.get("editable")
+            items.append(item)
+    if facts.get("attachment_count"):
+        items.append(
+            {
+                "field": "attachment_count",
+                "label": "첨부 수",
+                "value": str(facts["attachment_count"]),
+            }
+        )
+    return items
+
+
+def _slot_state_for_facts(
+    *,
+    scenario: str,
+    facts: dict[str, Any],
+    turns: list[dict[str, str]],
+    missing_fields: list[dict[str, str]],
+) -> dict[str, Any]:
+    missing_codes = {item["field"] for item in missing_fields}
+    labels = _slot_labels()
+    slots: dict[str, dict[str, Any]] = {}
+
+    for field in _slot_fields_for_scenario(scenario):
+        value = facts.get(field) or ""
+        source = _slot_source_for_field(field, value, facts, turns)
+        filled = bool(value) and field not in missing_codes
+        slots[field] = {
+            "field": field,
+            "label": labels.get(field, field),
+            "value": value or None,
+            "status": "filled" if filled else "missing",
+            "required": field in _required_slot_fields_for_scenario(scenario),
+            "confidence": _slot_confidence(value, source),
+            "source": source,
+            "editable": True,
+            "update_policy": "latest_user_turn_overrides_previous_value",
+        }
+
+    return {
+        "contract_version": "slot_filling_state.v1",
+        "scenario": scenario,
+        "turn_count": len(turns),
+        "filled_fields": [field for field, slot in slots.items() if slot["status"] == "filled"],
+        "missing_fields": [field for field, slot in slots.items() if slot["status"] == "missing" and slot["required"]],
+        "slots": slots,
+        "policy": {
+            "source_required": True,
+            "confidence_required": True,
+            "user_correction_supported": True,
+            "attachments_joined_by_attachment_id": True,
+        },
+    }
+
+
+def _slot_fields_for_scenario(scenario: str) -> list[str]:
+    if scenario == "law_question":
+        return ["law_query", "violation_text", "evidence_status"]
+    if scenario == "report_redownload":
+        return ["report_request", "evidence_status"]
     if scenario == "fault_ratio":
+        return ["accident_context", "road_context", "movement_context", "evidence_status"]
+    return [
+        "notice_or_disposition",
+        "notice_amount",
+        "incident_at",
+        "location",
+        "user_facts",
+        "evidence_status",
+    ]
+
+
+def _required_slot_fields_for_scenario(scenario: str) -> set[str]:
+    if scenario == "law_question":
+        return {"law_query"}
+    if scenario == "report_redownload":
+        return {"report_request"}
+    if scenario == "fault_ratio":
+        return {"accident_context", "movement_context", "evidence_status"}
+    return {"notice_or_disposition", "user_facts", "evidence_status"}
+
+
+def _slot_source_for_field(
+    field: str,
+    value: Any,
+    facts: dict[str, Any],
+    turns: list[dict[str, str]],
+) -> dict[str, Any]:
+    attachments = facts.get("attachments") if isinstance(facts.get("attachments"), list) else []
+    if field == "evidence_status" and attachments:
+        return {
+            "type": "attachment",
+            "attachment_ids": [
+                str(item.get("attachment_id"))
+                for item in attachments
+                if isinstance(item, dict) and item.get("attachment_id")
+            ],
+        }
+
+    value_text = str(value or "").strip()
+    keywords = _slot_source_keywords(field, value_text)
+    for index, turn in enumerate(turns):
+        content = str(turn.get("content") or "")
+        if not content:
+            continue
+        if value_text and value_text in content:
+            return {
+                "type": "conversation_turn",
+                "turn_index": index,
+                "role": turn.get("role") or "user",
+                "text": content[:240],
+            }
+        if keywords and any(keyword and keyword in content for keyword in keywords):
+            return {
+                "type": "conversation_turn",
+                "turn_index": index,
+                "role": turn.get("role") or "user",
+                "text": content[:240],
+            }
+
+    return {"type": "missing"}
+
+
+def _slot_source_keywords(field: str, value_text: str) -> tuple[str, ...]:
+    if field == "notice_amount":
+        return ("만원", "원")
+    if field == "incident_at":
+        return ("월", "일", "오전", "오후", "시")
+    if field == "evidence_status":
+        return ("블랙박스", "사진", "영상", "영수증", "고지서", "통화기록", "보험", "접수")
+    if value_text:
+        return tuple(part for part in re.split(r"\s+", value_text) if len(part) >= 2)[:5]
+    return ()
+
+
+def _slot_confidence(value: Any, source: dict[str, Any]) -> float:
+    if not value:
+        return 0.0
+    source_type = source.get("type")
+    if source_type == "attachment":
+        return 0.9
+    if source_type == "conversation_turn":
+        return 0.82
+    return 0.68
+
+
+def _slot_state_items(slot_state: dict[str, Any]) -> list[dict[str, Any]]:
+    slots = slot_state.get("slots") if isinstance(slot_state, dict) else {}
+    if not isinstance(slots, dict):
+        return []
+    return [
+        {
+            "field": field,
+            "label": slot.get("label"),
+            "status": slot.get("status"),
+            "confidence": slot.get("confidence"),
+            "source_type": (slot.get("source") or {}).get("type"),
+            "editable": slot.get("editable"),
+        }
+        for field, slot in slots.items()
+        if isinstance(slot, dict)
+    ]
+
+
+def _compact_facts(facts: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in facts.items()
+        if key not in {"raw_conversation", "attachments"} and value
+    }
+
+
+def _conversation_summary(conversation_text: str, scenario: str) -> str:
+    scenario_label = {
+        "fault_ratio": "과실비율",
+        "law_question": "법령 근거",
+        "report_redownload": "리포트 재다운로드",
+    }.get(scenario, "과태료/이의신청")
+    cleaned = " ".join(conversation_text.split())
+    if not cleaned:
+        return f"{scenario_label} 상담 입력이 아직 부족합니다."
+    return f"{scenario_label} 상담으로 분류했습니다. 핵심 입력: {cleaned[:160]}"
+
+
+def _evidence_status(conversation_text: str, attachments: list[dict[str, Any]]) -> str:
+    if attachments:
+        return f"첨부 {len(attachments)}건"
+    keywords = ("블랙박스", "사진", "영상", "영수증", "고지서", "통화기록", "보험", "접수")
+    found = [keyword for keyword in keywords if keyword in conversation_text]
+    return ", ".join(found)
+
+
+def _sentence_with_keywords(conversation_text: str, keywords: tuple[str, ...]) -> str:
+    if not conversation_text:
+        return ""
+    parts = re.split(r"(?<=[.!?。]|요|다)\s+|\n+", conversation_text)
+    for part in parts:
+        stripped = part.strip()
+        if stripped and any(keyword in stripped for keyword in keywords):
+            return stripped[:240]
+    return ""
+
+
+def _extract_amount(conversation_text: str) -> str:
+    match = re.search(r"(\d{1,3}(?:,\d{3})*|\d+)\s*(만원|원)", conversation_text)
+    if not match:
+        return ""
+    return f"{match.group(1)}{match.group(2)}"
+
+
+def _extract_datetime_hint(conversation_text: str) -> str:
+    patterns = [
+        r"\d{4}[-./]\d{1,2}[-./]\d{1,2}(?:\s*\d{1,2}:\d{2})?",
+        r"\d{1,2}월\s*\d{1,2}일(?:\s*(?:오전|오후)?\s*\d{1,2}시(?:\s*\d{1,2}분)?)?",
+        r"(?:오전|오후)\s*\d{1,2}시(?:\s*\d{1,2}분)?",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, conversation_text)
+        if match:
+            return match.group(0)
+    return ""
+
+
+def _law_search_query_for_fine_notice(facts: dict[str, Any]) -> str:
+    base = facts.get("notice_or_disposition") or "교통 과태료 의견제출 이의신청"
+    location = facts.get("location")
+    if location and "보호구역" in location:
+        return f"{base} 어린이보호구역 정차 예외 긴급상황"
+    return f"{base} 의견제출 근거"
+
+
+def _plan_steps_for_persona(persona_run: dict[str, Any], requested_status: str) -> list[dict[str, Any]]:
+    expected_nodes = ["input_context_validation"] + [
+        node_code
+        for node_code in persona_run.get("expected_nodes", [])
+        if node_code != "input_context_validation"
+    ]
+    steps = []
+    previous_node: str | None = None
+    for index, node_code in enumerate(expected_nodes, start=1):
+        steps.append(
+            _step(
+                index,
+                node_code,
+                [previous_node] if previous_node else [],
+                _persona_fallback_for_node(node_code),
+            )
+        )
+        previous_node = node_code
+
+    if requested_status == "failed":
+        statuses = ["failed"] + ["skipped"] * (len(steps) - 1)
+    elif requested_status in {"partial", "pending"}:
+        statuses = ["success"] + ["partial"] + ["blocked"] * max(len(steps) - 2, 0)
+    else:
+        statuses = [
+            "success"
+            if step["node_code"] not in {"objection_report_generation", "law_ground_search", "vision_media_analysis"}
+            else "partial"
+            for step in steps
+        ]
+        if steps:
+            statuses[-1] = "success"
+
+    for step, status in zip(steps, statuses, strict=False):
+        step["status"] = status
+    return steps
+
+
+def _persona_fallback_for_node(node_code: str) -> str:
+    return {
+        "vision_media_analysis": "mock_key_frame_or_scene_summary",
+        "law_ground_search": "mock_legal_evidence_or_limitations",
+        "objection_report_generation": "mock_report_draft_or_pending_questions",
+        "text_ml_case_search": "mock_similar_case_search",
+        "agent_result_validation": "limitations",
+    }.get(node_code, "missing_input_question")
+
+
+def _plan_steps_for_scenario(scenario: str, requested_status: str) -> list[dict[str, Any]]:
+    if scenario == "law_question":
+        base_steps = [
+            _step(1, "input_context_validation", [], "missing_input_question"),
+            _step(2, "law_ground_search", ["input_context_validation"], "semantic_search_or_limitations"),
+            _step(3, "agent_result_validation", ["law_ground_search"], "limitations"),
+        ]
+    elif scenario == "report_redownload":
+        base_steps = [
+            _step(1, "input_context_validation", [], "missing_input_question"),
+            _step(2, "agent_result_validation", ["input_context_validation"], "limitations"),
+        ]
+    elif scenario == "fault_ratio":
         base_steps = [
             _step(1, "input_context_validation", [], "missing_input_question"),
             _step(2, "text_ml_case_search", ["input_context_validation"], "pending_questions"),
@@ -393,6 +1503,20 @@ def _plan_steps_for_scenario(scenario: str, requested_status: str) -> list[dict[
             "partial": ["success", "partial", "blocked", "blocked"],
             "pending": ["running", "blocked", "blocked", "blocked"],
             "failed": ["failed", "skipped", "skipped", "skipped"],
+        }
+    elif scenario == "law_question":
+        status_patterns = {
+            "success": ["success", "partial", "success"],
+            "partial": ["success", "blocked", "blocked"],
+            "pending": ["running", "blocked", "blocked"],
+            "failed": ["failed", "skipped", "skipped"],
+        }
+    elif scenario == "report_redownload":
+        status_patterns = {
+            "success": ["success", "success"],
+            "partial": ["success", "blocked"],
+            "pending": ["running", "blocked"],
+            "failed": ["failed", "skipped"],
         }
 
     statuses = status_patterns.get(requested_status, status_patterns["success"])
@@ -428,11 +1552,16 @@ def _required_inputs_for_node(node_code: str) -> list[str]:
             "user_facts",
         ],
         "text_ml_case_search": ["query_text|accident_context"],
+        "vision_media_analysis": ["attachments[purpose=accident_scene|blackbox_video|evidence]"],
         "agent_result_validation": ["agent_results"],
     }.get(node_code, [])
 
 
 def _required_inputs_for_scenario(scenario: str) -> list[str]:
+    if scenario == "law_question":
+        return ["law_code|violation_text|search_query"]
+    if scenario == "report_redownload":
+        return ["report_id|session_id|owner_identity"]
     if scenario == "fault_ratio":
         return ["accident_context", "query_text"]
     return ["fine_notice_image_or_text", "user_facts"]

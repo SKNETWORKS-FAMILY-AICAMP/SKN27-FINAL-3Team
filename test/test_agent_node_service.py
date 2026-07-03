@@ -28,6 +28,13 @@ def test_agent_node_registry_lists_all_integration_nodes():
         "agent_result_validation",
     } <= node_codes
     assert {node["node_type"] for node in nodes} >= {"agent", "supervisor_internal"}
+    fine_notice_node = next(node for node in nodes if node["node_code"] == "fine_notice_analysis")
+    assert fine_notice_node["status"] == "sync_adapter_ready"
+    assert "sync" in fine_notice_node["adapter_modes"]
+    text_ml_node = next(node for node in nodes if node["node_code"] == "text_ml_case_search")
+    vision_node = next(node for node in nodes if node["node_code"] == "vision_media_analysis")
+    assert text_ml_node["adapter_modes"] == ["mock"]
+    assert vision_node["adapter_modes"] == ["mock"]
 
 
 def test_agent_node_registry_exposes_real_adapter_contract():
@@ -310,3 +317,78 @@ def test_execute_mock_node_resolves_attachment_id_for_agent_input(monkeypatch, t
     assert resolved_attachment["purpose"] == "accident_statement"
     assert resolved_attachment["type"] == "pdf"
     assert resolved_attachment["storage_uri"] == attachment["storage_uri"]
+
+
+def test_execute_sync_fine_notice_adapter_returns_supervisor_envelope_without_image():
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "fine_notice_analysis",
+            "analysis_plan_id": "plan_sync_fine",
+            "job_id": "job_sync_fine",
+            "session_id": "ses_sync_fine",
+            "message_id": "msg_sync_fine",
+            "user_text": "고지서 분석해줘",
+        }
+    )
+
+    output = execution["agent_output"]
+
+    assert execution["execution_mode"] == "sync"
+    assert execution["adapter_context"]["execution_mode"] == "sync"
+    assert output["node_code"] == "fine_notice_analysis"
+    assert output["status"] == "failed"
+    assert output["execution_status"] == "failed"
+    assert output["structured_result"]["ocr_error"] == "이미지 없음"
+    assert output["structured_result"]["adapter_trace"]["execution_mode"] == "sync"
+    assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
+
+
+def test_execute_plan_can_mix_sync_fine_notice_with_mock_supervisor_steps():
+    plan = {
+        "plan_id": "plan_hybrid_fine",
+        "session_id": "ses_hybrid_fine",
+        "message_id": "msg_hybrid_fine",
+        "steps": [
+            {"node_code": "input_context_validation", "status": "success"},
+            {"node_code": "fine_notice_analysis", "status": "success", "execution_mode": "sync"},
+            {"node_code": "agent_result_validation", "status": "success"},
+        ],
+    }
+
+    execution = execute_mock_plan(plan, {"user_text": "고지서 분석해줘"})
+    fine_execution = next(
+        item for item in execution["executions"] if item["node_code"] == "fine_notice_analysis"
+    )
+
+    assert execution["execution_mode"] == "hybrid"
+    assert fine_execution["execution_mode"] == "sync"
+    assert fine_execution["agent_output"]["status"] == "failed"
+    assert execution["executions"][0]["execution_mode"] == "mock"
+
+
+def test_unimplemented_text_ml_and_vision_agents_remain_mock_even_when_sync_requested():
+    plan = {
+        "plan_id": "plan_mock_only_agents",
+        "session_id": "ses_mock_only_agents",
+        "message_id": "msg_mock_only_agents",
+        "steps": [
+            {"node_code": "text_ml_case_search", "status": "success", "execution_mode": "sync"},
+            {"node_code": "vision_media_analysis", "status": "success", "execution_mode": "sync"},
+        ],
+    }
+
+    execution = execute_mock_plan(
+        plan,
+        {
+            "execution_mode": "sync",
+            "user_text": "사고 과실비율과 블랙박스 장면을 분석해줘",
+        },
+    )
+
+    executions_by_node = {item["node_code"]: item for item in execution["executions"]}
+    assert execution["execution_mode"] == "mock"
+    assert executions_by_node["text_ml_case_search"]["execution_mode"] == "mock"
+    assert executions_by_node["vision_media_analysis"]["execution_mode"] == "mock"
+    assert executions_by_node["text_ml_case_search"]["adapter_context"]["execution_mode"] == "mock"
+    assert executions_by_node["vision_media_analysis"]["adapter_context"]["execution_mode"] == "mock"
