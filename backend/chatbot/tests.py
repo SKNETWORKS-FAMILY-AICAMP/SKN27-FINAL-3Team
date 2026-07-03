@@ -185,6 +185,31 @@ class ChatbotPersistenceModelTests(TestCase):
             "disabled",
         )
 
+    def test_legal_rag_smoke_fixture_loads_searchable_chunks(self):
+        output = StringIO()
+
+        call_command(
+            "load_legal_rag_smoke_fixture",
+            "--replace",
+            "--smoke-query",
+            "school zone emergency stopping fine notice",
+            "--format",
+            "json",
+            stdout=output,
+        )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "legal_rag_smoke_fixture.v1")
+        self.assertEqual(body["status"], "loaded")
+        self.assertEqual(body["loaded"]["rag_chunks"], 3)
+        self.assertEqual(body["counts"]["rag_chunks"], 3)
+        self.assertEqual(body["smoke"]["backend"], "django_rag_tables")
+        self.assertEqual(body["smoke"]["status"], "ready")
+        self.assertGreaterEqual(body["smoke"]["result_count"], 1)
+        self.assertTrue(
+            RagChunk.objects.filter(chunk_id="rag_smoke_school_zone_stop", is_searchable=True).exists()
+        )
+
     def test_progress_cache_recovers_from_postgresql_on_cache_miss(self):
         cache.clear()
         session = ChatSession.objects.create(
