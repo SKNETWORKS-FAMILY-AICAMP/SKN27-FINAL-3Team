@@ -22,6 +22,8 @@ GUEST_ALLOWED_PATHS = (
     "/api/chat/sessions/",
     "/api/chat/messages/",
     "/api/chat/save-state/",
+    "/api/files/",
+    "/api/reports/",
 )
 
 MOCK_AUTH_PROTECTED_PREFIXES = (
@@ -115,7 +117,9 @@ def _is_guest_allowed_request(request: HttpRequest, authorization_header: str | 
         return False
     if not request.headers.get("X-Guest-Id"):
         return False
-    return request.path in GUEST_ALLOWED_PATHS
+    if request.path in GUEST_ALLOWED_PATHS:
+        return True
+    return request.path.startswith("/api/reports/") and request.path.endswith("/download/")
 
 
 def _bearer_token_from_header(header_value: str | None) -> str:

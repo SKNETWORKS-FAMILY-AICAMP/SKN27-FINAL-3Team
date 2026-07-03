@@ -10,12 +10,33 @@ services:
       MOCK_REQUIRE_AUTH: "1"
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1]"
+      DJANGO_DATABASE_ENGINE: "postgres"
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-law_db}
       REDIS_URL: "redis://redis:6379/0"
       PROGRESS_CACHE_TTL_SECONDS: "300"
       OBJECT_STORAGE_PROVIDER: "mock_s3"
       OBJECT_STORAGE_BUCKET: "skn27-demo-object-storage"
       OBJECT_STORAGE_PREFIX: "canonical"
+      OBJECT_STORAGE_LOCAL_ROOT: "backend/media/mock_object_storage"
       OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: "900"
+      OBJECT_STORAGE_ENDPOINT_URL: "${OBJECT_STORAGE_ENDPOINT_URL:-}"
+      OBJECT_STORAGE_REGION: "${OBJECT_STORAGE_REGION:-}"
+      OBJECT_STORAGE_ACCESS_KEY_ID: "${OBJECT_STORAGE_ACCESS_KEY_ID:-}"
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: "${OBJECT_STORAGE_SECRET_ACCESS_KEY:-}"
+      OBJECT_STORAGE_SESSION_TOKEN: ${OBJECT_STORAGE_SESSION_TOKEN:-}
+      FILE_SCAN_PROVIDER: "${FILE_SCAN_PROVIDER:-local_policy}"
+      FILE_SCAN_CLAMAV_HOST: "${FILE_SCAN_CLAMAV_HOST:-}"
+      FILE_SCAN_CLAMAV_PORT: "${FILE_SCAN_CLAMAV_PORT:-3310}"
+      FILE_SCAN_EXTERNAL_URL: "${FILE_SCAN_EXTERNAL_URL:-}"
+      FILE_SCAN_EXTERNAL_API_KEY: ${FILE_SCAN_EXTERNAL_API_KEY:-}
+      FILE_SCAN_MAX_BYTES: "${FILE_SCAN_MAX_BYTES:-52428800}"
+      FILE_SCAN_REJECT_PII: "${FILE_SCAN_REJECT_PII:-0}"
+      FILE_SCAN_TIMEOUT_SECONDS: "${FILE_SCAN_TIMEOUT_SECONDS:-10}"
+      FILE_SCAN_EXTERNAL_INLINE_MAX_BYTES: "${FILE_SCAN_EXTERNAL_INLINE_MAX_BYTES:-5242880}"
       GOOGLE_AUTH_ALLOW_MOCK: "${GOOGLE_AUTH_ALLOW_MOCK:-1}"
       GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -23,10 +44,19 @@ services:
       APP_AUTH_ALLOW_MOCK_BEARER: "${APP_AUTH_ALLOW_MOCK_BEARER:-1}"
       APP_JWT_SECRET: ${APP_JWT_SECRET:-dev-jwt-secret-change-before-deploy}
       OAUTH_TOKEN_SECRET: ${OAUTH_TOKEN_SECRET:-dev-oauth-secret-change-before-deploy}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SUPERVISOR_LLM_ENABLED: "${SUPERVISOR_LLM_ENABLED:-0}"
+      SUPERVISOR_LLM_PROVIDER: "${SUPERVISOR_LLM_PROVIDER:-openai}"
+      SUPERVISOR_LLM_MODEL: "${SUPERVISOR_LLM_MODEL:-gpt-5.4-mini}"
+      SUPERVISOR_LLM_API_KEY: ${SUPERVISOR_LLM_API_KEY:-}
+      SUPERVISOR_LLM_BASE_URL: "${SUPERVISOR_LLM_BASE_URL:-}"
+      SUPERVISOR_LLM_TEMPERATURE: "${SUPERVISOR_LLM_TEMPERATURE:-0.1}"
+      SUPERVISOR_LLM_TIMEOUT_SECONDS: "${SUPERVISOR_LLM_TIMEOUT_SECONDS:-12}"
     ports:
       - "8000:8000"
     depends_on:
       - redis
+      - postgres
 
   frontend:
     image: node:22-alpine
@@ -49,8 +79,17 @@ services:
     ports:
       - "6379:6379"
 
+  clamav:
+    image: ${CLAMAV_IMAGE:-clamav/clamav:stable}
+    container_name: skn27-clamav
+    restart: unless-stopped
+    ports:
+      - "${CLAMAV_PORT:-3310}:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+
   postgres:
-    image: pgvector/pgvector:16-pgvector
+    image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
     container_name: skn27-postgres
     restart: unless-stopped
     ports:
@@ -91,5 +130,6 @@ services:
 volumes:
   frontend_node_modules:
   postgres_data:
+  clamav_data:
   neo4j_data:
   neo4j_logs:
