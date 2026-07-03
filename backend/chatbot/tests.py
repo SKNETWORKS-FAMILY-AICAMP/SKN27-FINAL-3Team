@@ -1298,6 +1298,123 @@ class ChatbotMockApiTests(TestCase):
             ).exists()
         )
 
+    def test_mvp_guest_chat_login_upload_scan_report_keeps_session_spine(self):
+        session_id = "ses_mvp_auth_spine"
+        guest_response = Client().post(
+            "/api/auth/guest-session/",
+            data={"session_id": session_id},
+            content_type="application/json",
+        )
+        self.assertEqual(guest_response.status_code, 200)
+        guest_id = guest_response.json()["guest"]["guest_id"]
+
+        guest_client = Client(HTTP_X_GUEST_ID=guest_id)
+        chat_response = guest_client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "conversation_save_state": "pending",
+                "user_text": "어린이보호구역 과태료 고지서를 받았습니다.",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(chat_response.status_code, 200)
+        chat_body = chat_response.json()
+        self.assertEqual(chat_body["session_id"], session_id)
+        job_id = (
+            chat_body.get("persistence", {}).get("job_id")
+            or chat_body.get("supervisor_execution", {}).get("job_id")
+            or "job_mvp_auth_spine"
+        )
+
+        login_response = Client().post(
+            "/api/auth/google/code/",
+            data={
+                "provider": "google",
+                "code": "mock_google_code:mvp-spine",
+                "purpose": "LOGIN",
+                "scope": "openid email profile",
+                "email": "mvp.spine@example.com",
+                "display_name": "MVP Spine User",
+                "guest_id": guest_id,
+                "session_id": session_id,
+            },
+            content_type="application/json",
+            HTTP_X_REQUESTED_WITH="XmlHttpRequest",
+        )
+        self.assertEqual(login_response.status_code, 200)
+        login_body = login_response.json()
+        user_id = login_body["subject"]["user_id"]
+        auth_session_id = login_body["subject"]["auth_session_id"]
+        auth_client = Client(
+            HTTP_AUTHORIZATION=f"Bearer {login_body['access_token']}",
+            HTTP_X_GUEST_ID=guest_id,
+            HTTP_X_AUTH_SESSION_ID=auth_session_id,
+        )
+
+        save_response = auth_client.post(
+            "/api/chat/save-state/",
+            data={
+                "session_id": session_id,
+                "conversation_save_state": "saved",
+                "conversation_save_source": "mvp_auth_spine_test",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(save_response.json()["conversation_save"]["conversation_save_state"], "saved")
+
+        upload_response = auth_client.post(
+            "/api/files/",
+            data={
+                "session_id": session_id,
+                "purpose": "fine_notice",
+                "filename": "notice.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": 0,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(upload_response.status_code, 200)
+        attachment = upload_response.json()["attachment"]
+        self.assertEqual(attachment["session_id"], session_id)
+
+        scan_response = auth_client.post(
+            f"/api/files/{attachment['attachment_id']}/scan/",
+            data={"session_id": session_id},
+            content_type="application/json",
+        )
+        self.assertEqual(scan_response.status_code, 200)
+        self.assertEqual(scan_response.json()["attachment"]["scan_status"], "clean")
+
+        report_response = auth_client.post(
+            "/api/reports/",
+            data={
+                "action": "save",
+                "report_id": "rep_mvp_auth_spine",
+                "job_id": job_id,
+                "session_id": session_id,
+                "report_type": "general",
+                "title": "MVP auth spine report",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        self.assertEqual(report_response.json()["persistence"]["status"], "metadata_saved")
+
+        session = ChatSession.objects.get(session_id=session_id)
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
+        report = Report.objects.get(report_id="rep_mvp_auth_spine")
+        auth_session = AuthSession.objects.get(auth_session_id=auth_session_id)
+        self.assertEqual(session.owner_id, user_id)
+        self.assertEqual(session.metadata["auth_context"]["guest_id"], guest_id)
+        self.assertEqual(uploaded_file.owner_id, user_id)
+        self.assertEqual(uploaded_file.session, session)
+        self.assertEqual(report.owner_id, user_id)
+        self.assertEqual(report.session, session)
+        self.assertEqual(auth_session.user.user_id, user_id)
+        self.assertEqual(auth_session.guest.guest_id, guest_id)
+
     def test_google_code_login_requires_popup_csrf_header(self):
         response = Client().post(
             "/api/auth/google/code/",
