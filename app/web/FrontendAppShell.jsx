@@ -91,6 +91,7 @@ export default function FrontendAppShell({
   const [isSavingConversation, setIsSavingConversation] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState(DEMO_PERSONA_ID);
   const [attachmentPurpose, setAttachmentPurpose] = useState("fine_notice");
+  const [executionMode, setExecutionMode] = useState("mock");
   const [selectedUploadFile, setSelectedUploadFile] = useState(null);
   const [uploadInputResetKey, setUploadInputResetKey] = useState(0);
   const [registeredAttachments, setRegisteredAttachments] = useState([]);
@@ -270,6 +271,7 @@ export default function FrontendAppShell({
           auth_context: activeAuthContext,
           conversation_save_state: authSessionId ? "saved" : "pending",
           user_text: trimmedQuestion,
+          execution_mode: executionMode,
           conversation_history: conversationHistory,
           attachments: registeredAttachments.map((attachment) => ({
             attachment_id: attachment.attachment_id,
@@ -512,6 +514,7 @@ export default function FrontendAppShell({
               chatMessages={chatMessages}
               currentReport={currentReport}
               demoPersonas={DEMO_PERSONAS}
+              executionMode={executionMode}
               isRegisteringAttachment={isRegisteringAttachment}
               isSubmitting={isSubmitting}
               isSavingConversation={isSavingConversation}
@@ -531,6 +534,7 @@ export default function FrontendAppShell({
               personaRun={personaRun}
               reportingPayload={reportingPayload}
               setAttachmentPurpose={setAttachmentPurpose}
+              setExecutionMode={setExecutionMode}
               setQuestion={setQuestion}
               setSelectedPersonaId={setSelectedPersonaId}
               setSelectedUploadFile={setSelectedUploadFile}
@@ -830,6 +834,7 @@ function ChatScreenV2({
   chatMessages,
   currentReport,
   demoPersonas,
+  executionMode,
   isRegisteringAttachment,
   isSavingConversation,
   isSubmitting,
@@ -849,6 +854,7 @@ function ChatScreenV2({
   personaRun,
   reportingPayload,
   setAttachmentPurpose,
+  setExecutionMode,
   setQuestion,
   setSelectedPersonaId,
   setSelectedUploadFile,
@@ -960,6 +966,20 @@ function ChatScreenV2({
                 ))}
               </div>
             )}
+            <div className="execution-mode-control" role="group" aria-label="Agent execution mode">
+              <span>Agent mode</span>
+              {["mock", "sync"].map((mode) => (
+                <button
+                  className={executionMode === mode ? "mode-option active" : "mode-option"}
+                  key={mode}
+                  onClick={() => setExecutionMode(mode)}
+                  type="button"
+                >
+                  <strong>{mode}</strong>
+                  <small>{mode === "sync" ? "fine notice adapter" : "safe mock"}</small>
+                </button>
+              ))}
+            </div>
           </section>
 
           <div className="messages">

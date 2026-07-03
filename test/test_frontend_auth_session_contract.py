@@ -86,6 +86,10 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "NodeResultPill" in shell
     assert "adapter_execution_mode" in shell
     assert "normalizeExecutionMode" in shell
+    assert "executionMode" in shell
+    assert "setExecutionMode" in shell
+    assert "execution_mode: executionMode" in shell
+    assert "execution-mode-control" in shell
 
 
 def test_vite_proxy_does_not_capture_frontend_api_client_module():
