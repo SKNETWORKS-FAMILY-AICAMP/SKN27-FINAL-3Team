@@ -405,7 +405,10 @@ def persist_chat_message_analysis_boundary(
                     "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
                     "conversation_save_state": conversation_save_state,
                     "attachments": chat_response.get("attachments", []),
+                    "blocked_attachments": chat_response.get("blocked_attachments", []),
+                    "attachment_scan_policy": chat_response.get("attachment_scan_policy", {}),
                     "attachment_resolution": chat_response.get("attachment_resolution", {}),
+                    "scan_gate": chat_response.get("scan_gate", {}),
                     "raw_payload": _safe_payload(payload),
                 },
             },
@@ -432,7 +435,10 @@ def persist_chat_message_analysis_boundary(
                     "pending_questions": chat_response.get("pending_questions", []),
                     "report_links": chat_response.get("report_links", []),
                     "attachments": chat_response.get("attachments", []),
+                    "blocked_attachments": chat_response.get("blocked_attachments", []),
+                    "attachment_scan_policy": chat_response.get("attachment_scan_policy", {}),
                     "attachment_resolution": chat_response.get("attachment_resolution", {}),
+                    "scan_gate": chat_response.get("scan_gate", {}),
                     "limitations": chat_response.get("limitations", []),
                     "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
                     "conversation_save_state": conversation_save_state,
@@ -1340,7 +1346,10 @@ def persist_analysis_job_execution(
                         "mock_scenario": job_payload.get("mock_scenario"),
                         "response_status": job_payload.get("status"),
                         "attachments": job_payload.get("attachments", []),
+                        "blocked_attachments": job_payload.get("blocked_attachments", []),
+                        "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
                         "attachment_resolution": job_payload.get("attachment_resolution", {}),
+                        "scan_gate": job_payload.get("scan_gate", {}),
                         "raw_payload": _safe_payload(payload),
                     },
                 },
@@ -1368,7 +1377,10 @@ def persist_analysis_job_execution(
                     "pending_questions": chat_response.get("pending_questions", []),
                     "report_links": chat_response.get("report_links", []),
                     "attachments": job_payload.get("attachments", []),
+                    "blocked_attachments": job_payload.get("blocked_attachments", []),
+                    "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
                     "attachment_resolution": job_payload.get("attachment_resolution", {}),
+                    "scan_gate": job_payload.get("scan_gate", {}),
                     "limitations": job_payload.get("limitations", []),
                 },
             },
@@ -1460,7 +1472,10 @@ def enqueue_analysis_job_work(
                         "mock_scenario": job_payload.get("mock_scenario"),
                         "response_status": AgentWorkItemStatus.QUEUED.value,
                         "attachments": job_payload.get("attachments", []),
+                        "blocked_attachments": job_payload.get("blocked_attachments", []),
+                        "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
                         "attachment_resolution": job_payload.get("attachment_resolution", {}),
+                        "scan_gate": job_payload.get("scan_gate", {}),
                         "raw_payload": _safe_payload(payload),
                     },
                 },
@@ -1488,7 +1503,10 @@ def enqueue_analysis_job_work(
                     "pending_questions": chat_response.get("pending_questions", []),
                     "report_links": chat_response.get("report_links", []),
                     "attachments": job_payload.get("attachments", []),
+                    "blocked_attachments": job_payload.get("blocked_attachments", []),
+                    "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
                     "attachment_resolution": job_payload.get("attachment_resolution", {}),
+                    "scan_gate": job_payload.get("scan_gate", {}),
                     "limitations": job_payload.get("limitations", []),
                     "work_queue": {
                         "contract_version": "agent_worker_queue.v1",
@@ -1558,6 +1576,7 @@ def enqueue_analysis_job_work(
         "backend": "postgresql",
         "status": AgentWorkItemStatus.QUEUED.value,
         "execution_mode": "async_worker",
+        "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "tables": [AnalysisJob._meta.db_table, AgentWorkItem._meta.db_table],
         "analysis_job_table": AnalysisJob._meta.db_table,
         "agent_work_items_table": AgentWorkItem._meta.db_table,
@@ -1683,6 +1702,7 @@ def persist_report_action(
     job = AnalysisJob.objects.filter(job_id=_text(payload.get("job_id"))).first()
     session = job.session if job else _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
     display_result = _display_result_for_job(job)
+    report_quality = _report_quality_snapshot(job, display_result, report_payload)
     report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
     source_storage_uri = _text(payload.get("storage_uri")) or f"mock://reports/{report_id}"
     object_storage = build_report_storage_reference(
@@ -1725,11 +1745,13 @@ def persist_report_action(
                 "case_id": report_payload.get("case_id"),
                 "download_url": report_payload.get("download_url"),
                 "object_storage": object_storage,
+                "report_quality": report_quality,
             },
             "metadata": {
                 "source": "canonical_report_action",
                 "action": _text(payload.get("action")) or "save",
                 "mock_status": report_payload.get("status"),
+                "report_quality": report_quality,
                 "limitations": report_payload.get("limitations", []),
                 "object_storage_status": object_storage["status"],
                 "object_storage": object_storage,
@@ -1747,6 +1769,7 @@ def persist_report_action(
         "status": "metadata_saved",
         "storage_uri": report.storage_uri,
         "object_storage": object_storage,
+        "report_quality": report_quality,
     }
 
 
@@ -2606,6 +2629,7 @@ def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
         "work_item_id": work_item.work_item_id,
         "job_id": job.job_id,
         "attempt_no": work_item.attempt_no,
+        "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "progress_cache": progress_cache,
     }
 
@@ -2719,6 +2743,7 @@ def _complete_agent_work_item(
         "work_item_id": work_item.work_item_id,
         "job_id": job.job_id,
         "attempt_no": work_item.attempt_no,
+        "progress_state": _work_item_progress_state(work_item, job_status=final_status),
         "progress_cache": progress_cache,
         "session_cache": session_cache,
         "persistence": persistence,
@@ -2799,6 +2824,7 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
         "attempt_no": work_item.attempt_no,
         "error_code": error_code,
         "retryable": can_retry,
+        "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "progress_cache": progress_cache,
     }
 
@@ -2817,6 +2843,7 @@ def _update_job_worker_state(
         "contract_version": "agent_worker_queue.v1",
         "work_item_id": work_item.work_item_id,
         "status": work_item.status,
+        "progress_state": _work_item_progress_state(work_item, job_status=status),
         "attempt_no": work_item.attempt_no,
         "max_attempts": work_item.max_attempts,
         "next_run_at": work_item.next_run_at.isoformat() if work_item.next_run_at else None,
@@ -2826,6 +2853,30 @@ def _update_job_worker_state(
     job.progress_message = _text(progress_message)
     job.metadata = metadata
     job.save(update_fields=["status", "active_node", "progress_message", "metadata", "updated_at"])
+
+
+def _work_item_progress_state(
+    work_item: AgentWorkItem,
+    *,
+    job_status: str,
+) -> dict[str, Any]:
+    state = AgentWorkItemStatus.RETRYING.value if work_item.status == AgentWorkItemStatus.RETRYING.value else work_item.status
+    if state == AgentWorkItemStatus.RETRYING.value:
+        state = "retry_waiting"
+    retry_after_seconds = 0
+    if work_item.next_run_at:
+        retry_after_seconds = max(0, int((work_item.next_run_at - timezone.now()).total_seconds()))
+    return {
+        "contract_version": "agent_worker_progress.v1",
+        "state": state,
+        "work_item_status": work_item.status,
+        "job_status": _analysis_job_status(job_status),
+        "attempt_no": work_item.attempt_no,
+        "max_attempts": work_item.max_attempts,
+        "retryable": work_item.status == AgentWorkItemStatus.RETRYING.value,
+        "retry_after_seconds": retry_after_seconds,
+        "next_run_at": work_item.next_run_at.isoformat() if work_item.next_run_at else None,
+    }
 
 
 def _persist_agent_results(
@@ -3606,12 +3657,48 @@ def _report_download_body(
     ]
     if report.job_id:
         lines.append(f"job_id: {report.job.job_id}")
+        report_quality = _dict_or_empty(report.metadata.get("report_quality"))
+        if report_quality:
+            lines.append(f"analysis_job_status: {report_quality.get('analysis_job_status')}")
+            lines.append(f"partial_report: {report_quality.get('partial_report')}")
     if report.display_result_id:
         lines.append(f"display_result_id: {report.display_result.display_result_id}")
     if report.content_summary:
         lines.append("")
         lines.append(report.content_summary)
     return "\n".join(lines) + "\n"
+
+
+def _report_quality_snapshot(
+    job: AnalysisJob | None,
+    display_result: AnalysisDisplayResult | None,
+    report_payload: dict[str, Any],
+) -> dict[str, Any]:
+    agent_results = list(job.agent_results.all()) if job else []
+    limitations = []
+    limitations.extend(_list_or_empty(report_payload.get("limitations")))
+    if display_result:
+        limitations.extend(_list_or_empty(display_result.limitations))
+    for result in agent_results:
+        limitations.extend(_list_or_empty(result.limitations))
+    agent_status_counts = _agent_status_counts(agent_results)
+    analysis_job_status = job.status if job else ""
+    partial_report = analysis_job_status in {
+        AnalysisJobStatus.PARTIAL.value,
+        AnalysisJobStatus.FAILED.value,
+    }
+    deduped_limitations = []
+    for limitation in limitations:
+        if limitation not in deduped_limitations:
+            deduped_limitations.append(limitation)
+    return {
+        "contract_version": "report_quality.v1",
+        "analysis_job_status": analysis_job_status or None,
+        "agent_status_counts": agent_status_counts,
+        "partial_report": partial_report,
+        "limitation_count": len(deduped_limitations),
+        "limitations": deduped_limitations[:12],
+    }
 
 
 def _report_object_body_for_write(

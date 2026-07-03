@@ -2163,6 +2163,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["supervisor_execution"]["node_results"], [])
         self.assertEqual(body["supervisor_execution"]["work_item"]["status"], AgentWorkItemStatus.QUEUED)
         self.assertEqual(body["persistence"]["status"], AgentWorkItemStatus.QUEUED)
+        self.assertEqual(body["persistence"]["progress_state"]["state"], "queued")
         self.assertEqual(body["work_item"]["status"], AgentWorkItemStatus.QUEUED)
 
         job = AnalysisJob.objects.get(job_id=body["work_item"]["job_id"])
@@ -2175,6 +2176,7 @@ class ChatbotMockApiTests(TestCase):
         result = process_agent_work_items(limit=1)
 
         self.assertEqual(result["processed"], 1)
+        self.assertEqual(result["work_items"][0]["progress_state"]["state"], "success")
         job.refresh_from_db()
         work_item.refresh_from_db()
         self.assertEqual(work_item.status, AgentWorkItemStatus.SUCCESS)
@@ -2518,9 +2520,12 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(work_item.attempt_no, 1)
         self.assertEqual(work_item.error_code, "RuntimeError")
         self.assertEqual(work_item.result["retry_after_seconds"], 7)
+        self.assertEqual(result["work_items"][0]["progress_state"]["state"], "retry_waiting")
+        self.assertEqual(result["work_items"][0]["progress_state"]["work_item_status"], AgentWorkItemStatus.RETRYING)
         self.assertIsNotNone(work_item.next_run_at)
         self.assertGreater(work_item.next_run_at, timezone.now())
         self.assertEqual(work_item.job.status, AnalysisJobStatus.RUNNING)
+        self.assertEqual(work_item.job.metadata["work_queue"]["progress_state"]["state"], "retry_waiting")
 
         retry_result = process_agent_work_item(work_item.work_item_id)
         self.assertEqual(retry_result["status"], "skipped")
@@ -2825,6 +2830,7 @@ class ChatbotMockApiTests(TestCase):
             data={
                 "session_id": "ses_scan_blocked",
                 "user_text": "이 첨부를 근거로 이의신청을 준비해줘.",
+                "execution_mode": "async_worker",
                 "attachments": [{"attachment_id": attachment_id}],
             },
             content_type="application/json",
@@ -2836,6 +2842,15 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["blocked_attachments"][0]["attachment_id"], attachment_id)
         self.assertEqual(body["blocked_attachments"][0]["required_action"], "wait_for_file_scan")
         self.assertEqual(body["attachment_scan_policy"]["blocked_count"], 1)
+        self.assertEqual(body["status"], "partial")
+        self.assertEqual(body["execution_mode"], "async_worker")
+        self.assertIsNone(body.get("work_item"))
+        self.assertEqual(body["scan_gate"]["worker_action"], "not_queued")
+        self.assertFalse(AgentWorkItem.objects.filter(job__session__session_id="ses_scan_blocked").exists())
+        job = AnalysisJob.objects.get(session__session_id="ses_scan_blocked")
+        self.assertEqual(job.status, AnalysisJobStatus.PARTIAL)
+        self.assertEqual(job.metadata["scan_gate"]["status"], "blocked")
+        self.assertEqual(job.metadata["blocked_attachments"][0]["attachment_id"], attachment_id)
         for package in body["analysis_plan"]["agent_input_packages"]:
             self.assertEqual(package["payload"]["attachments"], [])
             self.assertEqual(package["payload"]["blocked_attachments"][0]["attachment_id"], attachment_id)
@@ -3318,6 +3333,8 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(report_body["persistence"]["table"], "reports")
         self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
         self.assertEqual(report_body["persistence"]["object_storage"]["backend"], "object_storage")
+        self.assertEqual(report_body["persistence"]["report_quality"]["contract_version"], "report_quality.v1")
+        self.assertFalse(report_body["persistence"]["report_quality"]["partial_report"])
         self.assertEqual(report_body["object_storage"]["policy_version"], "object_storage_adapter.v1")
         self.assertEqual(report_body["object_storage"]["resource_type"], "report")
         self.assertTrue(report_body["download_url"].startswith("/api/reports/"))
@@ -3329,6 +3346,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertTrue(report.storage_uri.startswith("s3://skn27-demo-object-storage/"))
         self.assertEqual(report.metadata["source"], "canonical_report_action")
         self.assertEqual(report.metadata["object_storage_status"], "written")
+        self.assertEqual(report.metadata["report_quality"]["analysis_job_status"], job["status"])
         self.assertTrue(report.metadata["object_storage_write"]["writes_binary"])
         self.assertEqual(report.metadata["object_storage"]["backend"], "object_storage")
         self.assertEqual(report.metadata["source_storage_uri"], "mock://reports/rep_canonical_smoke")
@@ -3452,6 +3470,44 @@ class ChatbotMockApiTests(TestCase):
         report_body = response.json()
         self.assertTrue(report_body["download_url"].startswith("/api/mock/reports/"))
         self.assertFalse(Report.objects.filter(report_id="rep_mock_sidecar").exists())
+
+    def test_canonical_report_marks_partial_analysis_quality(self):
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_partial_report_quality",
+                "conversation_save_state": "saved",
+                "user_text": "Need more info but prepare report preview.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "partial",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        job_id = message_response.json()["persistence"]["job_id"]
+
+        report_response = self.client.post(
+            "/api/reports/",
+            data={
+                "action": "save",
+                "report_id": "rep_partial_report_quality",
+                "job_id": job_id,
+                "session_id": "ses_partial_report_quality",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        quality = report_response.json()["persistence"]["report_quality"]
+        self.assertEqual(quality["contract_version"], "report_quality.v1")
+        self.assertEqual(quality["analysis_job_status"], AnalysisJobStatus.PARTIAL)
+        self.assertTrue(quality["partial_report"])
+
+        report = Report.objects.get(report_id="rep_partial_report_quality")
+        self.assertTrue(report.metadata["report_quality"]["partial_report"])
+
+        download_response = self.client.get("/api/reports/rep_partial_report_quality/download/")
+        self.assertEqual(download_response.status_code, 200)
+        self.assertIn("partial_report: True", download_response.content.decode("utf-8"))
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")
