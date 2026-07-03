@@ -970,6 +970,14 @@ function ChatScreenV2({
       : [];
   const hasConversation = visibleMessages.length > 0;
   const latestAssistantIndex = latestMessageIndex(visibleMessages, "assistant");
+  const isAuthenticated = Boolean(authSessionId);
+  const uploadButtonLabel = isRegisteringAttachment
+    ? "등록 중"
+    : selectedUploadFile
+      ? isAuthenticated
+        ? "파일 업로드"
+        : "Google 로그인 후 업로드"
+      : "파일 선택 필요";
   const quickQuestions = [
     "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
     "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했고 블랙박스가 있어",
@@ -1043,15 +1051,26 @@ function ChatScreenV2({
                 <span>파일</span>
                 <input
                   key={uploadInputResetKey}
+                  accept="image/*,application/pdf,video/*"
                   type="file"
                   onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
                 />
               </label>
-              <button className="button" type="button" onClick={onRegisterAttachment} disabled={isRegisteringAttachment}>
-                {isRegisteringAttachment ? "등록 중" : selectedUploadFile ? "파일 업로드" : "metadata 등록"}
+              <button
+                className="button"
+                type="button"
+                onClick={onRegisterAttachment}
+                disabled={isRegisteringAttachment || !selectedUploadFile}
+              >
+                {uploadButtonLabel}
               </button>
               <span className="tag">{registeredAttachments.length}건 연결</span>
             </div>
+            {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
+              <p className="status-message inside" role="status">
+                자료 분석은 로그인 후 현재 상담 세션에 이어서 진행됩니다.
+              </p>
+            )}
             {pendingAuthAction && (
               <p className="status-message inside" role="status">
                 로그인 후 {pendingAuthAction.type} 작업을 같은 상담 세션으로 이어갑니다.
@@ -1419,10 +1438,10 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
         <p>{helperText}</p>
       </div>
       <div className="report-action-buttons">
-        <button className="button" type="button" onClick={() => onRunReportAction("save")} disabled={!isAuthenticated}>
+        <button className="button" type="button" onClick={() => onRunReportAction("save")}>
           {isAuthenticated ? "저장" : "로그인 후 저장"}
         </button>
-        <button className="button primary" type="button" onClick={() => onRunReportAction("download")} disabled={!isAuthenticated}>
+        <button className="button primary" type="button" onClick={() => onRunReportAction("download")}>
           {isAuthenticated ? "다운로드 준비" : "로그인 후 다운로드"}
         </button>
       </div>
