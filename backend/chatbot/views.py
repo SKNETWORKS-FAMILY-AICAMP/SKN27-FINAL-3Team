@@ -648,40 +648,53 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             },
         }
         if _uses_async_worker(identity_body):
-            node_execution = _queued_node_execution_placeholder(
-                execution_payload,
-                analysis_plan=chat_response.get("analysis_plan") or {},
-                chat_response=chat_response,
-            )
-            job_payload = _agent_plan_job_payload(
-                execution_payload,
-                {
-                    "analysis_plan": chat_response.get("analysis_plan") or {},
-                    "chat_response": chat_response,
-                    "node_execution": node_execution,
-                },
-            )
-            job_payload["status"] = "queued"
-            job_payload["active_node"] = _analysis_plan_active_node(chat_response.get("analysis_plan") or {})
-            job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
-            job_payload["node_execution"] = {}
-            persistence = enqueue_analysis_job_work(execution_payload, job_payload)
-            conversation_save_state = conversation_save_state_from_payload(identity_body)
-            chat_response["persistence"] = persistence
-            chat_response["node_execution"] = node_execution
-            chat_response["work_item"] = {
-                "contract_version": "agent_worker_queue.v1",
-                "work_item_id": persistence["work_item_id"],
-                "status": persistence["work_item_status"],
-                "job_id": persistence["job_id"],
-            }
-            chat_response["supervisor_execution"] = _supervisor_execution_response(
-                node_execution,
-                persistence=persistence,
-            )
-            chat_response["usage"] = usage
-            chat_response["execution_mode"] = "async_worker"
-            chat_response["status"] = "queued"
+            if _has_blocked_attachments(chat_response):
+                chat_response = _scan_blocked_chat_response(chat_response)
+                node_execution = _scan_blocked_node_execution(identity_body, chat_response)
+                persistence = persist_chat_message_analysis_boundary(identity_body, chat_response)
+                conversation_save_state = persistence["conversation_save_state"]
+                chat_response["persistence"] = persistence
+                chat_response["supervisor_execution"] = _supervisor_execution_response(
+                    node_execution,
+                    persistence=persistence,
+                )
+                chat_response["usage"] = usage
+                chat_response["execution_mode"] = "async_worker"
+            else:
+                node_execution = _queued_node_execution_placeholder(
+                    execution_payload,
+                    analysis_plan=chat_response.get("analysis_plan") or {},
+                    chat_response=chat_response,
+                )
+                job_payload = _agent_plan_job_payload(
+                    execution_payload,
+                    {
+                        "analysis_plan": chat_response.get("analysis_plan") or {},
+                        "chat_response": chat_response,
+                        "node_execution": node_execution,
+                    },
+                )
+                job_payload["status"] = "queued"
+                job_payload["active_node"] = _analysis_plan_active_node(chat_response.get("analysis_plan") or {})
+                job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
+                job_payload["node_execution"] = {}
+                persistence = enqueue_analysis_job_work(execution_payload, job_payload)
+                conversation_save_state = conversation_save_state_from_payload(identity_body)
+                chat_response["persistence"] = persistence
+                chat_response["node_execution"] = node_execution
+                chat_response["work_item"] = {
+                    "contract_version": "agent_worker_queue.v1",
+                    "work_item_id": persistence["work_item_id"],
+                    "status": persistence["work_item_status"],
+                    "job_id": persistence["job_id"],
+                }
+                chat_response["supervisor_execution"] = _supervisor_execution_response(
+                    node_execution,
+                    persistence=persistence,
+                )
+                chat_response["usage"] = usage
+                chat_response["execution_mode"] = "async_worker"
+                chat_response["status"] = "queued"
         else:
             persistence_seed = persist_chat_message_analysis_boundary(identity_body, chat_response)
             execution_payload["job_id"] = persistence_seed["job_id"]
@@ -1271,6 +1284,72 @@ def _history_source(request: HttpRequest, node_code: str | None = None) -> dict[
     )
 
 
+def _has_blocked_attachments(chat_response: dict[str, object]) -> bool:
+    blocked = chat_response.get("blocked_attachments")
+    return isinstance(blocked, list) and bool(blocked)
+
+
+def _scan_blocked_chat_response(chat_response: dict[str, object]) -> dict[str, object]:
+    response = dict(chat_response)
+    blocked = response.get("blocked_attachments") if isinstance(response.get("blocked_attachments"), list) else []
+    waiting = [
+        item for item in blocked
+        if isinstance(item, dict) and item.get("required_action") == "wait_for_file_scan"
+    ]
+    rejected = [
+        item for item in blocked
+        if isinstance(item, dict) and item.get("required_action") == "replace_file"
+    ]
+    response["status"] = "partial"
+    progress = dict(response.get("progress") or {})
+    progress.update(
+        {
+            "status": "partial",
+            "active_node": "input_context_validation",
+            "message": "Attachment scan gate blocked agent execution.",
+        }
+    )
+    response["progress"] = progress
+    response["work_item"] = None
+    response.setdefault("limitations", [])
+    if waiting:
+        response["limitations"].append("Some attachments are still waiting for file scan before agent execution.")
+    if rejected:
+        response["limitations"].append("Rejected attachments were excluded from agent execution and must be replaced.")
+    response["scan_gate"] = {
+        "contract_version": "attachment_scan_gate.v1",
+        "status": "blocked",
+        "blocked_count": len(blocked),
+        "waiting_count": len(waiting),
+        "rejected_count": len(rejected),
+        "worker_action": "not_queued",
+    }
+    return response
+
+
+def _scan_blocked_node_execution(
+    body: dict[str, object],
+    chat_response: dict[str, object],
+) -> dict[str, object]:
+    message_id = str(chat_response.get("message_id") or body.get("message_id") or "")
+    job_id = str(body.get("job_id") or "")
+    if not job_id and message_id.startswith("msg_"):
+        job_id = f"job_{message_id.removeprefix('msg_')}"
+    return {
+        "execution_mode": "async_worker",
+        "status": "partial",
+        "job_id": job_id,
+        "plan_id": (chat_response.get("analysis_plan") or {}).get("plan_id")
+        if isinstance(chat_response.get("analysis_plan"), dict)
+        else None,
+        "session_id": chat_response.get("session_id") or body.get("session_id"),
+        "message_id": message_id,
+        "executions": [],
+        "status_counts": {"blocked": 1},
+        "completed_node_codes": [],
+    }
+
+
 def _agent_plan_job_payload(body: dict[str, object], response: dict[str, object]) -> dict[str, object]:
     node_execution = response.get("node_execution") if isinstance(response.get("node_execution"), dict) else {}
     chat_response = response.get("chat_response") if isinstance(response.get("chat_response"), dict) else {}
@@ -1303,6 +1382,11 @@ def _agent_plan_job_payload(body: dict[str, object], response: dict[str, object]
         "node_execution": node_execution,
         "status_counts": node_execution.get("status_counts") or {},
         "attachments": chat_response.get("attachments") or body.get("attachments") or [],
+        "blocked_attachments": chat_response.get("blocked_attachments") or body.get("blocked_attachments") or [],
+        "attachment_scan_policy": chat_response.get("attachment_scan_policy") or body.get("attachment_scan_policy") or {},
+        "attachment_resolution": chat_response.get("attachment_resolution") or body.get("attachment_resolution") or {},
+        "scan_gate": chat_response.get("scan_gate") or body.get("scan_gate") or {},
+        "limitations": chat_response.get("limitations") or [],
     }
 
 

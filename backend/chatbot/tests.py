@@ -2825,6 +2825,7 @@ class ChatbotMockApiTests(TestCase):
             data={
                 "session_id": "ses_scan_blocked",
                 "user_text": "이 첨부를 근거로 이의신청을 준비해줘.",
+                "execution_mode": "async_worker",
                 "attachments": [{"attachment_id": attachment_id}],
             },
             content_type="application/json",
@@ -2836,6 +2837,15 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["blocked_attachments"][0]["attachment_id"], attachment_id)
         self.assertEqual(body["blocked_attachments"][0]["required_action"], "wait_for_file_scan")
         self.assertEqual(body["attachment_scan_policy"]["blocked_count"], 1)
+        self.assertEqual(body["status"], "partial")
+        self.assertEqual(body["execution_mode"], "async_worker")
+        self.assertIsNone(body.get("work_item"))
+        self.assertEqual(body["scan_gate"]["worker_action"], "not_queued")
+        self.assertFalse(AgentWorkItem.objects.filter(job__session__session_id="ses_scan_blocked").exists())
+        job = AnalysisJob.objects.get(session__session_id="ses_scan_blocked")
+        self.assertEqual(job.status, AnalysisJobStatus.PARTIAL)
+        self.assertEqual(job.metadata["scan_gate"]["status"], "blocked")
+        self.assertEqual(job.metadata["blocked_attachments"][0]["attachment_id"], attachment_id)
         for package in body["analysis_plan"]["agent_input_packages"]:
             self.assertEqual(package["payload"]["attachments"], [])
             self.assertEqual(package["payload"]["blocked_attachments"][0]["attachment_id"], attachment_id)
