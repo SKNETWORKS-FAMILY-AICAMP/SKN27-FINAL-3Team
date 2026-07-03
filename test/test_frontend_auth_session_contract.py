@@ -34,7 +34,9 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
         "createFrontendApi",
         "buildRequestHeaders",
         "persistAuthSession",
+        "readStoredAuthSession",
         "clearStoredAuthSession",
+        "AUTH_SESSION_STORAGE_KEY",
     ]
 
     missing = [token for token in required_tokens if token not in content]
@@ -65,12 +67,21 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
         "getMyPageSummary",
         "listHistoryEvents",
         "readStoredAuthToken",
+        "readStoredAuthSession",
     ]:
         assert token in shell or token in api_client
 
     assert "fine-result" not in shell
     assert "FineResult" not in shell
     assert 'const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";' in shell
+    assert "storedAuthSession.session_id" in shell
+    assert "storedAuthSession.guest_id" in shell
+    assert "storedAuthSession.auth_session_id" in shell
+    assert "loginAndBindCurrentSession" in shell
+    assert "ensureGuestSession" in shell
+    assert "pendingAuthAction" in shell
+    assert 'source: "attachment_upload"' in shell
+    assert "report_${action}" in shell
     assert "authSessionId={authSessionId}" in shell
     assert "authToken: effectiveAuthToken" in shell
     assert "conversation_history" in shell
