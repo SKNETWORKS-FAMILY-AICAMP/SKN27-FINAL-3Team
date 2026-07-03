@@ -122,6 +122,16 @@ The command expects:
 - `output/law_ingestion/chunks/law_chunks.jsonl`
 - `output/law_ingestion/embeddings/law_embeddings_e5_large.jsonl`
 
+For a local no-pgvector smoke, load the tiny Django fallback fixture and run a
+representative query:
+
+```powershell
+python backend\manage.py load_legal_rag_smoke_fixture --replace --format text --smoke-query "school zone emergency stopping fine notice"
+```
+
+The fixture lives at `storage/rag/legal_rag_smoke_chunks.jsonl` and should keep
+`rag_chunks` non-zero even when pgvector ETL artifacts are not available yet.
+
 ## 5. Optional Warnings
 
 These settings may remain warning-level during a staged rollout:
