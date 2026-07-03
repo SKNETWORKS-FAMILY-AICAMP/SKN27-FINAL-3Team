@@ -1945,6 +1945,48 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(invocation.execution_mode, "sync")
         self.assertEqual(invocation.metadata["adapter_context"]["execution_mode"], "sync")
 
+    def test_canonical_chat_message_can_queue_worker_progress_flow(self):
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_chat_worker_progress",
+                "conversation_save_state": "pending",
+                "user_text": "Queue this chat message through the worker progress flow.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "execution_mode": "async_worker",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["execution_mode"], "async_worker")
+        self.assertEqual(body["status"], "queued")
+        self.assertEqual(body["node_execution"]["status"], "queued")
+        self.assertEqual(body["supervisor_execution"]["execution_mode"], "async_worker")
+        self.assertEqual(body["supervisor_execution"]["node_results"], [])
+        self.assertEqual(body["supervisor_execution"]["work_item"]["status"], AgentWorkItemStatus.QUEUED)
+        self.assertEqual(body["persistence"]["status"], AgentWorkItemStatus.QUEUED)
+        self.assertEqual(body["work_item"]["status"], AgentWorkItemStatus.QUEUED)
+
+        job = AnalysisJob.objects.get(job_id=body["work_item"]["job_id"])
+        work_item = AgentWorkItem.objects.get(work_item_id=body["work_item"]["work_item_id"])
+        self.assertEqual(job.status, AnalysisJobStatus.QUEUED)
+        self.assertEqual(work_item.status, AgentWorkItemStatus.QUEUED)
+        self.assertEqual(job.agent_results.count(), 0)
+        self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], AnalysisJobStatus.QUEUED)
+
+        result = process_agent_work_items(limit=1)
+
+        self.assertEqual(result["processed"], 1)
+        job.refresh_from_db()
+        work_item.refresh_from_db()
+        self.assertEqual(work_item.status, AgentWorkItemStatus.SUCCESS)
+        self.assertIn(job.status, {AnalysisJobStatus.SUCCESS, AnalysisJobStatus.PARTIAL})
+        self.assertGreater(job.agent_results.count(), 0)
+        self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], job.status)
+
     def test_canonical_chat_sync_request_keeps_unimplemented_agents_mock(self):
         response = self.client.post(
             "/api/chat/messages/",

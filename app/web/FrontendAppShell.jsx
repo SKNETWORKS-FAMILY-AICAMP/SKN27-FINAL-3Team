@@ -1193,6 +1193,7 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
   const questions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
   const packages = Array.isArray(supervisorState?.agent_input_packages) ? supervisorState.agent_input_packages : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
+  const workItem = supervisorExecution?.work_item || null;
 
   return (
     <section className="supervisor-flow" aria-label="Supervisor Agent 전달 흐름">
@@ -1252,6 +1253,20 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
           {nodeResults.map((node) => (
             <NodeResultPill key={node.execution_id || node.node_code} node={node} />
           ))}
+        </div>
+      )}
+
+      {workItem && nodeResults.length === 0 && (
+        <div className="node-result-list">
+          <NodeResultPill
+            node={{
+              node_code: workItem.work_item_id || workItem.job_id || "agent_worker",
+              status: workItem.status || "queued",
+              execution_mode: "async_worker",
+              adapter_execution_mode: "async_worker",
+              adapter_modes: ["async_worker"],
+            }}
+          />
         </div>
       )}
     </section>
