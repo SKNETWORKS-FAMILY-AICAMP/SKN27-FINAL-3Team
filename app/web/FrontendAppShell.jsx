@@ -183,12 +183,27 @@ export default function FrontendAppShell({
             },
             nextIdentity
           );
-      const attachment = result?.attachment;
+      let attachment = result?.attachment;
       if (attachment) {
+        try {
+          const scanResult = await api.processFileScan(
+            {
+              attachmentId: attachment.attachment_id,
+              session_id: activeSession,
+            },
+            nextIdentity
+          );
+          attachment = scanResult?.attachment || attachment;
+        } catch (_scanError) {
+          attachment = {
+            ...attachment,
+            scan_status: attachment.scan_status || "scan_pending",
+          };
+        }
         setRegisteredAttachments((items) => [...items, attachment]);
         setSelectedUploadFile(null);
         setUploadInputResetKey((value) => value + 1);
-        setStatusMessage(`${attachment.original_filename || attachment.filename || attachment.purpose} 자료를 상담 입력에 연결했습니다.`);
+        setStatusMessage(`${attachment.original_filename || attachment.filename || attachment.purpose} 자료를 상담 입력에 연결했습니다. scan=${attachment.scan_status || attachment.status}`);
       } else {
         setStatusMessage("첨부 등록 응답을 확인하지 못했습니다.");
       }
@@ -961,7 +976,7 @@ function ChatScreenV2({
                 {registeredAttachments.slice(-3).map((attachment) => (
                   <span key={attachment.attachment_id}>
                     {attachment.original_filename || attachment.filename || attachment.purpose}
-                    <em>{attachment.status}</em>
+                    <em>{attachment.scan_status || attachment.status}</em>
                   </span>
                 ))}
               </div>

@@ -2487,6 +2487,35 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(uploaded_file.metadata["scan_result"]["contract_version"], "file_scan_result.v1")
         self.assertEqual(uploaded_file.agent_handoff["scan_status"], "clean")
 
+    def test_file_scan_endpoint_marks_upload_ready_for_frontend_handoff(self):
+        response = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": "ses_scan_endpoint",
+                "purpose": "fine_notice",
+                "file": SimpleUploadedFile(
+                    "notice.txt",
+                    b"frontend scan endpoint bytes",
+                    content_type="text/plain",
+                ),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        attachment_id = response.json()["attachment"]["attachment_id"]
+
+        scan_response = self.client.post(
+            f"/api/files/{attachment_id}/scan/",
+            data={"session_id": "ses_scan_endpoint"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(scan_response.status_code, 200)
+        body = scan_response.json()
+        self.assertEqual(body["contract_version"], "file_scan_endpoint.v1")
+        self.assertEqual(body["file_scan"]["status"], "clean")
+        self.assertEqual(body["attachment"]["scan_status"], "clean")
+        self.assertEqual(body["attachment"]["status"], UploadedFileStatus.READY)
+
     def test_canonical_chat_sync_reads_ready_uploaded_fine_notice_attachment(self):
         with tempfile.TemporaryDirectory() as object_root, tempfile.TemporaryDirectory() as upload_root, override_settings(
             OBJECT_STORAGE_LOCAL_ROOT=object_root,

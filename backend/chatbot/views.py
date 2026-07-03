@@ -56,7 +56,7 @@ from chatbot.api_response import (
     is_canonical_mock_request as _is_canonical_mock_request,
     json_response as _json_response,
 )
-from chatbot.file_scan_service import apply_attachment_scan_gate
+from chatbot.file_scan_service import apply_attachment_scan_gate, scan_uploaded_file
 from chatbot.request_parsing import (
     first_upload_file as _first_upload_file,
     json_body as _json_body,
@@ -92,7 +92,7 @@ from chatbot.repositories import (
     record_usage_event,
     register_uploaded_file,
 )
-from chatbot.models import GuestIdentity, GuestIdentityStatus
+from chatbot.models import GuestIdentity, GuestIdentityStatus, UploadedFile
 from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
 
 
@@ -460,6 +460,41 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
             status=404,
         )
     return _json_response(request, {"attachment": attachment})
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def process_file_scan(request: HttpRequest, attachment_id: str) -> JsonResponse:
+    body = _json_body(request)
+    identity_payload = _request_access_payload(request, session_id=body.get("session_id"))
+    access_metadata = get_uploaded_file_access_metadata(attachment_id)
+    if access_metadata is not None:
+        access = authorize_resource_access(access_metadata, identity_payload)
+        if not access["allowed"]:
+            return _object_access_denied_response(request, access)
+
+    uploaded_file = UploadedFile.objects.filter(attachment_id=attachment_id).first()
+    if uploaded_file is None:
+        return _json_response(
+            request,
+            {
+                "error": {
+                    "code": "attachment_not_found",
+                    "message": "?붿껌??attachment metadata瑜?李얠쓣 ???놁뒿?덈떎.",
+                }
+            },
+            status=404,
+        )
+
+    scan_result = scan_uploaded_file(uploaded_file)
+    return _json_response(
+        request,
+        {
+            "contract_version": "file_scan_endpoint.v1",
+            "file_scan": scan_result,
+            "attachment": get_uploaded_file(attachment_id),
+        },
+    )
 
 
 @csrf_exempt

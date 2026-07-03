@@ -20,6 +20,7 @@ urlpatterns = [
     path("chat/messages/", views.submit_chat_message, name="canonical-submit-chat-message"),
     path("chat/save-state/", views.update_chat_save_state, name="canonical-chat-save-state"),
     path("files/", views.attachments, name="canonical-files"),
+    path("files/<str:attachment_id>/scan/", views.process_file_scan, name="canonical-file-scan"),
     path("files/<str:attachment_id>/", views.attachment_detail, name="canonical-file-detail"),
     path("analysis/jobs/", views.analysis_jobs, name="canonical-analysis-jobs"),
     path("analysis/jobs/<str:job_id>/", views.analysis_job_detail, name="canonical-analysis-job-detail"),
