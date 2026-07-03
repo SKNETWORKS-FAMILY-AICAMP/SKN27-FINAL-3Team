@@ -71,6 +71,7 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "fine-result" not in shell
     assert "FineResult" not in shell
     assert 'const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";' in shell
+    assert "authSessionId={authSessionId}" in shell
     assert "authToken: effectiveAuthToken" in shell
     assert "conversation_history" in shell
     assert "SupervisorFlowPanel" in shell
