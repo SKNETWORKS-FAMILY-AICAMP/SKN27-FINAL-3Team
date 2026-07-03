@@ -2487,6 +2487,59 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(uploaded_file.metadata["scan_result"]["contract_version"], "file_scan_result.v1")
         self.assertEqual(uploaded_file.agent_handoff["scan_status"], "clean")
 
+    def test_canonical_chat_sync_reads_ready_uploaded_fine_notice_attachment(self):
+        with tempfile.TemporaryDirectory() as object_root, tempfile.TemporaryDirectory() as upload_root, override_settings(
+            OBJECT_STORAGE_LOCAL_ROOT=object_root,
+            MOCK_UPLOAD_ROOT=upload_root,
+            FILE_SCAN_PROVIDER="local_policy",
+        ):
+            file_response = self.client.post(
+                "/api/files/",
+                data={
+                    "session_id": "ses_sync_uploaded_notice",
+                    "purpose": "fine_notice",
+                    "file": SimpleUploadedFile(
+                        "notice.txt",
+                        b"canonical fine notice bytes",
+                        content_type="text/plain",
+                    ),
+                },
+            )
+            self.assertEqual(file_response.status_code, 200)
+            attachment = file_response.json()["attachment"]
+
+            call_command("process_uploaded_file_scans", "--limit", "1", stdout=StringIO())
+            uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
+            self.assertEqual(uploaded_file.status, UploadedFileStatus.READY)
+            self.assertEqual(uploaded_file.metadata["object_storage_write"]["status"], "written")
+
+            message_response = self.client.post(
+                "/api/chat/messages/",
+                data={
+                    "session_id": "ses_sync_uploaded_notice",
+                    "user_text": "uploaded fine notice attachment sync bridge",
+                    "mock_scenario": "fine_notice",
+                    "mock_status": "success",
+                    "execution_mode": "sync",
+                    "attachments": [{"attachment_id": attachment["attachment_id"]}],
+                },
+                content_type="application/json",
+            )
+
+            self.assertEqual(message_response.status_code, 200)
+            body = message_response.json()
+            self.assertEqual(body["attachments"][0]["attachment_id"], attachment["attachment_id"])
+            self.assertEqual(body["attachments"][0]["scan_status"], "clean")
+            execution = body["supervisor_execution"]
+            node_results = {item["node_code"]: item for item in execution["node_results"]}
+            fine_notice_result = node_results["fine_notice_analysis"]
+            self.assertEqual(execution["execution_mode"], "hybrid")
+            self.assertEqual(fine_notice_result["execution_mode"], "sync")
+            self.assertEqual(
+                fine_notice_result["structured_result"]["adapter_trace"]["input_source"],
+                "attachment",
+            )
+
     def test_chat_message_blocks_unscanned_attachment_from_agent_payload(self):
         file_response = self.client.post(
             "/api/files/",

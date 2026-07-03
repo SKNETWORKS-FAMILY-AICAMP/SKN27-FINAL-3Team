@@ -1,3 +1,4 @@
+from app.services import agent_node_service
 from app.services.agent_adapter_contract import (
     ADAPTER_CONTRACT_VERSION,
     build_agent_adapter_input,
@@ -341,6 +342,51 @@ def test_execute_sync_fine_notice_adapter_returns_supervisor_envelope_without_im
     assert output["execution_status"] == "failed"
     assert output["structured_result"]["ocr_error"] == "이미지 없음"
     assert output["structured_result"]["adapter_trace"]["execution_mode"] == "sync"
+    assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
+
+
+def test_execute_sync_fine_notice_adapter_reads_canonical_object_attachment(monkeypatch):
+    captured_references = []
+
+    def fake_read_object_bytes(reference):
+        captured_references.append(reference)
+        return b"canonical notice bytes"
+
+    monkeypatch.setattr(agent_node_service, "read_object_bytes", fake_read_object_bytes)
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "fine_notice_analysis",
+            "analysis_plan_id": "plan_sync_upload_bridge",
+            "job_id": "job_sync_upload_bridge",
+            "session_id": "ses_sync_upload_bridge",
+            "message_id": "msg_sync_upload_bridge",
+            "user_text": "uploaded notice attachment bridge",
+            "attachments": [
+                {
+                    "attachment_id": "att_sync_upload_bridge",
+                    "purpose": "fine_notice",
+                    "content_type": "text/plain",
+                    "storage_uri": "s3://skn27-demo-object-storage/canonical/uploads/usr/ses/att/notice.txt",
+                    "object_storage": {
+                        "provider": "mock_s3",
+                        "bucket": "skn27-demo-object-storage",
+                        "key": "canonical/uploads/usr/ses/att/notice.txt",
+                        "storage_uri": "s3://skn27-demo-object-storage/canonical/uploads/usr/ses/att/notice.txt",
+                    },
+                }
+            ],
+        }
+    )
+
+    output = execution["agent_output"]
+
+    assert captured_references
+    assert captured_references[0]["storage_uri"].startswith("s3://")
+    assert execution["execution_mode"] == "sync"
+    assert output["structured_result"]["adapter_trace"]["input_source"] == "attachment"
+    assert output["structured_result"]["ocr_status"] == "failed"
     assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
 
 
