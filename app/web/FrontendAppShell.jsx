@@ -93,7 +93,7 @@ export default function FrontendAppShell({
   const [isSavingConversation, setIsSavingConversation] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState(DEMO_PERSONA_ID);
   const [attachmentPurpose, setAttachmentPurpose] = useState("fine_notice");
-  const [executionMode, setExecutionMode] = useState("mock");
+  const [executionMode, setExecutionMode] = useState("async_worker");
   const [selectedUploadFile, setSelectedUploadFile] = useState(null);
   const [uploadInputResetKey, setUploadInputResetKey] = useState(0);
   const [registeredAttachments, setRegisteredAttachments] = useState([]);
@@ -101,6 +101,7 @@ export default function FrontendAppShell({
   const [reportActionStatus, setReportActionStatus] = useState("");
   const [currentReport, setCurrentReport] = useState(null);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
+  const [workerActionStatus, setWorkerActionStatus] = useState("");
 
   const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";
   const identity = {
@@ -347,6 +348,55 @@ export default function FrontendAppShell({
     }
   }
 
+  async function processQueuedWorkerResult(chatResult, requestIdentity) {
+    const workItem = chatResult?.work_item || chatResult?.supervisor_execution?.work_item || null;
+    if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
+      return chatResult;
+    }
+    if (!requestIdentity?.authToken) {
+      setWorkerActionStatus("Agent worker queued. 로그인 전 상담은 별도 worker 세션에서 처리됩니다.");
+      return chatResult;
+    }
+
+    setWorkerActionStatus("Agent worker queued. 로컬 worker 세션이 분석을 처리하고 있습니다.");
+    try {
+      const workerResult = await api.processAgentWorkItems({ limit: 1 }, requestIdentity);
+      const processedItem =
+        (workerResult?.work_items || []).find((item) => item.work_item_id === workItem.work_item_id) ||
+        workerResult?.work_items?.[0] ||
+        {};
+      const nextWorkItem = {
+        ...workItem,
+        status: processedItem.status || workItem.status,
+        job_status: processedItem.job_status || workItem.job_status,
+      };
+      const enrichedResult = {
+        ...chatResult,
+        status: processedItem.job_status || chatResult.status,
+        worker_result: workerResult,
+        supervisor_execution: {
+          ...(chatResult.supervisor_execution || {}),
+          work_item: nextWorkItem,
+          worker_result: {
+            processed: workerResult?.processed || 0,
+            status: processedItem.status || null,
+            job_status: processedItem.job_status || null,
+          },
+        },
+        work_item: nextWorkItem,
+      };
+      setWorkerActionStatus(
+        processedItem.job_status
+          ? `Agent worker 처리 완료: ${processedItem.job_status}`
+          : "Agent worker 처리 요청을 보냈습니다."
+      );
+      return enrichedResult;
+    } catch (_error) {
+      setWorkerActionStatus("Agent worker 자동 처리를 실행하지 못했습니다. 별도 worker 세션을 확인해 주세요.");
+      return chatResult;
+    }
+  }
+
   async function submitServiceMessage() {
     const trimmedQuestion = question.trim();
     if (!trimmedQuestion) {
@@ -375,6 +425,11 @@ export default function FrontendAppShell({
     });
 
     try {
+      const submitIdentity = {
+        ...identity,
+        guestId: activeGuestId,
+        authSessionId,
+      };
       const result = await api.submitChatMessage(
         {
           session_id: activeSession,
@@ -393,29 +448,26 @@ export default function FrontendAppShell({
             ? { persona_id: selectedPersonaId || DEMO_PERSONA_ID }
             : {}),
         },
-        {
-          ...identity,
-          guestId: activeGuestId,
-          authSessionId,
-        }
+        submitIdentity
       );
+      const workerResult = await processQueuedWorkerResult(result, submitIdentity);
       setChatMessages([
         ...conversationHistory,
         {
           role: "assistant",
-          content: result?.assistant_message || "상담 내용을 접수했습니다.",
-          status: result?.status || "partial",
-          pending_questions: result?.pending_questions || [],
+          content: workerResult?.assistant_message || "상담 내용을 접수했습니다.",
+          status: workerResult?.status || "partial",
+          pending_questions: workerResult?.pending_questions || [],
         },
       ]);
-      setAnalysisResponse(result);
+      setAnalysisResponse(workerResult);
       setQuestion("");
-      setSavePromptVisible(!authSessionId && result?.status === "success");
+      setSavePromptVisible(!authSessionId && workerResult?.status === "success");
       setSaveDecision(authSessionId ? "saved" : "undecided");
       setStatusMessage(
         authSessionId
           ? "상담 응답을 받았습니다. 이 상담은 로그인 계정에 연결됩니다."
-          : result?.status === "success"
+          : workerResult?.status === "success"
             ? "상담 응답을 받았습니다. 저장 여부를 선택할 수 있습니다."
             : "Supervisor가 역질문을 만들었습니다. 답변을 이어서 입력해 주세요."
       );
@@ -637,6 +689,7 @@ export default function FrontendAppShell({
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
               uploadInputResetKey={uploadInputResetKey}
+              workerActionStatus={workerActionStatus}
             />
           )}
 
@@ -959,6 +1012,7 @@ function ChatScreenV2({
   supervisorExecution,
   supervisorState,
   uploadInputResetKey,
+  workerActionStatus,
 }) {
   const visibleMessages = chatMessages.length
     ? chatMessages
@@ -1076,6 +1130,11 @@ function ChatScreenV2({
                 로그인 후 {pendingAuthAction.type} 작업을 같은 상담 세션으로 이어갑니다.
               </p>
             )}
+            {workerActionStatus && (
+              <p className="status-message inside" role="status">
+                {workerActionStatus}
+              </p>
+            )}
             {registeredAttachments.length > 0 && (
               <div className="attachment-list" aria-label="상담 연결 자료">
                 {registeredAttachments.slice(-3).map((attachment) => (
@@ -1088,7 +1147,7 @@ function ChatScreenV2({
             )}
             <div className="execution-mode-control" role="group" aria-label="Agent execution mode">
               <span>Agent mode</span>
-              {["mock", "sync"].map((mode) => (
+              {["async_worker", "mock", "sync"].map((mode) => (
                 <button
                   className={executionMode === mode ? "mode-option active" : "mode-option"}
                   key={mode}
@@ -1096,7 +1155,9 @@ function ChatScreenV2({
                   type="button"
                 >
                   <strong>{mode}</strong>
-                  <small>{mode === "sync" ? "fine notice adapter" : "safe mock"}</small>
+                  <small>
+                    {mode === "async_worker" ? "worker progress" : mode === "sync" ? "fine notice adapter" : "safe mock"}
+                  </small>
                 </button>
               ))}
             </div>
