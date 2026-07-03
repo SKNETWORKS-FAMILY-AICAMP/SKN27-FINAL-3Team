@@ -1,11 +1,12 @@
-Django==5.2.14
+Django==6.0.6
 PyYAML
 numpy
 neo4j
 openai
+boto3
 psycopg2-binary
 sentence-transformers
-redis==5.0.8
+redis==8.0.1
 google-auth==2.55.1
 langgraph
 PyMuPDF

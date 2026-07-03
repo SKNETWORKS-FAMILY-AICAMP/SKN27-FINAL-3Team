@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 .venv/
 __pycache__/
 *.py[cod]
@@ -17,9 +18,19 @@ backend/db.sqlite3
 backend/media/
 app/web/node_modules/
 app/web/dist/
+tmp/ui-smoke/
+tmp/knia_check/
+output/erd/
+project-progress-report-*.html
+
+# Generated PDF/export scratch artifacts not already tracked
+output/pdf/SKN27_*.pdf
 
 # Ponytail Skills
 .agents/
+
+# Claude Code local settings (personal permission prefs, not shared config)
+.claude/
 
 # Documents & Designs
 서식문서/

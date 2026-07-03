@@ -1,0 +1,18 @@
+case_id,scenario_type,input_query,expected_status,actual_status,expected_source_name,actual_source_name,expected_article_no,actual_article_no,expected_appendix_no,actual_appendix_no,evidence_count,top_retrieval_score,passed,notes
+LAW-IO-001,article_success,전동 킥보드가 신호위반 걸리면 어떻게 돼?,success,success,도로교통법,도로교통법,제5조,제5조,,,1,0.91,true,신호위반 질문에서 도로교통법 제5조 근거와 source_type=law evidence가 반환됨
+LAW-IO-002,article_success,교차로에서 꼬리물기 하면 벌금이나 과태료가 얼마야?,success,success,도로교통법,도로교통법,제25조,제25조,,,1,0.91,true,교차로 통행방법 질문에서 도로교통법 제25조 evidence가 반환됨
+LAW-IO-003,article_success,킥보드 타고 길막하면 무슨 죄야?,success,success,도로교통법,도로교통법,제68조,제68조,,,1,0.91,true,도로 방해성 질문에서 도로교통법 제68조 evidence가 반환됨
+LAW-IO-004,article_success,신호위반 벌칙 조항 알려줘,success,success,도로교통법,도로교통법,제156조,제156조,,,1,0.91,true,벌칙 질문에서 도로교통법 제156조 evidence가 반환됨
+LAW-IO-005,appendix_success,교차로 정지선 위반 때 범칙금 액수,success,success,도로교통법 시행령,도로교통법 시행령,,,별표10,별표10,1,0.91,true,범칙금 액수 질문에서 시행령 별표10 appendix_no가 evidence에 보존됨
+LAW-IO-006,appendix_success,운전면허 벌점 기준도 같이 알려줘,success,success,도로교통법 시행규칙,도로교통법 시행규칙,,,별표28,별표28,1,0.91,true,벌점 기준 질문에서 시행규칙 별표28 appendix_no가 evidence에 보존됨
+LAW-IO-007,multiple_results,신호위반 벌칙과 범칙금 근거를 같이 알려줘,success,success,도로교통법,도로교통법,제156조,제156조,,,2,0.91,true,복수 검색 결과가 structured_result와 evidence에 모두 보존되고 두 번째 evidence에는 시행령 별표10이 포함됨
+LAW-IO-008,search_query_override,이건 원문 질문,success,success,도로교통법,도로교통법,제5조,제5조,,,1,0.91,true,raw_text보다 search_query가 검색 질의로 우선 사용됨
+LAW-IO-009,no_retrieval_result,오늘 점심 메뉴 추천해줘,partial,partial,,,,,,,0,,true,검색 결과가 없으면 성공으로 포장하지 않고 partial과 limitation으로 반환됨
+LAW-IO-010,disallowed_source,판례도 같이 찾아줘,partial,partial,,,,,,,0,,true,허용되지 않은 source_type=precedent는 필터링되어 evidence 없이 partial 반환됨
+LAW-IO-011,missing_provision_text,본문 없는 조항,partial,partial,,,,,,,0,,true,provision_text가 없는 검색 결과는 필수 필드 누락으로 제외됨
+LAW-IO-012,missing_source_url,출처 URL 없는 조항,partial,partial,,,,,,,0,,true,source_url이 없는 검색 결과는 필수 필드 누락으로 제외됨
+LAW-IO-013,low_confidence,모호한 법률 질문,partial,partial,도로교통법,도로교통법,제5조,제5조,,,1,0.10,true,근거가 있어도 retrieval score가 낮으면 success가 아니라 partial로 반환됨
+LAW-IO-014,llm_fallback,애매한 말로 신호 무시 설명,success,success,도로교통법,도로교통법,제5조,제5조,,,1,0.91,true,1차 검색 신뢰도 부족 후 LLM fallback 키워드로 재검색하여 도로교통법 제5조 success 반환됨
+LAW-IO-015,empty_input, ,failed,failed,,,,,,,0,,true,빈 질문은 missing_fields를 포함한 failed로 반환됨
+LAW-IO-016,invalid_temporal_basis,전동 킥보드 신호위반,failed,failed,,,,,,,0,,true,temporal_basis.mode=as_of인데 effective_at이 없으면 failed와 limitation 반환됨
+LAW-IO-017,vector_search_failure,전동 킥보드 신호위반,no_result,no_result,,,,,,,0,,true,벡터 검색 예외 발생 시 mock 조문으로 대체하지 않고 빈 결과를 반환함

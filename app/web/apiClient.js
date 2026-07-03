@@ -13,6 +13,17 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
         ...payload,
       });
     },
+    loginWithGoogleCode(payload = {}) {
+      return postJson(
+        joinApiPath(authApiBase, "auth/google/code/"),
+        {
+          provider: "google",
+          ...payload,
+        },
+        {},
+        { extraHeaders: { "X-Requested-With": "XmlHttpRequest" } }
+      );
+    },
     getCurrentAuthSubject({ sessionId, identity } = {}) {
       return getJson(buildAuthMeUrl(authApiBase, sessionId), identity);
     },
@@ -24,6 +35,24 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     },
     submitChatMessage(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/messages/"), payload, identity);
+    },
+    registerFileMetadata(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "files/"), payload, identity);
+    },
+    uploadFile({ file, ...payload } = {}, identity = {}) {
+      const formData = new FormData();
+      Object.entries(payload || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          formData.append(key, value);
+        }
+      });
+      if (file) {
+        formData.append("file", file);
+      }
+      return postFormData(joinApiPath(apiBase, "files/"), formData, identity);
+    },
+    updateConversationSaveState(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "chat/save-state/"), payload, identity);
     },
     runReportAction(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "reports/"), payload, identity);
@@ -42,11 +71,27 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
   };
 }
 
-export async function postJson(url, payload, identity = {}) {
+export async function postJson(url, payload, identity = {}, options = {}) {
   const response = await fetch(url, {
     method: "POST",
-    headers: buildRequestHeaders(identity, { includeContentType: true }),
+    headers: {
+      ...buildRequestHeaders(identity, { includeContentType: true }),
+      ...(options.extraHeaders || {}),
+    },
     body: JSON.stringify(payload || {}),
+  });
+
+  return parseJsonResponse(response);
+}
+
+export async function postFormData(url, formData, identity = {}, options = {}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...buildRequestHeaders(identity),
+      ...(options.extraHeaders || {}),
+    },
+    body: formData,
   });
 
   return parseJsonResponse(response);
