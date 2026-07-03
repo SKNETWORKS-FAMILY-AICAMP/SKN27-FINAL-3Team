@@ -97,6 +97,12 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "registeredAttachments" in shell
     assert "selectedUploadFile" in shell
     assert 'type="file"' in shell
+    assert 'accept="image/*,application/pdf,video/*"' in shell
+    assert "Google 로그인 후 업로드" in shell
+    assert "파일 선택 필요" in shell
+    assert "disabled={isRegisteringAttachment || !selectedUploadFile}" in shell
+    assert "자료 분석은 로그인 후 현재 상담 세션에 이어서 진행됩니다." in shell
+    assert "disabled={!isAuthenticated}" not in shell
     assert "파일 업로드" in shell
     assert "supervisorState" in shell
     assert "NodeResultPill" in shell
