@@ -98,13 +98,26 @@ class TestDeadlineGateNode:
         assert result == {"computed_deadline": None, "deadline_passed": None}
 
 
-# ── law_code_check_node (MVP 스텁, ARCH-001 §9-1) ───────────────────────────
+# ── law_code_check_node (LDB_CHECK, DATA-003 §7) ────────────────────────────
 
 class TestLawCodeCheckNode:
-    @pytest.mark.parametrize("law_code", ["도로교통법 제17조 제1항", None, ""])
-    def test_항상_True_스텁(self, law_code):
-        result = law_code_check_node({"law_code": law_code})
+    @pytest.mark.parametrize("law_code", [None, ""])
+    def test_law_code_없으면_조회없이_False(self, law_code):
+        with patch("etl.legal.search.law_code_exists") as mock_exists:
+            result = law_code_check_node({"law_code": law_code})
+        mock_exists.assert_not_called()
+        assert result == {"law_code_verified": False}
+
+    def test_DB에_존재하면_True(self):
+        with patch("etl.legal.search.law_code_exists", return_value=True) as mock_exists:
+            result = law_code_check_node({"law_code": "도로교통법 제17조 제1항"})
+        mock_exists.assert_called_once_with("도로교통법 제17조 제1항")
         assert result == {"law_code_verified": True}
+
+    def test_DB에_없거나_조회_실패시_False(self):
+        with patch("etl.legal.search.law_code_exists", return_value=False):
+            result = law_code_check_node({"law_code": "존재하지 않는 법 제999조"})
+        assert result == {"law_code_verified": False}
 
 
 # ── reason_intake_node (ARCH-001 §9-7) ──────────────────────────────────────

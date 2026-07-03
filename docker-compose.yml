@@ -24,10 +24,18 @@ services:
       APP_AUTH_ALLOW_MOCK_BEARER: "${APP_AUTH_ALLOW_MOCK_BEARER:-1}"
       APP_JWT_SECRET: ${APP_JWT_SECRET:-dev-jwt-secret-change-before-deploy}
       OAUTH_TOKEN_SECRET: ${OAUTH_TOKEN_SECRET:-dev-oauth-secret-change-before-deploy}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-law_db}
     ports:
       - "8000:8000"
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   frontend:
     image: node:22-alpine

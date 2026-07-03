@@ -3,11 +3,70 @@
 from __future__ import annotations
 
 import os
+import re
 from heapq import heappop, heappush
 from pathlib import Path
 from etl.common.utils import load_env_file, normalize_l2, read_jsonl, read_jsonl_iter
 
+_ARTICLE_NO_PATTERN = re.compile(r"제\d+(?:의\d+)?조")
 
+
+def parse_law_code(law_code: str) -> tuple[str, str] | None:
+    """"도로교통법 제17조 제1항" 같은 law_code에서 (source_name, article_no)를 추출한다.
+
+    law_chunks.article_no는 항·호 없이 조 단위("제17조")로 저장되므로(ingestion/parser.py
+    `_article_no`), law_code에 항·호가 붙어 있어도 조 단위까지만 비교 대상으로 삼는다.
+    """
+    match = _ARTICLE_NO_PATTERN.search(law_code)
+    if not match:
+        return None
+    source_name = law_code[:match.start()].strip()
+    if not source_name:
+        return None
+    return source_name, match.group(0)
+
+
+def law_code_exists(law_code: str) -> bool:
+    """law_chunks에 law_code에 해당하는 조문이 존재하는지 단일 조회한다 (LDB_CHECK, DATA-003 §7).
+
+    재시도 없음. law_code 파싱 실패·DB 연결 오류 등 어떤 이유로든 확인이 안 되면 False를
+    반환한다 — 호출 측(law_code_check_node)은 이 값으로 판정을 막지 않고 disclaimer 문구만
+    조건부로 바꾼다.
+    """
+    parsed = parse_law_code(law_code)
+    if not parsed:
+        return False
+    source_name, article_no = parsed
+
+    import psycopg2
+
+    db_host = os.environ.get("POSTGRES_HOST", "localhost")
+    db_port = os.environ.get("POSTGRES_PORT", "5432")
+    db_user = os.environ.get("POSTGRES_USER", "postgres")
+    db_password = os.environ.get("POSTGRES_PASSWORD", "change-me")
+    db_name = os.environ.get("POSTGRES_DB", "law_db")
+
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            host=db_host,
+            port=db_port,
+            user=db_user,
+            password=db_password,
+            dbname=db_name,
+        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM law_chunks WHERE source_name = %s AND article_no = %s LIMIT 1;",
+                (source_name, article_no),
+            )
+            return cur.fetchone() is not None
+    except Exception as exc:
+        print(f"[Error] law_code_exists lookup failed: {exc}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def search_laws(
