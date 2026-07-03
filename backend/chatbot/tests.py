@@ -3333,6 +3333,8 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(report_body["persistence"]["table"], "reports")
         self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
         self.assertEqual(report_body["persistence"]["object_storage"]["backend"], "object_storage")
+        self.assertEqual(report_body["persistence"]["report_quality"]["contract_version"], "report_quality.v1")
+        self.assertFalse(report_body["persistence"]["report_quality"]["partial_report"])
         self.assertEqual(report_body["object_storage"]["policy_version"], "object_storage_adapter.v1")
         self.assertEqual(report_body["object_storage"]["resource_type"], "report")
         self.assertTrue(report_body["download_url"].startswith("/api/reports/"))
@@ -3344,6 +3346,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertTrue(report.storage_uri.startswith("s3://skn27-demo-object-storage/"))
         self.assertEqual(report.metadata["source"], "canonical_report_action")
         self.assertEqual(report.metadata["object_storage_status"], "written")
+        self.assertEqual(report.metadata["report_quality"]["analysis_job_status"], job["status"])
         self.assertTrue(report.metadata["object_storage_write"]["writes_binary"])
         self.assertEqual(report.metadata["object_storage"]["backend"], "object_storage")
         self.assertEqual(report.metadata["source_storage_uri"], "mock://reports/rep_canonical_smoke")
@@ -3467,6 +3470,44 @@ class ChatbotMockApiTests(TestCase):
         report_body = response.json()
         self.assertTrue(report_body["download_url"].startswith("/api/mock/reports/"))
         self.assertFalse(Report.objects.filter(report_id="rep_mock_sidecar").exists())
+
+    def test_canonical_report_marks_partial_analysis_quality(self):
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_partial_report_quality",
+                "conversation_save_state": "saved",
+                "user_text": "Need more info but prepare report preview.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "partial",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        job_id = message_response.json()["persistence"]["job_id"]
+
+        report_response = self.client.post(
+            "/api/reports/",
+            data={
+                "action": "save",
+                "report_id": "rep_partial_report_quality",
+                "job_id": job_id,
+                "session_id": "ses_partial_report_quality",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        quality = report_response.json()["persistence"]["report_quality"]
+        self.assertEqual(quality["contract_version"], "report_quality.v1")
+        self.assertEqual(quality["analysis_job_status"], AnalysisJobStatus.PARTIAL)
+        self.assertTrue(quality["partial_report"])
+
+        report = Report.objects.get(report_id="rep_partial_report_quality")
+        self.assertTrue(report.metadata["report_quality"]["partial_report"])
+
+        download_response = self.client.get("/api/reports/rep_partial_report_quality/download/")
+        self.assertEqual(download_response.status_code, 200)
+        self.assertIn("partial_report: True", download_response.content.decode("utf-8"))
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")

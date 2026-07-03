@@ -1702,6 +1702,7 @@ def persist_report_action(
     job = AnalysisJob.objects.filter(job_id=_text(payload.get("job_id"))).first()
     session = job.session if job else _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
     display_result = _display_result_for_job(job)
+    report_quality = _report_quality_snapshot(job, display_result, report_payload)
     report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
     source_storage_uri = _text(payload.get("storage_uri")) or f"mock://reports/{report_id}"
     object_storage = build_report_storage_reference(
@@ -1744,11 +1745,13 @@ def persist_report_action(
                 "case_id": report_payload.get("case_id"),
                 "download_url": report_payload.get("download_url"),
                 "object_storage": object_storage,
+                "report_quality": report_quality,
             },
             "metadata": {
                 "source": "canonical_report_action",
                 "action": _text(payload.get("action")) or "save",
                 "mock_status": report_payload.get("status"),
+                "report_quality": report_quality,
                 "limitations": report_payload.get("limitations", []),
                 "object_storage_status": object_storage["status"],
                 "object_storage": object_storage,
@@ -1766,6 +1769,7 @@ def persist_report_action(
         "status": "metadata_saved",
         "storage_uri": report.storage_uri,
         "object_storage": object_storage,
+        "report_quality": report_quality,
     }
 
 
@@ -3653,12 +3657,48 @@ def _report_download_body(
     ]
     if report.job_id:
         lines.append(f"job_id: {report.job.job_id}")
+        report_quality = _dict_or_empty(report.metadata.get("report_quality"))
+        if report_quality:
+            lines.append(f"analysis_job_status: {report_quality.get('analysis_job_status')}")
+            lines.append(f"partial_report: {report_quality.get('partial_report')}")
     if report.display_result_id:
         lines.append(f"display_result_id: {report.display_result.display_result_id}")
     if report.content_summary:
         lines.append("")
         lines.append(report.content_summary)
     return "\n".join(lines) + "\n"
+
+
+def _report_quality_snapshot(
+    job: AnalysisJob | None,
+    display_result: AnalysisDisplayResult | None,
+    report_payload: dict[str, Any],
+) -> dict[str, Any]:
+    agent_results = list(job.agent_results.all()) if job else []
+    limitations = []
+    limitations.extend(_list_or_empty(report_payload.get("limitations")))
+    if display_result:
+        limitations.extend(_list_or_empty(display_result.limitations))
+    for result in agent_results:
+        limitations.extend(_list_or_empty(result.limitations))
+    agent_status_counts = _agent_status_counts(agent_results)
+    analysis_job_status = job.status if job else ""
+    partial_report = analysis_job_status in {
+        AnalysisJobStatus.PARTIAL.value,
+        AnalysisJobStatus.FAILED.value,
+    }
+    deduped_limitations = []
+    for limitation in limitations:
+        if limitation not in deduped_limitations:
+            deduped_limitations.append(limitation)
+    return {
+        "contract_version": "report_quality.v1",
+        "analysis_job_status": analysis_job_status or None,
+        "agent_status_counts": agent_status_counts,
+        "partial_report": partial_report,
+        "limitation_count": len(deduped_limitations),
+        "limitations": deduped_limitations[:12],
+    }
 
 
 def _report_object_body_for_write(
