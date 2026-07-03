@@ -1910,6 +1910,72 @@ class ChatbotMockApiTests(TestCase):
         usage_event = UsageEvent.objects.get(subject_id="user:usr_mock", scope="chat_message")
         self.assertEqual(usage_event.metadata["status"], "allowed")
 
+    def test_canonical_chat_sync_request_marks_fine_notice_adapter_mode(self):
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_canonical_sync_fine",
+                "user_text": "과태료 고지서를 실제 fine notice adapter로 확인해줘.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "execution_mode": "sync",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        execution = body["supervisor_execution"]
+        node_results = {item["node_code"]: item for item in execution["node_results"]}
+        fine_notice_result = node_results["fine_notice_analysis"]
+
+        self.assertEqual(execution["execution_mode"], "hybrid")
+        self.assertEqual(fine_notice_result["execution_mode"], "sync")
+        self.assertEqual(fine_notice_result["adapter_execution_mode"], "sync")
+        self.assertIn("sync", fine_notice_result["adapter_modes"])
+        self.assertEqual(
+            fine_notice_result["structured_result"]["adapter_trace"]["adapter"],
+            "ai.agents.fine_notice_analysis.graph",
+        )
+
+        invocation = AgentInvocation.objects.get(
+            job__job_id=execution["job_id"],
+            node_code="fine_notice_analysis",
+        )
+        self.assertEqual(invocation.execution_mode, "sync")
+        self.assertEqual(invocation.metadata["adapter_context"]["execution_mode"], "sync")
+
+    def test_canonical_chat_sync_request_keeps_unimplemented_agents_mock(self):
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_canonical_sync_mock_only",
+                "conversation_save_state": "pending",
+                "user_text": "사고 사진과 블랙박스 상황으로 과실 비율을 검토해줘.",
+                "persona_id": "accident_scene_photo_driver",
+                "execution_mode": "sync",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        execution = body["supervisor_execution"]
+        node_results = {item["node_code"]: item for item in execution["node_results"]}
+
+        self.assertEqual(execution["execution_mode"], "mock")
+        for node_code in ("vision_media_analysis", "text_ml_case_search"):
+            self.assertEqual(node_results[node_code]["execution_mode"], "mock")
+            self.assertEqual(node_results[node_code]["adapter_execution_mode"], "mock")
+            self.assertEqual(node_results[node_code]["adapter_modes"], ["mock"])
+
+        invocations = AgentInvocation.objects.filter(
+            job__job_id=execution["job_id"],
+            node_code__in=["vision_media_analysis", "text_ml_case_search"],
+        )
+        self.assertEqual(invocations.count(), 2)
+        self.assertEqual({invocation.execution_mode for invocation in invocations}, {"mock"})
+
     def test_canonical_chat_message_covers_all_demo_personas_before_real_agents(self):
         for persona in list_demo_personas():
             with self.subTest(persona_id=persona["persona_id"]):
