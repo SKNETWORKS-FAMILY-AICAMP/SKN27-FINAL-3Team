@@ -58,12 +58,6 @@ services:
     ports:
       - "6379:6379"
 
-  redis:
-    image: redis:7-alpine
-    container_name: skn27-demo-redis
-    ports:
-      - "6379:6379"
-
   postgres:
     image: pgvector/pgvector:pg16
     container_name: skn27-postgres
@@ -112,7 +106,7 @@ services:
     container_name: skn27-data-seed
     volumes:
       - .:/app
-    command: python -m etl.legal.run_pipeline --client offline --provider openai --embedding-output law_embeddings_openai.jsonl --db-load
+    command: python -m etl.legal.run_pipeline --client law_go_kr --provider openai --embedding-output law_embeddings_openai.jsonl --db-load
     environment:
       PYTHONUTF8: "1"
       POSTGRES_HOST: postgres
