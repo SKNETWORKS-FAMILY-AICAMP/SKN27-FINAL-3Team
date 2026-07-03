@@ -1576,6 +1576,7 @@ def enqueue_analysis_job_work(
         "backend": "postgresql",
         "status": AgentWorkItemStatus.QUEUED.value,
         "execution_mode": "async_worker",
+        "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "tables": [AnalysisJob._meta.db_table, AgentWorkItem._meta.db_table],
         "analysis_job_table": AnalysisJob._meta.db_table,
         "agent_work_items_table": AgentWorkItem._meta.db_table,
@@ -2624,6 +2625,7 @@ def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
         "work_item_id": work_item.work_item_id,
         "job_id": job.job_id,
         "attempt_no": work_item.attempt_no,
+        "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "progress_cache": progress_cache,
     }
 
@@ -2737,6 +2739,7 @@ def _complete_agent_work_item(
         "work_item_id": work_item.work_item_id,
         "job_id": job.job_id,
         "attempt_no": work_item.attempt_no,
+        "progress_state": _work_item_progress_state(work_item, job_status=final_status),
         "progress_cache": progress_cache,
         "session_cache": session_cache,
         "persistence": persistence,
@@ -2817,6 +2820,7 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
         "attempt_no": work_item.attempt_no,
         "error_code": error_code,
         "retryable": can_retry,
+        "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "progress_cache": progress_cache,
     }
 
@@ -2835,6 +2839,7 @@ def _update_job_worker_state(
         "contract_version": "agent_worker_queue.v1",
         "work_item_id": work_item.work_item_id,
         "status": work_item.status,
+        "progress_state": _work_item_progress_state(work_item, job_status=status),
         "attempt_no": work_item.attempt_no,
         "max_attempts": work_item.max_attempts,
         "next_run_at": work_item.next_run_at.isoformat() if work_item.next_run_at else None,
@@ -2844,6 +2849,30 @@ def _update_job_worker_state(
     job.progress_message = _text(progress_message)
     job.metadata = metadata
     job.save(update_fields=["status", "active_node", "progress_message", "metadata", "updated_at"])
+
+
+def _work_item_progress_state(
+    work_item: AgentWorkItem,
+    *,
+    job_status: str,
+) -> dict[str, Any]:
+    state = AgentWorkItemStatus.RETRYING.value if work_item.status == AgentWorkItemStatus.RETRYING.value else work_item.status
+    if state == AgentWorkItemStatus.RETRYING.value:
+        state = "retry_waiting"
+    retry_after_seconds = 0
+    if work_item.next_run_at:
+        retry_after_seconds = max(0, int((work_item.next_run_at - timezone.now()).total_seconds()))
+    return {
+        "contract_version": "agent_worker_progress.v1",
+        "state": state,
+        "work_item_status": work_item.status,
+        "job_status": _analysis_job_status(job_status),
+        "attempt_no": work_item.attempt_no,
+        "max_attempts": work_item.max_attempts,
+        "retryable": work_item.status == AgentWorkItemStatus.RETRYING.value,
+        "retry_after_seconds": retry_after_seconds,
+        "next_run_at": work_item.next_run_at.isoformat() if work_item.next_run_at else None,
+    }
 
 
 def _persist_agent_results(

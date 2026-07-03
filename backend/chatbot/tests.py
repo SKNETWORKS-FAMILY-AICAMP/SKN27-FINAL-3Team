@@ -2163,6 +2163,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["supervisor_execution"]["node_results"], [])
         self.assertEqual(body["supervisor_execution"]["work_item"]["status"], AgentWorkItemStatus.QUEUED)
         self.assertEqual(body["persistence"]["status"], AgentWorkItemStatus.QUEUED)
+        self.assertEqual(body["persistence"]["progress_state"]["state"], "queued")
         self.assertEqual(body["work_item"]["status"], AgentWorkItemStatus.QUEUED)
 
         job = AnalysisJob.objects.get(job_id=body["work_item"]["job_id"])
@@ -2175,6 +2176,7 @@ class ChatbotMockApiTests(TestCase):
         result = process_agent_work_items(limit=1)
 
         self.assertEqual(result["processed"], 1)
+        self.assertEqual(result["work_items"][0]["progress_state"]["state"], "success")
         job.refresh_from_db()
         work_item.refresh_from_db()
         self.assertEqual(work_item.status, AgentWorkItemStatus.SUCCESS)
@@ -2518,9 +2520,12 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(work_item.attempt_no, 1)
         self.assertEqual(work_item.error_code, "RuntimeError")
         self.assertEqual(work_item.result["retry_after_seconds"], 7)
+        self.assertEqual(result["work_items"][0]["progress_state"]["state"], "retry_waiting")
+        self.assertEqual(result["work_items"][0]["progress_state"]["work_item_status"], AgentWorkItemStatus.RETRYING)
         self.assertIsNotNone(work_item.next_run_at)
         self.assertGreater(work_item.next_run_at, timezone.now())
         self.assertEqual(work_item.job.status, AnalysisJobStatus.RUNNING)
+        self.assertEqual(work_item.job.metadata["work_queue"]["progress_state"]["state"], "retry_waiting")
 
         retry_result = process_agent_work_item(work_item.work_item_id)
         self.assertEqual(retry_result["status"], "skipped")
