@@ -1072,27 +1072,80 @@ class ChatbotMockApiTests(TestCase):
         session = ChatSession.objects.get(session_id="ses_guest_save_state_guard")
         self.assertEqual(session.metadata["conversation_save_state"], "pending")
 
-    def test_expired_guest_identity_is_rejected_before_state_changes(self):
+    def test_expired_guest_identity_is_rejected_before_guest_safe_state_changes(self):
         GuestIdentity.objects.create(
             guest_id="gst_expired_guard",
             status=GuestIdentityStatus.ACTIVE,
             expires_at=timezone.now() - timedelta(minutes=1),
         )
+        guest_client = Client(HTTP_X_GUEST_ID="gst_expired_guard")
 
-        response = Client(HTTP_X_GUEST_ID="gst_expired_guard").post(
-            "/api/chat/save-state/",
-            data={
-                "session_id": "ses_expired_guest_guard",
-                "conversation_save_state": "pending",
-            },
-            content_type="application/json",
-        )
+        cases = [
+            (
+                "chat_message",
+                "post",
+                "/api/chat/messages/",
+                {
+                    "session_id": "ses_expired_guest_guard",
+                    "conversation_save_state": "pending",
+                    "user_text": "만료된 guest는 새 상담으로 갱신해야 합니다.",
+                },
+            ),
+            (
+                "file_upload",
+                "post",
+                "/api/files/",
+                {
+                    "session_id": "ses_expired_guest_guard",
+                    "purpose": "fine_notice",
+                    "filename": "expired-guest.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 0,
+                },
+            ),
+            (
+                "file_list",
+                "get",
+                "/api/files/?session_id=ses_expired_guest_guard",
+                None,
+            ),
+            (
+                "report_preview",
+                "post",
+                "/api/reports/",
+                {
+                    "action": "preview",
+                    "report_id": "rep_expired_guest_guard",
+                    "session_id": "ses_expired_guest_guard",
+                },
+            ),
+            (
+                "save_state",
+                "post",
+                "/api/chat/save-state/",
+                {
+                    "session_id": "ses_expired_guest_guard",
+                    "conversation_save_state": "pending",
+                },
+            ),
+        ]
 
-        self.assertEqual(response.status_code, 401)
-        error = response.json()["error"]
-        self.assertEqual(error["code"], "guest_session_invalid")
-        self.assertEqual(error["required_action"], "refresh_guest_session")
-        self.assertEqual(error["reason"], "guest_expired")
+        for name, method, path, payload in cases:
+            with self.subTest(name=name):
+                if method == "get":
+                    response = guest_client.get(path)
+                else:
+                    response = guest_client.post(path, data=payload, content_type="application/json")
+
+                self.assertEqual(response.status_code, 401)
+                error = response.json()["error"]
+                self.assertEqual(error["code"], "guest_session_invalid")
+                self.assertEqual(error["required_action"], "refresh_guest_session")
+                self.assertEqual(error["reason"], "guest_expired")
+
+        self.assertFalse(ChatSession.objects.filter(session_id="ses_expired_guest_guard").exists())
+        self.assertFalse(UploadedFile.objects.filter(original_filename="expired-guest.pdf").exists())
+        self.assertFalse(Report.objects.filter(report_id="rep_expired_guest_guard").exists())
 
     @override_settings(GOOGLE_AUTH_ALLOW_MOCK=False, APP_AUTH_ALLOW_MOCK_BEARER=False)
     def test_real_auth_mode_rejects_legacy_dev_mock_bearer(self):

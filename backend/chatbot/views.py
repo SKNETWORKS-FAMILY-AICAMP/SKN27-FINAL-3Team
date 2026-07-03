@@ -409,6 +409,9 @@ def attachments(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
         if _is_canonical_mock_request(request):
             identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+            policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
+            if policy_response is not None:
+                return policy_response
             access = _authorize_session_query(request.GET.get("session_id"), identity_payload, resource_type="uploaded_file_list")
             if not access["allowed"]:
                 return _object_access_denied_response(request, access)
@@ -426,6 +429,9 @@ def attachments(request: HttpRequest) -> JsonResponse:
     upload_file = _first_upload_file(request)
     if _is_canonical_mock_request(request):
         identity_payload = _payload_with_request_identity(request, payload)
+        policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
+        if policy_response is not None:
+            return policy_response
         usage = record_usage_event(identity_payload, scope="file_upload")
         if not usage["allowed"]:
             return _rate_limit_response(request, usage)
@@ -616,6 +622,9 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     usage = None
     if _is_canonical_mock_request(request):
+        policy_response = _canonical_guest_identity_policy_response(request, identity_body)
+        if policy_response is not None:
+            return policy_response
         usage = record_usage_event(identity_body, scope="chat_message")
         if not usage["allowed"]:
             return _rate_limit_response(request, usage)
@@ -1193,6 +1202,19 @@ def _guest_identity_policy_response(
         },
         status=401,
     )
+
+
+def _canonical_guest_identity_policy_response(
+    request: HttpRequest,
+    payload: dict[str, object],
+) -> JsonResponse | None:
+    if not _is_canonical_mock_request(request):
+        return None
+    subject = access_subject_from_payload(payload)["subject"]
+    violation = _guest_identity_policy_violation(subject)
+    if not violation:
+        return None
+    return _guest_identity_policy_response(request, violation)
 
 
 def _report_history_event_type(action: str) -> str:
