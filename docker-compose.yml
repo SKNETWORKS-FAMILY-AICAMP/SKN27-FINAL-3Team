@@ -79,6 +79,8 @@ services:
     container_name: skn27-demo-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
 
   clamav:
     image: ${CLAMAV_IMAGE:-clamav/clamav:stable}
@@ -91,14 +93,6 @@ services:
 
   postgres:
     image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
-  redis:
-    image: redis:7-alpine
-    container_name: skn27-demo-redis
-    ports:
-      - "6379:6379"
-
-  postgres:
-    image: pgvector/pgvector:pg16
     container_name: skn27-postgres
     restart: unless-stopped
     ports:
@@ -169,5 +163,4 @@ volumes:
   clamav_data:
   neo4j_data:
   neo4j_logs:
-
   redis_data:
