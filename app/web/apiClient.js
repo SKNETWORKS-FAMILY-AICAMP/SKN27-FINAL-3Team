@@ -36,6 +36,9 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     submitChatMessage(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/messages/"), payload, identity);
     },
+    processAgentWorkItems(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "agents/work-items/process/"), payload, identity);
+    },
     registerFileMetadata(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "files/"), payload, identity);
     },

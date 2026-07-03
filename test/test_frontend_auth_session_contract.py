@@ -42,11 +42,13 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     missing = [token for token in required_tokens if token not in content]
     assert missing == []
     assert 'joinApiPath(apiBase, "chat/messages/")' in api_client
+    assert 'joinApiPath(apiBase, "agents/work-items/process/")' in api_client
     assert 'joinApiPath(apiBase, "files/")' in api_client
     assert 'files/${encodeURIComponent(attachmentId || "")}/scan/' in api_client
     assert 'joinApiPath(apiBase, "reports/")' in api_client
     assert "uploadFile" in api_client
     assert "processFileScan" in api_client
+    assert "processAgentWorkItems" in api_client
     assert "FormData" in api_client
     assert "postFormData" in api_client
     assert 'from "./apiClient.js"' in chatbot
@@ -114,6 +116,12 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "setExecutionMode" in shell
     assert "execution_mode: executionMode" in shell
     assert "execution-mode-control" in shell
+    assert 'const [executionMode, setExecutionMode] = useState("async_worker");' in shell
+    assert '["async_worker", "mock", "sync"]' in shell
+    assert "processQueuedWorkerResult" in shell
+    assert "processAgentWorkItems" in shell
+    assert "workerActionStatus" in shell
+    assert "worker progress" in shell
 
 
 def test_vite_proxy_does_not_capture_frontend_api_client_module():
