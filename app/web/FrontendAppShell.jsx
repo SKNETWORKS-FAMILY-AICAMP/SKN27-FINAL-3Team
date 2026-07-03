@@ -1213,13 +1213,31 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
       {nodeResults.length > 0 && (
         <div className="node-result-list">
           {nodeResults.map((node) => (
-            <span key={node.execution_id || node.node_code}>
-              {node.node_code}: {node.status}
-            </span>
+            <NodeResultPill key={node.execution_id || node.node_code} node={node} />
           ))}
         </div>
       )}
     </section>
+  );
+}
+
+function NodeResultPill({ node }) {
+  const executionMode = normalizeExecutionMode(node.execution_mode || node.adapter_execution_mode);
+  const adapterMode = normalizeExecutionMode(node.adapter_execution_mode || executionMode);
+  const modeLabel = adapterMode === executionMode ? executionMode : `${executionMode}/${adapterMode}`;
+  const adapterModes = Array.isArray(node.adapter_modes) ? node.adapter_modes.join(", ") : adapterMode;
+
+  return (
+    <span
+      className={`node-result-pill is-${executionMode}`}
+      title={`execution: ${executionMode}, adapter: ${adapterModes}`}
+    >
+      <span className="node-result-main">
+        <strong>{node.node_code}</strong>
+        <span>{node.status}</span>
+      </span>
+      <span className="node-mode-badge">{modeLabel}</span>
+    </span>
   );
 }
 
@@ -1497,9 +1515,7 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
                 <strong>Agent 결과</strong>
                 <div className="node-result-list vertical">
                   {nodeResults.map((node) => (
-                    <span key={node.execution_id || node.node_code}>
-                      {node.node_code}: {node.status}
-                    </span>
+                    <NodeResultPill key={node.execution_id || node.node_code} node={node} />
                   ))}
                 </div>
               </div>
@@ -1565,6 +1581,14 @@ function latestMessageIndex(messages, role) {
     }
   }
   return -1;
+}
+
+function normalizeExecutionMode(value) {
+  const mode = String(value || "mock").toLowerCase();
+  if (["sync", "hybrid", "async_worker"].includes(mode)) {
+    return mode;
+  }
+  return "mock";
 }
 
 function compactValue(value) {
