@@ -1267,6 +1267,9 @@ def _supervisor_execution_response(
         if not isinstance(execution, dict):
             continue
         agent_output = execution.get("agent_output") if isinstance(execution.get("agent_output"), dict) else {}
+        adapter_context = execution.get("adapter_context") if isinstance(execution.get("adapter_context"), dict) else {}
+        node = execution.get("node") if isinstance(execution.get("node"), dict) else {}
+        plan_step = execution.get("plan_step") if isinstance(execution.get("plan_step"), dict) else {}
         node_results.append(
             {
                 "execution_id": execution.get("execution_id"),
@@ -1274,6 +1277,15 @@ def _supervisor_execution_response(
                 "node_name": agent_output.get("node_name"),
                 "node_type": agent_output.get("node_type"),
                 "owner": agent_output.get("owner"),
+                "execution_mode": execution.get("execution_mode") or adapter_context.get("execution_mode") or "mock",
+                "adapter_execution_mode": adapter_context.get("execution_mode") or execution.get("execution_mode") or "mock",
+                "adapter_modes": node.get("adapter_modes") or ["mock"],
+                "plan_step": {
+                    "order": plan_step.get("order"),
+                    "status": plan_step.get("status"),
+                    "fallback": plan_step.get("fallback"),
+                    "depends_on": plan_step.get("depends_on") or [],
+                },
                 "status": agent_output.get("status"),
                 "summary": agent_output.get("summary"),
                 "structured_result": agent_output.get("structured_result") or {},
