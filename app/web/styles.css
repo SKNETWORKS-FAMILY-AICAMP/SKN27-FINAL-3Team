@@ -811,15 +811,54 @@ p {
   display: grid;
 }
 
-.node-result-list span {
+.node-result-pill {
   min-height: 28px;
   padding: 5px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--teal-dark);
   background: var(--green-soft);
   font-size: 12px;
   font-weight: 900;
+}
+
+.node-result-pill.is-sync {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.node-result-pill.is-hybrid {
+  color: #6d3f00;
+  background: var(--amber-soft);
+}
+
+.node-result-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.node-result-main strong {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-mode-badge {
+  min-height: 18px;
+  padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(16, 24, 40, 0.68);
+  font-size: 11px;
+  letter-spacing: 0;
 }
 
 .report-section-list {

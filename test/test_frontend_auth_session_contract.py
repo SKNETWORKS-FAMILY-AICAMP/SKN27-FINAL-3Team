@@ -83,6 +83,9 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert 'type="file"' in shell
     assert "파일 업로드" in shell
     assert "supervisorState" in shell
+    assert "NodeResultPill" in shell
+    assert "adapter_execution_mode" in shell
+    assert "normalizeExecutionMode" in shell
 
 
 def test_vite_proxy_does_not_capture_frontend_api_client_module():
