@@ -82,6 +82,8 @@ VALID_OCR_STATUSES = {"success", "degraded", "partial"}
 
 def _load_pdf_as_b64(filename: str) -> str:
     path = FORMS_DIR / filename
+    if not path.exists():
+        pytest.skip(f"fine notice OCR fixture is not available: {path}")
     return base64.b64encode(path.read_bytes()).decode()
 
 

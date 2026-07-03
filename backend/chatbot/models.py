@@ -103,6 +103,15 @@ class AgentInvocationStatus(models.TextChoices):
     RETRYING = "retrying", "Retrying"
 
 
+class AgentWorkItemStatus(models.TextChoices):
+    QUEUED = "queued", "Queued"
+    RUNNING = "running", "Running"
+    SUCCESS = "success", "Success"
+    FAILED = "failed", "Failed"
+    RETRYING = "retrying", "Retrying"
+    CANCELED = "canceled", "Canceled"
+
+
 class ChatSession(TimestampedModel):
     session_id = models.CharField(max_length=64, unique=True, db_index=True)
     owner_id = models.CharField(max_length=128, blank=True, db_index=True)
@@ -771,6 +780,69 @@ class AgentNodeDefinition(TimestampedModel):
         return self.node_code
 
 
+class SourceDocument(TimestampedModel):
+    source_document_id = models.CharField(max_length=64, unique=True, db_index=True)
+    source_type = models.CharField(max_length=50, db_index=True)
+    source_name = models.CharField(max_length=255, db_index=True)
+    jurisdiction = models.CharField(max_length=50, default="KR", db_index=True)
+    source_url = models.TextField(blank=True)
+    version_label = models.CharField(max_length=120, blank=True)
+    effective_date = models.DateField(null=True, blank=True)
+    expire_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=32, default="active", db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "source_documents"
+        ordering = ["source_name", "-effective_date", "source_document_id"]
+        indexes = [
+            models.Index(fields=["source_type", "status"], name="src_docs_type_status_idx"),
+            models.Index(fields=["jurisdiction", "status"], name="src_docs_juris_status_idx"),
+            models.Index(fields=["effective_date", "expire_date"], name="src_docs_temporal_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.source_document_id
+
+
+class RagChunk(TimestampedModel):
+    chunk_id = models.CharField(max_length=255, unique=True, db_index=True)
+    source_document = models.ForeignKey(
+        SourceDocument,
+        related_name="chunks",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    source_id = models.CharField(max_length=100, blank=True, db_index=True)
+    source_type = models.CharField(max_length=50, db_index=True)
+    chunk_type = models.CharField(max_length=50, db_index=True)
+    title = models.CharField(max_length=255, blank=True)
+    article_no = models.CharField(max_length=50, blank=True, db_index=True)
+    section_ref = models.CharField(max_length=120, blank=True)
+    content = models.TextField()
+    normalized_text = models.TextField(blank=True)
+    embedding_provider = models.CharField(max_length=50, blank=True)
+    embedding_model = models.CharField(max_length=120, blank=True)
+    embedding_dimensions = models.PositiveIntegerField(null=True, blank=True)
+    embedding_vector = models.JSONField(default=list, blank=True)
+    is_searchable = models.BooleanField(default=True, db_index=True)
+    domain_tags = models.JSONField(default=list, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "rag_chunks"
+        ordering = ["source_type", "source_id", "article_no", "chunk_id"]
+        indexes = [
+            models.Index(fields=["source_document", "is_searchable"], name="rag_chunks_doc_search_idx"),
+            models.Index(fields=["source_type", "chunk_type"], name="rag_chunks_type_chunk_idx"),
+            models.Index(fields=["source_type", "is_searchable"], name="rag_chunks_type_search_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.chunk_id
+
+
 class AiSession(TimestampedModel):
     ai_session_id = models.CharField(max_length=64, unique=True, db_index=True)
     session = models.ForeignKey(
@@ -868,6 +940,89 @@ class AgentInvocation(models.Model):
 
     def __str__(self) -> str:
         return self.invocation_id
+
+
+class RetrievalEvent(models.Model):
+    retrieval_event_id = models.CharField(max_length=64, unique=True, db_index=True)
+    job = models.ForeignKey(
+        AnalysisJob,
+        related_name="retrieval_events",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    invocation = models.ForeignKey(
+        AgentInvocation,
+        related_name="retrieval_events",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    query_text = models.TextField(blank=True)
+    query_type = models.CharField(max_length=50, default="semantic", db_index=True)
+    top_k = models.PositiveIntegerField(default=0)
+    result_count = models.PositiveIntegerField(default=0)
+    source_refs = models.JSONField(default=list, blank=True)
+    filters = models.JSONField(default=dict, blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "retrieval_events"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["job", "created_at"], name="retr_events_job_created_idx"),
+            models.Index(fields=["invocation", "created_at"], name="retr_events_inv_created_idx"),
+            models.Index(fields=["query_type"], name="retr_events_query_type_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.retrieval_event_id
+
+
+class AgentWorkItem(TimestampedModel):
+    work_item_id = models.CharField(max_length=64, unique=True, db_index=True)
+    job = models.ForeignKey(
+        AnalysisJob,
+        related_name="work_items",
+        on_delete=models.CASCADE,
+    )
+    ai_session = models.ForeignKey(
+        AiSession,
+        related_name="work_items",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=AgentWorkItemStatus.choices,
+        default=AgentWorkItemStatus.QUEUED,
+        db_index=True,
+    )
+    attempt_no = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=2)
+    locked_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    next_run_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    payload = models.JSONField(default=dict, blank=True)
+    result = models.JSONField(default=dict, blank=True)
+    error_code = models.CharField(max_length=120, blank=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "agent_work_items"
+        ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=["status", "next_run_at"], name="agent_work_status_next_idx"),
+            models.Index(fields=["job", "status"], name="agent_work_job_status_idx"),
+            models.Index(fields=["ai_session", "status"], name="agent_work_ai_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.work_item_id
 
 
 class AgentFeedbackEvent(models.Model):
