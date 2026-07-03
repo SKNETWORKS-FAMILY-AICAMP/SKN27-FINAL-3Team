@@ -22,7 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 from ai.agents.fine_notice_analysis.graph import graph  # noqa: E402
 
-pytestmark = pytest.mark.skipif(
+_requires_api = pytest.mark.skipif(
     not os.getenv("OPENAI_API_KEY"),
     reason="OPENAI_API_KEY not set — 통합 테스트 건너뜀",
 )
@@ -87,6 +87,7 @@ def _load_pdf_as_b64(filename: str) -> str:
     return base64.b64encode(path.read_bytes()).decode()
 
 
+@_requires_api
 @pytest.mark.parametrize("filename,expected_fine_type,expected_notice_stage", CASES, ids=CASE_IDS)
 def test_ocr_classifies_fine_type_and_stage(filename, expected_fine_type, expected_notice_stage):
     """fine_type·notice_stage 분류가 서식 제목과 일치하는지 확인."""
@@ -128,6 +129,7 @@ _EXPECTED_NEXT_ACTIONS = {
 }
 
 
+@_requires_api
 @pytest.mark.parametrize("filename,expected_fine_type,expected_notice_stage", CASES, ids=CASE_IDS)
 def test_ocr_agent_result_envelope_present(filename, expected_fine_type, expected_notice_stage):
     """agent_results 봉투 구조 및 next_actions 확인."""
@@ -168,3 +170,31 @@ def test_ocr_rejects_missing_image():
     result = graph.invoke({"notice_image": None, "notice_mime_type": "application/pdf"})
     assert result["ocr_status"] == "failed"
     assert result["ocr_error"] == "이미지 없음"
+
+
+@pytest.mark.parametrize("mime_type", [None, "", "text/plain", "video/mp4"])
+def test_ocr_rejects_invalid_mime_type(mime_type):
+    """미지원 mime_type → failed envelope 반환 (GPT 호출 불필요)."""
+    result = graph.invoke({"notice_image": "dGVzdA==", "notice_mime_type": mime_type})
+    assert result["ocr_status"] == "failed"
+    assert "파일 형식" in (result.get("ocr_error") or "")
+
+
+@pytest.mark.parametrize("mime_type", ["application/pdf", "image/jpeg"])
+def test_ocr_rejects_invalid_base64(mime_type):
+    """잘못된 base64 → failed envelope 반환 (GPT 호출 불필요)."""
+    result = graph.invoke({"notice_image": "!!!invalid-base64!!!", "notice_mime_type": mime_type})
+    assert result["ocr_status"] == "failed"
+    assert "재업로드" in (result.get("ocr_error") or "")
+    envelope = (result.get("agent_results") or {}).get("fine_notice_analysis") or {}
+    assert "이미지 재업로드 요청" in (envelope.get("next_actions") or [])
+
+
+def test_ocr_rejects_corrupted_pdf():
+    """손상된 PDF 바이트 → failed envelope 반환 (GPT 호출 불필요)."""
+    bad_pdf = base64.b64encode(b"not a real pdf content").decode()
+    result = graph.invoke({"notice_image": bad_pdf, "notice_mime_type": "application/pdf"})
+    assert result["ocr_status"] == "failed"
+    assert "재업로드" in (result.get("ocr_error") or "")
+    envelope = (result.get("agent_results") or {}).get("fine_notice_analysis") or {}
+    assert "이미지 재업로드 요청" in (envelope.get("next_actions") or [])

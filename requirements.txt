@@ -9,3 +9,6 @@ sentence-transformers
 redis==8.0.1
 google-auth==2.55.1
 langgraph
+PyMuPDF
+python-dotenv
+typing_extensions
