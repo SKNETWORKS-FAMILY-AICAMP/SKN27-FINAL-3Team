@@ -72,6 +72,25 @@ def _parse_date(value) -> Optional[str]:
         return None
 
 
+_NUMERIC_FIELDS = (
+    "fine_amount", "prepayment_amount", "additional_amount",
+    "demerit_points_base", "demerit_points_accumulated",
+)
+
+
+def _parse_int(value) -> Optional[int]:
+    """숫자 필드 파싱 → int. GPT가 "숫자만" 지시에도 문자열(예: "60000")로 반환하는
+    경우가 있어, 콤마·"원" 등 비숫자 문자를 제거하고 정수로 변환한다. 실패 시 None."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    digits = re.sub(r"[^\d]", "", str(value))
+    return int(digits) if digits else None
+
+
 def _call_gpt(image_blocks: list[dict]) -> dict:
     """GPT-4o Vision 호출 → R-11 마스킹 → JSON 파싱."""
     client = openai.OpenAI()
@@ -186,6 +205,12 @@ def ocr_node(state: FineNoticeState) -> dict:
     # ── 날짜 파싱 (R-04) ──────────────────────────────────────────────
     result["opinion_deadline"]     = _parse_date(result.get("opinion_deadline"))
     result["payment_deadline_2nd"] = _parse_date(result.get("payment_deadline_2nd"))
+
+    # ── 숫자 필드 파싱 ────────────────────────────────────────────────
+    # GPT가 "숫자만" 지시에도 문자열로 반환하는 경우가 있어(예: "60000"),
+    # verification.py의 수치 비교(V-03)가 타입 에러 없이 동작하도록 여기서 정규화한다.
+    for field in _NUMERIC_FIELDS:
+        result[field] = _parse_int(result.get(field))
 
     notice_stage = result.get("notice_stage")
 

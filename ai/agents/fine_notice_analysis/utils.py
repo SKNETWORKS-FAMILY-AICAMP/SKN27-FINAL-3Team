@@ -7,6 +7,7 @@ def make_envelope(
     missing: list[str],
     next_actions: list[str],
     summary: str = "",
+    limitations: list[str] | None = None,
 ) -> dict:
     return {
         "node_name":         "고지서 OCR·과태료/범칙금 분석 노드",
@@ -17,7 +18,7 @@ def make_envelope(
         "evidence":          [],
         "missing_fields":    missing,
         "next_actions":      next_actions,
-        "limitations":       [],
+        "limitations":       limitations or [],
     }
 
 
