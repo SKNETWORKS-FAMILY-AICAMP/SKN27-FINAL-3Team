@@ -41,8 +41,10 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     assert missing == []
     assert 'joinApiPath(apiBase, "chat/messages/")' in api_client
     assert 'joinApiPath(apiBase, "files/")' in api_client
+    assert 'files/${encodeURIComponent(attachmentId || "")}/scan/' in api_client
     assert 'joinApiPath(apiBase, "reports/")' in api_client
     assert "uploadFile" in api_client
+    assert "processFileScan" in api_client
     assert "FormData" in api_client
     assert "postFormData" in api_client
     assert 'from "./apiClient.js"' in chatbot
@@ -76,6 +78,8 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "DEMO_PERSONAS" in shell
     assert "persona-control-panel" in shell
     assert "registerFileMetadata" in shell
+    assert "processFileScan" in shell
+    assert "scan_status" in shell
     assert "runReportAction" in shell
     assert "ReportActionPanel" in shell
     assert "registeredAttachments" in shell

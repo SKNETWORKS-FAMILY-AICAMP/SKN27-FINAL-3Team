@@ -51,6 +51,9 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
       }
       return postFormData(joinApiPath(apiBase, "files/"), formData, identity);
     },
+    processFileScan({ attachmentId, ...payload } = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, `files/${encodeURIComponent(attachmentId || "")}/scan/`), payload, identity);
+    },
     updateConversationSaveState(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/save-state/"), payload, identity);
     },
