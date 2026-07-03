@@ -624,10 +624,8 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     conversation_save_state = conversation_save_state_from_payload(identity_body)
     node_execution = None
     if _is_canonical_mock_request(request):
-        persistence_seed = persist_chat_message_analysis_boundary(identity_body, chat_response)
         execution_payload = {
             **identity_body,
-            "job_id": persistence_seed["job_id"],
             "session_id": chat_response.get("session_id"),
             "message_id": chat_response.get("message_id"),
             "attachments": chat_response.get("attachments", []),
@@ -640,19 +638,57 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
                 "supervisor_handoff": chat_response.get("supervisor_state", {}),
             },
         }
-        node_execution = execute_mock_plan(chat_response.get("analysis_plan") or {}, execution_payload)
-        persistence = persist_chat_message_analysis_boundary(
-            identity_body,
-            chat_response,
-            node_execution=node_execution,
-        )
-        conversation_save_state = persistence["conversation_save_state"]
-        chat_response["persistence"] = persistence
-        chat_response["supervisor_execution"] = _supervisor_execution_response(
-            node_execution,
-            persistence=persistence,
-        )
-        chat_response["usage"] = usage
+        if _uses_async_worker(identity_body):
+            node_execution = _queued_node_execution_placeholder(
+                execution_payload,
+                analysis_plan=chat_response.get("analysis_plan") or {},
+                chat_response=chat_response,
+            )
+            job_payload = _agent_plan_job_payload(
+                execution_payload,
+                {
+                    "analysis_plan": chat_response.get("analysis_plan") or {},
+                    "chat_response": chat_response,
+                    "node_execution": node_execution,
+                },
+            )
+            job_payload["status"] = "queued"
+            job_payload["active_node"] = _analysis_plan_active_node(chat_response.get("analysis_plan") or {})
+            job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
+            job_payload["node_execution"] = {}
+            persistence = enqueue_analysis_job_work(execution_payload, job_payload)
+            conversation_save_state = conversation_save_state_from_payload(identity_body)
+            chat_response["persistence"] = persistence
+            chat_response["node_execution"] = node_execution
+            chat_response["work_item"] = {
+                "contract_version": "agent_worker_queue.v1",
+                "work_item_id": persistence["work_item_id"],
+                "status": persistence["work_item_status"],
+                "job_id": persistence["job_id"],
+            }
+            chat_response["supervisor_execution"] = _supervisor_execution_response(
+                node_execution,
+                persistence=persistence,
+            )
+            chat_response["usage"] = usage
+            chat_response["execution_mode"] = "async_worker"
+            chat_response["status"] = "queued"
+        else:
+            persistence_seed = persist_chat_message_analysis_boundary(identity_body, chat_response)
+            execution_payload["job_id"] = persistence_seed["job_id"]
+            node_execution = execute_mock_plan(chat_response.get("analysis_plan") or {}, execution_payload)
+            persistence = persist_chat_message_analysis_boundary(
+                identity_body,
+                chat_response,
+                node_execution=node_execution,
+            )
+            conversation_save_state = persistence["conversation_save_state"]
+            chat_response["persistence"] = persistence
+            chat_response["supervisor_execution"] = _supervisor_execution_response(
+                node_execution,
+                persistence=persistence,
+            )
+            chat_response["usage"] = usage
     _record_history_safely(
         request,
         event_type="chat_message_created",
@@ -1342,6 +1378,16 @@ def _supervisor_execution_response(
         "status_counts": node_execution.get("status_counts") or {},
         "agent_results_saved": persistence.get("agent_results_saved", 0),
         "agent_invocations_saved": persistence.get("agent_invocations_saved", 0),
+        "work_item": (
+            {
+                "contract_version": "agent_worker_queue.v1",
+                "work_item_id": persistence.get("work_item_id"),
+                "status": persistence.get("work_item_status") or persistence.get("status"),
+                "job_id": persistence.get("job_id") or node_execution.get("job_id"),
+            }
+            if persistence.get("work_item_id")
+            else None
+        ),
         "node_results": node_results,
     }
 
