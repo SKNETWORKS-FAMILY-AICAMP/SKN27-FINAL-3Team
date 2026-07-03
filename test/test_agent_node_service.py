@@ -51,6 +51,7 @@ def test_agent_node_registry_exposes_real_adapter_contract():
         == "run_law_ground_search(agent_input: AgentAdapterInput, context: AgentAdapterContext) -> AgentAdapterOutput"
     )
     assert "upstream_results" in contract["required_input_fields"]
+    assert "slot_state" in contract["required_input_fields"]
     assert "structured_result" in contract["required_output_fields"]
     assert contract["allowed_statuses"] == ["success", "partial", "failed"]
     assert contract["call_style"] == "sync_callable"
@@ -70,6 +71,7 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
         user_text="법률 근거를 확인해줘",
         attachments=[{"attachment_id": "att_contract", "purpose": "fine_notice"}],
         context={"locale": "ko-KR"},
+        slot_state={"contract_version": "slot_filling_state.v1", "slots": {"location": {"status": "filled"}}},
         required_inputs=["law_code"],
         depends_on=["fine_notice_analysis"],
         upstream_results={"fine_notice_analysis": {"status": "success"}},
@@ -88,6 +90,7 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
             "message_id": "msg_contract",
             "user_text": "법률 근거를 확인해줘",
             "context": {"locale": "ko-KR"},
+            "slot_state": {"contract_version": "slot_filling_state.v1", "slots": {}},
         }
     )
     context_validation = validate_adapter_context_envelope(
@@ -97,9 +100,11 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
 
     assert input_validation["valid"]
     assert agent_input["node_code"] == "law_ground_search"
+    assert agent_input["slot_state"]["contract_version"] == "slot_filling_state.v1"
     assert agent_input["upstream_results"]["fine_notice_analysis"]["status"] == "success"
     assert context_validation["valid"]
     assert execution["adapter_context"]["signature_version"] == ADAPTER_CONTRACT_VERSION
+    assert execution["agent_input"]["slot_state"]["contract_version"] == "slot_filling_state.v1"
 
 
 def test_execute_mock_node_returns_common_agent_output_envelope():
@@ -121,6 +126,7 @@ def test_execute_mock_node_returns_common_agent_output_envelope():
     assert execution["adapter_context"]["execution_id"] == execution["execution_id"]
     assert execution["adapter_context"]["node"]["adapter_contract"]["adapter_key"] == "law_ground_search"
     assert "upstream_results" in execution["agent_input"]
+    assert "slot_state" in execution["agent_input"]
     assert {
         "node_name",
         "node_code",
@@ -238,6 +244,7 @@ def test_agent_contract_validators_report_malformed_collections():
             "user_text": "법률 근거",
             "attachments": "att_bad",
             "context": {},
+            "slot_state": [],
             "required_inputs": [],
             "depends_on": [],
             "upstream_results": {},
@@ -263,7 +270,7 @@ def test_agent_contract_validators_report_malformed_collections():
     )
 
     assert not input_validation["valid"]
-    assert input_validation["invalid_collection_fields"] == ["attachments"]
+    assert input_validation["invalid_collection_fields"] == ["attachments", "slot_state"]
     assert not output_validation["valid"]
     assert output_validation["invalid_collection_fields"] == ["structured_result"]
 

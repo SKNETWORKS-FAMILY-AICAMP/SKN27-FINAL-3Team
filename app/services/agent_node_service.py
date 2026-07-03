@@ -253,6 +253,7 @@ def _payload_node_code(payload: dict[str, Any]) -> str:
 
 
 def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    nested_agent_input = payload.get("agent_input") if isinstance(payload.get("agent_input"), dict) else {}
     return build_agent_adapter_input(
         analysis_plan_id=payload.get("analysis_plan_id"),
         job_id=payload.get("job_id"),
@@ -262,6 +263,7 @@ def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any
         user_text=payload.get("user_text"),
         attachments=payload.get("attachments", []),
         context=payload.get("context", {}),
+        slot_state=payload.get("slot_state") or nested_agent_input.get("slot_state") or {},
         required_inputs=payload.get("required_inputs") or node["required_inputs"],
         depends_on=payload.get("depends_on", []),
         upstream_results=payload.get("upstream_results", {}),
