@@ -526,6 +526,7 @@ export default function FrontendAppShell({
               analysisCards={analysisCards}
               attachmentPurpose={attachmentPurpose}
               assistantAnswer={assistantAnswer}
+              authSessionId={authSessionId}
               chatMessages={chatMessages}
               currentReport={currentReport}
               demoPersonas={DEMO_PERSONAS}
@@ -846,6 +847,7 @@ function ChatScreenV2({
   analysisCards,
   attachmentPurpose,
   assistantAnswer,
+  authSessionId,
   chatMessages,
   currentReport,
   demoPersonas,
