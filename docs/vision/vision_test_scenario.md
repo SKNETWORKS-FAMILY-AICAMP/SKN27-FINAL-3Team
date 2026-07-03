@@ -1,4 +1,4 @@
-﻿# Vision/DL 테스트 시나리오
+# Vision/DL 테스트 시나리오
 
 | 항목 | 내용 |
 |---|---|
@@ -151,7 +151,7 @@
 |---|---|
 | 목적 | RunPod 또는 로컬에서 raw 이미지/영상 파일을 실제로 읽을 수 있는지 확인한다. |
 | 사전 조건 | `storage/vision/raw`에 이미지 또는 영상 파일이 존재한다. |
-| 실행 명령 | `python scripts/check_raw_media.py` |
+| 실행 명령 | `python scripts/vision/check_raw_media.py` |
 | 기대 결과 | 파일 개수와 media 정보가 출력되고 `failed_media: 0`이 출력된다. |
 | 실패 시 조치 | 파일 경로, Drive 다운로드 상태, 파일 확장자, OpenCV/Pillow 설치 여부를 확인한다. |
 
@@ -201,7 +201,7 @@
 |---|---|
 | 목적 | VideoMAE 또는 후속 검토에 사용할 clip 후보를 생성한다. |
 | 사전 조건 | `agent_output_*.json` 존재 |
-| 실행 명령 | `python etl/build_clip_candidates.py --short-video-sec 10` |
+| 실행 명령 | `python etl/vision/build_clip_candidates.py --short-video-sec 5` |
 | 기대 결과 | `clip_candidates_*.json` 생성 |
 | 확인 기준 | 10초 이하 영상은 `basis=short_video_full_context`로 전체 영상 사용 |
 
@@ -211,7 +211,7 @@
 |---|---|
 | 목적 | clip 후보를 실제 mp4 파일로 저장한다. |
 | 사전 조건 | `clip_candidates_*.json` 존재 |
-| 실행 명령 | `python etl/extract_video_clips.py --overwrite` |
+| 실행 명령 | `python etl/vision/extract_video_clips.py --overwrite` |
 | 기대 결과 | `storage/vision/processed/clips/*.mp4` 생성 |
 | 확인 기준 | `status=ok`, `written_frames > 0` |
 
@@ -221,7 +221,7 @@
 |---|---|
 | 목적 | clip에서 VideoMAE 입력용 16프레임을 추출한다. |
 | 사전 조건 | clip mp4 존재 |
-| 실행 명령 | `python etl/extract_videomae_frames.py --overwrite` |
+| 실행 명령 | `python etl/vision/extract_videomae_frames.py --overwrite` |
 | 기대 결과 | `videomae_clip_manifest_*.json`, clip별 16장 이미지 생성 |
 | 확인 기준 | `target_frame_count=16`, `frame_exists=true` |
 
@@ -271,7 +271,7 @@
 |---|---|
 | 목적 | Jupyter Notebook 하나로 전체 POC 흐름을 실행하고 결과를 확인한다. |
 | 사전 조건 | RunPod 또는 로컬에 raw media와 코드가 준비되어 있다. |
-| 실행 방법 | `scripts/vision_situation_analysis_review.ipynb`에서 `Run All` 실행 |
+| 실행 방법 | `scripts/vision/vision_situation_analysis_review.ipynb`에서 `Run All` 실행 |
 | 기대 결과 | 전체 파이프라인 실행 후 final_analysis summary 출력 |
 | 실패 시 조치 | `transformers`, `ffmpeg`, raw media 경로, GPU/CPU 환경 확인 |
 
@@ -281,7 +281,7 @@
 |---|---|
 | 목적 | 상위 라벨 기준 학습 데이터 manifest와 frame-level manifest를 검증한다. |
 | 사전 조건 | Drive listing 또는 sample manifest 존재 |
-| 실행 명령 | `python etl/sample_classification_dataset.py`, `python etl/extract_training_frames.py` |
+| 실행 명령 | `python etl/vision/sample_classification_dataset.py`, `python etl/vision/extract_training_frames.py` |
 | 기대 결과 | `sample_700_coarse_manifest.csv`, `frame_manifest_train_700_f8.csv` 생성 |
 | 확인 기준 | coarse label, split, frame_path, file_exists 필드 확인 |
 
@@ -294,14 +294,14 @@
 ```bash
 cd /workspace/SKN27-FINAL-3Team
 
-python scripts/check_raw_media.py
+python scripts/vision/check_raw_media.py
 python ai/vision/pipeline.py
 python ai/vision/models.py
 python ai/vision/schemas.py
 python ai/vision/visualize.py
-python etl/build_clip_candidates.py --short-video-sec 10
-python etl/extract_video_clips.py --overwrite
-python etl/extract_videomae_frames.py --overwrite
+python etl/vision/build_clip_candidates.py --short-video-sec 5
+python etl/vision/extract_video_clips.py --overwrite
+python etl/vision/extract_videomae_frames.py --overwrite
 python ai/vision/videomae_infer.py
 python ai/vision/merge_analysis.py
 ```

@@ -1,11 +1,11 @@
-﻿# Vision/DL 프로젝트 방향성 수정 보고서
+# Vision/DL 프로젝트 방향성 수정 보고서
 
 | 항목 | 내용 |
 |---|---|
 | 작성일 | 2026-06-27 |
 | 목적 | Vision/DL POC 진행 중 확인된 비용, 데이터 규모, 구현 난이도, 팀 역할 범위를 반영하여 기존 방향과 수정 방향을 정리한다. |
 | 적용 범위 | RunPod 데이터 적재, 영상 프레임 추출, 이미지 분류 학습 파이프라인, Vision 결과 스키마, 산출물 관리 |
-| 기준 산출물 | `docs/vision/runpod_vision_poc_log.md`, `docs/vision/vision_training_plan.md`, `docs/vision/vision_schema_change_report.md`, `ai/vision/train_classifier.py`, `etl/extract_training_frames.py` |
+| 기준 산출물 | `docs/vision/runpod_vision_poc_log.md`, `docs/vision/vision_training_plan.md`, `docs/vision/vision_schema_change_report.md`, `ai/vision/train_classifier.py`, `etl/vision/extract_training_frames.py` |
 
 ## 1. 요약
 
@@ -26,7 +26,7 @@
 |---|---|---|---|---|
 | 데이터 적재 | Google Drive 전체 데이터를 RunPod로 바로 다운로드 | Drive listing 기반 manifest를 먼저 생성하고, 필요한 샘플만 다운로드 | 전체 데이터 용량과 Drive 폴더 구조 때문에 무작정 다운로드하면 비용과 시간이 커짐 | `classification_manifest.csv` 기준으로 샘플 단위 다운로드 유지 |
 | RunPod 사용 | RunPod에서 바로 분석과 학습 진행 | 로컬에서 코드와 dry-run을 검증한 뒤 RunPod GPU 사용 | GPU 비용 절감, 오류를 로컬에서 먼저 제거 가능 | 로컬 dry-run 완료 후 `sample_700_coarse_manifest.csv` 기준 RunPod 학습 |
-| 영상 처리 | 영상 원본을 학습 데이터로 직접 사용 | 영상에서 대표 프레임을 추출해 이미지 분류 데이터셋으로 사용 | 영상 모델은 비용과 복잡도가 높음. 초기 baseline은 이미지 분류가 더 빠름 | `etl/extract_training_frames.py`로 frame-level manifest 확장 |
+| 영상 처리 | 영상 원본을 학습 데이터로 직접 사용 | 영상에서 대표 프레임을 추출해 이미지 분류 데이터셋으로 사용 | 영상 모델은 비용과 복잡도가 높음. 초기 baseline은 이미지 분류가 더 빠름 | `etl/vision/extract_training_frames.py`로 frame-level manifest 확장 |
 | 라벨 기준 | AI-Hub 세부 카테고리를 그대로 사용 | 상위 라벨 4개로 단순화: 차대차, 차대보행자, 차대이륜차, 차대자전거 | 세부 라벨은 불균형이 심하고 초기 성능 검증이 어려움 | coarse label 기준 700개 샘플링 유지 |
 | 샘플링 전략 | 전체 15,823건을 바로 학습에 사용 | 카테고리별 최대 700개 랜덤 샘플링 후 train/val/test 분할 | 데이터 규모를 통제하면서 baseline 성능 확인 가능 | label별 700개 영상에서 프레임 추출 후 첫 GPU 학습 |
 | 단일 영상 POC | 단일 영상 분석을 계속 반복 | 단일 영상 POC는 검증 완료로 보고 학습 파이프라인으로 이동 | 단일 영상 반복은 학습 목표와 직접 연결되지 않음 | 이후 단일 영상은 데모/검증 예시로만 유지 |
@@ -36,7 +36,7 @@
 | 학습 파라미터 | 결과만 확인 | epoch, batch size, learning rate, freeze 여부, sample size를 run 단위로 기록 | 발표/보고 시 실험 재현성과 비교 근거 필요 | `run_config.json`, `training_history.csv`, `class_mapping.json` 유지 |
 | 스키마 | `damage_image`를 attachment purpose처럼 사용 가능 | `damage_image`는 Vision 내부 `analysis_mode`로 처리하고, PM 상위 purpose와 분리 | PM 상위 enum과 node 내부 세분화 purpose의 정합성 문제 방지 | `vision_agent_input_output_schema.md` 기준 유지 |
 | 챗봇/웹/ERD 문서 | 주희 담당 범위와 팀 공통 범위가 섞임 | 주희는 Vision 결과가 Supervisor/RAG/ERD에 연결 가능한 산출물 제공에 집중 | 챗봇 전체 플로우는 팀 공통/혜림 담당 비중이 큼 | Vision 플로우차트/시퀀스만 직접 산출물로 관리 |
-| 코드 구조 | ETL 파일마다 CSV/파일명 처리 코드가 반복 | 공통 ETL helper를 `etl/utils.py`로 분리 | 중복 제거. 단, 실행 방식은 유지 | ETL 스크립트는 `from utils import ...` 사용 유지 |
+| 코드 구조 | ETL 파일마다 CSV/파일명 처리 코드가 반복 | 공통 ETL helper를 `etl/vision/utils.py`로 분리 | 중복 제거. 단, 실행 방식은 유지 | ETL 스크립트는 `from utils import ...` 사용 유지 |
 
 ## 3. 현재까지 완료된 기준
 
@@ -89,18 +89,18 @@
 | `docs/vision/runpod_vision_poc_log.md` | RunPod 설정부터 POC, 학습 dry-run까지 진행 로그 |
 | `docs/vision/vision_training_plan.md` | 상위 라벨, 샘플링, 학습 모델, 파라미터 기록 기준 |
 | `docs/vision/vision_schema_change_report.md` | 급한 일/천천히 해도 되는 일/이슈 매핑 |
-| `etl/build_classification_manifest.py` | Drive listing에서 classification 후보 manifest 생성 |
-| `etl/sample_classification_dataset.py` | 상위 라벨별 최대 700개 샘플링 및 split 생성 |
-| `etl/download_sampled_media.py` | 샘플링된 영상 다운로드 검증 |
-| `etl/extract_training_frames.py` | 영상에서 학습용 프레임 추출 및 frame manifest 생성 |
-| `etl/utils.py` | ETL 공통 CSV/파일명 helper |
+| `etl/vision/build_classification_manifest.py` | Drive listing에서 classification 후보 manifest 생성 |
+| `etl/vision/sample_classification_dataset.py` | 상위 라벨별 최대 700개 샘플링 및 split 생성 |
+| `etl/vision/download_sampled_media.py` | 샘플링된 영상 다운로드 검증 |
+| `etl/vision/extract_training_frames.py` | 영상에서 학습용 프레임 추출 및 frame manifest 생성 |
+| `etl/vision/utils.py` | ETL 공통 CSV/파일명 helper |
 | `ai/vision/train_classifier.py` | frame-level classification baseline 학습 |
-| `etl/build_clip_candidates.py` | bbox 변화/event window 기준으로 VideoMAE 비교용 clip 후보 생성 |
-| `etl/extract_video_clips.py` | clip 후보 JSON을 기준으로 mp4 clip 파일 생성 |
-| `etl/extract_videomae_frames.py` | clip별 16프레임을 균등 샘플링해 VideoMAE 입력 manifest 생성 |
+| `etl/vision/build_clip_candidates.py` | bbox 변화/event window 기준으로 VideoMAE 비교용 clip 후보 생성 |
+| `etl/vision/extract_video_clips.py` | clip 후보 JSON을 기준으로 mp4 clip 파일 생성 |
+| `etl/vision/extract_videomae_frames.py` | clip별 16프레임을 균등 샘플링해 VideoMAE 입력 manifest 생성 |
 | `ai/vision/videomae_infer.py` | pretrained VideoMAE로 clip-level action hint 추론 |
 | `ai/vision/merge_analysis.py` | Vision Agent Output과 VideoMAE 결과를 final_analysis JSON으로 병합 |
-| `scripts/vision_situation_analysis_review.ipynb` | Run All로 전체 Vision POC 실행 및 결과 확인이 가능한 Jupyter 리뷰 노트북 |
+| `scripts/vision/vision_situation_analysis_review.ipynb` | Run All로 전체 Vision POC 실행 및 결과 확인이 가능한 Jupyter 리뷰 노트북 |
 
 ## 5. 앞으로의 권장 진행 순서
 

@@ -1,7 +1,7 @@
 """Build VideoMAE comparison clip candidates from final Vision evidence.
 
-Short videos are kept whole; longer videos use event-window evidence to choose
-small clips for clip-level inference.
+Videos up to 5 seconds are kept whole; longer videos use the center of an
+event-window candidate to build a 5-second clip for clip-level inference.
 """
 from pathlib import Path
 import argparse
@@ -12,7 +12,7 @@ import cv2
 
 AGENT_OUTPUT_DIR = Path("storage/vision/outputs/agent_outputs")
 CLIP_CANDIDATE_DIR = Path("storage/vision/outputs/clip_candidates")
-DEFAULT_SHORT_VIDEO_SEC = 10.0
+DEFAULT_SHORT_VIDEO_SEC = 5.0
 
 
 def find_latest_agent_output() -> Path:
@@ -58,24 +58,29 @@ def make_event_window_candidates(
     event_windows: list[dict],
     pre_context_sec: float,
     post_context_sec: float,
+    source_duration_sec: float | None,
 ) -> list[dict]:
     candidates = []
     for idx, window in enumerate(event_windows, start=1):
         base_start_sec = float(window.get("event_window_start_sec") or 0.0)
         base_end_sec = max(base_start_sec, float(window.get("event_window_end_sec") or base_start_sec))
-        start_sec = max(0.0, base_start_sec - pre_context_sec)
-        end_sec = max(start_sec, base_end_sec + post_context_sec)
+        accident_sec = (base_start_sec + base_end_sec) / 2
+        start_sec = max(0.0, accident_sec - pre_context_sec)
+        end_sec = accident_sec + post_context_sec
+        if source_duration_sec is not None:
+            end_sec = min(source_duration_sec, end_sec)
         clip_id = window.get("event_candidate_id", f"event_window_{idx:02d}").replace("event_window", "clip")
         candidates.append(
             {
                 "clip_id": clip_id,
                 "source_video": source_video,
+                "accident_candidate_sec": round(accident_sec, 3),
                 "clip_start_sec": round(start_sec, 3),
                 "clip_end_sec": round(end_sec, 3),
                 "clip_duration_sec": round(end_sec - start_sec, 3),
                 "priority_score": window.get("priority_score"),
                 "source_refs": window.get("source_refs", []),
-                "basis": window.get("basis", "agent_event_window"),
+                "basis": window.get("basis", "agent_event_window_center_5s"),
                 "clip_label_status": window.get("clip_status", "candidate_for_inference"),
                 "pre_context_sec": pre_context_sec,
                 "post_context_sec": post_context_sec,
@@ -87,8 +92,8 @@ def make_event_window_candidates(
 
 def build_clip_candidates(
     agent_output_path: Path,
-    pre_context_sec: float = 4.0,
-    post_context_sec: float = 2.0,
+    pre_context_sec: float = 2.5,
+    post_context_sec: float = 2.5,
     short_video_sec: float = DEFAULT_SHORT_VIDEO_SEC,
 ) -> tuple[Path, dict]:
     CLIP_CANDIDATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -109,6 +114,7 @@ def build_clip_candidates(
             event_windows=result.get("event_window_candidates", []),
             pre_context_sec=pre_context_sec,
             post_context_sec=post_context_sec,
+            source_duration_sec=duration_sec,
         )
 
     output = {
@@ -129,8 +135,8 @@ def build_clip_candidates(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build clip candidates from Vision Agent output.")
     parser.add_argument("--agent-output", type=Path, default=None)
-    parser.add_argument("--pre-context-sec", type=float, default=4.0)
-    parser.add_argument("--post-context-sec", type=float, default=2.0)
+    parser.add_argument("--pre-context-sec", type=float, default=2.5)
+    parser.add_argument("--post-context-sec", type=float, default=2.5)
     parser.add_argument("--short-video-sec", type=float, default=DEFAULT_SHORT_VIDEO_SEC)
     return parser.parse_args()
 

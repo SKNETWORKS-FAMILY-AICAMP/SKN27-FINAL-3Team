@@ -1,4 +1,4 @@
-﻿# Vision Input·Output Schema 변경 보고서
+# Vision Input·Output Schema 변경 보고서
 
 | 항목 | 내용 |
 |---|---|
@@ -153,7 +153,7 @@ Supervisor Agent가 Vision Agent를 호출할 때 사용할 권장 Input Schema�
       "summarize_scene": true,
       "remove_audio": true,
       "clip_policy": {
-        "short_video_full_context_sec": 10,
+        "short_video_full_context_sec": 5,
         "long_video_pre_context_sec": 4,
         "long_video_post_context_sec": 2,
         "videomae_frame_count": 16

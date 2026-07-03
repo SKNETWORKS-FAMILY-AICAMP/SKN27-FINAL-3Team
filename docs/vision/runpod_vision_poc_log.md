@@ -1,4 +1,4 @@
-﻿# RunPod Vision POC 진행 기록
+# RunPod Vision POC 진행 기록
 
 작성일: 2026-06-26
 
@@ -200,7 +200,7 @@ ls -lh storage/vision/raw
 생성 파일:
 
 ```text
-scripts/check_raw_images.py
+scripts/vision/check_raw_images.py
 ```
 
 역할:
@@ -213,7 +213,7 @@ scripts/check_raw_images.py
 실행:
 
 ```bash
-python scripts/check_raw_images.py
+python scripts/vision/check_raw_images.py
 ```
 
 성공 결과:
@@ -247,7 +247,7 @@ RunPod에서 이미지 파일 읽기 성공
 생성 파일:
 
 ```text
-etl/vision_data.py
+etl/vision/vision_data.py
 ```
 
 역할:
@@ -260,7 +260,7 @@ etl/vision_data.py
 실행:
 
 ```bash
-python etl/vision_data.py
+python etl/vision/vision_data.py
 ```
 
 성공 결과:
@@ -327,7 +327,7 @@ bb_3_190909_pedestrian_226_21450.mp4
 생성 파일:
 
 ```text
-scripts/check_raw_media.py
+scripts/vision/check_raw_media.py
 ```
 
 역할:
@@ -341,7 +341,7 @@ scripts/check_raw_media.py
 실행:
 
 ```bash
-python scripts/check_raw_media.py
+python scripts/vision/check_raw_media.py
 ```
 
 성공 결과:
@@ -724,9 +724,9 @@ storage/vision/outputs/visualizations/visualizations_bb_3_190909_pedestrian_226_
 현재 구현 파일:
 
 ```text
-scripts/check_raw_images.py
-scripts/check_raw_media.py
-etl/vision_data.py
+scripts/vision/check_raw_images.py
+scripts/vision/check_raw_media.py
+etl/vision/vision_data.py
 ai/vision/pipeline.py
 ai/vision/models.py
 ai/vision/schemas.py
@@ -755,14 +755,14 @@ ai/vision/visualize.py
 생성 파일:
 
 ```text
-etl/attachment_evidence_sample.py
+etl/vision/attachment_evidence_sample.py
 ```
 
 실행:
 
 ```powershell
 cd D:\dev\SKN27-FINAL-3Team
-.\.venv\Scripts\python.exe etl\attachment_evidence_sample.py
+.\.venv\Scripts\python.exe etl\vision\attachment_evidence_sample.py
 ```
 
 현재 샘플 입력:
@@ -835,7 +835,7 @@ evidence_candidates와 detected_objects가 원본 이미지 경로 또는 source
 추가 파일:
 
 ```text
-etl/extract_training_frames.py
+etl/vision/extract_training_frames.py
 ```
 
 역할:
@@ -934,9 +934,9 @@ RunPod에서 sample_700_coarse_manifest.csv 기반 학습으로 확장한다.
 ```bash
 cd /workspace/SKN27-FINAL-3Team
 
-python etl/build_clip_candidates.py --short-video-sec 10
-python etl/extract_video_clips.py --overwrite
-python etl/extract_videomae_frames.py --overwrite
+python etl/vision/build_clip_candidates.py --short-video-sec 5
+python etl/vision/extract_video_clips.py --overwrite
+python etl/vision/extract_videomae_frames.py --overwrite
 python ai/vision/videomae_infer.py
 python ai/vision/merge_analysis.py
 ```
@@ -973,7 +973,7 @@ videomae: clip_01 driving car 0.563136
 
 ### 18.5 Jupyter Notebook 실행 방식
 
-`scripts/vision_situation_analysis_review.ipynb`에 전체 파이프라인 실행 셀을 추가했다.
+`scripts/vision/vision_situation_analysis_review.ipynb`에 전체 파이프라인 실행 셀을 추가했다.
 
 RunPod Jupyter에서 노트북을 열고 `Run All`을 실행하면 다음 순서가 한 번에 실행된다.
 

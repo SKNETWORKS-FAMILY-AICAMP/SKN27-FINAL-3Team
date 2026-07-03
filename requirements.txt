@@ -12,3 +12,10 @@ langgraph
 PyMuPDF
 python-dotenv
 typing_extensions
+opencv-python
+Pillow
+torch
+torchvision
+transformers
+tqdm
+ultralytics

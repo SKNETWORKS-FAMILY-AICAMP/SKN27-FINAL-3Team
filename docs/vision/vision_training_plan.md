@@ -262,8 +262,8 @@ RunPod는 아래 준비가 끝난 뒤 사용한다.
 다음으로 만들 파일:
 
 ```text
-etl/build_classification_manifest.py
-etl/sample_classification_dataset.py
+etl/vision/build_classification_manifest.py
+etl/vision/sample_classification_dataset.py
 ai/vision/train_classifier.py
 ```
 
@@ -287,14 +287,14 @@ train_classifier.py
 생성 파일:
 
 ```text
-etl/build_classification_manifest.py
+etl/vision/build_classification_manifest.py
 ```
 
 실행:
 
 ```powershell
 cd D:\dev\SKN27-FINAL-3Team
-python etl\build_classification_manifest.py
+python etl\vision\build_classification_manifest.py
 ```
 
 로컬 `.venv` 런처가 깨진 경우에는 Codex 번들 Python 또는 정상 Python으로 실행해도 된다. 해당 스크립트는 표준 라이브러리만 사용한다.
@@ -338,7 +338,7 @@ planned_use
 다음 단계:
 
 ```text
-etl/sample_classification_dataset.py
+etl/vision/sample_classification_dataset.py
 ```
 
 역할:
@@ -355,14 +355,14 @@ sample_700_coarse_manifest.csv 생성
 생성 파일:
 
 ```text
-etl/sample_classification_dataset.py
+etl/vision/sample_classification_dataset.py
 ```
 
 실행:
 
 ```powershell
 cd D:\dev\SKN27-FINAL-3Team
-python etl\sample_classification_dataset.py
+python etl\vision\sample_classification_dataset.py
 ```
 
 생성 결과:
@@ -408,7 +408,7 @@ split_counts: {'train': 4530, 'val': 1291, 'test': 660}
 다음 구현 후보:
 
 ```text
-etl/download_sampled_media.py
+etl/vision/download_sampled_media.py
 etl/extract_classification_frames.py
 ai/vision/train_classifier.py
 ```
@@ -446,8 +446,8 @@ coarse_label : 1차 학습에 사용할 상위 라벨
 수정 파일:
 
 ```text
-etl/build_classification_manifest.py
-etl/sample_classification_dataset.py
+etl/vision/build_classification_manifest.py
+etl/vision/sample_classification_dataset.py
 ```
 
 `build_classification_manifest.py`는 category에서 `coarse_label`을 추출한다.
@@ -501,7 +501,7 @@ split_counts: {'train': 1956, 'val': 560, 'test': 284}
 생성 파일:
 
 ```text
-etl/download_sampled_media.py
+etl/vision/download_sampled_media.py
 ```
 
 목적:
@@ -513,7 +513,7 @@ etl/download_sampled_media.py
 
 ```powershell
 cd D:\dev\SKN27-FINAL-3Team
-python etl\download_sampled_media.py --per-label 1 --split train
+python etl\vision\download_sampled_media.py --per-label 1 --split train
 ```
 
 생성 결과:
@@ -565,13 +565,13 @@ frame_classification_manifest.csv 생성
 
 작성일: 2026-06-26
 
-`etl/extract_training_frames.py`를 추가하여 다운로드된 영상 manifest를 frame-level classification manifest로 변환했다.
+`etl/vision/extract_training_frames.py`를 추가하여 다운로드된 영상 manifest를 frame-level classification manifest로 변환했다.
 
 실행 명령:
 
 ```powershell
 cd D:\dev\SKN27-FINAL-3Team
-.\.venv\Scripts\python.exe etl\extract_training_frames.py `
+.\.venv\Scripts\python.exe etl\vision\extract_training_frames.py `
   --input storage\vision\datasets\classification\manifests\dryrun_download_manifest.csv `
   --output storage\vision\datasets\classification\manifests\frame_manifest_dryrun.csv `
   --frames-per-video 5 `
@@ -732,7 +732,7 @@ Disk: 200GB 이상 권장
 ### 23.4 비용 절감 기준
 
 - 전체 2,800개 학습 전에는 코드와 manifest가 로컬에서 검증되어 있어야 한다.
-- RunPod에서는 `scripts/vision_training_runpod_full_pipeline.ipynb`를 기준으로 실행한다.
+- RunPod에서는 `scripts/vision/vision_training_resnet18_runpod.ipynb ?? scripts/vision/vision_model1_yolo_tracking_videomae_runpod.ipynb`를 기준으로 실행한다.
 - 학습 완료 후 아래 산출물을 확인하면 Pod를 stop한다.
 
 ```text
@@ -746,7 +746,7 @@ storage/vision/models/classification/vision_cls_*/run_config.json
 ### 23.5 RunPod에서 실행할 노트북
 
 ```text
-/workspace/SKN27-FINAL-3Team/scripts/vision_training_runpod_full_pipeline.ipynb
+/workspace/SKN27-FINAL-3Team/scripts/vision/vision_training_resnet18_runpod.ipynb ?? scripts/vision/vision_model1_yolo_tracking_videomae_runpod.ipynb
 ```
 
 Run All 실행 순서:
@@ -776,3 +776,20 @@ requirements 설치
 | CUDA/CUDNN | deterministic 설정 적용 | `train_classifier.py` |
 
 주의: GPU/CUDA 연산은 환경과 라이브러리 버전에 따라 완전한 bit-level 동일성을 보장하지 못할 수 있다. 그래도 seed, DataLoader generator, deterministic 옵션을 고정해 실험 간 변동을 최소화한다.
+## 24. 모델별 RunPod 실행 기준 업데이트
+
+현재 Vision/DL 실험은 모델별 노트북으로 분리한다.
+
+| 목적 | 실행 노트북 | 권장 GPU/설정 |
+|---|---|---|
+| clip 전략 샘플 테스트 | `scripts/vision/vision_clip_strategy_sample_test_runpod.ipynb` | RTX A5000 24GB 이상, 라벨별 1개부터 실행 |
+| ResNet18 baseline | `scripts/vision/vision_training_resnet18_runpod.ipynb` | RTX A5000 24GB 이상, batch size 32 기준 |
+| VideoMAE 원본 영상 baseline | `scripts/vision/vision_training_videomae_runpod.ipynb` | RTX A5000 24GB 이상, batch size 1~2 권장 |
+| YOLO/ByteTrack + 5초 clip + VideoMAE | `scripts/vision/vision_model1_yolo_tracking_videomae_runpod.ipynb` | RTX A5000 24GB 이상, 가능하면 A40/L40/4090 |
+| YOLO/ByteTrack + Qwen2.5-VL | `scripts/vision/vision_model2_yolo_tracking_qwen_vl_runpod.ipynb` | 최소 24GB VRAM, 가능하면 40GB 이상 |
+| 서비스 통합 흐름 검증 | `scripts/vision/vision_model3_service_pipeline_runpod.ipynb` | A5000급이면 가능. Qwen까지 포함하면 40GB 이상 권장 |
+
+VideoMAE와 Qwen2.5-VL은 ResNet18보다 메모리 사용량이 크다. VideoMAE는 batch size 1~2부터 시작하고, Qwen2.5-VL은 clip 길이와 fps를 작게 유지한다.
+
+사고 후보 clip 기준은 전체 영상이 아니라 사고 후보 지점 중심 총 5초이다. 구성은 사고 전 약 2.5초와 사고 후 약 2.5초이며, VideoMAE는 해당 clip에서 16프레임을 균등 샘플링한다.
+

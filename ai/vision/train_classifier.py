@@ -328,6 +328,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument("--label-smoothing", type=float, default=0.0)
+    parser.add_argument("--early-stopping-patience", type=int, default=3)
     parser.add_argument("--val-ratio-if-missing", type=float, default=0.25)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--show-progress", action=argparse.BooleanOptionalAction, default=False)
@@ -353,10 +356,11 @@ def main() -> None:
 
     device = choose_device(args.device)
     model = build_model(args.model_name, len(label_to_index), args.pretrained, args.freeze_backbone).to(device)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
     optimizer = torch.optim.AdamW(
         [parameter for parameter in model.parameters() if parameter.requires_grad],
         lr=args.learning_rate,
+        weight_decay=args.weight_decay,
     )
 
     train_loader = make_loader(
@@ -399,6 +403,10 @@ def main() -> None:
     run_id = datetime.now().strftime("vision_cls_%Y%m%d_%H%M%S")
     output_dir = args.output_dir / run_id
     history = []
+    best_val_acc = -1.0
+    best_epoch = 0
+    epochs_without_improvement = 0
+    best_state = None
 
     print(f"run_id: {run_id}")
     print(f"device: {device}")
@@ -429,6 +437,21 @@ def main() -> None:
             f"val_loss={history_row['val_loss']} val_acc={history_row['val_accuracy']}"
         )
 
+        current_val_acc = val_acc if val_acc is not None else -1.0
+        if current_val_acc > best_val_acc:
+            best_val_acc = current_val_acc
+            best_epoch = epoch
+            epochs_without_improvement = 0
+            best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+        else:
+            epochs_without_improvement += 1
+            if args.early_stopping_patience > 0 and epochs_without_improvement >= args.early_stopping_patience:
+                print(f"early_stopping: epoch={epoch} best_epoch={best_epoch} best_val_acc={best_val_acc:.6f}")
+                break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+
     config = {
         "run_id": run_id,
         "manifest": args.manifest.as_posix(),
@@ -440,6 +463,11 @@ def main() -> None:
         "epochs": args.epochs,
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
+        "weight_decay": args.weight_decay,
+        "label_smoothing": args.label_smoothing,
+        "early_stopping_patience": args.early_stopping_patience,
+        "best_epoch": best_epoch,
+        "best_val_accuracy": best_val_acc,
         "seed": args.seed,
         "deterministic": args.deterministic,
         "show_progress": args.show_progress,
