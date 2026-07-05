@@ -1196,6 +1196,13 @@ p {
   color: var(--muted);
 }
 
+.report-quality-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
 .save-choice-panel {
   margin: 0 22px 14px;
   padding: 14px;

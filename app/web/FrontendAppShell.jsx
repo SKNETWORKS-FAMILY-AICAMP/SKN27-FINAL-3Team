@@ -1487,6 +1487,13 @@ function ReportingPreviewPanel({ reportingPayload }) {
 }
 
 function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, reportActionStatus }) {
+  const reportQuality =
+    currentReport?.persistence?.report_quality ||
+    currentReport?.report_quality ||
+    currentReport?.metadata?.report_quality ||
+    null;
+  const agentStatusCounts = reportQuality?.agent_status_counts || {};
+  const hasReportQuality = Boolean(reportQuality);
   const helperText = isAuthenticated
     ? reportActionStatus || "상담 결과를 reports metadata로 저장하거나 다운로드 경계를 확인할 수 있습니다."
     : reportActionStatus || "리포트 저장과 다운로드는 Google 로그인 후 사용할 수 있습니다.";
@@ -1497,6 +1504,18 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
         <span className="eyebrow">Report action</span>
         <strong>{currentReport?.report_id || "리포트 metadata 준비"}</strong>
         <p>{helperText}</p>
+        {hasReportQuality && (
+          <div className="report-quality-panel" data-partial-report={String(Boolean(reportQuality.partial_report))}>
+            <span className={reportQuality.partial_report ? "tag amber" : "tag green"}>
+              {reportQuality.partial_report ? "partial_report" : "ready_report"}
+            </span>
+            <span className="tag">analysis_job_status: {reportQuality.analysis_job_status || "unknown"}</span>
+            <span className="tag">limitations: {reportQuality.limitation_count ?? 0}</span>
+            {Object.keys(agentStatusCounts).length > 0 && (
+              <span className="tag">agent_status_counts: {compactValue(agentStatusCounts)}</span>
+            )}
+          </div>
+        )}
       </div>
       <div className="report-action-buttons">
         <button className="button" type="button" onClick={() => onRunReportAction("save")}>
