@@ -1468,6 +1468,139 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(auth_session.user.user_id, user_id)
         self.assertEqual(auth_session.guest.guest_id, guest_id)
 
+    def test_mvp_e2e_demo_spine_upload_worker_report_history(self):
+        session_id = "ses_mvp_e2e_demo"
+        guest_response = Client().post(
+            "/api/auth/guest-session/",
+            data={"session_id": session_id},
+            content_type="application/json",
+        )
+        self.assertEqual(guest_response.status_code, 200)
+        guest_id = guest_response.json()["guest"]["guest_id"]
+
+        login_response = Client().post(
+            "/api/auth/google/code/",
+            data={
+                "provider": "google",
+                "code": "mock_google_code:mvp-e2e-demo",
+                "purpose": "LOGIN",
+                "scope": "openid email profile",
+                "email": "mvp.e2e@example.com",
+                "display_name": "MVP E2E Demo User",
+                "guest_id": guest_id,
+                "session_id": session_id,
+            },
+            content_type="application/json",
+            HTTP_X_REQUESTED_WITH="XmlHttpRequest",
+        )
+        self.assertEqual(login_response.status_code, 200)
+        login_body = login_response.json()
+        auth_session_id = login_body["subject"]["auth_session_id"]
+        auth_client = Client(
+            HTTP_AUTHORIZATION=f"Bearer {login_body['access_token']}",
+            HTTP_X_GUEST_ID=guest_id,
+            HTTP_X_AUTH_SESSION_ID=auth_session_id,
+        )
+
+        upload_response = auth_client.post(
+            "/api/files/",
+            data={
+                "session_id": session_id,
+                "purpose": "fine_notice",
+                "filename": "demo-notice.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": 0,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(upload_response.status_code, 200)
+        attachment = upload_response.json()["attachment"]
+
+        scan_response = auth_client.post(
+            f"/api/files/{attachment['attachment_id']}/scan/",
+            data={"session_id": session_id},
+            content_type="application/json",
+        )
+        self.assertEqual(scan_response.status_code, 200)
+        self.assertEqual(scan_response.json()["attachment"]["scan_status"], "clean")
+
+        message_response = auth_client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "conversation_save_state": "saved",
+                "user_text": "Prepare an MVP demo report from this uploaded fine notice.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "execution_mode": "async_worker",
+                "attachments": [{"attachment_id": attachment["attachment_id"]}],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        message_body = message_response.json()
+        self.assertEqual(message_body["execution_mode"], "async_worker")
+        self.assertEqual(message_body["status"], "queued")
+        self.assertEqual(message_body["persistence"]["progress_state"]["state"], "queued")
+        self.assertEqual(message_body["attachments"][0]["scan_status"], "clean")
+        self.assertNotIn("scan_gate", message_body)
+        self.assertTrue(message_body["work_item"]["work_item_id"])
+
+        worker_response = auth_client.post(
+            "/api/agents/work-items/process/",
+            data={"limit": 1},
+            content_type="application/json",
+        )
+        self.assertEqual(worker_response.status_code, 200)
+        worker_body = worker_response.json()
+        self.assertEqual(worker_body["processed"], 1)
+        self.assertEqual(worker_body["work_items"][0]["progress_state"]["state"], "success")
+        job_id = message_body["work_item"]["job_id"]
+        job = AnalysisJob.objects.get(job_id=job_id)
+        self.assertIn(job.status, {AnalysisJobStatus.SUCCESS, AnalysisJobStatus.PARTIAL})
+        self.assertGreater(job.agent_results.count(), 0)
+
+        report_response = auth_client.post(
+            "/api/reports/",
+            data={
+                "action": "save",
+                "report_id": "rep_mvp_e2e_demo",
+                "job_id": job_id,
+                "session_id": session_id,
+                "report_type": "general",
+                "title": "MVP E2E demo report",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        report_body = report_response.json()
+        self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
+        self.assertEqual(report_body["persistence"]["report_quality"]["contract_version"], "report_quality.v1")
+        self.assertEqual(report_body["persistence"]["report_quality"]["analysis_job_status"], job.status)
+
+        download_response = auth_client.get("/api/reports/rep_mvp_e2e_demo/download/")
+        self.assertEqual(download_response.status_code, 200)
+        download_body = download_response.content.decode("utf-8")
+        self.assertIn("analysis_job_status:", download_body)
+        self.assertIn("partial_report:", download_body)
+
+        summary_response = auth_client.get(f"/api/mypage/summary/?session_id={session_id}")
+        self.assertEqual(summary_response.status_code, 200)
+        summary_body = summary_response.json()
+        self.assertEqual(summary_body["saved_reports"], 1)
+        self.assertTrue(any(item["job_id"] == job_id for item in summary_body["cases"]))
+
+        session_history_response = auth_client.get(f"/api/history/?session_id={session_id}")
+        self.assertEqual(session_history_response.status_code, 200)
+        session_history_types = {event["event_type"] for event in session_history_response.json()["events"]}
+        self.assertIn("chat_message_created", session_history_types)
+        self.assertIn("report_saved", session_history_types)
+
+        job_history_response = auth_client.get(f"/api/history/?session_id={session_id}&job_id={job_id}")
+        self.assertEqual(job_history_response.status_code, 200)
+        job_history_types = {event["event_type"] for event in job_history_response.json()["events"]}
+        self.assertIn("report_saved", job_history_types)
+
     def test_google_code_login_requires_popup_csrf_header(self):
         response = Client().post(
             "/api/auth/google/code/",

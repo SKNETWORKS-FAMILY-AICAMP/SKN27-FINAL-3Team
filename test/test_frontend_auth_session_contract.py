@@ -122,6 +122,13 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "processAgentWorkItems" in shell
     assert "workerActionStatus" in shell
     assert "worker progress" in shell
+    assert "reportQuality" in shell
+    assert "report-quality-panel" in shell
+    assert "data-partial-report" in shell
+    assert "partial_report" in shell
+    assert "ready_report" in shell
+    assert "analysis_job_status" in shell
+    assert "agent_status_counts" in shell
 
 
 def test_vite_proxy_does_not_capture_frontend_api_client_module():
