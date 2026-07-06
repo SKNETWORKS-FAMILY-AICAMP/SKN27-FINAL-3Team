@@ -424,29 +424,63 @@ def test_execute_plan_can_mix_sync_fine_notice_with_mock_supervisor_steps():
 def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypatch):
     from ai.agents.text_ml_case_search import agent as text_ml_agent
 
-    def fake_search_legal_rag(query, *, top_k, source_type):
-        return {
-            "contract_version": "legal_rag_search.v1",
-            "status": "ready",
-            "backend": "django_rag_tables",
-            "query": query,
-            "top_k": top_k,
-            "result_count": 1,
-            "latency_ms": 0,
-            "results": [
-                {
-                    "source_reference": "case_chunk_sync_001",
-                    "source_type": source_type,
-                    "source_name": "Fault review cases",
-                    "title": "Intersection side-entry collision",
-                    "summary": "Visibility and right-of-way are the primary disputed issues.",
-                    "score": 0.82,
-                }
-            ],
-            "error_code": "",
-        }
+    class FakeElasticsearch:
+        def __init__(self):
+            self.calls = []
 
-    monkeypatch.setattr(text_ml_agent, "search_legal_rag", fake_search_legal_rag)
+        def search(self, *, index, body):
+            self.calls.append({"index": index, "body": body})
+            if index == "precedent_fault_ratio_chunks_bm25_nori_v1":
+                return {
+                    "hits": {
+                        "hits": [
+                            {
+                                "_index": "precedent_fault_ratio_chunks_bm25_nori_v1",
+                                "_score": 31.5,
+                                "_source": {
+                                    "case_id": "616249",
+                                    "chunk_id": "616249:structured_1500_250:0001",
+                                    "chunk_type": "fault_ratio_evidence",
+                                    "case_name": "precedent title",
+                                    "case_number": "2022da287284",
+                                    "court_name": "Supreme Court",
+                                    "decision_date": "2025-05-15",
+                                    "chunk_text": "valid precedent evidence text " * 5,
+                                    "search_text": "sample search text",
+                                },
+                            }
+                        ]
+                    }
+                }
+            return {
+                "hits": {
+                    "hits": [
+                        {
+                            "_index": "review_case_chunks_bm25_nori_v1",
+                            "_score": 10.1,
+                            "_source": {
+                                "review_case_id": "rc_001",
+                                "review_no": "2017-032889",
+                                "chunk_id": "rc_001:case_overview",
+                                "chunk_type": "case_overview",
+                                "case_title": "sample case",
+                                "decision_fault_ratio": "A 70 : B 30",
+                                "claimant_final_ratio": "70",
+                                "respondent_final_ratio": "30",
+                                "chunk_text": "valid review case evidence text " * 4,
+                                "search_text": "sample search text",
+                            },
+                        }
+                    ]
+                }
+            }
+
+    fake_es = FakeElasticsearch()
+    monkeypatch.setattr(
+        text_ml_agent,
+        "_optional_elasticsearch_client",
+        lambda: (fake_es, ["test Elasticsearch client enabled"]),
+    )
 
     execution = execute_mock_node(
         {
@@ -474,12 +508,17 @@ def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypa
     assert execution["adapter_context"]["execution_mode"] == "sync"
     assert output["node_code"] == "text_ml_case_search"
     assert output["status"] == "success"
-    assert structured_result["similar_cases"][0]["source_ref"] == "case_chunk_sync_001"
+    assert len(fake_es.calls) == 2
+    assert structured_result["similar_cases"][0]["source_ref"] == "review_case_db:rc_001#rc_001:case_overview"
     assert structured_result["top_cases"] == structured_result["similar_cases"]
-    assert structured_result["retrieval"]["source_type"] == "review_case"
+    assert structured_result["ratio_range_label"] == "A 70 : B 30"
+    assert structured_result["retrieval"]["adapter_source"] == "fault_ratio_knowledge_agent"
+    assert structured_result["retrieval"]["source_summary"]["source_counts"] == {
+        "review_case": 1,
+        "fault_ratio_precedent": 1,
+    }
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"
     assert output["evidence"][0]["source_type"] == "review_case"
-    assert "blackbox" in structured_result["evidence_tags"]
     assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
 
 
