@@ -1407,6 +1407,7 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
   const questions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
   const packages = Array.isArray(supervisorState?.agent_input_packages) ? supervisorState.agent_input_packages : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
+  const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
   const workItem = supervisorExecution?.work_item || null;
 
   return (
@@ -1470,6 +1471,8 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
         </div>
       )}
 
+      {faultRatioNode && <FaultRatioInsightPanel node={faultRatioNode} />}
+
       {workItem && nodeResults.length === 0 && (
         <div className="node-result-list">
           <NodeResultPill
@@ -1484,6 +1487,83 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
         </div>
       )}
     </section>
+  );
+}
+
+function FaultRatioInsightPanel({ node, compact = false }) {
+  const structuredResult = node?.structured_result || {};
+  const retrieval = structuredResult.retrieval || {};
+  const sourceSummary = retrieval.source_summary || structuredResult.source_summary || {};
+  const sourceCounts = sourceSummary.source_counts || {};
+  const similarCases = Array.isArray(structuredResult.similar_cases)
+    ? structuredResult.similar_cases
+    : Array.isArray(structuredResult.top_cases)
+      ? structuredResult.top_cases
+      : [];
+  const recommendedEvidence = Array.isArray(structuredResult.recommended_evidence)
+    ? structuredResult.recommended_evidence
+    : [];
+  const limitations = Array.isArray(node?.limitations)
+    ? node.limitations
+    : Array.isArray(structuredResult.limitations)
+      ? structuredResult.limitations
+      : [];
+  const ratioRangeLabel = structuredResult.ratio_range_label || "pending review";
+  const adapterSource = retrieval.adapter_source || "not reported";
+  const sourceCountSummary = Object.keys(sourceCounts).length ? compactValue(sourceCounts) : "not reported";
+
+  if (!node || node.node_code !== "text_ml_case_search") {
+    return null;
+  }
+
+  return (
+    <article className={compact ? "fault-ratio-insight-panel compact" : "fault-ratio-insight-panel"}>
+      <div className="fault-ratio-insight-head">
+        <span className="tag">text_ml_case_search</span>
+        <strong>Fault ratio evidence</strong>
+        <span className="tag">{normalizeExecutionMode(node.adapter_execution_mode || node.execution_mode)}</span>
+      </div>
+      <div className="fault-ratio-insight-grid">
+        <p>
+          <span>ratio_range_label</span>
+          <strong>{compactValue(ratioRangeLabel)}</strong>
+        </p>
+        <p>
+          <span>retrieval.adapter_source</span>
+          <strong>{compactValue(adapterSource)}</strong>
+        </p>
+        <p>
+          <span>source_summary</span>
+          <strong>{sourceCountSummary}</strong>
+        </p>
+      </div>
+      {similarCases.length > 0 && (
+        <div className="fault-ratio-insight-section">
+          <strong>similar_cases</strong>
+          {similarCases.slice(0, compact ? 2 : 3).map((item, index) => (
+            <p key={item.source_ref || item.source_reference || item.case_id || `similar-case-${index}`}>
+              {compactValue(item)}
+            </p>
+          ))}
+        </div>
+      )}
+      {recommendedEvidence.length > 0 && (
+        <div className="fault-ratio-insight-section">
+          <strong>recommended_evidence</strong>
+          <p>{compactValue(recommendedEvidence)}</p>
+        </div>
+      )}
+      {limitations.length > 0 && (
+        <div className="fault-ratio-insight-section">
+          <strong>limitations</strong>
+          <ul>
+            {limitations.slice(0, compact ? 2 : 3).map((item, index) => (
+              <li key={`fault-ratio-limitation-${index}`}>{compactValue(item)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -1717,6 +1797,7 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
   const hasReport = Boolean(reportingPayload || analysisCards.length || supervisorExecution);
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
+  const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
 
   return (
     <section className="screen">
@@ -1817,6 +1898,7 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
                   ))}
                 </div>
               </div>
+              {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
             </>
           ) : (
             <div className="inspector-section">

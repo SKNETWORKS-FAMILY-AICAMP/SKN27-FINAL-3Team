@@ -2332,11 +2332,11 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(completed_detail["progress_state"]["state"], "success")
         self.assertGreater(completed_detail["agent_result_count"], 0)
 
-    def test_canonical_chat_sync_request_keeps_unimplemented_agents_mock(self):
+    def test_canonical_chat_sync_request_runs_ready_fault_ratio_adapter_only(self):
         response = self.client.post(
             "/api/chat/messages/",
             data={
-                "session_id": "ses_canonical_sync_mock_only",
+                "session_id": "ses_canonical_sync_fault_ratio_hybrid",
                 "conversation_save_state": "pending",
                 "user_text": "사고 사진과 블랙박스 상황으로 과실 비율을 검토해줘.",
                 "persona_id": "accident_scene_photo_driver",
@@ -2349,19 +2349,44 @@ class ChatbotMockApiTests(TestCase):
         body = response.json()
         execution = body["supervisor_execution"]
         node_results = {item["node_code"]: item for item in execution["node_results"]}
+        text_ml_result = node_results["text_ml_case_search"]
+        vision_result = node_results["vision_media_analysis"]
 
-        self.assertEqual(execution["execution_mode"], "mock")
-        for node_code in ("vision_media_analysis", "text_ml_case_search"):
-            self.assertEqual(node_results[node_code]["execution_mode"], "mock")
-            self.assertEqual(node_results[node_code]["adapter_execution_mode"], "mock")
-            self.assertEqual(node_results[node_code]["adapter_modes"], ["mock"])
+        self.assertEqual(execution["execution_mode"], "hybrid")
+        self.assertEqual(text_ml_result["execution_mode"], "sync")
+        self.assertEqual(text_ml_result["adapter_execution_mode"], "sync")
+        self.assertIn("sync", text_ml_result["adapter_modes"])
+        self.assertEqual(vision_result["execution_mode"], "mock")
+        self.assertEqual(vision_result["adapter_execution_mode"], "mock")
+        self.assertEqual(vision_result["adapter_modes"], ["mock"])
+
+        structured_result = text_ml_result["structured_result"]
+        self.assertEqual(
+            structured_result["retrieval"]["adapter_source"],
+            "fault_ratio_knowledge_agent",
+        )
+        self.assertIn("similar_cases", structured_result)
+        self.assertIn("top_cases", structured_result)
+        self.assertIn("ratio_range_label", structured_result)
+        self.assertIn("recommended_evidence", structured_result)
+        self.assertTrue(
+            any(
+                "TEXT_ML_CASE_SEARCH_SYNC_USE_ES" in limitation
+                for limitation in text_ml_result["limitations"]
+            )
+        )
 
         invocations = AgentInvocation.objects.filter(
             job__job_id=execution["job_id"],
             node_code__in=["vision_media_analysis", "text_ml_case_search"],
         )
         self.assertEqual(invocations.count(), 2)
-        self.assertEqual({invocation.execution_mode for invocation in invocations}, {"mock"})
+        invocation_modes = {
+            invocation.node_code: invocation.execution_mode
+            for invocation in invocations
+        }
+        self.assertEqual(invocation_modes["text_ml_case_search"], "sync")
+        self.assertEqual(invocation_modes["vision_media_analysis"], "mock")
 
     def test_canonical_chat_message_covers_all_demo_personas_before_real_agents(self):
         for persona in list_demo_personas():
