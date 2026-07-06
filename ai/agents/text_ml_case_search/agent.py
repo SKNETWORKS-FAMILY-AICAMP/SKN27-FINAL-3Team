@@ -6,6 +6,7 @@ AgentAdapterInput -> AgentAdapterOutput contract stable.
 
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +24,14 @@ def run_text_ml_case_search(
 ) -> dict[str, Any]:
     query_text = _case_query(agent_input)
     node = context.get("node") if isinstance(context.get("node"), dict) else {}
+
+    knowledge_output = _run_fault_ratio_knowledge_agent(
+        agent_input=agent_input,
+        node=node,
+        query_text=query_text,
+    )
+    if knowledge_output:
+        return knowledge_output
 
     if not query_text:
         return _output(
@@ -88,6 +97,7 @@ def _output(
     structured_result: dict[str, Any],
     evidence: list[dict[str, Any]],
     limitations: list[str],
+    next_actions: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "session_id": agent_input.get("session_id"),
@@ -101,13 +111,213 @@ def _output(
         "summary": summary,
         "structured_result": structured_result,
         "evidence": evidence,
-        "next_actions": [
+        "next_actions": next_actions
+        or [
             "show_similar_case_candidates",
             "request_blackbox_scene_photo_or_insurance_record",
         ],
         "limitations": limitations,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _run_fault_ratio_knowledge_agent(
+    *,
+    agent_input: dict[str, Any],
+    node: dict[str, Any],
+    query_text: str,
+) -> dict[str, Any] | None:
+    try:
+        from etl.fault_cases.src.agents.text_ml_case_search.agent import (
+            run_text_ml_case_search as run_fault_ratio_agent,
+        )
+    except Exception:
+        return None
+
+    etl_input = _etl_agent_input(agent_input, query_text)
+    if not etl_input["query_text"]:
+        return None
+
+    es_client, adapter_notes = _optional_elasticsearch_client()
+    try:
+        raw_output = (
+            run_fault_ratio_agent(etl_input, es_client=es_client)
+            if es_client is not None
+            else run_fault_ratio_agent(etl_input)
+        )
+    except Exception as exc:
+        raw_output = None
+        adapter_notes.append(
+            f"fault_ratio_knowledge_agent_error:{exc.__class__.__name__}"
+        )
+
+    if not isinstance(raw_output, dict):
+        return None
+
+    structured_result = _knowledge_structured_result(raw_output, query_text)
+    evidence = _knowledge_evidence(raw_output)
+    limitations = [
+        str(item)
+        for item in raw_output.get("limitations", []) + adapter_notes
+        if str(item)
+    ]
+    return _output(
+        agent_input=agent_input,
+        node=node,
+        status=_knowledge_status(raw_output.get("status")),
+        summary=_knowledge_summary(raw_output, evidence=evidence),
+        structured_result=structured_result,
+        evidence=evidence,
+        next_actions=[
+            str(item)
+            for item in raw_output.get("next_actions", [])
+            if str(item)
+        ]
+        or [
+            "show_similar_case_candidates",
+            "request_blackbox_scene_photo_or_insurance_record",
+        ],
+        limitations=limitations
+        or [
+            "The fault-ratio knowledge agent returned without additional limitations."
+        ],
+    )
+
+
+def _etl_agent_input(agent_input: dict[str, Any], query_text: str) -> dict[str, Any]:
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    return {
+        "session_id": agent_input.get("session_id") or "unknown_session",
+        "message_id": agent_input.get("message_id") or "unknown_message",
+        "job_id": agent_input.get("job_id") or "unknown_job",
+        "node_code": "text_ml_case_search",
+        "query_text": query_text,
+        "raw_user_text": _text(context.get("raw_user_text")) or _text(agent_input.get("user_text")),
+        "vision_evidence": _vision_evidence(agent_input),
+        "ocr_evidence": _dict_or_none(context.get("ocr_evidence")),
+        "insurer_claim": _insurer_claim(agent_input),
+        "required_outputs": agent_input.get("required_inputs")
+        or [
+            "normalized_description",
+            "issue_tags",
+            "similar_cases",
+            "evidence",
+            "ratio_range_label",
+            "recommended_evidence",
+        ],
+    }
+
+
+def _optional_elasticsearch_client() -> tuple[Any | None, list[str]]:
+    if not _truthy(os.getenv("TEXT_ML_CASE_SEARCH_SYNC_USE_ES", "")):
+        return None, [
+            "TEXT_ML_CASE_SEARCH_SYNC_USE_ES is not enabled; ran fault-ratio agent without Elasticsearch RAG."
+        ]
+
+    try:
+        from etl.fault_cases.src.agents.text_ml_case_search.rag.es_client import (
+            get_elasticsearch_client,
+            ping_elasticsearch,
+        )
+
+        client = get_elasticsearch_client()
+        if not ping_elasticsearch(client):
+            return None, [
+                "Elasticsearch ping failed; ran fault-ratio agent without Elasticsearch RAG."
+            ]
+        return client, ["Elasticsearch RAG was enabled for text_ml_case_search."]
+    except Exception as exc:
+        return None, [
+            f"Elasticsearch RAG unavailable for text_ml_case_search:{exc.__class__.__name__}"
+        ]
+
+
+def _knowledge_structured_result(
+    raw_output: dict[str, Any],
+    query_text: str,
+) -> dict[str, Any]:
+    structured = deepcopy(raw_output.get("structured_result") or {})
+    similar_cases = structured.get("similar_cases")
+    if not isinstance(similar_cases, list):
+        similar_cases = []
+    structured["similar_cases"] = [_case_with_source_ref(item) for item in similar_cases]
+    structured["top_cases"] = deepcopy(structured["similar_cases"])
+    structured.setdefault("query_text", query_text)
+    structured.setdefault("normalized_description", query_text)
+    structured.setdefault("ratio_range_label", "")
+    structured.setdefault("recommended_evidence", [])
+    structured.setdefault("evidence_tags", [])
+    structured["reliability_score"] = _knowledge_reliability_score(
+        structured,
+        raw_output.get("evidence"),
+    )
+    structured.setdefault("retrieval", {})
+    if isinstance(structured["retrieval"], dict):
+        structured["retrieval"].setdefault("adapter_source", "fault_ratio_knowledge_agent")
+        structured["retrieval"].setdefault(
+            "source_summary",
+            structured.get("source_summary") if isinstance(structured.get("source_summary"), dict) else {},
+        )
+    limitations = structured.get("limitations")
+    structured["limitations"] = limitations if isinstance(limitations, list) else []
+    return structured
+
+
+def _case_with_source_ref(value: Any) -> dict[str, Any]:
+    case = deepcopy(value) if isinstance(value, dict) else {}
+    source_reference = case.get("source_reference") or case.get("source_ref") or case.get("chunk_id")
+    if source_reference:
+        case.setdefault("source_reference", source_reference)
+        case.setdefault("source_ref", source_reference)
+    if "reliability_score" not in case and "score" in case:
+        case["reliability_score"] = _case_score(case.get("score"))
+    return case
+
+
+def _knowledge_evidence(raw_output: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence = raw_output.get("evidence")
+    if not isinstance(evidence, list):
+        return []
+    return [deepcopy(item) for item in evidence if isinstance(item, dict)]
+
+
+def _knowledge_reliability_score(
+    structured_result: dict[str, Any],
+    evidence: Any,
+) -> float | None:
+    raw_score = structured_result.get("reliability_score")
+    if isinstance(raw_score, (int, float)):
+        return round(float(raw_score), 4)
+
+    scores = []
+    for item in evidence if isinstance(evidence, list) else []:
+        if not isinstance(item, dict):
+            continue
+        score = item.get("confidence") or item.get("score")
+        if isinstance(score, (int, float)):
+            scores.append(float(score))
+    if not scores:
+        return None
+    return round(sum(scores) / len(scores), 4)
+
+
+def _knowledge_status(status: Any) -> str:
+    value = str(status or "partial")
+    return value if value in {"success", "partial", "failed"} else "partial"
+
+
+def _knowledge_summary(
+    raw_output: dict[str, Any],
+    *,
+    evidence: list[dict[str, Any]],
+) -> str:
+    status = _knowledge_status(raw_output.get("status"))
+    if status == "success":
+        return f"Fault-ratio knowledge agent returned {len(evidence)} evidence item(s)."
+    if status == "failed":
+        missing_fields = raw_output.get("missing_fields") or []
+        return f"Fault-ratio knowledge agent failed; missing fields: {', '.join(missing_fields) or 'unknown'}."
+    return "Fault-ratio knowledge agent prepared issue tags and evidence recommendations without live RAG evidence."
 
 
 def _structured_result(
@@ -232,6 +442,81 @@ def _dedupe(values: list[str]) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _vision_evidence(agent_input: dict[str, Any]) -> list[dict[str, Any]]:
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    direct = context.get("vision_evidence")
+    if isinstance(direct, list):
+        return [deepcopy(item) for item in direct if isinstance(item, dict)]
+
+    upstream_results = (
+        agent_input.get("upstream_results")
+        if isinstance(agent_input.get("upstream_results"), dict)
+        else {}
+    )
+    vision_result = upstream_results.get("vision_media_analysis")
+    if not isinstance(vision_result, dict):
+        return []
+
+    structured = vision_result.get("structured_result")
+    if not isinstance(structured, dict):
+        return []
+
+    evidence = []
+    for key in ("observations", "key_frames", "detected_objects", "accident_scene_candidates"):
+        value = structured.get(key)
+        if isinstance(value, list):
+            evidence.extend(
+                {"source_reference": f"vision_media_analysis.{key}", "description": _text(item)}
+                for item in value
+                if _text(item)
+            )
+        elif _text(value):
+            evidence.append(
+                {"source_reference": f"vision_media_analysis.{key}", "description": _text(value)}
+            )
+    if _text(structured.get("scene_summary")):
+        evidence.append(
+            {
+                "source_reference": "vision_media_analysis.scene_summary",
+                "description": _text(structured.get("scene_summary")),
+            }
+        )
+    return evidence
+
+
+def _insurer_claim(agent_input: dict[str, Any]) -> dict[str, Any] | None:
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    claim = _dict_or_none(context.get("insurer_claim"))
+    if claim:
+        return claim
+
+    slot_state = (
+        agent_input.get("slot_state") if isinstance(agent_input.get("slot_state"), dict) else {}
+    )
+    slots = slot_state.get("slots") if isinstance(slot_state.get("slots"), dict) else {}
+    claim_slot = slots.get("insurer_claim") or slots.get("claimed_ratio")
+    if isinstance(claim_slot, dict):
+        claim_text = claim_slot.get("value") or claim_slot.get("text")
+    else:
+        claim_text = claim_slot
+    if not _text(claim_text):
+        return None
+    return {
+        "claimed_ratio": _text(claim_text),
+        "reason_text": _text(slots.get("insurer_claim_reason")),
+        "source_type": "slot_state",
+        "source_text": _text(claim_text),
+    }
+
+
+def _dict_or_none(value: Any) -> dict[str, Any] | None:
+    return deepcopy(value) if isinstance(value, dict) else None
+
+
+def _truthy(value: Any) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _cases_from_retrieval(retrieval: dict[str, Any]) -> list[dict[str, Any]]:
