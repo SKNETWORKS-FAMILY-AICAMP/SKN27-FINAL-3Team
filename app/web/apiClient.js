@@ -36,6 +36,9 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     submitChatMessage(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/messages/"), payload, identity);
     },
+    processAgentWorkItems(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "agents/work-items/process/"), payload, identity);
+    },
     registerFileMetadata(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "files/"), payload, identity);
     },
@@ -50,6 +53,9 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
         formData.append("file", file);
       }
       return postFormData(joinApiPath(apiBase, "files/"), formData, identity);
+    },
+    processFileScan({ attachmentId, ...payload } = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, `files/${encodeURIComponent(attachmentId || "")}/scan/`), payload, identity);
     },
     updateConversationSaveState(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/save-state/"), payload, identity);

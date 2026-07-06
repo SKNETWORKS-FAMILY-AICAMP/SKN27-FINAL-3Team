@@ -18,6 +18,12 @@ from app.services.agent_adapter_contract import (
 from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.legal_rag_service import search_legal_rag
 
+try:
+    from chatbot.object_storage import read_object_bytes, storage_reference_from_uri
+except Exception:  # pragma: no cover - keeps CLI-only mock service imports decoupled from Django.
+    read_object_bytes = None
+    storage_reference_from_uri = None
+
 
 NODE_REGISTRY: dict[str, dict[str, Any]] = {
     "input_context_validation": {
@@ -247,6 +253,7 @@ def _payload_node_code(payload: dict[str, Any]) -> str:
 
 
 def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    nested_agent_input = payload.get("agent_input") if isinstance(payload.get("agent_input"), dict) else {}
     return build_agent_adapter_input(
         analysis_plan_id=payload.get("analysis_plan_id"),
         job_id=payload.get("job_id"),
@@ -256,6 +263,7 @@ def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any
         user_text=payload.get("user_text"),
         attachments=payload.get("attachments", []),
         context=payload.get("context", {}),
+        slot_state=payload.get("slot_state") or nested_agent_input.get("slot_state") or {},
         required_inputs=payload.get("required_inputs") or node["required_inputs"],
         depends_on=payload.get("depends_on", []),
         upstream_results=payload.get("upstream_results", {}),
@@ -395,6 +403,10 @@ def _attachment_base64(attachment: dict[str, Any]) -> str | None:
             return value.strip()
 
     storage_uri = str(attachment.get("storage_uri") or "")
+    object_storage_bytes = _attachment_object_storage_bytes(attachment, storage_uri)
+    if object_storage_bytes is not None:
+        return base64.b64encode(object_storage_bytes).decode("ascii")
+
     if not storage_uri.startswith("mock://uploads/"):
         return None
 
@@ -403,6 +415,25 @@ def _attachment_base64(attachment: dict[str, Any]) -> str | None:
     if not file_path.exists() or not file_path.is_file():
         return None
     return base64.b64encode(file_path.read_bytes()).decode("ascii")
+
+
+def _attachment_object_storage_bytes(attachment: dict[str, Any], storage_uri: str) -> bytes | None:
+    if read_object_bytes is None:
+        return None
+    object_storage = attachment.get("object_storage")
+    if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
+        return read_object_bytes(object_storage)
+    if storage_reference_from_uri is None or not storage_uri.startswith("s3://"):
+        return None
+    reference = storage_reference_from_uri(
+        storage_uri,
+        resource_type="uploaded_file",
+        resource_id=str(attachment.get("attachment_id") or ""),
+        filename=str(attachment.get("filename") or attachment.get("original_filename") or ""),
+        content_type=str(attachment.get("content_type") or attachment.get("mime_type") or ""),
+        size_bytes=attachment.get("size_bytes"),
+    )
+    return read_object_bytes(reference)
 
 
 def _fine_notice_structured_result(result: dict[str, Any]) -> dict[str, Any]:

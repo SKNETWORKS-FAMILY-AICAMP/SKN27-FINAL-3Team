@@ -7,6 +7,14 @@ sources:
     enabled: true
     priority: 1
 
+  - source_id: act_on_the_regulation_of_violations_of_public_order
+    source_name: 질서위반행위규제법
+    source_type: law
+    provider: law_go_kr
+    provider_source_id: 질서위반행위규제법
+    enabled: true
+    priority: 1
+
   - source_id: road_traffic_act_enforcement_decree
     source_name: 도로교통법 시행령
     source_type: enforcement_decree

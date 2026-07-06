@@ -153,6 +153,31 @@ def object_exists(reference: dict[str, Any]) -> bool:
     return False
 
 
+def read_object_bytes(reference: dict[str, Any]) -> bytes | None:
+    provider = _text(reference.get("provider")) or object_storage_provider()
+    if provider == "mock_s3":
+        object_path = _local_object_path(reference)
+        if object_path.exists() and object_path.is_file():
+            return object_path.read_bytes()
+        return None
+    if provider == "s3":
+        client = _boto3_client()
+        if client is None:
+            return None
+        try:
+            response = client.get_object(
+                Bucket=_text(reference.get("bucket")) or object_storage_bucket(),
+                Key=_text(reference.get("key")),
+            )
+        except Exception:
+            return None
+        body = response.get("Body")
+        if body is None:
+            return None
+        return body.read()
+    return None
+
+
 def presign_get(reference: dict[str, Any], *, ttl_seconds: int | None = None) -> dict[str, Any]:
     provider = _text(reference.get("provider")) or object_storage_provider()
     ttl = ttl_seconds or signed_url_ttl_seconds()

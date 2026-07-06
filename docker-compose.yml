@@ -139,7 +139,7 @@ services:
     container_name: skn27-data-seed
     volumes:
       - .:/app
-    command: python -m etl.legal.run_pipeline --client offline --provider openai --embedding-output law_embeddings_openai.jsonl --db-load
+    command: python -m etl.legal.run_pipeline --client law_go_kr --provider openai --embedding-output law_embeddings_openai.jsonl --db-load
     environment:
       PYTHONUTF8: "1"
       POSTGRES_HOST: postgres

@@ -1,16 +1,19 @@
-"""MG(merit_classification_node)·RG(risk_classification_node)가 참조하는 법조문 원문 상수.
+"""MG(merit_classification_node)·RG(risk_classification_node)가 참조하는 법조문 원문.
 
-MVP 하드코딩 대상 (ARCH-001 §9-1) — 개정 빈도가 낮은 조문이라 상수로 유지하되,
-팀 법령DB API 연동 시 이 파일의 조회 지점만 API 호출로 교체하면 되도록 격리했다.
+법령DB(law_chunks)에서 조회하는 게 우선이고, 조회 실패(DB 연결 오류 등)나 해당 조문이
+아직 적재되지 않은 경우에만 아래 하드코딩 상수로 폴백한다 — 법령DB가 항상 최신본을
+반영하지만, 일시적으로 접근이 안 될 때 MG가 컨텍스트 없이 판단하는 사태는 막는다.
 원문 출처·적용범위 검증 근거는 `docs/architecture/appeal-judgment/법조문_참고자료_142조_14조.md` 참고.
 """
 
 import re
 
-# ── 도로교통법 시행규칙 제142조 (부득이한 사유) ──────────────────────
+# ── 폴백 원문 (DB 조회 실패 시에만 사용) ──────────────────────────────
+
+# 도로교통법 시행규칙 제142조(부득이한 사유)
 # 위임 근거: 도로교통법 제160조제4항제1호 "그 밖의 부득이한 사유"
 # 적용범위: 주정차 위반(법 제32~34조)에 한정 (제160조 제3·4항이 그 예외 규정이라서)
-RULE_142_TEXT = """\
+_FALLBACK_RULE_142_TEXT = """\
 도로교통법 시행규칙 제142조(부득이한 사유)
 「도로교통법」제160조제4항제1호에서 "그 밖의 부득이한 사유"란 해당 위반행위가 다음 각 호의
 어느 하나에 해당하는 경우를 말한다.
@@ -21,24 +24,24 @@ RULE_142_TEXT = """\
 5. 「장애인복지법」에 따른 장애인의 승·하차를 돕는 경우
 6. 그 밖에 부득이한 사유라고 인정할 만한 상당한 이유가 있는 경우"""
 
-# ── 도로교통법 제160조제4항제1호 본문 (도난 포함) ────────────────────
+# 도로교통법 제160조제4항제1호 본문 (도난 포함)
 # 142조 목록과 별개로, "도난"은 이 본문에 부득이한 사유와 병렬로 직접 명시돼 있다.
 # 142조 목록만 주입하면 도난 사례를 놓치므로 주정차 위반 컨텍스트에는 이것도 함께 주입한다.
-ARTICLE_160_4_1_TEXT = """\
+_FALLBACK_ARTICLE_160_4_1_TEXT = """\
 도로교통법 제160조제4항제1호
 제3항에도 불구하고 차를 도난당하였거나 그 밖의 부득이한 사유가 있는 경우에는
 과태료 처분을 할 수 없다."""
 
-# ── 질서위반행위규제법 제7조 (고의 또는 과실) ─────────────────────────
+# 질서위반행위규제법 제7조(고의 또는 과실)
 # 위반유형과 무관하게 모든 과태료(질서위반행위)에 보편 적용되는 일반 원칙.
 # 비주정차 위반(과속·신호위반 등)에서 142조를 대체하는 참조 조문 — 도난도 이 원칙에 포함됨.
-ARTICLE_7_TEXT = """\
+_FALLBACK_ARTICLE_7_TEXT = """\
 질서위반행위규제법 제7조(고의 또는 과실)
 고의 또는 과실이 없는 질서위반행위는 과태료를 부과하지 아니한다."""
 
-# ── 질서위반행위규제법 제14조 (과태료의 산정) ─────────────────────────
+# 질서위반행위규제법 제14조(과태료의 산정)
 # 위반유형 무관 공통 적용. 1차 고지서(법원 비송사건절차) 단계의 정황요소 판단에 추가 주입.
-ARTICLE_14_TEXT = """\
+_FALLBACK_ARTICLE_14_TEXT = """\
 질서위반행위규제법 제14조(과태료의 산정)
 행정청 및 법원은 과태료를 정함에 있어서 다음 각 호의 사항을 고려하여야 한다.
 1. 질서위반행위의 동기·목적·방법·결과
@@ -48,6 +51,8 @@ ARTICLE_14_TEXT = """\
 
 # ── 질서위반행위규제법 제20조 (이의제기 기한) ─────────────────────────
 # deadline_gate_node가 쓰는 하드코딩 상수. 기산일은 "받은 날"(수령일, 도달주의) — 발송일 아님.
+# (DATA-003 §9) 조문 원문이 아니라 계산 로직에 박힌 숫자 상수라 LDB 조회 대상이 아니다 —
+# 별도 수동 검토 대상으로 남겨둔다.
 APPEAL_DEADLINE_DAYS = 60
 APPEAL_DEADLINE_BASIS = (
     "질서위반행위규제법 제20조제1항 — "
@@ -68,6 +73,18 @@ def is_parking_violation(law_code: str | None) -> bool:
     return bool(PARKING_VIOLATION_LAW_CODE_PATTERN.search(law_code))
 
 
+def _fetch_provision_text(source_name: str, article_no: str, fallback: str) -> str:
+    """법령DB에서 (source_name, article_no) 원문을 조회하고, 실패하면 fallback을 쓴다."""
+    try:
+        from etl.legal.search import get_provision_text
+
+        text = get_provision_text(source_name, article_no)
+    except Exception as exc:
+        print(f"[Warning] law_refs DB 조회 실패, 폴백 원문 사용: {exc}")
+        return fallback
+    return text or fallback
+
+
 def get_merit_context(notice_stage: str, law_code: str | None) -> str:
     """MG(merit_classification_node)가 LLM에 주입할 참조 법조문 컨텍스트를 조립한다.
 
@@ -78,9 +95,15 @@ def get_merit_context(notice_stage: str, law_code: str | None) -> str:
         1차 고지서 × 비주정차 → 제7조 + 제14조
     """
     parking = is_parking_violation(law_code)
-    parts = [ARTICLE_160_4_1_TEXT, RULE_142_TEXT] if parking else [ARTICLE_7_TEXT]
+    if parking:
+        parts = [
+            _fetch_provision_text("도로교통법", "제160조", _FALLBACK_ARTICLE_160_4_1_TEXT),
+            _fetch_provision_text("도로교통법 시행규칙", "제142조", _FALLBACK_RULE_142_TEXT),
+        ]
+    else:
+        parts = [_fetch_provision_text("질서위반행위규제법", "제7조", _FALLBACK_ARTICLE_7_TEXT)]
 
     if notice_stage == "1차 고지서":
-        parts.append(ARTICLE_14_TEXT)
+        parts.append(_fetch_provision_text("질서위반행위규제법", "제14조", _FALLBACK_ARTICLE_14_TEXT))
 
     return "\n\n".join(parts)

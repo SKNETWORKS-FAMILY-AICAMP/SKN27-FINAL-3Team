@@ -1,3 +1,4 @@
+from app.services import agent_node_service
 from app.services.agent_adapter_contract import (
     ADAPTER_CONTRACT_VERSION,
     build_agent_adapter_input,
@@ -50,6 +51,7 @@ def test_agent_node_registry_exposes_real_adapter_contract():
         == "run_law_ground_search(agent_input: AgentAdapterInput, context: AgentAdapterContext) -> AgentAdapterOutput"
     )
     assert "upstream_results" in contract["required_input_fields"]
+    assert "slot_state" in contract["required_input_fields"]
     assert "structured_result" in contract["required_output_fields"]
     assert contract["allowed_statuses"] == ["success", "partial", "failed"]
     assert contract["call_style"] == "sync_callable"
@@ -69,6 +71,7 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
         user_text="법률 근거를 확인해줘",
         attachments=[{"attachment_id": "att_contract", "purpose": "fine_notice"}],
         context={"locale": "ko-KR"},
+        slot_state={"contract_version": "slot_filling_state.v1", "slots": {"location": {"status": "filled"}}},
         required_inputs=["law_code"],
         depends_on=["fine_notice_analysis"],
         upstream_results={"fine_notice_analysis": {"status": "success"}},
@@ -87,6 +90,7 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
             "message_id": "msg_contract",
             "user_text": "법률 근거를 확인해줘",
             "context": {"locale": "ko-KR"},
+            "slot_state": {"contract_version": "slot_filling_state.v1", "slots": {}},
         }
     )
     context_validation = validate_adapter_context_envelope(
@@ -96,9 +100,11 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
 
     assert input_validation["valid"]
     assert agent_input["node_code"] == "law_ground_search"
+    assert agent_input["slot_state"]["contract_version"] == "slot_filling_state.v1"
     assert agent_input["upstream_results"]["fine_notice_analysis"]["status"] == "success"
     assert context_validation["valid"]
     assert execution["adapter_context"]["signature_version"] == ADAPTER_CONTRACT_VERSION
+    assert execution["agent_input"]["slot_state"]["contract_version"] == "slot_filling_state.v1"
 
 
 def test_execute_mock_node_returns_common_agent_output_envelope():
@@ -120,6 +126,7 @@ def test_execute_mock_node_returns_common_agent_output_envelope():
     assert execution["adapter_context"]["execution_id"] == execution["execution_id"]
     assert execution["adapter_context"]["node"]["adapter_contract"]["adapter_key"] == "law_ground_search"
     assert "upstream_results" in execution["agent_input"]
+    assert "slot_state" in execution["agent_input"]
     assert {
         "node_name",
         "node_code",
@@ -237,6 +244,7 @@ def test_agent_contract_validators_report_malformed_collections():
             "user_text": "법률 근거",
             "attachments": "att_bad",
             "context": {},
+            "slot_state": [],
             "required_inputs": [],
             "depends_on": [],
             "upstream_results": {},
@@ -262,7 +270,7 @@ def test_agent_contract_validators_report_malformed_collections():
     )
 
     assert not input_validation["valid"]
-    assert input_validation["invalid_collection_fields"] == ["attachments"]
+    assert input_validation["invalid_collection_fields"] == ["attachments", "slot_state"]
     assert not output_validation["valid"]
     assert output_validation["invalid_collection_fields"] == ["structured_result"]
 
@@ -341,6 +349,51 @@ def test_execute_sync_fine_notice_adapter_returns_supervisor_envelope_without_im
     assert output["execution_status"] == "failed"
     assert output["structured_result"]["ocr_error"] == "이미지 없음"
     assert output["structured_result"]["adapter_trace"]["execution_mode"] == "sync"
+    assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
+
+
+def test_execute_sync_fine_notice_adapter_reads_canonical_object_attachment(monkeypatch):
+    captured_references = []
+
+    def fake_read_object_bytes(reference):
+        captured_references.append(reference)
+        return b"canonical notice bytes"
+
+    monkeypatch.setattr(agent_node_service, "read_object_bytes", fake_read_object_bytes)
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "fine_notice_analysis",
+            "analysis_plan_id": "plan_sync_upload_bridge",
+            "job_id": "job_sync_upload_bridge",
+            "session_id": "ses_sync_upload_bridge",
+            "message_id": "msg_sync_upload_bridge",
+            "user_text": "uploaded notice attachment bridge",
+            "attachments": [
+                {
+                    "attachment_id": "att_sync_upload_bridge",
+                    "purpose": "fine_notice",
+                    "content_type": "text/plain",
+                    "storage_uri": "s3://skn27-demo-object-storage/canonical/uploads/usr/ses/att/notice.txt",
+                    "object_storage": {
+                        "provider": "mock_s3",
+                        "bucket": "skn27-demo-object-storage",
+                        "key": "canonical/uploads/usr/ses/att/notice.txt",
+                        "storage_uri": "s3://skn27-demo-object-storage/canonical/uploads/usr/ses/att/notice.txt",
+                    },
+                }
+            ],
+        }
+    )
+
+    output = execution["agent_output"]
+
+    assert captured_references
+    assert captured_references[0]["storage_uri"].startswith("s3://")
+    assert execution["execution_mode"] == "sync"
+    assert output["structured_result"]["adapter_trace"]["input_source"] == "attachment"
+    assert output["structured_result"]["ocr_status"] == "failed"
     assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
 
 

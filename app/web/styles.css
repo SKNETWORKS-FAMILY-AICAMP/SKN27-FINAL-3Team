@@ -1133,6 +1133,49 @@ p {
   font-weight: 900;
 }
 
+.execution-mode-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.execution-mode-control > span {
+  color: var(--subtle);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.mode-option {
+  min-width: 118px;
+  min-height: 42px;
+  padding: 7px 10px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  text-align: left;
+}
+
+.mode-option strong {
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.mode-option small {
+  color: var(--subtle);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mode-option.active {
+  border-color: #6fb7ac;
+  color: var(--teal-dark);
+  background: var(--green-soft);
+}
+
 .report-action-panel {
   margin-top: 12px;
   padding: 12px;
@@ -1151,6 +1194,13 @@ p {
 .report-action-panel p {
   margin: 0;
   color: var(--muted);
+}
+
+.report-quality-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 .save-choice-panel {

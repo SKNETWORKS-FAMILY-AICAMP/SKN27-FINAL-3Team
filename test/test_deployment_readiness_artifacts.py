@@ -98,6 +98,8 @@ def test_production_env_doc_references_readiness_command_and_secret_rules():
     assert "law_chunks" in content
     assert "law_embeddings" in content
     assert "load_legal_rag_pgvector" in content
+    assert "load_legal_rag_smoke_fixture" in content
+    assert "legal_rag_smoke_chunks.jsonl" in content
     assert "process_agent_work_items --loop" in content
     assert "smoke_supervisor_llm" in content
     assert "smoke_google_oauth_code" in content

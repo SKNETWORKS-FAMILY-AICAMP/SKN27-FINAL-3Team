@@ -185,6 +185,31 @@ class ChatbotPersistenceModelTests(TestCase):
             "disabled",
         )
 
+    def test_legal_rag_smoke_fixture_loads_searchable_chunks(self):
+        output = StringIO()
+
+        call_command(
+            "load_legal_rag_smoke_fixture",
+            "--replace",
+            "--smoke-query",
+            "school zone emergency stopping fine notice",
+            "--format",
+            "json",
+            stdout=output,
+        )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "legal_rag_smoke_fixture.v1")
+        self.assertEqual(body["status"], "loaded")
+        self.assertEqual(body["loaded"]["rag_chunks"], 3)
+        self.assertEqual(body["counts"]["rag_chunks"], 3)
+        self.assertEqual(body["smoke"]["backend"], "django_rag_tables")
+        self.assertEqual(body["smoke"]["status"], "ready")
+        self.assertGreaterEqual(body["smoke"]["result_count"], 1)
+        self.assertTrue(
+            RagChunk.objects.filter(chunk_id="rag_smoke_school_zone_stop", is_searchable=True).exists()
+        )
+
     def test_progress_cache_recovers_from_postgresql_on_cache_miss(self):
         cache.clear()
         session = ChatSession.objects.create(
@@ -1047,27 +1072,80 @@ class ChatbotMockApiTests(TestCase):
         session = ChatSession.objects.get(session_id="ses_guest_save_state_guard")
         self.assertEqual(session.metadata["conversation_save_state"], "pending")
 
-    def test_expired_guest_identity_is_rejected_before_state_changes(self):
+    def test_expired_guest_identity_is_rejected_before_guest_safe_state_changes(self):
         GuestIdentity.objects.create(
             guest_id="gst_expired_guard",
             status=GuestIdentityStatus.ACTIVE,
             expires_at=timezone.now() - timedelta(minutes=1),
         )
+        guest_client = Client(HTTP_X_GUEST_ID="gst_expired_guard")
 
-        response = Client(HTTP_X_GUEST_ID="gst_expired_guard").post(
-            "/api/chat/save-state/",
-            data={
-                "session_id": "ses_expired_guest_guard",
-                "conversation_save_state": "pending",
-            },
-            content_type="application/json",
-        )
+        cases = [
+            (
+                "chat_message",
+                "post",
+                "/api/chat/messages/",
+                {
+                    "session_id": "ses_expired_guest_guard",
+                    "conversation_save_state": "pending",
+                    "user_text": "만료된 guest는 새 상담으로 갱신해야 합니다.",
+                },
+            ),
+            (
+                "file_upload",
+                "post",
+                "/api/files/",
+                {
+                    "session_id": "ses_expired_guest_guard",
+                    "purpose": "fine_notice",
+                    "filename": "expired-guest.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 0,
+                },
+            ),
+            (
+                "file_list",
+                "get",
+                "/api/files/?session_id=ses_expired_guest_guard",
+                None,
+            ),
+            (
+                "report_preview",
+                "post",
+                "/api/reports/",
+                {
+                    "action": "preview",
+                    "report_id": "rep_expired_guest_guard",
+                    "session_id": "ses_expired_guest_guard",
+                },
+            ),
+            (
+                "save_state",
+                "post",
+                "/api/chat/save-state/",
+                {
+                    "session_id": "ses_expired_guest_guard",
+                    "conversation_save_state": "pending",
+                },
+            ),
+        ]
 
-        self.assertEqual(response.status_code, 401)
-        error = response.json()["error"]
-        self.assertEqual(error["code"], "guest_session_invalid")
-        self.assertEqual(error["required_action"], "refresh_guest_session")
-        self.assertEqual(error["reason"], "guest_expired")
+        for name, method, path, payload in cases:
+            with self.subTest(name=name):
+                if method == "get":
+                    response = guest_client.get(path)
+                else:
+                    response = guest_client.post(path, data=payload, content_type="application/json")
+
+                self.assertEqual(response.status_code, 401)
+                error = response.json()["error"]
+                self.assertEqual(error["code"], "guest_session_invalid")
+                self.assertEqual(error["required_action"], "refresh_guest_session")
+                self.assertEqual(error["reason"], "guest_expired")
+
+        self.assertFalse(ChatSession.objects.filter(session_id="ses_expired_guest_guard").exists())
+        self.assertFalse(UploadedFile.objects.filter(original_filename="expired-guest.pdf").exists())
+        self.assertFalse(Report.objects.filter(report_id="rep_expired_guest_guard").exists())
 
     @override_settings(GOOGLE_AUTH_ALLOW_MOCK=False, APP_AUTH_ALLOW_MOCK_BEARER=False)
     def test_real_auth_mode_rejects_legacy_dev_mock_bearer(self):
@@ -1272,6 +1350,256 @@ class ChatbotMockApiTests(TestCase):
                 auth_session=auth_session,
             ).exists()
         )
+
+    def test_mvp_guest_chat_login_upload_scan_report_keeps_session_spine(self):
+        session_id = "ses_mvp_auth_spine"
+        guest_response = Client().post(
+            "/api/auth/guest-session/",
+            data={"session_id": session_id},
+            content_type="application/json",
+        )
+        self.assertEqual(guest_response.status_code, 200)
+        guest_id = guest_response.json()["guest"]["guest_id"]
+
+        guest_client = Client(HTTP_X_GUEST_ID=guest_id)
+        chat_response = guest_client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "conversation_save_state": "pending",
+                "user_text": "어린이보호구역 과태료 고지서를 받았습니다.",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(chat_response.status_code, 200)
+        chat_body = chat_response.json()
+        self.assertEqual(chat_body["session_id"], session_id)
+        job_id = (
+            chat_body.get("persistence", {}).get("job_id")
+            or chat_body.get("supervisor_execution", {}).get("job_id")
+            or "job_mvp_auth_spine"
+        )
+
+        login_response = Client().post(
+            "/api/auth/google/code/",
+            data={
+                "provider": "google",
+                "code": "mock_google_code:mvp-spine",
+                "purpose": "LOGIN",
+                "scope": "openid email profile",
+                "email": "mvp.spine@example.com",
+                "display_name": "MVP Spine User",
+                "guest_id": guest_id,
+                "session_id": session_id,
+            },
+            content_type="application/json",
+            HTTP_X_REQUESTED_WITH="XmlHttpRequest",
+        )
+        self.assertEqual(login_response.status_code, 200)
+        login_body = login_response.json()
+        user_id = login_body["subject"]["user_id"]
+        auth_session_id = login_body["subject"]["auth_session_id"]
+        auth_client = Client(
+            HTTP_AUTHORIZATION=f"Bearer {login_body['access_token']}",
+            HTTP_X_GUEST_ID=guest_id,
+            HTTP_X_AUTH_SESSION_ID=auth_session_id,
+        )
+
+        save_response = auth_client.post(
+            "/api/chat/save-state/",
+            data={
+                "session_id": session_id,
+                "conversation_save_state": "saved",
+                "conversation_save_source": "mvp_auth_spine_test",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(save_response.json()["conversation_save"]["conversation_save_state"], "saved")
+
+        upload_response = auth_client.post(
+            "/api/files/",
+            data={
+                "session_id": session_id,
+                "purpose": "fine_notice",
+                "filename": "notice.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": 0,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(upload_response.status_code, 200)
+        attachment = upload_response.json()["attachment"]
+        self.assertEqual(attachment["session_id"], session_id)
+
+        scan_response = auth_client.post(
+            f"/api/files/{attachment['attachment_id']}/scan/",
+            data={"session_id": session_id},
+            content_type="application/json",
+        )
+        self.assertEqual(scan_response.status_code, 200)
+        self.assertEqual(scan_response.json()["attachment"]["scan_status"], "clean")
+
+        report_response = auth_client.post(
+            "/api/reports/",
+            data={
+                "action": "save",
+                "report_id": "rep_mvp_auth_spine",
+                "job_id": job_id,
+                "session_id": session_id,
+                "report_type": "general",
+                "title": "MVP auth spine report",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        self.assertEqual(report_response.json()["persistence"]["status"], "metadata_saved")
+
+        session = ChatSession.objects.get(session_id=session_id)
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
+        report = Report.objects.get(report_id="rep_mvp_auth_spine")
+        auth_session = AuthSession.objects.get(auth_session_id=auth_session_id)
+        self.assertEqual(session.owner_id, user_id)
+        self.assertEqual(session.metadata["auth_context"]["guest_id"], guest_id)
+        self.assertEqual(uploaded_file.owner_id, user_id)
+        self.assertEqual(uploaded_file.session, session)
+        self.assertEqual(report.owner_id, user_id)
+        self.assertEqual(report.session, session)
+        self.assertEqual(auth_session.user.user_id, user_id)
+        self.assertEqual(auth_session.guest.guest_id, guest_id)
+
+    def test_mvp_e2e_demo_spine_upload_worker_report_history(self):
+        session_id = "ses_mvp_e2e_demo"
+        guest_response = Client().post(
+            "/api/auth/guest-session/",
+            data={"session_id": session_id},
+            content_type="application/json",
+        )
+        self.assertEqual(guest_response.status_code, 200)
+        guest_id = guest_response.json()["guest"]["guest_id"]
+
+        login_response = Client().post(
+            "/api/auth/google/code/",
+            data={
+                "provider": "google",
+                "code": "mock_google_code:mvp-e2e-demo",
+                "purpose": "LOGIN",
+                "scope": "openid email profile",
+                "email": "mvp.e2e@example.com",
+                "display_name": "MVP E2E Demo User",
+                "guest_id": guest_id,
+                "session_id": session_id,
+            },
+            content_type="application/json",
+            HTTP_X_REQUESTED_WITH="XmlHttpRequest",
+        )
+        self.assertEqual(login_response.status_code, 200)
+        login_body = login_response.json()
+        auth_session_id = login_body["subject"]["auth_session_id"]
+        auth_client = Client(
+            HTTP_AUTHORIZATION=f"Bearer {login_body['access_token']}",
+            HTTP_X_GUEST_ID=guest_id,
+            HTTP_X_AUTH_SESSION_ID=auth_session_id,
+        )
+
+        upload_response = auth_client.post(
+            "/api/files/",
+            data={
+                "session_id": session_id,
+                "purpose": "fine_notice",
+                "filename": "demo-notice.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": 0,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(upload_response.status_code, 200)
+        attachment = upload_response.json()["attachment"]
+
+        scan_response = auth_client.post(
+            f"/api/files/{attachment['attachment_id']}/scan/",
+            data={"session_id": session_id},
+            content_type="application/json",
+        )
+        self.assertEqual(scan_response.status_code, 200)
+        self.assertEqual(scan_response.json()["attachment"]["scan_status"], "clean")
+
+        message_response = auth_client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "conversation_save_state": "saved",
+                "user_text": "Prepare an MVP demo report from this uploaded fine notice.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "execution_mode": "async_worker",
+                "attachments": [{"attachment_id": attachment["attachment_id"]}],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        message_body = message_response.json()
+        self.assertEqual(message_body["execution_mode"], "async_worker")
+        self.assertEqual(message_body["status"], "queued")
+        self.assertEqual(message_body["persistence"]["progress_state"]["state"], "queued")
+        self.assertEqual(message_body["attachments"][0]["scan_status"], "clean")
+        self.assertNotIn("scan_gate", message_body)
+        self.assertTrue(message_body["work_item"]["work_item_id"])
+
+        worker_response = auth_client.post(
+            "/api/agents/work-items/process/",
+            data={"limit": 1},
+            content_type="application/json",
+        )
+        self.assertEqual(worker_response.status_code, 200)
+        worker_body = worker_response.json()
+        self.assertEqual(worker_body["processed"], 1)
+        self.assertEqual(worker_body["work_items"][0]["progress_state"]["state"], "success")
+        job_id = message_body["work_item"]["job_id"]
+        job = AnalysisJob.objects.get(job_id=job_id)
+        self.assertIn(job.status, {AnalysisJobStatus.SUCCESS, AnalysisJobStatus.PARTIAL})
+        self.assertGreater(job.agent_results.count(), 0)
+
+        report_response = auth_client.post(
+            "/api/reports/",
+            data={
+                "action": "save",
+                "report_id": "rep_mvp_e2e_demo",
+                "job_id": job_id,
+                "session_id": session_id,
+                "report_type": "general",
+                "title": "MVP E2E demo report",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        report_body = report_response.json()
+        self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
+        self.assertEqual(report_body["persistence"]["report_quality"]["contract_version"], "report_quality.v1")
+        self.assertEqual(report_body["persistence"]["report_quality"]["analysis_job_status"], job.status)
+
+        download_response = auth_client.get("/api/reports/rep_mvp_e2e_demo/download/")
+        self.assertEqual(download_response.status_code, 200)
+        download_body = download_response.content.decode("utf-8")
+        self.assertIn("analysis_job_status:", download_body)
+        self.assertIn("partial_report:", download_body)
+
+        summary_response = auth_client.get(f"/api/mypage/summary/?session_id={session_id}")
+        self.assertEqual(summary_response.status_code, 200)
+        summary_body = summary_response.json()
+        self.assertEqual(summary_body["saved_reports"], 1)
+        self.assertTrue(any(item["job_id"] == job_id for item in summary_body["cases"]))
+
+        session_history_response = auth_client.get(f"/api/history/?session_id={session_id}")
+        self.assertEqual(session_history_response.status_code, 200)
+        session_history_types = {event["event_type"] for event in session_history_response.json()["events"]}
+        self.assertIn("chat_message_created", session_history_types)
+        self.assertIn("report_saved", session_history_types)
+
+        job_history_response = auth_client.get(f"/api/history/?session_id={session_id}&job_id={job_id}")
+        self.assertEqual(job_history_response.status_code, 200)
+        job_history_types = {event["event_type"] for event in job_history_response.json()["events"]}
+        self.assertIn("report_saved", job_history_types)
 
     def test_google_code_login_requires_popup_csrf_header(self):
         response = Client().post(
@@ -1945,6 +2273,50 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(invocation.execution_mode, "sync")
         self.assertEqual(invocation.metadata["adapter_context"]["execution_mode"], "sync")
 
+    def test_canonical_chat_message_can_queue_worker_progress_flow(self):
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_chat_worker_progress",
+                "conversation_save_state": "pending",
+                "user_text": "Queue this chat message through the worker progress flow.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+                "execution_mode": "async_worker",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["execution_mode"], "async_worker")
+        self.assertEqual(body["status"], "queued")
+        self.assertEqual(body["node_execution"]["status"], "queued")
+        self.assertEqual(body["supervisor_execution"]["execution_mode"], "async_worker")
+        self.assertEqual(body["supervisor_execution"]["node_results"], [])
+        self.assertEqual(body["supervisor_execution"]["work_item"]["status"], AgentWorkItemStatus.QUEUED)
+        self.assertEqual(body["persistence"]["status"], AgentWorkItemStatus.QUEUED)
+        self.assertEqual(body["persistence"]["progress_state"]["state"], "queued")
+        self.assertEqual(body["work_item"]["status"], AgentWorkItemStatus.QUEUED)
+
+        job = AnalysisJob.objects.get(job_id=body["work_item"]["job_id"])
+        work_item = AgentWorkItem.objects.get(work_item_id=body["work_item"]["work_item_id"])
+        self.assertEqual(job.status, AnalysisJobStatus.QUEUED)
+        self.assertEqual(work_item.status, AgentWorkItemStatus.QUEUED)
+        self.assertEqual(job.agent_results.count(), 0)
+        self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], AnalysisJobStatus.QUEUED)
+
+        result = process_agent_work_items(limit=1)
+
+        self.assertEqual(result["processed"], 1)
+        self.assertEqual(result["work_items"][0]["progress_state"]["state"], "success")
+        job.refresh_from_db()
+        work_item.refresh_from_db()
+        self.assertEqual(work_item.status, AgentWorkItemStatus.SUCCESS)
+        self.assertIn(job.status, {AnalysisJobStatus.SUCCESS, AnalysisJobStatus.PARTIAL})
+        self.assertGreater(job.agent_results.count(), 0)
+        self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], job.status)
+
     def test_canonical_chat_sync_request_keeps_unimplemented_agents_mock(self):
         response = self.client.post(
             "/api/chat/messages/",
@@ -2281,9 +2653,12 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(work_item.attempt_no, 1)
         self.assertEqual(work_item.error_code, "RuntimeError")
         self.assertEqual(work_item.result["retry_after_seconds"], 7)
+        self.assertEqual(result["work_items"][0]["progress_state"]["state"], "retry_waiting")
+        self.assertEqual(result["work_items"][0]["progress_state"]["work_item_status"], AgentWorkItemStatus.RETRYING)
         self.assertIsNotNone(work_item.next_run_at)
         self.assertGreater(work_item.next_run_at, timezone.now())
         self.assertEqual(work_item.job.status, AnalysisJobStatus.RUNNING)
+        self.assertEqual(work_item.job.metadata["work_queue"]["progress_state"]["state"], "retry_waiting")
 
         retry_result = process_agent_work_item(work_item.work_item_id)
         self.assertEqual(retry_result["status"], "skipped")
@@ -2487,6 +2862,88 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(uploaded_file.metadata["scan_result"]["contract_version"], "file_scan_result.v1")
         self.assertEqual(uploaded_file.agent_handoff["scan_status"], "clean")
 
+    def test_file_scan_endpoint_marks_upload_ready_for_frontend_handoff(self):
+        response = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": "ses_scan_endpoint",
+                "purpose": "fine_notice",
+                "file": SimpleUploadedFile(
+                    "notice.txt",
+                    b"frontend scan endpoint bytes",
+                    content_type="text/plain",
+                ),
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        attachment_id = response.json()["attachment"]["attachment_id"]
+
+        scan_response = self.client.post(
+            f"/api/files/{attachment_id}/scan/",
+            data={"session_id": "ses_scan_endpoint"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(scan_response.status_code, 200)
+        body = scan_response.json()
+        self.assertEqual(body["contract_version"], "file_scan_endpoint.v1")
+        self.assertEqual(body["file_scan"]["status"], "clean")
+        self.assertEqual(body["attachment"]["scan_status"], "clean")
+        self.assertEqual(body["attachment"]["status"], UploadedFileStatus.READY)
+
+    def test_canonical_chat_sync_reads_ready_uploaded_fine_notice_attachment(self):
+        with tempfile.TemporaryDirectory() as object_root, tempfile.TemporaryDirectory() as upload_root, override_settings(
+            OBJECT_STORAGE_LOCAL_ROOT=object_root,
+            MOCK_UPLOAD_ROOT=upload_root,
+            FILE_SCAN_PROVIDER="local_policy",
+        ):
+            file_response = self.client.post(
+                "/api/files/",
+                data={
+                    "session_id": "ses_sync_uploaded_notice",
+                    "purpose": "fine_notice",
+                    "file": SimpleUploadedFile(
+                        "notice.txt",
+                        b"canonical fine notice bytes",
+                        content_type="text/plain",
+                    ),
+                },
+            )
+            self.assertEqual(file_response.status_code, 200)
+            attachment = file_response.json()["attachment"]
+
+            call_command("process_uploaded_file_scans", "--limit", "1", stdout=StringIO())
+            uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
+            self.assertEqual(uploaded_file.status, UploadedFileStatus.READY)
+            self.assertEqual(uploaded_file.metadata["object_storage_write"]["status"], "written")
+
+            message_response = self.client.post(
+                "/api/chat/messages/",
+                data={
+                    "session_id": "ses_sync_uploaded_notice",
+                    "user_text": "uploaded fine notice attachment sync bridge",
+                    "mock_scenario": "fine_notice",
+                    "mock_status": "success",
+                    "execution_mode": "sync",
+                    "attachments": [{"attachment_id": attachment["attachment_id"]}],
+                },
+                content_type="application/json",
+            )
+
+            self.assertEqual(message_response.status_code, 200)
+            body = message_response.json()
+            self.assertEqual(body["attachments"][0]["attachment_id"], attachment["attachment_id"])
+            self.assertEqual(body["attachments"][0]["scan_status"], "clean")
+            execution = body["supervisor_execution"]
+            node_results = {item["node_code"]: item for item in execution["node_results"]}
+            fine_notice_result = node_results["fine_notice_analysis"]
+            self.assertEqual(execution["execution_mode"], "hybrid")
+            self.assertEqual(fine_notice_result["execution_mode"], "sync")
+            self.assertEqual(
+                fine_notice_result["structured_result"]["adapter_trace"]["input_source"],
+                "attachment",
+            )
+
     def test_chat_message_blocks_unscanned_attachment_from_agent_payload(self):
         file_response = self.client.post(
             "/api/files/",
@@ -2506,6 +2963,7 @@ class ChatbotMockApiTests(TestCase):
             data={
                 "session_id": "ses_scan_blocked",
                 "user_text": "이 첨부를 근거로 이의신청을 준비해줘.",
+                "execution_mode": "async_worker",
                 "attachments": [{"attachment_id": attachment_id}],
             },
             content_type="application/json",
@@ -2517,6 +2975,15 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(body["blocked_attachments"][0]["attachment_id"], attachment_id)
         self.assertEqual(body["blocked_attachments"][0]["required_action"], "wait_for_file_scan")
         self.assertEqual(body["attachment_scan_policy"]["blocked_count"], 1)
+        self.assertEqual(body["status"], "partial")
+        self.assertEqual(body["execution_mode"], "async_worker")
+        self.assertIsNone(body.get("work_item"))
+        self.assertEqual(body["scan_gate"]["worker_action"], "not_queued")
+        self.assertFalse(AgentWorkItem.objects.filter(job__session__session_id="ses_scan_blocked").exists())
+        job = AnalysisJob.objects.get(session__session_id="ses_scan_blocked")
+        self.assertEqual(job.status, AnalysisJobStatus.PARTIAL)
+        self.assertEqual(job.metadata["scan_gate"]["status"], "blocked")
+        self.assertEqual(job.metadata["blocked_attachments"][0]["attachment_id"], attachment_id)
         for package in body["analysis_plan"]["agent_input_packages"]:
             self.assertEqual(package["payload"]["attachments"], [])
             self.assertEqual(package["payload"]["blocked_attachments"][0]["attachment_id"], attachment_id)
@@ -2999,6 +3466,8 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(report_body["persistence"]["table"], "reports")
         self.assertEqual(report_body["persistence"]["status"], "metadata_saved")
         self.assertEqual(report_body["persistence"]["object_storage"]["backend"], "object_storage")
+        self.assertEqual(report_body["persistence"]["report_quality"]["contract_version"], "report_quality.v1")
+        self.assertFalse(report_body["persistence"]["report_quality"]["partial_report"])
         self.assertEqual(report_body["object_storage"]["policy_version"], "object_storage_adapter.v1")
         self.assertEqual(report_body["object_storage"]["resource_type"], "report")
         self.assertTrue(report_body["download_url"].startswith("/api/reports/"))
@@ -3010,6 +3479,7 @@ class ChatbotMockApiTests(TestCase):
         self.assertTrue(report.storage_uri.startswith("s3://skn27-demo-object-storage/"))
         self.assertEqual(report.metadata["source"], "canonical_report_action")
         self.assertEqual(report.metadata["object_storage_status"], "written")
+        self.assertEqual(report.metadata["report_quality"]["analysis_job_status"], job["status"])
         self.assertTrue(report.metadata["object_storage_write"]["writes_binary"])
         self.assertEqual(report.metadata["object_storage"]["backend"], "object_storage")
         self.assertEqual(report.metadata["source_storage_uri"], "mock://reports/rep_canonical_smoke")
@@ -3133,6 +3603,44 @@ class ChatbotMockApiTests(TestCase):
         report_body = response.json()
         self.assertTrue(report_body["download_url"].startswith("/api/mock/reports/"))
         self.assertFalse(Report.objects.filter(report_id="rep_mock_sidecar").exists())
+
+    def test_canonical_report_marks_partial_analysis_quality(self):
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_partial_report_quality",
+                "conversation_save_state": "saved",
+                "user_text": "Need more info but prepare report preview.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "partial",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        job_id = message_response.json()["persistence"]["job_id"]
+
+        report_response = self.client.post(
+            "/api/reports/",
+            data={
+                "action": "save",
+                "report_id": "rep_partial_report_quality",
+                "job_id": job_id,
+                "session_id": "ses_partial_report_quality",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+        quality = report_response.json()["persistence"]["report_quality"]
+        self.assertEqual(quality["contract_version"], "report_quality.v1")
+        self.assertEqual(quality["analysis_job_status"], AnalysisJobStatus.PARTIAL)
+        self.assertTrue(quality["partial_report"])
+
+        report = Report.objects.get(report_id="rep_partial_report_quality")
+        self.assertTrue(report.metadata["report_quality"]["partial_report"])
+
+        download_response = self.client.get("/api/reports/rep_partial_report_quality/download/")
+        self.assertEqual(download_response.status_code, 200)
+        self.assertIn("partial_report: True", download_response.content.decode("utf-8"))
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")

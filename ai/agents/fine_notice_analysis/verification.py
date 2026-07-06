@@ -86,7 +86,7 @@ def confidence_verification_node(state: FineNoticeState) -> dict:
     summary = f"{fine_type} {violation_text[:20] or '내용 미확인'} — {notice_stage} OCR {ocr_status}"
 
     structured = _structured_from_state(state, ocr_status)
-    env = make_envelope(ocr_status, structured, missing, next_actions, summary)
+    env = make_envelope(ocr_status, structured, missing, next_actions, summary, limitations=format_errors)
 
     return {
         "ocr_status":    ocr_status,

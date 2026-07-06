@@ -6,6 +6,7 @@ import {
   buildAuthContext,
   buildGoogleLoginPayload,
   persistAuthSession,
+  readStoredAuthSession,
   readStoredAuthToken,
 } from "./authSession.js";
 
@@ -73,10 +74,11 @@ export default function FrontendAppShell({
   void ChatbotMockFlow;
 
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
+  const storedAuthSession = useMemo(() => readStoredAuthSession(), []);
   const [activeRoute, setActiveRoute] = useState("entry");
-  const [sessionId, setSessionId] = useState("");
-  const [guestId, setGuestId] = useState("");
-  const [authSessionId, setAuthSessionId] = useState("");
+  const [sessionId, setSessionId] = useState(() => storedAuthSession.session_id || "");
+  const [guestId, setGuestId] = useState(() => storedAuthSession.guest_id || "");
+  const [authSessionId, setAuthSessionId] = useState(() => storedAuthSession.auth_session_id || "");
   const [mypageSummary, setMypageSummary] = useState(null);
   const [historyEvents, setHistoryEvents] = useState(null);
   const [question, setQuestion] = useState("");
@@ -91,12 +93,15 @@ export default function FrontendAppShell({
   const [isSavingConversation, setIsSavingConversation] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState(DEMO_PERSONA_ID);
   const [attachmentPurpose, setAttachmentPurpose] = useState("fine_notice");
+  const [executionMode, setExecutionMode] = useState("async_worker");
   const [selectedUploadFile, setSelectedUploadFile] = useState(null);
   const [uploadInputResetKey, setUploadInputResetKey] = useState(0);
   const [registeredAttachments, setRegisteredAttachments] = useState([]);
   const [isRegisteringAttachment, setIsRegisteringAttachment] = useState(false);
   const [reportActionStatus, setReportActionStatus] = useState("");
   const [currentReport, setCurrentReport] = useState(null);
+  const [pendingAuthAction, setPendingAuthAction] = useState(null);
+  const [workerActionStatus, setWorkerActionStatus] = useState("");
 
   const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";
   const identity = {
@@ -145,6 +150,67 @@ export default function FrontendAppShell({
     }
   }
 
+  async function ensureGuestSession(nextRoute = "chatbot") {
+    if (sessionId && guestId) {
+      setActiveRoute(nextRoute);
+      return { sessionId, guestId };
+    }
+    const guestSessionResult = await bootstrapGuestSession(nextRoute);
+    if (guestSessionResult?.sessionId) {
+      return guestSessionResult;
+    }
+    const fallbackSessionId = sessionId || `ses_web_${Date.now()}`;
+    setSessionId(fallbackSessionId);
+    setActiveRoute(nextRoute);
+    return { sessionId: fallbackSessionId, guestId };
+  }
+
+  async function loginAndBindCurrentSession({ source = "manual_login", nextRoute = "chatbot" } = {}) {
+    const activeGuestSession = await ensureGuestSession(nextRoute);
+    const activeSessionId = activeGuestSession.sessionId || sessionId || `ses_web_${Date.now()}`;
+    const activeGuestId = activeGuestSession.guestId || guestId || "";
+    const loginPayload = {
+      guest_id: activeGuestId,
+      session_id: activeSessionId,
+      ...(await buildGoogleLoginPayload({ googleClientId, guestId: activeGuestId })),
+    };
+    const loginResult = await api.loginWithGoogleCode(loginPayload);
+    const nextToken = loginResult?.access_token || "";
+    const subject = loginResult?.subject || {};
+    const nextAuthSessionId = subject.auth_session_id || "";
+    const nextGuestId = subject.guest_id || activeGuestId;
+    const nextUserId = subject.user_id || loginResult?.user?.user_id || null;
+
+    setActiveAuthToken(nextToken);
+    setAuthSessionId(nextAuthSessionId);
+    setGuestId(nextGuestId);
+    setSessionId(activeSessionId);
+    persistAuthSession({
+      accessToken: nextToken,
+      googleProfile: loginResult?.user || null,
+      authSessionId: nextAuthSessionId,
+      guestId: nextGuestId,
+      sessionId: activeSessionId,
+      userId: nextUserId,
+    });
+
+    const nextIdentity = {
+      authToken: nextToken,
+      authSessionId: nextAuthSessionId,
+      guestId: nextGuestId,
+    };
+    return {
+      authSessionId: nextAuthSessionId,
+      authToken: nextToken,
+      guestId: nextGuestId,
+      identity: nextIdentity,
+      loginResult,
+      sessionId: activeSessionId,
+      source,
+      userId: nextUserId,
+    };
+  }
+
   function useSelectedPersonaSample() {
     setQuestion(selectedPersona.sample);
     setStatusMessage(`${selectedPersona.name} persona 샘플 입력을 채웠습니다.`);
@@ -155,14 +221,34 @@ export default function FrontendAppShell({
     setIsRegisteringAttachment(true);
     setStatusMessage(selectedUploadFile ? "첨부 파일을 업로드하고 있습니다." : "첨부 metadata를 등록하고 있습니다.");
     try {
-      const guestSessionResult = sessionId ? null : await bootstrapGuestSession("chatbot");
-      const activeSession = sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
-      const activeGuestId = guestId || guestSessionResult?.guestId || "";
-      const nextIdentity = {
-        ...identity,
-        guestId: activeGuestId,
-        authSessionId,
-      };
+      let activeSession = sessionId;
+      let activeGuestId = guestId;
+      let nextIdentity = identity;
+      if (!authSessionId) {
+        setPendingAuthAction({
+          type: "upload",
+          filename: selectedUploadFile?.name || `${attachmentPurpose}-sample.txt`,
+          purpose: attachmentPurpose,
+        });
+        setStatusMessage("자료 업로드를 위해 Google 로그인 후 현재 상담 세션에 이어서 연결합니다.");
+        const loginState = await loginAndBindCurrentSession({
+          source: "attachment_upload",
+          nextRoute: "chatbot",
+        });
+        activeSession = loginState.sessionId;
+        activeGuestId = loginState.guestId;
+        nextIdentity = loginState.identity;
+        setPendingAuthAction(null);
+      } else {
+        const guestSessionResult = sessionId ? null : await bootstrapGuestSession("chatbot");
+        activeSession = sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
+        activeGuestId = guestId || guestSessionResult?.guestId || "";
+        nextIdentity = {
+          ...identity,
+          guestId: activeGuestId,
+          authSessionId,
+        };
+      }
       const result = selectedUploadFile
         ? await api.uploadFile(
             {
@@ -182,17 +268,33 @@ export default function FrontendAppShell({
             },
             nextIdentity
           );
-      const attachment = result?.attachment;
+      let attachment = result?.attachment;
       if (attachment) {
+        try {
+          const scanResult = await api.processFileScan(
+            {
+              attachmentId: attachment.attachment_id,
+              session_id: activeSession,
+            },
+            nextIdentity
+          );
+          attachment = scanResult?.attachment || attachment;
+        } catch (_scanError) {
+          attachment = {
+            ...attachment,
+            scan_status: attachment.scan_status || "scan_pending",
+          };
+        }
         setRegisteredAttachments((items) => [...items, attachment]);
         setSelectedUploadFile(null);
         setUploadInputResetKey((value) => value + 1);
-        setStatusMessage(`${attachment.original_filename || attachment.filename || attachment.purpose} 자료를 상담 입력에 연결했습니다.`);
+        setStatusMessage(`${attachment.original_filename || attachment.filename || attachment.purpose} 자료를 상담 입력에 연결했습니다. scan=${attachment.scan_status || attachment.status}`);
       } else {
         setStatusMessage("첨부 등록 응답을 확인하지 못했습니다.");
       }
     } catch (_error) {
       setStatusMessage("첨부 등록에 실패했습니다.");
+      setPendingAuthAction(null);
     } finally {
       setIsRegisteringAttachment(false);
     }
@@ -204,22 +306,31 @@ export default function FrontendAppShell({
       setReportActionStatus("리포트 action을 실행할 상담 결과가 아직 없습니다.");
       return;
     }
-    if (!authSessionId) {
-      setReportActionStatus("리포트 저장과 다운로드는 Google 로그인 후 사용할 수 있습니다.");
-      return;
-    }
     setReportActionStatus(action === "download" ? "리포트 다운로드 metadata를 준비하고 있습니다." : "리포트를 저장하고 있습니다.");
     try {
+      let activeSessionId = analysisResponse?.session_id || sessionId;
+      let nextIdentity = identity;
+      if (!authSessionId) {
+        setPendingAuthAction({ type: `report_${action}`, jobId });
+        setReportActionStatus("리포트 작업을 위해 Google 로그인 후 같은 상담 세션으로 이어갑니다.");
+        const loginState = await loginAndBindCurrentSession({
+          source: `report_${action}`,
+          nextRoute: "chatbot",
+        });
+        activeSessionId = activeSessionId || loginState.sessionId;
+        nextIdentity = loginState.identity;
+        setPendingAuthAction(null);
+      }
       const report = await api.runReportAction(
         {
           action,
           report_id: currentReport?.report_id || `rep_${jobId}`,
           job_id: jobId,
-          session_id: analysisResponse?.session_id || sessionId,
+          session_id: activeSessionId,
           report_type: "general",
           title: reportingPayload?.title || "상담 분석 리포트",
         },
-        identity
+        nextIdentity
       );
       setCurrentReport(report);
       setReportActionStatus(
@@ -227,12 +338,62 @@ export default function FrontendAppShell({
           ? `다운로드 준비 완료: ${report.download_url || report.report_id}`
           : `리포트 저장 완료: ${report.report_id}`
       );
-      if (authSessionId) {
+      if (nextIdentity.authSessionId) {
         await loadMyPageSummary();
         await loadHistoryEvents();
       }
     } catch (_error) {
+      setPendingAuthAction(null);
       setReportActionStatus("리포트 action 실행에 실패했습니다.");
+    }
+  }
+
+  async function processQueuedWorkerResult(chatResult, requestIdentity) {
+    const workItem = chatResult?.work_item || chatResult?.supervisor_execution?.work_item || null;
+    if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
+      return chatResult;
+    }
+    if (!requestIdentity?.authToken) {
+      setWorkerActionStatus("Agent worker queued. 로그인 전 상담은 별도 worker 세션에서 처리됩니다.");
+      return chatResult;
+    }
+
+    setWorkerActionStatus("Agent worker queued. 로컬 worker 세션이 분석을 처리하고 있습니다.");
+    try {
+      const workerResult = await api.processAgentWorkItems({ limit: 1 }, requestIdentity);
+      const processedItem =
+        (workerResult?.work_items || []).find((item) => item.work_item_id === workItem.work_item_id) ||
+        workerResult?.work_items?.[0] ||
+        {};
+      const nextWorkItem = {
+        ...workItem,
+        status: processedItem.status || workItem.status,
+        job_status: processedItem.job_status || workItem.job_status,
+      };
+      const enrichedResult = {
+        ...chatResult,
+        status: processedItem.job_status || chatResult.status,
+        worker_result: workerResult,
+        supervisor_execution: {
+          ...(chatResult.supervisor_execution || {}),
+          work_item: nextWorkItem,
+          worker_result: {
+            processed: workerResult?.processed || 0,
+            status: processedItem.status || null,
+            job_status: processedItem.job_status || null,
+          },
+        },
+        work_item: nextWorkItem,
+      };
+      setWorkerActionStatus(
+        processedItem.job_status
+          ? `Agent worker 처리 완료: ${processedItem.job_status}`
+          : "Agent worker 처리 요청을 보냈습니다."
+      );
+      return enrichedResult;
+    } catch (_error) {
+      setWorkerActionStatus("Agent worker 자동 처리를 실행하지 못했습니다. 별도 worker 세션을 확인해 주세요.");
+      return chatResult;
     }
   }
 
@@ -264,12 +425,18 @@ export default function FrontendAppShell({
     });
 
     try {
+      const submitIdentity = {
+        ...identity,
+        guestId: activeGuestId,
+        authSessionId,
+      };
       const result = await api.submitChatMessage(
         {
           session_id: activeSession,
           auth_context: activeAuthContext,
           conversation_save_state: authSessionId ? "saved" : "pending",
           user_text: trimmedQuestion,
+          execution_mode: executionMode,
           conversation_history: conversationHistory,
           attachments: registeredAttachments.map((attachment) => ({
             attachment_id: attachment.attachment_id,
@@ -281,29 +448,26 @@ export default function FrontendAppShell({
             ? { persona_id: selectedPersonaId || DEMO_PERSONA_ID }
             : {}),
         },
-        {
-          ...identity,
-          guestId: activeGuestId,
-          authSessionId,
-        }
+        submitIdentity
       );
+      const workerResult = await processQueuedWorkerResult(result, submitIdentity);
       setChatMessages([
         ...conversationHistory,
         {
           role: "assistant",
-          content: result?.assistant_message || "상담 내용을 접수했습니다.",
-          status: result?.status || "partial",
-          pending_questions: result?.pending_questions || [],
+          content: workerResult?.assistant_message || "상담 내용을 접수했습니다.",
+          status: workerResult?.status || "partial",
+          pending_questions: workerResult?.pending_questions || [],
         },
       ]);
-      setAnalysisResponse(result);
+      setAnalysisResponse(workerResult);
       setQuestion("");
-      setSavePromptVisible(!authSessionId && result?.status === "success");
+      setSavePromptVisible(!authSessionId && workerResult?.status === "success");
       setSaveDecision(authSessionId ? "saved" : "undecided");
       setStatusMessage(
         authSessionId
           ? "상담 응답을 받았습니다. 이 상담은 로그인 계정에 연결됩니다."
-          : result?.status === "success"
+          : workerResult?.status === "success"
             ? "상담 응답을 받았습니다. 저장 여부를 선택할 수 있습니다."
             : "Supervisor가 역질문을 만들었습니다. 답변을 이어서 입력해 주세요."
       );
@@ -331,37 +495,19 @@ export default function FrontendAppShell({
     setIsSavingConversation(true);
     setStatusMessage("Google 로그인 후 현재 상담을 내 사건 이력에 연결하고 있습니다.");
     try {
-      const guestSessionResult = sessionId ? null : await bootstrapGuestSession("chatbot");
-      const activeSessionId = sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
-      const activeGuestId = guestId || guestSessionResult?.guestId || "";
-      const loginPayload = {
-        guest_id: activeGuestId,
-        session_id: activeSessionId,
-        ...(await buildGoogleLoginPayload({ googleClientId, guestId: activeGuestId })),
-      };
-      const loginResult = await api.loginWithGoogleCode(loginPayload);
-      const nextToken = loginResult?.access_token || "";
-      const subject = loginResult?.subject || {};
-
-      setActiveAuthToken(nextToken);
-      setAuthSessionId(subject.auth_session_id || "");
-      setGuestId(subject.guest_id || activeGuestId);
-      setSessionId(activeSessionId);
-      persistAuthSession({ accessToken: nextToken, googleProfile: loginResult?.user || null });
-      const nextIdentity = {
-        authToken: nextToken,
-        authSessionId: subject.auth_session_id || "",
-        guestId: subject.guest_id || activeGuestId,
-      };
+      const loginState = await loginAndBindCurrentSession({
+        source: "google_login_save_prompt",
+        nextRoute: "chatbot",
+      });
       await api.updateConversationSaveState(
         {
-          session_id: activeSessionId,
+          session_id: loginState.sessionId,
           conversation_save_state: "saved",
           conversation_save_source: "google_login_save_prompt",
         },
-        nextIdentity
+        loginState.identity
       );
-      const summary = await api.getMyPageSummary({ identity: nextIdentity, sessionId: activeSessionId });
+      const summary = await api.getMyPageSummary({ identity: loginState.identity, sessionId: loginState.sessionId });
       setMypageSummary(summary);
       setActiveRoute("mypage");
 
@@ -509,9 +655,11 @@ export default function FrontendAppShell({
               analysisCards={analysisCards}
               attachmentPurpose={attachmentPurpose}
               assistantAnswer={assistantAnswer}
+              authSessionId={authSessionId}
               chatMessages={chatMessages}
               currentReport={currentReport}
               demoPersonas={DEMO_PERSONAS}
+              executionMode={executionMode}
               isRegisteringAttachment={isRegisteringAttachment}
               isSubmitting={isSubmitting}
               isSavingConversation={isSavingConversation}
@@ -521,6 +669,7 @@ export default function FrontendAppShell({
               onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
               onUsePersonaSample={useSelectedPersonaSample}
+              pendingAuthAction={pendingAuthAction}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
@@ -531,6 +680,7 @@ export default function FrontendAppShell({
               personaRun={personaRun}
               reportingPayload={reportingPayload}
               setAttachmentPurpose={setAttachmentPurpose}
+              setExecutionMode={setExecutionMode}
               setQuestion={setQuestion}
               setSelectedPersonaId={setSelectedPersonaId}
               setSelectedUploadFile={setSelectedUploadFile}
@@ -539,6 +689,7 @@ export default function FrontendAppShell({
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
               uploadInputResetKey={uploadInputResetKey}
+              workerActionStatus={workerActionStatus}
             />
           )}
 
@@ -827,9 +978,11 @@ function ChatScreenV2({
   analysisCards,
   attachmentPurpose,
   assistantAnswer,
+  authSessionId,
   chatMessages,
   currentReport,
   demoPersonas,
+  executionMode,
   isRegisteringAttachment,
   isSavingConversation,
   isSubmitting,
@@ -839,6 +992,7 @@ function ChatScreenV2({
   onSaveConversation,
   onSubmit,
   onUsePersonaSample,
+  pendingAuthAction,
   question,
   registeredAttachments,
   reportActionStatus,
@@ -849,6 +1003,7 @@ function ChatScreenV2({
   personaRun,
   reportingPayload,
   setAttachmentPurpose,
+  setExecutionMode,
   setQuestion,
   setSelectedPersonaId,
   setSelectedUploadFile,
@@ -857,6 +1012,7 @@ function ChatScreenV2({
   supervisorExecution,
   supervisorState,
   uploadInputResetKey,
+  workerActionStatus,
 }) {
   const visibleMessages = chatMessages.length
     ? chatMessages
@@ -868,6 +1024,14 @@ function ChatScreenV2({
       : [];
   const hasConversation = visibleMessages.length > 0;
   const latestAssistantIndex = latestMessageIndex(visibleMessages, "assistant");
+  const isAuthenticated = Boolean(authSessionId);
+  const uploadButtonLabel = isRegisteringAttachment
+    ? "등록 중"
+    : selectedUploadFile
+      ? isAuthenticated
+        ? "파일 업로드"
+        : "Google 로그인 후 업로드"
+      : "파일 선택 필요";
   const quickQuestions = [
     "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
     "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했고 블랙박스가 있어",
@@ -941,25 +1105,62 @@ function ChatScreenV2({
                 <span>파일</span>
                 <input
                   key={uploadInputResetKey}
+                  accept="image/*,application/pdf,video/*"
                   type="file"
                   onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
                 />
               </label>
-              <button className="button" type="button" onClick={onRegisterAttachment} disabled={isRegisteringAttachment}>
-                {isRegisteringAttachment ? "등록 중" : selectedUploadFile ? "파일 업로드" : "metadata 등록"}
+              <button
+                className="button"
+                type="button"
+                onClick={onRegisterAttachment}
+                disabled={isRegisteringAttachment || !selectedUploadFile}
+              >
+                {uploadButtonLabel}
               </button>
               <span className="tag">{registeredAttachments.length}건 연결</span>
             </div>
+            {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
+              <p className="status-message inside" role="status">
+                자료 분석은 로그인 후 현재 상담 세션에 이어서 진행됩니다.
+              </p>
+            )}
+            {pendingAuthAction && (
+              <p className="status-message inside" role="status">
+                로그인 후 {pendingAuthAction.type} 작업을 같은 상담 세션으로 이어갑니다.
+              </p>
+            )}
+            {workerActionStatus && (
+              <p className="status-message inside" role="status">
+                {workerActionStatus}
+              </p>
+            )}
             {registeredAttachments.length > 0 && (
               <div className="attachment-list" aria-label="상담 연결 자료">
                 {registeredAttachments.slice(-3).map((attachment) => (
                   <span key={attachment.attachment_id}>
                     {attachment.original_filename || attachment.filename || attachment.purpose}
-                    <em>{attachment.status}</em>
+                    <em>{attachment.scan_status || attachment.status}</em>
                   </span>
                 ))}
               </div>
             )}
+            <div className="execution-mode-control" role="group" aria-label="Agent execution mode">
+              <span>Agent mode</span>
+              {["async_worker", "mock", "sync"].map((mode) => (
+                <button
+                  className={executionMode === mode ? "mode-option active" : "mode-option"}
+                  key={mode}
+                  onClick={() => setExecutionMode(mode)}
+                  type="button"
+                >
+                  <strong>{mode}</strong>
+                  <small>
+                    {mode === "async_worker" ? "worker progress" : mode === "sync" ? "fine notice adapter" : "safe mock"}
+                  </small>
+                </button>
+              ))}
+            </div>
           </section>
 
           <div className="messages">
@@ -1156,6 +1357,7 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
   const questions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
   const packages = Array.isArray(supervisorState?.agent_input_packages) ? supervisorState.agent_input_packages : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
+  const workItem = supervisorExecution?.work_item || null;
 
   return (
     <section className="supervisor-flow" aria-label="Supervisor Agent 전달 흐름">
@@ -1217,6 +1419,20 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
           ))}
         </div>
       )}
+
+      {workItem && nodeResults.length === 0 && (
+        <div className="node-result-list">
+          <NodeResultPill
+            node={{
+              node_code: workItem.work_item_id || workItem.job_id || "agent_worker",
+              status: workItem.status || "queued",
+              execution_mode: "async_worker",
+              adapter_execution_mode: "async_worker",
+              adapter_modes: ["async_worker"],
+            }}
+          />
+        </div>
+      )}
     </section>
   );
 }
@@ -1271,6 +1487,13 @@ function ReportingPreviewPanel({ reportingPayload }) {
 }
 
 function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, reportActionStatus }) {
+  const reportQuality =
+    currentReport?.persistence?.report_quality ||
+    currentReport?.report_quality ||
+    currentReport?.metadata?.report_quality ||
+    null;
+  const agentStatusCounts = reportQuality?.agent_status_counts || {};
+  const hasReportQuality = Boolean(reportQuality);
   const helperText = isAuthenticated
     ? reportActionStatus || "상담 결과를 reports metadata로 저장하거나 다운로드 경계를 확인할 수 있습니다."
     : reportActionStatus || "리포트 저장과 다운로드는 Google 로그인 후 사용할 수 있습니다.";
@@ -1281,12 +1504,24 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
         <span className="eyebrow">Report action</span>
         <strong>{currentReport?.report_id || "리포트 metadata 준비"}</strong>
         <p>{helperText}</p>
+        {hasReportQuality && (
+          <div className="report-quality-panel" data-partial-report={String(Boolean(reportQuality.partial_report))}>
+            <span className={reportQuality.partial_report ? "tag amber" : "tag green"}>
+              {reportQuality.partial_report ? "partial_report" : "ready_report"}
+            </span>
+            <span className="tag">analysis_job_status: {reportQuality.analysis_job_status || "unknown"}</span>
+            <span className="tag">limitations: {reportQuality.limitation_count ?? 0}</span>
+            {Object.keys(agentStatusCounts).length > 0 && (
+              <span className="tag">agent_status_counts: {compactValue(agentStatusCounts)}</span>
+            )}
+          </div>
+        )}
       </div>
       <div className="report-action-buttons">
-        <button className="button" type="button" onClick={() => onRunReportAction("save")} disabled={!isAuthenticated}>
+        <button className="button" type="button" onClick={() => onRunReportAction("save")}>
           {isAuthenticated ? "저장" : "로그인 후 저장"}
         </button>
-        <button className="button primary" type="button" onClick={() => onRunReportAction("download")} disabled={!isAuthenticated}>
+        <button className="button primary" type="button" onClick={() => onRunReportAction("download")}>
           {isAuthenticated ? "다운로드 준비" : "로그인 후 다운로드"}
         </button>
       </div>
