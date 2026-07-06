@@ -1,0 +1,15 @@
+{
+  "created_at": "2026-07-03T14:23:37",
+  "dataset": "traffic",
+  "db_name": "traffic_precedent_db",
+  "embedding_table": "traffic_precedent_chunk_embeddings",
+  "index_name": "idx_traffic_precedent_chunk_embeddings_cosine_hnsw",
+  "index_method": "hnsw",
+  "operator_class": "vector_cosine_ops",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+  "embedding_dim": 1536,
+  "embedding_count": 25952,
+  "hnsw_m": 16,
+  "hnsw_ef_construction": 64
+}

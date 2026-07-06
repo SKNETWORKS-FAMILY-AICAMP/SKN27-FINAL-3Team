@@ -1,0 +1,12 @@
+{
+  "created_at": "2026-07-05T23:25:21",
+  "retriever": "traffic_law_bm25_nori",
+  "source_type": "traffic_precedent",
+  "elasticsearch_index": "precedent_traffic_chunks_bm25_nori_v1",
+  "top_k": 5,
+  "query_count": 10,
+  "total_result_count": 50,
+  "zero_result_query_count": 0,
+  "zero_result_query_ids": [],
+  "output_json": "C:\\dev\\project\\SKN27-FINAL-3Team\\etl\\fault_cases\\artifacts\\traffic_precedents_output\\traffic_law_rag\\traffic_law_bm25_sample_queries.json"
+}

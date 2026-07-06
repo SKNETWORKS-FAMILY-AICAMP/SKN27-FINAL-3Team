@@ -1,0 +1,410 @@
+{
+  "created_at": "2026-07-04T12:08:08",
+  "candidate_count": 100,
+  "query_count": 5,
+  "retriever_count": 4,
+  "top_k": 5,
+  "reranker_model": "models/bge-reranker-v2-m3",
+  "reranker_input_field": "chunk_text",
+  "retriever_summary": [
+    {
+      "retriever": "elasticsearch_bm25_nori",
+      "query_count": 5,
+      "candidate_count": 25,
+      "avg_top1_score": 0.7277324182818614,
+      "avg_score_at_5": 0.7115340968857873,
+      "avg_max_score_at_5": 0.7278396680230897,
+      "avg_min_score_at_5": 0.6687517252164619,
+      "avg_std_score_at_5": 0.02375892868628849,
+      "reference_chart_top1_hit_rate": 1,
+      "reference_chart_hit_at_5_rate": 1
+    },
+    {
+      "retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "query_count": 5,
+      "candidate_count": 25,
+      "avg_top1_score": 0.7149494029051022,
+      "avg_score_at_5": 0.7220995069440747,
+      "avg_max_score_at_5": 0.7298770906983366,
+      "avg_min_score_at_5": 0.7084311830271625,
+      "avg_std_score_at_5": 0.007758604280223776,
+      "reference_chart_top1_hit_rate": 1,
+      "reference_chart_hit_at_5_rate": 1
+    },
+    {
+      "retriever": "elasticsearch_vector_cosine",
+      "query_count": 5,
+      "candidate_count": 25,
+      "avg_top1_score": 0.6676432922582394,
+      "avg_score_at_5": 0.665020201983966,
+      "avg_max_score_at_5": 0.7149494272310104,
+      "avg_min_score_at_5": 0.6027355125389093,
+      "avg_std_score_at_5": 0.04131830182519724,
+      "reference_chart_top1_hit_rate": 1,
+      "reference_chart_hit_at_5_rate": 1
+    },
+    {
+      "retriever": "pgvector_cosine",
+      "query_count": 5,
+      "candidate_count": 25,
+      "avg_top1_score": 0.6676432314160284,
+      "avg_score_at_5": 0.6561973689262736,
+      "avg_max_score_at_5": 0.7107149489409428,
+      "avg_min_score_at_5": 0.6018930690757024,
+      "avg_std_score_at_5": 0.040062977510293335,
+      "reference_chart_top1_hit_rate": 1,
+      "reference_chart_hit_at_5_rate": 1
+    }
+  ],
+  "query_retriever_metrics": [
+    {
+      "query_id": "review_q001",
+      "query": "신호등 없는 중앙선 설치 도로에서 중앙선을 침범한 역주행 사고",
+      "retriever": "elasticsearch_bm25_nori",
+      "count": 5,
+      "top1_score": 0.7309827734869915,
+      "avg_score_at_5": 0.7282071802208858,
+      "max_score_at_5": 0.7309827734869915,
+      "min_score_at_5": 0.7246867243177887,
+      "std_score_at_5": 0.0026076098132721565,
+      "top_chunk_type": "case_overview",
+      "reference_chart_top1_hit": true,
+      "reference_chart_hit_at_5": true
+    },
+    {
+      "query_id": "review_q001",
+      "query": "신호등 없는 중앙선 설치 도로에서 중앙선을 침범한 역주행 사고",
+      "retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "count": 5,
+      "top1_score": 0.7309827734869915,
+      "avg_score_at_5": 0.724325744081034,
+      "max_score_at_5": 0.7309827734869915,
+      "min_score_at_5": 0.70527954361853,
+      "std_score_at_5": 0.009715485809332082,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": true,
+      "reference_chart_hit_at_5": true
+    },
+    {
+      "query_id": "review_q001",
+      "query": "신호등 없는 중앙선 설치 도로에서 중앙선을 침범한 역주행 사고",
+      "retriever": "elasticsearch_vector_cosine",
+      "count": 5,
+      "top1_score": 0.7309827734869915,
+      "avg_score_at_5": 0.7227735553363492,
+      "max_score_at_5": 0.7309827734869915,
+      "min_score_at_5": 0.7052795064502089,
+      "std_score_at_5": 0.009993505458827089,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": true,
+      "reference_chart_hit_at_5": true
+    },
+    {
+      "query_id": "review_q001",
+      "query": "신호등 없는 중앙선 설치 도로에서 중앙선을 침범한 역주행 사고",
+      "retriever": "pgvector_cosine",
+      "count": 5,
+      "top1_score": 0.7309827734869915,
+      "avg_score_at_5": 0.7227735627700135,
+      "max_score_at_5": 0.7309827734869915,
+      "min_score_at_5": 0.70527954361853,
+      "std_score_at_5": 0.009993492445889846,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": true,
+      "reference_chart_hit_at_5": true
+    },
+    {
+      "query_id": "review_q002",
+      "query": "신호등 있는 사거리 교차로에서 녹색 직진 차량과 적색 직진 차량 충돌",
+      "retriever": "elasticsearch_bm25_nori",
+      "count": 5,
+      "top1_score": 0.730390565342949,
+      "avg_score_at_5": 0.7303175650211212,
+      "max_score_at_5": 0.7307888862662704,
+      "min_score_at_5": 0.7294926204352553,
+      "std_score_at_5": 0.0004545174548680399,
+      "top_chunk_type": "case_overview",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q002",
+      "query": "신호등 있는 사거리 교차로에서 녹색 직진 차량과 적색 직진 차량 충돌",
+      "retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "count": 5,
+      "top1_score": 0.730390565342949,
+      "avg_score_at_5": 0.7303438495022659,
+      "max_score_at_5": 0.7307888862662704,
+      "min_score_at_5": 0.7294926204352553,
+      "std_score_at_5": 0.0004537105828079044,
+      "top_chunk_type": "case_overview",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q002",
+      "query": "신호등 있는 사거리 교차로에서 녹색 직진 차량과 적색 직진 차량 충돌",
+      "retriever": "elasticsearch_vector_cosine",
+      "count": 5,
+      "top1_score": 0.7102183107896227,
+      "avg_score_at_5": 0.6661900342692016,
+      "max_score_at_5": 0.730390565342949,
+      "min_score_at_5": 0.5733370233928755,
+      "std_score_at_5": 0.05443588570828436,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q002",
+      "query": "신호등 있는 사거리 교차로에서 녹색 직진 차량과 적색 직진 차량 충돌",
+      "retriever": "pgvector_cosine",
+      "count": 5,
+      "top1_score": 0.7102182862553654,
+      "avg_score_at_5": 0.666190029405426,
+      "max_score_at_5": 0.730390565342949,
+      "min_score_at_5": 0.5733370233928755,
+      "std_score_at_5": 0.05443588117216802,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q003",
+      "query": "차로 변경 중 후행 직진 차량과 충돌한 사고의 과실비율",
+      "retriever": "elasticsearch_bm25_nori",
+      "count": 5,
+      "top1_score": 0.7301695407274092,
+      "avg_score_at_5": 0.6858317465740517,
+      "max_score_at_5": 0.7303074685102298,
+      "min_score_at_5": 0.5090618482308573,
+      "std_score_at_5": 0.08838560809746808,
+      "top_chunk_type": "case_overview",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q003",
+      "query": "차로 변경 중 후행 직진 차량과 충돌한 사고의 과실비율",
+      "retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "count": 5,
+      "top1_score": 0.7303074685102298,
+      "avg_score_at_5": 0.730286355816014,
+      "max_score_at_5": 0.7308697321843324,
+      "min_score_at_5": 0.7298339583545502,
+      "std_score_at_5": 0.0003347618237988737,
+      "top_chunk_type": "case_overview",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q003",
+      "query": "차로 변경 중 후행 직진 차량과 충돌한 사고의 과실비율",
+      "retriever": "elasticsearch_vector_cosine",
+      "count": 5,
+      "top1_score": 0.5139490481997008,
+      "avg_score_at_5": 0.6311412890155691,
+      "max_score_at_5": 0.7303074685102298,
+      "min_score_at_5": 0.5139490481997008,
+      "std_score_at_5": 0.08001460922030133,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q003",
+      "query": "차로 변경 중 후행 직진 차량과 충돌한 사고의 과실비율",
+      "retriever": "pgvector_cosine",
+      "count": 5,
+      "top1_score": 0.5139490928683913,
+      "avg_score_at_5": 0.5870271608484536,
+      "max_score_at_5": 0.7091354014053795,
+      "min_score_at_5": 0.5097367830059619,
+      "std_score_at_5": 0.07373807615864113,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q004",
+      "query": "비보호 좌회전 차량과 녹색 신호 직진 차량 사이 교차로 사고",
+      "retriever": "elasticsearch_bm25_nori",
+      "count": 5,
+      "top1_score": 0.7305867571681895,
+      "avg_score_at_5": 0.7296607538354789,
+      "max_score_at_5": 0.7305867571681895,
+      "min_score_at_5": 0.7285965560744431,
+      "std_score_at_5": 0.0007448752447653143,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q004",
+      "query": "비보호 좌회전 차량과 녹색 신호 직진 차량 사이 교차로 사고",
+      "retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "count": 5,
+      "top1_score": 0.7305339717842255,
+      "avg_score_at_5": 0.7293303187906309,
+      "max_score_at_5": 0.7305339717842255,
+      "min_score_at_5": 0.7250175573263619,
+      "std_score_at_5": 0.0021613826795317042,
+      "top_chunk_type": "case_overview",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q004",
+      "query": "비보호 좌회전 차량과 녹색 신호 직진 차량 사이 교차로 사고",
+      "retriever": "elasticsearch_vector_cosine",
+      "count": 5,
+      "top1_score": 0.7305339717842255,
+      "avg_score_at_5": 0.7276707338320724,
+      "max_score_at_5": 0.7305339717842255,
+      "min_score_at_5": 0.7167196325335689,
+      "std_score_at_5": 0.005477522445228289,
+      "top_chunk_type": "case_overview",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q004",
+      "query": "비보호 좌회전 차량과 녹색 신호 직진 차량 사이 교차로 사고",
+      "retriever": "pgvector_cosine",
+      "count": 5,
+      "top1_score": 0.7305339717842255,
+      "avg_score_at_5": 0.7276707338320724,
+      "max_score_at_5": 0.7305339717842255,
+      "min_score_at_5": 0.7167196325335689,
+      "std_score_at_5": 0.005477522445228289,
+      "top_chunk_type": "case_overview",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q005",
+      "query": "주차장 또는 이면도로에서 출차 차량과 직진 차량이 충돌한 사고",
+      "retriever": "elasticsearch_bm25_nori",
+      "count": 5,
+      "top1_score": 0.7165324546837677,
+      "avg_score_at_5": 0.6836532387773988,
+      "max_score_at_5": 0.7165324546837677,
+      "min_score_at_5": 0.651920877023965,
+      "std_score_at_5": 0.02660203282106886,
+      "top_chunk_type": "decision",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q005",
+      "query": "주차장 또는 이면도로에서 출차 차량과 직진 차량이 충돌한 사고",
+      "retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "count": 5,
+      "top1_score": 0.6525322354011152,
+      "avg_score_at_5": 0.6962112665304284,
+      "max_score_at_5": 0.7262100897698635,
+      "min_score_at_5": 0.6525322354011152,
+      "std_score_at_5": 0.026127680505648315,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q005",
+      "query": "주차장 또는 이면도로에서 출차 차량과 직진 차량이 충돌한 사고",
+      "retriever": "elasticsearch_vector_cosine",
+      "count": 5,
+      "top1_score": 0.6525323570306565,
+      "avg_score_at_5": 0.5773253974666378,
+      "max_score_at_5": 0.6525323570306565,
+      "min_score_at_5": 0.5043923521181928,
+      "std_score_at_5": 0.05666998629334514,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    },
+    {
+      "query_id": "review_q005",
+      "query": "주차장 또는 이면도로에서 출차 차량과 직진 차량이 충돌한 사고",
+      "retriever": "pgvector_cosine",
+      "count": 5,
+      "top1_score": 0.6525320326851685,
+      "avg_score_at_5": 0.5773253577754025,
+      "max_score_at_5": 0.6525320326851685,
+      "min_score_at_5": 0.5043923628275759,
+      "std_score_at_5": 0.0566699153295394,
+      "top_chunk_type": "evidence_issue",
+      "reference_chart_top1_hit": null,
+      "reference_chart_hit_at_5": null
+    }
+  ],
+  "winners_by_query": [
+    {
+      "query_id": "review_q001",
+      "query": "신호등 없는 중앙선 설치 도로에서 중앙선을 침범한 역주행 사고",
+      "winner_retriever": "elasticsearch_bm25_nori",
+      "winner_avg_score_at_5": 0.7282071802208858,
+      "winner_top1_score": 0.7309827734869915
+    },
+    {
+      "query_id": "review_q002",
+      "query": "신호등 있는 사거리 교차로에서 녹색 직진 차량과 적색 직진 차량 충돌",
+      "winner_retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "winner_avg_score_at_5": 0.7303438495022659,
+      "winner_top1_score": 0.730390565342949
+    },
+    {
+      "query_id": "review_q003",
+      "query": "차로 변경 중 후행 직진 차량과 충돌한 사고의 과실비율",
+      "winner_retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "winner_avg_score_at_5": 0.730286355816014,
+      "winner_top1_score": 0.7303074685102298
+    },
+    {
+      "query_id": "review_q004",
+      "query": "비보호 좌회전 차량과 녹색 신호 직진 차량 사이 교차로 사고",
+      "winner_retriever": "elasticsearch_bm25_nori",
+      "winner_avg_score_at_5": 0.7296607538354789,
+      "winner_top1_score": 0.7305867571681895
+    },
+    {
+      "query_id": "review_q005",
+      "query": "주차장 또는 이면도로에서 출차 차량과 직진 차량이 충돌한 사고",
+      "winner_retriever": "elasticsearch_hybrid_bm25_vector_rrf",
+      "winner_avg_score_at_5": 0.6962112665304284,
+      "winner_top1_score": 0.6525322354011152
+    }
+  ],
+  "winner_counts": {
+    "elasticsearch_bm25_nori": 2,
+    "elasticsearch_hybrid_bm25_vector_rrf": 3
+  },
+  "chunk_type_counts": {
+    "case_overview": 47,
+    "evidence_issue": 45,
+    "arguments": 3,
+    "decision": 5
+  },
+  "chunk_type_counts_by_retriever": {
+    "elasticsearch_bm25_nori": {
+      "case_overview": 12,
+      "evidence_issue": 7,
+      "arguments": 2,
+      "decision": 4
+    },
+    "elasticsearch_hybrid_bm25_vector_rrf": {
+      "case_overview": 18,
+      "evidence_issue": 5,
+      "decision": 1,
+      "arguments": 1
+    },
+    "elasticsearch_vector_cosine": {
+      "case_overview": 9,
+      "evidence_issue": 16
+    },
+    "pgvector_cosine": {
+      "case_overview": 8,
+      "evidence_issue": 17
+    }
+  }
+}

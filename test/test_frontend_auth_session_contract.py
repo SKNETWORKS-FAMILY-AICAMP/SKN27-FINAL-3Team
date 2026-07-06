@@ -43,12 +43,14 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     assert missing == []
     assert 'joinApiPath(apiBase, "chat/messages/")' in api_client
     assert 'joinApiPath(apiBase, "agents/work-items/process/")' in api_client
+    assert "analysis/jobs/${encodeURIComponent(jobId || \"\")}/" in api_client
     assert 'joinApiPath(apiBase, "files/")' in api_client
     assert 'files/${encodeURIComponent(attachmentId || "")}/scan/' in api_client
     assert 'joinApiPath(apiBase, "reports/")' in api_client
     assert "uploadFile" in api_client
     assert "processFileScan" in api_client
     assert "processAgentWorkItems" in api_client
+    assert "getAnalysisJobDetail" in api_client
     assert "FormData" in api_client
     assert "postFormData" in api_client
     assert 'from "./apiClient.js"' in chatbot
@@ -89,6 +91,12 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "conversation_history" in shell
     assert "SupervisorFlowPanel" in shell
     assert "ReportingPreviewPanel" in shell
+    assert "FaultRatioInsightPanel" in shell
+    assert "fault-ratio-insight-panel" in shell
+    assert "similar_cases" in shell
+    assert "ratio_range_label" in shell
+    assert "recommended_evidence" in shell
+    assert "retrieval.adapter_source" in shell
     assert "DEMO_PERSONAS" in shell
     assert "persona-control-panel" in shell
     assert "registerFileMetadata" in shell
@@ -119,6 +127,10 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert 'const [executionMode, setExecutionMode] = useState("async_worker");' in shell
     assert '["async_worker", "mock", "sync"]' in shell
     assert "processQueuedWorkerResult" in shell
+    assert "pollQueuedWorkerResult" in shell
+    assert "const workerResult = await pollQueuedWorkerResult(result, submitIdentity);" in shell
+    assert "getAnalysisJobDetail" in shell
+    assert "worker_progress_polling.v1" in shell
     assert "processAgentWorkItems" in shell
     assert "workerActionStatus" in shell
     assert "worker progress" in shell
@@ -129,6 +141,12 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "ready_report" in shell
     assert "analysis_job_status" in shell
     assert "agent_status_counts" in shell
+    assert "reportLimitations" in shell
+    assert "Partial analysis report" in shell
+    assert "Ready analysis report" in shell
+    assert "Review required before final submission." in shell
+    assert "report-quality-warning" in shell
+    assert "report-quality-limitations" in shell
 
 
 def test_vite_proxy_does_not_capture_frontend_api_client_module():

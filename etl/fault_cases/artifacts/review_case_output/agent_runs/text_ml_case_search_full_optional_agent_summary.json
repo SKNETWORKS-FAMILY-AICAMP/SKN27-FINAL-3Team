@@ -1,0 +1,380 @@
+{
+  "created_at": "2026-07-05T20:04:23",
+  "started_at": "2026-07-05T20:04:19",
+  "input_path": "C:\\dev\\project\\SKN27-FINAL-3Team\\etl\\fault_cases\\artifacts\\review_case_output\\schema_search_test\\text_ml_case_search_agent_input_full_optional_fields.jsonl",
+  "output_path": "C:\\dev\\project\\SKN27-FINAL-3Team\\etl\\fault_cases\\artifacts\\review_case_output\\agent_runs\\text_ml_case_search_full_optional_agent_outputs.jsonl",
+  "search_variant": "schema_search_text",
+  "limit": 10,
+  "active_input_count": 10,
+  "status_counts": {
+    "success": 10
+  },
+  "total_evidence_count": 100,
+  "total_review_case_evidence_count": 50,
+  "total_fault_ratio_precedent_evidence_count": 50,
+  "total_similar_case_count": 50,
+  "total_display_evidence_count": 100,
+  "zero_evidence_count": 0,
+  "records": [
+    {
+      "run_index": 1,
+      "session_id": "ses_20260623_0001",
+      "message_id": "msg_0001",
+      "job_id": "job_0001",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(청구) : B(피청구) = 0 : 100",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 2,
+      "session_id": "ses_20260623_0002",
+      "message_id": "msg_0002",
+      "job_id": "job_0002",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(청구) : B(피청구) = 20 : 80",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 3,
+      "session_id": "ses_20260623_0003",
+      "message_id": "msg_0003",
+      "job_id": "job_0003",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(청구) : B(피청구) = 30 : 70",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 4,
+      "session_id": "ses_20260623_0004",
+      "message_id": "msg_0004",
+      "job_id": "job_0004",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(피청구) : B(청구) = 80 : 20",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 5,
+      "session_id": "ses_20260623_0005",
+      "message_id": "msg_0005",
+      "job_id": "job_0005",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(청구) : B(피청구) = 20 : 80",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 6,
+      "session_id": "ses_20260623_0006",
+      "message_id": "msg_0006",
+      "job_id": "job_0006",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(청구) : B(피청구) = 30 : 70",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 7,
+      "session_id": "ses_20260623_0007",
+      "message_id": "msg_0007",
+      "job_id": "job_0007",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(청구) : B(피청구) = 90 : 10",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 8,
+      "session_id": "ses_20260623_0008",
+      "message_id": "msg_0008",
+      "job_id": "job_0008",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(청구) : B(피청구) = 20 : 80",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 9,
+      "session_id": "ses_20260623_0009",
+      "message_id": "msg_0009",
+      "job_id": "job_0009",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(피청구) : B(청구) = 60 : 40",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    },
+    {
+      "run_index": 10,
+      "session_id": "ses_20260623_0010",
+      "message_id": "msg_0010",
+      "job_id": "job_0010",
+      "status": "success",
+      "evidence_count": 10,
+      "review_case_evidence_count": 5,
+      "fault_ratio_precedent_evidence_count": 5,
+      "similar_case_count": 5,
+      "display_evidence_count": 10,
+      "ratio_range_label": "A(피청구) : B(청구) = 20 : 80",
+      "insurer_claim_review_exists": true,
+      "source_summary": {
+        "active_sources": [
+          "review_case",
+          "fault_ratio_precedent"
+        ],
+        "standby_sources": [
+          "traffic_precedent"
+        ],
+        "excluded_sources": [
+          "standard"
+        ],
+        "source_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "input_counts": {
+          "review_case": 5,
+          "fault_ratio_precedent": 5
+        },
+        "final_top_k": 10,
+        "merge_strategy": "source_quota"
+      }
+    }
+  ]
+}

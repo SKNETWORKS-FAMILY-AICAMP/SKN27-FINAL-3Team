@@ -39,6 +39,9 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     processAgentWorkItems(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "agents/work-items/process/"), payload, identity);
     },
+    getAnalysisJobDetail({ jobId, identity } = {}) {
+      return getJson(joinApiPath(apiBase, `analysis/jobs/${encodeURIComponent(jobId || "")}/`), identity);
+    },
     registerFileMetadata(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "files/"), payload, identity);
     },

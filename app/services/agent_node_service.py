@@ -61,7 +61,8 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["law_code|violation_text|search_query"],
         "produces": ["matched_laws", "source_ref", "applicability_limit"],
         "handoff_to": ["agent_result_validation", "objection_report_generation"],
-        "status": "mock_ready",
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["mock", "sync"],
     },
     "text_ml_case_search": {
         "order": 40,
@@ -73,8 +74,8 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["query_text|accident_context"],
         "produces": ["accident_type_candidates", "similar_cases", "reliability_score"],
         "handoff_to": ["law_ground_search", "agent_result_validation"],
-        "status": "mock_ready",
-        "adapter_modes": ["mock"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["mock", "sync"],
     },
     "vision_media_analysis": {
         "order": 50,
@@ -99,7 +100,8 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["notice_analysis_result", "law_ground_result", "user_facts"],
         "produces": ["objection_draft", "attachment_list", "report_actions"],
         "handoff_to": ["agent_result_validation", "final_response_merge"],
-        "status": "mock_ready",
+        "status": "mock_contract_only",
+        "adapter_modes": ["mock"],
     },
     "agent_result_validation": {
         "order": 70,
@@ -193,6 +195,10 @@ def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) ->
                 "upstream_results": deepcopy(upstream_results),
             }
         )
+        if isinstance(step.get("context"), dict):
+            step_context = deepcopy(payload.get("context") if isinstance(payload.get("context"), dict) else {})
+            step_context.update(deepcopy(step["context"]))
+            step_payload["context"] = step_context
         execution = execute_mock_node(step_payload)
         execution["plan_step"] = deepcopy(step)
         executions.append(execution)
@@ -262,12 +268,30 @@ def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any
         node=node,
         user_text=payload.get("user_text"),
         attachments=payload.get("attachments", []),
-        context=payload.get("context", {}),
+        context=_agent_context(payload, node),
         slot_state=payload.get("slot_state") or nested_agent_input.get("slot_state") or {},
         required_inputs=payload.get("required_inputs") or node["required_inputs"],
         depends_on=payload.get("depends_on", []),
         upstream_results=payload.get("upstream_results", {}),
     )
+
+
+def _agent_context(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    context = deepcopy(payload.get("context") if isinstance(payload.get("context"), dict) else {})
+    if node.get("node_code") != "law_ground_search":
+        return context
+
+    query_context = context.get("query") if isinstance(context.get("query"), dict) else {}
+    if query_context.get("raw_text") or query_context.get("search_query"):
+        return context
+
+    query = _law_ground_query(payload)
+    if query:
+        context["query"] = {
+            "raw_text": query,
+            "search_query": query,
+        }
+    return context
 
 
 def _node_with_adapter_contract(node: dict[str, Any]) -> dict[str, Any]:
@@ -284,7 +308,11 @@ def _requested_execution_mode(payload: dict[str, Any]) -> str:
 
 
 def _should_use_sync_adapter(node_code: str, execution_mode: str) -> bool:
-    return execution_mode == "sync" and node_code == "fine_notice_analysis"
+    return execution_mode == "sync" and node_code in {
+        "fine_notice_analysis",
+        "law_ground_search",
+        "text_ml_case_search",
+    }
 
 
 def _execute_sync_node(
@@ -332,6 +360,10 @@ def _run_sync_adapter(
     node_code = str(agent_input.get("node_code") or "")
     if node_code == "fine_notice_analysis":
         return _run_fine_notice_analysis_adapter(agent_input, adapter_context)
+    if node_code == "law_ground_search":
+        return _run_law_ground_search_adapter(agent_input, adapter_context)
+    if node_code == "text_ml_case_search":
+        return _run_text_ml_case_search_adapter(agent_input, adapter_context)
     raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
 
 
@@ -366,6 +398,71 @@ def _run_fine_notice_analysis_adapter(
             "execution_mode": "sync",
             "source_status": raw_output.get("status"),
             "input_source": state.get("_input_source"),
+        },
+    )
+
+
+def _run_law_ground_search_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    from ai.agents.law_ground_search import run_law_ground_search
+
+    raw_output = run_law_ground_search(agent_input, adapter_context)
+    if not isinstance(raw_output, dict):
+        raw_output = {
+            "status": "partial",
+            "summary": "law_ground_search returned without an AgentAdapterOutput envelope.",
+            "structured_result": {
+                "law_provisions": [],
+                "matched_laws": [],
+            },
+            "evidence": [],
+            "next_actions": ["check_law_ground_search_agent_output"],
+            "limitations": ["The law_ground_search adapter did not return a dictionary."],
+        }
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "ai.agents.law_ground_search.run_law_ground_search",
+            "execution_mode": "sync",
+            "source_status": raw_output.get("status"),
+            "input_source": "agent_input.context",
+        },
+    )
+
+
+def _run_text_ml_case_search_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    from ai.agents.text_ml_case_search import run_text_ml_case_search
+
+    raw_output = run_text_ml_case_search(agent_input, adapter_context)
+    if not isinstance(raw_output, dict):
+        raw_output = {
+            "status": "partial",
+            "summary": "text_ml_case_search returned without an AgentAdapterOutput envelope.",
+            "structured_result": {
+                "similar_cases": [],
+                "top_cases": [],
+                "reliability_score": 0,
+            },
+            "evidence": [],
+            "next_actions": ["check_text_ml_case_search_agent_output"],
+            "limitations": ["The text_ml_case_search adapter did not return a dictionary."],
+        }
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "ai.agents.text_ml_case_search.run_text_ml_case_search",
+            "execution_mode": "sync",
+            "source_status": raw_output.get("status"),
+            "input_source": "agent_input",
         },
     )
 
@@ -497,10 +594,16 @@ def _adapter_result_status(status: str) -> str:
 
 def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, Any]) -> list[str]:
     limitations = [str(item) for item in raw_output.get("limitations") or [] if str(item)]
-    marker = "fine_notice_analysis real adapter is connected through Supervisor sync execution mode."
+    adapter = str(adapter_trace.get("adapter") or "")
+    if "fine_notice_analysis" in adapter:
+        marker = "fine_notice_analysis real adapter is connected through Supervisor sync execution mode."
+    elif "text_ml_case_search" in adapter:
+        marker = "text_ml_case_search sync adapter is connected through the RAG-backed case-search port."
+    else:
+        marker = "Sync adapter is connected through Supervisor sync execution mode."
     if marker not in limitations:
         limitations.append(marker)
-    if adapter_trace.get("input_source") == "missing":
+    if "fine_notice_analysis" in adapter and adapter_trace.get("input_source") == "missing":
         limitations.append("No fine_notice attachment image was available for OCR.")
     return limitations
 

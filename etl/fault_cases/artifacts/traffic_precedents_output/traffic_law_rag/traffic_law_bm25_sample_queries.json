@@ -1,0 +1,2708 @@
+{
+  "created_at": "2026-07-05T23:25:21",
+  "retriever": "traffic_law_bm25_nori",
+  "source_type": "traffic_precedent",
+  "elasticsearch_index": "precedent_traffic_chunks_bm25_nori_v1",
+  "top_k": 5,
+  "query_count": 10,
+  "total_result_count": 50,
+  "zero_result_query_ids": [],
+  "queries": [
+    {
+      "query_id": "traffic_law_q001",
+      "query": "신호위반 교통사고 판례",
+      "issue_tags": [
+        "신호위반",
+        "교차로",
+        "주의의무"
+      ],
+      "purpose": "신호위반 사고에서 운전자 주의의무와 책임 판단 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "158616",
+          "chunk_id": "158616:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고 처리 특례법 위반",
+          "case_number": "2009노1873",
+          "court_name": "인천지방법원",
+          "decision_date": "2009-07-31",
+          "retriever_score": 49.391777,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:158616#158616:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 교통사고처리특례법 로 수긍이 간다. 피고인이 교차로 진입 직전의 횡단보도에서 신호를 위반하여 횡단보도를 진행한 점은 인정할 수 있지만, 이 사건 사고는 피고인의 차량이 횡단보도를 약 8m 지나 삼거리 교차로에서 우회전하다가 직진하던 피해자 운전의 자전거와 충돌하여 발생한 것이어서 횡단보도 전...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 교통사고처리특례법 로 수긍이 간다. 피고인이 교차로 진입 직전의 횡단보도에서 신호를 위반하여 횡단보도를 진행한 점은 인정할 수 있지만, 이 사건 사고는 피고인의 차량이 횡단보도를 약 8m 지나 삼거리 교차로에서 우회전하다가 직진하던 피해자 운전의 자전거와 충돌하여 발생한 것이어서 횡단보도 전...",
+          "matched_snippets": [
+            "우회전하다가 직진하던 피해자 운전의 자전거와 충돌하여 발생한 것이어서 횡단보도 전 정지선에서의 신호위반과 이 사건 사고는 상당인과관계가 있다고 할 수 없고, 검사가 원용하는 판례( 대법\ntraffic_legal_terms: 교통사고처리특례법\ntraffic_actor_terms: 교차로\n보행자\n신호등\n자전거\n차량\n차로\n횡단보도",
+            "traffic_action_terms: 부딪\n사고\n충돌\ntraffic_situation_terms: 신호위반\n우회전\n적색신호"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "우회전하다가 직진하던 피해자 운전의 자전거와 충돌하여 발생한 것이어서 횡단보도 전 정지선에서의 <em>신호</em><em>위반</em>과 이 사건 <em>사고</em>는 상당인과관계가 있다고 할 수 없고, 검사가 원용하는 <em>판례</em>( 대법\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례법\ntraffic_actor_terms: 교차로\n보행자\n<em>신호</em>등\n자전거\n차량\n차로\n횡단보도",
+              "traffic_action_terms: 부딪\n<em>사고</em>\n충돌\ntraffic_situation_terms: <em>신호</em><em>위반</em>\n우회전\n적색<em>신호</em>"
+            ],
+            "search_text": [
+              "우회전하다가 직진하던 피해자 운전의 자전거와 충돌하여 발생한 것이어서 횡단보도 전 정지선에서의 <em>신호</em><em>위반</em>과 이 사건 <em>사고</em>는 상당인과관계가 있다고 할 수 없고, 검사가 원용하는 <em>판례</em>( 대법\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례법\ntraffic_actor_terms: 교차로\n보행자\n<em>신호</em>등\n자전거\n차량\n차로\n횡단보도",
+              "traffic_action_terms: 부딪\n<em>사고</em>\n충돌\ntraffic_situation_terms: <em>신호</em><em>위반</em>\n우회전\n적색<em>신호</em>"
+            ]
+          },
+          "metadata": {
+            "case_id": "158616",
+            "dataset": "traffic",
+            "case_name": "교통사고 처리 특례법 위반",
+            "court_name": "인천지방법원",
+            "case_number": "2009노1873",
+            "case_category": "형사",
+            "decision_date": "2009-07-31"
+          },
+          "query_id": "traffic_law_q001",
+          "query": "신호위반 교통사고 판례",
+          "issue_tags": [
+            "신호위반",
+            "교차로",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "158616",
+          "chunk_id": "158616:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고 처리 특례법 위반",
+          "case_number": "2009노1873",
+          "court_name": "인천지방법원",
+          "decision_date": "2009-07-31",
+          "retriever_score": 47.605347,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:158616#158616:structured_1500_250:0002",
+          "chunk_preview": "【피 고 인】 【항 소 인】 검사 【검 사】 이춘 【변 호 인】 변호사 송현순(국선) 【원심판결】 인천지방법원 2009. 5. 28. 선고 2008고단6383 판결 【주 문】 검사의 항소를 기각한다. 【이 유】1. 검사의 항소이유의 요지 교차로와 횡단보도가 인접하여 설치되어 있고 차량용 신호기는 교차로에만 설치된 경우에 있어서 차량용 신호기는 차량에 대하여 교차로의 통행은 물론 교차로 직전의 횡단보도에 대한 통행까지 아울러 지시하는 것인바, 피고인이 진행하였던 이 사건 사고 지점 직전의 횡단보도의 신호등은 보행자 진행신호인 녹...",
+          "search_preview": "【피 고 인】 【항 소 인】 검사 【검 사】 이춘 【변 호 인】 변호사 송현순(국선) 【원심판결】 인천지방법원 2009. 5. 28. 선고 2008고단6383 판결 【주 문】 검사의 항소를 기각한다. 【이 유】1. 검사의 항소이유의 요지 교차로와 횡단보도가 인접하여 설치되어 있고 차량용 신호기는 교차로에만 설치된 경우에 있어서 차량용 신호기는 차량에 대하여 교차로의 통행은 물론 교차로 직전의 횡단보도에 대한 통행까지 아울러 지시하는 것인바, 피고인이 진행하였던 이 사건 사고 지점 직전의 횡단보도의 신호등은 보행자 진행신호인 녹...",
+          "matched_snippets": [
+            "과정에서 사고가 발생한 경우에 교통사고처리특례법 제3조 제2항 제1호가 정한 ‘신호위반’의 책임을 묻도록 하려는 취지는 아닌 것이라는 이유로 삼거리 교차로에서 적색신호에서 우회전하다가 사고를 일으킨 피고인에 대하여 신호위반의 책임을 부정하였는바, 원심판결의 이유와 기록을 대조하여 살펴보면, 원심의 판단은 정당한 것으로 수긍이",
+            "피고인이 교차로 진입 직전의 횡단보도에서 신호를 위반하여 횡단보도를 진행한 점은 인정할 수 있지만, 이 사건 사고는 피고인의 차량이 횡단보도를 약 8m 지나 삼거리 교차로에서 우회전하다가 직진하던 피해자 운전의 자전거와 충돌하여 발생한 것이어서 횡단보도 전 정지선에서의 신호위반과 이 사건 사고는 상당인과관계가 있다고 할 수"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "과정에서 <em>사고</em>가 발생한 경우에 <em>교통</em><em>사고</em>처리특례법 제3조 제2항 제1호가 정한 ‘<em>신호</em><em>위반</em>’의 책임을 묻도록 하려는 취지는 아닌 것이라는 이유로 삼거리 교차로에서 적색<em>신호</em>에서 우회전하다가 <em>사고</em>를 일으킨 피고인에 대하여 <em>신호</em><em>위반</em>의 책임을 부정하였는바, 원심판결의 이유와 기록을 대조하여 살펴보면, 원심의 판단은 정당한 것으로 수긍이",
+              "피고인이 교차로 진입 직전의 횡단보도에서 <em>신호</em>를 <em>위반</em>하여 횡단보도를 진행한 점은 인정할 수 있지만, 이 사건 <em>사고</em>는 피고인의 차량이 횡단보도를 약 8m 지나 삼거리 교차로에서 우회전하다가 직진하던 피해자 운전의 자전거와 충돌하여 발생한 것이어서 횡단보도 전 정지선에서의 <em>신호</em><em>위반</em>과 이 사건 <em>사고</em>는 상당인과관계가 있다고 할 수"
+            ],
+            "search_text": [
+              "과정에서 <em>사고</em>가 발생한 경우에 <em>교통</em><em>사고</em>처리특례법 제3조 제2항 제1호가 정한 ‘<em>신호</em><em>위반</em>’의 책임을 묻도록 하려는 취지는 아닌 것이라는 이유로 삼거리 교차로에서 적색<em>신호</em>에서 우회전하다가 <em>사고</em>를 일으킨 피고인에 대하여 <em>신호</em><em>위반</em>의 책임을 부정하였는바, 원심판결의 이유와 기록을 대조하여 살펴보면, 원심의 판단은 정당한 것으로 수긍이",
+              "피고인이 교차로 진입 직전의 횡단보도에서 <em>신호</em>를 <em>위반</em>하여 횡단보도를 진행한 점은 인정할 수 있지만, 이 사건 <em>사고</em>는 피고인의 차량이 횡단보도를 약 8m 지나 삼거리 교차로에서 우회전하다가 직진하던 피해자 운전의 자전거와 충돌하여 발생한 것이어서 횡단보도 전 정지선에서의 <em>신호</em><em>위반</em>과 이 사건 <em>사고</em>는 상당인과관계가 있다고 할 수"
+            ]
+          },
+          "metadata": {
+            "case_id": "158616",
+            "dataset": "traffic",
+            "case_name": "교통사고 처리 특례법 위반",
+            "court_name": "인천지방법원",
+            "case_number": "2009노1873",
+            "case_category": "형사",
+            "decision_date": "2009-07-31"
+          },
+          "query_id": "traffic_law_q001",
+          "query": "신호위반 교통사고 판례",
+          "issue_tags": [
+            "신호위반",
+            "교차로",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "69028",
+          "chunk_id": "69028:structured_1500_250:0004",
+          "chunk_index": 4,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "구상금",
+          "case_number": "2005다51235",
+          "court_name": "대법원",
+          "decision_date": "2007-10-26",
+          "retriever_score": 44.67303,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:69028#69028:structured_1500_250:0004",
+          "chunk_preview": "사고가 오로지 보행자의 과실에만 기인한 것이고 보행자 신호기의 고장과는 무관한 것이라고 할 수 없는 점, 특히 이 사건에서 피고와의 교통신호등 유지보수공사 계약에 따라 사고 장소의 각 신호기를 관리하여 오던 삼흥전설이라는 업체는 매일 순회하면서 신호기의 정상작동 여부를 확인, 점검하여 고장 신호기를 보수하고 있는데 이 사건 사고 발생 이틀 후에야 비로소 위 고장 신호기가 수리된 점 등의 각 사정에 비추어, 피고가 자신이 관리하는 영조물인 이 사건 보행자 신호기의 위험성에 비례하여 사회통념상 일반적으로 요구되는 정도의 방호조치의...",
+          "search_preview": "사고가 오로지 보행자의 과실에만 기인한 것이고 보행자 신호기의 고장과는 무관한 것이라고 할 수 없는 점, 특히 이 사건에서 피고와의 교통신호등 유지보수공사 계약에 따라 사고 장소의 각 신호기를 관리하여 오던 삼흥전설이라는 업체는 매일 순회하면서 신호기의 정상작동 여부를 확인, 점검하여 고장 신호기를 보수하고 있는데 이 사건 사고 발생 이틀 후에야 비로소 위 고장 신호기가 수리된 점 등의 각 사정에 비추어, 피고가 자신이 관리하는 영조물인 이 사건 보행자 신호기의 위험성에 비례하여 사회통념상 일반적으로 요구되는 정도의 방호조치의...",
+          "matched_snippets": [
+            "사고가 오로지 보행자의 과실에만 기인한 것이고 보행자 신호기의 고장과는 무관한 것이라고 할 수 없는 점, 특히 이 사건에서 피고와의 교통신호등 유지보수공사 계약에 따라 사고 장소의 각 신호기를 관리하여 오던 삼흥전설이라는 업체는 매일 순회하면서 신호기의 정상작동 여부를 확인, 점검하여 고장 신호기를 보수하고 있는데 이 사건",
+            "회피가능성이 없는 경우에 해당한다고 볼 수도 없다는 이유로, 이 사건 사고 당시 적색등의 전구가 단선되어 있었던 이 사건 보행자 신호기에는 그 용도에 따라 통상 갖추어야 할 안전성을 갖추지 못한 관리상의 하자가 있었다고 본 원심의 판단은 정당하고, 거기에 상고이유의 주장과 같이 경험칙이나 판례의 위반 또는 판결에 영향을"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "<em>사고</em>가 오로지 보행자의 과실에만 기인한 것이고 보행자 <em>신호</em>기의 고장과는 무관한 것이라고 할 수 없는 점, 특히 이 사건에서 피고와의 <em>교통</em><em>신호</em>등 유지보수공사 계약에 따라 <em>사고</em> 장소의 각 <em>신호</em>기를 관리하여 오던 삼흥전설이라는 업체는 매일 순회하면서 <em>신호</em>기의 정상작동 여부를 확인, 점검하여 고장 <em>신호</em>기를 보수하고 있는데 이 사건",
+              "회피가능성이 없는 경우에 해당한다고 볼 수도 없다는 이유로, 이 사건 <em>사고</em> 당시 적색등의 전구가 단선되어 있었던 이 사건 보행자 <em>신호</em>기에는 그 용도에 따라 통상 갖추어야 할 안전성을 갖추지 못한 관리상의 하자가 있었다고 본 원심의 판단은 정당하고, 거기에 상고이유의 주장과 같이 경험칙이나 <em>판례</em>의 <em>위반</em> 또는 판결에 영향을"
+            ],
+            "search_text": [
+              "<em>사고</em>가 오로지 보행자의 과실에만 기인한 것이고 보행자 <em>신호</em>기의 고장과는 무관한 것이라고 할 수 없는 점, 특히 이 사건에서 피고와의 <em>교통</em><em>신호</em>등 유지보수공사 계약에 따라 <em>사고</em> 장소의 각 <em>신호</em>기를 관리하여 오던 삼흥전설이라는 업체는 매일 순회하면서 <em>신호</em>기의 정상작동 여부를 확인, 점검하여 고장 <em>신호</em>기를 보수하고 있는데 이 사건",
+              "회피가능성이 없는 경우에 해당한다고 볼 수도 없다는 이유로, 이 사건 <em>사고</em> 당시 적색등의 전구가 단선되어 있었던 이 사건 보행자 <em>신호</em>기에는 그 용도에 따라 통상 갖추어야 할 안전성을 갖추지 못한 관리상의 하자가 있었다고 본 원심의 판단은 정당하고, 거기에 상고이유의 주장과 같이 경험칙이나 <em>판례</em>의 <em>위반</em> 또는 판결에 영향을"
+            ]
+          },
+          "metadata": {
+            "case_id": "69028",
+            "dataset": "traffic",
+            "case_name": "구상금",
+            "court_name": "대법원",
+            "case_number": "2005다51235",
+            "case_category": "민사",
+            "decision_date": "2007-10-26"
+          },
+          "query_id": "traffic_law_q001",
+          "query": "신호위반 교통사고 판례",
+          "issue_tags": [
+            "신호위반",
+            "교차로",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "240895",
+          "chunk_id": "240895:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반(치상)",
+          "case_number": "2022도12175",
+          "court_name": "대법원",
+          "decision_date": "2024-06-20",
+          "retriever_score": 42.008575,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:240895#240895:structured_1500_250:0002",
+          "chunk_preview": "없는 문제가 있다. 3. 판례 변경의 범위 에서 규정하는 ‘통행금지를 내용으로 하는 안전표지’로 볼 경우, 전용차로제가 시행되는 시간대는 물론 전용차로제가 시행되지 않는 시간대에도 일반 차량의 운전자가 청색실선을 넘어 진로를 변경하는 과정에서 교통사고가 발생하면 처벌특례의 적용을 받을 수 없는 문제가 있다. 【피 고 인】 피고인 【 종합보험 주의의무 하여 운전한 경우에 해당하지 않으므로 이로 인한 업무상과실치상죄에 대하여는 처벌특례가 적용된다. 그런데 이 사건 당시 피고인이 운전한 승용차가 자동차종합보험에 가입되어 있었음은 원...",
+          "search_preview": "없는 문제가 있다. 3. 판례 변경의 범위 에서 규정하는 ‘통행금지를 내용으로 하는 안전표지’로 볼 경우, 전용차로제가 시행되는 시간대는 물론 전용차로제가 시행되지 않는 시간대에도 일반 차량의 운전자가 청색실선을 넘어 진로를 변경하는 과정에서 교통사고가 발생하면 처벌특례의 적용을 받을 수 없는 문제가 있다. 【피 고 인】 피고인 【 종합보험 주의의무 하여 운전한 경우에 해당하지 않으므로 이로 인한 업무상과실치상죄에 대하여는 처벌특례가 적용된다. 그런데 이 사건 당시 피고인이 운전한 승용차가 자동차종합보험에 가입되어 있었음은 원...",
+          "matched_snippets": [
+            "그런데 이 사건 당시 피고인이 운전한 승용차가 자동차종합보험에 가입되어 있었음은 원심이 인정한 바와 같으므로, 처벌특례에 따라 검사의 공소제기는 그 절차가 법률의 규정을 위반하여 무효인 때에 해당\ntraffic_direct_terms: 교통사고\ntraffic_legal_terms: 교통사고처리특례법\n종합보험\ntraffic_actor_terms",
+            ": 교차로\n도로\n보행자\n승용차\n운전자\n자동차\n차량\n차로\n차선\n택시\n횡단보도\ntraffic_action_terms: 사고\n상해\n상해를 입\n추돌\n치상\ntraffic_situation_terms: 신호위반\ntraffic_fault_terms: 주의의무"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "그런데 이 사건 당시 피고인이 운전한 승용차가 자동차종합보험에 가입되어 있었음은 원심이 인정한 바와 같으므로, 처벌특례에 따라 검사의 공소제기는 그 절차가 법률의 규정을 <em>위반</em>하여 무효인 때에 해당\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례법\n종합보험\ntraffic_actor_terms",
+              ": 교차로\n도로\n보행자\n승용차\n운전자\n자동차\n차량\n차로\n차선\n택시\n횡단보도\ntraffic_action_terms: <em>사고</em>\n상해\n상해를 입\n추돌\n치상\ntraffic_situation_terms: <em>신호</em><em>위반</em>\ntraffic_fault_terms: 주의의무"
+            ],
+            "search_text": [
+              "그런데 이 사건 당시 피고인이 운전한 승용차가 자동차종합보험에 가입되어 있었음은 원심이 인정한 바와 같으므로, 처벌특례에 따라 검사의 공소제기는 그 절차가 법률의 규정을 <em>위반</em>하여 무효인 때에 해당\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례법\n종합보험\ntraffic_actor_terms",
+              ": 교차로\n도로\n보행자\n승용차\n운전자\n자동차\n차량\n차로\n차선\n택시\n횡단보도\ntraffic_action_terms: <em>사고</em>\n상해\n상해를 입\n추돌\n치상\ntraffic_situation_terms: <em>신호</em><em>위반</em>\ntraffic_fault_terms: 주의의무"
+            ]
+          },
+          "metadata": {
+            "case_id": "240895",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반(치상)",
+            "court_name": "대법원",
+            "case_number": "2022도12175",
+            "case_category": "형사",
+            "decision_date": "2024-06-20"
+          },
+          "query_id": "traffic_law_q001",
+          "query": "신호위반 교통사고 판례",
+          "issue_tags": [
+            "신호위반",
+            "교차로",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "120112",
+          "chunk_id": "120112:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반",
+          "case_number": "95노1878",
+          "court_name": "서울지법",
+          "decision_date": "1995-10-06",
+          "retriever_score": 40.830185,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:120112#120112:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 교통사고 교통사고처리특례법 신호위반 여 가변차선을 침범하리라는 것까지 예상하고 사고를 방지할 의무를 부담한다고는 할 수 없으므로, 반대차선의 가변신호를 위반하여 가변차선을 침범한 차량과 충돌하였다면 피고인의 가변차선 주행이 사고의 직접적 원인으로...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 교통사고 교통사고처리특례법 신호위반 여 가변차선을 침범하리라는 것까지 예상하고 사고를 방지할 의무를 부담한다고는 할 수 없으므로, 반대차선의 가변신호를 위반하여 가변차선을 침범한 차량과 충돌하였다면 피고인의 가변차선 주행이 사고의 직접적 원인으로...",
+          "matched_snippets": [
+            "없으므로, 반대차선의 가변신호를 위반하여 가변차선을 침범한 차량과 충돌하였다면 피고인의 가변차선 주행이 사고의 직접원인으로서 사고와의 사이에 상당인과관계가 있다고 할 수 없어 운전자에게 그 교통사고로 인한\n행하였다고 하더라도 이를 신호위반이라 할 수 없는 반면, 반대차선의 가변차선 신호는 진입불가능 신호인 적색 상태인바,",
+            "피고인으로서는 반대차선의 차량이 신호를 위반하여 가변차선을 침범하리라는 것까지 예상하고 사고를 방지할 의무를 부담한다고는 할 수 없으므로, 반대차선의 가변신호를 위반하여 가\ntraffic_direct_terms: 교통사고\ntraffic_legal_terms: 교통사고처리특례법\ntraffic_actor_terms: 도로\n운전자"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "없으므로, 반대차선의 가변<em>신호</em>를 <em>위반</em>하여 가변차선을 침범한 차량과 충돌하였다면 피고인의 가변차선 주행이 <em>사고</em>의 직접원인으로서 <em>사고</em>와의 사이에 상당인과관계가 있다고 할 수 없어 운전자에게 그 <em>교통</em><em>사고</em>로 인한\n행하였다고 하더라도 이를 <em>신호</em><em>위반</em>이라 할 수 없는 반면, 반대차선의 가변차선 <em>신호</em>는 진입불가능 <em>신호</em>인 적색 상태인바,",
+              "피고인으로서는 반대차선의 차량이 <em>신호</em>를 <em>위반</em>하여 가변차선을 침범하리라는 것까지 예상하고 <em>사고</em>를 방지할 의무를 부담한다고는 할 수 없으므로, 반대차선의 가변<em>신호</em>를 <em>위반</em>하여 가\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례법\ntraffic_actor_terms: 도로\n운전자"
+            ],
+            "search_text": [
+              "없으므로, 반대차선의 가변<em>신호</em>를 <em>위반</em>하여 가변차선을 침범한 차량과 충돌하였다면 피고인의 가변차선 주행이 <em>사고</em>의 직접원인으로서 <em>사고</em>와의 사이에 상당인과관계가 있다고 할 수 없어 운전자에게 그 <em>교통</em><em>사고</em>로 인한\n행하였다고 하더라도 이를 <em>신호</em><em>위반</em>이라 할 수 없는 반면, 반대차선의 가변차선 <em>신호</em>는 진입불가능 <em>신호</em>인 적색 상태인바,",
+              "피고인으로서는 반대차선의 차량이 <em>신호</em>를 <em>위반</em>하여 가변차선을 침범하리라는 것까지 예상하고 <em>사고</em>를 방지할 의무를 부담한다고는 할 수 없으므로, 반대차선의 가변<em>신호</em>를 <em>위반</em>하여 가\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례법\ntraffic_actor_terms: 도로\n운전자"
+            ]
+          },
+          "metadata": {
+            "case_id": "120112",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반",
+            "court_name": "서울지법",
+            "case_number": "95노1878",
+            "case_category": "형사",
+            "decision_date": "1995-10-06"
+          },
+          "query_id": "traffic_law_q001",
+          "query": "신호위반 교통사고 판례",
+          "issue_tags": [
+            "신호위반",
+            "교차로",
+            "주의의무"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q002",
+      "query": "중앙선 침범 사고 운전자 책임",
+      "issue_tags": [
+        "중앙선 침범",
+        "반대차선",
+        "주의의무"
+      ],
+      "purpose": "중앙선 침범 또는 역주행 사고의 책임 판단 근거를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "115666",
+          "chunk_id": "115666:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "holding_summary",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "구상금",
+          "case_number": "97다19229",
+          "court_name": "대법원",
+          "decision_date": "1997-09-05",
+          "retriever_score": 76.227715,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:115666#115666:structured_1500_250:0002",
+          "chunk_preview": "판시사항: 선행 차량이 중앙선을 0.6m 정도 침범하여 교행 차량과 스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자는 후행 차량에 의한 충돌사고에 책임이 없다고 한 사례 요약: 우측으로 심하게 굽은 커브길이 끝나는 지점에서 선행 차량이 중앙선을 0.6m 정도 침범하여 교행 차량과 스치듯이 충돌하자마자 거의 동시에 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자가...",
+          "search_preview": "판시사항: 선행 차량이 중앙선을 0.6m 정도 침범하여 교행 차량과 스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자는 후행 차량에 의한 충돌사고에 책임이 없다고 한 사례 요약: 우측으로 심하게 굽은 커브길이 끝나는 지점에서 선행 차량이 중앙선을 0.6m 정도 침범하여 교행 차량과 스치듯이 충돌하자마자 거의 동시에 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자가...",
+          "matched_snippets": [
+            "판시사항: 선행 차량이 중앙선을 0.6m 정도 침범하여 교행 차량과 스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자는 후행 차량에 의한 충돌사고에 책임이 없다고 한 사례\n요약: 우측으로 심하게 굽은 커브길이 끝나는 지점에서 선행",
+            "차량이 중앙선을 0.6m 정도 침범하여 교행 차량과 스치듯이 충돌하자마자 거의 동시에 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자가 사고 지점에 이르러 중앙선을 침범한 과실이 있고 그로 인하여 1차 충돌사고가 발생하여 선행 차량이 도로를 비스듬히"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "판시사항: 선행 차량이 <em>중앙</em><em>선</em>을 0.6m 정도 <em>침범</em>하여 교행 차량과 스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 <em>중앙</em><em>선</em>을 완전히 <em>침범</em>하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 <em>운전</em><em>자</em>는 후행 차량에 의한 충돌<em>사고</em>에 <em>책임</em>이 없다고 한 사례\n요약: 우측으로 심하게 굽은 커브길이 끝나는 지점에서 선행",
+              "차량이 <em>중앙</em><em>선</em>을 0.6m 정도 <em>침범</em>하여 교행 차량과 스치듯이 충돌하자마자 거의 동시에 선행 차량에 근접하여 운행하던 후행 차량이 <em>중앙</em><em>선</em>을 완전히 <em>침범</em>하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 <em>운전</em><em>자</em>가 <em>사고</em> 지점에 이르러 <em>중앙</em><em>선</em>을 <em>침범</em>한 과실이 있고 그로 인하여 1차 충돌<em>사고</em>가 발생하여 선행 차량이 도로를 비스듬히"
+            ],
+            "search_text": [
+              "판시사항: 선행 차량이 <em>중앙</em><em>선</em>을 0.6m 정도 <em>침범</em>하여 교행 차량과 스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 <em>중앙</em><em>선</em>을 완전히 <em>침범</em>하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 <em>운전</em><em>자</em>는 후행 차량에 의한 충돌<em>사고</em>에 <em>책임</em>이 없다고 한 사례\n요약: 우측으로 심하게 굽은 커브길이 끝나는 지점에서 선행",
+              "차량이 <em>중앙</em><em>선</em>을 0.6m 정도 <em>침범</em>하여 교행 차량과 스치듯이 충돌하자마자 거의 동시에 선행 차량에 근접하여 운행하던 후행 차량이 <em>중앙</em><em>선</em>을 완전히 <em>침범</em>하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 <em>운전</em><em>자</em>가 <em>사고</em> 지점에 이르러 <em>중앙</em><em>선</em>을 <em>침범</em>한 과실이 있고 그로 인하여 1차 충돌<em>사고</em>가 발생하여 선행 차량이 도로를 비스듬히"
+            ]
+          },
+          "metadata": {
+            "case_id": "115666",
+            "dataset": "traffic",
+            "case_name": "구상금",
+            "court_name": "대법원",
+            "case_number": "97다19229",
+            "case_category": "민사",
+            "decision_date": "1997-09-05"
+          },
+          "query_id": "traffic_law_q002",
+          "query": "중앙선 침범 사고 운전자 책임",
+          "issue_tags": [
+            "중앙선 침범",
+            "반대차선",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "82149",
+          "chunk_id": "82149:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "손해배상(자)",
+          "case_number": "2001다72678",
+          "court_name": "대법원",
+          "decision_date": "2002-11-26",
+          "retriever_score": 75.528885,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:82149#82149:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 를 착용하지 아니하는 등 이 사건 사고 발생에 과실이 있으므로 피고의 책임이 제한되어야 한다는 피고의 주장에 대하여 원고가 사고운전자 소외인의 중앙선 침범과 같은 비정상적인 운행을 미리 예상하였거나 예상할 수 있었음을 인정할 증거가 없을 뿐만 아니라, 원고가 안전띠를 착용하지 않았음을 인정할 손해배상(자) 원고에게도 안전띠를 착용하지 아...",
+          "search_preview": "traffic_signal_groups: traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 를 착용하지 아니하는 등 이 사건 사고 발생에 과실이 있으므로 피고의 책임이 제한되어야 한다는 피고의 주장에 대하여 원고가 사고운전자 소외인의 중앙선 침범과 같은 비정상적인 운행을 미리 예상하였거나 예상할 수 있었음을 인정할 증거가 없을 뿐만 아니라, 원고가 안전띠를 착용하지 않았음을 인정할 손해배상(자) 원고에게도 안전띠를 착용하지 아...",
+          "matched_snippets": [
+            "소외인의 중앙선 침범과 같은 비정상적인 운행을 미리 예상하였거나 예상할 수 있었음을 인정할 증거가 없을 뿐만 아니라, 원고가 안전띠를 착용하지 않았음을 인정할\n손해배상(자)\n원고에게도 안전띠를 착용하지 아니하는 등 이 사건 사고 발생에 과실이 있으므로 피고의 책임이 제한되어야 한다는 피고의 주장에 대하여 원고가 사고운전자",
+            "소외인의 중앙선 침범과 같은 비정상적인 운행을 미리 예상하였거나 예상할 수 있었음을 인정할 증거가 없을 뿐만 아니라, 원고가 안전띠를 착용하지\n중앙선 침범\ntraffic_legal_terms: 손해배상(자)\ntraffic_actor_terms: 운전자\n중앙선\ntraffic_action_terms: 사고\n상해\ntraffic_situation_terms"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "소외인의 <em>중앙</em><em>선</em> <em>침범</em>과 같은 비정상적인 운행을 미리 예상하였거나 예상할 수 있었음을 인정할 증거가 없을 뿐만 아니라, 원고가 안전띠를 착용하지 않았음을 인정할\n손해배상(<em>자</em>)\n원고에게도 안전띠를 착용하지 아니하는 등 이 사건 <em>사고</em> 발생에 과실이 있으므로 피고의 <em>책임</em>이 제한되어야 한다는 피고의 주장에 대하여 원고가 <em>사고</em><em>운전</em><em>자</em>",
+              "소외인의 <em>중앙</em><em>선</em> <em>침범</em>과 같은 비정상적인 운행을 미리 예상하였거나 예상할 수 있었음을 인정할 증거가 없을 뿐만 아니라, 원고가 안전띠를 착용하지\n<em>중앙</em><em>선</em> <em>침범</em>\ntraffic_legal_terms: 손해배상(<em>자</em>)\ntraffic_actor_terms: <em>운전</em><em>자</em>\n<em>중앙</em><em>선</em>\ntraffic_action_terms: <em>사고</em>\n상해\ntraffic_situation_terms"
+            ],
+            "search_text": [
+              "소외인의 <em>중앙</em><em>선</em> <em>침범</em>과 같은 비정상적인 운행을 미리 예상하였거나 예상할 수 있었음을 인정할 증거가 없을 뿐만 아니라, 원고가 안전띠를 착용하지 않았음을 인정할\n손해배상(<em>자</em>)\n원고에게도 안전띠를 착용하지 아니하는 등 이 사건 <em>사고</em> 발생에 과실이 있으므로 피고의 <em>책임</em>이 제한되어야 한다는 피고의 주장에 대하여 원고가 <em>사고</em><em>운전</em><em>자</em>",
+              "소외인의 <em>중앙</em><em>선</em> <em>침범</em>과 같은 비정상적인 운행을 미리 예상하였거나 예상할 수 있었음을 인정할 증거가 없을 뿐만 아니라, 원고가 안전띠를 착용하지\n<em>중앙</em><em>선</em> <em>침범</em>\ntraffic_legal_terms: 손해배상(<em>자</em>)\ntraffic_actor_terms: <em>운전</em><em>자</em>\n<em>중앙</em><em>선</em>\ntraffic_action_terms: <em>사고</em>\n상해\ntraffic_situation_terms"
+            ]
+          },
+          "metadata": {
+            "case_id": "82149",
+            "dataset": "traffic",
+            "case_name": "손해배상(자)",
+            "court_name": "대법원",
+            "case_number": "2001다72678",
+            "case_category": "민사",
+            "decision_date": "2002-11-26"
+          },
+          "query_id": "traffic_law_q002",
+          "query": "중앙선 침범 사고 운전자 책임",
+          "issue_tags": [
+            "중앙선 침범",
+            "반대차선",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "213087",
+          "chunk_id": "213087:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "구상금",
+          "case_number": "2020다261776",
+          "court_name": "대법원",
+          "decision_date": "2021-01-14",
+          "retriever_score": 74.3735,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:213087#213087:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 가해차량 과 乙이 공동소유하는 甲 운전의 가해차량이 중앙선 침범으로 丙 운전의 피해차량을 충격하는 교통사고가 발생하여 丙이 인적, 물적 손해를 입고 피해차량 동승자 丁이 인적 손해를 입자, 피해차량의 자동차보험자인 戊 보험회사가 丙과 丁에게...",
+          "search_preview": "traffic_signal_groups: direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 가해차량 과 乙이 공동소유하는 甲 운전의 가해차량이 중앙선 침범으로 丙 운전의 피해차량을 충격하는 교통사고가 발생하여 丙이 인적, 물적 손해를 입고 피해차량 동승자 丁이 인적 손해를 입자, 피해차량의 자동차보험자인 戊 보험회사가 丙과 丁에게...",
+          "matched_snippets": [
+            "여부(원칙적 소극) [4] 甲과 乙이 공동소유하는 甲 운전의 가해차량이 중앙선 침범으로 丙 운전의 피해차량을 충격하는 교통사고가 발생하여 丙이 인적, 물적 손해를 입고 피해차량 동승자 丁이 인적 손해를 입자, 피해차량의 자동차보험자인 戊 보험회사가\n자동차보험\n중앙선 침범\n중앙선 침범으로 丙 운전의 피해차량을 충격하는 교통사고가",
+            "보험자대위\n자동차보험\n책임보험\ntraffic_actor_terms: 동승자\n자동차\n중앙선\n차량\ntraffic_action_terms: 사고\n충격\ntraffic_situation_terms: 중앙선 침범\ntraffic_fault_terms: 과실상계\n손해배상책임\n손해액"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "여부(원칙적 소극) [4] 甲과 乙이 공동소유하는 甲 <em>운전</em>의 가해차량이 <em>중앙</em><em>선</em> <em>침범</em>으로 丙 <em>운전</em>의 피해차량을 충격하는 교통<em>사고</em>가 발생하여 丙이 인적, 물적 손해를 입고 피해차량 동승<em>자</em> 丁이 인적 손해를 입자, 피해차량의 자동차보험<em>자</em>인 戊 보험회사가\n자동차보험\n<em>중앙</em><em>선</em> <em>침범</em>\n<em>중앙</em><em>선</em> <em>침범</em>으로 丙 <em>운전</em>의 피해차량을 충격하는 교통<em>사고</em>가",
+              "보험자대위\n자동차보험\n<em>책임</em>보험\ntraffic_actor_terms: 동승<em>자</em>\n자동차\n<em>중앙</em><em>선</em>\n차량\ntraffic_action_terms: <em>사고</em>\n충격\ntraffic_situation_terms: <em>중앙</em><em>선</em> <em>침범</em>\ntraffic_fault_terms: 과실상계\n손해배상<em>책임</em>\n손해액"
+            ],
+            "search_text": [
+              "여부(원칙적 소극) [4] 甲과 乙이 공동소유하는 甲 <em>운전</em>의 가해차량이 <em>중앙</em><em>선</em> <em>침범</em>으로 丙 <em>운전</em>의 피해차량을 충격하는 교통<em>사고</em>가 발생하여 丙이 인적, 물적 손해를 입고 피해차량 동승<em>자</em> 丁이 인적 손해를 입자, 피해차량의 자동차보험<em>자</em>인 戊 보험회사가\n자동차보험\n<em>중앙</em><em>선</em> <em>침범</em>\n<em>중앙</em><em>선</em> <em>침범</em>으로 丙 <em>운전</em>의 피해차량을 충격하는 교통<em>사고</em>가",
+              "보험자대위\n자동차보험\n<em>책임</em>보험\ntraffic_actor_terms: 동승<em>자</em>\n자동차\n<em>중앙</em><em>선</em>\n차량\ntraffic_action_terms: <em>사고</em>\n충격\ntraffic_situation_terms: <em>중앙</em><em>선</em> <em>침범</em>\ntraffic_fault_terms: 과실상계\n손해배상<em>책임</em>\n손해액"
+            ]
+          },
+          "metadata": {
+            "case_id": "213087",
+            "dataset": "traffic",
+            "case_name": "구상금",
+            "court_name": "대법원",
+            "case_number": "2020다261776",
+            "case_category": "민사",
+            "decision_date": "2021-01-14"
+          },
+          "query_id": "traffic_law_q002",
+          "query": "중앙선 침범 사고 운전자 책임",
+          "issue_tags": [
+            "중앙선 침범",
+            "반대차선",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "116497",
+          "chunk_id": "116497:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "보험금",
+          "case_number": "97다27039",
+          "court_name": "대법원",
+          "decision_date": "1998-03-27",
+          "retriever_score": 72.89146,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:116497#116497:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby traffic_legal_or_insurance_context traffic_evidence_terms: 아니한다는 면책조항이 있었는데, 망 소외 1이 그 후 무면허 상태에서 오토바이를 운전하여 전남 영광군 염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진행하던 중 중앙선을 침범하여 때마침 역시 중앙선을 침범한 채 마주오고 있던 소외 2 운전의 차량과 충돌하여 두개강내출혈상을 입고 그로부터 염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby traffic_legal_or_insurance_context traffic_evidence_terms: 아니한다는 면책조항이 있었는데, 망 소외 1이 그 후 무면허 상태에서 오토바이를 운전하여 전남 영광군 염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진행하던 중 중앙선을 침범하여 때마침 역시 중앙선을 침범한 채 마주오고 있던 소외 2 운전의 차량과 충돌하여 두개강내출혈상을 입고 그로부터 염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진...",
+          "matched_snippets": [
+            "1차선 도로를 진행하던 중 중앙선을 침범하여 때마침 역시 중앙선을 침범한 채 마주오고 있던 소외 2 운전의 차량과 충돌하여 두개강내출혈상을 입고 그로부터\n염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진행하던 중 중앙선을 침범하여 때마침 역시 중앙선을 침범한 채 마주오고 있던 소외 2 운전의 차량과 충돌하여 두개강내출혈상을",
+            "소외 2 운전의 차량과 충돌하여 두개강내출혈상을 입고 그로부터 몇 시간 후 위 상해로\n책임보험\n하지 아니한다는 면책조항이 있었는데, 망 소외 1이 그 후 무면허 상태에서 오토바이를 운전하여 전남 영광군 염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진행하던 중 중앙선을 침범하여 때마침 역시 중앙선을 침범한 채 마주오고 있던"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "1차선 도로를 진행하던 중 <em>중앙</em><em>선</em>을 <em>침범</em>하여 때마침 역시 <em>중앙</em><em>선</em>을 <em>침범</em>한 채 마주오고 있던 소외 2 <em>운전</em>의 차량과 충돌하여 두개강내출혈상을 입고 그로부터\n염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진행하던 중 <em>중앙</em><em>선</em>을 <em>침범</em>하여 때마침 역시 <em>중앙</em><em>선</em>을 <em>침범</em>한 채 마주오고 있던 소외 2 <em>운전</em>의 차량과 충돌하여 두개강내출혈상을",
+              "소외 2 <em>운전</em>의 차량과 충돌하여 두개강내출혈상을 입고 그로부터 몇 시간 후 위 상해로\n<em>책임</em>보험\n하지 아니한다는 면책조항이 있었는데, 망 소외 1이 그 후 무면허 상태에서 오토바이를 <em>운전</em>하여 전남 영광군 염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진행하던 중 <em>중앙</em><em>선</em>을 <em>침범</em>하여 때마침 역시 <em>중앙</em><em>선</em>을 <em>침범</em>한 채 마주오고 있던"
+            ],
+            "search_text": [
+              "1차선 도로를 진행하던 중 <em>중앙</em><em>선</em>을 <em>침범</em>하여 때마침 역시 <em>중앙</em><em>선</em>을 <em>침범</em>한 채 마주오고 있던 소외 2 <em>운전</em>의 차량과 충돌하여 두개강내출혈상을 입고 그로부터\n염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진행하던 중 <em>중앙</em><em>선</em>을 <em>침범</em>하여 때마침 역시 <em>중앙</em><em>선</em>을 <em>침범</em>한 채 마주오고 있던 소외 2 <em>운전</em>의 차량과 충돌하여 두개강내출혈상을",
+              "소외 2 <em>운전</em>의 차량과 충돌하여 두개강내출혈상을 입고 그로부터 몇 시간 후 위 상해로\n<em>책임</em>보험\n하지 아니한다는 면책조항이 있었는데, 망 소외 1이 그 후 무면허 상태에서 오토바이를 <em>운전</em>하여 전남 영광군 염산면 옥실리 송정부락 앞의 편도 1차선 도로를 진행하던 중 <em>중앙</em><em>선</em>을 <em>침범</em>하여 때마침 역시 <em>중앙</em><em>선</em>을 <em>침범</em>한 채 마주오고 있던"
+            ]
+          },
+          "metadata": {
+            "case_id": "116497",
+            "dataset": "traffic",
+            "case_name": "보험금",
+            "court_name": "대법원",
+            "case_number": "97다27039",
+            "case_category": "민사",
+            "decision_date": "1998-03-27"
+          },
+          "query_id": "traffic_law_q002",
+          "query": "중앙선 침범 사고 운전자 책임",
+          "issue_tags": [
+            "중앙선 침범",
+            "반대차선",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "115666",
+          "chunk_id": "115666:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "구상금",
+          "case_number": "97다19229",
+          "court_name": "대법원",
+          "decision_date": "1997-09-05",
+          "retriever_score": 72.81788,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:115666#115666:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 19229 대법원 민사 판결 선행 차량이 중앙선을 0.6m 정도 침범하여 교행 차량과 스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자는 후행 차량에 의한 충돌사고에 책임이 없다고 한 사례 우측으로...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 19229 대법원 민사 판결 선행 차량이 중앙선을 0.6m 정도 침범하여 교행 차량과 스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자는 후행 차량에 의한 충돌사고에 책임이 없다고 한 사례 우측으로...",
+          "matched_snippets": [
+            "스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 중앙선을 완전히 침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자는 후행 차량에 의한 충돌사고에 책임이 없다고 한 사례 우측으로\n가 티코 승용차의 운전자인 망 김홍수가 1차 충돌사고를 발견하고 급제동조치를 취하였다는 점을 인정할 증거도 없다는 이유로",
+            "침범하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 운전자는 후행 차량에 의한 충돌사고에\n종합보험\ntraffic_direct_terms: 교통사고\ntraffic_legal_terms: 구상금\n종합보험\ntraffic_actor_terms: 도로\n승용차\n운전자\n자동차\n중앙선\n차량\n차로\ntraffic_action_terms"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 <em>중앙</em><em>선</em>을 완전히 <em>침범</em>하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 <em>운전</em><em>자</em>는 후행 차량에 의한 충돌<em>사고</em>에 <em>책임</em>이 없다고 한 사례 우측으로\n가 티코 승용차의 <em>운전</em><em>자</em>인 망 김홍수가 1차 충돌<em>사고</em>를 발견하고 급제동조치를 취하였다는 점을 인정할 증거도 없다는 이유로",
+              "<em>침범</em>하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 <em>운전</em><em>자</em>는 후행 차량에 의한 충돌<em>사고</em>에\n종합보험\ntraffic_direct_terms: 교통<em>사고</em>\ntraffic_legal_terms: 구상금\n종합보험\ntraffic_actor_terms: 도로\n승용차\n<em>운전</em><em>자</em>\n자동차\n<em>중앙</em><em>선</em>\n차량\n차로\ntraffic_action_terms"
+            ],
+            "search_text": [
+              "스치듯이 충돌하자마자 선행 차량에 근접하여 운행하던 후행 차량이 <em>중앙</em><em>선</em>을 완전히 <em>침범</em>하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 <em>운전</em><em>자</em>는 후행 차량에 의한 충돌<em>사고</em>에 <em>책임</em>이 없다고 한 사례 우측으로\n가 티코 승용차의 <em>운전</em><em>자</em>인 망 김홍수가 1차 충돌<em>사고</em>를 발견하고 급제동조치를 취하였다는 점을 인정할 증거도 없다는 이유로",
+              "<em>침범</em>하여 교행 차량과 정면 충돌한 사안에서 선행 차량의 <em>운전</em><em>자</em>는 후행 차량에 의한 충돌<em>사고</em>에\n종합보험\ntraffic_direct_terms: 교통<em>사고</em>\ntraffic_legal_terms: 구상금\n종합보험\ntraffic_actor_terms: 도로\n승용차\n<em>운전</em><em>자</em>\n자동차\n<em>중앙</em><em>선</em>\n차량\n차로\ntraffic_action_terms"
+            ]
+          },
+          "metadata": {
+            "case_id": "115666",
+            "dataset": "traffic",
+            "case_name": "구상금",
+            "court_name": "대법원",
+            "case_number": "97다19229",
+            "case_category": "민사",
+            "decision_date": "1997-09-05"
+          },
+          "query_id": "traffic_law_q002",
+          "query": "중앙선 침범 사고 운전자 책임",
+          "issue_tags": [
+            "중앙선 침범",
+            "반대차선",
+            "주의의무"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q003",
+      "query": "횡단보도 보행자 사고 운전자 주의의무",
+      "issue_tags": [
+        "횡단보도",
+        "보행자 보호의무",
+        "전방주시의무"
+      ],
+      "purpose": "횡단보도 보행자 사고에서 운전자의 보호의무 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "232595",
+          "chunk_id": "232595:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(도주치상)",
+          "case_number": "2022도1401",
+          "court_name": "대법원",
+          "decision_date": "2022-06-16",
+          "retriever_score": 110.47017,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:232595#232595:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_situation_context traffic_evidence_terms: 교통사고 로교통 관련 제반 법규를 지켜 자동차의 운행 또는 보행에 임하리라고 신뢰할 수 없는 특별한 사정이 있는 경우 적용이 배제되는지 여부(적극) / 자동차의 운전자가 통상 예견되는 상황에 대비하여 결과를 회피할 수 있는 정도의 주의의무를 다하지 못한 것이...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_situation_context traffic_evidence_terms: 교통사고 로교통 관련 제반 법규를 지켜 자동차의 운행 또는 보행에 임하리라고 신뢰할 수 없는 특별한 사정이 있는 경우 적용이 배제되는지 여부(적극) / 자동차의 운전자가 통상 예견되는 상황에 대비하여 결과를 회피할 수 있는 정도의 주의의무를 다하지 못한 것이...",
+          "matched_snippets": [
+            "설치되지 않은 횡단보도를 횡단하는 보행자가 있을 경우, 자동차 운전자의 보행자에 대한 주의의무 / 운전자가 횡단보도 표시구역을 통과하면서 보행자가 횡단보도 노면표시가 없는 곳에서 갑자기 건너오지 않을 것이라고 신뢰하는 신\n안전거리\n이 많이 있었고, 횡단보도에는 횡단보행자용 신호기가 설치되어 있지 않아 언제든지 보행자가 횡단할",
+            "설치되지 않은 횡단보도를 횡단하는 보행자가 있을 경우, 자동차 운전자의 보행자에 대한 주의의무 / 운전자가 횡단보도 표시구역을 통과하면서 보행자가 횡단보도 노면표시가 없는 곳에서 갑자\n판결, 대법원 2002. 10. 11."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "설치되지 않은 <em>횡단</em><em>보도</em>를 <em>횡단</em>하는 <em>보행</em><em>자</em>가 있을 경우, 자동차 <em>운전</em><em>자</em>의 <em>보행</em><em>자</em>에 대한 주의<em>의무</em> / <em>운전</em><em>자</em>가 <em>횡단</em><em>보도</em> 표시구역을 통과하면서 <em>보행</em><em>자</em>가 <em>횡단</em><em>보도</em> 노면표시가 없는 곳에서 갑자기 건너오지 않을 것이라고 신뢰하는 신\n안전거리\n이 많이 있었고, <em>횡단</em><em>보도</em>에는 <em>횡단</em><em>보행</em><em>자</em>용 신호기가 설치되어 있지 않아 언제든지 <em>보행</em><em>자</em>가 <em>횡단</em>할",
+              "설치되지 않은 <em>횡단</em><em>보도</em>를 <em>횡단</em>하는 <em>보행</em><em>자</em>가 있을 경우, 자동차 <em>운전</em><em>자</em>의 <em>보행</em><em>자</em>에 대한 주의<em>의무</em> / <em>운전</em><em>자</em>가 <em>횡단</em><em>보도</em> 표시구역을 통과하면서 <em>보행</em><em>자</em>가 <em>횡단</em><em>보도</em> 노면표시가 없는 곳에서 갑자\n판결, 대법원 2002. 10. 11."
+            ],
+            "search_text": [
+              "설치되지 않은 <em>횡단</em><em>보도</em>를 <em>횡단</em>하는 <em>보행</em><em>자</em>가 있을 경우, 자동차 <em>운전</em><em>자</em>의 <em>보행</em><em>자</em>에 대한 주의<em>의무</em> / <em>운전</em><em>자</em>가 <em>횡단</em><em>보도</em> 표시구역을 통과하면서 <em>보행</em><em>자</em>가 <em>횡단</em><em>보도</em> 노면표시가 없는 곳에서 갑자기 건너오지 않을 것이라고 신뢰하는 신\n안전거리\n이 많이 있었고, <em>횡단</em><em>보도</em>에는 <em>횡단</em><em>보행</em><em>자</em>용 신호기가 설치되어 있지 않아 언제든지 <em>보행</em><em>자</em>가 <em>횡단</em>할",
+              "설치되지 않은 <em>횡단</em><em>보도</em>를 <em>횡단</em>하는 <em>보행</em><em>자</em>가 있을 경우, 자동차 <em>운전</em><em>자</em>의 <em>보행</em><em>자</em>에 대한 주의<em>의무</em> / <em>운전</em><em>자</em>가 <em>횡단</em><em>보도</em> 표시구역을 통과하면서 <em>보행</em><em>자</em>가 <em>횡단</em><em>보도</em> 노면표시가 없는 곳에서 갑자\n판결, 대법원 2002. 10. 11."
+            ]
+          },
+          "metadata": {
+            "case_id": "232595",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(도주치상)",
+            "court_name": "대법원",
+            "case_number": "2022도1401",
+            "case_category": "형사",
+            "decision_date": "2022-06-16"
+          },
+          "query_id": "traffic_law_q003",
+          "query": "횡단보도 보행자 사고 운전자 주의의무",
+          "issue_tags": [
+            "횡단보도",
+            "보행자 보호의무",
+            "전방주시의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "119148",
+          "chunk_id": "119148:structured_1500_250:0003",
+          "chunk_index": 3,
+          "chunk_type": "holding_summary",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반등",
+          "case_number": "90노1137",
+          "court_name": "인천지법",
+          "decision_date": "1991-05-30",
+          "retriever_score": 110.01935,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:119148#119148:structured_1500_250:0003",
+          "chunk_preview": "판시사항: 보행자 신호가 바뀐 후에 횡단보도를 계속 횡단하는 사람이 교통사고처리특례법 제3조 제6호, 도로교통법 제48조 제3호에서 규정한 \"보행자\"에 해당하는지 여부 요약: 횡단보도상의 보행자 진행신호의 지속시간이 도로의 횡단에 충분할 만큼 길지 못하여 횡단보도에서 대기하고 있다가 보행자 신호가 진행신호 바뀌자마자 횡단을 시작하더라도 미처 횡단을 끝마치기 전에 보행자 신호가 정지신호로 바뀌는 일이 비일비재한 현실정에서 보행신호주기 내에 횡단을 끝마치지 못하였다는 이유만으로 보행자 진행신호를 보고 횡단보도에 진입하여 횡단하던...",
+          "search_preview": "판시사항: 보행자 신호가 바뀐 후에 횡단보도를 계속 횡단하는 사람이 교통사고처리특례법 제3조 제6호, 도로교통법 제48조 제3호에서 규정한 \"보행자\"에 해당하는지 여부 요약: 횡단보도상의 보행자 진행신호의 지속시간이 도로의 횡단에 충분할 만큼 길지 못하여 횡단보도에서 대기하고 있다가 보행자 신호가 진행신호 바뀌자마자 횡단을 시작하더라도 미처 횡단을 끝마치기 전에 보행자 신호가 정지신호로 바뀌는 일이 비일비재한 현실정에서 보행신호주기 내에 횡단을 끝마치지 못하였다는 이유만으로 보행자 진행신호를 보고 횡단보도에 진입하여 횡단하던...",
+          "matched_snippets": [
+            "판시사항: 보행자 신호가 바뀐 후에 횡단보도를 계속 횡단하는 사람이 교통사고처리특례법 제3조 제6호, 도로교통법 제48조 제3호에서 규정한 \"보행자\"에 해당하는지 여부\n요약: 횡단보도상의 보행자 진행신호의 지속시간이 도로의 횡단에 충분할 만큼 길지 못하여 횡단보도에서 대기하고 있다가 보행자 신호가 진행신호 바뀌자마자 횡단을",
+            "함으로서 그러한 보행자의 통행을 방해하지 않도록 할 업무상의 주의의무를 여전히 부담한다고 할 것이므로, 운전자가 위와 같은 주의의무를 게을리하여 보행자 신호가 바뀐 후에 횡단보도를 계속 횡단하는 사람을 충돌하였다면, 이는 교통사고처리특례법 제3조 제6호 소정의 도로교통법 제48조 제3호의 규정에 의한 횡단보도에서의 보행자"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "판시사항: <em>보행</em><em>자</em> 신호가 바뀐 후에 <em>횡단</em><em>보도</em>를 계속 <em>횡단</em>하는 사람이 교통<em>사고</em>처리특례법 제3조 제6호, 도로교통법 제48조 제3호에서 규정한 \"<em>보행</em><em>자</em>\"에 해당하는지 여부\n요약: <em>횡단</em><em>보도</em>상의 <em>보행</em><em>자</em> 진행신호의 지속시간이 도로의 <em>횡단</em>에 충분할 만큼 길지 못하여 <em>횡단</em><em>보도</em>에서 대기하고 있다가 <em>보행</em><em>자</em> 신호가 진행신호 바뀌자마자 <em>횡단</em>을",
+              "함으로서 그러한 <em>보행</em><em>자</em>의 통행을 방해하지 않도록 할 업무상의 <em>주</em>의<em>의무</em>를 여전히 부담한다고 할 것이므로, <em>운전</em><em>자</em>가 위와 같은 <em>주</em>의<em>의무</em>를 게을리하여 <em>보행</em><em>자</em> 신호가 바뀐 후에 <em>횡단</em><em>보도</em>를 계속 <em>횡단</em>하는 사람을 충돌하였다면, 이는 교통<em>사고</em>처리특례법 제3조 제6호 소정의 도로교통법 제48조 제3호의 규정에 의한 <em>횡단</em><em>보도</em>에서의 <em>보행</em><em>자</em>"
+            ],
+            "search_text": [
+              "판시사항: <em>보행</em><em>자</em> 신호가 바뀐 후에 <em>횡단</em><em>보도</em>를 계속 <em>횡단</em>하는 사람이 교통<em>사고</em>처리특례법 제3조 제6호, 도로교통법 제48조 제3호에서 규정한 \"<em>보행</em><em>자</em>\"에 해당하는지 여부\n요약: <em>횡단</em><em>보도</em>상의 <em>보행</em><em>자</em> 진행신호의 지속시간이 도로의 <em>횡단</em>에 충분할 만큼 길지 못하여 <em>횡단</em><em>보도</em>에서 대기하고 있다가 <em>보행</em><em>자</em> 신호가 진행신호 바뀌자마자 <em>횡단</em>을",
+              "함으로서 그러한 <em>보행</em><em>자</em>의 통행을 방해하지 않도록 할 업무상의 <em>주</em>의<em>의무</em>를 여전히 부담한다고 할 것이므로, <em>운전</em><em>자</em>가 위와 같은 <em>주</em>의<em>의무</em>를 게을리하여 <em>보행</em><em>자</em> 신호가 바뀐 후에 <em>횡단</em><em>보도</em>를 계속 <em>횡단</em>하는 사람을 충돌하였다면, 이는 교통<em>사고</em>처리특례법 제3조 제6호 소정의 도로교통법 제48조 제3호의 규정에 의한 <em>횡단</em><em>보도</em>에서의 <em>보행</em><em>자</em>"
+            ]
+          },
+          "metadata": {
+            "case_id": "119148",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반등",
+            "court_name": "인천지법",
+            "case_number": "90노1137",
+            "case_category": "형사",
+            "decision_date": "1991-05-30"
+          },
+          "query_id": "traffic_law_q003",
+          "query": "횡단보도 보행자 사고 운전자 주의의무",
+          "issue_tags": [
+            "횡단보도",
+            "보행자 보호의무",
+            "전방주시의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "149922",
+          "chunk_id": "149922:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반",
+          "case_number": "2009노939",
+          "court_name": "청주지방법원",
+          "decision_date": "2009-10-28",
+          "retriever_score": 108.3122,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:149922#149922:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: fault_or_liability_context traffic_legal_or_insurance_context traffic_evidence_terms: 2009. 7. 30. 선고 2009고단74 판결 【주 문】 검사의 항소를 기각한다. 【이 유】1. 항소이유의 요지 원심은, 피고인이 운전하는 자동차가 횡단보도를 보행하는 공소외인을 충격하고, 그로 인하여 공소외인이 부축하고 있던 피해자가 밀려 넘어져 상해를 입게 되었다고 하더라도 피해자가 가 횡단보도 밖에서 보행하고 있었던 이상 피해...",
+          "search_preview": "traffic_signal_groups: fault_or_liability_context traffic_legal_or_insurance_context traffic_evidence_terms: 2009. 7. 30. 선고 2009고단74 판결 【주 문】 검사의 항소를 기각한다. 【이 유】1. 항소이유의 요지 원심은, 피고인이 운전하는 자동차가 횡단보도를 보행하는 공소외인을 충격하고, 그로 인하여 공소외인이 부축하고 있던 피해자가 밀려 넘어져 상해를 입게 되었다고 하더라도 피해자가 가 횡단보도 밖에서 보행하고 있었던 이상 피해...",
+          "matched_snippets": [
+            "따라서 이 사건에서 피고인이 운전하는 자동차가 횡단보도를 보행하는 공소외인을 충격하여 피고인이 보행자보호의무를 위반하였고, 그로 인하여 피해자가 상해를 입게 된 이상 피고인은 횡단보도 밖\n교통사고처리특례법\n법 제27조 제1항이 정하는 횡단보도에서의 보행자보호의무의 보호대상이 된다고 할 수는 없다고 판단하였다.",
+            "따라서 이 사건에서 피고인이 운전하는 자동차가 횡단보도를 보행하는 공소\ntraffic_legal_terms: 교통사고처리특례법\ntraffic_actor_terms: 도로\n보행자\n운전자\n자동차\n횡단보도\ntraffic_action_terms: 넘어져\n사고\n상해\n상해를 입\n충격\ntraffic_fault_terms: 주의의무"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "따라서 이 사건에서 피고인이 <em>운전</em>하는 자동차가 <em>횡단</em><em>보도</em>를 <em>보행</em>하는 공소외인을 충격하여 피고인이 <em>보행</em><em>자</em>보호<em>의무</em>를 위반하였고, 그로 인하여 피해<em>자</em>가 상해를 입게 된 이상 피고인은 <em>횡단</em><em>보도</em> 밖\n교통<em>사고</em>처리특례법\n법 제27조 제1항이 정하는 <em>횡단</em><em>보도</em>에서의 <em>보행</em><em>자</em>보호<em>의무</em>의 보호대상이 된다고 할 수는 없다고 판단하였다.",
+              "따라서 이 사건에서 피고인이 <em>운전</em>하는 자동차가 <em>횡단</em><em>보도</em>를 <em>보행</em>하는 공소\ntraffic_legal_terms: 교통<em>사고</em>처리특례법\ntraffic_actor_terms: 도로\n<em>보행</em><em>자</em>\n<em>운전</em><em>자</em>\n자동차\n<em>횡단</em><em>보도</em>\ntraffic_action_terms: 넘어져\n<em>사고</em>\n상해\n상해를 입\n충격\ntraffic_fault_terms: 주의<em>의무</em>"
+            ],
+            "search_text": [
+              "따라서 이 사건에서 피고인이 <em>운전</em>하는 자동차가 <em>횡단</em><em>보도</em>를 <em>보행</em>하는 공소외인을 충격하여 피고인이 <em>보행</em><em>자</em>보호<em>의무</em>를 위반하였고, 그로 인하여 피해<em>자</em>가 상해를 입게 된 이상 피고인은 <em>횡단</em><em>보도</em> 밖\n교통<em>사고</em>처리특례법\n법 제27조 제1항이 정하는 <em>횡단</em><em>보도</em>에서의 <em>보행</em><em>자</em>보호<em>의무</em>의 보호대상이 된다고 할 수는 없다고 판단하였다.",
+              "따라서 이 사건에서 피고인이 <em>운전</em>하는 자동차가 <em>횡단</em><em>보도</em>를 <em>보행</em>하는 공소\ntraffic_legal_terms: 교통<em>사고</em>처리특례법\ntraffic_actor_terms: 도로\n<em>보행</em><em>자</em>\n<em>운전</em><em>자</em>\n자동차\n<em>횡단</em><em>보도</em>\ntraffic_action_terms: 넘어져\n<em>사고</em>\n상해\n상해를 입\n충격\ntraffic_fault_terms: 주의<em>의무</em>"
+            ]
+          },
+          "metadata": {
+            "case_id": "149922",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반",
+            "court_name": "청주지방법원",
+            "case_number": "2009노939",
+            "case_category": "형사",
+            "decision_date": "2009-10-28"
+          },
+          "query_id": "traffic_law_q003",
+          "query": "횡단보도 보행자 사고 운전자 주의의무",
+          "issue_tags": [
+            "횡단보도",
+            "보행자 보호의무",
+            "전방주시의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "226675",
+          "chunk_id": "226675:structured_1500_250:0003",
+          "chunk_index": 3,
+          "chunk_type": "holding_summary",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반(치상)",
+          "case_number": "2020도8675",
+          "court_name": "대법원",
+          "decision_date": "2020-12-24",
+          "retriever_score": 107.77652,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:226675#226675:structured_1500_250:0003",
+          "chunk_preview": "판시사항: [1] 횡단보행자용 신호기가 설치되지 않은 횡단보도를 횡단하는 보행자가 있을 경우, 자동차 운전자의 보행자에 대한 주의의무 / 이를 위반하여 형법 제268조의 죄를 범한 때에는 교통사고처리 특례법 제3조 제2항 단서 제6호의 ‘횡단보도에서의 보행자 보호의무를 위반하여 운전한 경우’에 해당하여 보험 또는 공제 가입 여부나 처벌에 관한 피해자의 의사를 묻지 않고 교통사고처리 특례법 제3조 제1항에 의한 처벌의 대상이 되는지 여부(적극) [2] 횡단보도에서의 보행자 보호의무를 규정한 도로교통법 제27조 제1항의 취지 /...",
+          "search_preview": "판시사항: [1] 횡단보행자용 신호기가 설치되지 않은 횡단보도를 횡단하는 보행자가 있을 경우, 자동차 운전자의 보행자에 대한 주의의무 / 이를 위반하여 형법 제268조의 죄를 범한 때에는 교통사고처리 특례법 제3조 제2항 단서 제6호의 ‘횡단보도에서의 보행자 보호의무를 위반하여 운전한 경우’에 해당하여 보험 또는 공제 가입 여부나 처벌에 관한 피해자의 의사를 묻지 않고 교통사고처리 특례법 제3조 제1항에 의한 처벌의 대상이 되는지 여부(적극) [2] 횡단보도에서의 보행자 보호의무를 규정한 도로교통법 제27조 제1항의 취지 /...",
+          "matched_snippets": [
+            "판시사항: [1] 횡단보행자용 신호기가 설치되지 않은 횡단보도를 횡단하는 보행자가 있을 경우, 자동차 운전자의 보행자에 대한 주의의무 / 이를 위반하여 형법 제268조의 죄를 범한 때에는 교통사고처리 특례법 제3조 제2항 단서 제6호의 ‘횡단보도에서의 보행자 보호의무를 위반하여 운전한 경우’에 해당하여 보험 또는 공제 가입",
+            "그 입법 취지는 차를 운전하여 횡단보도를 지나는 운전자의 보행자에 대한 주의의무를 강화하여 횡단보도를 통행하는 보행자의 생명·신체의 안전을 두텁게 보호하려는 데에 있다."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "판시사항: [1] <em>횡단</em><em>보행</em><em>자</em>용 신호기가 설치되지 않은 <em>횡단</em><em>보도</em>를 <em>횡단</em>하는 <em>보행</em><em>자</em>가 있을 경우, 자동차 <em>운전</em><em>자</em>의 <em>보행</em><em>자</em>에 대한 주의<em>의무</em> / 이를 위반하여 형법 제268조의 죄를 범한 때에는 교통<em>사고</em>처리 특례법 제3조 제2항 단서 제6호의 ‘<em>횡단</em><em>보도</em>에서의 <em>보행</em><em>자</em> 보호<em>의무</em>를 위반하여 <em>운전</em>한 경우’에 해당하여 보험 또는 공제 가입",
+              "그 입법 취지는 차를 <em>운전</em>하여 <em>횡단</em><em>보도</em>를 지나는 <em>운전</em><em>자</em>의 <em>보행</em><em>자</em>에 대한 <em>주</em>의<em>의무</em>를 강화하여 <em>횡단</em><em>보도</em>를 통행하는 <em>보행</em><em>자</em>의 생명·신체의 안전을 두텁게 보호하려는 데에 있다."
+            ],
+            "search_text": [
+              "판시사항: [1] <em>횡단</em><em>보행</em><em>자</em>용 신호기가 설치되지 않은 <em>횡단</em><em>보도</em>를 <em>횡단</em>하는 <em>보행</em><em>자</em>가 있을 경우, 자동차 <em>운전</em><em>자</em>의 <em>보행</em><em>자</em>에 대한 주의<em>의무</em> / 이를 위반하여 형법 제268조의 죄를 범한 때에는 교통<em>사고</em>처리 특례법 제3조 제2항 단서 제6호의 ‘<em>횡단</em><em>보도</em>에서의 <em>보행</em><em>자</em> 보호<em>의무</em>를 위반하여 <em>운전</em>한 경우’에 해당하여 보험 또는 공제 가입",
+              "그 입법 취지는 차를 <em>운전</em>하여 <em>횡단</em><em>보도</em>를 지나는 <em>운전</em><em>자</em>의 <em>보행</em><em>자</em>에 대한 <em>주</em>의<em>의무</em>를 강화하여 <em>횡단</em><em>보도</em>를 통행하는 <em>보행</em><em>자</em>의 생명·신체의 안전을 두텁게 보호하려는 데에 있다."
+            ]
+          },
+          "metadata": {
+            "case_id": "226675",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반(치상)",
+            "court_name": "대법원",
+            "case_number": "2020도8675",
+            "case_category": "형사",
+            "decision_date": "2020-12-24"
+          },
+          "query_id": "traffic_law_q003",
+          "query": "횡단보도 보행자 사고 운전자 주의의무",
+          "issue_tags": [
+            "횡단보도",
+            "보행자 보호의무",
+            "전방주시의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "188537",
+          "chunk_id": "188537:structured_1500_250:0006",
+          "chunk_index": 6,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반",
+          "case_number": "2015노3482",
+          "court_name": "의정부지방법원",
+          "decision_date": "2016-10-07",
+          "retriever_score": 107.628334,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:188537#188537:structured_1500_250:0006",
+          "chunk_preview": "량의 유무를 확인하고 횡단하여야 할 주의의무가 있다고 보기 어려운 반면, 교차로의 우회전 직후 실치되어 있는 횡단보도를 통과하려는 운전자에게는 횡단보도의 보행자 신호만을 믿고 횡단보도를 통행하는 보행자가 있음을 예견하여 우회전 직후 설치되어 있는 횡단보도의 보행자 신호기가 녹색 등화인지 여부를 확인하여야 할 주의의무가 있고, 위 횡단보도의 보행자 신호기가 녹색 등화인 경우에는 보행자의 횡단을 방해하거나 위험을 주지 아니하도록 일시정지하여야 하고, 위 횡단보도의 보행자 신호기가 적색 등화인 경우에도 교차로의 차량 신호기가 녹색...",
+          "search_preview": "량의 유무를 확인하고 횡단하여야 할 주의의무가 있다고 보기 어려운 반면, 교차로의 우회전 직후 실치되어 있는 횡단보도를 통과하려는 운전자에게는 횡단보도의 보행자 신호만을 믿고 횡단보도를 통행하는 보행자가 있음을 예견하여 우회전 직후 설치되어 있는 횡단보도의 보행자 신호기가 녹색 등화인지 여부를 확인하여야 할 주의의무가 있고, 위 횡단보도의 보행자 신호기가 녹색 등화인 경우에는 보행자의 횡단을 방해하거나 위험을 주지 아니하도록 일시정지하여야 하고, 위 횡단보도의 보행자 신호기가 적색 등화인 경우에도 교차로의 차량 신호기가 녹색...",
+          "matched_snippets": [
+            "량의 유무를 확인하고 횡단하여야 할 주의의무가 있다고 보기 어려운 반면, 교차로의 우회전 직후 실치되어 있는 횡단보도를 통과하려는 운전자에게는 횡단보도의 보행자 신호만을 믿고 횡단보도를 통행하는 보행자가 있음을 예견하여 우회전 직후 설치되어 있는 횡단보도의 보행자 신호기가 녹색 등화인지 여부를 확인하여야 할 주의의무가 있고",
+            "통행하는 보행자에 대하여도 동일한 보행자 보호의무를 부담하는바, 횡단보도의 보행자 신호기가 적색 등화여서 횡단보도에 적법하게 진입한 차량의 경우에도 횡단보도의 진입 이후에 횡단보도의 보행자 신호기가 녹색 등화로 바뀌는 경우가 있을 수 있고, 이와 같은 경우 차량 운전자로서는 차량 진행 방향 앞쪽으로 횡단보도를 통행하는 보행자에"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "량의 유무를 확인하고 <em>횡단</em>하여야 할 주의<em>의무</em>가 있다고 보기 어려운 반면, 교차로의 우회전 직후 실치되어 있는 <em>횡단</em><em>보도</em>를 통과하려는 <em>운전</em><em>자</em>에게는 <em>횡단</em><em>보도</em>의 <em>보행</em><em>자</em> 신호만을 믿고 <em>횡단</em><em>보도</em>를 통행하는 <em>보행</em><em>자</em>가 있음을 예견하여 우회전 직후 설치되어 있는 <em>횡단</em><em>보도</em>의 <em>보행</em><em>자</em> 신호기가 녹색 등화인지 여부를 확인하여야 할 주의<em>의무</em>가 있고",
+              "통행하는 <em>보행</em><em>자</em>에 대하여도 동일한 <em>보행</em><em>자</em> 보호<em>의무</em>를 부담하는바, <em>횡단</em><em>보도</em>의 <em>보행</em><em>자</em> 신호기가 적색 등화여서 <em>횡단</em><em>보도</em>에 적법하게 진입한 차량의 경우에도 <em>횡단</em><em>보도</em>의 진입 이후에 <em>횡단</em><em>보도</em>의 <em>보행</em><em>자</em> 신호기가 녹색 등화로 바뀌는 경우가 있을 수 있고, 이와 같은 경우 차량 <em>운전</em><em>자</em>로서는 차량 진행 방향 앞쪽으로 <em>횡단</em><em>보도</em>를 통행하는 <em>보행</em><em>자</em>에"
+            ],
+            "search_text": [
+              "량의 유무를 확인하고 <em>횡단</em>하여야 할 주의<em>의무</em>가 있다고 보기 어려운 반면, 교차로의 우회전 직후 실치되어 있는 <em>횡단</em><em>보도</em>를 통과하려는 <em>운전</em><em>자</em>에게는 <em>횡단</em><em>보도</em>의 <em>보행</em><em>자</em> 신호만을 믿고 <em>횡단</em><em>보도</em>를 통행하는 <em>보행</em><em>자</em>가 있음을 예견하여 우회전 직후 설치되어 있는 <em>횡단</em><em>보도</em>의 <em>보행</em><em>자</em> 신호기가 녹색 등화인지 여부를 확인하여야 할 주의<em>의무</em>가 있고",
+              "통행하는 <em>보행</em><em>자</em>에 대하여도 동일한 <em>보행</em><em>자</em> 보호<em>의무</em>를 부담하는바, <em>횡단</em><em>보도</em>의 <em>보행</em><em>자</em> 신호기가 적색 등화여서 <em>횡단</em><em>보도</em>에 적법하게 진입한 차량의 경우에도 <em>횡단</em><em>보도</em>의 진입 이후에 <em>횡단</em><em>보도</em>의 <em>보행</em><em>자</em> 신호기가 녹색 등화로 바뀌는 경우가 있을 수 있고, 이와 같은 경우 차량 <em>운전</em><em>자</em>로서는 차량 진행 방향 앞쪽으로 <em>횡단</em><em>보도</em>를 통행하는 <em>보행</em><em>자</em>에"
+            ]
+          },
+          "metadata": {
+            "case_id": "188537",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반",
+            "court_name": "의정부지방법원",
+            "case_number": "2015노3482",
+            "case_category": "형사",
+            "decision_date": "2016-10-07"
+          },
+          "query_id": "traffic_law_q003",
+          "query": "횡단보도 보행자 사고 운전자 주의의무",
+          "issue_tags": [
+            "횡단보도",
+            "보행자 보호의무",
+            "전방주시의무"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q004",
+      "query": "음주운전 교통사고 형사 책임",
+      "issue_tags": [
+        "음주운전",
+        "형사책임",
+        "위험운전"
+      ],
+      "purpose": "음주운전 사고의 형사책임 또는 법률상 책임 판단 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "223463",
+          "chunk_id": "223463:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "도로교통법위반(음주측정거부)·교통사고처리특례법위반·도로교통법위반(무면허운전)",
+          "case_number": "2021노1048, 1819(병합)",
+          "court_name": "창원지방법원",
+          "decision_date": "2021-10-21",
+          "retriever_score": 56.043144,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:223463#223463:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 교통사고 교통사고처리특례법 도로교통법위반(음주측정거부)·교통사고처리특례법위반·도로교통법위반(무면허운전) 2021노1048, 1819(병합) 창원지방법원 형사 판결 【피 고 인 도로교통법위반(음주측정거부)·교통사고처리특례법위반·도로교통법위반(무면허운전) 2021노1048, 1819(병합) 창원지방법원 형사 판결 【피 고 인】 피고인 【항...",
+          "search_preview": "traffic_signal_groups: direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 교통사고 교통사고처리특례법 도로교통법위반(음주측정거부)·교통사고처리특례법위반·도로교통법위반(무면허운전) 2021노1048, 1819(병합) 창원지방법원 형사 판결 【피 고 인 도로교통법위반(음주측정거부)·교통사고처리특례법위반·도로교통법위반(무면허운전) 2021노1048, 1819(병합) 창원지방법원 형사 판결 【피 고 인】 피고인 【항...",
+          "matched_snippets": [
+            "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: 교통사고\n교통사고처리특례법\n도로교통법위반(음주측정거부)·교통사고처리특례법위반·도로교통법위반(무면허운전) 2021노1048, 1819",
+            "(병합) 창원지방법원 형사 판결 【피 고 인\n도로교통법위반(음주측정거부)·교통사고처리특례법위반·도로교통법위반(무면허운전) 2021노1048, 1819(병합) 창원지방법원 형사 판결 【피 고 인】 피고인 【항 소 인】 피고인 【검 사】 류경환,\n시 다음과 같이 판결한다."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: <em>교통</em><em>사고</em>\n<em>교통</em><em>사고</em>처리특례법\n도로<em>교통</em>법위반(<em>음주</em>측정거부)·<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(무면허<em>운전</em>) 2021노1048, 1819",
+              "(병합) 창원지방법원 <em>형사</em> 판결 【피 고 인\n도로<em>교통</em>법위반(<em>음주</em>측정거부)·<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(무면허<em>운전</em>) 2021노1048, 1819(병합) 창원지방법원 <em>형사</em> 판결 【피 고 인】 피고인 【항 소 인】 피고인 【검 사】 류경환,\n시 다음과 같이 판결한다."
+            ],
+            "search_text": [
+              "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: <em>교통</em><em>사고</em>\n<em>교통</em><em>사고</em>처리특례법\n도로<em>교통</em>법위반(<em>음주</em>측정거부)·<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(무면허<em>운전</em>) 2021노1048, 1819",
+              "(병합) 창원지방법원 <em>형사</em> 판결 【피 고 인\n도로<em>교통</em>법위반(<em>음주</em>측정거부)·<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(무면허<em>운전</em>) 2021노1048, 1819(병합) 창원지방법원 <em>형사</em> 판결 【피 고 인】 피고인 【항 소 인】 피고인 【검 사】 류경환,\n시 다음과 같이 판결한다."
+            ]
+          },
+          "metadata": {
+            "case_id": "223463",
+            "dataset": "traffic",
+            "case_name": "도로교통법위반(음주측정거부)·교통사고처리특례법위반·도로교통법위반(무면허운전)",
+            "court_name": "창원지방법원",
+            "case_number": "2021노1048, 1819(병합)",
+            "case_category": "형사",
+            "decision_date": "2021-10-21"
+          },
+          "query_id": "traffic_law_q004",
+          "query": "음주운전 교통사고 형사 책임",
+          "issue_tags": [
+            "음주운전",
+            "형사책임",
+            "위험운전"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "68885",
+          "chunk_id": "68885:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(무면허운전)",
+          "case_number": "2007도4484",
+          "court_name": "대법원",
+          "decision_date": "2007-07-27",
+          "retriever_score": 53.477962,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:68885#68885:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 교통사고 교통사고처리특례법 교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(무면허운전) 2007도4484 대법원 형사 판결 음주운전을 할 의사를 가지고 음주만취한 후 운전을 결행하여 교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(무면허운전) 2007도4484 대법원 형사 판결 음주운전을 할 의사를 가지고 음주...",
+          "search_preview": "traffic_signal_groups: direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 교통사고 교통사고처리특례법 교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(무면허운전) 2007도4484 대법원 형사 판결 음주운전을 할 의사를 가지고 음주만취한 후 운전을 결행하여 교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(무면허운전) 2007도4484 대법원 형사 판결 음주운전을 할 의사를 가지고 음주...",
+          "matched_snippets": [
+            "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: 교통사고\n교통사고처리특례법\n교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(무면허운전) 2007도4484 대법원 형사",
+            "판결 음주운전을 할 의사를 가지고 음주만취한 후 운전을 결행하여\n교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(무면허운전) 2007도4484 대법원 형사 판결 음주운전을 할 의사를 가지고 음주만취한 후 운전을 결행하여 교통사고를 일으킨 경우 심\ntraffic_direct_terms: 교통사고\ntraffic_legal_terms"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: <em>교통</em><em>사고</em>\n<em>교통</em><em>사고</em>처리특례법\n<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>) 2007도4484 대법원 <em>형사</em>",
+              "판결 <em>음주</em><em>운전</em>을 할 의사를 가지고 <em>음주</em>만취한 후 <em>운전</em>을 결행하여\n<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>) 2007도4484 대법원 <em>형사</em> 판결 <em>음주</em><em>운전</em>을 할 의사를 가지고 <em>음주</em>만취한 후 <em>운전</em>을 결행하여 <em>교통</em><em>사고</em>를 일으킨 경우 심\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms"
+            ],
+            "search_text": [
+              "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: <em>교통</em><em>사고</em>\n<em>교통</em><em>사고</em>처리특례법\n<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>) 2007도4484 대법원 <em>형사</em>",
+              "판결 <em>음주</em><em>운전</em>을 할 의사를 가지고 <em>음주</em>만취한 후 <em>운전</em>을 결행하여\n<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>) 2007도4484 대법원 <em>형사</em> 판결 <em>음주</em><em>운전</em>을 할 의사를 가지고 <em>음주</em>만취한 후 <em>운전</em>을 결행하여 <em>교통</em><em>사고</em>를 일으킨 경우 심\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms"
+            ]
+          },
+          "metadata": {
+            "case_id": "68885",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(무면허운전)",
+            "court_name": "대법원",
+            "case_number": "2007도4484",
+            "case_category": "형사",
+            "decision_date": "2007-07-27"
+          },
+          "query_id": "traffic_law_q004",
+          "query": "음주운전 교통사고 형사 책임",
+          "issue_tags": [
+            "음주운전",
+            "형사책임",
+            "위험운전"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "193128",
+          "chunk_id": "193128:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반·도로교통법위반(음주운전)",
+          "case_number": "2017도661",
+          "court_name": "대법원",
+          "decision_date": "2017-09-21",
+          "retriever_score": 51.5595,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:193128#193128:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 교통사고 교통사고처리특례법 교통사고처리특례법위반·도로교통법위반(음주운전) 2017도661 대법원 형사 판결 [1] 음주운전의 혐의가 있는 운전자에 대하여 도로교통법 제44조 제2항에 따른 호흡측정 교통사고처리특례법위반·도로교통법위반(음주운전) 2017도661 대법원 형사 판결 [1] 음주운전의 혐의가 있는 운전자에 대하여 도로교통법 제...",
+          "search_preview": "traffic_signal_groups: direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 교통사고 교통사고처리특례법 교통사고처리특례법위반·도로교통법위반(음주운전) 2017도661 대법원 형사 판결 [1] 음주운전의 혐의가 있는 운전자에 대하여 도로교통법 제44조 제2항에 따른 호흡측정 교통사고처리특례법위반·도로교통법위반(음주운전) 2017도661 대법원 형사 판결 [1] 음주운전의 혐의가 있는 운전자에 대하여 도로교통법 제...",
+          "matched_snippets": [
+            "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: 교통사고\n교통사고처리특례법\n교통사고처리특례법위반·도로교통법위반(음주운전) 2017도661 대법원 형사 판결 [1] 음주운전의 혐의가",
+            "있는 운전자에 대하여 도로교통법 제44조 제2항에 따른 호흡측정\n교통사고처리특례법위반·도로교통법위반(음주운전) 2017도661 대법원 형사 판결 [1] 음주운전의 혐의가 있는 운전자에 대하여 도로교통법 제44조 제2항에 따른 호흡측정이 이루어진 경우, 운전자의 불복이 없는데도 다시 음주측정을 하는 것이 허용되는지 여부(원칙"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: <em>교통</em><em>사고</em>\n<em>교통</em><em>사고</em>처리특례법\n<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>) 2017도661 대법원 <em>형사</em> 판결 [1] <em>음주</em><em>운전</em>의 혐의가",
+              "있는 <em>운전</em>자에 대하여 도로<em>교통</em>법 제44조 제2항에 따른 호흡측정\n<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>) 2017도661 대법원 <em>형사</em> 판결 [1] <em>음주</em><em>운전</em>의 혐의가 있는 <em>운전</em>자에 대하여 도로<em>교통</em>법 제44조 제2항에 따른 호흡측정이 이루어진 경우, <em>운전</em>자의 불복이 없는데도 다시 <em>음주</em>측정을 하는 것이 허용되는지 여부(원칙"
+            ],
+            "search_text": [
+              "traffic_signal_groups: direct_accident_expression\ntraffic_legal_or_insurance_context\ntraffic_evidence_terms: <em>교통</em><em>사고</em>\n<em>교통</em><em>사고</em>처리특례법\n<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>) 2017도661 대법원 <em>형사</em> 판결 [1] <em>음주</em><em>운전</em>의 혐의가",
+              "있는 <em>운전</em>자에 대하여 도로<em>교통</em>법 제44조 제2항에 따른 호흡측정\n<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>) 2017도661 대법원 <em>형사</em> 판결 [1] <em>음주</em><em>운전</em>의 혐의가 있는 <em>운전</em>자에 대하여 도로<em>교통</em>법 제44조 제2항에 따른 호흡측정이 이루어진 경우, <em>운전</em>자의 불복이 없는데도 다시 <em>음주</em>측정을 하는 것이 허용되는지 여부(원칙"
+            ]
+          },
+          "metadata": {
+            "case_id": "193128",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반·도로교통법위반(음주운전)",
+            "court_name": "대법원",
+            "case_number": "2017도661",
+            "case_category": "형사",
+            "decision_date": "2017-09-21"
+          },
+          "query_id": "traffic_law_q004",
+          "query": "음주운전 교통사고 형사 책임",
+          "issue_tags": [
+            "음주운전",
+            "형사책임",
+            "위험운전"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "599717",
+          "chunk_id": "599717:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "도로교통법위반(음주운전)·도로교통법위반(무면허운전)·도로교통법위반·도로교통법위반(사고후미조치)·자동차손해배상보장법위반",
+          "case_number": "2024도9537",
+          "court_name": "대법원",
+          "decision_date": "2024-12-26",
+          "retriever_score": 49.76215,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:599717#599717:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 0.217% 상태에서 무면허로 약 4km를 운전하다가 추돌사고를 내고 그대로 도주하였고, 4 2023. 4. 6. 무면허 운전을 하다가 타인의 차량을 들이받고 그대로 도주하여 기소되었다(같은 법원 2023고단1044). 즉, 피고인은 네 달 사이에 혈중알코올농도 0.2%가 넘는 위험한 상태...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 0.217% 상태에서 무면허로 약 4km를 운전하다가 추돌사고를 내고 그대로 도주하였고, 4 2023. 4. 6. 무면허 운전을 하다가 타인의 차량을 들이받고 그대로 도주하여 기소되었다(같은 법원 2023고단1044). 즉, 피고인은 네 달 사이에 혈중알코올농도 0.2%가 넘는 위험한 상태...",
+          "matched_snippets": [
+            "즉, 피고인은 네 달 사이에 혈중알코올농도 0.2%가 넘는 위험한 상태\n교통사고\n도로교통법위반(음주운전)·도로교통법위반(무면허운전)·도로교통법위반·도로교통법위반(사고후미조치)·자동차손해배상보장법위반 2024도9537 대법원 형사\n도로교통법위반(음주운전)·도로교통법위반(무면허운전)·도로교통법위반·도로교통법위반(사고후미조치)·",
+            "자동차손해배상보장법위반 2024도9537 대법원 형사 판결 치료감호 등에 관한\n도로교통법위반(음주운전)·도로교통법위반(무면허운전)·도로교통법위반·도로교통법위반(사고후미조치)·자동차손해배상보장법위반 2024도9537 대법원 형사 판결 치료감호 등에 관한 법률상 치료감호청구 요구\n도로교통법위반(음주운전)·도로교통법위반(무면허운전"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "즉, 피고인은 네 달 사이에 혈중알코올농도 0.2%가 넘는 위험한 상태\n<em>교통</em><em>사고</em>\n도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>)·도로<em>교통</em>법위반·도로<em>교통</em>법위반(<em>사고</em>후미조치)·자동차손해배상보장법위반 2024도9537 대법원 <em>형사</em>\n도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>)·도로<em>교통</em>법위반·도로<em>교통</em>법위반(<em>사고</em>후미조치)·",
+              "자동차손해배상보장법위반 2024도9537 대법원 <em>형사</em> 판결 치료감호 등에 관한\n도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>)·도로<em>교통</em>법위반·도로<em>교통</em>법위반(<em>사고</em>후미조치)·자동차손해배상보장법위반 2024도9537 대법원 <em>형사</em> 판결 치료감호 등에 관한 법률상 치료감호청구 요구\n도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>"
+            ],
+            "search_text": [
+              "즉, 피고인은 네 달 사이에 혈중알코올농도 0.2%가 넘는 위험한 상태\n<em>교통</em><em>사고</em>\n도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>)·도로<em>교통</em>법위반·도로<em>교통</em>법위반(<em>사고</em>후미조치)·자동차손해배상보장법위반 2024도9537 대법원 <em>형사</em>\n도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>)·도로<em>교통</em>법위반·도로<em>교통</em>법위반(<em>사고</em>후미조치)·",
+              "자동차손해배상보장법위반 2024도9537 대법원 <em>형사</em> 판결 치료감호 등에 관한\n도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>)·도로<em>교통</em>법위반·도로<em>교통</em>법위반(<em>사고</em>후미조치)·자동차손해배상보장법위반 2024도9537 대법원 <em>형사</em> 판결 치료감호 등에 관한 법률상 치료감호청구 요구\n도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(무면허<em>운전</em>"
+            ]
+          },
+          "metadata": {
+            "case_id": "599717",
+            "dataset": "traffic",
+            "case_name": "도로교통법위반(음주운전)·도로교통법위반(무면허운전)·도로교통법위반·도로교통법위반(사고후미조치)·자동차손해배상보장법위반",
+            "court_name": "대법원",
+            "case_number": "2024도9537",
+            "case_category": "형사",
+            "decision_date": "2024-12-26"
+          },
+          "query_id": "traffic_law_q004",
+          "query": "음주운전 교통사고 형사 책임",
+          "issue_tags": [
+            "음주운전",
+            "형사책임",
+            "위험운전"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "69813",
+          "chunk_id": "69813:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "폭력행위등처벌에관한법률위반(야간·공동상해)·공무집행방해·교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(음주측정거부)",
+          "case_number": "2004고단232",
+          "court_name": "울산지법",
+          "decision_date": "2004-06-11",
+          "retriever_score": 48.599995,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:69813#69813:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_evidence_terms: 공소사실 중 교통사고처리특례법위반의 점의 요지는 \"2004. 1. 21. 23:00경 혈중알코올농도 0.056%의 술에 취한 상태에서 업무로 (차량번호 생략) 엑셀승용차를 운전하여 양산시 원동면 원리 소재 ‘신나는 세상’ 노래연습장 앞 중앙선이 없는 왕복 1차선 도로를 신촌삼거리 방면에서...",
+          "search_preview": "traffic_signal_groups: direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_evidence_terms: 공소사실 중 교통사고처리특례법위반의 점의 요지는 \"2004. 1. 21. 23:00경 혈중알코올농도 0.056%의 술에 취한 상태에서 업무로 (차량번호 생략) 엑셀승용차를 운전하여 양산시 원동면 원리 소재 ‘신나는 세상’ 노래연습장 앞 중앙선이 없는 왕복 1차선 도로를 신촌삼거리 방면에서...",
+          "matched_snippets": [
+            "판 단\n폭력행위등처벌에관한법률위반(야간·공동상해)·공무집행방해·교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(음주측정거부) 2004고단232 울산지법 형사 판결 : 확정 [1] 음주측정거부죄와 음주운전죄를 경합범으로\n폭력행위등처벌에관한법률위반(야간·공동상해)·공무집행방해·교통사고처리특례법위반·도로교통법위반(음주운전",
+            ")·도로교통법위반(음주측정거부) 2004고단232 울산지법 형사 판결 : 확정 [1] 음주측정거부죄와 음주운전죄를 경합범으로 기소한 경우, 위드마크 공\ntraffic_direct_terms: 교통사고\ntraffic_legal_terms: 교통사고처리특례법\ntraffic_actor_terms: 도로\n승용차\n운전자\n중앙선\n차량"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "판 단\n폭력행위등처벌에관한법률위반(야간·공동상해)·공무집행방해·<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(<em>음주</em>측정거부) 2004고단232 울산지법 <em>형사</em> 판결 : 확정 [1] <em>음주</em>측정거부죄와 <em>음주</em><em>운전</em>죄를 경합범으로\n폭력행위등처벌에관한법률위반(야간·공동상해)·공무집행방해·<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>",
+              ")·도로<em>교통</em>법위반(<em>음주</em>측정거부) 2004고단232 울산지법 <em>형사</em> 판결 : 확정 [1] <em>음주</em>측정거부죄와 <em>음주</em><em>운전</em>죄를 경합범으로 기소한 경우, 위드마크 공\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례법\ntraffic_actor_terms: 도로\n승용차\n<em>운전</em>자\n중앙선\n차량"
+            ],
+            "search_text": [
+              "판 단\n폭력행위등처벌에관한법률위반(야간·공동상해)·공무집행방해·<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>)·도로<em>교통</em>법위반(<em>음주</em>측정거부) 2004고단232 울산지법 <em>형사</em> 판결 : 확정 [1] <em>음주</em>측정거부죄와 <em>음주</em><em>운전</em>죄를 경합범으로\n폭력행위등처벌에관한법률위반(야간·공동상해)·공무집행방해·<em>교통</em><em>사고</em>처리특례법위반·도로<em>교통</em>법위반(<em>음주</em><em>운전</em>",
+              ")·도로<em>교통</em>법위반(<em>음주</em>측정거부) 2004고단232 울산지법 <em>형사</em> 판결 : 확정 [1] <em>음주</em>측정거부죄와 <em>음주</em><em>운전</em>죄를 경합범으로 기소한 경우, 위드마크 공\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례법\ntraffic_actor_terms: 도로\n승용차\n<em>운전</em>자\n중앙선\n차량"
+            ]
+          },
+          "metadata": {
+            "case_id": "69813",
+            "dataset": "traffic",
+            "case_name": "폭력행위등처벌에관한법률위반(야간·공동상해)·공무집행방해·교통사고처리특례법위반·도로교통법위반(음주운전)·도로교통법위반(음주측정거부)",
+            "court_name": "울산지법",
+            "case_number": "2004고단232",
+            "case_category": "형사",
+            "decision_date": "2004-06-11"
+          },
+          "query_id": "traffic_law_q004",
+          "query": "음주운전 교통사고 형사 책임",
+          "issue_tags": [
+            "음주운전",
+            "형사책임",
+            "위험운전"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q005",
+      "query": "뺑소니 사고 후 미조치 판례",
+      "issue_tags": [
+        "뺑소니",
+        "사고 후 미조치",
+        "도주차량"
+      ],
+      "purpose": "사고 후 미조치 또는 도주 관련 교통사고 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "221787",
+          "chunk_id": "221787:structured_1500_250:0011",
+          "chunk_index": 11,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(운전자폭행등)(인정된죄명상해)·재물손괴·특정범죄가중처벌등에관한법률위반(도주치상)·도로교통법위반(사고후미조치)·도로교통법위반(음주운전)·도로교통법위반(무면허운전)·특정범죄가중처벌등에관한법률위반(위험운전치상)",
+          "case_number": "2021노393",
+          "court_name": "부산고등법원",
+          "decision_date": "2022-01-13",
+          "retriever_score": 59.03794,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:221787#221787:structured_1500_250:0011",
+          "chunk_preview": "항(상해의 점), 형법 제366조(재물손괴의 점), 각 도로교통법 제148조의2 제3항 제2호, 제44조 제1항(음주운전의 점), 각 특정범죄 가중처벌 등에 관한 법률 제5조의3 제1항 제2호, 형법 제268조(업무상과실치상 후 도주의 점), 각 도로교통법 제148조, 제54조 제1항(사고 후 미조치의 점), 도로교통법 제152조 제1호, 제43조(무면허운전의 점), 특정범죄 가중처벌 등에 관한 법률 제5조의11 제1항(위험운전치상의 점) 1. 상상적 경합 형법 제40조, 제50조[판시 제4항 기재 각 특정범죄가중처벌등에관한법...",
+          "search_preview": "항(상해의 점), 형법 제366조(재물손괴의 점), 각 도로교통법 제148조의2 제3항 제2호, 제44조 제1항(음주운전의 점), 각 특정범죄 가중처벌 등에 관한 법률 제5조의3 제1항 제2호, 형법 제268조(업무상과실치상 후 도주의 점), 각 도로교통법 제148조, 제54조 제1항(사고 후 미조치의 점), 도로교통법 제152조 제1호, 제43조(무면허운전의 점), 특정범죄 가중처벌 등에 관한 법률 제5조의11 제1항(위험운전치상의 점) 1. 상상적 경합 형법 제40조, 제50조[판시 제4항 기재 각 특정범죄가중처벌등에관한법...",
+          "matched_snippets": [
+            "항(상해의 점), 형법 제366조(재물손괴의 점), 각 도로교통법 제148조의2 제3항 제2호, 제44조 제1항(음주운전의 점), 각 특정범죄 가중처벌 등에 관한 법률 제5조의3 제1항 제2호, 형법 제268조(업무상과실치상 후 도주의 점), 각 도로교통법 제148조, 제54조 제1항(사고 후 미조치의 점), 도로교통법 제152조",
+            "또 피고인은 과거에 음주운전 내지 뺑소니 범행으로 처벌받은 전력도 있는데 재차 이 사건 음주운전 등 범행을 저질렀고, 특히 음주운전으로 교통사고를 내고 도주한 잘못으로 수사를 받던 중에 동종의 음주운전 및 뺑소니 범행을 다시 저질렀을 뿐만 아니라, 그 후에도 음주 및 무면허운전을 한 것이어서, 죄질과 범정이 매우 불량하고"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "항(상해의 점), 형법 제366조(재물손괴의 점), 각 도로교통법 제148조의2 제3항 제2호, 제44조 제1항(음주운전의 점), 각 특정범죄 가중처벌 등에 관한 법률 제5조의3 제1항 제2호, 형법 제268조(업무상과실치상 <em>후</em> 도주의 점), 각 도로교통법 제148조, 제54조 제1항(<em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 점), 도로교통법 제152조",
+              "또 피고인은 과거에 음주운전 내지 <em>뺑소니</em> 범행으로 처벌받은 전력도 있는데 재차 이 사건 음주운전 등 범행을 저질렀고, 특히 음주운전으로 교통<em>사고</em>를 내고 도주한 잘못으로 수사를 받던 중에 동종의 음주운전 및 <em>뺑소니</em> 범행을 다시 저질렀을 뿐만 아니라, 그 <em>후</em>에도 음주 및 무면허운전을 한 것이어서, 죄질과 범정이 매우 불량하고"
+            ],
+            "search_text": [
+              "항(상해의 점), 형법 제366조(재물손괴의 점), 각 도로교통법 제148조의2 제3항 제2호, 제44조 제1항(음주운전의 점), 각 특정범죄 가중처벌 등에 관한 법률 제5조의3 제1항 제2호, 형법 제268조(업무상과실치상 <em>후</em> 도주의 점), 각 도로교통법 제148조, 제54조 제1항(<em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 점), 도로교통법 제152조",
+              "또 피고인은 과거에 음주운전 내지 <em>뺑소니</em> 범행으로 처벌받은 전력도 있는데 재차 이 사건 음주운전 등 범행을 저질렀고, 특히 음주운전으로 교통<em>사고</em>를 내고 도주한 잘못으로 수사를 받던 중에 동종의 음주운전 및 <em>뺑소니</em> 범행을 다시 저질렀을 뿐만 아니라, 그 <em>후</em>에도 음주 및 무면허운전을 한 것이어서, 죄질과 범정이 매우 불량하고"
+            ]
+          },
+          "metadata": {
+            "case_id": "221787",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(운전자폭행등)(인정된죄명상해)·재물손괴·특정범죄가중처벌등에관한법률위반(도주치상)·도로교통법위반(사고후미조치)·도로교통법위반(음주운전)·도로교통법위반(무면허운전)·특정범죄가중처벌등에관한법률위반(위험운전치상)",
+            "court_name": "부산고등법원",
+            "case_number": "2021노393",
+            "case_category": "형사",
+            "decision_date": "2022-01-13"
+          },
+          "query_id": "traffic_law_q005",
+          "query": "뺑소니 사고 후 미조치 판례",
+          "issue_tags": [
+            "뺑소니",
+            "사고 후 미조치",
+            "도주차량"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "174787",
+          "chunk_id": "174787:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "holding_summary",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "채무부존재확인",
+          "case_number": "2013나10413",
+          "court_name": "부산고법",
+          "decision_date": "2014-04-22",
+          "retriever_score": 54.3239,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:174787#174787:structured_1500_250:0002",
+          "chunk_preview": "판시사항: 보험자가 피보험자의 도로교통법 제148조에서 정한 사고 후 미조치에 해당하는 행위를 보험계약의 교통사고처리지원금 특별약관상 면책사유인 ‘피보험자가 사고를 내고 도주하였을 때’에 해당한다고 주장한 사안에서, 피보험자가 도로교통법 제148조의 사고 후 미조치의 점에 해당하는 범죄를 저질렀더라도, 위 약관에서 정한 ‘피보험자가 사고를 내고 도주하였을 때’에 해당한다고 보기 어렵다고 한 사례 요약: 보험자가 피보험자의 도로교통법 제148조에서 정한 사고 후 미조치에 해당하는 행위를 보험계약의 교통사고처리지원금 특별약관상 면...",
+          "search_preview": "판시사항: 보험자가 피보험자의 도로교통법 제148조에서 정한 사고 후 미조치에 해당하는 행위를 보험계약의 교통사고처리지원금 특별약관상 면책사유인 ‘피보험자가 사고를 내고 도주하였을 때’에 해당한다고 주장한 사안에서, 피보험자가 도로교통법 제148조의 사고 후 미조치의 점에 해당하는 범죄를 저질렀더라도, 위 약관에서 정한 ‘피보험자가 사고를 내고 도주하였을 때’에 해당한다고 보기 어렵다고 한 사례 요약: 보험자가 피보험자의 도로교통법 제148조에서 정한 사고 후 미조치에 해당하는 행위를 보험계약의 교통사고처리지원금 특별약관상 면...",
+          "matched_snippets": [
+            "판시사항: 보험자가 피보험자의 도로교통법 제148조에서 정한 사고 후 미조치에 해당하는 행위를 보험계약의 교통사고처리지원금 특별약관상 면책사유인 ‘피보험자가 사고를 내고 도주하였을 때’에 해당한다고 주장한 사안에서, 피보험자가 도로교통법 제148조의 사고 후 미조치의 점에 해당하는 범죄를 저질렀더라도, 위 약관에서 정한 ‘",
+            "제148조의 사고 후 미조치의 점에 해당하는 범죄를 저질렀더라도, 이를 위 약관에서 정한 ‘피보험자가 사고를 내고 도주하였을 때’에 해당한다고 보기 어렵다고 한 사례."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "판시사항: 보험자가 피보험자의 도로교통법 제148조에서 정한 <em>사고</em> <em>후</em> <em>미</em><em>조치</em>에 해당하는 행위를 보험계약의 교통<em>사고</em>처리지원금 특별약관상 면책사유인 ‘피보험자가 <em>사고</em>를 내고 도주하였을 때’에 해당한다고 주장한 사안에서, 피보험자가 도로교통법 제148조의 <em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 점에 해당하는 범죄를 저질렀더라도, 위 약관에서 정한 ‘",
+              "제148조의 <em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 점에 해당하는 범죄를 저질렀더라도, 이를 위 약관에서 정한 ‘피보험자가 <em>사고</em>를 내고 도주하였을 때’에 해당한다고 보기 어렵다고 한 사례."
+            ],
+            "search_text": [
+              "판시사항: 보험자가 피보험자의 도로교통법 제148조에서 정한 <em>사고</em> <em>후</em> <em>미</em><em>조치</em>에 해당하는 행위를 보험계약의 교통<em>사고</em>처리지원금 특별약관상 면책사유인 ‘피보험자가 <em>사고</em>를 내고 도주하였을 때’에 해당한다고 주장한 사안에서, 피보험자가 도로교통법 제148조의 <em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 점에 해당하는 범죄를 저질렀더라도, 위 약관에서 정한 ‘",
+              "제148조의 <em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 점에 해당하는 범죄를 저질렀더라도, 이를 위 약관에서 정한 ‘피보험자가 <em>사고</em>를 내고 도주하였을 때’에 해당한다고 보기 어렵다고 한 사례."
+            ]
+          },
+          "metadata": {
+            "case_id": "174787",
+            "dataset": "traffic",
+            "case_name": "채무부존재확인",
+            "court_name": "부산고법",
+            "case_number": "2013나10413",
+            "case_category": "민사",
+            "decision_date": "2014-04-22"
+          },
+          "query_id": "traffic_law_q005",
+          "query": "뺑소니 사고 후 미조치 판례",
+          "issue_tags": [
+            "뺑소니",
+            "사고 후 미조치",
+            "도주차량"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "120576",
+          "chunk_id": "120576:structured_1500_250:0005",
+          "chunk_index": 5,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "보험금",
+          "case_number": "97가합78100",
+          "court_name": "서울지법",
+          "decision_date": "1998-02-25",
+          "retriever_score": 49.7748,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:120576#120576:structured_1500_250:0005",
+          "chunk_preview": "고로 인정되고, 일단 가해차량이 자동차보험 대인배상II에 가입되어 있는 경우에는 면책사유에 해당되어 보험회사의 보험금지급책임이 발생하지 아니하는 경우라도 무보험자동차에 의한 사고로 볼 수 없다할 것이므로, 위 차량이 자동차종합보험에 가입되어 있는 이상 위 사고는 무보험자동차에 의한 사고가 아니라 할 것이므로 피고가 교통상해사고로 인한 사망보험금 100,000,000원을 지급함으로써 이 사건 보험계약에 따른 보험금지급채무는 소멸하였다고 주장한다. 그러므로 살피건대, 을 제3호증의 기재에 의하면 이 사건 보험계약상의 뺑소니, 무보...",
+          "search_preview": "고로 인정되고, 일단 가해차량이 자동차보험 대인배상II에 가입되어 있는 경우에는 면책사유에 해당되어 보험회사의 보험금지급책임이 발생하지 아니하는 경우라도 무보험자동차에 의한 사고로 볼 수 없다할 것이므로, 위 차량이 자동차종합보험에 가입되어 있는 이상 위 사고는 무보험자동차에 의한 사고가 아니라 할 것이므로 피고가 교통상해사고로 인한 사망보험금 100,000,000원을 지급함으로써 이 사건 보험계약에 따른 보험금지급채무는 소멸하였다고 주장한다. 그러므로 살피건대, 을 제3호증의 기재에 의하면 이 사건 보험계약상의 뺑소니, 무보...",
+          "matched_snippets": [
+            "규정하고 있는바, 이 사건 보험은 일반적인 상해보험이나 사망보험의 성격도 가지고 있지만, 자동차 운행 중에는 사고를 당할 위험이 높고 특히 뺑소니와 무보험자동차에 의한 사고의 경우에는 손해배상청구권이 있지만 사실상 손해배상청구를 할 수 없거나 손해배상청구를 하더라도 실익이 없게 되는 때가 많다는 점을 고려하여 그러한 피해자에게",
+            "보다 많은 보상을 하는 방법으로 많은 운전자들로 하여금 위 보험에 가입하게 하기 위하여 개발된 보험상품으로서 위 약관 제2조는 뺑소니 또는 무보험자동차에 의한 사고의 경우에는 교통상해사고의 경우보다 그 보험가입금액의 5배 상당의 사망보험금을 추가로 그 수익자에게 지급하도록 규정하고 있는 점, 이 사건 사고와 같이 가해차량이"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "규정하고 있는바, 이 사건 보험은 일반적인 상해보험이나 사망보험의 성격도 가지고 있지만, 자동차 운행 중에는 <em>사고</em>를 당할 위험이 높고 특히 <em>뺑소니</em>와 무보험자동차에 의한 <em>사고</em>의 경우에는 손해배상청구권이 있지만 사실상 손해배상청구를 할 수 없거나 손해배상청구를 하더라도 실익이 없게 되는 때가 많다는 점을 고려하여 그러한 피해자에게",
+              "보다 많은 보상을 하는 방법으로 많은 운전자들로 하여금 위 보험에 가입하게 하기 위하여 개발된 보험상품으로서 위 약관 제2조는 <em>뺑소니</em> 또는 무보험자동차에 의한 <em>사고</em>의 경우에는 교통상해<em>사고</em>의 경우보다 그 보험가입금액의 5배 상당의 사망보험금을 추가로 그 수익자에게 지급하도록 규정하고 있는 점, 이 사건 <em>사고</em>와 같이 가해차량이"
+            ],
+            "search_text": [
+              "규정하고 있는바, 이 사건 보험은 일반적인 상해보험이나 사망보험의 성격도 가지고 있지만, 자동차 운행 중에는 <em>사고</em>를 당할 위험이 높고 특히 <em>뺑소니</em>와 무보험자동차에 의한 <em>사고</em>의 경우에는 손해배상청구권이 있지만 사실상 손해배상청구를 할 수 없거나 손해배상청구를 하더라도 실익이 없게 되는 때가 많다는 점을 고려하여 그러한 피해자에게",
+              "보다 많은 보상을 하는 방법으로 많은 운전자들로 하여금 위 보험에 가입하게 하기 위하여 개발된 보험상품으로서 위 약관 제2조는 <em>뺑소니</em> 또는 무보험자동차에 의한 <em>사고</em>의 경우에는 교통상해<em>사고</em>의 경우보다 그 보험가입금액의 5배 상당의 사망보험금을 추가로 그 수익자에게 지급하도록 규정하고 있는 점, 이 사건 <em>사고</em>와 같이 가해차량이"
+            ]
+          },
+          "metadata": {
+            "case_id": "120576",
+            "dataset": "traffic",
+            "case_name": "보험금",
+            "court_name": "서울지법",
+            "case_number": "97가합78100",
+            "case_category": "민사",
+            "decision_date": "1998-02-25"
+          },
+          "query_id": "traffic_law_q005",
+          "query": "뺑소니 사고 후 미조치 판례",
+          "issue_tags": [
+            "뺑소니",
+            "사고 후 미조치",
+            "도주차량"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "153072",
+          "chunk_id": "153072:structured_1500_250:0005",
+          "chunk_index": 5,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(도주차량){인정된죄명:교통사고처리특례법위반}ᆞ도로교통법위반ᆞ도로교통법위반(음주운전)",
+          "case_number": "2005도4459",
+          "court_name": "대법원",
+          "decision_date": "2007-09-06",
+          "retriever_score": 49.09229,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:153072#153072:structured_1500_250:0005",
+          "chunk_preview": "생 사실을 인식하게 되었음에도 차량에서 나와 사고현장 부근에 앉아 있다가 이유 없이 사고현장에서는 보이지 않는 길로 걸어가 사고현장을 이탈하였고, 피고인 자신도 사고현장에서 이탈한 사실을 알고 있었던 것으로 보이며, 사고 현장에서 이탈한 피고인을 찾아 이리저리 돌아다녀 피고인을 다시 붙잡아 사고현장으로 데리고 온 공소외 1의 노력이 없었다면 피고인은 사고현장으로 다시 돌아오지 않았으리라고 보이는바, 피고인에게 도주의 범의가 없다고 할 수 없다. 그런데도 원심이 피고인이 잠시 동안 사고장소를 이탈하였다는 사정, 피고인이 당시 만...",
+          "search_preview": "생 사실을 인식하게 되었음에도 차량에서 나와 사고현장 부근에 앉아 있다가 이유 없이 사고현장에서는 보이지 않는 길로 걸어가 사고현장을 이탈하였고, 피고인 자신도 사고현장에서 이탈한 사실을 알고 있었던 것으로 보이며, 사고 현장에서 이탈한 피고인을 찾아 이리저리 돌아다녀 피고인을 다시 붙잡아 사고현장으로 데리고 온 공소외 1의 노력이 없었다면 피고인은 사고현장으로 다시 돌아오지 않았으리라고 보이는바, 피고인에게 도주의 범의가 없다고 할 수 없다. 그런데도 원심이 피고인이 잠시 동안 사고장소를 이탈하였다는 사정, 피고인이 당시 만...",
+          "matched_snippets": [
+            "그런데도 원심이 피고인이 잠시 동안 사고장소를 이탈하였다는 사정, 피고인이 당시 만취하였던 사정만을 근거로 피고인이 이 사건 사고 당시 도주의 고의가 있었다고 보기 어렵다는 이유로 이 사건 공소사실 중 특정범죄 가중처벌 등에 관한 법률 위반(도주차량)의 점 및 승합차 손괴 후 미조치로 인한 도로교통법위반의 점에 대하여 무죄로",
+            "판단한 제1심을 유지한 것은 심리를 다하지 못하였거나 특정범죄 가중처벌 등에 관한 법률 위반(도주차량)죄 및 교통사고 후 미조치로 인한 도로교통법위반죄에 관한 법리를 오해하여 판결 결과에 영향을 미친 위법이 있다. 3."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "그런데도 원심이 피고인이 잠시 동안 <em>사고</em>장소를 이탈하였다는 사정, 피고인이 당시 만취하였던 사정만을 근거로 피고인이 이 사건 <em>사고</em> 당시 도주의 고의가 있었다고 보기 어렵다는 이유로 이 사건 공소사실 중 특정범죄 가중처벌 등에 관한 법률 위반(도주차량)의 점 및 승합차 손괴 <em>후</em> <em>미</em><em>조치</em>로 인한 도로교통법위반의 점에 대하여 무죄로",
+              "판단한 제1심을 유지한 것은 심리를 다하지 못하였거나 특정범죄 가중처벌 등에 관한 법률 위반(도주차량)죄 및 교통<em>사고</em> <em>후</em> <em>미</em><em>조치</em>로 인한 도로교통법위반죄에 관한 법리를 오해하여 판결 결과에 영향을 미친 위법이 있다. 3."
+            ],
+            "search_text": [
+              "그런데도 원심이 피고인이 잠시 동안 <em>사고</em>장소를 이탈하였다는 사정, 피고인이 당시 만취하였던 사정만을 근거로 피고인이 이 사건 <em>사고</em> 당시 도주의 고의가 있었다고 보기 어렵다는 이유로 이 사건 공소사실 중 특정범죄 가중처벌 등에 관한 법률 위반(도주차량)의 점 및 승합차 손괴 <em>후</em> <em>미</em><em>조치</em>로 인한 도로교통법위반의 점에 대하여 무죄로",
+              "판단한 제1심을 유지한 것은 심리를 다하지 못하였거나 특정범죄 가중처벌 등에 관한 법률 위반(도주차량)죄 및 교통<em>사고</em> <em>후</em> <em>미</em><em>조치</em>로 인한 도로교통법위반죄에 관한 법리를 오해하여 판결 결과에 영향을 미친 위법이 있다. 3."
+            ]
+          },
+          "metadata": {
+            "case_id": "153072",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(도주차량){인정된죄명:교통사고처리특례법위반}ᆞ도로교통법위반ᆞ도로교통법위반(음주운전)",
+            "court_name": "대법원",
+            "case_number": "2005도4459",
+            "case_category": "형사",
+            "decision_date": "2007-09-06"
+          },
+          "query_id": "traffic_law_q005",
+          "query": "뺑소니 사고 후 미조치 판례",
+          "issue_tags": [
+            "뺑소니",
+            "사고 후 미조치",
+            "도주차량"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "67803",
+          "chunk_id": "67803:structured_1500_250:0006",
+          "chunk_index": 6,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(도주차량)·도로교통법위반",
+          "case_number": "2005도5981",
+          "court_name": "대법원",
+          "decision_date": "2005-12-09",
+          "retriever_score": 48.988235,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:67803#67803:structured_1500_250:0006",
+          "chunk_preview": "할 것이다. 2. 도로교통법위반의 점에 대하여 가. 원심은 위 1.의 가.항에서 본 바와 같이 사실인정을 한 다음, 피고인이 이 사건 교통사고 후 교통상의 위험과 장해를 방지·제거하는 등 도로교통법 제50조 제1항의 규정에 의한 조치를 취하지 아니할 의사나 목적을 가지고 사고현장을 이탈하였다고 보기 어렵고, 달리 피고인에게 교통사고 후 미조치의 범의가 있었다고 인정할 만한 증거가 없다고 하여 이 부분 공소사실에 대하여 무죄를 선고하였다. 나. 피고인이 이 사건 사고현장을 떠나기 전에 공소외인에게 뒤처리를 부탁한 것만으로는 도로...",
+          "search_preview": "할 것이다. 2. 도로교통법위반의 점에 대하여 가. 원심은 위 1.의 가.항에서 본 바와 같이 사실인정을 한 다음, 피고인이 이 사건 교통사고 후 교통상의 위험과 장해를 방지·제거하는 등 도로교통법 제50조 제1항의 규정에 의한 조치를 취하지 아니할 의사나 목적을 가지고 사고현장을 이탈하였다고 보기 어렵고, 달리 피고인에게 교통사고 후 미조치의 범의가 있었다고 인정할 만한 증거가 없다고 하여 이 부분 공소사실에 대하여 무죄를 선고하였다. 나. 피고인이 이 사건 사고현장을 떠나기 전에 공소외인에게 뒤처리를 부탁한 것만으로는 도로...",
+          "matched_snippets": [
+            "원심은 위 1.의 가.항에서 본 바와 같이 사실인정을 한 다음, 피고인이 이 사건 교통사고 후 교통상의 위험과 장해를 방지·제거하는 등 도로교통법 제50조 제1항의 규정에 의한 조치를 취하지 아니할 의사나 목적을 가지고 사고현장을 이탈하였다고 보기 어렵고, 달리 피고인에게 교통사고 후 미조치의 범의가 있었다고 인정할 만한",
+            "피고인이 이 사건 사고현장을 떠나기 전에 공소외인에게 뒤처리를 부탁한 것만으로는 도로교통법 제50조 제1항의 규정에 의한 필요한 조치를 모두 다하였다고 볼 수 없음은 위에서 본 바와 같으므로, 피고인에게 교통사고 후 미조치의 범의가 없었다고 본 원심의 이 부분 설시는 부적절하다고 할 것이나, 한편 기록에 비추어 살펴보면,"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "원심은 위 1.의 가.항에서 본 바와 같이 사실인정을 한 다음, 피고인이 이 사건 교통<em>사고</em> <em>후</em> 교통상의 위험과 장해를 방지·제거하는 등 도로교통법 제50조 제1항의 규정에 의한 <em>조치</em>를 취하지 아니할 의사나 목적을 가지고 <em>사고</em>현장을 이탈하였다고 보기 어렵고, 달리 피고인에게 교통<em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 범의가 있었다고 인정할 만한",
+              "피고인이 이 사건 <em>사고</em>현장을 떠나기 전에 공소외인에게 뒤처리를 부탁한 것만으로는 도로교통법 제50조 제1항의 규정에 의한 필요한 <em>조치</em>를 모두 다하였다고 볼 수 없음은 위에서 본 바와 같으므로, 피고인에게 교통<em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 범의가 없었다고 본 원심의 이 부분 설시는 부적절하다고 할 것이나, 한편 기록에 비추어 살펴보면,"
+            ],
+            "search_text": [
+              "원심은 위 1.의 가.항에서 본 바와 같이 사실인정을 한 다음, 피고인이 이 사건 교통<em>사고</em> <em>후</em> 교통상의 위험과 장해를 방지·제거하는 등 도로교통법 제50조 제1항의 규정에 의한 <em>조치</em>를 취하지 아니할 의사나 목적을 가지고 <em>사고</em>현장을 이탈하였다고 보기 어렵고, 달리 피고인에게 교통<em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 범의가 있었다고 인정할 만한",
+              "피고인이 이 사건 <em>사고</em>현장을 떠나기 전에 공소외인에게 뒤처리를 부탁한 것만으로는 도로교통법 제50조 제1항의 규정에 의한 필요한 <em>조치</em>를 모두 다하였다고 볼 수 없음은 위에서 본 바와 같으므로, 피고인에게 교통<em>사고</em> <em>후</em> <em>미</em><em>조치</em>의 범의가 없었다고 본 원심의 이 부분 설시는 부적절하다고 할 것이나, 한편 기록에 비추어 살펴보면,"
+            ]
+          },
+          "metadata": {
+            "case_id": "67803",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(도주차량)·도로교통법위반",
+            "court_name": "대법원",
+            "case_number": "2005도5981",
+            "case_category": "형사",
+            "decision_date": "2005-12-09"
+          },
+          "query_id": "traffic_law_q005",
+          "query": "뺑소니 사고 후 미조치 판례",
+          "issue_tags": [
+            "뺑소니",
+            "사고 후 미조치",
+            "도주차량"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q006",
+      "query": "전동킥보드 교통사고 법적 책임",
+      "issue_tags": [
+        "전동킥보드",
+        "개인형 이동장치",
+        "교통사고 책임"
+      ],
+      "purpose": "전동킥보드 또는 개인형 이동장치 사고 책임 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "410414",
+          "chunk_id": "410414:structured_1500_250:0005",
+          "chunk_index": 5,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "요양불승인처분취소",
+          "case_number": "2020구단61488",
+          "court_name": "서울행정법원",
+          "decision_date": "0001-01-01",
+          "retriever_score": 164.57378,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:410414#410414:structured_1500_250:0005",
+          "chunk_preview": "고처리 특례법 제3조 제2항 단서 각 호의 어느 하나에 해당하는 행위를 하다가 교통사고를 야기하였다는 사정만으로 곧바로 그 사고가 산재보험법 제37조 제2항 본문에서 정한 업무상 재해 배제사유에 해당한다고 단정하여서는 아니 되고,그 사고가 발생한 경위와 양상, 운전자의 운전 능력과 교통사고 방지 노력 등과 같은사고 발생 당시의 상황을 종합적으로 고려하여 판단하여야 한다(대법원 2021. 2. 4. 선고 2020두41429 판결 등 취지 참조). 나) 보행신호등의 녹색등화가 점멸될 때 보행자는 횡단을 시작하여서는 아니 되고, 횡...",
+          "search_preview": "고처리 특례법 제3조 제2항 단서 각 호의 어느 하나에 해당하는 행위를 하다가 교통사고를 야기하였다는 사정만으로 곧바로 그 사고가 산재보험법 제37조 제2항 본문에서 정한 업무상 재해 배제사유에 해당한다고 단정하여서는 아니 되고,그 사고가 발생한 경위와 양상, 운전자의 운전 능력과 교통사고 방지 노력 등과 같은사고 발생 당시의 상황을 종합적으로 고려하여 판단하여야 한다(대법원 2021. 2. 4. 선고 2020두41429 판결 등 취지 참조). 나) 보행신호등의 녹색등화가 점멸될 때 보행자는 횡단을 시작하여서는 아니 되고, 횡...",
+          "matched_snippets": [
+            "그러나 1 이 사건 사고 당시 전동킥보드의 이용자가 급격히 증가하는데 비해 도로의 통행방법 등을 제대로 알지 못하는 경우가 많았고 이를 규제하기 위한 법적?",
+            "어려운 점, 4 전동킥보드를 타고 횡단보도를 횡단하는 킥보드 운전자는 횡단보도를 통행 중인 보행자에 해당하지 않으므로 상대방 화물차 운전자에게 구 도로교통법 제27조 제1항에서 규정한 보행자보호의무가 있다고는 할 수 없으나, 이 사건과 같이 보행신호등의 녹색등화가 점멸되고 있음에도 횡단보도를 건너가는 자전거나 전동킥보드"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em><em>보드</em>의 이용자가 급격히 증가하는데 비해 도로의 통행방법 등을 제대로 알지 못하는 경우가 많았고 이를 규제하기 위한 <em>법</em>적?",
+              "어려운 점, 4 <em>전동</em><em>킥</em><em>보드</em>를 타고 횡단보도를 횡단하는 <em>킥</em><em>보드</em> 운전자는 횡단보도를 통행 중인 보행자에 해당하지 않으므로 상대방 화물차 운전자에게 구 도로<em>교통</em><em>법</em> 제27조 제1항에서 규정한 보행자보호의무가 있다고는 할 수 없으나, 이 사건과 같이 보행신호등의 녹색등화가 점멸되고 있음에도 횡단보도를 건너가는 자전거나 <em>전동</em><em>킥</em><em>보드</em>"
+            ],
+            "search_text": [
+              "그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em><em>보드</em>의 이용자가 급격히 증가하는데 비해 도로의 통행방법 등을 제대로 알지 못하는 경우가 많았고 이를 규제하기 위한 <em>법</em>적?",
+              "어려운 점, 4 <em>전동</em><em>킥</em><em>보드</em>를 타고 횡단보도를 횡단하는 <em>킥</em><em>보드</em> 운전자는 횡단보도를 통행 중인 보행자에 해당하지 않으므로 상대방 화물차 운전자에게 구 도로<em>교통</em><em>법</em> 제27조 제1항에서 규정한 보행자보호의무가 있다고는 할 수 없으나, 이 사건과 같이 보행신호등의 녹색등화가 점멸되고 있음에도 횡단보도를 건너가는 자전거나 <em>전동</em><em>킥</em><em>보드</em>"
+            ]
+          },
+          "metadata": {
+            "case_id": "410414",
+            "dataset": "traffic",
+            "case_name": "요양불승인처분취소",
+            "court_name": "서울행정법원",
+            "case_number": "2020구단61488",
+            "case_category": "일반행정",
+            "decision_date": "0001-01-01"
+          },
+          "query_id": "traffic_law_q006",
+          "query": "전동킥보드 교통사고 법적 책임",
+          "issue_tags": [
+            "전동킥보드",
+            "개인형 이동장치",
+            "교통사고 책임"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "410414",
+          "chunk_id": "410414:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "요양불승인처분취소",
+          "case_number": "2020구단61488",
+          "court_name": "서울행정법원",
+          "decision_date": "0001-01-01",
+          "retriever_score": 152.11356,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:410414#410414:structured_1500_250:0002",
+          "chunk_preview": "도 3차로 도로의 3차로에서 주행을 시작하였 호등의 녹색등화가 점멸되고 있는 상태에서 전동킥보드를 타고 횡단보도를 횡단하기 시작하여 횡단을 완료하기 전에 보행신호등이 적색등화로 변경된 후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다. 그러나 1 이 사건 사고 당시 전동킥보 후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다. 그러나 1 이 사건 사고 당시 전동킥보드의 이용자가 급격히 증가하는데 비해 도로의...",
+          "search_preview": "도 3차로 도로의 3차로에서 주행을 시작하였 호등의 녹색등화가 점멸되고 있는 상태에서 전동킥보드를 타고 횡단보도를 횡단하기 시작하여 횡단을 완료하기 전에 보행신호등이 적색등화로 변경된 후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다. 그러나 1 이 사건 사고 당시 전동킥보 후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다. 그러나 1 이 사건 사고 당시 전동킥보드의 이용자가 급격히 증가하는데 비해 도로의...",
+          "matched_snippets": [
+            "그러나 1 이 사건 사고 당시 전동킥보\n후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다. 그러나 1 이 사건 사고 당시 전동킥보드의 이용자가 급격히 증가하는데 비해 도로의 통행방법 등을 제대로 알지 못하는 경우가 많았고 이를 규제하기 위한 법적?",
+            "제도적 장치도 미비하여 다소\ntraffic_direct_terms: 교통사고\ntraffic_legal_terms: 종합보험\ntraffic_actor_terms: 도로\n보행자\n신호등\n오토바이\n운전자\n원동기장치자전거\n자동차\n자전거\n전동킥보드\n차량\n차로\n화물차\n횡단보도\ntraffic_action_terms: 부상\n사고\n사망\n충돌"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em>보\n후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다. 그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em><em>보드</em>의 이용자가 급격히 증가하는데 비해 도로의 통행방법 등을 제대로 알지 못하는 경우가 많았고 이를 규제하기 위한 <em>법</em>적?",
+              "제도적 장치도 미비하여 다소\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms: 종합보험\ntraffic_actor_terms: 도로\n보행자\n신호등\n오토바이\n운전자\n원동기장치자전거\n자동차\n자전거\n<em>전동</em><em>킥</em>보드\n차량\n차로\n화물차\n횡단보도\ntraffic_action_terms: 부상\n<em>사고</em>\n사망\n충돌"
+            ],
+            "search_text": [
+              "그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em>보\n후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다. 그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em><em>보드</em>의 이용자가 급격히 증가하는데 비해 도로의 통행방법 등을 제대로 알지 못하는 경우가 많았고 이를 규제하기 위한 <em>법</em>적?",
+              "제도적 장치도 미비하여 다소\ntraffic_direct_terms: <em>교통</em><em>사고</em>\ntraffic_legal_terms: 종합보험\ntraffic_actor_terms: 도로\n보행자\n신호등\n오토바이\n운전자\n원동기장치자전거\n자동차\n자전거\n<em>전동</em><em>킥</em>보드\n차량\n차로\n화물차\n횡단보도\ntraffic_action_terms: 부상\n<em>사고</em>\n사망\n충돌"
+            ]
+          },
+          "metadata": {
+            "case_id": "410414",
+            "dataset": "traffic",
+            "case_name": "요양불승인처분취소",
+            "court_name": "서울행정법원",
+            "case_number": "2020구단61488",
+            "case_category": "일반행정",
+            "decision_date": "0001-01-01"
+          },
+          "query_id": "traffic_law_q006",
+          "query": "전동킥보드 교통사고 법적 책임",
+          "issue_tags": [
+            "전동킥보드",
+            "개인형 이동장치",
+            "교통사고 책임"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "611057",
+          "chunk_id": "611057:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "요양급여불승인처분취소",
+          "case_number": "2023구단74959",
+          "court_name": "서울행정법원",
+          "decision_date": "0001-01-01",
+          "retriever_score": 148.93837,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:611057#611057:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: . 5 경찰이 작성한 조사보고서에 따르면, 이 사건 사고 발생 직전 스포티지 차량이전에 불상의 차량들이 먼저 좌회전을 했고, 그 이후 스포티지 차량이 좌회전을 하던중 직진하던 원고의 전동킥보드와 충돌한 것으로 확인된다. 당시 교차로 상황은 원고진...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: . 5 경찰이 작성한 조사보고서에 따르면, 이 사건 사고 발생 직전 스포티지 차량이전에 불상의 차량들이 먼저 좌회전을 했고, 그 이후 스포티지 차량이 좌회전을 하던중 직진하던 원고의 전동킥보드와 충돌한 것으로 확인된다. 당시 교차로 상황은 원고진...",
+          "matched_snippets": [
+            "전동킥보드와 충돌한 것으로 확인된다.",
+            "당시\n좌회전\n차량 충돌\ntraffic_direct_terms: 교통사고\n차량 충돌\ntraffic_legal_terms: 교통사고처리특례법\n자동차보험\ntraffic_actor_terms: 교차로\n도로\n운전자\n원동기장치자전거\n자동차\n자전거\n전동킥보드\n차량\n차로\n택시\ntraffic_action_terms: 부상\n사고\n사망\n충돌"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "<em>전동</em><em>킥</em><em>보드</em>와 충돌한 것으로 확인된다.",
+              "당시\n좌회전\n차량 충돌\ntraffic_direct_terms: <em>교통</em><em>사고</em>\n차량 충돌\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례<em>법</em>\n자동차보험\ntraffic_actor_terms: 교차로\n도로\n운전자\n원동기장치자전거\n자동차\n자전거\n<em>전동</em><em>킥</em>보드\n차량\n차로\n택시\ntraffic_action_terms: 부상\n<em>사고</em>\n사망\n충돌"
+            ],
+            "search_text": [
+              "<em>전동</em><em>킥</em><em>보드</em>와 충돌한 것으로 확인된다.",
+              "당시\n좌회전\n차량 충돌\ntraffic_direct_terms: <em>교통</em><em>사고</em>\n차량 충돌\ntraffic_legal_terms: <em>교통</em><em>사고</em>처리특례<em>법</em>\n자동차보험\ntraffic_actor_terms: 교차로\n도로\n운전자\n원동기장치자전거\n자동차\n자전거\n<em>전동</em><em>킥</em>보드\n차량\n차로\n택시\ntraffic_action_terms: 부상\n<em>사고</em>\n사망\n충돌"
+            ]
+          },
+          "metadata": {
+            "case_id": "611057",
+            "dataset": "traffic",
+            "case_name": "요양급여불승인처분취소",
+            "court_name": "서울행정법원",
+            "case_number": "2023구단74959",
+            "case_category": "일반행정",
+            "decision_date": "0001-01-01"
+          },
+          "query_id": "traffic_law_q006",
+          "query": "전동킥보드 교통사고 법적 책임",
+          "issue_tags": [
+            "전동킥보드",
+            "개인형 이동장치",
+            "교통사고 책임"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "236905",
+          "chunk_id": "236905:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(위험운전치상)·도로교통법위반(음주운전)",
+          "case_number": "2022노189",
+          "court_name": "서울동부지방법원",
+          "decision_date": "2022-09-29",
+          "retriever_score": 146.92462,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:236905#236905:structured_1500_250:0002",
+          "chunk_preview": "【피 고 인】 피고인 【항 소 인】 피고인 【검 사】 원민영(기소), 김상범(공판) 【변 호 인】 법무법인 법승 담당변호사 안지성 【원심판결】 서울동부지방법원 2022. 2. 11. 선고 2020고정1182 판결 【주 문】 피고인의 항소를 기각한다. 【이 유】1. 이 법원의 심판범위 검사는 ‘피고인이 2020. 10. 9. 19:41경 혈중알콜농도 0.144%의 술에 취한 상태로 전동킥보드를 운전하였다’는 범행에 대해 ‘2020. 6. 9. 법률 제17371호로 개정되기 전의 도로교통법 제148조의2 제3항, 제2호, 제44조...",
+          "search_preview": "【피 고 인】 피고인 【항 소 인】 피고인 【검 사】 원민영(기소), 김상범(공판) 【변 호 인】 법무법인 법승 담당변호사 안지성 【원심판결】 서울동부지방법원 2022. 2. 11. 선고 2020고정1182 판결 【주 문】 피고인의 항소를 기각한다. 【이 유】1. 이 법원의 심판범위 검사는 ‘피고인이 2020. 10. 9. 19:41경 혈중알콜농도 0.144%의 술에 취한 상태로 전동킥보드를 운전하였다’는 범행에 대해 ‘2020. 6. 9. 법률 제17371호로 개정되기 전의 도로교통법 제148조의2 제3항, 제2호, 제44조...",
+          "matched_snippets": [
+            "사실오인, 법리오해[특정범죄가중처벌등에관한법률위반(위험운전치상) 부분] 1) ‘전기자전거’ 및 ‘자전거’의 운전자는 특정범죄가중처벌등에관한법률위반(위험운전치상)죄(이하 ‘특정범죄가중법’이라 한다)의 주체가 될 수 없는 점, 개정 도로교통법에 따라 ‘전동킥보드’는 ‘개인형 이동장치’로 규정되며, 전동킥보드를 음주운전하는 경우",
+            "개정 도로교통법 제156조 제11호가 적용되어 자전거에 준하여 처벌하는 것으로 변경된 점 등을 종합하면, 전동킥보드의 운전자는 특정범죄가중법위반(위험운전치상)죄의 주체가 되지 아니한다. 2) 원심 증인 공소외인이 ‘걸음걸이에는 이상이 없다고 판단하였다’거나 ‘마스크를 내리고 피고인의 얼굴을 확인한 적이 없다’고 증언한 점"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "사실오인, 법리오해[특정범죄가중처벌등에관한법률위반(위험운전치상) 부분] 1) ‘전기자전거’ 및 ‘자전거’의 운전자는 특정범죄가중처벌등에관한법률위반(위험운전치상)죄(이하 ‘특정범죄가중<em>법</em>’이라 한다)의 주체가 될 수 없는 점, 개정 도로<em>교통</em><em>법</em>에 따라 ‘<em>전동</em><em>킥</em><em>보드</em>’는 ‘개인형 이동장치’로 규정되며, <em>전동</em><em>킥</em><em>보드</em>를 음주운전하는 경우",
+              "개정 도로<em>교통</em><em>법</em> 제156조 제11호가 적용되어 자전거에 준하여 처벌하는 것으로 변경된 점 등을 종합하면, <em>전동</em><em>킥</em><em>보드</em>의 운전자는 특정범죄가중<em>법</em>위반(위험운전치상)죄의 주체가 되지 아니한다. 2) 원심 증인 공소외인이 ‘걸음걸이에는 이상이 없다고 판단하였다’거나 ‘마스크를 내리고 피고인의 얼굴을 확인한 적이 없다’고 증언한 점"
+            ],
+            "search_text": [
+              "사실오인, 법리오해[특정범죄가중처벌등에관한법률위반(위험운전치상) 부분] 1) ‘전기자전거’ 및 ‘자전거’의 운전자는 특정범죄가중처벌등에관한법률위반(위험운전치상)죄(이하 ‘특정범죄가중<em>법</em>’이라 한다)의 주체가 될 수 없는 점, 개정 도로<em>교통</em><em>법</em>에 따라 ‘<em>전동</em><em>킥</em><em>보드</em>’는 ‘개인형 이동장치’로 규정되며, <em>전동</em><em>킥</em><em>보드</em>를 음주운전하는 경우",
+              "개정 도로<em>교통</em><em>법</em> 제156조 제11호가 적용되어 자전거에 준하여 처벌하는 것으로 변경된 점 등을 종합하면, <em>전동</em><em>킥</em><em>보드</em>의 운전자는 특정범죄가중<em>법</em>위반(위험운전치상)죄의 주체가 되지 아니한다. 2) 원심 증인 공소외인이 ‘걸음걸이에는 이상이 없다고 판단하였다’거나 ‘마스크를 내리고 피고인의 얼굴을 확인한 적이 없다’고 증언한 점"
+            ]
+          },
+          "metadata": {
+            "case_id": "236905",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(위험운전치상)·도로교통법위반(음주운전)",
+            "court_name": "서울동부지방법원",
+            "case_number": "2022노189",
+            "case_category": "형사",
+            "decision_date": "2022-09-29"
+          },
+          "query_id": "traffic_law_q006",
+          "query": "전동킥보드 교통사고 법적 책임",
+          "issue_tags": [
+            "전동킥보드",
+            "개인형 이동장치",
+            "교통사고 책임"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "410414",
+          "chunk_id": "410414:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "요양불승인처분취소",
+          "case_number": "2020구단61488",
+          "court_name": "서울행정법원",
+          "decision_date": "0001-01-01",
+          "retriever_score": 141.31833,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:410414#410414:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 교통사고 녹색신호 동킥보드를 타고 횡단보도를 횡단하기 시작하여 횡단을 완료하기 전에 보행신호등이 적색등화로 변경된 후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 교통사고 녹색신호 동킥보드를 타고 횡단보도를 횡단하기 시작하여 횡단을 완료하기 전에 보행신호등이 적색등화로 변경된 후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실...",
+          "matched_snippets": [
+            "그러나 1 이 사건 사고 당시 전동킥보드의 이용자가 급격히 증가하는데 비해 도로의\n때 횡단보도에 진입하여 횡단하다가, 보행신호등이 적색등화로 바뀐 후 차량신호등의 녹색등화에 따라 편도 3차로 도로의 3차로에서 주행을 시작한 화물차에 충돌하는 교통사고를 당하였다(자세한것은 별지 참조, 이하 ’이 사건 사고‘라 한다).",
+            "그러나 1 이 사건 사고 당시 전동킥보\n후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em><em>보드</em>의 이용자가 급격히 증가하는데 비해 도로의\n때 횡단보도에 진입하여 횡단하다가, 보행신호등이 적색등화로 바뀐 후 차량신호등의 녹색등화에 따라 편도 3차로 도로의 3차로에서 주행을 시작한 화물차에 충돌하는 <em>교통</em><em>사고</em>를 당하였다(자세한것은 별지 참조, 이하 ’이 사건 <em>사고</em>‘라 한다).",
+              "그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em>보\n후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다."
+            ],
+            "search_text": [
+              "그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em><em>보드</em>의 이용자가 급격히 증가하는데 비해 도로의\n때 횡단보도에 진입하여 횡단하다가, 보행신호등이 적색등화로 바뀐 후 차량신호등의 녹색등화에 따라 편도 3차로 도로의 3차로에서 주행을 시작한 화물차에 충돌하는 <em>교통</em><em>사고</em>를 당하였다(자세한것은 별지 참조, 이하 ’이 사건 <em>사고</em>‘라 한다).",
+              "그러나 1 이 사건 <em>사고</em> 당시 <em>전동</em><em>킥</em>보\n후 차량신호등의 녹색등화에 따라 주행을 시작한 화물차에 충돌하였는바, 원고에게 과실이 있었음은 충분히 인정된다."
+            ]
+          },
+          "metadata": {
+            "case_id": "410414",
+            "dataset": "traffic",
+            "case_name": "요양불승인처분취소",
+            "court_name": "서울행정법원",
+            "case_number": "2020구단61488",
+            "case_category": "일반행정",
+            "decision_date": "0001-01-01"
+          },
+          "query_id": "traffic_law_q006",
+          "query": "전동킥보드 교통사고 법적 책임",
+          "issue_tags": [
+            "전동킥보드",
+            "개인형 이동장치",
+            "교통사고 책임"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q007",
+      "query": "오토바이와 자동차 충돌 사고 책임",
+      "issue_tags": [
+        "오토바이",
+        "이륜차",
+        "차량 충돌"
+      ],
+      "purpose": "이륜차와 자동차 충돌 사고의 주의의무와 책임 판단 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "169577",
+          "chunk_id": "169577:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "청구이의",
+          "case_number": "2012다200028",
+          "court_name": "대법원",
+          "decision_date": "2012-12-13",
+          "retriever_score": 59.798313,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:169577#169577:structured_1500_250:0002",
+          "chunk_preview": "유자를 알 수 없거나 무보험인 자동차의 운행으로 인한 사고에 의하 자동차손해배상 자동차손해배상 보장법 증거들에 의하면, 소외 1은 2008. 3. 22. 책임보험에 가입되어 있지 아니한 오토바이를 운전하던 중 전방에 신호대기 중이던 화물차량과 택시를 연이어 충돌하는 이 사건 사고를 일으킨 사실, 이 사건 사고로 인하여 위 오토바이 뒷좌석에 동승하고 있던 소외 2는 손목 등에 부상을 입고 채택된 증거들에 의하면, 소외 1은 2008. 3. 22. 책임보험에 가입되어 있지 아니한 오토바이를 운전하던 중 전방에 신호대기 중이던 화물...",
+          "search_preview": "유자를 알 수 없거나 무보험인 자동차의 운행으로 인한 사고에 의하 자동차손해배상 자동차손해배상 보장법 증거들에 의하면, 소외 1은 2008. 3. 22. 책임보험에 가입되어 있지 아니한 오토바이를 운전하던 중 전방에 신호대기 중이던 화물차량과 택시를 연이어 충돌하는 이 사건 사고를 일으킨 사실, 이 사건 사고로 인하여 위 오토바이 뒷좌석에 동승하고 있던 소외 2는 손목 등에 부상을 입고 채택된 증거들에 의하면, 소외 1은 2008. 3. 22. 책임보험에 가입되어 있지 아니한 오토바이를 운전하던 중 전방에 신호대기 중이던 화물...",
+          "matched_snippets": [
+            "책임보험에 가입되어 있지 아니한 오토바이를 운전하던 중 전방에 신호대기 중이던 화물차량과 택시를 연이어 충돌하는 이 사건 사고를 일으킨 사실, 이 사건 사고로 인하여 위 오토바이 뒷좌석에 동승하고 있던 소외 2는 손목 등에 부상을\n책임보험\n청구이의 2012다200028 대법원 민사 판결 뺑소니 자동차 또는 무보험 자동차에",
+            "자동차손해배상 보장법\n책임보험\ntraffic_actor_terms: 오토바이\n자동차\n차량\n택시\n화물차\ntraffic_action_terms: 부상\n사고\n사망\n충돌"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "<em>책임</em>보험에 가입되어 있지 아니한 <em>오토바이</em>를 운전하던 중 전방에 신호대기 중이던 화물차량과 택시를 연이어 <em>충돌</em>하는 이 사건 <em>사고</em>를 일으킨 사실, 이 사건 <em>사고</em>로 인하여 위 <em>오토바이</em> 뒷좌석에 동승하고 있던 소외 2는 손목 등에 부상을\n<em>책임</em>보험\n청구이의 2012다200028 대법원 민사 판결 뺑소니 <em>자동</em><em>차</em> 또는 무보험 <em>자동</em><em>차</em>에",
+              "<em>자동</em><em>차</em>손해배상 보장법\n<em>책임</em>보험\ntraffic_actor_terms: <em>오토바이</em>\n<em>자동</em><em>차</em>\n차량\n택시\n화물<em>차</em>\ntraffic_action_terms: 부상\n<em>사고</em>\n사망\n<em>충돌</em>"
+            ],
+            "search_text": [
+              "<em>책임</em>보험에 가입되어 있지 아니한 <em>오토바이</em>를 운전하던 중 전방에 신호대기 중이던 화물차량과 택시를 연이어 <em>충돌</em>하는 이 사건 <em>사고</em>를 일으킨 사실, 이 사건 <em>사고</em>로 인하여 위 <em>오토바이</em> 뒷좌석에 동승하고 있던 소외 2는 손목 등에 부상을\n<em>책임</em>보험\n청구이의 2012다200028 대법원 민사 판결 뺑소니 <em>자동</em><em>차</em> 또는 무보험 <em>자동</em><em>차</em>에",
+              "<em>자동</em><em>차</em>손해배상 보장법\n<em>책임</em>보험\ntraffic_actor_terms: <em>오토바이</em>\n<em>자동</em><em>차</em>\n차량\n택시\n화물<em>차</em>\ntraffic_action_terms: 부상\n<em>사고</em>\n사망\n<em>충돌</em>"
+            ]
+          },
+          "metadata": {
+            "case_id": "169577",
+            "dataset": "traffic",
+            "case_name": "청구이의",
+            "court_name": "대법원",
+            "case_number": "2012다200028",
+            "case_category": "민사",
+            "decision_date": "2012-12-13"
+          },
+          "query_id": "traffic_law_q007",
+          "query": "오토바이와 자동차 충돌 사고 책임",
+          "issue_tags": [
+            "오토바이",
+            "이륜차",
+            "차량 충돌"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "202281",
+          "chunk_id": "202281:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "구상금",
+          "case_number": "2014가합570757",
+          "court_name": "서울중앙지방법원",
+          "decision_date": "2015-06-25",
+          "retriever_score": 59.22964,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:202281#202281:structured_1500_250:0002",
+          "chunk_preview": "여는 순간 소외 1이 운전하던 오토바이(차량번호 2 생략)가 이 사건 가해차량의 우측과 인도 사이의 좁은 공간을 자나가다가 위 차량 뒷문과 충돌하여 넘어지면서 소외 1이 지주막하출혈 자동차보험 자동차손해배상 자동차손해배상보장법 종합보험 주의의무 책임보험 책임비율 킨 후 위 병원에서 진료를 받기 위하여 피고 3으로 하여금 하차하도록 하였는데, 피고 3이 차량 뒷문을 여는 순간 소외 1이 운전하던 오토바이(차량번호 2 생략)가 이 사건 가해차량의 우측과 인도 사이의 좁은 공간을 자나가다가 위 차량 뒷문과 충돌하여 넘어지면서 소외...",
+          "search_preview": "여는 순간 소외 1이 운전하던 오토바이(차량번호 2 생략)가 이 사건 가해차량의 우측과 인도 사이의 좁은 공간을 자나가다가 위 차량 뒷문과 충돌하여 넘어지면서 소외 1이 지주막하출혈 자동차보험 자동차손해배상 자동차손해배상보장법 종합보험 주의의무 책임보험 책임비율 킨 후 위 병원에서 진료를 받기 위하여 피고 3으로 하여금 하차하도록 하였는데, 피고 3이 차량 뒷문을 여는 순간 소외 1이 운전하던 오토바이(차량번호 2 생략)가 이 사건 가해차량의 우측과 인도 사이의 좁은 공간을 자나가다가 위 차량 뒷문과 충돌하여 넘어지면서 소외...",
+          "matched_snippets": [
+            "여는 순간 소외 1이 운전하던 오토바이(차량번호 2 생략)가 이 사건 가해차량의 우측과 인도 사이의 좁은 공간을 자나가다가 위 차량 뒷문과 충돌하여 넘어지면서 소외 1이 지주막하출혈\n자동차보험\n자동차손해배상\n자동차손해배상보장법\n종합보험\n주의의무\n책임보험\n책임비율\n킨 후 위 병원에서 진료를 받기 위하여 피고 3으로 하여금 하차하도록",
+            "자동차손해배상\n자동차손해배상보장법\n종합보험\n책임보험\ntraffic_actor_terms: 도로\n동승자\n오토바이\n운전자\n이륜자동차\n자동차\n차량\n차로\n횡단보도\ntraffic_action_terms: 사고\n상해\n상해를 입\n충돌\ntraffic_fault_terms: 과실상계\n손해배상책임\n손해액\n주의의무\n책임비율"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "여는 순간 소외 1이 운전하던 <em>오토바이</em>(차량번호 2 생략)가 이 사건 가해차량의 우측과 인도 사이의 좁은 공간을 자나가다가 위 차량 뒷문과 <em>충돌</em>하여 넘어지면서 소외 1이 지주막하출혈\n<em>자동</em><em>차</em>보험\n<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\n종합보험\n주의의무\n<em>책임</em>보험\n<em>책임</em>비율\n킨 후 위 병원에서 진료를 받기 위하여 피고 3으로 하여금 하차하도록",
+              "<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\n종합보험\n<em>책임</em>보험\ntraffic_actor_terms: 도로\n동승자\n<em>오토바이</em>\n운전자\n이륜<em>자동</em><em>차</em>\n<em>자동</em><em>차</em>\n차량\n<em>차</em>로\n횡단보도\ntraffic_action_terms: <em>사고</em>\n상해\n상해를 입\n<em>충돌</em>\ntraffic_fault_terms: 과실상계\n손해배상<em>책임</em>\n손해액\n주의의무\n<em>책임</em>비율"
+            ],
+            "search_text": [
+              "여는 순간 소외 1이 운전하던 <em>오토바이</em>(차량번호 2 생략)가 이 사건 가해차량의 우측과 인도 사이의 좁은 공간을 자나가다가 위 차량 뒷문과 <em>충돌</em>하여 넘어지면서 소외 1이 지주막하출혈\n<em>자동</em><em>차</em>보험\n<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\n종합보험\n주의의무\n<em>책임</em>보험\n<em>책임</em>비율\n킨 후 위 병원에서 진료를 받기 위하여 피고 3으로 하여금 하차하도록",
+              "<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\n종합보험\n<em>책임</em>보험\ntraffic_actor_terms: 도로\n동승자\n<em>오토바이</em>\n운전자\n이륜<em>자동</em><em>차</em>\n<em>자동</em><em>차</em>\n차량\n<em>차</em>로\n횡단보도\ntraffic_action_terms: <em>사고</em>\n상해\n상해를 입\n<em>충돌</em>\ntraffic_fault_terms: 과실상계\n손해배상<em>책임</em>\n손해액\n주의의무\n<em>책임</em>비율"
+            ]
+          },
+          "metadata": {
+            "case_id": "202281",
+            "dataset": "traffic",
+            "case_name": "구상금",
+            "court_name": "서울중앙지방법원",
+            "case_number": "2014가합570757",
+            "case_category": "민사",
+            "decision_date": "2015-06-25"
+          },
+          "query_id": "traffic_law_q007",
+          "query": "오토바이와 자동차 충돌 사고 책임",
+          "issue_tags": [
+            "오토바이",
+            "이륜차",
+            "차량 충돌"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "169577",
+          "chunk_id": "169577:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "청구이의",
+          "case_number": "2012다200028",
+          "court_name": "대법원",
+          "decision_date": "2012-12-13",
+          "retriever_score": 58.062115,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:169577#169577:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 교통사고 구 자배법’이라고 한다) 제30조 이하에서 규정하고 있는 보장사업은 자동차 보유자가 납부하는 책임보험료 중 일정액을 정부가 분담금으로 징수하여 자동차 보유자를 알 수 없거나 무보험인 자동차의 운행으로 인한 사고에 의하여 사망하거나 부상을 입은 피해자의 손해를 책임보험의 보험금의 한도...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_legal_or_insurance_context traffic_evidence_terms: 교통사고 구 자배법’이라고 한다) 제30조 이하에서 규정하고 있는 보장사업은 자동차 보유자가 납부하는 책임보험료 중 일정액을 정부가 분담금으로 징수하여 자동차 보유자를 알 수 없거나 무보험인 자동차의 운행으로 인한 사고에 의하여 사망하거나 부상을 입은 피해자의 손해를 책임보험의 보험금의 한도...",
+          "matched_snippets": [
+            "보유자가 납부하는 책임보험료 중 일정액을 정부가 분담금으로 징수하여 자동차 보유자를 알 수 없거나 무보험인 자동차의 운행으로 인한 사고에 의하여 사망하거나 부상을 입은 피해자의 손해를 책임보험의 보험금의 한도 안에서\n구상금\n니한 오토바이를 운전하던 중 전방에 신호대기 중이던 화물차량과 택시를 연이어 충돌하는 이 사건 사고를",
+            "법률 제11369호로 개정되기 전의 것, 이하 ‘구 자배법’이라고 한다) 제30조 이하에서 규정하고 있는 보장사업은 자동차 보유자가 납부하는 책임보험료 중 일정액을 정부가 분담금으로 징수하여 자동차 보유자를 알 수 없거나 무보험인 자동차의 운행으로 인한 사고에 의하\n자동차손해배상\n자동차손해배상 보장법\n증거들에 의하면, 소외"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "보유자가 납부하는 <em>책임</em>보험료 중 일정액을 정부가 분담금으로 징수하여 <em>자동</em><em>차</em> 보유자를 알 수 없거나 무보험인 <em>자동</em><em>차</em>의 운행으로 인한 <em>사고</em>에 의하여 사망하거나 부상을 입은 피해자의 손해를 <em>책임</em>보험의 보험금의 한도 안에서\n구상금\n니한 <em>오토바이</em>를 운전하던 중 전방에 신호대기 중이던 화물차량과 택시를 연이어 <em>충돌</em>하는 이 사건 <em>사고</em>를",
+              "법률 제11369호로 개정되기 전의 것, 이하 ‘구 자배법’이라고 한다) 제30조 이하에서 규정하고 있는 보장사업은 <em>자동</em><em>차</em> 보유자가 납부하는 <em>책임</em>보험료 중 일정액을 정부가 분담금으로 징수하여 <em>자동</em><em>차</em> 보유자를 알 수 없거나 무보험인 <em>자동</em><em>차</em>의 운행으로 인한 <em>사고</em>에 의하\n<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상 보장법\n증거들에 의하면, 소외"
+            ],
+            "search_text": [
+              "보유자가 납부하는 <em>책임</em>보험료 중 일정액을 정부가 분담금으로 징수하여 <em>자동</em><em>차</em> 보유자를 알 수 없거나 무보험인 <em>자동</em><em>차</em>의 운행으로 인한 <em>사고</em>에 의하여 사망하거나 부상을 입은 피해자의 손해를 <em>책임</em>보험의 보험금의 한도 안에서\n구상금\n니한 <em>오토바이</em>를 운전하던 중 전방에 신호대기 중이던 화물차량과 택시를 연이어 <em>충돌</em>하는 이 사건 <em>사고</em>를",
+              "법률 제11369호로 개정되기 전의 것, 이하 ‘구 자배법’이라고 한다) 제30조 이하에서 규정하고 있는 보장사업은 <em>자동</em><em>차</em> 보유자가 납부하는 <em>책임</em>보험료 중 일정액을 정부가 분담금으로 징수하여 <em>자동</em><em>차</em> 보유자를 알 수 없거나 무보험인 <em>자동</em><em>차</em>의 운행으로 인한 <em>사고</em>에 의하\n<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상 보장법\n증거들에 의하면, 소외"
+            ]
+          },
+          "metadata": {
+            "case_id": "169577",
+            "dataset": "traffic",
+            "case_name": "청구이의",
+            "court_name": "대법원",
+            "case_number": "2012다200028",
+            "case_category": "민사",
+            "decision_date": "2012-12-13"
+          },
+          "query_id": "traffic_law_q007",
+          "query": "오토바이와 자동차 충돌 사고 책임",
+          "issue_tags": [
+            "오토바이",
+            "이륜차",
+            "차량 충돌"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "110102",
+          "chunk_id": "110102:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "손해배상(자)",
+          "case_number": "94다2121",
+          "court_name": "대법원",
+          "decision_date": "1994-04-26",
+          "retriever_score": 57.532875,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:110102#110102:structured_1500_250:0002",
+          "chunk_preview": "바이가 충돌하는 바람에 오토바이 뒷자리에 타고 있던 원고들의 아들인 소외 2(당시 만15세)가 사망한 의를 하여야 할 의무가 있으므로 자동차의 운행으로 말미암아 발생하는 결과에 대하여 책임이 있고, 따라서 자동차의 보유자가 다른 사람으로 하여금 자동차를 운전하게 하고 그 자동차에 함께 탔다가 제3자의 과실로 인하여 교통사고가 발생한 결과 손해를 입은 경우에, 그 자동차의 운전자에게도 과실이 자동차손해배상 자동차손해배상보장법 하여 판단한다. 1. 원심은, 피고의 피용자가 운전하던 피고 소유의 영업용버스와 소외 1(당시 만15세)...",
+          "search_preview": "바이가 충돌하는 바람에 오토바이 뒷자리에 타고 있던 원고들의 아들인 소외 2(당시 만15세)가 사망한 의를 하여야 할 의무가 있으므로 자동차의 운행으로 말미암아 발생하는 결과에 대하여 책임이 있고, 따라서 자동차의 보유자가 다른 사람으로 하여금 자동차를 운전하게 하고 그 자동차에 함께 탔다가 제3자의 과실로 인하여 교통사고가 발생한 결과 손해를 입은 경우에, 그 자동차의 운전자에게도 과실이 자동차손해배상 자동차손해배상보장법 하여 판단한다. 1. 원심은, 피고의 피용자가 운전하던 피고 소유의 영업용버스와 소외 1(당시 만15세)...",
+          "matched_snippets": [
+            "바이가 충돌하는 바람에 오토바이 뒷자리에 타고 있던 원고들의 아들인 소외 2(당시 만15세)가 사망한\n의를 하여야 할 의무가 있으므로 자동차의 운행으로 말미암아 발생하는 결과에 대하여 책임이 있고, 따라서 자동차의 보유자가 다른 사람으로 하여금 자동차를 운전하게 하고 그 자동차에 함께 탔다가 제3자의 과실로 인하여 교통사고가",
+            "traffic_legal_terms: 손해배상(자)\n자동차손해배상\n자동차손해배상보장법\ntraffic_actor_terms: 버스\n오토바이\n운전자\n자동차\n차량\ntraffic_action_terms: 사고\n사망\n충돌\ntraffic_fault_terms: 과실상계\n손해액"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "바이가 <em>충돌</em>하는 바람에 <em>오토바이</em> 뒷자리에 타고 있던 원고들의 아들인 소외 2(당시 만15세)가 사망한\n의를 하여야 할 의무가 있으므로 <em>자동</em><em>차</em>의 운행으로 말미암아 발생하는 결과에 대하여 <em>책임</em>이 있고, 따라서 <em>자동</em><em>차</em>의 보유자가 다른 사람으로 하여금 <em>자동</em><em>차</em>를 운전하게 하고 그 <em>자동</em><em>차</em>에 함께 탔다가 제3자의 과실로 인하여 교통<em>사고</em>가",
+              "traffic_legal_terms: 손해배상(자)\n<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\ntraffic_actor_terms: 버스\n<em>오토바이</em>\n운전자\n<em>자동</em><em>차</em>\n차량\ntraffic_action_terms: <em>사고</em>\n사망\n<em>충돌</em>\ntraffic_fault_terms: 과실상계\n손해액"
+            ],
+            "search_text": [
+              "바이가 <em>충돌</em>하는 바람에 <em>오토바이</em> 뒷자리에 타고 있던 원고들의 아들인 소외 2(당시 만15세)가 사망한\n의를 하여야 할 의무가 있으므로 <em>자동</em><em>차</em>의 운행으로 말미암아 발생하는 결과에 대하여 <em>책임</em>이 있고, 따라서 <em>자동</em><em>차</em>의 보유자가 다른 사람으로 하여금 <em>자동</em><em>차</em>를 운전하게 하고 그 <em>자동</em><em>차</em>에 함께 탔다가 제3자의 과실로 인하여 교통<em>사고</em>가",
+              "traffic_legal_terms: 손해배상(자)\n<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\ntraffic_actor_terms: 버스\n<em>오토바이</em>\n운전자\n<em>자동</em><em>차</em>\n차량\ntraffic_action_terms: <em>사고</em>\n사망\n<em>충돌</em>\ntraffic_fault_terms: 과실상계\n손해액"
+            ]
+          },
+          "metadata": {
+            "case_id": "110102",
+            "dataset": "traffic",
+            "case_name": "손해배상(자)",
+            "court_name": "대법원",
+            "case_number": "94다2121",
+            "case_category": "민사",
+            "decision_date": "1994-04-26"
+          },
+          "query_id": "traffic_law_q007",
+          "query": "오토바이와 자동차 충돌 사고 책임",
+          "issue_tags": [
+            "오토바이",
+            "이륜차",
+            "차량 충돌"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "75728",
+          "chunk_id": "75728:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "손해배상청구사건",
+          "case_number": "83가합4168",
+          "court_name": "부산지법",
+          "decision_date": "1984-04-06",
+          "retriever_score": 57.53065,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:75728#75728:structured_1500_250:0002",
+          "chunk_preview": "서가는 다른 자동차와의 안전거리를 확보하지 않은 채 지나치게 근접하다가 이를 들이받아 일어난 것으로서 오로지 위 소외인의 일방적 과실로 인하여 사고가 발생하였으며 자동차손해배상 자동차손해배상보장법 토바이의 뒷자리에 타고 가던 승객이 그 오토바이가 앞의 차와 충돌하는 바람에 중앙선을 넘어 반대차선의 도로 위에 떨어졌다면 반대차선을 운행하는 차량의 운전수로서는 일반적으로 예견할 수 없는 일이므로 그를 늑과하였다 하더라도 과실이 있다고 할 수 없다. 【원 고】 【피 고】 무궁화운수주식회사 해배상청구사건 83가합4168 부산지법 민사...",
+          "search_preview": "서가는 다른 자동차와의 안전거리를 확보하지 않은 채 지나치게 근접하다가 이를 들이받아 일어난 것으로서 오로지 위 소외인의 일방적 과실로 인하여 사고가 발생하였으며 자동차손해배상 자동차손해배상보장법 토바이의 뒷자리에 타고 가던 승객이 그 오토바이가 앞의 차와 충돌하는 바람에 중앙선을 넘어 반대차선의 도로 위에 떨어졌다면 반대차선을 운행하는 차량의 운전수로서는 일반적으로 예견할 수 없는 일이므로 그를 늑과하였다 하더라도 과실이 있다고 할 수 없다. 【원 고】 【피 고】 무궁화운수주식회사 해배상청구사건 83가합4168 부산지법 민사...",
+          "matched_snippets": [
+            "서가는 다른 자동차와의 안전거리를 확보하지 않은 채 지나치게 근접하다가 이를 들이받아 일어난 것으로서 오로지 위 소외인의 일방적 과실로 인하여 사고가 발생하였으며\n자동차손해배상\n자동차손해배상보장법\n토바이의 뒷자리에 타고 가던 승객이 그 오토바이가 앞의 차와 충돌하는 바람에 중앙선을 넘어 반대차선의 도로 위에 떨어졌다면 반대차선을",
+            "traffic_direct_terms: 교통사고\ntraffic_legal_terms: 자동차손해배상\n자동차손해배상보장법\ntraffic_actor_terms: 도로\n신호등\n오토바이\n운전자\n자동차\n중앙선\n차량\n차선\n트럭\ntraffic_action_terms: 들이받\n부딪\n사고\n상해\n상해를 입\n충격\n충돌\ntraffic_situation_terms"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "서가는 다른 <em>자동</em><em>차</em>와의 안전거리를 확보하지 않은 채 지나치게 근접하다가 이를 들이받아 일어난 것으로서 오로지 위 소외인의 일방적 과실로 인하여 <em>사고</em>가 발생하였으며\n<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\n토바이의 뒷자리에 타고 가던 승객이 그 <em>오토바이</em>가 앞의 <em>차</em>와 <em>충돌</em>하는 바람에 중앙선을 넘어 반대차선의 도로 위에 떨어졌다면 반대차선을",
+              "traffic_direct_terms: 교통<em>사고</em>\ntraffic_legal_terms: <em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\ntraffic_actor_terms: 도로\n신호등\n<em>오토바이</em>\n운전자\n<em>자동</em><em>차</em>\n중앙선\n차량\n차선\n트럭\ntraffic_action_terms: 들이받\n부딪\n<em>사고</em>\n상해\n상해를 입\n충격\n<em>충돌</em>\ntraffic_situation_terms"
+            ],
+            "search_text": [
+              "서가는 다른 <em>자동</em><em>차</em>와의 안전거리를 확보하지 않은 채 지나치게 근접하다가 이를 들이받아 일어난 것으로서 오로지 위 소외인의 일방적 과실로 인하여 <em>사고</em>가 발생하였으며\n<em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\n토바이의 뒷자리에 타고 가던 승객이 그 <em>오토바이</em>가 앞의 <em>차</em>와 <em>충돌</em>하는 바람에 중앙선을 넘어 반대차선의 도로 위에 떨어졌다면 반대차선을",
+              "traffic_direct_terms: 교통<em>사고</em>\ntraffic_legal_terms: <em>자동</em><em>차</em>손해배상\n<em>자동</em><em>차</em>손해배상보장법\ntraffic_actor_terms: 도로\n신호등\n<em>오토바이</em>\n운전자\n<em>자동</em><em>차</em>\n중앙선\n차량\n차선\n트럭\ntraffic_action_terms: 들이받\n부딪\n<em>사고</em>\n상해\n상해를 입\n충격\n<em>충돌</em>\ntraffic_situation_terms"
+            ]
+          },
+          "metadata": {
+            "case_id": "75728",
+            "dataset": "traffic",
+            "case_name": "손해배상청구사건",
+            "court_name": "부산지법",
+            "case_number": "83가합4168",
+            "case_category": "민사",
+            "decision_date": "1984-04-06"
+          },
+          "query_id": "traffic_law_q007",
+          "query": "오토바이와 자동차 충돌 사고 책임",
+          "issue_tags": [
+            "오토바이",
+            "이륜차",
+            "차량 충돌"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q008",
+      "query": "후방추돌 사고 안전거리 주의의무",
+      "issue_tags": [
+        "후방추돌",
+        "안전거리",
+        "전방주시의무"
+      ],
+      "purpose": "후방추돌 사고에서 안전거리 확보와 전방주시의무 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "140847",
+          "chunk_id": "140847:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "holding_summary",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "손해배상(기)",
+          "case_number": "2009나23282",
+          "court_name": "서울중앙지법",
+          "decision_date": "2009-11-03",
+          "retriever_score": 77.005615,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:140847#140847:structured_1500_250:0002",
+          "chunk_preview": "판시사항: [1] 자전거 도로에서 좌회전을 하려는 자전거 운전자의 주의의무 [2] 보행자 자전거 겸용도로의 우측에서 선행하던 자전거 운전자가 갑자기 좌회전을 하자 좌측에서 후행하던 자전거 운전자가 충돌을 피하기 위하여 급정지를 하다가 자전거와 함께 넘어진 사안에서, 선행 자전거 운전자가 자신의 진행방향을 적절히 알리거나 근접거리 후방의 교통상황을 살필 주의의무를 다하지 아니한 과실이 있다는 이유로 손해배상책임을 인정한 사례 요약: [1] 자전거 도로의 구조상 하나의 차로 내에서 두 대의 자전거가 나란히 달리거나, 차로 내에서...",
+          "search_preview": "판시사항: [1] 자전거 도로에서 좌회전을 하려는 자전거 운전자의 주의의무 [2] 보행자 자전거 겸용도로의 우측에서 선행하던 자전거 운전자가 갑자기 좌회전을 하자 좌측에서 후행하던 자전거 운전자가 충돌을 피하기 위하여 급정지를 하다가 자전거와 함께 넘어진 사안에서, 선행 자전거 운전자가 자신의 진행방향을 적절히 알리거나 근접거리 후방의 교통상황을 살필 주의의무를 다하지 아니한 과실이 있다는 이유로 손해배상책임을 인정한 사례 요약: [1] 자전거 도로의 구조상 하나의 차로 내에서 두 대의 자전거가 나란히 달리거나, 차로 내에서...",
+          "matched_snippets": [
+            "진행하면서 수신호 등을 통하여 후방에서 진행하는 자전거 운전자에게 자신의 진행방향을 알리거나, 진행방향 근접거리 후방의 교통상황을 살피면서 안전하게 좌회전을 할 의무가 있다. [2] 보행자 자전거 겸용도로의 우측에서 선행하던 자전거 운전자가 갑자기 좌회전을 하자 좌측에서 후행하던 자전거 운전자가 충돌을 피하기 위하여 급정지를",
+            "하다가 자전거와 함께 넘어진 사안에서, 선행 자전거 운전자가 자신의 진행방향을 적절히 알리거나 근접거리 후방의 교통상황을 살필 주의의무를 다하지 아니한 과실이 있다는 이유로 손해배상책임을 인정한 사례(단, 후행 자전거 운전자의 안전거리 미확보, 자전거 조작 미숙 등의 과실을 인정하여 책임을 20%로 제한함)."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "진행하면서 수신호 등을 통하여 <em>후방</em>에서 진행하는 자전거 운전자에게 자신의 진행방향을 알리거나, 진행방향 근접<em>거리</em> <em>후방</em>의 교통상황을 살피면서 <em>안전</em>하게 좌회전을 할 <em>의무</em>가 있다. [2] 보행자 자전거 겸용도로의 우측에서 선행하던 자전거 운전자가 갑자기 좌회전을 하자 좌측에서 후행하던 자전거 운전자가 충돌을 피하기 위하여 급정지를",
+              "하다가 자전거와 함께 넘어진 사안에서, 선행 자전거 운전자가 자신의 진행방향을 적절히 알리거나 근접<em>거리</em> <em>후방</em>의 교통상황을 살필 <em>주</em>의<em>의무</em>를 다하지 아니한 과실이 있다는 이유로 손해배상책임을 인정한 사례(단, 후행 자전거 운전자의 <em>안전</em><em>거리</em> 미확보, 자전거 조작 미숙 등의 과실을 인정하여 책임을 20%로 제한함)."
+            ],
+            "search_text": [
+              "진행하면서 수신호 등을 통하여 <em>후방</em>에서 진행하는 자전거 운전자에게 자신의 진행방향을 알리거나, 진행방향 근접<em>거리</em> <em>후방</em>의 교통상황을 살피면서 <em>안전</em>하게 좌회전을 할 <em>의무</em>가 있다. [2] 보행자 자전거 겸용도로의 우측에서 선행하던 자전거 운전자가 갑자기 좌회전을 하자 좌측에서 후행하던 자전거 운전자가 충돌을 피하기 위하여 급정지를",
+              "하다가 자전거와 함께 넘어진 사안에서, 선행 자전거 운전자가 자신의 진행방향을 적절히 알리거나 근접<em>거리</em> <em>후방</em>의 교통상황을 살필 <em>주</em>의<em>의무</em>를 다하지 아니한 과실이 있다는 이유로 손해배상책임을 인정한 사례(단, 후행 자전거 운전자의 <em>안전</em><em>거리</em> 미확보, 자전거 조작 미숙 등의 과실을 인정하여 책임을 20%로 제한함)."
+            ]
+          },
+          "metadata": {
+            "case_id": "140847",
+            "dataset": "traffic",
+            "case_name": "손해배상(기)",
+            "court_name": "서울중앙지법",
+            "case_number": "2009나23282",
+            "case_category": "민사",
+            "decision_date": "2009-11-03"
+          },
+          "query_id": "traffic_law_q008",
+          "query": "후방추돌 사고 안전거리 주의의무",
+          "issue_tags": [
+            "후방추돌",
+            "안전거리",
+            "전방주시의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "140847",
+          "chunk_id": "140847:structured_1500_250:0005",
+          "chunk_index": 5,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "손해배상(기)",
+          "case_number": "2009나23282",
+          "court_name": "서울중앙지법",
+          "decision_date": "2009-11-03",
+          "retriever_score": 76.29595,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:140847#140847:structured_1500_250:0005",
+          "chunk_preview": "후방의 교통상황을 살피면서 안전하게 좌회전을 할 의무가 있다고 할 것이다. 그런데 앞서 본 사실관계에 의하면, 원고는 피고의 근접거리 후방 좌측에서 진행하고 있었음에도, 피고는 위와 같은 주의의무를 다하지 않은 채 차로 좌측에서 갑자기 좌회전을 한 과실이 있다고 할 것이고, 이로 인하여 원고가 피고와의 충돌을 피하기 위하여 급하게 정지하다가 전도되면서 이 사건 사고가 발생하였으므로, 피고는 이로 인하여 원고가 입은 손해를 배상할 책임이 있다. (다) 이에 대하여 피고는, 손을 놓고 수신호를 하거나, 고개를 뒤로 돌리는 것이 오...",
+          "search_preview": "후방의 교통상황을 살피면서 안전하게 좌회전을 할 의무가 있다고 할 것이다. 그런데 앞서 본 사실관계에 의하면, 원고는 피고의 근접거리 후방 좌측에서 진행하고 있었음에도, 피고는 위와 같은 주의의무를 다하지 않은 채 차로 좌측에서 갑자기 좌회전을 한 과실이 있다고 할 것이고, 이로 인하여 원고가 피고와의 충돌을 피하기 위하여 급하게 정지하다가 전도되면서 이 사건 사고가 발생하였으므로, 피고는 이로 인하여 원고가 입은 손해를 배상할 책임이 있다. (다) 이에 대하여 피고는, 손을 놓고 수신호를 하거나, 고개를 뒤로 돌리는 것이 오...",
+          "matched_snippets": [
+            "후방의 교통상황을 살피면서 안전하게 좌회전을 할 의무가 있다고 할 것이다.",
+            "그런데 앞서 본 사실관계에 의하면, 원고는 피고의 근접거리 후방 좌측에서 진행하고 있었음에도, 피고는 위와 같은 주의의무를 다하지 않은 채 차로 좌측에서 갑자기 좌회전을 한 과실이 있다고 할 것이고, 이로 인하여 원고가 피고와의 충돌을 피하기 위하여 급하게 정지하다가 전도되면서 이 사건 사고가 발생하였으므로, 피고는 이로"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "<em>후방</em>의 교통상황을 살피면서 <em>안전</em>하게 좌회전을 할 <em>의무</em>가 있다고 할 것이다.",
+              "그런데 앞서 본 사실관계에 의하면, 원고는 피고의 근접<em>거리</em> <em>후방</em> 좌측에서 진행하고 있었음에도, 피고는 위와 같은 <em>주</em>의<em>의무</em>를 다하지 않은 채 차로 좌측에서 갑자기 좌회전을 한 과실이 있다고 할 것이고, 이로 인하여 원고가 피고와의 충돌을 피하기 위하여 급하게 정지하다가 전도되면서 이 사건 <em>사고</em>가 발생하였으므로, 피고는 이로"
+            ],
+            "search_text": [
+              "<em>후방</em>의 교통상황을 살피면서 <em>안전</em>하게 좌회전을 할 <em>의무</em>가 있다고 할 것이다.",
+              "그런데 앞서 본 사실관계에 의하면, 원고는 피고의 근접<em>거리</em> <em>후방</em> 좌측에서 진행하고 있었음에도, 피고는 위와 같은 <em>주</em>의<em>의무</em>를 다하지 않은 채 차로 좌측에서 갑자기 좌회전을 한 과실이 있다고 할 것이고, 이로 인하여 원고가 피고와의 충돌을 피하기 위하여 급하게 정지하다가 전도되면서 이 사건 <em>사고</em>가 발생하였으므로, 피고는 이로"
+            ]
+          },
+          "metadata": {
+            "case_id": "140847",
+            "dataset": "traffic",
+            "case_name": "손해배상(기)",
+            "court_name": "서울중앙지법",
+            "case_number": "2009나23282",
+            "case_category": "민사",
+            "decision_date": "2009-11-03"
+          },
+          "query_id": "traffic_law_q008",
+          "query": "후방추돌 사고 안전거리 주의의무",
+          "issue_tags": [
+            "후방추돌",
+            "안전거리",
+            "전방주시의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "68274",
+          "chunk_id": "68274:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "보험급여제한처분취소",
+          "case_number": "2002두12175",
+          "court_name": "대법원",
+          "decision_date": "2003-02-28",
+          "retriever_score": 75.74403,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:68274#68274:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_evidence_terms: 강화구 소재 편도 1차로 도로를 다소 빠른 속도로 진행하다가 전방에 주차되어 있던 화물차의 적재함 뒷부분을 추돌하여 부상을 입은 사실, 화물차 운전자가 차폭등·미등이나 비상등도 켜지 아니하고 후방에 안전삼각대도 설치하지 아니한 채 도로 우측에 화물차를 주차시켜 둔 사실, 유한중은 2종 원동기 교통사고 라는 요건은 되도록 엄격하게 해석하여야 할 것이다....",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression traffic_evidence_terms: 강화구 소재 편도 1차로 도로를 다소 빠른 속도로 진행하다가 전방에 주차되어 있던 화물차의 적재함 뒷부분을 추돌하여 부상을 입은 사실, 화물차 운전자가 차폭등·미등이나 비상등도 켜지 아니하고 후방에 안전삼각대도 설치하지 아니한 채 도로 우측에 화물차를 주차시켜 둔 사실, 유한중은 2종 원동기 교통사고 라는 요건은 되도록 엄격하게 해석하여야 할 것이다....",
+          "matched_snippets": [
+            "아니하고 후방에 안전삼각대도 설치하지 아니한 채 도로 우측에 화물차를 주차시켜 둔 사실, 유한중은 2종 원동기장치자전거 면허를 소지하고 있으며 이 사고에 대하여 안전운전 의무불이행을 이유로 범칙금 납부 통고처분\n여 원고의 아들 유한중이 일몰 직후 오토바이를 운전하여 인천 강화구 소재 편도 1차로 도로를 다소 빠른 속도로",
+            "운전자가 차폭등·미등이나 비상등도 켜지 아니하고 후방에 안전삼각대도 설치하지 아니한 채 도로 우측에 화물차를 주차시켜 둔 사실, 유한중은 2종\n지하고 있으며 이 사고에 대하여 안전운전 의무불이행을 이유로 범칙금 납부 통고처분을 받은 사실을 인정하고, 이 사건 교통사고는 유한중의 과실과 화물차 운전자의 과실이 경합되어 발생한"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "아니하고 <em>후방</em>에 <em>안전</em>삼각대도 설치하지 아니한 채 도로 우측에 화물차를 주차시켜 둔 사실, 유한중은 2종 원동기장치자전거 면허를 소지하고 있으며 이 <em>사고</em>에 대하여 <em>안전</em>운전 <em>의무</em>불이행을 이유로 범칙금 납부 통고처분\n여 원고의 아들 유한중이 일몰 직후 오토바이를 운전하여 인천 강화구 소재 편도 1차로 도로를 다소 빠른 속도로",
+              "운전자가 차폭등·미등이나 비상등도 켜지 아니하고 <em>후방</em>에 <em>안전</em>삼각대도 설치하지 아니한 채 도로 우측에 화물차를 주차시켜 둔 사실, 유한중은 2종\n지하고 있으며 이 <em>사고</em>에 대하여 <em>안전</em>운전 <em>의무</em>불이행을 이유로 범칙금 납부 통고처분을 받은 사실을 인정하고, 이 사건 교통<em>사고</em>는 유한중의 과실과 화물차 운전자의 과실이 경합되어 발생한"
+            ],
+            "search_text": [
+              "아니하고 <em>후방</em>에 <em>안전</em>삼각대도 설치하지 아니한 채 도로 우측에 화물차를 주차시켜 둔 사실, 유한중은 2종 원동기장치자전거 면허를 소지하고 있으며 이 <em>사고</em>에 대하여 <em>안전</em>운전 <em>의무</em>불이행을 이유로 범칙금 납부 통고처분\n여 원고의 아들 유한중이 일몰 직후 오토바이를 운전하여 인천 강화구 소재 편도 1차로 도로를 다소 빠른 속도로",
+              "운전자가 차폭등·미등이나 비상등도 켜지 아니하고 <em>후방</em>에 <em>안전</em>삼각대도 설치하지 아니한 채 도로 우측에 화물차를 주차시켜 둔 사실, 유한중은 2종\n지하고 있으며 이 <em>사고</em>에 대하여 <em>안전</em>운전 <em>의무</em>불이행을 이유로 범칙금 납부 통고처분을 받은 사실을 인정하고, 이 사건 교통<em>사고</em>는 유한중의 과실과 화물차 운전자의 과실이 경합되어 발생한"
+            ]
+          },
+          "metadata": {
+            "case_id": "68274",
+            "dataset": "traffic",
+            "case_name": "보험급여제한처분취소",
+            "court_name": "대법원",
+            "case_number": "2002두12175",
+            "case_category": "일반행정",
+            "decision_date": "2003-02-28"
+          },
+          "query_id": "traffic_law_q008",
+          "query": "후방추돌 사고 안전거리 주의의무",
+          "issue_tags": [
+            "후방추돌",
+            "안전거리",
+            "전방주시의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "107960",
+          "chunk_id": "107960:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반",
+          "case_number": "89도2589",
+          "court_name": "대법원",
+          "decision_date": "1990-12-26",
+          "retriever_score": 73.86003,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:107960#107960:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_evidence_terms: 가 단순히 제한속도를 준수하였다는 사실만으로 주의의무를 다하였다 할 수 있는지 여부(소극) 나. 피고인의 운전업무상 과실로 고속도로에 정차중인 차량을 추돌한 경우 피해차량 후방에 사고발생 표지가 설치되어 있지 아니하였고 피해자들이 노면에 들어와...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_evidence_terms: 가 단순히 제한속도를 준수하였다는 사실만으로 주의의무를 다하였다 할 수 있는지 여부(소극) 나. 피고인의 운전업무상 과실로 고속도로에 정차중인 차량을 추돌한 경우 피해차량 후방에 사고발생 표지가 설치되어 있지 아니하였고 피해자들이 노면에 들어와...",
+          "matched_snippets": [
+            "피고인의 주의의무 태만으로 인하여 고속도로상에 정지중인 차량을 추돌한 사고가 발생된 이상 피해차량 후방에 사고발생표지가 설치되어 있지 아니하였고 피해자들이 다른 승객들처럼 대피하지 않고 피해차량 뒤 고속\n수하였다는 사실만으로 주의의무를 다하였다 할 수 있는지 여부(소극) 나.",
+            "피고인의 주의의무 태만으로 인하여 고속도로상에 정지중인 차량을 추돌한 사고가 발생된 이상 피해차량 후방에 사고발생표지가 설치되어 있지 아니하였고 피해자들이 다른 승객들처럼 대피하지 않고 피해차량 뒤 고속도로 노면에 들어와 있었다 하더라도 피\n정지중인 차량을 추돌한 사고가 발생된 이상 피해차량 후방에 사고발생표지가 설치되어"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "피고인의 주의의무 태만으로 인하여 고속도로상에 정지중인 차량을 <em>추돌</em>한 <em>사고</em>가 발생된 이상 피해차량 <em>후방</em>에 <em>사고</em>발생표지가 설치되어 있지 아니하였고 피해자들이 다른 승객들처럼 대피하지 않고 피해차량 뒤 고속\n수하였다는 사실만으로 <em>주</em>의<em>의무</em>를 다하였다 할 수 있는지 여부(소극) 나.",
+              "피고인의 주의의무 태만으로 인하여 고속도로상에 정지중인 차량을 <em>추돌</em>한 <em>사고</em>가 발생된 이상 피해차량 <em>후방</em>에 <em>사고</em>발생표지가 설치되어 있지 아니하였고 피해자들이 다른 승객들처럼 대피하지 않고 피해차량 뒤 고속도로 노면에 들어와 있었다 하더라도 피\n정지중인 차량을 <em>추돌</em>한 <em>사고</em>가 발생된 이상 피해차량 <em>후방</em>에 <em>사고</em>발생표지가 설치되어"
+            ],
+            "search_text": [
+              "피고인의 주의의무 태만으로 인하여 고속도로상에 정지중인 차량을 <em>추돌</em>한 <em>사고</em>가 발생된 이상 피해차량 <em>후방</em>에 <em>사고</em>발생표지가 설치되어 있지 아니하였고 피해자들이 다른 승객들처럼 대피하지 않고 피해차량 뒤 고속\n수하였다는 사실만으로 <em>주</em>의<em>의무</em>를 다하였다 할 수 있는지 여부(소극) 나.",
+              "피고인의 주의의무 태만으로 인하여 고속도로상에 정지중인 차량을 <em>추돌</em>한 <em>사고</em>가 발생된 이상 피해차량 <em>후방</em>에 <em>사고</em>발생표지가 설치되어 있지 아니하였고 피해자들이 다른 승객들처럼 대피하지 않고 피해차량 뒤 고속도로 노면에 들어와 있었다 하더라도 피\n정지중인 차량을 <em>추돌</em>한 <em>사고</em>가 발생된 이상 피해차량 <em>후방</em>에 <em>사고</em>발생표지가 설치되어"
+            ]
+          },
+          "metadata": {
+            "case_id": "107960",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반",
+            "court_name": "대법원",
+            "case_number": "89도2589",
+            "case_category": "형사",
+            "decision_date": "1990-12-26"
+          },
+          "query_id": "traffic_law_q008",
+          "query": "후방추돌 사고 안전거리 주의의무",
+          "issue_tags": [
+            "후방추돌",
+            "안전거리",
+            "전방주시의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "236063",
+          "chunk_id": "236063:structured_1500_250:0005",
+          "chunk_index": 5,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "구상금",
+          "case_number": "2021나80829",
+          "court_name": "서울중앙지방법원",
+          "decision_date": "2022-11-25",
+          "retriever_score": 73.66693,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:236063#236063:structured_1500_250:0005",
+          "chunk_preview": "%] 및 이에 대한 지연손해금을 구상금으로 지급할 의무가 있다. 3. 청구원인에 관한 판단 가. 공동불법행위 책임의 발생 1) 과실비율 이 사건의 쟁점은 과실비율이다. 앞서 인정한 사실 및 앞서 든 증거들을 종합하여 알 수 있는 이 사건 사고 장소의 특징, 사고 경위, 충돌 부위 및 충격의 정도 등과 아래의 사실 내지 사정에 비추어 볼 때, 이 사건 사고에 관한 원고차량, 피고차량 및 제3 차량의 과실비율은 50 : 20 : 30으로 판단된다. 가) 원고차량의 과실 (1) 자동차의 운전자는 그 차를 운전하여 자동차전용도로를 횡...",
+          "search_preview": "%] 및 이에 대한 지연손해금을 구상금으로 지급할 의무가 있다. 3. 청구원인에 관한 판단 가. 공동불법행위 책임의 발생 1) 과실비율 이 사건의 쟁점은 과실비율이다. 앞서 인정한 사실 및 앞서 든 증거들을 종합하여 알 수 있는 이 사건 사고 장소의 특징, 사고 경위, 충돌 부위 및 충격의 정도 등과 아래의 사실 내지 사정에 비추어 볼 때, 이 사건 사고에 관한 원고차량, 피고차량 및 제3 차량의 과실비율은 50 : 20 : 30으로 판단된다. 가) 원고차량의 과실 (1) 자동차의 운전자는 그 차를 운전하여 자동차전용도로를 횡...",
+          "matched_snippets": [
+            "매우 높음에도 불구하고, 원고차량은 1차 사고 발생 이후 피고차량에 발생한 화재를 진압하려는 시도만 하였을 뿐, 피고차량 후방에 삼각대를 설치하는 등 후행 추돌사고를 방지할 안전조치를 전혀 취하지 않았다.",
+            "원고차량에게 위험경고를 한 다른 차량은 원고차량을 발견하고 이를 피해서 1차로로 진로변경을 하여 사고를 방지하였으나, 피고차량은 전방주시의무를 게을리 하고 충분한 안전거리를 확보하지 않아 1차 사고가 발생하였다. (2) 위와 같이 1차 사고와 관련된 피고차량의 과실이 있고, 1차 사고로 인한 피고차량의 정차가 이 사건 사고의"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "매우 높음에도 불구하고, 원고차량은 1차 <em>사고</em> 발생 이후 피고차량에 발생한 화재를 진압하려는 시도만 하였을 뿐, 피고차량 <em>후방</em>에 삼각대를 설치하는 등 후행 <em>추돌</em><em>사고</em>를 방지할 <em>안전</em>조치를 전혀 취하지 않았다.",
+              "원고차량에게 위험경고를 한 다른 차량은 원고차량을 발견하고 이를 피해서 1차로로 진로변경을 하여 <em>사고</em>를 방지하였으나, 피고차량은 전방주시<em>의무</em>를 게을리 하고 충분한 <em>안전</em><em>거리</em>를 확보하지 않아 1차 <em>사고</em>가 발생하였다. (2) 위와 같이 1차 <em>사고</em>와 관련된 피고차량의 과실이 있고, 1차 <em>사고</em>로 인한 피고차량의 정차가 이 사건 <em>사고</em>의"
+            ],
+            "search_text": [
+              "매우 높음에도 불구하고, 원고차량은 1차 <em>사고</em> 발생 이후 피고차량에 발생한 화재를 진압하려는 시도만 하였을 뿐, 피고차량 <em>후방</em>에 삼각대를 설치하는 등 후행 <em>추돌</em><em>사고</em>를 방지할 <em>안전</em>조치를 전혀 취하지 않았다.",
+              "원고차량에게 위험경고를 한 다른 차량은 원고차량을 발견하고 이를 피해서 1차로로 진로변경을 하여 <em>사고</em>를 방지하였으나, 피고차량은 전방주시<em>의무</em>를 게을리 하고 충분한 <em>안전</em><em>거리</em>를 확보하지 않아 1차 <em>사고</em>가 발생하였다. (2) 위와 같이 1차 <em>사고</em>와 관련된 피고차량의 과실이 있고, 1차 <em>사고</em>로 인한 피고차량의 정차가 이 사건 <em>사고</em>의"
+            ]
+          },
+          "metadata": {
+            "case_id": "236063",
+            "dataset": "traffic",
+            "case_name": "구상금",
+            "court_name": "서울중앙지방법원",
+            "case_number": "2021나80829",
+            "case_category": "민사",
+            "decision_date": "2022-11-25"
+          },
+          "query_id": "traffic_law_q008",
+          "query": "후방추돌 사고 안전거리 주의의무",
+          "issue_tags": [
+            "후방추돌",
+            "안전거리",
+            "전방주시의무"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q009",
+      "query": "어린이보호구역 사고 처벌 판례",
+      "issue_tags": [
+        "어린이보호구역",
+        "보호의무",
+        "처벌"
+      ],
+      "purpose": "어린이보호구역 사고의 법적 책임 또는 처벌 관련 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "239383",
+          "chunk_id": "239383:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "holding_summary",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(도주치사)·특정범죄가중처벌등에관한법률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+          "case_number": "2023노1673",
+          "court_name": "서울고법",
+          "decision_date": "2023-11-24",
+          "retriever_score": 112.23878,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:239383#239383:structured_1500_250:0002",
+          "chunk_preview": "판시사항: 자동차 운전자인 피고인이 음주의 영향으로 정상적인 운전이 곤란한 상태에서 어린이 보호구역인 초등학교 후문 교차로에서 안전운전의무를 위반한 업무상과실로 어린이(9세)인 피해자 甲을 자동차로 충격 후 역과하여 甲을 사망에 이르게 하였다는 내용의 특정범죄 가중처벌 등에 관한 법률 위반(위험운전치사) 및 같은 법 위반(어린이보호구역치사) 공소사실이 유죄로 인정된 후 그 죄수관계가 문제 된 사안에서, 피고인의 행위는 1개의 운전행위로 한 번의 교통사고를 내어 1명의 피해자를 사망에 이르게 한 경우로서, 같은 법 위반(위험운전...",
+          "search_preview": "판시사항: 자동차 운전자인 피고인이 음주의 영향으로 정상적인 운전이 곤란한 상태에서 어린이 보호구역인 초등학교 후문 교차로에서 안전운전의무를 위반한 업무상과실로 어린이(9세)인 피해자 甲을 자동차로 충격 후 역과하여 甲을 사망에 이르게 하였다는 내용의 특정범죄 가중처벌 등에 관한 법률 위반(위험운전치사) 및 같은 법 위반(어린이보호구역치사) 공소사실이 유죄로 인정된 후 그 죄수관계가 문제 된 사안에서, 피고인의 행위는 1개의 운전행위로 한 번의 교통사고를 내어 1명의 피해자를 사망에 이르게 한 경우로서, 같은 법 위반(위험운전...",
+          "matched_snippets": [
+            "어린이보호구역치사) 공소사실이 유죄로 인정된 후 그 죄수관계가 문제 된 사안에서, 피고인의 행위는 1개의 운전행위로 한 번의 교통사고를 내어 1명의 피해자를 사망에 이르게 한 경우로서, 같은 법 위반(위험운전치사)죄와 같은 법 위반(어린이보호구역치사)죄가 각각 성립하고, 위 각 죄는 상상적 경합관계에 있다고 한 사례\n요약:",
+            "규정하여 가중처벌하기 위한 것이고, 특정범죄가중법 제5조의13 역시 그 문언(어린이 보호구역에서 어린이에게 교통사고처리 특례법 제3조 제1항의 죄를 범한 경우 다음 각호의 구분에 따라 ‘가중처벌한다.’고 정한다)과 입법 취지에 비추어 어린이 보호구역에서 안전운전의무 위반으로 인한 업무상과실치사상죄를 가중처벌하는 특례 규정으로"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "<em>어린이</em><em>보호</em><em>구역</em>치사) 공소사실이 유죄로 인정된 후 그 죄수관계가 문제 된 사안에서, 피고인의 행위는 1개의 운전행위로 한 번의 교통<em>사고</em>를 내어 1명의 피해자를 사망에 이르게 한 경우로서, 같은 법 위반(위험운전치사)죄와 같은 법 위반(<em>어린이</em><em>보호</em><em>구역</em>치사)죄가 각각 성립하고, 위 각 죄는 상상적 경합관계에 있다고 한 사례\n요약:",
+              "규정하여 가중<em>처벌</em>하기 위한 것이고, 특정범죄가중법 제5조의13 역시 그 문언(<em>어린이</em> <em>보호</em><em>구역</em>에서 <em>어린이</em>에게 교통<em>사고</em>처리 특례법 제3조 제1항의 죄를 범한 경우 다음 각호의 구분에 따라 ‘가중<em>처벌</em>한다.’고 정한다)과 입법 취지에 비추어 <em>어린이</em> <em>보호</em><em>구역</em>에서 안전운전의무 위반으로 인한 업무상과실치사상죄를 가중<em>처벌</em>하는 특례 규정으로"
+            ],
+            "search_text": [
+              "<em>어린이</em><em>보호</em><em>구역</em>치사) 공소사실이 유죄로 인정된 후 그 죄수관계가 문제 된 사안에서, 피고인의 행위는 1개의 운전행위로 한 번의 교통<em>사고</em>를 내어 1명의 피해자를 사망에 이르게 한 경우로서, 같은 법 위반(위험운전치사)죄와 같은 법 위반(<em>어린이</em><em>보호</em><em>구역</em>치사)죄가 각각 성립하고, 위 각 죄는 상상적 경합관계에 있다고 한 사례\n요약:",
+              "규정하여 가중<em>처벌</em>하기 위한 것이고, 특정범죄가중법 제5조의13 역시 그 문언(<em>어린이</em> <em>보호</em><em>구역</em>에서 <em>어린이</em>에게 교통<em>사고</em>처리 특례법 제3조 제1항의 죄를 범한 경우 다음 각호의 구분에 따라 ‘가중<em>처벌</em>한다.’고 정한다)과 입법 취지에 비추어 <em>어린이</em> <em>보호</em><em>구역</em>에서 안전운전의무 위반으로 인한 업무상과실치사상죄를 가중<em>처벌</em>하는 특례 규정으로"
+            ]
+          },
+          "metadata": {
+            "case_id": "239383",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(도주치사)·특정범죄가중처벌등에관한법률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+            "court_name": "서울고법",
+            "case_number": "2023노1673",
+            "case_category": "형사",
+            "decision_date": "2023-11-24"
+          },
+          "query_id": "traffic_law_q009",
+          "query": "어린이보호구역 사고 처벌 판례",
+          "issue_tags": [
+            "어린이보호구역",
+            "보호의무",
+            "처벌"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "239383",
+          "chunk_id": "239383:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(도주치사)·특정범죄가중처벌등에관한법률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+          "case_number": "2023노1673",
+          "court_name": "서울고법",
+          "decision_date": "2023-11-24",
+          "retriever_score": 111.5235,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:239383#239383:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 경우로서, 같은 법 위반(위험운전치사)죄와 같은 법 위반(어린이보호구역치사)죄가 각각 성립하고, 위 각 죄는 상상적 경합관계에 있다고 한 사례 자동차 운전자인 피고인이 음주의 영향으로 정상적인 운전...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 경우로서, 같은 법 위반(위험운전치사)죄와 같은 법 위반(어린이보호구역치사)죄가 각각 성립하고, 위 각 죄는 상상적 경합관계에 있다고 한 사례 자동차 운전자인 피고인이 음주의 영향으로 정상적인 운전...",
+          "matched_snippets": [
+            ")죄가 각각 성립하고, 위 각 죄는 상상적 경합관계에 있다고 한 사례 자동차 운전자인 피고인이 음주의 영향으로 정상적인 운전이 곤란한 상태에서 어린이 보호구역인 초등학교 후문 교차로에서 안전운전의무를 위반한 업무상과실로\n교통사고\n률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+            "위반한 업무상과실로 어린이(9세)인 피해자 甲을 자동차로 충격 후 역과하여 甲을 사망에 이르게 하였다는 내용의 특정범죄 가중처벌 등에 관한 법률 위반(위험운전치사) 및 같은 법 위반(어린이보호구역치\n으로 정상적인 운전이 곤란한 상태에서 어린이 보호구역인 초등학교 후문 교차로에서 안전운전의무를 위반한 업무상과실로 어린이(9세"
+          ],
+          "highlight": {
+            "chunk_text": [
+              ")죄가 각각 성립하고, 위 각 죄는 상상적 경합관계에 있다고 한 사례 자동차 운전자인 피고인이 음주의 영향으로 정상적인 운전이 곤란한 상태에서 <em>어린이</em> <em>보호</em><em>구역</em>인 초등학교 후문 교차로에서 안전운전의무를 위반한 업무상과실로\n교통<em>사고</em>\n률위반(<em>어린이</em><em>보호</em><em>구역</em>치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+              "위반한 업무상과실로 <em>어린이</em>(9세)인 피해자 甲을 자동차로 충격 후 역과하여 甲을 사망에 이르게 하였다는 내용의 특정범죄 가중<em>처벌</em> 등에 관한 법률 위반(위험운전치사) 및 같은 법 위반(<em>어린이</em><em>보호</em>구역치\n으로 정상적인 운전이 곤란한 상태에서 <em>어린이</em> <em>보호</em><em>구역</em>인 초등학교 후문 교차로에서 안전운전의무를 위반한 업무상과실로 <em>어린이</em>(9세"
+            ],
+            "search_text": [
+              ")죄가 각각 성립하고, 위 각 죄는 상상적 경합관계에 있다고 한 사례 자동차 운전자인 피고인이 음주의 영향으로 정상적인 운전이 곤란한 상태에서 <em>어린이</em> <em>보호</em><em>구역</em>인 초등학교 후문 교차로에서 안전운전의무를 위반한 업무상과실로\n교통<em>사고</em>\n률위반(<em>어린이</em><em>보호</em><em>구역</em>치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+              "위반한 업무상과실로 <em>어린이</em>(9세)인 피해자 甲을 자동차로 충격 후 역과하여 甲을 사망에 이르게 하였다는 내용의 특정범죄 가중<em>처벌</em> 등에 관한 법률 위반(위험운전치사) 및 같은 법 위반(<em>어린이</em><em>보호</em>구역치\n으로 정상적인 운전이 곤란한 상태에서 <em>어린이</em> <em>보호</em><em>구역</em>인 초등학교 후문 교차로에서 안전운전의무를 위반한 업무상과실로 <em>어린이</em>(9세"
+            ]
+          },
+          "metadata": {
+            "case_id": "239383",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(도주치사)·특정범죄가중처벌등에관한법률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+            "court_name": "서울고법",
+            "case_number": "2023노1673",
+            "case_category": "형사",
+            "decision_date": "2023-11-24"
+          },
+          "query_id": "traffic_law_q009",
+          "query": "어린이보호구역 사고 처벌 판례",
+          "issue_tags": [
+            "어린이보호구역",
+            "보호의무",
+            "처벌"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "239383",
+          "chunk_id": "239383:structured_1500_250:0005",
+          "chunk_index": 5,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(도주치사)·특정범죄가중처벌등에관한법률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+          "case_number": "2023노1673",
+          "court_name": "서울고법",
+          "decision_date": "2023-11-24",
+          "retriever_score": 106.682304,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:239383#239383:structured_1500_250:0005",
+          "chunk_preview": "분 주장은 받아들이지 않는다. 3. 죄수에 대한 직권 판단 피고인은 음주의 영향으로 정상적인 운전이 곤란한 상태에서 어린이 보호구역을 운전하다가 안전운전의무를 위반하여 어린이인 피해자를 사망에 이르게 하였으므로, 피고인의 행위는 특정범죄가중법 위반(위험운전치사)죄와 특정범죄가중법 위반(어린이보호구역치사)죄의 구성요건에 각각 해당한다. 그런데 1 피고인의 행위는 1개의 운전행위로 한 번의 교통사고를 내어 1명의 피해자를 사망에 이르게 한 것이다. 2 신호위반, 음주·무면허운전, 어린이 보호구역에서의 안전운전의무 위반 등 운전자의...",
+          "search_preview": "분 주장은 받아들이지 않는다. 3. 죄수에 대한 직권 판단 피고인은 음주의 영향으로 정상적인 운전이 곤란한 상태에서 어린이 보호구역을 운전하다가 안전운전의무를 위반하여 어린이인 피해자를 사망에 이르게 하였으므로, 피고인의 행위는 특정범죄가중법 위반(위험운전치사)죄와 특정범죄가중법 위반(어린이보호구역치사)죄의 구성요건에 각각 해당한다. 그런데 1 피고인의 행위는 1개의 운전행위로 한 번의 교통사고를 내어 1명의 피해자를 사망에 이르게 한 것이다. 2 신호위반, 음주·무면허운전, 어린이 보호구역에서의 안전운전의무 위반 등 운전자의...",
+          "matched_snippets": [
+            "죄수에 대한 직권 판단 피고인은 음주의 영향으로 정상적인 운전이 곤란한 상태에서 어린이 보호구역을 운전하다가 안전운전의무를 위반하여 어린이인 피해자를 사망에 이르게 하였으므로, 피고인의 행위는 특정범죄가중법 위반(위험운전치사)죄와 특정범죄가중법 위반(어린이보호구역치사)죄의 구성요건에 각각 해당한다.",
+            "선고 2008도9182 판결), 특정범죄가중법 제5조의13 역시 그 문언(어린이 보호구역에서 어린이에게 「교통사고처리 특례법」 제3조 제1항의 죄를 범한 경우 다음 각호의 구분에 따라 ‘가중처벌한다.’고 정한다)과 입법 취지에 비추어 볼 때 어린이 보호구역에서 안전운전의무 위반으로 인한 업무상과실치사상죄를 가중처벌하는 특례"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "죄수에 대한 직권 판단 피고인은 음주의 영향으로 정상적인 운전이 곤란한 상태에서 <em>어린이</em> <em>보호</em><em>구역</em>을 운전하다가 안전운전의무를 위반하여 <em>어린이</em>인 피해자를 사망에 이르게 하였으므로, 피고인의 행위는 특정범죄가중법 위반(위험운전치사)죄와 특정범죄가중법 위반(<em>어린이</em><em>보호</em><em>구역</em>치사)죄의 구성요건에 각각 해당한다.",
+              "선고 2008도9182 판결), 특정범죄가중법 제5조의13 역시 그 문언(<em>어린이</em> <em>보호</em><em>구역</em>에서 <em>어린이</em>에게 「교통<em>사고</em>처리 특례법」 제3조 제1항의 죄를 범한 경우 다음 각호의 구분에 따라 ‘가중<em>처벌</em>한다.’고 정한다)과 입법 취지에 비추어 볼 때 <em>어린이</em> <em>보호</em><em>구역</em>에서 안전운전의무 위반으로 인한 업무상과실치사상죄를 가중<em>처벌</em>하는 특례"
+            ],
+            "search_text": [
+              "죄수에 대한 직권 판단 피고인은 음주의 영향으로 정상적인 운전이 곤란한 상태에서 <em>어린이</em> <em>보호</em><em>구역</em>을 운전하다가 안전운전의무를 위반하여 <em>어린이</em>인 피해자를 사망에 이르게 하였으므로, 피고인의 행위는 특정범죄가중법 위반(위험운전치사)죄와 특정범죄가중법 위반(<em>어린이</em><em>보호</em><em>구역</em>치사)죄의 구성요건에 각각 해당한다.",
+              "선고 2008도9182 판결), 특정범죄가중법 제5조의13 역시 그 문언(<em>어린이</em> <em>보호</em><em>구역</em>에서 <em>어린이</em>에게 「교통<em>사고</em>처리 특례법」 제3조 제1항의 죄를 범한 경우 다음 각호의 구분에 따라 ‘가중<em>처벌</em>한다.’고 정한다)과 입법 취지에 비추어 볼 때 <em>어린이</em> <em>보호</em><em>구역</em>에서 안전운전의무 위반으로 인한 업무상과실치사상죄를 가중<em>처벌</em>하는 특례"
+            ]
+          },
+          "metadata": {
+            "case_id": "239383",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(도주치사)·특정범죄가중처벌등에관한법률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+            "court_name": "서울고법",
+            "case_number": "2023노1673",
+            "case_category": "형사",
+            "decision_date": "2023-11-24"
+          },
+          "query_id": "traffic_law_q009",
+          "query": "어린이보호구역 사고 처벌 판례",
+          "issue_tags": [
+            "어린이보호구역",
+            "보호의무",
+            "처벌"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "239383",
+          "chunk_id": "239383:structured_1500_250:0008",
+          "chunk_index": 8,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "특정범죄가중처벌등에관한법률위반(도주치사)·특정범죄가중처벌등에관한법률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+          "case_number": "2023노1673",
+          "court_name": "서울고법",
+          "decision_date": "2023-11-24",
+          "retriever_score": 96.93939,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:239383#239383:structured_1500_250:0008",
+          "chunk_preview": "을 것이다.’는 안일하고 어리석은 생각으로 음주운전의 유혹에 빠질 수 있기 때문이다. 피고인도 이 사건 이전까지 아무런 범죄전력 없이 사업체를 운영하며 성실한 사회구성원으로 지내 오던 평범한 가장이었다. 피고인은 평소와 같이 집에서 술을 곁들여 점심식사를 하고 낮잠을 자던 중 자녀가 갑자기 학원에 데려다 달라며 깨우자 운전대를 잡았다. 피고인은 술을 마신 지 2시간가량 지났고 잠도 잤으며 거리가 가까워 괜찮을 것이라고 생각하였던 것으로 보인다. 피고인이 자신의 자녀를 태우고 운전하였고 사고 전까지는 좁은 골목길을 비교적 정상적...",
+          "search_preview": "을 것이다.’는 안일하고 어리석은 생각으로 음주운전의 유혹에 빠질 수 있기 때문이다. 피고인도 이 사건 이전까지 아무런 범죄전력 없이 사업체를 운영하며 성실한 사회구성원으로 지내 오던 평범한 가장이었다. 피고인은 평소와 같이 집에서 술을 곁들여 점심식사를 하고 낮잠을 자던 중 자녀가 갑자기 학원에 데려다 달라며 깨우자 운전대를 잡았다. 피고인은 술을 마신 지 2시간가량 지났고 잠도 잤으며 거리가 가까워 괜찮을 것이라고 생각하였던 것으로 보인다. 피고인이 자신의 자녀를 태우고 운전하였고 사고 전까지는 좁은 골목길을 비교적 정상적...",
+          "matched_snippets": [
+            "이러한 점에서 어린이 보호구역에서 음주운전 사고를 일으킨 피고인을 엄히 처벌하여 우리 사회에서 음주운전을 근절할 필요가 크다. 한편 이러한 일반예방의 필요성을 충분히 고려하더라도, 양형은 피고인 개인의 죄책에 부합하는 합리적인 범위 내의 것이어야 한다.",
+            "또한 어린이 보호구역에서 교통사고를 일으킨 행위를 가중처벌하기 위해 2019. 12. 24. 특정범죄가중법 제5조의13이 신설되었고 ‘어린이 교통사고’에 대한 양형기준이 마련되어 2023. 7. 1.부터 시행되었는데, 어린이 보호구역 치사 범죄의 권고형의 범위는 기본영역이 2~5년이다."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "이러한 점에서 <em>어린이</em> <em>보호</em><em>구역</em>에서 음주운전 <em>사고</em>를 일으킨 피고인을 엄히 <em>처벌</em>하여 우리 사회에서 음주운전을 근절할 필요가 크다. 한편 이러한 일반예방의 필요성을 충분히 고려하더라도, 양형은 피고인 개인의 죄책에 부합하는 합리적인 범위 내의 것이어야 한다.",
+              "또한 <em>어린이</em> <em>보호</em><em>구역</em>에서 교통<em>사고</em>를 일으킨 행위를 가중<em>처벌</em>하기 위해 2019. 12. 24. 특정범죄가중법 제5조의13이 신설되었고 ‘<em>어린이</em> 교통<em>사고</em>’에 대한 양형기준이 마련되어 2023. 7. 1.부터 시행되었는데, <em>어린이</em> <em>보호</em><em>구역</em> 치사 범죄의 권고형의 범위는 기본영역이 2~5년이다."
+            ],
+            "search_text": [
+              "이러한 점에서 <em>어린이</em> <em>보호</em><em>구역</em>에서 음주운전 <em>사고</em>를 일으킨 피고인을 엄히 <em>처벌</em>하여 우리 사회에서 음주운전을 근절할 필요가 크다. 한편 이러한 일반예방의 필요성을 충분히 고려하더라도, 양형은 피고인 개인의 죄책에 부합하는 합리적인 범위 내의 것이어야 한다.",
+              "또한 <em>어린이</em> <em>보호</em><em>구역</em>에서 교통<em>사고</em>를 일으킨 행위를 가중<em>처벌</em>하기 위해 2019. 12. 24. 특정범죄가중법 제5조의13이 신설되었고 ‘<em>어린이</em> 교통<em>사고</em>’에 대한 양형기준이 마련되어 2023. 7. 1.부터 시행되었는데, <em>어린이</em> <em>보호</em><em>구역</em> 치사 범죄의 권고형의 범위는 기본영역이 2~5년이다."
+            ]
+          },
+          "metadata": {
+            "case_id": "239383",
+            "dataset": "traffic",
+            "case_name": "특정범죄가중처벌등에관한법률위반(도주치사)·특정범죄가중처벌등에관한법률위반(어린이보호구역치사)·특정범죄가중처벌등에관한법률위반(위험운전치사)·도로교통법위반(음주운전)",
+            "court_name": "서울고법",
+            "case_number": "2023노1673",
+            "case_category": "형사",
+            "decision_date": "2023-11-24"
+          },
+          "query_id": "traffic_law_q009",
+          "query": "어린이보호구역 사고 처벌 판례",
+          "issue_tags": [
+            "어린이보호구역",
+            "보호의무",
+            "처벌"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "619139",
+          "chunk_id": "619139:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "구상금",
+          "case_number": "2021가단5064487",
+          "court_name": "서울중앙지방법원",
+          "decision_date": "2023-10-26",
+          "retriever_score": 93.084946,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:619139#619139:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby fault_or_liability_context traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 15:59경 원고 차량을 운전하여 인천 서구 (이하 생략) 앞 편도 1차로 도로를 ◇◇교회 쪽에서 ☆☆동행정복지센터 쪽으로 진행하던 중, 피고 차량에서 하차하여 원고 차량의 진행방향 우측에서 좌측으로 어린이보호구역 내 횡단보도를 뛰어서 건너던 소...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby fault_or_liability_context traffic_legal_or_insurance_context traffic_situation_context traffic_evidence_terms: 15:59경 원고 차량을 운전하여 인천 서구 (이하 생략) 앞 편도 1차로 도로를 ◇◇교회 쪽에서 ☆☆동행정복지센터 쪽으로 진행하던 중, 피고 차량에서 하차하여 원고 차량의 진행방향 우측에서 좌측으로 어린이보호구역 내 횡단보도를 뛰어서 건너던 소...",
+          "matched_snippets": [
+            "발견하고 바로 제동하였더라도 충돌을 피하기는 상당히 어려운 상황이었던\n어린이보호구역\n운영하는 자는 어린이통학버스에 어린이를 태울 때에는 보호자를 함께 태우고 운행하여야 하며, 동승한 보호자는 어린이가 승차 또는 하차하는 때에는 자동차에서 내려서 어린이가 안전하게 승하차하는 것을 확인하는 등 어린이 보호에 필요한 조치를 하여야",
+            "사고’라 한다)가\n으로 어린이보호구역 내 횡단보도를 뛰어서 건너던 소외인을 원고 차량으로 충격하는 사고(이하 ‘이 사건 사고’라 한다)가 발생하였다."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "발견하고 바로 제동하였더라도 충돌을 피하기는 상당히 어려운 상황이었던\n<em>어린이</em><em>보호</em><em>구역</em>\n운영하는 자는 <em>어린이</em>통학버스에 <em>어린이</em>를 태울 때에는 <em>보호</em>자를 함께 태우고 운행하여야 하며, 동승한 <em>보호</em>자는 <em>어린이</em>가 승차 또는 하차하는 때에는 자동차에서 내려서 <em>어린이</em>가 안전하게 승하차하는 것을 확인하는 등 <em>어린이</em> <em>보호</em>에 필요한 조치를 하여야",
+              "<em>사고</em>’라 한다)가\n으로 <em>어린이</em><em>보호</em><em>구역</em> 내 횡단보도를 뛰어서 건너던 소외인을 원고 차량으로 충격하는 <em>사고</em>(이하 ‘이 사건 <em>사고</em>’라 한다)가 발생하였다."
+            ],
+            "search_text": [
+              "발견하고 바로 제동하였더라도 충돌을 피하기는 상당히 어려운 상황이었던\n<em>어린이</em><em>보호</em><em>구역</em>\n운영하는 자는 <em>어린이</em>통학버스에 <em>어린이</em>를 태울 때에는 <em>보호</em>자를 함께 태우고 운행하여야 하며, 동승한 <em>보호</em>자는 <em>어린이</em>가 승차 또는 하차하는 때에는 자동차에서 내려서 <em>어린이</em>가 안전하게 승하차하는 것을 확인하는 등 <em>어린이</em> <em>보호</em>에 필요한 조치를 하여야",
+              "<em>사고</em>’라 한다)가\n으로 <em>어린이</em><em>보호</em><em>구역</em> 내 횡단보도를 뛰어서 건너던 소외인을 원고 차량으로 충격하는 <em>사고</em>(이하 ‘이 사건 <em>사고</em>’라 한다)가 발생하였다."
+            ]
+          },
+          "metadata": {
+            "case_id": "619139",
+            "dataset": "traffic",
+            "case_name": "구상금",
+            "court_name": "서울중앙지방법원",
+            "case_number": "2021가단5064487",
+            "case_category": "민사",
+            "decision_date": "2023-10-26"
+          },
+          "query_id": "traffic_law_q009",
+          "query": "어린이보호구역 사고 처벌 판례",
+          "issue_tags": [
+            "어린이보호구역",
+            "보호의무",
+            "처벌"
+          ]
+        }
+      ]
+    },
+    {
+      "query_id": "traffic_law_q010",
+      "query": "교차로 좌회전 직진 충돌 주의의무",
+      "issue_tags": [
+        "교차로",
+        "좌회전",
+        "직진",
+        "주의의무"
+      ],
+      "purpose": "교차로 좌회전/직진 충돌 사고의 통행방법과 주의의무 판례를 찾는다.",
+      "top_k": 5,
+      "result_count": 5,
+      "results": [
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 1,
+          "case_id": "100083",
+          "chunk_id": "100083:structured_1500_250:0003",
+          "chunk_index": 3,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반ᆞ도로교통법위반",
+          "case_number": "84도1493",
+          "court_name": "대법원",
+          "decision_date": "1985-01-22",
+          "retriever_score": 134.25368,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:100083#100083:structured_1500_250:0003",
+          "chunk_preview": "【피 고 인】 【상 고 인】 피고인 【원심판결】 마산지방법원 1984.5.18. 선고 84노255 판결 【주 문】 원심판결을 파기하고, 사건을 마산지방법원 합의부에 환송한다. 【이 유】 피고인의 상고이유를 판단한다. 원심판결 이유에 의하면, 원심은 피고인이 택시를 운전하여 1983.9.15. 22:50경 마산시 석전동 마산역 앞 교차로상을 석전동쪽에서 시외뻐스 주차장쪽으로 직진하게 되었던 바, 그곳은 자동신호등이 설치된 넓은 광장으로 직진신호에 의하여 진행하는 차량이라도 광장에 진입하여 진행할 때 신호가 바뀌는 경우가 많은 곳...",
+          "search_preview": "【피 고 인】 【상 고 인】 피고인 【원심판결】 마산지방법원 1984.5.18. 선고 84노255 판결 【주 문】 원심판결을 파기하고, 사건을 마산지방법원 합의부에 환송한다. 【이 유】 피고인의 상고이유를 판단한다. 원심판결 이유에 의하면, 원심은 피고인이 택시를 운전하여 1983.9.15. 22:50경 마산시 석전동 마산역 앞 교차로상을 석전동쪽에서 시외뻐스 주차장쪽으로 직진하게 되었던 바, 그곳은 자동신호등이 설치된 넓은 광장으로 직진신호에 의하여 진행하는 차량이라도 광장에 진입하여 진행할 때 신호가 바뀌는 경우가 많은 곳...",
+          "matched_snippets": [
+            "들어 오더라도 교차로 안 광장으로 좌회전하는 차량들의 동태를 잘 살피면서 조심스럽게 서행하여야함에도 불구하고, 만연히 직진신호에 따라 시속 약70킬로미터의 과속으로 전방주시를 태만히 한 채 직진한 과실로 때마침 안외식 운전의 시내뻐스가 좌회전하기 위하여 직진신호에서 교차로에 진입하여 황색신호등에 좌회전하려고 하는 것을 전혀",
+            "따른 사고발생을 미연에 방지할 특별한 조치까지 강구할 업무상의 주의의무는 없다고 할 것이고, 이는 대향차량이 좌회전하기 위하여 직진신호중에 교차로 중앙까지 서서히 진입하고 있었다 하더라도 변함이 없을 것이다."
+          ],
+          "highlight": {
+            "chunk_text": [
+              "들어 오더라도 <em>교차</em><em>로</em> 안 광장으로 <em>좌</em><em>회전</em>하는 차량들의 동태를 잘 살피면서 조심스럽게 서행하여야함에도 불구하고, 만연히 <em>직진</em>신호에 따라 시속 약70킬로미터의 과속으로 전방주시를 태만히 한 채 <em>직진</em>한 과실로 때마침 안외식 운전의 시내뻐스가 <em>좌</em><em>회전</em>하기 위하여 <em>직진</em>신호에서 <em>교차</em><em>로</em>에 진입하여 황색신호등에 <em>좌</em><em>회전</em>하려고 하는 것을 전혀",
+              "따른 사고발생을 미연에 방지할 특별한 조치까지 강구할 업무상의 주의<em>의무</em>는 없다고 할 것이고, 이는 대향차량이 <em>좌</em><em>회전</em>하기 위하여 <em>직진</em>신호중에 <em>교차</em><em>로</em> 중앙까지 서서히 진입하고 있었다 하더라도 변함이 없을 것이다."
+            ],
+            "search_text": [
+              "들어 오더라도 <em>교차</em><em>로</em> 안 광장으로 <em>좌</em><em>회전</em>하는 차량들의 동태를 잘 살피면서 조심스럽게 서행하여야함에도 불구하고, 만연히 <em>직진</em>신호에 따라 시속 약70킬로미터의 과속으로 전방주시를 태만히 한 채 <em>직진</em>한 과실로 때마침 안외식 운전의 시내뻐스가 <em>좌</em><em>회전</em>하기 위하여 <em>직진</em>신호에서 <em>교차</em><em>로</em>에 진입하여 황색신호등에 <em>좌</em><em>회전</em>하려고 하는 것을 전혀",
+              "따른 사고발생을 미연에 방지할 특별한 조치까지 강구할 업무상의 주의<em>의무</em>는 없다고 할 것이고, 이는 대향차량이 <em>좌</em><em>회전</em>하기 위하여 <em>직진</em>신호중에 <em>교차</em><em>로</em> 중앙까지 서서히 진입하고 있었다 하더라도 변함이 없을 것이다."
+            ]
+          },
+          "metadata": {
+            "case_id": "100083",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반ᆞ도로교통법위반",
+            "court_name": "대법원",
+            "case_number": "84도1493",
+            "case_category": "형사",
+            "decision_date": "1985-01-22"
+          },
+          "query_id": "traffic_law_q010",
+          "query": "교차로 좌회전 직진 충돌 주의의무",
+          "issue_tags": [
+            "교차로",
+            "좌회전",
+            "직진",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 2,
+          "case_id": "102105",
+          "chunk_id": "102105:structured_1500_250:0003",
+          "chunk_index": 3,
+          "chunk_type": "main_text",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반",
+          "case_number": "86도163",
+          "court_name": "대법원",
+          "decision_date": "1986-09-09",
+          "retriever_score": 131.74564,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:102105#102105:structured_1500_250:0003",
+          "chunk_preview": "【피 고 인】 【상 고 인】 검사 【원심판결】 인천지방법원 1985.12.5 선고 85노221 판결 【주 문】 상고를 기각한다. 【이 유】 검사의 상고이유를 판단한다. 교통정리가 행하여 지고 있지 아니하는 교차로에서 직진하려는 차량과 좌회전하려는 차량사이에는 직진하려는 차량에 통행우선권이 인정되는 것이 원칙이기는 하나 좌회전하려는 차량이 이미 교차로 안으로 진입하여 좌로 방향을 전환하고 있는 경우에는 교차로 안으로 진입하기 이전에 있는 직진하려는 차량은 좌회전중인 차량의 진행을 방해하여서는 아니된다고 할 것인바, ( 도로교통법...",
+          "search_preview": "【피 고 인】 【상 고 인】 검사 【원심판결】 인천지방법원 1985.12.5 선고 85노221 판결 【주 문】 상고를 기각한다. 【이 유】 검사의 상고이유를 판단한다. 교통정리가 행하여 지고 있지 아니하는 교차로에서 직진하려는 차량과 좌회전하려는 차량사이에는 직진하려는 차량에 통행우선권이 인정되는 것이 원칙이기는 하나 좌회전하려는 차량이 이미 교차로 안으로 진입하여 좌로 방향을 전환하고 있는 경우에는 교차로 안으로 진입하기 이전에 있는 직진하려는 차량은 좌회전중인 차량의 진행을 방해하여서는 아니된다고 할 것인바, ( 도로교통법...",
+          "matched_snippets": [
+            "교통정리가 행하여 지고 있지 아니하는 교차로에서 직진하려는 차량과 좌회전하려는 차량사이에는 직진하려는 차량에 통행우선권이 인정되는 것이 원칙이기는 하나 좌회전하려는 차량이 이미 교차로 안으로 진입하여 좌로 방향을 전환하고 있는 경우에는 교차로 안으로 진입하기 이전에 있는 직진하려는 차량은 좌회전중인 차량의 진행을 방해하여서는",
+            "정면 충돌하여 이 사건 사고가 발생되었다는 것인즉 사고 경위가 이와 같다면 이미 교차로 안으로 진입하여 좌회전을 거의 끝마칠 상태에 있는 위 버스의 운전자인 피고인에게 아직 위 교차로 안으로 진입하지도 아니한 피해차량을 위하여 좌회전도중이라도 일단 정차하여 피해차량의 우선통행을 방해하지 않아야 할 업무상 주의의무가 있다거나"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "교통정리가 행하여 지고 있지 아니하는 <em>교차</em><em>로</em>에서 <em>직진</em>하려는 차량과 <em>좌</em><em>회전</em>하려는 차량사이에는 <em>직진</em>하려는 차량에 통행우선권이 인정되는 것이 원칙이기는 하나 <em>좌</em><em>회전</em>하려는 차량이 이미 <em>교차</em><em>로</em> 안으로 진입하여 <em>좌</em>로 방향을 전환하고 있는 경우에는 <em>교차</em><em>로</em> 안으로 진입하기 이전에 있는 <em>직진</em>하려는 차량은 <em>좌</em><em>회전</em>중인 차량의 진행을 방해하여서는",
+              "정면 <em>충돌</em>하여 이 사건 사고가 발생되었다는 것인즉 사고 경위가 이와 같다면 이미 <em>교차</em><em>로</em> 안으로 진입하여 <em>좌</em><em>회전</em>을 거의 끝마칠 상태에 있는 위 버스의 운전자인 피고인에게 아직 위 <em>교차</em><em>로</em> 안으로 진입하지도 아니한 피해차량을 위하여 <em>좌</em><em>회전</em>도중이라도 일단 정차하여 피해차량의 우선통행을 방해하지 않아야 할 업무상 주의<em>의무</em>가 있다거나"
+            ],
+            "search_text": [
+              "교통정리가 행하여 지고 있지 아니하는 <em>교차</em><em>로</em>에서 <em>직진</em>하려는 차량과 <em>좌</em><em>회전</em>하려는 차량사이에는 <em>직진</em>하려는 차량에 통행우선권이 인정되는 것이 원칙이기는 하나 <em>좌</em><em>회전</em>하려는 차량이 이미 <em>교차</em><em>로</em> 안으로 진입하여 <em>좌</em>로 방향을 전환하고 있는 경우에는 <em>교차</em><em>로</em> 안으로 진입하기 이전에 있는 <em>직진</em>하려는 차량은 <em>좌</em><em>회전</em>중인 차량의 진행을 방해하여서는",
+              "정면 <em>충돌</em>하여 이 사건 사고가 발생되었다는 것인즉 사고 경위가 이와 같다면 이미 <em>교차</em><em>로</em> 안으로 진입하여 <em>좌</em><em>회전</em>을 거의 끝마칠 상태에 있는 위 버스의 운전자인 피고인에게 아직 위 <em>교차</em><em>로</em> 안으로 진입하지도 아니한 피해차량을 위하여 <em>좌</em><em>회전</em>도중이라도 일단 정차하여 피해차량의 우선통행을 방해하지 않아야 할 업무상 주의<em>의무</em>가 있다거나"
+            ]
+          },
+          "metadata": {
+            "case_id": "102105",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반",
+            "court_name": "대법원",
+            "case_number": "86도163",
+            "case_category": "형사",
+            "decision_date": "1986-09-09"
+          },
+          "query_id": "traffic_law_q010",
+          "query": "교차로 좌회전 직진 충돌 주의의무",
+          "issue_tags": [
+            "교차로",
+            "좌회전",
+            "직진",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 3,
+          "case_id": "102105",
+          "chunk_id": "102105:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "holding_summary",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "교통사고처리특례법위반",
+          "case_number": "86도163",
+          "court_name": "대법원",
+          "decision_date": "1986-09-09",
+          "retriever_score": 131.0303,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:102105#102105:structured_1500_250:0002",
+          "chunk_preview": "판시사항: 교통정리가 행해지고 있지 아니한 교차로에서 이미 교차로에 진입하여 좌회전을 거의 끝마칠 상태에 있는 자동차운전자의 주의의무 정도 요약: 교통정리가 행하여지고 있지 아니한 교차로에서 이미 교차로 안으로 진입하여 좌회전을 거의 끝마칠 상태에 있는 차량의 운전자에게 아직 위 교차로 안으로 진입하지도 아니한 반대차선의 직진차량을 위하여 좌회전 도중이라도 일단 정차하여 동 차량의 우선통행을 방해하지 않아야 할 업무상 주의의무가 있다거나 또는 교차로 안에서 좌회전중인데도 불구하고 이를 무시한 채 위 직진차량이 미끄러운 빗길을...",
+          "search_preview": "판시사항: 교통정리가 행해지고 있지 아니한 교차로에서 이미 교차로에 진입하여 좌회전을 거의 끝마칠 상태에 있는 자동차운전자의 주의의무 정도 요약: 교통정리가 행하여지고 있지 아니한 교차로에서 이미 교차로 안으로 진입하여 좌회전을 거의 끝마칠 상태에 있는 차량의 운전자에게 아직 위 교차로 안으로 진입하지도 아니한 반대차선의 직진차량을 위하여 좌회전 도중이라도 일단 정차하여 동 차량의 우선통행을 방해하지 않아야 할 업무상 주의의무가 있다거나 또는 교차로 안에서 좌회전중인데도 불구하고 이를 무시한 채 위 직진차량이 미끄러운 빗길을...",
+          "matched_snippets": [
+            "판시사항: 교통정리가 행해지고 있지 아니한 교차로에서 이미 교차로에 진입하여 좌회전을 거의 끝마칠 상태에 있는 자동차운전자의 주의의무 정도\n요약: 교통정리가 행하여지고 있지 아니한 교차로에서 이미 교차로 안으로 진입하여 좌회전을 거의 끝마칠 상태에 있는 차량의 운전자에게 아직 위 교차로 안으로 진입하지도 아니한 반대차선의",
+            "직진차량을 위하여 좌회전 도중이라도 일단 정차하여 동 차량의 우선통행을 방해하지 않아야 할 업무상 주의의무가 있다거나 또는 교차로 안에서 좌회전중인데도 불구하고 이를 무시한 채 위 직진차량이 미끄러운 빗길을 과속으로 달려와 일단 정지선에서 정지하거나 감속조치를 취함이 없이 그대로 교차로 안으로 진입해 들어오는 경우까지 예상하고"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "판시사항: 교통정리가 행해지고 있지 아니한 <em>교차</em><em>로</em>에서 이미 <em>교차</em><em>로</em>에 진입하여 <em>좌</em><em>회전</em>을 거의 끝마칠 상태에 있는 자동차운전자의 주의의무 정도\n요약: 교통정리가 행하여지고 있지 아니한 <em>교차</em><em>로</em>에서 이미 <em>교차</em><em>로</em> 안으로 진입하여 <em>좌</em><em>회전</em>을 거의 끝마칠 상태에 있는 차량의 운전자에게 아직 위 <em>교차</em><em>로</em> 안으로 진입하지도 아니한 반대차선의",
+              "<em>직진</em>차량을 위하여 <em>좌</em><em>회전</em> 도중이라도 일단 정차하여 동 차량의 우선통행을 방해하지 않아야 할 업무상 주의<em>의무</em>가 있다거나 또는 <em>교차</em><em>로</em> 안에서 <em>좌</em><em>회전</em>중인데도 불구하고 이를 무시한 채 위 <em>직진</em>차량이 미끄러운 빗길을 과속으로 달려와 일단 정지선에서 정지하거나 감속조치를 취함이 없이 그대로 <em>교차</em><em>로</em> 안으로 진입해 들어오는 경우까지 예상하고"
+            ],
+            "search_text": [
+              "판시사항: 교통정리가 행해지고 있지 아니한 <em>교차</em><em>로</em>에서 이미 <em>교차</em><em>로</em>에 진입하여 <em>좌</em><em>회전</em>을 거의 끝마칠 상태에 있는 자동차운전자의 주의의무 정도\n요약: 교통정리가 행하여지고 있지 아니한 <em>교차</em><em>로</em>에서 이미 <em>교차</em><em>로</em> 안으로 진입하여 <em>좌</em><em>회전</em>을 거의 끝마칠 상태에 있는 차량의 운전자에게 아직 위 <em>교차</em><em>로</em> 안으로 진입하지도 아니한 반대차선의",
+              "<em>직진</em>차량을 위하여 <em>좌</em><em>회전</em> 도중이라도 일단 정차하여 동 차량의 우선통행을 방해하지 않아야 할 업무상 주의<em>의무</em>가 있다거나 또는 <em>교차</em><em>로</em> 안에서 <em>좌</em><em>회전</em>중인데도 불구하고 이를 무시한 채 위 <em>직진</em>차량이 미끄러운 빗길을 과속으로 달려와 일단 정지선에서 정지하거나 감속조치를 취함이 없이 그대로 <em>교차</em><em>로</em> 안으로 진입해 들어오는 경우까지 예상하고"
+            ]
+          },
+          "metadata": {
+            "case_id": "102105",
+            "dataset": "traffic",
+            "case_name": "교통사고처리특례법위반",
+            "court_name": "대법원",
+            "case_number": "86도163",
+            "case_category": "형사",
+            "decision_date": "1986-09-09"
+          },
+          "query_id": "traffic_law_q010",
+          "query": "교차로 좌회전 직진 충돌 주의의무",
+          "issue_tags": [
+            "교차로",
+            "좌회전",
+            "직진",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 4,
+          "case_id": "415558",
+          "chunk_id": "415558:structured_1500_250:0001",
+          "chunk_index": 1,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "요양급여불승인처분취소",
+          "case_number": "2022구단53078",
+          "court_name": "서울행정법원",
+          "decision_date": "0001-01-01",
+          "retriever_score": 129.48788,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:415558#415558:structured_1500_250:0001",
+          "chunk_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_situation_context traffic_evidence_terms: ○○○○○ 방면에서 ○○○○○○ 방면으로 직진하여 교차로를 통과하다가 ○○○○○○ 방면에서 ○○○○○○ 방면으로 신호에 따라 좌회전하는 아반떼 승용차와 충돌하였다(이하 '이 사건 사고'라 한다). 나. 원고는 이 사건 사고로 '안쪽 복사의 골절(개방성, 좌측)...",
+          "search_preview": "traffic_signal_groups: core_actor_action_nearby direct_accident_expression fault_or_liability_context traffic_situation_context traffic_evidence_terms: ○○○○○ 방면에서 ○○○○○○ 방면으로 직진하여 교차로를 통과하다가 ○○○○○○ 방면에서 ○○○○○○ 방면으로 신호에 따라 좌회전하는 아반떼 승용차와 충돌하였다(이하 '이 사건 사고'라 한다). 나. 원고는 이 사건 사고로 '안쪽 복사의 골절(개방성, 좌측)...",
+          "matched_snippets": [
+            "나) 원고가 정지신호를 위반하여 교차로에 진입하지 않았더라면 이 사건 사고가 발생되지 않았을 것임이 명백한 점, 이 사건 사고 당시 상대 차량은 좌회전신호에 따라 교차로에 진입하였는바, 진행신호에 따라 교차로를 정상적으로 통과하던 상대 차량운전자로서는 신호에 위반하여 교차로에 진입하는\n신호위반\n앞을 보면서직진으로 진행하였고",
+            "있는 피해차량을 보면서도 속도를 줄이거나 멈추지 않고 계속 앞을 보면서직진으로 진행하였고 피해차량과 충돌하기 직전에도 사고를 회피하려고 방향을 틀어옆으로 피\n적색신호\n좌회전\n좌회전신호에 따라 교차로에 진입하였는바, 진행신"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "나) 원고가 정지신호를 위반하여 <em>교차</em><em>로</em>에 진입하지 않았더라면 이 사건 사고가 발생되지 않았을 것임이 명백한 점, 이 사건 사고 당시 상대 차량은 <em>좌</em><em>회전</em>신호에 따라 <em>교차</em><em>로</em>에 진입하였는바, 진행신호에 따라 <em>교차</em><em>로</em>를 정상적으로 통과하던 상대 차량운전자로서는 신호에 위반하여 <em>교차</em><em>로</em>에 진입하는\n신호위반\n앞을 보면서<em>직진</em>으로 진행하였고",
+              "있는 피해차량을 보면서도 속도를 줄이거나 멈추지 않고 계속 앞을 보면서<em>직진</em>으로 진행하였고 피해차량과 <em>충돌</em>하기 직전에도 사고를 회피하려고 방향을 틀어옆으로 피\n적색신호\n<em>좌</em><em>회전</em>\n<em>좌</em><em>회전</em>신호에 따라 <em>교차</em><em>로</em>에 진입하였는바, 진행신"
+            ],
+            "search_text": [
+              "나) 원고가 정지신호를 위반하여 <em>교차</em><em>로</em>에 진입하지 않았더라면 이 사건 사고가 발생되지 않았을 것임이 명백한 점, 이 사건 사고 당시 상대 차량은 <em>좌</em><em>회전</em>신호에 따라 <em>교차</em><em>로</em>에 진입하였는바, 진행신호에 따라 <em>교차</em><em>로</em>를 정상적으로 통과하던 상대 차량운전자로서는 신호에 위반하여 <em>교차</em><em>로</em>에 진입하는\n신호위반\n앞을 보면서<em>직진</em>으로 진행하였고",
+              "있는 피해차량을 보면서도 속도를 줄이거나 멈추지 않고 계속 앞을 보면서<em>직진</em>으로 진행하였고 피해차량과 <em>충돌</em>하기 직전에도 사고를 회피하려고 방향을 틀어옆으로 피\n적색신호\n<em>좌</em><em>회전</em>\n<em>좌</em><em>회전</em>신호에 따라 <em>교차</em><em>로</em>에 진입하였는바, 진행신"
+            ]
+          },
+          "metadata": {
+            "case_id": "415558",
+            "dataset": "traffic",
+            "case_name": "요양급여불승인처분취소",
+            "court_name": "서울행정법원",
+            "case_number": "2022구단53078",
+            "case_category": "일반행정",
+            "decision_date": "0001-01-01"
+          },
+          "query_id": "traffic_law_q010",
+          "query": "교차로 좌회전 직진 충돌 주의의무",
+          "issue_tags": [
+            "교차로",
+            "좌회전",
+            "직진",
+            "주의의무"
+          ]
+        },
+        {
+          "query_source": "traffic_law",
+          "retriever": "traffic_law_bm25_nori",
+          "source_type": "traffic_precedent",
+          "rank": 5,
+          "case_id": "409902",
+          "chunk_id": "409902:structured_1500_250:0002",
+          "chunk_index": 2,
+          "chunk_type": "traffic_metadata",
+          "chunk_strategy": "structured_1500_250",
+          "case_name": "요양급여불승인 처분취소",
+          "case_number": "2020구단16051",
+          "court_name": "서울행정법원",
+          "decision_date": "0001-01-01",
+          "retriever_score": 129.2667,
+          "score_type": "bm25_score",
+          "index": "precedent_traffic_chunks_bm25_nori_v1",
+          "source_reference": "precedent_traffic_db:409902#409902:structured_1500_250:0002",
+          "chunk_preview": "위반하고 자신의 진로를 가 전방주시의무 좌회전 주의의무 지신호를 위반하여 직진하였고, 이 사건 사고지점 교차로에 이르러서도 역시 정지신호를 위반하여 직진함으로써 좌회전 신호에 따라 좌회전 하던 피해 차량과 교차로에서 부딪힌 사실이 인정된다. 당시 원고를 제외한 나머지 차량들은 모두 정지신호를 준수하여 정차 중이었음에도 원고만이 신호를 위반하여 탓하기 어렵다거나 이 사건 사고가 업무수행에 수반되는 통상적인 범위 내에 있는 것이라고 볼 수 없다. 1 이 사건 사고지점이 왕복 8차선으로 차량 통행량이 많은 곳이기는 하였으나 도로구조...",
+          "search_preview": "위반하고 자신의 진로를 가 전방주시의무 좌회전 주의의무 지신호를 위반하여 직진하였고, 이 사건 사고지점 교차로에 이르러서도 역시 정지신호를 위반하여 직진함으로써 좌회전 신호에 따라 좌회전 하던 피해 차량과 교차로에서 부딪힌 사실이 인정된다. 당시 원고를 제외한 나머지 차량들은 모두 정지신호를 준수하여 정차 중이었음에도 원고만이 신호를 위반하여 탓하기 어렵다거나 이 사건 사고가 업무수행에 수반되는 통상적인 범위 내에 있는 것이라고 볼 수 없다. 1 이 사건 사고지점이 왕복 8차선으로 차량 통행량이 많은 곳이기는 하였으나 도로구조...",
+          "matched_snippets": [
+            "위반하고 자신의 진로를 가\n전방주시의무\n좌회전\n주의의무\n지신호를 위반하여 직진하였고, 이 사건 사고지점 교차로에 이르러서도 역시 정지신호를 위반하여 직진함으로써 좌회전 신호에 따라 좌회전 하던 피해 차량과 교차로에서 부딪힌 사실이 인정된다.",
+            ": 신호위반\n좌회전\ntraffic_fault_terms: 과실비율\n안전운전의무\n전방주시의무\n주의의무"
+          ],
+          "highlight": {
+            "chunk_text": [
+              "위반하고 자신의 진로를 가\n전방주시의무\n<em>좌</em><em>회전</em>\n주의<em>의무</em>\n지신호를 위반하여 <em>직진</em>하였고, 이 사건 사고지점 <em>교차</em><em>로</em>에 이르러서도 역시 정지신호를 위반하여 <em>직진</em>함으로써 <em>좌</em><em>회전</em> 신호에 따라 <em>좌</em><em>회전</em> 하던 피해 차량과 <em>교차</em><em>로</em>에서 부딪힌 사실이 인정된다.",
+              ": 신호위반\n<em>좌</em><em>회전</em>\ntraffic_fault_terms: 과실비율\n안전운전의무\n전방주시의무\n<em>주</em>의<em>의무</em>"
+            ],
+            "search_text": [
+              "위반하고 자신의 진로를 가\n전방주시의무\n<em>좌</em><em>회전</em>\n주의<em>의무</em>\n지신호를 위반하여 <em>직진</em>하였고, 이 사건 사고지점 <em>교차</em><em>로</em>에 이르러서도 역시 정지신호를 위반하여 <em>직진</em>함으로써 <em>좌</em><em>회전</em> 신호에 따라 <em>좌</em><em>회전</em> 하던 피해 차량과 <em>교차</em><em>로</em>에서 부딪힌 사실이 인정된다.",
+              ": 신호위반\n<em>좌</em><em>회전</em>\ntraffic_fault_terms: 과실비율\n안전운전의무\n전방주시의무\n<em>주</em>의<em>의무</em>"
+            ]
+          },
+          "metadata": {
+            "case_id": "409902",
+            "dataset": "traffic",
+            "case_name": "요양급여불승인 처분취소",
+            "court_name": "서울행정법원",
+            "case_number": "2020구단16051",
+            "case_category": "일반행정",
+            "decision_date": "0001-01-01"
+          },
+          "query_id": "traffic_law_q010",
+          "query": "교차로 좌회전 직진 충돌 주의의무",
+          "issue_tags": [
+            "교차로",
+            "좌회전",
+            "직진",
+            "주의의무"
+          ]
+        }
+      ]
+    }
+  ]
+}

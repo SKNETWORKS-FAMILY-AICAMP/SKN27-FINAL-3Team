@@ -45,8 +45,10 @@ def run_law_ground_search(
         output["limitations"].extend(validation_res["errors"])
         return output
         
-    # Neo4j 세션 주입 (파라미터로 안 넘어오면 자체 생성)
-    session = neo4j_session or _get_neo4j_session()
+    # Neo4j 세션 주입 (명시 설정이 있을 때만 자체 생성)
+    session = neo4j_session
+    if session is None and _should_open_neo4j_session(context, input_context):
+        session = _get_neo4j_session()
 
     # 2. Query Processing & Neo4j Hint Graph Boosting
     query_data = input_context.get("query", {})
@@ -179,3 +181,16 @@ def _init_output(agent_input: dict) -> dict:
         "missing_fields": [],
         "created_at": datetime.now().isoformat()
     }
+
+
+def _should_open_neo4j_session(adapter_context: dict[str, Any], input_context: dict[str, Any]) -> bool:
+    graph_config = input_context.get("law_graph") if isinstance(input_context.get("law_graph"), dict) else {}
+    if "enabled" in graph_config:
+        return _truthy(graph_config.get("enabled"))
+    if "enable_neo4j" in adapter_context:
+        return _truthy(adapter_context.get("enable_neo4j"))
+    return _truthy(os.environ.get("LAW_GROUND_SEARCH_ENABLE_NEO4J"))
+
+
+def _truthy(value: Any) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}

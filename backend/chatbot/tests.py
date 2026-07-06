@@ -546,6 +546,8 @@ class ProductionReadinessTests(TestCase):
         warning_checks = {check["name"] for check in report["checks"] if check["status"] == "warn"}
         self.assertIn("supervisor_llm", warning_checks)
         self.assertIn("legal_rag", warning_checks)
+        self.assertIn("law_ground_search_sync", warning_checks)
+        self.assertIn("text_ml_case_search_rag", warning_checks)
         self.assertIn("object_storage", warning_checks)
 
     @override_settings(
@@ -649,6 +651,29 @@ class ProductionReadinessTests(TestCase):
             any("sentence-transformers package is not installed" in detail["message"] for detail in checks["legal_rag"]["details"])
         )
 
+    @override_settings(
+        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
+        REVIEW_CASE_ES_BM25_INDEX="review_case_chunks_bm25_nori_v1",
+        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="precedent_fault_ratio_chunks_bm25_nori_v1",
+    )
+    def test_readiness_report_requires_elasticsearch_package_for_text_ml_rag(self):
+        def fake_find_spec(name):
+            if name == "elasticsearch":
+                return None
+            return object()
+
+        with patch("chatbot.readiness.importlib.util.find_spec", side_effect=fake_find_spec):
+            report = build_production_readiness_report(include_database=False)
+
+        checks = {check["name"]: check for check in report["checks"]}
+        self.assertEqual(checks["text_ml_case_search_rag"]["status"], "fail")
+        self.assertTrue(
+            any("elasticsearch package is required" in detail["message"] for detail in checks["text_ml_case_search_rag"]["details"])
+        )
+
     def test_readiness_management_command_outputs_json(self):
         output = StringIO()
 
@@ -663,6 +688,66 @@ class ProductionReadinessTests(TestCase):
         body = json.loads(output.getvalue())
         self.assertEqual(body["contract_version"], "production_readiness.v1")
         self.assertIn(body["status"], {"pass", "warn", "fail"})
+
+    def test_text_ml_case_search_smoke_reports_safe_fallback_without_es(self):
+        output = StringIO()
+
+        with patch.dict(os.environ, {"TEXT_ML_CASE_SEARCH_SYNC_USE_ES": ""}):
+            call_command(
+                "smoke_text_ml_case_search",
+                "--format",
+                "json",
+                stdout=output,
+            )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "text_ml_case_search_smoke.v1")
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["execution_mode"], "sync")
+        self.assertEqual(body["adapter_execution_mode"], "sync")
+        self.assertEqual(body["adapter_source"], "fault_ratio_knowledge_agent")
+        self.assertFalse(body["es_rag_enabled"])
+        self.assertTrue(body["es_rag_fallback"])
+
+    def test_text_ml_case_search_smoke_require_es_fails_without_es(self):
+        with patch.dict(os.environ, {"TEXT_ML_CASE_SEARCH_SYNC_USE_ES": ""}):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "smoke_text_ml_case_search",
+                    "--require-es",
+                    stdout=StringIO(),
+                )
+
+    def test_law_ground_search_smoke_reports_safe_partial_without_results(self):
+        output = StringIO()
+
+        with patch("ai.agents.law_ground_search.agent._get_neo4j_session", return_value=None):
+            with patch("ai.agents.law_ground_search.agent.search_law_provisions", return_value=[]):
+                call_command(
+                    "smoke_law_ground_search",
+                    "--format",
+                    "json",
+                    stdout=output,
+                )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "law_ground_search_smoke.v1")
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["execution_mode"], "sync")
+        self.assertEqual(body["adapter_execution_mode"], "sync")
+        self.assertEqual(body["agent_status"], "partial")
+        self.assertEqual(body["execution_status"], "empty")
+        self.assertEqual(body["law_provision_count"], 0)
+
+    def test_law_ground_search_smoke_require_results_fails_without_results(self):
+        with patch("ai.agents.law_ground_search.agent._get_neo4j_session", return_value=None):
+            with patch("ai.agents.law_ground_search.agent.search_law_provisions", return_value=[]):
+                with self.assertRaises(CommandError):
+                    call_command(
+                        "smoke_law_ground_search",
+                        "--require-results",
+                        stdout=StringIO(),
+                    )
 
     @override_settings(
         DJANGO_DATABASE_ENGINE="postgres",
@@ -2306,6 +2391,14 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job.agent_results.count(), 0)
         self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], AnalysisJobStatus.QUEUED)
 
+        queued_detail_response = self.client.get(f"/api/analysis/jobs/{job.job_id}/")
+        self.assertEqual(queued_detail_response.status_code, 200)
+        queued_detail = queued_detail_response.json()["job"]
+        self.assertEqual(queued_detail["backend"], "postgresql")
+        self.assertEqual(queued_detail["contract_version"], "analysis_job_detail.v1")
+        self.assertEqual(queued_detail["progress_state"]["state"], "queued")
+        self.assertEqual(queued_detail["work_item"]["work_item_id"], work_item.work_item_id)
+
         result = process_agent_work_items(limit=1)
 
         self.assertEqual(result["processed"], 1)
@@ -2317,11 +2410,18 @@ class ChatbotMockApiTests(TestCase):
         self.assertGreater(job.agent_results.count(), 0)
         self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], job.status)
 
-    def test_canonical_chat_sync_request_keeps_unimplemented_agents_mock(self):
+        completed_detail_response = self.client.get(f"/api/analysis/jobs/{job.job_id}/")
+        self.assertEqual(completed_detail_response.status_code, 200)
+        completed_detail = completed_detail_response.json()["job"]
+        self.assertEqual(completed_detail["status"], job.status)
+        self.assertEqual(completed_detail["progress_state"]["state"], "success")
+        self.assertGreater(completed_detail["agent_result_count"], 0)
+
+    def test_canonical_chat_sync_request_runs_ready_fault_ratio_adapter_only(self):
         response = self.client.post(
             "/api/chat/messages/",
             data={
-                "session_id": "ses_canonical_sync_mock_only",
+                "session_id": "ses_canonical_sync_fault_ratio_hybrid",
                 "conversation_save_state": "pending",
                 "user_text": "사고 사진과 블랙박스 상황으로 과실 비율을 검토해줘.",
                 "persona_id": "accident_scene_photo_driver",
@@ -2334,19 +2434,44 @@ class ChatbotMockApiTests(TestCase):
         body = response.json()
         execution = body["supervisor_execution"]
         node_results = {item["node_code"]: item for item in execution["node_results"]}
+        text_ml_result = node_results["text_ml_case_search"]
+        vision_result = node_results["vision_media_analysis"]
 
-        self.assertEqual(execution["execution_mode"], "mock")
-        for node_code in ("vision_media_analysis", "text_ml_case_search"):
-            self.assertEqual(node_results[node_code]["execution_mode"], "mock")
-            self.assertEqual(node_results[node_code]["adapter_execution_mode"], "mock")
-            self.assertEqual(node_results[node_code]["adapter_modes"], ["mock"])
+        self.assertEqual(execution["execution_mode"], "hybrid")
+        self.assertEqual(text_ml_result["execution_mode"], "sync")
+        self.assertEqual(text_ml_result["adapter_execution_mode"], "sync")
+        self.assertIn("sync", text_ml_result["adapter_modes"])
+        self.assertEqual(vision_result["execution_mode"], "mock")
+        self.assertEqual(vision_result["adapter_execution_mode"], "mock")
+        self.assertEqual(vision_result["adapter_modes"], ["mock"])
+
+        structured_result = text_ml_result["structured_result"]
+        self.assertEqual(
+            structured_result["retrieval"]["adapter_source"],
+            "fault_ratio_knowledge_agent",
+        )
+        self.assertIn("similar_cases", structured_result)
+        self.assertIn("top_cases", structured_result)
+        self.assertIn("ratio_range_label", structured_result)
+        self.assertIn("recommended_evidence", structured_result)
+        self.assertTrue(
+            any(
+                "TEXT_ML_CASE_SEARCH_SYNC_USE_ES" in limitation
+                for limitation in text_ml_result["limitations"]
+            )
+        )
 
         invocations = AgentInvocation.objects.filter(
             job__job_id=execution["job_id"],
             node_code__in=["vision_media_analysis", "text_ml_case_search"],
         )
         self.assertEqual(invocations.count(), 2)
-        self.assertEqual({invocation.execution_mode for invocation in invocations}, {"mock"})
+        invocation_modes = {
+            invocation.node_code: invocation.execution_mode
+            for invocation in invocations
+        }
+        self.assertEqual(invocation_modes["text_ml_case_search"], "sync")
+        self.assertEqual(invocation_modes["vision_media_analysis"], "mock")
 
     def test_canonical_chat_message_covers_all_demo_personas_before_real_agents(self):
         for persona in list_demo_personas():
@@ -3634,13 +3759,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(quality["contract_version"], "report_quality.v1")
         self.assertEqual(quality["analysis_job_status"], AnalysisJobStatus.PARTIAL)
         self.assertTrue(quality["partial_report"])
+        self.assertGreaterEqual(quality["limitation_count"], 1)
 
         report = Report.objects.get(report_id="rep_partial_report_quality")
         self.assertTrue(report.metadata["report_quality"]["partial_report"])
 
         download_response = self.client.get("/api/reports/rep_partial_report_quality/download/")
         self.assertEqual(download_response.status_code, 200)
-        self.assertIn("partial_report: True", download_response.content.decode("utf-8"))
+        download_body = download_response.content.decode("utf-8")
+        self.assertIn("partial_report: True", download_body)
+        self.assertIn("limitation_1:", download_body)
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")

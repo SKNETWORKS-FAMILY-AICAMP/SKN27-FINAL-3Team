@@ -52,3 +52,4 @@ output/pdf/SKN27_*.pdf
 설계/
 # Local archive exports
 *.tar.gz
+models/

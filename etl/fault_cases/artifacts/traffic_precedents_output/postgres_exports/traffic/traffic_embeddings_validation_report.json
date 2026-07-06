@@ -1,0 +1,56 @@
+{
+  "created_at": "2026-07-03T14:22:53",
+  "dataset": "traffic",
+  "db_name": "traffic_precedent_db",
+  "chunk_table": "traffic_precedent_chunks",
+  "embedding_table": "traffic_precedent_chunk_embeddings",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dim": 1536,
+  "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+  "chunk_count": 25952,
+  "embedding_count": 25952,
+  "missing_embedding_count": 0,
+  "is_complete": true,
+  "sample_rows": [
+    {
+      "chunk_id": "100017:structured_1500_250:0000",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "has_vector": true
+    },
+    {
+      "chunk_id": "100017:structured_1500_250:0001",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "has_vector": true
+    },
+    {
+      "chunk_id": "100017:structured_1500_250:0002",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "has_vector": true
+    },
+    {
+      "chunk_id": "100017:structured_1500_250:0003",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "has_vector": true
+    },
+    {
+      "chunk_id": "100017:structured_1500_250:0004",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "has_vector": true
+    }
+  ]
+}

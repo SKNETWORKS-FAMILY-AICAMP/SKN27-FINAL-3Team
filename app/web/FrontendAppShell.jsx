@@ -397,6 +397,56 @@ export default function FrontendAppShell({
     }
   }
 
+  async function pollQueuedWorkerResult(chatResult, requestIdentity) {
+    const workItem = chatResult?.work_item || chatResult?.supervisor_execution?.work_item || null;
+    if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
+      return chatResult;
+    }
+    if (!requestIdentity?.authToken) {
+      setWorkerActionStatus("Agent worker queued. Login is required for progress polling.");
+      return chatResult;
+    }
+
+    setWorkerActionStatus("Agent worker queued. polling job progress.");
+    try {
+      const jobDetailResult = await api.getAnalysisJobDetail({ jobId: workItem.job_id, identity: requestIdentity });
+      const jobDetail = jobDetailResult?.job || {};
+      const processedItem = jobDetail.work_item || {};
+      const progressState = jobDetail.progress_state || processedItem.progress_state || {};
+      const nextWorkItem = {
+        ...workItem,
+        status: processedItem.status || workItem.status,
+        job_status: progressState.job_status || jobDetail.status || workItem.job_status,
+        progress_state: progressState,
+      };
+      const enrichedResult = {
+        ...chatResult,
+        status: jobDetail.status || progressState.job_status || chatResult.status,
+        job_detail: jobDetail,
+        supervisor_execution: {
+          ...(chatResult.supervisor_execution || {}),
+          work_item: nextWorkItem,
+          worker_poll: {
+            contract_version: "worker_progress_polling.v1",
+            status: processedItem.status || null,
+            job_status: jobDetail.status || null,
+            progress_state: progressState,
+          },
+        },
+        work_item: nextWorkItem,
+      };
+      setWorkerActionStatus(
+        jobDetail.status
+          ? `Agent worker progress: ${jobDetail.status}`
+          : "Agent worker queued. waiting for worker process."
+      );
+      return enrichedResult;
+    } catch (_error) {
+      setWorkerActionStatus("Agent worker progress polling failed. check worker session.");
+      return chatResult;
+    }
+  }
+
   async function submitServiceMessage() {
     const trimmedQuestion = question.trim();
     if (!trimmedQuestion) {
@@ -450,7 +500,7 @@ export default function FrontendAppShell({
         },
         submitIdentity
       );
-      const workerResult = await processQueuedWorkerResult(result, submitIdentity);
+      const workerResult = await pollQueuedWorkerResult(result, submitIdentity);
       setChatMessages([
         ...conversationHistory,
         {
@@ -1357,6 +1407,7 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
   const questions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
   const packages = Array.isArray(supervisorState?.agent_input_packages) ? supervisorState.agent_input_packages : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
+  const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
   const workItem = supervisorExecution?.work_item || null;
 
   return (
@@ -1420,6 +1471,8 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
         </div>
       )}
 
+      {faultRatioNode && <FaultRatioInsightPanel node={faultRatioNode} />}
+
       {workItem && nodeResults.length === 0 && (
         <div className="node-result-list">
           <NodeResultPill
@@ -1434,6 +1487,83 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
         </div>
       )}
     </section>
+  );
+}
+
+function FaultRatioInsightPanel({ node, compact = false }) {
+  const structuredResult = node?.structured_result || {};
+  const retrieval = structuredResult.retrieval || {};
+  const sourceSummary = retrieval.source_summary || structuredResult.source_summary || {};
+  const sourceCounts = sourceSummary.source_counts || {};
+  const similarCases = Array.isArray(structuredResult.similar_cases)
+    ? structuredResult.similar_cases
+    : Array.isArray(structuredResult.top_cases)
+      ? structuredResult.top_cases
+      : [];
+  const recommendedEvidence = Array.isArray(structuredResult.recommended_evidence)
+    ? structuredResult.recommended_evidence
+    : [];
+  const limitations = Array.isArray(node?.limitations)
+    ? node.limitations
+    : Array.isArray(structuredResult.limitations)
+      ? structuredResult.limitations
+      : [];
+  const ratioRangeLabel = structuredResult.ratio_range_label || "pending review";
+  const adapterSource = retrieval.adapter_source || "not reported";
+  const sourceCountSummary = Object.keys(sourceCounts).length ? compactValue(sourceCounts) : "not reported";
+
+  if (!node || node.node_code !== "text_ml_case_search") {
+    return null;
+  }
+
+  return (
+    <article className={compact ? "fault-ratio-insight-panel compact" : "fault-ratio-insight-panel"}>
+      <div className="fault-ratio-insight-head">
+        <span className="tag">text_ml_case_search</span>
+        <strong>Fault ratio evidence</strong>
+        <span className="tag">{normalizeExecutionMode(node.adapter_execution_mode || node.execution_mode)}</span>
+      </div>
+      <div className="fault-ratio-insight-grid">
+        <p>
+          <span>ratio_range_label</span>
+          <strong>{compactValue(ratioRangeLabel)}</strong>
+        </p>
+        <p>
+          <span>retrieval.adapter_source</span>
+          <strong>{compactValue(adapterSource)}</strong>
+        </p>
+        <p>
+          <span>source_summary</span>
+          <strong>{sourceCountSummary}</strong>
+        </p>
+      </div>
+      {similarCases.length > 0 && (
+        <div className="fault-ratio-insight-section">
+          <strong>similar_cases</strong>
+          {similarCases.slice(0, compact ? 2 : 3).map((item, index) => (
+            <p key={item.source_ref || item.source_reference || item.case_id || `similar-case-${index}`}>
+              {compactValue(item)}
+            </p>
+          ))}
+        </div>
+      )}
+      {recommendedEvidence.length > 0 && (
+        <div className="fault-ratio-insight-section">
+          <strong>recommended_evidence</strong>
+          <p>{compactValue(recommendedEvidence)}</p>
+        </div>
+      )}
+      {limitations.length > 0 && (
+        <div className="fault-ratio-insight-section">
+          <strong>limitations</strong>
+          <ul>
+            {limitations.slice(0, compact ? 2 : 3).map((item, index) => (
+              <li key={`fault-ratio-limitation-${index}`}>{compactValue(item)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </article>
   );
 }
 
@@ -1494,6 +1624,8 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
     null;
   const agentStatusCounts = reportQuality?.agent_status_counts || {};
   const hasReportQuality = Boolean(reportQuality);
+  const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
+  const reportQualityTitle = reportQuality?.partial_report ? "Partial analysis report" : "Ready analysis report";
   const helperText = isAuthenticated
     ? reportActionStatus || "상담 결과를 reports metadata로 저장하거나 다운로드 경계를 확인할 수 있습니다."
     : reportActionStatus || "리포트 저장과 다운로드는 Google 로그인 후 사용할 수 있습니다.";
@@ -1509,10 +1641,21 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
             <span className={reportQuality.partial_report ? "tag amber" : "tag green"}>
               {reportQuality.partial_report ? "partial_report" : "ready_report"}
             </span>
+            <strong className="report-quality-title">{reportQualityTitle}</strong>
             <span className="tag">analysis_job_status: {reportQuality.analysis_job_status || "unknown"}</span>
             <span className="tag">limitations: {reportQuality.limitation_count ?? 0}</span>
             {Object.keys(agentStatusCounts).length > 0 && (
               <span className="tag">agent_status_counts: {compactValue(agentStatusCounts)}</span>
+            )}
+            {reportQuality.partial_report && (
+              <p className="report-quality-warning">Review required before final submission.</p>
+            )}
+            {reportLimitations.length > 0 && (
+              <ul className="report-quality-limitations" aria-label="report quality limitations">
+                {reportLimitations.map((item, index) => (
+                  <li key={`report-quality-limitation-${index}`}>{compactValue(item)}</li>
+                ))}
+              </ul>
             )}
           </div>
         )}
@@ -1654,6 +1797,7 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
   const hasReport = Boolean(reportingPayload || analysisCards.length || supervisorExecution);
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
+  const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
 
   return (
     <section className="screen">
@@ -1754,6 +1898,7 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
                   ))}
                 </div>
               </div>
+              {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
             </>
           ) : (
             <div className="inspector-section">

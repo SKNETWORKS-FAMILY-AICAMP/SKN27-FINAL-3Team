@@ -99,11 +99,14 @@ LEGAL_RAG_VECTOR_ENABLED=1
 LEGAL_RAG_QUERY_EMBEDDING_PROVIDER=sentence-transformers
 LEGAL_RAG_QUERY_EMBEDDING_MODEL=intfloat/multilingual-e5-large
 LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS=1024
+LAW_GROUND_SEARCH_ENABLE_NEO4J=0
 ```
 
 Before enabling it, load ETL output into `law_chunks` and `law_embeddings`.
 The runtime falls back to Django `rag_chunks` lexical search when vector search
 is disabled or unavailable, and records that fallback in retrieval metadata.
+Keep `LAW_GROUND_SEARCH_ENABLE_NEO4J=0` unless the Neo4j hint graph is running
+and `NEO4J_URI` points to that service.
 
 Create or refresh the pgvector schema from the Django runtime:
 
@@ -132,13 +135,74 @@ python backend\manage.py load_legal_rag_smoke_fixture --replace --format text --
 The fixture lives at `storage/rag/legal_rag_smoke_chunks.jsonl` and should keep
 `rag_chunks` non-zero even when pgvector ETL artifacts are not available yet.
 
-## 5. Optional Warnings
+## 5. Law Ground Search Sync Smoke
+
+`law_ground_search` can run in sync mode through the Supervisor adapter. The
+safe smoke verifies that the adapter imports, receives the canonical context,
+and returns a normalized envelope even when the legal RAG result set is empty:
+
+```powershell
+python backend\manage.py smoke_law_ground_search --format text
+```
+
+After the legal RAG data and retrieval path are ready, require at least one
+provision:
+
+```powershell
+python backend\manage.py smoke_law_ground_search --require-results --format text
+```
+
+The readiness report includes `law_ground_search_sync`; it warns while
+`LEGAL_RAG_VECTOR_ENABLED=0` because the adapter may only prove connectivity,
+not release-quality retrieval.
+
+## 6. Fault Ratio Text ML RAG
+
+`text_ml_case_search` can run in sync mode without Elasticsearch. In that mode
+it returns a safe partial/fallback result and records the fallback in
+`limitations`. Enable Elasticsearch only after the review-case and
+fault-ratio-precedent BM25/Nori indexes are loaded.
+
+```dotenv
+TEXT_ML_CASE_SEARCH_SYNC_USE_ES=1
+TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST=http://elasticsearch:9200
+TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER=elastic
+TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=<secret-store-value>
+TEXT_ML_CASE_SEARCH_ELASTICSEARCH_REQUEST_TIMEOUT=120
+REVIEW_CASE_ES_BM25_INDEX=review_case_chunks_bm25_nori_v1
+FAULT_RATIO_PRECEDENT_ES_BM25_INDEX=precedent_fault_ratio_chunks_bm25_nori_v1
+```
+
+The readiness report includes `text_ml_case_search_rag`. With
+`TEXT_ML_CASE_SEARCH_SYNC_USE_ES=0` or unset, this check is `warn` because the
+runtime stays usable but does not perform ES-backed case retrieval. With
+`TEXT_ML_CASE_SEARCH_SYNC_USE_ES=1`, readiness validates the required package,
+host, password policy, and index names without pinging Elasticsearch.
+
+Run the safe smoke without requiring Elasticsearch:
+
+```powershell
+python backend\manage.py smoke_text_ml_case_search --format text
+```
+
+After Elasticsearch is reachable and the two BM25/Nori indexes are loaded, use
+the stricter smoke:
+
+```powershell
+python backend\manage.py smoke_text_ml_case_search --require-es --format text
+```
+
+If `--require-es` fails, the service can still run the non-ES fallback, but the
+fault-ratio similar-case quality is not release-ready.
+
+## 7. Optional Warnings
 
 These settings may remain warning-level during a staged rollout:
 
 ```dotenv
 SUPERVISOR_LLM_ENABLED=0
 LEGAL_RAG_VECTOR_ENABLED=0
+TEXT_ML_CASE_SEARCH_SYNC_USE_ES=0
 OBJECT_STORAGE_PROVIDER=mock_s3
 REDIS_URL=
 ```
@@ -231,10 +295,10 @@ This smoke does not prove OCR/RAG/Vision model quality; it proves the
 Supervisor-facing persona plan, reporting payload, and report action boundary
 remain executable.
 
-## 6. Secret Rules
+## 7. Secret Rules
 
 - Do not commit `.env`, `.env.production`, or copied secret files.
 - Commit only `.env.example` and `.env.production.example`.
-- Store real Google OAuth, app JWT, OAuth token, database, object storage, and
-  LLM keys in the deployment secret store.
+- Store real Google OAuth, app JWT, OAuth token, database, object storage, LLM,
+  and Elasticsearch keys in the deployment secret store.
 - After changing secrets, rerun the readiness command and the auth smoke tests.
