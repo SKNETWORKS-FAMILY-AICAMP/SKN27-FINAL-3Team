@@ -1971,6 +1971,64 @@ def get_mycase_summary(
     }
 
 
+def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
+    job = (
+        AnalysisJob.objects.select_related("session", "message")
+        .prefetch_related("events", "agent_results", "agent_invocations", "work_items", "reports")
+        .filter(job_id=_text(job_id))
+        .first()
+    )
+    if job is None:
+        return None
+
+    display_result = _display_result_for_job(job)
+    work_items = list(job.work_items.order_by("-updated_at"))
+    latest_work_item = work_items[0] if work_items else None
+    agent_results = list(job.agent_results.all())
+    agent_invocations = list(job.agent_invocations.all())
+    latest_event = job.events.order_by("-created_at").first()
+    metadata = _dict_or_empty(job.metadata)
+    work_queue = _dict_or_empty(metadata.get("work_queue"))
+    progress_state = work_queue.get("progress_state")
+    if not isinstance(progress_state, dict) and latest_work_item:
+        progress_state = _work_item_progress_state(latest_work_item, job_status=job.status)
+
+    return {
+        "backend": "postgresql",
+        "contract_version": "analysis_job_detail.v1",
+        "job_id": job.job_id,
+        "session_id": job.session.session_id,
+        "message_id": job.message.message_id if job.message_id else None,
+        "owner_id": job.owner_id or None,
+        "routing_intent": job.routing_intent,
+        "mock_scenario": job.mock_scenario,
+        "status": job.status,
+        "active_node": job.active_node,
+        "progress_message": job.progress_message,
+        "analysis_plan_id": job.analysis_plan_id,
+        "status_counts": job.status_counts or {},
+        "progress_state": progress_state or {},
+        "work_queue": work_queue,
+        "work_item": _analysis_job_work_item_summary(latest_work_item),
+        "work_items": [_analysis_job_work_item_summary(work_item) for work_item in work_items],
+        "agent_result_count": len(agent_results),
+        "agent_status_counts": _agent_status_counts(agent_results),
+        "agent_invocation_count": len(agent_invocations),
+        "agent_invocation_status_counts": _agent_invocation_status_counts(agent_invocations),
+        "display_result_id": display_result.display_result_id if display_result else None,
+        "report_count": job.reports.count(),
+        "last_event_at": (latest_event.created_at if latest_event else job.updated_at).isoformat(),
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
+        "metadata": {
+            "source": metadata.get("source"),
+            "scan_gate": metadata.get("scan_gate") or {},
+            "blocked_attachments": metadata.get("blocked_attachments") or [],
+            "attachment_scan_policy": metadata.get("attachment_scan_policy") or {},
+        },
+    }
+
+
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
     metadata = uploaded_file.metadata or {}
     checks = dict(metadata.get("checks") or {})
@@ -3713,6 +3771,21 @@ def _report_object_body_for_write(
         f"case_id: {_text(report_payload.get('case_id'))}",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _analysis_job_work_item_summary(work_item: AgentWorkItem | None) -> dict[str, Any] | None:
+    if work_item is None:
+        return None
+    return {
+        "contract_version": "agent_worker_queue.v1",
+        "work_item_id": work_item.work_item_id,
+        "job_id": work_item.job.job_id,
+        "status": work_item.status,
+        "attempt_no": work_item.attempt_no,
+        "max_attempts": work_item.max_attempts,
+        "next_run_at": work_item.next_run_at.isoformat() if work_item.next_run_at else None,
+        "progress_state": _work_item_progress_state(work_item, job_status=work_item.job.status),
+    }
 
 
 def _case_summary(job: AnalysisJob) -> dict[str, Any]:

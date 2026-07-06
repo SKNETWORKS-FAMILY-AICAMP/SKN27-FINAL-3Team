@@ -2306,6 +2306,14 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(job.agent_results.count(), 0)
         self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], AnalysisJobStatus.QUEUED)
 
+        queued_detail_response = self.client.get(f"/api/analysis/jobs/{job.job_id}/")
+        self.assertEqual(queued_detail_response.status_code, 200)
+        queued_detail = queued_detail_response.json()["job"]
+        self.assertEqual(queued_detail["backend"], "postgresql")
+        self.assertEqual(queued_detail["contract_version"], "analysis_job_detail.v1")
+        self.assertEqual(queued_detail["progress_state"]["state"], "queued")
+        self.assertEqual(queued_detail["work_item"]["work_item_id"], work_item.work_item_id)
+
         result = process_agent_work_items(limit=1)
 
         self.assertEqual(result["processed"], 1)
@@ -2316,6 +2324,13 @@ class ChatbotMockApiTests(TestCase):
         self.assertIn(job.status, {AnalysisJobStatus.SUCCESS, AnalysisJobStatus.PARTIAL})
         self.assertGreater(job.agent_results.count(), 0)
         self.assertEqual(read_analysis_job_progress(job.job_id)["snapshot"]["status"], job.status)
+
+        completed_detail_response = self.client.get(f"/api/analysis/jobs/{job.job_id}/")
+        self.assertEqual(completed_detail_response.status_code, 200)
+        completed_detail = completed_detail_response.json()["job"]
+        self.assertEqual(completed_detail["status"], job.status)
+        self.assertEqual(completed_detail["progress_state"]["state"], "success")
+        self.assertGreater(completed_detail["agent_result_count"], 0)
 
     def test_canonical_chat_sync_request_keeps_unimplemented_agents_mock(self):
         response = self.client.post(

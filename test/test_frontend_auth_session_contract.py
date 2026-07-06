@@ -43,12 +43,14 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     assert missing == []
     assert 'joinApiPath(apiBase, "chat/messages/")' in api_client
     assert 'joinApiPath(apiBase, "agents/work-items/process/")' in api_client
+    assert "analysis/jobs/${encodeURIComponent(jobId || \"\")}/" in api_client
     assert 'joinApiPath(apiBase, "files/")' in api_client
     assert 'files/${encodeURIComponent(attachmentId || "")}/scan/' in api_client
     assert 'joinApiPath(apiBase, "reports/")' in api_client
     assert "uploadFile" in api_client
     assert "processFileScan" in api_client
     assert "processAgentWorkItems" in api_client
+    assert "getAnalysisJobDetail" in api_client
     assert "FormData" in api_client
     assert "postFormData" in api_client
     assert 'from "./apiClient.js"' in chatbot
@@ -119,6 +121,10 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert 'const [executionMode, setExecutionMode] = useState("async_worker");' in shell
     assert '["async_worker", "mock", "sync"]' in shell
     assert "processQueuedWorkerResult" in shell
+    assert "pollQueuedWorkerResult" in shell
+    assert "const workerResult = await pollQueuedWorkerResult(result, submitIdentity);" in shell
+    assert "getAnalysisJobDetail" in shell
+    assert "worker_progress_polling.v1" in shell
     assert "processAgentWorkItems" in shell
     assert "workerActionStatus" in shell
     assert "worker progress" in shell

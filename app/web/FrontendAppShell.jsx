@@ -397,6 +397,56 @@ export default function FrontendAppShell({
     }
   }
 
+  async function pollQueuedWorkerResult(chatResult, requestIdentity) {
+    const workItem = chatResult?.work_item || chatResult?.supervisor_execution?.work_item || null;
+    if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
+      return chatResult;
+    }
+    if (!requestIdentity?.authToken) {
+      setWorkerActionStatus("Agent worker queued. Login is required for progress polling.");
+      return chatResult;
+    }
+
+    setWorkerActionStatus("Agent worker queued. polling job progress.");
+    try {
+      const jobDetailResult = await api.getAnalysisJobDetail({ jobId: workItem.job_id, identity: requestIdentity });
+      const jobDetail = jobDetailResult?.job || {};
+      const processedItem = jobDetail.work_item || {};
+      const progressState = jobDetail.progress_state || processedItem.progress_state || {};
+      const nextWorkItem = {
+        ...workItem,
+        status: processedItem.status || workItem.status,
+        job_status: progressState.job_status || jobDetail.status || workItem.job_status,
+        progress_state: progressState,
+      };
+      const enrichedResult = {
+        ...chatResult,
+        status: jobDetail.status || progressState.job_status || chatResult.status,
+        job_detail: jobDetail,
+        supervisor_execution: {
+          ...(chatResult.supervisor_execution || {}),
+          work_item: nextWorkItem,
+          worker_poll: {
+            contract_version: "worker_progress_polling.v1",
+            status: processedItem.status || null,
+            job_status: jobDetail.status || null,
+            progress_state: progressState,
+          },
+        },
+        work_item: nextWorkItem,
+      };
+      setWorkerActionStatus(
+        jobDetail.status
+          ? `Agent worker progress: ${jobDetail.status}`
+          : "Agent worker queued. waiting for worker process."
+      );
+      return enrichedResult;
+    } catch (_error) {
+      setWorkerActionStatus("Agent worker progress polling failed. check worker session.");
+      return chatResult;
+    }
+  }
+
   async function submitServiceMessage() {
     const trimmedQuestion = question.trim();
     if (!trimmedQuestion) {
@@ -450,7 +500,7 @@ export default function FrontendAppShell({
         },
         submitIdentity
       );
-      const workerResult = await processQueuedWorkerResult(result, submitIdentity);
+      const workerResult = await pollQueuedWorkerResult(result, submitIdentity);
       setChatMessages([
         ...conversationHistory,
         {
