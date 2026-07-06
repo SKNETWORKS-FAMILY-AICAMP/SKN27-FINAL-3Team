@@ -176,6 +176,8 @@ def test_vite_proxy_does_not_capture_frontend_api_client_module():
     assert 'const repoRoot = resolve(appWebDir, "../..");' in config
     assert 'loadEnv(mode, repoRoot, "VITE_")' in config
     assert "envDir: repoRoot" in config
+    assert '"http://127.0.0.1:8010"' in config
+    assert '"http://127.0.0.1:8000"' not in config
     assert 'const apiProxyPrefix = "^/api(/|$)";' in config
     assert "[apiProxyPrefix]: apiProxyTarget" in config
     assert '"/api": apiProxyTarget' not in config

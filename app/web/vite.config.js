@@ -11,7 +11,7 @@ const apiProxyPrefix = "^/api(/|$)";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, repoRoot, "VITE_");
   const apiProxyTarget =
-    process.env.VITE_API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8000";
+    process.env.VITE_API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || "http://127.0.0.1:8010";
 
   return {
     envDir: repoRoot,
