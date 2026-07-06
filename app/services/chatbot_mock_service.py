@@ -1136,12 +1136,22 @@ def _infer_scenario(payload: dict[str, Any]) -> str:
     text = _conversation_text(payload)
     if "리포트" in text or "다운로드" in text or "내려받" in text or "내 사건" in text:
         return "report_redownload"
+    if (
+        "과실비율" in text
+        or "과실" in text
+        or "판례" in text
+        or "유사 사례" in text
+        or "유사사례" in text
+        or "심의사례" in text
+        or "사고" in text
+        or "접촉" in text
+        or "충돌" in text
+    ):
+        return "fault_ratio"
     if "법령" in text or "조문" in text or "근거" in text or "도로교통법" in text:
         return "law_question"
     if "고지서" in text or "과태료" in text or "범칙금" in text or "이의" in text:
         return "fine_notice"
-    if "과실" in text or "사고" in text or "접촉" in text or "충돌" in text:
-        return "fault_ratio"
     return "fine_notice"
 
 

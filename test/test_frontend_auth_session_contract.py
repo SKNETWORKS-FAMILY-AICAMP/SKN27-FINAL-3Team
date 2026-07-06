@@ -124,11 +124,18 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "setExecutionMode" in shell
     assert "execution_mode: executionMode" in shell
     assert "execution-mode-control" in shell
-    assert 'const [executionMode, setExecutionMode] = useState("async_worker");' in shell
-    assert '["async_worker", "mock", "sync"]' in shell
+    assert 'const [executionMode, setExecutionMode] = useState("sync");' in shell
+    assert '["sync", "async_worker", "mock"]' in shell
     assert "processQueuedWorkerResult" in shell
     assert "pollQueuedWorkerResult" in shell
     assert "const workerResult = await pollQueuedWorkerResult(result, submitIdentity);" in shell
+    assert "canSaveGuestConversation" in shell
+    assert "workerResult?.persistence?.job_id || workerResult?.session_id || workerResult?.message_id" in shell
+    assert "guestDetailedReportUsed" in shell
+    assert 'source: "guest_followup_question"' in shell
+    assert "비로그인 상담은 1회 리포팅까지 제공됩니다." in shell
+    assert "saveConversationWithGoogle" in shell
+    assert "현재 상태로 저장하거나 답변을 이어갈 수 있습니다." in shell
     assert "getAnalysisJobDetail" in shell
     assert "worker_progress_polling.v1" in shell
     assert "processAgentWorkItems" in shell
@@ -136,6 +143,20 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "worker progress" in shell
     assert "reportQuality" in shell
     assert "report-quality-panel" in shell
+    assert "openSavedCase" in shell
+    assert "onOpenCase={openSavedCase}" in shell
+    assert "restoreConversationMessages" in shell
+    assert "restoreAnalysisResponse" in shell
+    assert "restoreCurrentReport" in shell
+    assert "저장된 상담을 현재 대화로 다시 열었습니다." in shell
+    assert "latest_report_id" in shell
+    assert "내 사건에서 저장된 리포트를 열었습니다." in shell
+    assert 'const [selectedPersonaId, setSelectedPersonaId] = useState("");' in shell
+    assert "<details className=\"persona-control-panel\"" in shell
+    assert "개발용 Agent 점검" in shell
+    assert "Traffic Dispute AI" in shell
+    assert "비회원 1회 리포팅 가능" in shell
+    assert "reportingPayload || analysisCards.length || supervisorExecution || currentReport" in shell
     assert "data-partial-report" in shell
     assert "partial_report" in shell
     assert "ready_report" in shell
@@ -152,6 +173,9 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
 def test_vite_proxy_does_not_capture_frontend_api_client_module():
     config = read_text(ROOT / "app" / "web" / "vite.config.js")
 
+    assert 'const repoRoot = resolve(appWebDir, "../..");' in config
+    assert 'loadEnv(mode, repoRoot, "VITE_")' in config
+    assert "envDir: repoRoot" in config
     assert 'const apiProxyPrefix = "^/api(/|$)";' in config
     assert "[apiProxyPrefix]: apiProxyTarget" in config
     assert '"/api": apiProxyTarget' not in config

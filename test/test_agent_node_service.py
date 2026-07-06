@@ -533,6 +533,65 @@ def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypa
     assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
 
 
+def test_execute_sync_text_ml_case_search_falls_back_to_django_review_case_rag(monkeypatch):
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    monkeypatch.setattr(
+        text_ml_agent,
+        "_run_fault_ratio_knowledge_agent",
+        lambda **_kwargs: None,
+    )
+
+    def fake_search_legal_rag(query, *, top_k, source_type):
+        assert "교차로" in query
+        assert top_k == 3
+        assert source_type == "review_case"
+        return {
+            "contract_version": "legal_rag_search.v1",
+            "status": "ready",
+            "backend": "django_rag_tables",
+            "query": query,
+            "top_k": top_k,
+            "result_count": 1,
+            "results": [
+                {
+                    "source_reference": "review_case:local_chunk_001",
+                    "source_type": "review_case",
+                    "source_name": "local review case chunks",
+                    "title": "신호 없는 교차로 직진/우측 진입 사고",
+                    "summary": "선진입과 일시정지 여부가 과실 판단의 핵심 쟁점입니다.",
+                    "score": 7.5,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(text_ml_agent, "search_legal_rag", fake_search_legal_rag)
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "text_ml_case_search",
+            "analysis_plan_id": "plan_sync_text_ml_rag",
+            "job_id": "job_sync_text_ml_rag",
+            "session_id": "ses_sync_text_ml_rag",
+            "message_id": "msg_sync_text_ml_rag",
+            "user_text": "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어. 과실비율과 유사 판례를 봐줘.",
+        }
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+
+    assert output["status"] == "success"
+    assert structured_result["similar_cases"][0]["source_ref"] == "review_case:local_chunk_001"
+    assert structured_result["top_cases"] == structured_result["similar_cases"]
+    assert structured_result["retrieval"]["backend"] == "django_rag_tables"
+    assert structured_result["retrieval"]["source_type"] == "review_case"
+    assert structured_result["retrieval"]["fallback_used"] is False
+    assert output["evidence"][0]["metadata"]["retrieval_backend"] == "django_rag_tables"
+    assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
+
+
 def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch):
     from ai.agents.law_ground_search import agent as law_agent
 
@@ -610,6 +669,50 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
     assert output["evidence"][0]["source_type"] == "law"
     assert output["evidence"][0]["source_ref"] == "law_db:road_traffic#article_5"
     assert validate_agent_output_envelope(output, expected_node_code="law_ground_search")["valid"]
+
+
+def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
+    from ai.agents.law_ground_search import search as law_search
+    from app.services import legal_rag_service
+    from etl.legal import search as etl_search
+
+    monkeypatch.setattr(etl_search, "search_laws", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        legal_rag_service,
+        "search_legal_rag",
+        lambda query, *, top_k, source_type: {
+            "status": "ready",
+            "backend": "django_rag_tables",
+            "query": query,
+            "top_k": top_k,
+            "results": [
+                {
+                    "source_reference": "rag_smoke_school_zone_stop",
+                    "source_type": source_type,
+                    "source_name": "Road Traffic Act smoke fixture",
+                    "title": "School zone emergency stopping",
+                    "article": "Article 32",
+                    "summary": "어린이보호구역 정차 과태료는 긴급 정차 증빙을 확인합니다.",
+                    "source_url": "https://example.test/road-traffic-act",
+                    "score": 4.0,
+                }
+            ],
+        },
+    )
+
+    provisions = law_search.search_law_provisions(
+        query_text="어린이보호구역 정차 과태료 이의신청",
+        article_refs=[],
+        temporal_basis={},
+        scope={},
+    )
+
+    assert provisions[0]["chunk_id"] == "rag_smoke_school_zone_stop"
+    assert provisions[0]["source_ref"] == "rag_smoke_school_zone_stop"
+    assert provisions[0]["source_type"] == "law"
+    assert provisions[0]["article_no"] == "Article 32"
+    assert provisions[0]["provision_text"].startswith("어린이보호구역")
+    assert provisions[0]["match_reason"] == "legal_rag_fallback:django_rag_tables"
 
 
 def test_law_ground_sync_adapter_can_mix_with_mock_objection_when_sync_requested(monkeypatch):

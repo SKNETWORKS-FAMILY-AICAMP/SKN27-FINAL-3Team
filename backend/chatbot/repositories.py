@@ -434,6 +434,8 @@ def persist_chat_message_analysis_boundary(
                     "cards": chat_response.get("cards", []),
                     "pending_questions": chat_response.get("pending_questions", []),
                     "report_links": chat_response.get("report_links", []),
+                    "supervisor_state": chat_response.get("supervisor_state", {}),
+                    "reporting_payload": chat_response.get("reporting_payload", {}),
                     "attachments": chat_response.get("attachments", []),
                     "blocked_attachments": chat_response.get("blocked_attachments", []),
                     "attachment_scan_policy": chat_response.get("attachment_scan_policy", {}),
@@ -1376,6 +1378,8 @@ def persist_analysis_job_execution(
                     "cards": chat_response.get("cards", []),
                     "pending_questions": chat_response.get("pending_questions", []),
                     "report_links": chat_response.get("report_links", []),
+                    "supervisor_state": chat_response.get("supervisor_state", {}),
+                    "reporting_payload": chat_response.get("reporting_payload", {}),
                     "attachments": job_payload.get("attachments", []),
                     "blocked_attachments": job_payload.get("blocked_attachments", []),
                     "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
@@ -1502,6 +1506,8 @@ def enqueue_analysis_job_work(
                     "cards": chat_response.get("cards", []),
                     "pending_questions": chat_response.get("pending_questions", []),
                     "report_links": chat_response.get("report_links", []),
+                    "supervisor_state": chat_response.get("supervisor_state", {}),
+                    "reporting_payload": chat_response.get("reporting_payload", {}),
                     "attachments": job_payload.get("attachments", []),
                     "blocked_attachments": job_payload.get("blocked_attachments", []),
                     "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
@@ -1989,6 +1995,17 @@ def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
     latest_event = job.events.order_by("-created_at").first()
     metadata = _dict_or_empty(job.metadata)
     work_queue = _dict_or_empty(metadata.get("work_queue"))
+    reports = list(job.reports.order_by("-created_at"))
+    latest_report = reports[0] if reports else None
+    display_payload = _analysis_job_display_payload(job, display_result)
+    node_results = _agent_result_node_results(agent_results)
+    supervisor_execution = _analysis_job_supervisor_execution(
+        job,
+        metadata=metadata,
+        node_results=node_results,
+        agent_results=agent_results,
+        latest_work_item=latest_work_item,
+    )
     progress_state = work_queue.get("progress_state")
     if not isinstance(progress_state, dict) and latest_work_item:
         progress_state = _work_item_progress_state(latest_work_item, job_status=job.status)
@@ -2006,17 +2023,33 @@ def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
         "active_node": job.active_node,
         "progress_message": job.progress_message,
         "analysis_plan_id": job.analysis_plan_id,
+        "analysis_plan": _dict_or_empty(metadata.get("analysis_plan")),
         "status_counts": job.status_counts or {},
         "progress_state": progress_state or {},
         "work_queue": work_queue,
         "work_item": _analysis_job_work_item_summary(latest_work_item),
         "work_items": [_analysis_job_work_item_summary(work_item) for work_item in work_items],
+        "conversation_messages": _analysis_job_conversation_messages(job),
+        "assistant_message": display_payload["assistant_message"],
+        "assistant_message_payload": display_payload["assistant_message_payload"],
+        "cards": display_payload["cards"],
+        "pending_questions": display_payload["pending_questions"],
+        "attachments": display_payload["attachments"],
+        "report_links": display_payload["report_links"],
+        "limitations": display_payload["limitations"],
+        "supervisor_state": _dict_or_empty(metadata.get("supervisor_state")),
+        "reporting_payload": _dict_or_empty(metadata.get("reporting_payload")),
+        "supervisor_execution": supervisor_execution,
+        "agent_results": node_results,
         "agent_result_count": len(agent_results),
         "agent_status_counts": _agent_status_counts(agent_results),
         "agent_invocation_count": len(agent_invocations),
         "agent_invocation_status_counts": _agent_invocation_status_counts(agent_invocations),
         "display_result_id": display_result.display_result_id if display_result else None,
-        "report_count": job.reports.count(),
+        "report_count": len(reports),
+        "reports": [_analysis_job_report_summary(report) for report in reports],
+        "latest_report_id": latest_report.report_id if latest_report else None,
+        "latest_report_status": latest_report.status if latest_report else None,
         "last_event_at": (latest_event.created_at if latest_event else job.updated_at).isoformat(),
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
@@ -2026,6 +2059,134 @@ def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
             "blocked_attachments": metadata.get("blocked_attachments") or [],
             "attachment_scan_policy": metadata.get("attachment_scan_policy") or {},
         },
+    }
+
+
+def _analysis_job_display_payload(
+    job: AnalysisJob,
+    display_result: AnalysisDisplayResult | None,
+) -> dict[str, Any]:
+    metadata = _dict_or_empty(job.metadata)
+    assistant_payload = _dict_or_empty(display_result.assistant_message if display_result else None)
+    metadata_assistant_message = _text(metadata.get("assistant_message"))
+    assistant_message = (
+        _text(assistant_payload.get("answer"))
+        or _text(assistant_payload.get("summary"))
+        or metadata_assistant_message
+        or job.progress_message
+    )
+    cards = _list_or_empty(display_result.cards if display_result else metadata.get("cards"))
+    pending_questions = _list_or_empty(
+        display_result.pending_questions if display_result else metadata.get("pending_questions")
+    )
+    attachments = _list_or_empty(display_result.attachments if display_result else metadata.get("attachments"))
+    report_links = _list_or_empty(display_result.report_links if display_result else metadata.get("report_links"))
+    limitations = _list_or_empty(display_result.limitations if display_result else metadata.get("limitations"))
+    if not limitations:
+        limitations = _list_or_empty(metadata.get("limitations"))
+
+    return {
+        "assistant_message": assistant_message,
+        "assistant_message_payload": assistant_payload
+        or {
+            "answer": assistant_message,
+            "summary": _case_display_summary(display_result) or assistant_message,
+            "limitations": limitations,
+        },
+        "cards": cards,
+        "pending_questions": pending_questions,
+        "attachments": attachments,
+        "report_links": report_links,
+        "limitations": limitations,
+    }
+
+
+def _analysis_job_conversation_messages(job: AnalysisJob) -> list[dict[str, Any]]:
+    messages = ChatMessage.objects.filter(session=job.session).order_by("created_at")
+    return [
+        {
+            "message_id": message.message_id,
+            "role": message.role,
+            "content": message.content,
+            "routing_intent": message.routing_intent,
+            "metadata": {
+                "analysis_job_id": _dict_or_empty(message.metadata).get("analysis_job_id"),
+                "conversation_save_state": _dict_or_empty(message.metadata).get("conversation_save_state"),
+                "response_status": _dict_or_empty(message.metadata).get("response_status"),
+            },
+            "created_at": message.created_at.isoformat(),
+        }
+        for message in messages
+    ]
+
+
+def _agent_result_node_results(agent_results: list[AgentResult]) -> list[dict[str, Any]]:
+    node_results = []
+    for index, result in enumerate(agent_results, start=1):
+        raw_output = _dict_or_empty(result.raw_output)
+        adapter_context = _dict_or_empty(raw_output.get("adapter_context"))
+        plan_step = _dict_or_empty(raw_output.get("plan_step"))
+        node_results.append(
+            {
+                "result_id": result.result_id,
+                "execution_id": _text(raw_output.get("execution_id")) or result.result_id,
+                "node_code": result.node_code,
+                "node_name": result.node_name,
+                "execution_mode": _text(raw_output.get("execution_mode")) or adapter_context.get("execution_mode") or "mock",
+                "adapter_execution_mode": adapter_context.get("execution_mode") or raw_output.get("execution_mode") or "mock",
+                "plan_step": {
+                    "order": plan_step.get("order") or index,
+                    "status": plan_step.get("status") or result.status,
+                    "fallback": plan_step.get("fallback"),
+                    "depends_on": plan_step.get("depends_on") or [],
+                },
+                "status": result.status,
+                "summary": result.summary,
+                "structured_result": result.structured_result or {},
+                "evidence": result.evidence or [],
+                "next_actions": result.next_actions or [],
+                "limitations": result.limitations or [],
+                "created_at": result.created_at.isoformat(),
+            }
+        )
+    return node_results
+
+
+def _analysis_job_supervisor_execution(
+    job: AnalysisJob,
+    *,
+    metadata: dict[str, Any],
+    node_results: list[dict[str, Any]],
+    agent_results: list[AgentResult],
+    latest_work_item: AgentWorkItem | None,
+) -> dict[str, Any]:
+    supervisor_execution = dict(_dict_or_empty(metadata.get("supervisor_execution")))
+    supervisor_execution.setdefault("contract_version", "supervisor_execution.v1")
+    supervisor_execution.setdefault("orchestration_mode", "background_session")
+    supervisor_execution.setdefault("execution_mode", "sync" if node_results else "not_recorded")
+    supervisor_execution.setdefault("job_id", job.job_id)
+    supervisor_execution.setdefault("session_id", job.session.session_id)
+    supervisor_execution.setdefault("message_id", job.message.message_id if job.message_id else None)
+    supervisor_execution["agent_results_saved"] = len(agent_results)
+    supervisor_execution["node_results"] = node_results
+    if latest_work_item:
+        supervisor_execution["work_item"] = _analysis_job_work_item_summary(latest_work_item)
+    return supervisor_execution
+
+
+def _analysis_job_report_summary(report: Report) -> dict[str, Any]:
+    metadata = _dict_or_empty(report.metadata)
+    return {
+        "report_id": report.report_id,
+        "report_type": report.report_type,
+        "status": report.status,
+        "title": report.title,
+        "content_summary": report.content_summary,
+        "storage_uri": report.storage_uri,
+        "object_storage": _dict_or_empty(metadata.get("object_storage")),
+        "report_quality": _dict_or_empty(metadata.get("report_quality")),
+        "created_at": report.created_at.isoformat(),
+        "updated_at": report.updated_at.isoformat(),
     }
 
 
