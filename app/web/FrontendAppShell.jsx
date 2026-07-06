@@ -1544,6 +1544,8 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
     null;
   const agentStatusCounts = reportQuality?.agent_status_counts || {};
   const hasReportQuality = Boolean(reportQuality);
+  const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
+  const reportQualityTitle = reportQuality?.partial_report ? "Partial analysis report" : "Ready analysis report";
   const helperText = isAuthenticated
     ? reportActionStatus || "상담 결과를 reports metadata로 저장하거나 다운로드 경계를 확인할 수 있습니다."
     : reportActionStatus || "리포트 저장과 다운로드는 Google 로그인 후 사용할 수 있습니다.";
@@ -1559,10 +1561,21 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
             <span className={reportQuality.partial_report ? "tag amber" : "tag green"}>
               {reportQuality.partial_report ? "partial_report" : "ready_report"}
             </span>
+            <strong className="report-quality-title">{reportQualityTitle}</strong>
             <span className="tag">analysis_job_status: {reportQuality.analysis_job_status || "unknown"}</span>
             <span className="tag">limitations: {reportQuality.limitation_count ?? 0}</span>
             {Object.keys(agentStatusCounts).length > 0 && (
               <span className="tag">agent_status_counts: {compactValue(agentStatusCounts)}</span>
+            )}
+            {reportQuality.partial_report && (
+              <p className="report-quality-warning">Review required before final submission.</p>
+            )}
+            {reportLimitations.length > 0 && (
+              <ul className="report-quality-limitations" aria-label="report quality limitations">
+                {reportLimitations.map((item, index) => (
+                  <li key={`report-quality-limitation-${index}`}>{compactValue(item)}</li>
+                ))}
+              </ul>
             )}
           </div>
         )}

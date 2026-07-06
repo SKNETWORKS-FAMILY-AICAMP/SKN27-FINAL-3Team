@@ -135,6 +135,12 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "ready_report" in shell
     assert "analysis_job_status" in shell
     assert "agent_status_counts" in shell
+    assert "reportLimitations" in shell
+    assert "Partial analysis report" in shell
+    assert "Ready analysis report" in shell
+    assert "Review required before final submission." in shell
+    assert "report-quality-warning" in shell
+    assert "report-quality-limitations" in shell
 
 
 def test_vite_proxy_does_not_capture_frontend_api_client_module():

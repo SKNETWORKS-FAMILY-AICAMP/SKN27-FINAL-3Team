@@ -3719,6 +3719,8 @@ def _report_download_body(
         if report_quality:
             lines.append(f"analysis_job_status: {report_quality.get('analysis_job_status')}")
             lines.append(f"partial_report: {report_quality.get('partial_report')}")
+            for index, limitation in enumerate(_list_or_empty(report_quality.get("limitations"))[:3], start=1):
+                lines.append(f"limitation_{index}: {_text(limitation)}")
     if report.display_result_id:
         lines.append(f"display_result_id: {report.display_result.display_result_id}")
     if report.content_summary:
