@@ -1,0 +1,60 @@
+{
+  "created_at": "2026-07-04T11:28:25",
+  "db_name": "review_case_db",
+  "chunk_table": "review_case_chunks",
+  "embedding_table": "review_case_chunk_embeddings",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dim": 1536,
+  "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+  "chunk_count": 904,
+  "embedding_count": 904,
+  "missing_embedding_count": 0,
+  "is_complete": true,
+  "sample_rows": [
+    {
+      "chunk_id": "review_case_2016_036061_arguments",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "input_field": "chunk_text",
+      "has_vector": true
+    },
+    {
+      "chunk_id": "review_case_2016_036061_case_overview",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "input_field": "chunk_text",
+      "has_vector": true
+    },
+    {
+      "chunk_id": "review_case_2016_036061_decision",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "input_field": "chunk_text",
+      "has_vector": true
+    },
+    {
+      "chunk_id": "review_case_2016_036061_evidence_issue",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "input_field": "chunk_text",
+      "has_vector": true
+    },
+    {
+      "chunk_id": "review_case_2016_036161_arguments",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dim": 1536,
+      "embedding_version": "openai_text_embedding_3_small_chunk_text_v1",
+      "embedding_provider": "openai",
+      "input_field": "chunk_text",
+      "has_vector": true
+    }
+  ]
+}

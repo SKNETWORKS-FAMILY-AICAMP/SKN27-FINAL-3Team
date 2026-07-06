@@ -12,3 +12,46 @@ langgraph
 PyMuPDF
 python-dotenv
 typing_extensions
+
+
+#########재강#######
+beautifulsoup4>=4.12,<5
+playwright>=1.49,<2
+requests>=2.32,<3
+PyMuPDF>=1.25,<2
+pdfplumber>=0.11,<1
+# ---------------------------------------------------------------------------
+# [PRECEDENT RAG - OPTIONAL / DISABLED]
+#
+# 아래 패키지는 판례 RAG 파이프라인 확장 후보입니다.
+# 현재 requirements 동작을 바꾸지 않기 위해 모두 주석 처리합니다.
+#
+# 목적:
+#   1. PostgreSQL 원본/chunk 적재
+#   2. PostgreSQL pgvector embedding 저장 및 검색
+#   3. Elasticsearch BM25/vector/hybrid A/B 테스트
+#
+# 참고 계획:
+#   etl/fault_cases/MD/판례/과실비율 판례 RAG 파이프라인 통합 최종 계획.md
+#
+# PostgreSQL/pgvector
+psycopg[binary]>=3.2,<4
+pgvector>=0.3,<1
+#
+# Elasticsearch BM25/vector/hybrid
+elasticsearch>=8.12,<9
+#
+# RAG chunking/vectorstore 실험
+langchain>=0.3,<1
+langchain-community>=0.3,<1
+langchain-text-splitters>=0.3,<1
+langchain-openai>=0.3,<1
+langchain-google-genai>=2,<3
+#
+# Local/open-source embedding 후보
+langchain-ollama>=0.2,<1
+#
+# Evaluation / utility
+pandas>=2.2,<3
+scikit-learn>=1.5,<2
+# ---------------------------------------------------------------------------

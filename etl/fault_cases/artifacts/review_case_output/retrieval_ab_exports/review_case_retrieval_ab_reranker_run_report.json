@@ -1,0 +1,13 @@
+{
+  "created_at": "2026-07-04T12:07:59",
+  "input_path": "C:\\dev\\project\\SKN27-FINAL-3Team\\etl\\fault_cases\\artifacts\\review_case_output\\retrieval_ab_exports\\review_case_retrieval_ab_candidates.jsonl",
+  "output_path": "C:\\dev\\project\\SKN27-FINAL-3Team\\etl\\fault_cases\\artifacts\\review_case_output\\retrieval_ab_exports\\review_case_retrieval_ab_reranker_scores.jsonl",
+  "reranker_model": "models/bge-reranker-v2-m3",
+  "reranker_input_field": "chunk_text",
+  "batch_size": 4,
+  "limit": null,
+  "device": "cpu",
+  "candidate_count": 100,
+  "elapsed_seconds": 65.1239882000009,
+  "avg_latency_ms_per_pair": 651.239882000009
+}

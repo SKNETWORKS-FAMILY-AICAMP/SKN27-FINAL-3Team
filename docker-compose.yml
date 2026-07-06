@@ -157,6 +157,71 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # ---------------------------------------------------------------------------
+  # [PRECEDENT RAG - OPTIONAL / DISABLED]
+  #
+  # 아래 블록은 판례 RAG A/B 테스트용 Elasticsearch/Kibana 추가 후보입니다.
+  # 현재 프로젝트의 기준 저장소는 PostgreSQL(pgvector)입니다.
+  #
+  # 최종 흐름:
+  #   1. PostgreSQL에 판례 원본 저장
+  #   2. PostgreSQL 기준 chunk 생성
+  #   3. PostgreSQL pgvector에 embedding 저장
+  #   4. Elasticsearch BM25 실험: chunk_text만 색인
+  #   5. Elasticsearch vector/hybrid 실험: chunk_text + embedding_vector 색인
+  #
+  # 주의:
+  #   - 기존 서비스는 충돌 방지를 위해 수정하지 않습니다.
+  #   - Elasticsearch 내부 data volume은 artifacts/traffic_precedents_output과
+  #     절대 섞지 않습니다.
+  #   - 실제 활성화 시 아래 주석을 풀고 .env에 비밀번호를 분리하세요.
+  #   - 참고 계획:
+  #     etl/fault_cases/MD/판례/과실비율 판례 RAG 파이프라인 통합 최종 계획.md
+  #
+  elasticsearch:
+    build:
+      context: ./infra/elasticsearch
+      dockerfile: Dockerfile
+      args:
+        ELASTICSEARCH_VERSION: ${ELASTICSEARCH_VERSION:-8.12.1}
+    image: skn27-elasticsearch-nori:${ELASTICSEARCH_VERSION:-8.12.1}
+    container_name: skn27-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-change-me}
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -u elastic:${ELASTIC_PASSWORD:-change-me} -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+  
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.1
+    container_name: skn27-kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-change-me}
+      - SERVER_HOST=0.0.0.0
+      - I18N_LOCALE=ko-KR
+    ports:
+      - "${KIBANA_PORT:-5601}:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+  # ---------------------------------------------------------------------------
+
 volumes:
   frontend_node_modules:
   postgres_data:
@@ -164,3 +229,6 @@ volumes:
   neo4j_data:
   neo4j_logs:
   redis_data:
+  # [PRECEDENT RAG - OPTIONAL / DISABLED]
+  # Elasticsearch/Kibana 실험을 활성화할 때만 아래 volume 주석을 해제합니다.
+  elasticsearch_data:

@@ -1,0 +1,54 @@
+{
+  "source": {
+    "type": "insurance_fault_standard",
+    "reliability_score": 4,
+    "seed_url": "https://accident.knia.or.kr/standard#0"
+  },
+  "paths": {
+    "artifacts_dir": "artifacts",
+    "crawled_dir": "fault_standard_output/crawled",
+    "preprocessed_dir": "fault_standard_output/preprocessed",
+    "raw_source_dir": "raw_source_files",
+    "logs_dir": "logs",
+    "manifest_filename": "collection_manifest.jsonl",
+    "quality_report_filename": "collection_quality_report.jsonl"
+  },
+  "download": {
+    "default_filename": "download.pdf",
+    "default_standard_filename": "fault_standard.pdf",
+    "required_suffix": ".pdf"
+  },
+  "collection": {
+    "id_prefix": "fault_standard",
+    "unknown_document_type": "unknown",
+    "max_documents": 4
+  },
+  "browser": {
+    "timeout_ms": 30000,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+  },
+  "scoring": {
+    "confirmation_threshold": 50,
+    "confidence_denominator": 100,
+    "attachment_bonus": 20,
+    "attachment_markers": [".PDF", "FILE-MANAGER"],
+    "positive_keywords": {
+      "과실비율": 35,
+      "기준": 20,
+      "인정기준": 35,
+      "비정형": 35,
+      "자동차사고": 25,
+      "자동차": 15,
+      "PM": 20,
+      "개인형이동장치": 20,
+      "회전교차로": 20
+    },
+    "negative_keywords": {
+      "보도자료": -30,
+      "홍보자료": -30,
+      "세미나": -20,
+      "상담사례": -20,
+      "FAQ": -20
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "created_at": "2026-07-03T12:27:21",
+  "dataset": "traffic",
+  "db_name": "traffic_precedent_db",
+  "case_table": "traffic_precedent_cases",
+  "chunk_table": "traffic_precedent_chunks",
+  "chunk_strategy": "structured_1500_250",
+  "chunk_size_chars": 1500,
+  "chunk_overlap_chars": 250,
+  "case_count": 3562,
+  "chunk_count": 25952,
+  "deleted_existing_chunks": 21712,
+  "inserted_or_updated_chunks": 25952,
+  "chunk_type_counts": {
+    "case_overview": 3562,
+    "traffic_metadata": 4076,
+    "holding_summary": 2465,
+    "main_text": 13568,
+    "law_reference": 2281
+  }
+}
