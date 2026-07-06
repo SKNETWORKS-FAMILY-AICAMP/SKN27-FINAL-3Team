@@ -152,6 +152,9 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
 def test_vite_proxy_does_not_capture_frontend_api_client_module():
     config = read_text(ROOT / "app" / "web" / "vite.config.js")
 
+    assert 'const repoRoot = resolve(appWebDir, "../..");' in config
+    assert 'loadEnv(mode, repoRoot, "VITE_")' in config
+    assert "envDir: repoRoot" in config
     assert 'const apiProxyPrefix = "^/api(/|$)";' in config
     assert "[apiProxyPrefix]: apiProxyTarget" in config
     assert '"/api": apiProxyTarget' not in config

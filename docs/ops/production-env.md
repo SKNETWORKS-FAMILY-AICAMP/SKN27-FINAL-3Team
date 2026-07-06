@@ -245,13 +245,23 @@ packages.
 After Google Cloud OAuth settings are registered, verify code-flow settings:
 
 ```powershell
+$env:DJANGO_ENV_FILE=".env.production"
 python backend\manage.py smoke_google_oauth_code --format text
+```
+
+The Vite frontend reads `VITE_` variables from the repository root env files.
+For local development, put `VITE_GOOGLE_CLIENT_ID` in the loaded root `.env` or
+start Vite with the same mode as the file that contains it:
+
+```powershell
+npm --prefix app\web run dev -- --mode production
 ```
 
 To complete a real exchange smoke, obtain a one-time Google authorization code
 from the configured frontend redirect flow, then run:
 
 ```powershell
+$env:DJANGO_ENV_FILE=".env.production"
 python backend\manage.py smoke_google_oauth_code --code "<one-time-code>" --require-exchange --format text
 ```
 
