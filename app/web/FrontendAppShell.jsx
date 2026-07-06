@@ -118,7 +118,7 @@ export default function FrontendAppShell({
     userId: null,
   });
   const isGuestReady = Boolean(guestId);
-  const sessionLabel = isGuestReady ? "비회원 상담" : "상담 준비";
+  const sessionLabel = authSessionId ? "Google 계정 상담" : isGuestReady ? "비회원 상담" : "상담 준비";
   const cases = mypageSummary?.cases || [];
   const history = historyEvents?.events || [];
   const analysisCards = analysisResponse?.cards?.length
@@ -330,13 +330,22 @@ export default function FrontendAppShell({
           session_id: activeSessionId,
           report_type: "general",
           title: reportingPayload?.title || "상담 분석 리포트",
+          reporting_payload: reportingPayload,
         },
         nextIdentity
       );
       setCurrentReport(report);
+      let downloadedFilename = "";
+      if (action === "download" && report?.report_id) {
+        downloadedFilename = await triggerReportDownload({
+          reportId: report.report_id,
+          sessionId: activeSessionId,
+          requestIdentity: nextIdentity,
+        });
+      }
       setReportActionStatus(
         action === "download"
-          ? `다운로드 준비 완료: ${report.download_url || report.report_id}`
+          ? `다운로드 완료: ${downloadedFilename || report.download_url || report.report_id}`
           : `리포트 저장 완료: ${report.report_id}`
       );
       if (nextIdentity.authSessionId) {
@@ -346,8 +355,30 @@ export default function FrontendAppShell({
       setActiveRoute("reporting");
     } catch (_error) {
       setPendingAuthAction(null);
-      setReportActionStatus("리포트 action 실행에 실패했습니다.");
+      setReportActionStatus(`리포트 action 실행에 실패했습니다. ${_error?.message || ""}`.trim());
     }
+  }
+
+  async function triggerReportDownload({ reportId, sessionId: activeSessionId, requestIdentity }) {
+    const file = await api.downloadReport({
+      reportId,
+      sessionId: activeSessionId,
+      identity: requestIdentity,
+    });
+    const filename = file.filename || `${reportId}.txt`;
+    if (typeof document === "undefined" || typeof URL === "undefined") {
+      return filename;
+    }
+
+    const url = URL.createObjectURL(file.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return filename;
   }
 
   async function processQueuedWorkerResult(chatResult, requestIdentity) {
@@ -856,11 +887,13 @@ export default function FrontendAppShell({
             <ReportingScreen
               analysisCards={analysisCards}
               currentReport={currentReport}
+              isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
               onRefresh={async () => {
                 await loadMyPageSummary();
                 await loadHistoryEvents();
               }}
+              onRunReportAction={runCurrentReportAction}
               reportActionStatus={reportActionStatus}
               reportingPayload={reportingPayload}
               supervisorExecution={supervisorExecution}
@@ -1875,7 +1908,7 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
           {isAuthenticated ? "저장" : "로그인 후 저장"}
         </button>
         <button className="button primary" type="button" onClick={() => onRunReportAction("download")}>
-          {isAuthenticated ? "다운로드 준비" : "로그인 후 다운로드"}
+          {isAuthenticated ? "다운로드" : "로그인 후 다운로드"}
         </button>
       </div>
     </section>
@@ -2046,8 +2079,10 @@ function historyEventMatchesFilter(event, activeFilter) {
 function ReportingScreen({
   analysisCards = [],
   currentReport = null,
+  isAuthenticated = false,
   onOpenChat,
   onRefresh,
+  onRunReportAction,
   reportActionStatus = "",
   reportingPayload = null,
   supervisorExecution = null,
@@ -2073,7 +2108,7 @@ function ReportingScreen({
       <div className="screen-header">
         <div className="screen-title">
           <h2>리포트 작업대</h2>
-          <p>상담 결과에서 생성한 과실비율·사고 리포트를 검토하고 내려받는 화면입니다.</p>
+          <p>상담 결과에서 생성한 과태료·과실비율·사고 리포트를 검토하고 내려받는 화면입니다.</p>
         </div>
         <div className="screen-actions">
           <button className="button" type="button" onClick={onRefresh}>목록 새로고침</button>
@@ -2193,7 +2228,22 @@ function ReportingScreen({
             </div>
           )}
           <div className="inspector-actions">
-            <button className="button" type="button" disabled>PDF 내려받기</button>
+            <button
+              className="button"
+              type="button"
+              onClick={() => onRunReportAction?.("download")}
+              disabled={!hasReport}
+            >
+              {isAuthenticated ? "리포트 내려받기" : "로그인 후 내려받기"}
+            </button>
+            <button
+              className="button"
+              type="button"
+              onClick={() => onRunReportAction?.("save")}
+              disabled={!hasReport}
+            >
+              {isAuthenticated ? "리포트 저장" : "로그인 후 저장"}
+            </button>
             <button className="button" type="button" disabled>근거 보기</button>
           </div>
         </aside>
@@ -2360,6 +2410,11 @@ function compactValue(value) {
       .join(", ");
   }
   if (typeof value === "object") {
+    const label = value.label || value.title || value.field || value.node_code;
+    const itemValue = value.value ?? value.summary ?? value.text ?? value.question ?? value.status;
+    if (label && itemValue !== undefined && itemValue !== null && itemValue !== "") {
+      return `${label}: ${compactValue(itemValue)}`;
+    }
     return Object.entries(value)
       .slice(0, 4)
       .map(([key, item]) => `${key}: ${compactValue(item)}`)

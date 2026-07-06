@@ -1744,12 +1744,13 @@ def persist_report_action(
             "status": _report_status(report_payload.get("status")),
             "title": _report_title(payload, report_payload),
             "storage_uri": object_storage["storage_uri"],
-            "content_summary": _report_content_summary(display_result, report_payload),
+            "content_summary": _report_content_summary(display_result, report_payload, payload=payload),
             "content": {
                 "format": _text(payload.get("format")) or "mock_text",
                 "action": _text(payload.get("action")) or "save",
                 "case_id": report_payload.get("case_id"),
                 "download_url": report_payload.get("download_url"),
+                "reporting_payload": _dict_or_empty(payload.get("reporting_payload")),
                 "object_storage": object_storage,
                 "report_quality": report_quality,
             },
@@ -3848,7 +3849,14 @@ def _report_title(payload: dict[str, Any], report_payload: dict[str, Any]) -> st
 def _report_content_summary(
     display_result: AnalysisDisplayResult | None,
     report_payload: dict[str, Any],
+    *,
+    payload: dict[str, Any] | None = None,
 ) -> str:
+    reporting_summary = _reporting_payload_content_summary(
+        _dict_or_empty((payload or {}).get("reporting_payload"))
+    )
+    if reporting_summary:
+        return reporting_summary
     if display_result and isinstance(display_result.assistant_message, dict):
         summary = _text(display_result.assistant_message.get("summary"))
         if summary:
@@ -3857,6 +3865,48 @@ def _report_content_summary(
         if answer:
             return answer[:500]
     return f"Mock report action result: {_text(report_payload.get('status')) or 'ready'}"
+
+
+def _reporting_payload_content_summary(reporting_payload: dict[str, Any]) -> str:
+    if not reporting_payload:
+        return ""
+    lines = [
+        _text(reporting_payload.get("title")) or "상담 분석 리포트",
+        _text(reporting_payload.get("summary")),
+    ]
+    for section in _list_or_empty(reporting_payload.get("sections")):
+        if not isinstance(section, dict):
+            continue
+        title = _text(section.get("title"))
+        if title:
+            lines.extend(["", f"## {title}"])
+        for item in _list_or_empty(section.get("items")):
+            text = _reporting_payload_item_text(item)
+            if text:
+                lines.append(f"- {text}")
+    return "\n".join(line for line in lines if line).strip()
+
+
+def _reporting_payload_item_text(item: Any) -> str:
+    if isinstance(item, dict):
+        label = _text(item.get("label") or item.get("title") or item.get("field") or item.get("node_code"))
+        value = _text(
+            item.get("value")
+            or item.get("summary")
+            or item.get("text")
+            or item.get("question")
+            or item.get("status")
+        )
+        if label and value:
+            return f"{label}: {value}"
+        if label:
+            return label
+        return " · ".join(
+            f"{_text(key)}: {_text(value)}"
+            for key, value in list(item.items())[:4]
+            if _text(value)
+        )
+    return _text(item)
 
 
 def _report_download_body(
@@ -3933,6 +3983,9 @@ def _report_object_body_for_write(
         f"title: {_text(payload.get('title'))}",
         f"case_id: {_text(report_payload.get('case_id'))}",
     ]
+    reporting_summary = _reporting_payload_content_summary(_dict_or_empty(payload.get("reporting_payload")))
+    if reporting_summary:
+        lines.extend(["", reporting_summary])
     return "\n".join(lines) + "\n"
 
 

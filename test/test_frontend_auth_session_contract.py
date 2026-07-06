@@ -51,6 +51,9 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     assert "processFileScan" in api_client
     assert "processAgentWorkItems" in api_client
     assert "getAnalysisJobDetail" in api_client
+    assert "downloadReport" in api_client
+    assert "getBlob" in api_client
+    assert "filenameFromContentDisposition" in api_client
     assert "FormData" in api_client
     assert "postFormData" in api_client
     assert 'from "./apiClient.js"' in chatbot
@@ -82,6 +85,7 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "storedAuthSession.guest_id" in shell
     assert "storedAuthSession.auth_session_id" in shell
     assert "loginAndBindCurrentSession" in shell
+    assert 'const sessionLabel = authSessionId ? "Google 계정 상담"' in shell
     assert "ensureGuestSession" in shell
     assert "pendingAuthAction" in shell
     assert 'source: "attachment_upload"' in shell
@@ -103,6 +107,11 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "processFileScan" in shell
     assert "scan_status" in shell
     assert "runReportAction" in shell
+    assert "triggerReportDownload" in shell
+    assert "api.downloadReport" in shell
+    assert "URL.createObjectURL" in shell
+    assert "reporting_payload: reportingPayload" in shell
+    assert "onRunReportAction={runCurrentReportAction}" in shell
     assert "ReportActionPanel" in shell
     assert "registeredAttachments" in shell
     assert "selectedUploadFile" in shell
@@ -157,6 +166,7 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "Traffic Dispute AI" in shell
     assert "비회원 1회 리포팅 가능" in shell
     assert "reportingPayload || analysisCards.length || supervisorExecution || currentReport" in shell
+    assert "리포트 내려받기" in shell
     assert "data-partial-report" in shell
     assert "partial_report" in shell
     assert "ready_report" in shell
