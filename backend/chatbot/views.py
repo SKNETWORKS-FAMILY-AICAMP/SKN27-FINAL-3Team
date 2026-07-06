@@ -68,6 +68,7 @@ from chatbot.repositories import (
     authorize_report_download_metadata,
     build_history_after_service_summary,
     conversation_save_state_from_payload,
+    get_analysis_job_record,
     get_chat_session_access_metadata,
     get_mycase_summary,
     get_report_download_metadata,
@@ -561,6 +562,8 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
     job = get_analysis_job(job_id)
+    if not job and _is_canonical_mock_request(request):
+        job = get_analysis_job_record(job_id)
     if not job:
         return _json_response(
             request,
