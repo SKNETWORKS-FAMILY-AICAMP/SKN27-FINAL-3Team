@@ -1203,6 +1203,23 @@ p {
   align-items: center;
 }
 
+.report-quality-title {
+  flex-basis: 100%;
+}
+
+.report-quality-warning {
+  flex-basis: 100%;
+  font-weight: 800;
+  color: #8a5a00;
+}
+
+.report-quality-limitations {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
 .save-choice-panel {
   margin: 0 22px 14px;
   padding: 14px;

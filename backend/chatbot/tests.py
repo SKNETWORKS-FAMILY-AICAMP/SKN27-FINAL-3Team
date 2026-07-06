@@ -3649,13 +3649,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(quality["contract_version"], "report_quality.v1")
         self.assertEqual(quality["analysis_job_status"], AnalysisJobStatus.PARTIAL)
         self.assertTrue(quality["partial_report"])
+        self.assertGreaterEqual(quality["limitation_count"], 1)
 
         report = Report.objects.get(report_id="rep_partial_report_quality")
         self.assertTrue(report.metadata["report_quality"]["partial_report"])
 
         download_response = self.client.get("/api/reports/rep_partial_report_quality/download/")
         self.assertEqual(download_response.status_code, 200)
-        self.assertIn("partial_report: True", download_response.content.decode("utf-8"))
+        download_body = download_response.content.decode("utf-8")
+        self.assertIn("partial_report: True", download_body)
+        self.assertIn("limitation_1:", download_body)
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")
