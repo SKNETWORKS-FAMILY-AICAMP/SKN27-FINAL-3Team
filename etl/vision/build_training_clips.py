@@ -117,10 +117,16 @@ def build_training_clips(args: argparse.Namespace) -> None:
         start_sec, end_sec = centered_window(duration, accident_sec, args.clip_sec)
         label = row.get(args.label_column) or row.get("label") or "unknown"
         asset_id = row.get("asset_id") or src.stem
-        clip_path = args.clip_dir / safe_name(label) / f"{safe_name(asset_id)}_clip5s.mp4"
-        ok = clip_path.exists() and not args.overwrite
-        if not ok:
-            ok = write_clip(src, clip_path, start_sec, end_sec)
+        if duration <= args.short_video_sec:
+            # ponytail: short videos already contain the full context; do not re-encode and risk losing them.
+            clip_path = src
+            ok = True
+            basis = f"{basis}_short_video_full_context"
+        else:
+            clip_path = args.clip_dir / safe_name(label) / f"{safe_name(asset_id)}_clip5s.mp4"
+            ok = clip_path.exists() and not args.overwrite
+            if not ok:
+                ok = write_clip(src, clip_path, start_sec, end_sec)
 
         copied = dict(row)
         copied.update(
@@ -153,6 +159,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clip-dir", type=Path, default=DEFAULT_CLIP_DIR)
     parser.add_argument("--label-column", default="coarse_label")
     parser.add_argument("--clip-sec", type=float, default=5.0)
+    parser.add_argument("--short-video-sec", type=float, default=10.0)
     parser.add_argument("--accident-source", choices=["center", "yolo_track"], default="center")
     parser.add_argument("--model-name", default="yolov8n.pt")
     parser.add_argument("--overwrite", action="store_true")

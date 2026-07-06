@@ -50,3 +50,5 @@ output/pdf/SKN27_*.pdf
 # Documents & Designs
 서식문서/
 설계/
+# Local archive exports
+*.tar.gz
