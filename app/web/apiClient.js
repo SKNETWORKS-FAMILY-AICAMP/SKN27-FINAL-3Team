@@ -156,10 +156,19 @@ export function withQuery(url, params = {}) {
 }
 
 async function parseJsonResponse(response) {
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+  let payload = null;
+  try {
+    payload = await response.clone().json();
+  } catch (_error) {
+    payload = null;
   }
-  return response.json();
+
+  if (!response.ok) {
+    const error = payload?.error || {};
+    const reason = error?.auth?.reason || error?.reason || error?.code || response.statusText;
+    throw new Error(`Request failed: ${response.status}${reason ? ` ${reason}` : ""}`);
+  }
+  return payload ?? response.json();
 }
 
 function trimTrailingSlash(value) {
