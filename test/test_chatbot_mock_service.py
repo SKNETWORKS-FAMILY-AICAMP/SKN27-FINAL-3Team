@@ -128,6 +128,23 @@ def test_chatbot_mock_fault_ratio_success_flow_returns_schema_fields_without_rat
     assert any("수치로 확정하지 않습니다" in item for item in structured_result["limitations"])
 
 
+def test_chatbot_mock_infers_fault_ratio_before_law_or_fine_notice_terms():
+    response = submit_message(
+        {
+            "session_id": "ses_fault_infer",
+            "user_text": "교차로 접촉 사고의 과실비율과 유사 판례를 리포팅해줘",
+            "mock_status": "success",
+        }
+    )
+
+    assert response["mock_scenario"] == "fault_ratio"
+    assert response["routing_intent"] == "fault_ratio"
+    assert any(
+        step["node_code"] == "text_ml_case_search"
+        for step in response["analysis_plan"]["steps"]
+    )
+
+
 def test_chatbot_mock_partial_flow_returns_pending_question():
     response = submit_message(
         {

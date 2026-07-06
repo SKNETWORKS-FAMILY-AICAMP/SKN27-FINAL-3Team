@@ -29,6 +29,9 @@ def search_law_provisions(
         print(f"[Warning] Vector Search 실패: {e}")
         core_provisions = []
 
+    if not core_provisions:
+        core_provisions = _search_fallback_legal_rag(query_text=query_text, top_k=top_k)
+
     # Temporal & Scope 검증 (초반 필터)
     # 실제 구현에서는 rule_guard를 통해 거르거나 쿼리 시점에 필터링합니다.
     
@@ -38,6 +41,45 @@ def search_law_provisions(
         core_provisions = _expand_with_law_graph(core_provisions, article_refs, neo4j_session, core_scores)
 
     return core_provisions
+
+def _search_fallback_legal_rag(query_text: str, top_k: int) -> list[dict[str, Any]]:
+    """Django RAG tables fallback for local/dev environments without pgvector."""
+    try:
+        from app.services import legal_rag_service
+
+        rag_response = legal_rag_service.search_legal_rag(
+            query_text,
+            top_k=top_k,
+            source_type="law",
+        )
+    except Exception as e:
+        print(f"[Warning] Django RAG fallback 실패: {e}")
+        return []
+
+    if rag_response.get("status") != "ready":
+        return []
+
+    provisions = []
+    backend = rag_response.get("backend") or "django_rag_tables"
+    for item in rag_response.get("results") or []:
+        source_reference = item.get("source_reference") or item.get("chunk_id") or ""
+        provisions.append(
+            {
+                "chunk_id": source_reference,
+                "source_ref": source_reference,
+                "source_name": item.get("source_name"),
+                "source_type": item.get("source_type") or "law",
+                "article_no": item.get("article") or item.get("section_ref"),
+                "appendix_no": None,
+                "article_title": item.get("title"),
+                "provision_text": item.get("summary") or "",
+                "source_url": item.get("source_url") or "",
+                "retrieval_score": item.get("score", 0.0),
+                "score": item.get("score", 0.0),
+                "match_reason": f"legal_rag_fallback:{backend}",
+            }
+        )
+    return provisions
 
 def evaluate_confidence(provisions: list[dict[str, Any]]) -> dict[str, Any]:
     if not provisions:

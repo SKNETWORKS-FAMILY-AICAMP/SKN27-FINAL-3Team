@@ -91,9 +91,9 @@ export default function FrontendAppShell({
   const [statusMessage, setStatusMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingConversation, setIsSavingConversation] = useState(false);
-  const [selectedPersonaId, setSelectedPersonaId] = useState(DEMO_PERSONA_ID);
+  const [selectedPersonaId, setSelectedPersonaId] = useState("");
   const [attachmentPurpose, setAttachmentPurpose] = useState("fine_notice");
-  const [executionMode, setExecutionMode] = useState("async_worker");
+  const [executionMode, setExecutionMode] = useState("sync");
   const [selectedUploadFile, setSelectedUploadFile] = useState(null);
   const [uploadInputResetKey, setUploadInputResetKey] = useState(0);
   const [registeredAttachments, setRegisteredAttachments] = useState([]);
@@ -102,6 +102,7 @@ export default function FrontendAppShell({
   const [currentReport, setCurrentReport] = useState(null);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [workerActionStatus, setWorkerActionStatus] = useState("");
+  const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
 
   const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";
   const identity = {
@@ -339,9 +340,10 @@ export default function FrontendAppShell({
           : `리포트 저장 완료: ${report.report_id}`
       );
       if (nextIdentity.authSessionId) {
-        await loadMyPageSummary();
-        await loadHistoryEvents();
+        await loadMyPageSummary({ identity: nextIdentity, sessionId: activeSessionId });
+        await loadHistoryEvents({ identity: nextIdentity, sessionId: activeSessionId });
       }
+      setActiveRoute("reporting");
     } catch (_error) {
       setPendingAuthAction(null);
       setReportActionStatus("리포트 action 실행에 실패했습니다.");
@@ -403,11 +405,11 @@ export default function FrontendAppShell({
       return chatResult;
     }
     if (!requestIdentity?.authToken) {
-      setWorkerActionStatus("Agent worker queued. Login is required for progress polling.");
+      setWorkerActionStatus("Agent worker가 큐에 등록되었습니다. 진행 조회는 Google 로그인 후 사용할 수 있습니다.");
       return chatResult;
     }
 
-    setWorkerActionStatus("Agent worker queued. polling job progress.");
+    setWorkerActionStatus("Agent worker 진행 상태를 조회하고 있습니다.");
     try {
       const jobDetailResult = await api.getAnalysisJobDetail({ jobId: workItem.job_id, identity: requestIdentity });
       const jobDetail = jobDetailResult?.job || {};
@@ -437,12 +439,12 @@ export default function FrontendAppShell({
       };
       setWorkerActionStatus(
         jobDetail.status
-          ? `Agent worker progress: ${jobDetail.status}`
-          : "Agent worker queued. waiting for worker process."
+          ? `Agent worker 진행 상태: ${jobDetail.status}`
+          : "Agent worker가 처리 대기 중입니다."
       );
       return enrichedResult;
     } catch (_error) {
-      setWorkerActionStatus("Agent worker progress polling failed. check worker session.");
+      setWorkerActionStatus("Agent worker 진행 조회에 실패했습니다. worker 세션을 확인해 주세요.");
       return chatResult;
     }
   }
@@ -458,33 +460,49 @@ export default function FrontendAppShell({
     setStatusMessage("상담 내용을 정리하고 있습니다.");
     setSubmittedQuestion(trimmedQuestion);
 
-    const guestSessionResult = sessionId ? null : await bootstrapGuestSession("chatbot");
-    const activeSession = sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
-    const activeGuestId = guestId || guestSessionResult?.guestId || "";
+    let followupLoginState = null;
+    if (!authSessionId && guestDetailedReportUsed) {
+      setStatusMessage("비로그인 상담은 1회 리포팅까지 제공됩니다. 추가 질문은 Google 로그인 후 이어갑니다.");
+      followupLoginState = await saveConversationWithGoogle({
+        routeAfterSave: "chatbot",
+        source: "guest_followup_question",
+        statusMessage: "추가 질문을 위해 Google 로그인 후 기존 상담을 내 사건으로 저장하고 있습니다.",
+      });
+      if (!followupLoginState?.authSessionId) {
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    const effectiveAuthSessionId = followupLoginState?.authSessionId || authSessionId;
+    const effectiveIdentity = followupLoginState?.identity || identity;
+    const guestSessionResult = followupLoginState?.sessionId || sessionId ? null : await bootstrapGuestSession("chatbot");
+    const activeSession = followupLoginState?.sessionId || sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
+    const activeGuestId = followupLoginState?.guestId || guestId || guestSessionResult?.guestId || "";
     const nextUserMessage = { role: "user", content: trimmedQuestion };
     const conversationHistory = [...chatMessages, nextUserMessage].map((message) => ({
       role: message.role,
       content: message.content,
     }));
     const activeAuthContext = buildAuthContext({
-      authState: authSessionId ? "authenticated" : activeGuestId ? "guest" : "anonymous",
+      authState: effectiveAuthSessionId ? "authenticated" : activeGuestId ? "guest" : "anonymous",
       guestId: activeGuestId,
-      authSessionId,
+      authSessionId: effectiveAuthSessionId,
       sessionId: activeSession,
-      userId: null,
+      userId: followupLoginState?.userId || null,
     });
 
     try {
       const submitIdentity = {
-        ...identity,
+        ...effectiveIdentity,
         guestId: activeGuestId,
-        authSessionId,
+        authSessionId: effectiveAuthSessionId,
       };
       const result = await api.submitChatMessage(
         {
           session_id: activeSession,
           auth_context: activeAuthContext,
-          conversation_save_state: authSessionId ? "saved" : "pending",
+          conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
           user_text: trimmedQuestion,
           execution_mode: executionMode,
           conversation_history: conversationHistory,
@@ -512,13 +530,19 @@ export default function FrontendAppShell({
       ]);
       setAnalysisResponse(workerResult);
       setQuestion("");
-      setSavePromptVisible(!authSessionId && workerResult?.status === "success");
-      setSaveDecision(authSessionId ? "saved" : "undecided");
+      const canSaveGuestConversation = !effectiveAuthSessionId && Boolean(
+        workerResult?.persistence?.job_id || workerResult?.session_id || workerResult?.message_id
+      );
+      setSavePromptVisible(canSaveGuestConversation);
+      setGuestDetailedReportUsed(canSaveGuestConversation);
+      setSaveDecision(effectiveAuthSessionId ? "saved" : "undecided");
       setStatusMessage(
-        authSessionId
+        effectiveAuthSessionId
           ? "상담 응답을 받았습니다. 이 상담은 로그인 계정에 연결됩니다."
-          : workerResult?.status === "success"
-            ? "상담 응답을 받았습니다. 저장 여부를 선택할 수 있습니다."
+          : canSaveGuestConversation
+            ? workerResult?.status === "success"
+              ? "상담 응답을 받았습니다. 저장 여부를 선택할 수 있습니다."
+              : "상담 응답을 받았습니다. 현재 상태로 저장하거나 답변을 이어갈 수 있습니다."
             : "Supervisor가 역질문을 만들었습니다. 답변을 이어서 입력해 주세요."
       );
     } catch (_error) {
@@ -541,34 +565,50 @@ export default function FrontendAppShell({
     }
   }
 
-  async function saveConversationAfterLogin() {
+  async function saveConversationWithGoogle({
+    routeAfterSave = "mypage",
+    source = "google_login_save_prompt",
+    statusMessage = "Google 로그인 후 현재 상담을 내 사건 이력에 연결하고 있습니다.",
+  } = {}) {
     setIsSavingConversation(true);
-    setStatusMessage("Google 로그인 후 현재 상담을 내 사건 이력에 연결하고 있습니다.");
+    setStatusMessage(statusMessage);
     try {
       const loginState = await loginAndBindCurrentSession({
-        source: "google_login_save_prompt",
+        source,
         nextRoute: "chatbot",
       });
       await api.updateConversationSaveState(
         {
           session_id: loginState.sessionId,
           conversation_save_state: "saved",
-          conversation_save_source: "google_login_save_prompt",
+          conversation_save_source: source,
         },
         loginState.identity
       );
       const summary = await api.getMyPageSummary({ identity: loginState.identity, sessionId: loginState.sessionId });
       setMypageSummary(summary);
-      setActiveRoute("mypage");
+      const events = await api.listHistoryEvents({ identity: loginState.identity, sessionId: loginState.sessionId });
+      setHistoryEvents(events);
+      setActiveRoute(routeAfterSave);
 
       setSaveDecision("saved");
       setSavePromptVisible(false);
+      setGuestDetailedReportUsed(false);
       setStatusMessage("현재 상담을 Google 계정 기준 내 사건 이력에 저장했습니다.");
+      return loginState;
     } catch (_error) {
       setStatusMessage("로그인 또는 저장 연결에 실패했습니다. 상담은 현재 임시 세션에서 계속 진행할 수 있습니다.");
+      return null;
     } finally {
       setIsSavingConversation(false);
     }
+  }
+
+  async function saveConversationAfterLogin() {
+    await saveConversationWithGoogle({
+      routeAfterSave: "mypage",
+      source: "google_login_save_prompt",
+    });
   }
 
   async function keepConversationTemporary() {
@@ -593,10 +633,26 @@ export default function FrontendAppShell({
     );
   }
 
-  async function loadMyPageSummary() {
+  function startNewConversation() {
+    setQuestion("");
+    setSubmittedQuestion("");
+    setChatMessages([]);
+    setAnalysisResponse(null);
+    setCurrentReport(null);
+    setReportActionStatus("");
+    setSaveDecision("undecided");
+    setSavePromptVisible(false);
+    setGuestDetailedReportUsed(false);
+    setStatusMessage("새 상담을 시작할 수 있습니다.");
+    setActiveRoute("chatbot");
+  }
+
+  async function loadMyPageSummary(options = {}) {
+    const requestIdentity = options?.identity || identity;
+    const requestSessionId = options?.sessionId || sessionId;
     setStatusMessage("내 사건을 불러오고 있습니다.");
     try {
-      const summary = await api.getMyPageSummary({ sessionId, identity });
+      const summary = await api.getMyPageSummary({ sessionId: requestSessionId, identity: requestIdentity });
       setMypageSummary(summary);
       setStatusMessage("내 사건 현황을 업데이트했습니다.");
       return summary;
@@ -606,10 +662,12 @@ export default function FrontendAppShell({
     }
   }
 
-  async function loadHistoryEvents() {
+  async function loadHistoryEvents(options = {}) {
+    const requestIdentity = options?.identity || identity;
+    const requestSessionId = options?.sessionId || sessionId;
     setStatusMessage("과거 이력을 불러오고 있습니다.");
     try {
-      const events = await api.listHistoryEvents({ sessionId, identity });
+      const events = await api.listHistoryEvents({ sessionId: requestSessionId, identity: requestIdentity });
       setHistoryEvents(events);
       setStatusMessage("과거 이력을 업데이트했습니다.");
       return events;
@@ -619,8 +677,66 @@ export default function FrontendAppShell({
     }
   }
 
+  async function openSavedCase(item) {
+    const jobId = item?.job_id || item?.case_id || "";
+    if (jobId) {
+      setStatusMessage("저장된 상담과 리포트를 불러오고 있습니다.");
+      try {
+        const detail = await api.getAnalysisJobDetail({ jobId, identity });
+        const job = detail?.job || {};
+        const restoredMessages = restoreConversationMessages(job, item);
+        const restoredResponse = restoreAnalysisResponse(job, item);
+        const restoredReport = restoreCurrentReport(job, item);
+        const firstUserMessage = restoredMessages.find((message) => message.role === "user");
+
+        setSessionId(job.session_id || item?.session_id || sessionId);
+        setSubmittedQuestion(firstUserMessage?.content || item?.title || job.progress_message || "");
+        setChatMessages(restoredMessages);
+        setAnalysisResponse(restoredResponse);
+        setCurrentReport(restoredReport);
+        setReportActionStatus(
+          restoredReport
+            ? "내 사건에서 저장된 상담과 리포트를 불러왔습니다."
+            : "내 사건에서 저장된 상담을 불러왔습니다. 리포트는 상담 결과 아래에서 다시 생성할 수 있습니다."
+        );
+        setSaveDecision("saved");
+        setSavePromptVisible(false);
+        setGuestDetailedReportUsed(false);
+        setStatusMessage("저장된 상담을 현재 대화로 다시 열었습니다.");
+        setActiveRoute("chatbot");
+        return;
+      } catch (_error) {
+        setStatusMessage("상담 상세를 불러오지 못해 저장 리포트 정보만 표시합니다.");
+      }
+    }
+
+    const reportId = item?.latest_report_id || item?.report_id || "";
+    if (!reportId) {
+      setCurrentReport(null);
+      setReportActionStatus("선택한 사건에는 아직 저장된 리포트가 없습니다. 상담 화면에서 이어갈 수 있습니다.");
+      setActiveRoute("chatbot");
+      return;
+    }
+
+    const reportStatus = item?.latest_report_status || item?.status || "saved";
+    setCurrentReport({
+      report_id: reportId,
+      status: reportStatus,
+      persistence: { status: reportStatus },
+      metadata: {
+        case_id: item?.case_id || item?.job_id || "",
+        title: item?.title || item?.case_id || "저장된 상담 리포트",
+        updated_at: item?.updated_at || item?.last_event_at || item?.created_at || "",
+        report_count: item?.report_count || 1,
+      },
+    });
+    setReportActionStatus("내 사건에서 저장된 리포트를 열었습니다.");
+    setActiveRoute("reporting");
+  }
+
   return (
     <div className="app-shell" data-auth-state={authContext.auth_state}>
+      {activeRoute === "entry" && (
       <header className="topbar">
         <div className="topbar-inner">
           <button
@@ -650,46 +766,25 @@ export default function FrontendAppShell({
           </nav>
         </div>
       </header>
+      )}
 
       <div className={activeRoute === "entry" ? "layout is-entry" : "layout"}>
         {activeRoute !== "entry" && (
-          <aside className="sidebar" aria-label="사용자 작업 영역">
-            <section className="profile-box">
-              <div className="profile-row">
-                <span className="avatar">{isGuestReady ? "비" : "AI"}</span>
-                <div>
-                  <div className="profile-name">{sessionLabel}</div>
-                  <div className="profile-meta">
-                    {isGuestReady ? "기본 상담 가능 · 자료 분석은 로그인 후" : "Google 로그인 또는 비회원 시작"}
-                  </div>
-                </div>
-              </div>
-              <button className="button primary" type="button" onClick={() => setActiveRoute("chatbot")}>
-                새 상담 시작
-              </button>
-            </section>
-
-            <nav className="nav-panel" aria-label="화면 이동">
-              {ROUTES.filter((route) => route.id !== "entry").map((route) => (
-                <button
-                  className={activeRoute === route.id ? "nav-item active" : "nav-item"}
-                  key={route.id}
-                  onClick={() => setActiveRoute(route.id)}
-                  type="button"
-                >
-                  {route.label}
-                  {route.id === "chatbot" && submittedQuestion && <span className="badge">1</span>}
-                </button>
-              ))}
-            </nav>
-
-            <section className="deadline-panel">
-              <strong>다가오는 일정</strong>
-              <div className="empty-panel compact">
-                <p>로그인 후 저장한 사건의 기한과 리포트 상태가 표시됩니다.</p>
-              </div>
-            </section>
-          </aside>
+          <ConversationSidebar
+            activeRoute={activeRoute}
+            cases={cases}
+            currentTitle={submittedQuestion}
+            isAuthenticated={Boolean(authSessionId)}
+            isGuestReady={isGuestReady}
+            isSavingConversation={isSavingConversation}
+            onLogin={saveConversationAfterLogin}
+            onNavigate={setActiveRoute}
+            onNewChat={startNewConversation}
+            onOpenCase={openSavedCase}
+            savePromptVisible={savePromptVisible}
+            sessionLabel={sessionLabel}
+            statusMessage={statusMessage}
+          />
         )}
 
         <main className="workspace" aria-live="polite">
@@ -744,7 +839,13 @@ export default function FrontendAppShell({
           )}
 
           {activeRoute === "mypage" && (
-            <MyPageScreen cases={cases} onRefresh={loadMyPageSummary} summary={mypageSummary} />
+            <MyPageScreen
+              cases={cases}
+              onOpenChat={() => setActiveRoute("chatbot")}
+              onOpenCase={openSavedCase}
+              onRefresh={loadMyPageSummary}
+              summary={mypageSummary}
+            />
           )}
 
           {activeRoute === "history" && (
@@ -754,6 +855,13 @@ export default function FrontendAppShell({
           {activeRoute === "reporting" && (
             <ReportingScreen
               analysisCards={analysisCards}
+              currentReport={currentReport}
+              onOpenChat={() => setActiveRoute("chatbot")}
+              onRefresh={async () => {
+                await loadMyPageSummary();
+                await loadHistoryEvents();
+              }}
+              reportActionStatus={reportActionStatus}
               reportingPayload={reportingPayload}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
@@ -1024,6 +1132,107 @@ function EntryScreenV2({ onGuestStart, onOpenChat }) {
   );
 }
 
+function ConversationSidebar({
+  activeRoute,
+  cases,
+  currentTitle,
+  isAuthenticated,
+  isGuestReady,
+  isSavingConversation,
+  onLogin,
+  onNavigate,
+  onNewChat,
+  onOpenCase,
+  savePromptVisible,
+  sessionLabel,
+  statusMessage,
+}) {
+  const hasCases = cases.length > 0;
+  const currentConversationTitle = currentTitle || "새 상담";
+
+  return (
+    <aside className="sidebar chat-sidebar" aria-label="대화 목록과 계정">
+      <div className="sidebar-brand">
+        <button className="brand compact" type="button" onClick={() => onNavigate("chatbot")}>
+          <span className="brand-mark">AI</span>
+          <span>Traffic Dispute AI</span>
+        </button>
+      </div>
+
+      <div className="sidebar-actions">
+        <button className="nav-item primary-action" type="button" onClick={onNewChat}>
+          <span>새 상담</span>
+          <span>+</span>
+        </button>
+        <button className="nav-item" type="button" onClick={() => onNavigate("history")}>
+          <span>상담 검색</span>
+        </button>
+      </div>
+
+      <section className="conversation-section" aria-label="현재 대화">
+        <div className="section-label">현재</div>
+        <button
+          className={activeRoute === "chatbot" ? "conversation-card active" : "conversation-card"}
+          type="button"
+          onClick={() => onNavigate("chatbot")}
+        >
+          <strong>{currentConversationTitle}</strong>
+          <span>{isAuthenticated ? "저장됨 · 추가 질문 가능" : savePromptVisible ? "게스트 리포트 생성됨" : "게스트 상담"}</span>
+        </button>
+      </section>
+
+      <section className="conversation-section grow" aria-label="내 사건 대화">
+        <div className="section-label">내 사건</div>
+        {!hasCases ? (
+          <div className="empty-panel compact">
+            <p>{isAuthenticated ? "저장된 상담이 아직 없습니다." : "로그인하면 저장한 상담과 리포트 상태가 표시됩니다."}</p>
+          </div>
+        ) : (
+          cases.slice(0, 8).map((item) => (
+            <button
+              className="conversation-card"
+              key={item.case_id || item.job_id || item.title}
+              type="button"
+              onClick={() => onOpenCase(item)}
+            >
+              <strong>{item.title || item.case_id}</strong>
+              <span>
+                {caseStatusLabel(item.case_status || item.status)}
+                {item.latest_report_id ? " · 리포트 저장" : " · 리포트 대기"}
+              </span>
+            </button>
+          ))
+        )}
+      </section>
+
+      <nav className="sidebar-mini-nav" aria-label="보조 화면">
+        <button className={activeRoute === "mypage" ? "nav-item active" : "nav-item"} type="button" onClick={() => onNavigate("mypage")}>
+          내 사건 전체
+        </button>
+        <button className={activeRoute === "reporting" ? "nav-item active" : "nav-item"} type="button" onClick={() => onNavigate("reporting")}>
+          리포트
+        </button>
+      </nav>
+
+      <section className="sidebar-auth" aria-label="계정 상태">
+        <div className="profile-row">
+          <span className="avatar">{isAuthenticated ? "G" : isGuestReady ? "비" : "AI"}</span>
+          <div>
+            <div className="profile-name">{sessionLabel}</div>
+            <div className="profile-meta">{isAuthenticated ? "대화 저장 및 후속 질문 가능" : "비회원 1회 리포팅 가능"}</div>
+          </div>
+        </div>
+        {!isAuthenticated && (
+          <button className="button primary full" type="button" onClick={onLogin} disabled={isSavingConversation}>
+            {isSavingConversation ? "연결 중" : "Google 로그인"}
+          </button>
+        )}
+        {statusMessage && <p className="sidebar-status">{statusMessage}</p>}
+      </section>
+    </aside>
+  );
+}
+
 function ChatScreenV2({
   analysisCards,
   attachmentPurpose,
@@ -1120,9 +1329,10 @@ function ChatScreenV2({
         </div>
 
         <div className="chat-main">
-          <section className="persona-control-panel" aria-label="데모 페르소나 선택">
+          <details className="persona-control-panel" aria-label="개발용 Agent 점검">
+            <summary>개발용 Agent 점검</summary>
             <div className="panel-head compact">
-              <strong>실 Agent 전 persona smoke</strong>
+              <strong>persona smoke와 실행 모드</strong>
               <button className="button" type="button" onClick={onUsePersonaSample}>
                 샘플 입력
               </button>
@@ -1197,7 +1407,7 @@ function ChatScreenV2({
             )}
             <div className="execution-mode-control" role="group" aria-label="Agent execution mode">
               <span>Agent mode</span>
-              {["async_worker", "mock", "sync"].map((mode) => (
+              {["sync", "async_worker", "mock"].map((mode) => (
                 <button
                   className={executionMode === mode ? "mode-option active" : "mode-option"}
                   key={mode}
@@ -1206,12 +1416,12 @@ function ChatScreenV2({
                 >
                   <strong>{mode}</strong>
                   <small>
-                    {mode === "async_worker" ? "worker progress" : mode === "sync" ? "fine notice adapter" : "safe mock"}
+                    {mode === "sync" ? "sync adapter" : mode === "async_worker" ? "worker progress" : "safe mock"}
                   </small>
                 </button>
               ))}
             </div>
-          </section>
+          </details>
 
           <div className="messages">
             {!hasConversation && (
@@ -1672,10 +1882,11 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
   );
 }
 
-function MyPageScreen({ cases, onRefresh, summary }) {
+function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
   const activeCases = summary?.active_cases ?? cases.length;
   const savedReports = summary?.saved_reports ?? 0;
   const recentCount = summary?.recent_analysis_count ?? cases.length;
+  const hasCases = cases.length > 0;
 
   return (
     <section className="screen">
@@ -1685,7 +1896,7 @@ function MyPageScreen({ cases, onRefresh, summary }) {
           <p>진행 중인 상담, 저장한 리포트, 기한이 임박한 사건을 관리합니다.</p>
         </div>
         <div className="screen-actions">
-          <button className="button" type="button">새 상담</button>
+          <button className="button" type="button" onClick={onOpenChat}>새 상담</button>
           <button className="button primary" type="button" onClick={onRefresh}>
             현황 새로고침
           </button>
@@ -1703,7 +1914,7 @@ function MyPageScreen({ cases, onRefresh, summary }) {
         <article className="table-panel">
           <div className="panel-head">
             <strong>최근 분석 이력</strong>
-            <button className="button" type="button">필터</button>
+            <button className="button" type="button" disabled={!hasCases}>필터</button>
           </div>
           <div className="table-scroll">
             <table className="history-table">
@@ -1733,7 +1944,7 @@ function MyPageScreen({ cases, onRefresh, summary }) {
                       <td>{item.title || item.case_id}</td>
                       <td>{item.case_status || item.status || "확인 필요"}</td>
                       <td>{item.updated_at || item.created_at || "-"}</td>
-                      <td><button className="button" type="button">열기</button></td>
+                      <td><button className="button" type="button" onClick={() => onOpenCase(item)}>열기</button></td>
                     </tr>
                   ))
                 )}
@@ -1747,6 +1958,13 @@ function MyPageScreen({ cases, onRefresh, summary }) {
 }
 
 function HistoryScreen({ events, onRefresh }) {
+  const [activeFilter, setActiveFilter] = useState("전체");
+  const filterOptions = ["전체", "과태료", "과실비율", "리포트"];
+  const filteredEvents =
+    activeFilter === "전체"
+      ? events
+      : events.filter((event) => historyEventMatchesFilter(event, activeFilter));
+
   return (
     <section className="screen">
       <div className="screen-header">
@@ -1763,13 +1981,19 @@ function HistoryScreen({ events, onRefresh }) {
 
       <div className="dashboard">
         <div className="filter-row">
-          <button className="quick-chip active" type="button">전체</button>
-          <button className="quick-chip" type="button">과태료</button>
-          <button className="quick-chip" type="button">과실비율</button>
-          <button className="quick-chip" type="button">리포트</button>
+          {filterOptions.map((option) => (
+            <button
+              className={activeFilter === option ? "quick-chip active" : "quick-chip"}
+              key={option}
+              type="button"
+              onClick={() => setActiveFilter(option)}
+            >
+              {option}
+            </button>
+          ))}
         </div>
         <ol className="history-list">
-          {events.length === 0 ? (
+          {filteredEvents.length === 0 ? (
             <li className="history-row empty">
               <div>
                 <strong>아직 과거 이력이 없습니다.</strong>
@@ -1777,7 +2001,7 @@ function HistoryScreen({ events, onRefresh }) {
               </div>
             </li>
           ) : (
-            events.map((event) => (
+            filteredEvents.map((event) => (
               <li className="history-row" key={event.event_id || `${event.event_type}-${event.created_at}`}>
                 <div>
                   <span className="tag green">{event.event_type}</span>
@@ -1793,11 +2017,56 @@ function HistoryScreen({ events, onRefresh }) {
   );
 }
 
-function ReportingScreen({ analysisCards = [], reportingPayload = null, supervisorExecution = null, supervisorState = null }) {
-  const hasReport = Boolean(reportingPayload || analysisCards.length || supervisorExecution);
+function historyEventMatchesFilter(event, activeFilter) {
+  const haystack = [
+    event?.event_type,
+    event?.summary,
+    event?.status,
+    event?.subject_type,
+    event?.resource_type,
+    event?.metadata?.mock_scenario,
+    event?.metadata?.routing_intent,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (activeFilter === "과태료") {
+    return /fine|notice|penalty|ticket|과태료|고지/.test(haystack);
+  }
+  if (activeFilter === "과실비율") {
+    return /fault|ratio|case_search|과실|비율|사고/.test(haystack);
+  }
+  if (activeFilter === "리포트") {
+    return /report|download|리포트|보고서/.test(haystack);
+  }
+  return true;
+}
+
+function ReportingScreen({
+  analysisCards = [],
+  currentReport = null,
+  onOpenChat,
+  onRefresh,
+  reportActionStatus = "",
+  reportingPayload = null,
+  supervisorExecution = null,
+  supervisorState = null,
+}) {
+  const hasReport = Boolean(reportingPayload || analysisCards.length || supervisorExecution || currentReport);
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
+  const reportPersistence = currentReport?.persistence || {};
+  const reportMetadata = currentReport?.metadata || {};
+  const reportStatus = reportingPayload?.stage || currentReport?.status || reportPersistence.status || "draft";
+  const reportTitle = reportingPayload?.title || reportMetadata.title || "Supervisor 상담 분석 리포트";
+  const reportSummary =
+    reportingPayload?.summary ||
+    (reportMetadata.case_id
+      ? `내 사건 ${reportMetadata.case_id}에 저장된 리포트입니다.`
+      : "최신 상담 결과를 리포팅 화면에 연결했습니다.");
+  const reportTagClass = currentReport || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber";
 
   return (
     <section className="screen">
@@ -1807,8 +2076,8 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
           <p>상담 결과에서 생성한 과실비율·사고 리포트를 검토하고 내려받는 화면입니다.</p>
         </div>
         <div className="screen-actions">
-          <button className="button" type="button">목록 새로고침</button>
-          <button className="button primary" type="button">리포트 생성 준비</button>
+          <button className="button" type="button" onClick={onRefresh}>목록 새로고침</button>
+          <button className="button primary" type="button" onClick={onOpenChat}>리포트 생성 준비</button>
         </div>
       </div>
 
@@ -1820,11 +2089,18 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
           </div>
           {hasReport ? (
             <div className="report-list-card">
-              <span className={reportingPayload?.stage === "agent_execution_ready" ? "tag green" : "tag amber"}>
-                {reportingPayload?.stage || "draft"}
+              <span className={reportTagClass}>
+                {reportStatus}
               </span>
-              <strong>{reportingPayload?.title || "Supervisor 상담 분석 리포트"}</strong>
-              <p>{reportingPayload?.summary || "최신 상담 결과를 리포팅 화면에 연결했습니다."}</p>
+              <strong>{reportTitle}</strong>
+              <p>{reportSummary}</p>
+              {currentReport && (
+                <p>
+                  저장 리포트: {currentReport.report_id}
+                  {reportPersistence.status ? ` · ${reportPersistence.status}` : ""}
+                </p>
+              )}
+              {reportActionStatus && <p>{reportActionStatus}</p>}
             </div>
           ) : (
             <div className="empty-panel report-empty">
@@ -1838,8 +2114,8 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
           {hasReport ? (
             <div className="report-page">
               <span className="eyebrow">리포트 미리보기</span>
-              <h3>{reportingPayload?.title || "Supervisor 상담 분석 리포트"}</h3>
-              <p>{reportingPayload?.summary}</p>
+              <h3>{reportTitle}</h3>
+              <p>{reportSummary}</p>
               <div className="report-section-list">
                 {sections.map((section) => (
                   <article key={section.title}>
@@ -1849,6 +2125,15 @@ function ReportingScreen({ analysisCards = [], reportingPayload = null, supervis
                     ))}
                   </article>
                 ))}
+                {sections.length === 0 && currentReport && (
+                  <article>
+                    <strong>저장 리포트</strong>
+                    <p>
+                      리포트 ID {currentReport.report_id}
+                      {reportMetadata.updated_at ? ` · 최근 작업 ${reportMetadata.updated_at}` : ""}
+                    </p>
+                  </article>
+                )}
               </div>
               {analysisCards.length > 0 && (
                 <div className="result-cards">
@@ -1927,6 +2212,85 @@ function MetricCard({ detail, label, value }) {
   );
 }
 
+function restoreConversationMessages(job = {}, item = {}) {
+  const storedMessages = Array.isArray(job.conversation_messages) ? job.conversation_messages : [];
+  const messages = storedMessages
+    .map((message) => ({
+      role: message?.role === "assistant" ? "assistant" : "user",
+      content: String(message?.content || "").trim(),
+      status: message?.metadata?.response_status || job.status || "success",
+    }))
+    .filter((message) => message.content);
+  const assistantMessage =
+    job.assistant_message ||
+    job.assistant_message_payload?.answer ||
+    job.progress_message ||
+    "저장된 상담 결과를 불러왔습니다.";
+
+  if (!messages.some((message) => message.role === "user")) {
+    messages.unshift({
+      role: "user",
+      content: item?.title || job.routing_intent || "저장된 상담",
+    });
+  }
+  if (!messages.some((message) => message.role === "assistant")) {
+    messages.push({
+      role: "assistant",
+      content: assistantMessage,
+      status: job.status || "success",
+      pending_questions: job.pending_questions || [],
+    });
+  }
+  return messages;
+}
+
+function restoreAnalysisResponse(job = {}, item = {}) {
+  const reportingPayload = job.reporting_payload || job.supervisor_state?.reporting_payload || null;
+  return {
+    ...job,
+    cards: Array.isArray(job.cards) ? job.cards : [],
+    assistant_message:
+      job.assistant_message ||
+      job.assistant_message_payload?.answer ||
+      job.progress_message ||
+      "저장된 상담 결과를 불러왔습니다.",
+    pending_questions: Array.isArray(job.pending_questions) ? job.pending_questions : [],
+    reporting_payload: reportingPayload,
+    supervisor_state: job.supervisor_state || null,
+    supervisor_execution: job.supervisor_execution || null,
+    persistence: {
+      conversation_save_state: "saved",
+      job_id: job.job_id || item?.job_id || item?.case_id || "",
+      session_id: job.session_id || item?.session_id || "",
+    },
+  };
+}
+
+function restoreCurrentReport(job = {}, item = {}) {
+  const reportId = job.latest_report_id || item?.latest_report_id || item?.report_id || "";
+  if (!reportId) {
+    return null;
+  }
+  const latestReport = Array.isArray(job.reports)
+    ? job.reports.find((report) => report?.report_id === reportId) || job.reports[0]
+    : null;
+  const reportStatus = job.latest_report_status || latestReport?.status || item?.latest_report_status || item?.status || "saved";
+  return {
+    report_id: reportId,
+    status: reportStatus,
+    persistence: {
+      status: reportStatus,
+      report_quality: latestReport?.report_quality || {},
+    },
+    metadata: {
+      case_id: job.job_id || item?.case_id || item?.job_id || "",
+      title: latestReport?.title || item?.title || job.assistant_message || "저장된 상담 리포트",
+      updated_at: latestReport?.updated_at || job.updated_at || item?.updated_at || item?.last_event_at || "",
+      report_count: job.report_count || item?.report_count || 1,
+    },
+  };
+}
+
 function normalizeAnalysisCards(cards) {
   return cards.map((card) => ({
     card_type: normalizeLabel(card.card_type),
@@ -1952,6 +2316,17 @@ function normalizeLabel(value) {
     reporting_preview: "리포팅",
   };
   return labels[value] || value || "분석";
+}
+
+function caseStatusLabel(value) {
+  const labels = {
+    queued: "대기",
+    running: "분석 중",
+    partial: "추가 확인",
+    success: "분석 완료",
+    failed: "확인 필요",
+  };
+  return labels[String(value || "").toLowerCase()] || value || "상태 확인";
 }
 
 function latestMessageIndex(messages, role) {
