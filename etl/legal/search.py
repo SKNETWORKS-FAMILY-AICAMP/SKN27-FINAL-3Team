@@ -3,11 +3,102 @@
 from __future__ import annotations
 
 import os
+import re
 from heapq import heappop, heappush
 from pathlib import Path
 from etl.common.utils import load_env_file, normalize_l2, read_jsonl, read_jsonl_iter
 
+_ARTICLE_NO_PATTERN = re.compile(r"제(\d+)조(?:의(\d+))?")
 
+
+def parse_law_code(law_code: str) -> tuple[str, str] | None:
+    """"도로교통법 제148조의2 제1항" 같은 law_code에서 (source_name, article_no)를 추출한다.
+
+    law_code는 표준 인용 순서("제148조의2" — 조가 먼저)를 쓰지만, law_chunks.article_no는
+    ingestion 단계(ingestion/parser.py `_article_no`)가 만드는 내부 저장 순서
+    ("제148의2조" — 의가 먼저)를 쓴다. 조회 전에 순서를 저장 포맷에 맞춰 변환한다 —
+    그렇지 않으면 가지번호(의N)가 있는 조문에서 엉뚱한 본조를 조회하게 된다.
+    """
+    match = _ARTICLE_NO_PATTERN.search(law_code)
+    if not match:
+        return None
+    source_name = law_code[:match.start()].strip()
+    if not source_name:
+        return None
+    number, branch = match.group(1), match.group(2)
+    article_no = f"제{number}의{branch}조" if branch else f"제{number}조"
+    return source_name, article_no
+
+
+def _connect_law_db():
+    import psycopg2
+
+    return psycopg2.connect(
+        host=os.environ.get("POSTGRES_HOST", "localhost"),
+        port=os.environ.get("POSTGRES_PORT", "5432"),
+        user=os.environ.get("POSTGRES_USER", "postgres"),
+        password=os.environ.get("POSTGRES_PASSWORD", "change-me"),
+        dbname=os.environ.get("POSTGRES_DB", "law_db"),
+    )
+
+
+def law_code_exists(law_code: str) -> bool:
+    """law_chunks에 law_code에 해당하는 조문이 존재하는지 단일 조회한다 (LDB_CHECK, DATA-003 §7).
+
+    재시도 없음. law_code 파싱 실패·DB 연결 오류 등 어떤 이유로든 확인이 안 되면 False를
+    반환한다 — 호출 측(law_code_check_node)은 이 값으로 판정을 막지 않고 disclaimer 문구만
+    조건부로 바꾼다.
+    """
+    parsed = parse_law_code(law_code)
+    if not parsed:
+        return False
+    source_name, article_no = parsed
+
+    conn = None
+    try:
+        conn = _connect_law_db()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM law_chunks WHERE source_name = %s AND article_no = %s LIMIT 1;",
+                (source_name, article_no),
+            )
+            return cur.fetchone() is not None
+    except Exception as exc:
+        print(f"[Error] law_code_exists lookup failed: {exc}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def get_provision_text(source_name: str, article_no: str) -> str | None:
+    """law_chunks에서 (source_name, article_no)에 해당하는 조문 원문을 조회한다.
+
+    같은 조문이라도 개정 이력별로 여러 버전이 저장돼 있을 수 있어(enforce_date가 다른
+    행), 가장 최근에 시행된 버전을 반환한다. 재시도 없음 — 조회 실패·미존재는 모두 None.
+    호출 측(law_refs.py)은 None일 때 하드코딩된 폴백 원문으로 대체한다.
+    """
+    conn = None
+    try:
+        conn = _connect_law_db()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT provision_text FROM law_chunks
+                WHERE source_name = %s AND article_no = %s
+                ORDER BY enforce_date DESC NULLS LAST
+                LIMIT 1;
+                """,
+                (source_name, article_no),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as exc:
+        print(f"[Error] get_provision_text lookup failed: {exc}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def search_laws(

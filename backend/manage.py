@@ -14,6 +14,9 @@ def main() -> None:
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
+    from config.env_loader import load_django_env_file
+
+    load_django_env_file(repo_root)
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
     from django.core.management import execute_from_command_line

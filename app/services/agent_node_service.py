@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import os
 from copy import deepcopy
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -13,6 +16,13 @@ from app.services.agent_adapter_contract import (
     build_agent_adapter_contract,
 )
 from app.services.attachment_mock_service import resolve_attachment_references
+from app.services.legal_rag_service import search_legal_rag
+
+try:
+    from chatbot.object_storage import read_object_bytes, storage_reference_from_uri
+except Exception:  # pragma: no cover - keeps CLI-only mock service imports decoupled from Django.
+    read_object_bytes = None
+    storage_reference_from_uri = None
 
 
 NODE_REGISTRY: dict[str, dict[str, Any]] = {
@@ -38,7 +48,8 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["attachments[purpose=fine_notice]|user_text"],
         "produces": ["fine_notice_analysis", "notice_fields", "required_documents"],
         "handoff_to": ["law_ground_search", "objection_report_generation"],
-        "status": "mock_ready",
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["mock", "sync"],
     },
     "law_ground_search": {
         "order": 30,
@@ -63,6 +74,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "produces": ["accident_type_candidates", "similar_cases", "reliability_score"],
         "handoff_to": ["law_ground_search", "agent_result_validation"],
         "status": "mock_ready",
+        "adapter_modes": ["mock"],
     },
     "vision_media_analysis": {
         "order": 50,
@@ -75,6 +87,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "produces": ["key_frames", "scene_summary", "quality_issues"],
         "handoff_to": ["text_ml_case_search", "agent_result_validation"],
         "status": "mock_contract_only",
+        "adapter_modes": ["mock"],
     },
     "objection_report_generation": {
         "order": 60,
@@ -124,6 +137,22 @@ def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
     node = get_agent_node(node_code)
     agent_input = _agent_input(payload, node)
     execution_id = f"exec_{uuid4().hex[:12]}"
+    execution_mode = _requested_execution_mode(payload)
+    adapter_context = build_adapter_context(
+        execution_id=execution_id,
+        execution_mode=execution_mode if _should_use_sync_adapter(node_code, execution_mode) else "mock",
+        node=node,
+        plan_step=payload.get("plan_step"),
+    )
+
+    if _should_use_sync_adapter(node_code, execution_mode):
+        return _execute_sync_node(
+            payload=payload,
+            node=node,
+            agent_input=agent_input,
+            adapter_context=adapter_context,
+            execution_id=execution_id,
+        )
 
     return {
         "execution_id": execution_id,
@@ -131,12 +160,7 @@ def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
         "job_id": payload.get("job_id"),
         "node_code": node_code,
         "node": node,
-        "adapter_context": build_adapter_context(
-            execution_id=execution_id,
-            execution_mode="mock",
-            node=node,
-            plan_step=payload.get("plan_step"),
-        ),
+        "adapter_context": adapter_context,
         "agent_input": agent_input,
         "agent_output": build_agent_output(
             node_code=node_code,
@@ -161,6 +185,8 @@ def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) ->
                 "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
                 "node_code": step.get("node_code"),
                 "execution_status": step.get("status", "success"),
+                "execution_mode": step.get("execution_mode") or payload.get("execution_mode"),
+                "adapter_mode": step.get("adapter_mode") or payload.get("adapter_mode"),
                 "required_inputs": step.get("required_inputs", []),
                 "depends_on": step.get("depends_on", []),
                 "plan_step": step,
@@ -173,7 +199,7 @@ def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) ->
         upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
 
     return {
-        "execution_mode": "mock",
+        "execution_mode": _plan_execution_mode(executions),
         "job_id": payload.get("job_id"),
         "plan_id": analysis_plan.get("plan_id"),
         "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
@@ -227,6 +253,7 @@ def _payload_node_code(payload: dict[str, Any]) -> str:
 
 
 def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    nested_agent_input = payload.get("agent_input") if isinstance(payload.get("agent_input"), dict) else {}
     return build_agent_adapter_input(
         analysis_plan_id=payload.get("analysis_plan_id"),
         job_id=payload.get("job_id"),
@@ -236,6 +263,7 @@ def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any
         user_text=payload.get("user_text"),
         attachments=payload.get("attachments", []),
         context=payload.get("context", {}),
+        slot_state=payload.get("slot_state") or nested_agent_input.get("slot_state") or {},
         required_inputs=payload.get("required_inputs") or node["required_inputs"],
         depends_on=payload.get("depends_on", []),
         upstream_results=payload.get("upstream_results", {}),
@@ -246,6 +274,272 @@ def _node_with_adapter_contract(node: dict[str, Any]) -> dict[str, Any]:
     node_copy = deepcopy(node)
     node_copy["adapter_contract"] = build_agent_adapter_contract(node_copy)
     return node_copy
+
+
+def _requested_execution_mode(payload: dict[str, Any]) -> str:
+    requested = str(payload.get("execution_mode") or payload.get("adapter_mode") or "").strip().lower()
+    if requested in {"sync", "real", "live", "agent"}:
+        return "sync"
+    return "mock"
+
+
+def _should_use_sync_adapter(node_code: str, execution_mode: str) -> bool:
+    return execution_mode == "sync" and node_code == "fine_notice_analysis"
+
+
+def _execute_sync_node(
+    *,
+    payload: dict[str, Any],
+    node: dict[str, Any],
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+    execution_id: str,
+) -> dict[str, Any]:
+    try:
+        agent_output = _run_sync_adapter(agent_input, adapter_context)
+        adapter_error = None
+    except Exception as exc:  # pragma: no cover - defensive production boundary.
+        agent_output = _adapter_error_output(
+            node=node,
+            agent_input=agent_input,
+            exc=exc,
+        )
+        adapter_error = {
+            "error_code": exc.__class__.__name__,
+            "message": str(exc),
+        }
+
+    result = {
+        "execution_id": execution_id,
+        "execution_mode": "sync",
+        "job_id": payload.get("job_id"),
+        "node_code": node["node_code"],
+        "node": node,
+        "adapter_context": adapter_context,
+        "agent_input": agent_input,
+        "agent_output": agent_output,
+        "created_at": _now_iso(),
+    }
+    if adapter_error:
+        result["adapter_error"] = adapter_error
+    return result
+
+
+def _run_sync_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    node_code = str(agent_input.get("node_code") or "")
+    if node_code == "fine_notice_analysis":
+        return _run_fine_notice_analysis_adapter(agent_input, adapter_context)
+    raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
+
+
+def _run_fine_notice_analysis_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    from ai.agents.fine_notice_analysis.graph import graph
+
+    state = _fine_notice_state(agent_input)
+    result = graph.invoke(state)
+    raw_output = (
+        result.get("agent_results", {}).get("fine_notice_analysis")
+        if isinstance(result, dict)
+        else None
+    )
+    if not isinstance(raw_output, dict):
+        raw_output = {
+            "status": _normalize_result_status(str(result.get("ocr_status") or "partial")),
+            "summary": "fine_notice_analysis returned without an agent_results envelope.",
+            "structured_result": _fine_notice_structured_result(result if isinstance(result, dict) else {}),
+            "evidence": [],
+            "next_actions": ["check_fine_notice_agent_output"],
+            "limitations": ["The real fine_notice_analysis graph did not return a complete envelope."],
+        }
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "ai.agents.fine_notice_analysis.graph",
+            "execution_mode": "sync",
+            "source_status": raw_output.get("status"),
+            "input_source": state.get("_input_source"),
+        },
+    )
+
+
+def _fine_notice_state(agent_input: dict[str, Any]) -> dict[str, Any]:
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    notice_image = context.get("notice_image")
+    notice_mime_type = context.get("notice_mime_type")
+    input_source = "context"
+
+    if not notice_image:
+        for attachment in agent_input.get("attachments") or []:
+            if not isinstance(attachment, dict):
+                continue
+            if attachment.get("purpose") != "fine_notice":
+                continue
+            notice_image = _attachment_base64(attachment)
+            notice_mime_type = attachment.get("content_type") or attachment.get("mime_type")
+            input_source = "attachment"
+            if notice_image:
+                break
+
+    return {
+        "notice_image": notice_image,
+        "notice_mime_type": notice_mime_type or "image/jpeg",
+        "agent_results": {},
+        "_input_source": input_source if notice_image else "missing",
+    }
+
+
+def _attachment_base64(attachment: dict[str, Any]) -> str | None:
+    for key in ("content_base64", "data_base64", "base64"):
+        value = attachment.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    storage_uri = str(attachment.get("storage_uri") or "")
+    object_storage_bytes = _attachment_object_storage_bytes(attachment, storage_uri)
+    if object_storage_bytes is not None:
+        return base64.b64encode(object_storage_bytes).decode("ascii")
+
+    if not storage_uri.startswith("mock://uploads/"):
+        return None
+
+    relative_path = storage_uri.removeprefix("mock://uploads/")
+    file_path = Path(os.environ.get("MOCK_UPLOAD_ROOT", "backend/media/mock_uploads")) / relative_path
+    if not file_path.exists() or not file_path.is_file():
+        return None
+    return base64.b64encode(file_path.read_bytes()).decode("ascii")
+
+
+def _attachment_object_storage_bytes(attachment: dict[str, Any], storage_uri: str) -> bytes | None:
+    if read_object_bytes is None:
+        return None
+    object_storage = attachment.get("object_storage")
+    if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
+        return read_object_bytes(object_storage)
+    if storage_reference_from_uri is None or not storage_uri.startswith("s3://"):
+        return None
+    reference = storage_reference_from_uri(
+        storage_uri,
+        resource_type="uploaded_file",
+        resource_id=str(attachment.get("attachment_id") or ""),
+        filename=str(attachment.get("filename") or attachment.get("original_filename") or ""),
+        content_type=str(attachment.get("content_type") or attachment.get("mime_type") or ""),
+        size_bytes=attachment.get("size_bytes"),
+    )
+    return read_object_bytes(reference)
+
+
+def _fine_notice_structured_result(result: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "ocr_status",
+        "ocr_error",
+        "fine_type",
+        "notice_stage",
+        "law_code",
+        "violation_text",
+        "violation_datetime",
+        "violation_location",
+        "fine_amount",
+        "opinion_deadline",
+        "issuing_authority",
+        "vehicle_number",
+        "missing_fields",
+        "format_errors",
+    }
+    return {key: result.get(key) for key in allowed if key in result}
+
+
+def _complete_adapter_output(
+    raw_output: dict[str, Any],
+    *,
+    node: dict[str, Any],
+    agent_input: dict[str, Any],
+    adapter_trace: dict[str, Any],
+) -> dict[str, Any]:
+    source_status = str(raw_output.get("status") or "partial")
+    structured_result = deepcopy(raw_output.get("structured_result") or {})
+    structured_result.setdefault("adapter_trace", adapter_trace)
+    return {
+        "session_id": agent_input.get("session_id"),
+        "message_id": agent_input.get("message_id"),
+        "job_id": agent_input.get("job_id"),
+        "node_name": raw_output.get("node_name") or node["node_name"],
+        "node_code": node["node_code"],
+        "node_type": node["node_type"],
+        "owner": node["owner"],
+        "status": _adapter_result_status(source_status),
+        "execution_status": source_status,
+        "summary": raw_output.get("summary") or _summary_for_node(node["node_code"], _adapter_result_status(source_status)),
+        "structured_result": structured_result,
+        "evidence": deepcopy(raw_output.get("evidence") or []),
+        "next_actions": deepcopy(raw_output.get("next_actions") or []),
+        "limitations": _adapter_limitations(raw_output, adapter_trace),
+        "created_at": raw_output.get("created_at") or _now_iso(),
+    }
+
+
+def _adapter_result_status(status: str) -> str:
+    if status in {"success", "partial", "failed"}:
+        return status
+    if status in {"degraded"}:
+        return "partial"
+    if status in {"rejected", "blocked", "skipped"}:
+        return "failed"
+    return "partial"
+
+
+def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, Any]) -> list[str]:
+    limitations = [str(item) for item in raw_output.get("limitations") or [] if str(item)]
+    marker = "fine_notice_analysis real adapter is connected through Supervisor sync execution mode."
+    if marker not in limitations:
+        limitations.append(marker)
+    if adapter_trace.get("input_source") == "missing":
+        limitations.append("No fine_notice attachment image was available for OCR.")
+    return limitations
+
+
+def _adapter_error_output(
+    *,
+    node: dict[str, Any],
+    agent_input: dict[str, Any],
+    exc: Exception,
+) -> dict[str, Any]:
+    return {
+        "session_id": agent_input.get("session_id"),
+        "message_id": agent_input.get("message_id"),
+        "job_id": agent_input.get("job_id"),
+        "node_name": node["node_name"],
+        "node_code": node["node_code"],
+        "node_type": node["node_type"],
+        "owner": node["owner"],
+        "status": "failed",
+        "execution_status": "adapter_error",
+        "summary": f"{node['node_code']} sync adapter failed before returning a usable envelope.",
+        "structured_result": {
+            "error_code": exc.__class__.__name__,
+            "error_message": str(exc),
+        },
+        "evidence": [],
+        "next_actions": ["fallback_to_mock_or_retry_adapter"],
+        "limitations": ["Sync adapter exception was normalized for Supervisor result validation."],
+        "created_at": _now_iso(),
+    }
+
+
+def _plan_execution_mode(executions: list[dict[str, Any]]) -> str:
+    modes = {str(execution.get("execution_mode") or "mock") for execution in executions}
+    if not modes or modes == {"mock"}:
+        return "mock"
+    if modes == {"sync"}:
+        return "sync"
+    return "hybrid"
 
 
 def _normalize_result_status(status: str) -> str:
@@ -318,6 +612,26 @@ def _structured_result_for_node(
         }
 
     if node_code == "law_ground_search":
+        rag_search = search_legal_rag(_law_ground_query(payload), top_k=3)
+        if rag_search.get("results"):
+            return {
+                "matched_laws": [
+                    {
+                        "law_name": item.get("source_name") or item.get("title"),
+                        "article": item.get("article") or item.get("section_ref") or "source_chunk",
+                        "summary": item.get("summary"),
+                        "source_reference": item.get("source_reference"),
+                        "source_url": item.get("source_url"),
+                        "effective_date": item.get("effective_date"),
+                        "score": item.get("score"),
+                    }
+                    for item in rag_search["results"]
+                ],
+                "applicable_conditions": ["RAG 근거는 사용자 사실관계와 처분 문구 확인 후 적용 여부를 판단해야 합니다."],
+                "exceptions": [],
+                "retrieval_quality": rag_search.get("backend") or "django_rag_tables",
+                "retrieval": _retrieval_metadata(rag_search),
+            }
         return {
             "matched_laws": [
                 {
@@ -329,6 +643,7 @@ def _structured_result_for_node(
             "applicable_conditions": ["고지서 또는 사고 유형 확인 후 적용 가능성 검토"],
             "exceptions": [],
             "retrieval_quality": "mock_only",
+            "retrieval": _retrieval_metadata(rag_search),
         }
 
     if node_code == "text_ml_case_search":
@@ -384,6 +699,27 @@ def _structured_result_for_node(
         }
 
     return {"node_code": node_code, "mock_result": "unregistered node"}
+
+
+def _retrieval_metadata(rag_search: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: rag_search.get(key)
+        for key in (
+            "contract_version",
+            "status",
+            "backend",
+            "query",
+            "top_k",
+            "result_count",
+            "latency_ms",
+            "error_code",
+            "fallback_from",
+            "attempted_backends",
+            "embedding",
+            "sql_tables",
+        )
+        if key in rag_search
+    }
 
 
 def _evidence_for_node(node_code: str, status: str) -> list[dict[str, Any]]:
@@ -470,6 +806,35 @@ def _input_modalities(payload: dict[str, Any]) -> list[str]:
         if attachment_type and attachment_type not in modalities:
             modalities.append(attachment_type)
     return modalities
+
+
+def _law_ground_query(payload: dict[str, Any]) -> str:
+    agent_input = payload.get("agent_input") if isinstance(payload.get("agent_input"), dict) else {}
+    direct_query = (
+        payload.get("search_query")
+        or payload.get("violation_text")
+        or agent_input.get("search_query")
+        or agent_input.get("violation_text")
+    )
+    if direct_query:
+        return str(direct_query)
+
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    supervisor = (
+        context.get("supervisor_handoff")
+        if isinstance(context.get("supervisor_handoff"), dict)
+        else {}
+    )
+    packages = supervisor.get("agent_input_packages") if isinstance(supervisor.get("agent_input_packages"), list) else []
+    for package in packages:
+        if not isinstance(package, dict) or package.get("node_code") != "law_ground_search":
+            continue
+        package_payload = package.get("payload") if isinstance(package.get("payload"), dict) else {}
+        query = package_payload.get("search_query") or package_payload.get("violation_text")
+        if query:
+            return str(query)
+
+    return str(payload.get("user_text") or "")
 
 
 def _attachment_purposes(payload: dict[str, Any]) -> list[str]:

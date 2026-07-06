@@ -1,0 +1,240 @@
+# Production Environment Guide
+
+This guide pins the environment variables required before the Django canonical
+runtime can be treated as production-shaped.
+
+Use [.env.production.example](../../.env.production.example) as a template only.
+Actual values must live in the deployment platform secret store, not in Git.
+
+## 1. Readiness Command
+
+Run the non-network readiness check before a release:
+
+```powershell
+python backend\manage.py check_production_readiness --skip-database --format json
+```
+
+For local verification with a file copied from `.env.production.example`, load it
+explicitly:
+
+```powershell
+$env:DJANGO_ENV_FILE=".env.production"
+python backend\manage.py check_production_readiness --skip-database --format json
+```
+
+Run the database-backed check after PostgreSQL is reachable and migrations plus
+legal RAG ETL have been applied:
+
+```powershell
+python backend\manage.py check_production_readiness --format json --fail-on-error
+```
+
+The first command validates settings only. The second also checks that the
+runtime database has worker and RAG tables.
+
+## 2. Blocking Settings
+
+These variables must be production values before release:
+
+```dotenv
+DJANGO_DEBUG=0
+DJANGO_SECRET_KEY=<secret-store-value>
+DJANGO_ALLOWED_HOSTS=<production-hosts>
+DJANGO_DATABASE_ENGINE=postgres
+GOOGLE_AUTH_ALLOW_MOCK=0
+APP_AUTH_ALLOW_MOCK_BEARER=0
+GOOGLE_CLIENT_ID=<google-oauth-web-client-id>
+GOOGLE_CLIENT_SECRET=<secret-store-value>
+GOOGLE_POPUP_REDIRECT_URI=<frontend-origin>
+APP_JWT_SECRET=<secret-store-value>
+OAUTH_TOKEN_SECRET=<secret-store-value>
+```
+
+The readiness command reports `fail` when any of these are missing or still in
+mock/development mode.
+
+## 3. Database And Worker
+
+Production uses PostgreSQL with the pgvector image:
+
+```dotenv
+POSTGRES_IMAGE=pgvector/pgvector:pg16
+POSTGRES_HOST=<postgres-host>
+POSTGRES_PORT=5432
+POSTGRES_USER=<app-db-user>
+POSTGRES_PASSWORD=<secret-store-value>
+POSTGRES_DB=law_db
+REDIS_URL=<redis-url>
+AGENT_WORKER_STALE_AFTER_SECONDS=900
+AGENT_WORKER_RETRY_BACKOFF_SECONDS=60
+AGENT_WORKER_RETRY_BACKOFF_MAX_SECONDS=900
+AGENT_WORKER_LOOP_SLEEP_SECONDS=5
+```
+
+Use `POSTGRES_HOST=postgres` only from containers that share the
+`docker-compose` network. When running `python backend\manage.py ...` directly
+from the Windows host against the published Compose database port, set
+`POSTGRES_HOST=localhost` in the loaded environment file.
+
+`agent_work_items`, `analysis_jobs`, and `agent_invocations` must exist before a
+worker is started. Run migrations first, then start a long-running worker
+process:
+
+```powershell
+python backend\manage.py process_agent_work_items --loop --limit 10
+```
+
+For smoke tests, run one bounded polling loop:
+
+```powershell
+python backend\manage.py process_agent_work_items --limit 10 --max-loops 1
+```
+
+## 4. Legal RAG
+
+Vector search is optional during staged rollout but required for full RAG:
+
+```dotenv
+LEGAL_RAG_VECTOR_ENABLED=1
+LEGAL_RAG_QUERY_EMBEDDING_PROVIDER=sentence-transformers
+LEGAL_RAG_QUERY_EMBEDDING_MODEL=intfloat/multilingual-e5-large
+LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS=1024
+```
+
+Before enabling it, load ETL output into `law_chunks` and `law_embeddings`.
+The runtime falls back to Django `rag_chunks` lexical search when vector search
+is disabled or unavailable, and records that fallback in retrieval metadata.
+
+Create or refresh the pgvector schema from the Django runtime:
+
+```powershell
+python backend\manage.py load_legal_rag_pgvector --schema-only --format text
+```
+
+Load ETL JSONL artifacts and run a smoke query:
+
+```powershell
+python backend\manage.py load_legal_rag_pgvector --replace --format text --smoke-query "어린이보호구역 정차 과태료"
+```
+
+The command expects:
+
+- `output/law_ingestion/chunks/law_chunks.jsonl`
+- `output/law_ingestion/embeddings/law_embeddings_e5_large.jsonl`
+
+For a local no-pgvector smoke, load the tiny Django fallback fixture and run a
+representative query:
+
+```powershell
+python backend\manage.py load_legal_rag_smoke_fixture --replace --format text --smoke-query "school zone emergency stopping fine notice"
+```
+
+The fixture lives at `storage/rag/legal_rag_smoke_chunks.jsonl` and should keep
+`rag_chunks` non-zero even when pgvector ETL artifacts are not available yet.
+
+## 5. Optional Warnings
+
+These settings may remain warning-level during a staged rollout:
+
+```dotenv
+SUPERVISOR_LLM_ENABLED=0
+LEGAL_RAG_VECTOR_ENABLED=0
+OBJECT_STORAGE_PROVIDER=mock_s3
+REDIS_URL=
+```
+
+For a production release, prefer:
+
+```dotenv
+SUPERVISOR_LLM_ENABLED=1
+SUPERVISOR_LLM_API_KEY=<secret-store-value>
+OBJECT_STORAGE_PROVIDER=s3
+OBJECT_STORAGE_BUCKET=<production-bucket>
+OBJECT_STORAGE_REGION=<aws-region>
+OBJECT_STORAGE_ACCESS_KEY_ID=<secret-store-value-or-empty-when-using-iam-role>
+OBJECT_STORAGE_SECRET_ACCESS_KEY=<secret-store-value-or-empty-when-using-iam-role>
+REDIS_URL=<redis-url>
+FILE_SCAN_PROVIDER=clamav
+FILE_SCAN_CLAMAV_HOST=<clamav-host>
+FILE_SCAN_CLAMAV_PORT=3310
+FILE_SCAN_TIMEOUT_SECONDS=10
+FILE_SCAN_EXTERNAL_INLINE_MAX_BYTES=5242880
+```
+
+The S3 binary adapter requires the `boto3` package at runtime. When using AWS
+standard environment variables or an IAM role, leave the project-specific
+access key fields empty and provide `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and `AWS_DEFAULT_REGION` through
+the deployment platform as needed.
+
+After enabling Supervisor LLM, run a real planner smoke:
+
+```powershell
+python backend\manage.py smoke_supervisor_llm --require-used --require-slot-state --format text
+```
+
+Without `--require-used`, the command reports whether the LLM path was
+`used`, `fallback`, or `disabled` without printing secrets. `--require-slot-state`
+also verifies that `slot_filling_state.v1` is present in ready Agent input
+packages.
+
+After Google Cloud OAuth settings are registered, verify code-flow settings:
+
+```powershell
+python backend\manage.py smoke_google_oauth_code --format text
+```
+
+To complete a real exchange smoke, obtain a one-time Google authorization code
+from the configured frontend redirect flow, then run:
+
+```powershell
+python backend\manage.py smoke_google_oauth_code --code "<one-time-code>" --require-exchange --format text
+```
+
+Run the file scan smoke before allowing uploaded files into Agent handoff:
+
+```powershell
+python backend\manage.py smoke_file_scan --require-clean --format text
+python backend\manage.py process_uploaded_file_scans --limit 20 --format text
+```
+
+`FILE_SCAN_PROVIDER=local_policy` is acceptable for local development only. A
+production release should use `clamav` or an external scan API and keep
+`FILE_SCAN_MAX_BYTES`, `FILE_SCAN_TIMEOUT_SECONDS`, and `FILE_SCAN_REJECT_PII`
+explicit in the environment. The scanner fails closed: if the configured
+provider cannot scan a source file, the uploaded file is rejected instead of
+being handed to an Agent.
+
+Run the object storage binary smoke:
+
+```powershell
+python backend\manage.py smoke_object_storage --require-binary --format text
+```
+
+For local staged rollout, `OBJECT_STORAGE_PROVIDER=mock_s3` writes binary
+objects into `OBJECT_STORAGE_LOCAL_ROOT`. For production, use
+`OBJECT_STORAGE_PROVIDER=s3` with real bucket credentials and run the same
+`--require-binary` smoke against the target storage. A `no_credentials` smoke
+failure means the runtime did not receive either project-specific S3
+credentials or standard AWS credentials/IAM role credentials.
+
+Before real Agent adapters are connected, verify the demo persona catalog still
+drives every pre-agent product flow to the mock-contract boundary:
+
+```powershell
+python backend\manage.py smoke_persona_catalog --format text
+```
+
+The staged catalog currently covers fine notice objection, accident scene
+photo, blackbox video, law-only question, and saved report re-download personas.
+This smoke does not prove OCR/RAG/Vision model quality; it proves the
+Supervisor-facing persona plan, reporting payload, and report action boundary
+remain executable.
+
+## 6. Secret Rules
+
+- Do not commit `.env`, `.env.production`, or copied secret files.
+- Commit only `.env.example` and `.env.production.example`.
+- Store real Google OAuth, app JWT, OAuth token, database, object storage, and
+  LLM keys in the deployment secret store.
+- After changing secrets, rerun the readiness command and the auth smoke tests.

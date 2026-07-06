@@ -11,6 +11,7 @@ REQUIRED_DOCS = [
     ROOT / "docs" / "ops" / "rollback-plan.md",
     ROOT / "docs" / "ops" / "incident-response.md",
     ROOT / "docs" / "ops" / "secret-management.md",
+    ROOT / "docs" / "ops" / "production-env.md",
     ROOT / "docs" / "ops" / "backup-and-recovery.md",
 ]
 
@@ -59,6 +60,51 @@ def test_secret_management_document_defines_rotation_and_logging_rules():
     assert "## 3. 교체 절차" in content
     assert "Authorization" in content
     assert "Cookie" in content
+
+
+def test_production_env_template_contains_readiness_keys():
+    content = read_text(ROOT / ".env.production.example")
+    required_keys = [
+        "DJANGO_DEBUG=0",
+        "DJANGO_SECRET_KEY=",
+        "DJANGO_ALLOWED_HOSTS=",
+        "DJANGO_DATABASE_ENGINE=postgres",
+        "GOOGLE_AUTH_ALLOW_MOCK=0",
+        "APP_AUTH_ALLOW_MOCK_BEARER=0",
+        "GOOGLE_CLIENT_ID=",
+        "GOOGLE_CLIENT_SECRET=",
+        "GOOGLE_POPUP_REDIRECT_URI=",
+        "APP_JWT_SECRET=",
+        "OAUTH_TOKEN_SECRET=",
+        "POSTGRES_IMAGE=pgvector/pgvector:pg16",
+        "REDIS_URL=",
+        "AGENT_WORKER_STALE_AFTER_SECONDS=",
+        "AGENT_WORKER_RETRY_BACKOFF_SECONDS=",
+        "AGENT_WORKER_LOOP_SLEEP_SECONDS=",
+        "SUPERVISOR_LLM_ENABLED=",
+        "LEGAL_RAG_VECTOR_ENABLED=",
+        "OBJECT_STORAGE_PROVIDER=s3",
+    ]
+    missing = [key for key in required_keys if key not in content]
+    assert missing == []
+
+
+def test_production_env_doc_references_readiness_command_and_secret_rules():
+    content = read_text(ROOT / "docs" / "ops" / "production-env.md")
+    assert "check_production_readiness" in content
+    assert "--fail-on-error" in content
+    assert ".env.production.example" in content
+    assert "secret store" in content
+    assert "law_chunks" in content
+    assert "law_embeddings" in content
+    assert "load_legal_rag_pgvector" in content
+    assert "load_legal_rag_smoke_fixture" in content
+    assert "legal_rag_smoke_chunks.jsonl" in content
+    assert "process_agent_work_items --loop" in content
+    assert "smoke_supervisor_llm" in content
+    assert "smoke_google_oauth_code" in content
+    assert "smoke_object_storage" in content
+    assert "smoke_persona_catalog" in content
 
 
 def test_repository_text_files_do_not_contain_obvious_secret_assignments():

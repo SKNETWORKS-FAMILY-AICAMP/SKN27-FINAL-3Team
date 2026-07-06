@@ -15,6 +15,7 @@ class AgentAdapterInput(TypedDict, total=False):
     user_text: str | None
     attachments: list[dict[str, Any]]
     context: dict[str, Any]
+    slot_state: dict[str, Any]
     required_inputs: list[str]
     depends_on: list[str]
     upstream_results: dict[str, dict[str, Any]]
@@ -61,6 +62,7 @@ REQUIRED_AGENT_INPUT_FIELDS = (
     "user_text",
     "attachments",
     "context",
+    "slot_state",
     "required_inputs",
     "depends_on",
     "upstream_results",
@@ -144,6 +146,7 @@ def build_agent_adapter_input(
     user_text: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
     context: dict[str, Any] | None = None,
+    slot_state: dict[str, Any] | None = None,
     required_inputs: list[str] | None = None,
     depends_on: list[str] | None = None,
     upstream_results: dict[str, dict[str, Any]] | None = None,
@@ -159,6 +162,7 @@ def build_agent_adapter_input(
         "user_text": user_text,
         "attachments": deepcopy(attachments or []),
         "context": deepcopy(context or {}),
+        "slot_state": deepcopy(slot_state or {}),
         "required_inputs": deepcopy(required_inputs or node.get("required_inputs") or []),
         "depends_on": deepcopy(depends_on or []),
         "upstream_results": deepcopy(upstream_results or {}),
@@ -202,6 +206,7 @@ def validate_agent_input_envelope(
         {
             "attachments": list,
             "context": dict,
+            "slot_state": dict,
             "required_inputs": list,
             "depends_on": list,
             "upstream_results": dict,

@@ -2,6 +2,7 @@ from app.services.chatbot_mock_service import (
     build_analysis_plan,
     create_session,
     list_demo_scenarios,
+    list_demo_personas,
     perform_report_action,
     submit_message,
 )
@@ -12,11 +13,19 @@ def test_chatbot_mock_session_exposes_mid_demo_scenarios():
     session = create_session(user_id="usr_mock")
 
     assert session["status"] == "draft"
-    assert {item["scenario"] for item in session["available_scenarios"]} == {
+    assert {item["scenario"] for item in session["available_scenarios"]} >= {
         "fine_notice",
         "fault_ratio",
     }
-    assert {item["scenario"] for item in list_demo_scenarios()} == {"fine_notice", "fault_ratio"}
+    assert {item["scenario"] for item in list_demo_scenarios()} == {
+        "fine_notice",
+        "fault_ratio",
+        "law_question",
+        "report_redownload",
+    }
+    assert {item["persona_id"] for item in session["available_personas"]} == {
+        item["persona_id"] for item in list_demo_personas()
+    }
 
 
 def test_chatbot_mock_fine_notice_success_flow_returns_cards_and_report_actions():
@@ -136,6 +145,156 @@ def test_chatbot_mock_partial_flow_returns_pending_question():
     assert response["analysis_plan"]["blocked_reason"]
     assert any(step["status"] == "blocked" for step in response["analysis_plan"]["steps"])
     assert response["report_links"] == []
+
+
+def test_chatbot_mock_demo_persona_runs_consultation_timeline():
+    response = submit_message(
+        {
+            "session_id": "ses_persona",
+            "user_text": "데모 페르소나로 상담을 끝까지 진행해줘",
+            "persona_id": "school_zone_fine_notice_parent",
+        }
+    )
+
+    persona_run = response["persona_run"]
+
+    assert response["mock_scenario"] == "fine_notice"
+    assert response["status"] == "success"
+    assert "정민서" in response["assistant_message"]
+    assert persona_run["persona"]["name"] == "정민서"
+    assert persona_run["stage"] == "draft_ready"
+    assert len(persona_run["turns"]) >= 5
+    assert persona_run["turns"][0]["role"] == "persona_user"
+    assert {card["card_type"] for card in response["cards"]} >= {
+        "persona_case_summary",
+        "persona_next_questions",
+        "persona_draft_outline",
+    }
+    assert response["structured_result"]["persona_id"] == "school_zone_fine_notice_parent"
+    assert response["pending_questions"]
+
+
+def test_chatbot_mock_all_demo_personas_run_to_contract_boundary():
+    personas = list_demo_personas()
+
+    assert {item["persona_id"] for item in personas} == {
+        "school_zone_fine_notice_parent",
+        "accident_scene_photo_driver",
+        "blackbox_video_fault_driver",
+        "traffic_law_question_citizen",
+        "saved_report_returning_user",
+    }
+
+    for persona in personas:
+        response = submit_message(
+            {
+                "session_id": f"ses_{persona['persona_id']}",
+                "user_text": persona["sample_user_text"],
+                "persona_id": persona["persona_id"],
+            }
+        )
+        node_codes = {step["node_code"] for step in response["analysis_plan"]["steps"]}
+
+        assert response["status"] == "success"
+        assert response["persona_run"]["persona"]["persona_id"] == persona["persona_id"]
+        assert response["mock_scenario"] == persona["scenario"]
+        assert response["routing_intent"] == persona["routing_intent"]
+        assert response["reporting_payload"]["contract_version"] == "reporting_payload.v1"
+        assert response["analysis_plan"]["persona_id"] == persona["persona_id"]
+        assert node_codes >= set(persona["expected_nodes"])
+        assert response["structured_result"]["expected_nodes"] == persona["expected_nodes"]
+        assert bool(response["report_links"]) is persona["report_action_ready"]
+
+
+def test_chatbot_mock_supervisor_conversation_sequence_asks_followup_then_builds_agent_inputs():
+    first = submit_message(
+        {
+            "session_id": "ses_conversation",
+            "user_text": "과태료 고지서를 받았는데 어떻게 해야 해?",
+        }
+    )
+
+    assert first["status"] == "partial"
+    assert first["supervisor_state"]["stage"] == "need_more_input"
+    assert first["pending_questions"]
+    assert first["analysis_plan"]["agent_input_packages"]
+    assert any(
+        item["status"] == "waiting_for_fields"
+        for item in first["supervisor_state"]["agent_input_packages"]
+    )
+
+    conversation_history = [
+        {"role": "user", "content": "과태료 고지서를 받았는데 어떻게 해야 해?"},
+        {"role": "assistant", "content": first["assistant_message"]},
+        {
+            "role": "user",
+            "content": (
+                "6월 24일 오후 3시 초등학교 앞에서 아이가 갑자기 아파서 "
+                "비상등을 켜고 정차했어. 과태료는 12만원이고 블랙박스와 약국 영수증이 있어."
+            ),
+        },
+    ]
+    second = submit_message(
+        {
+            "session_id": "ses_conversation",
+            "user_text": "그럼 의견제출서 초안까지 갈 수 있는지 봐줘",
+            "conversation_history": conversation_history,
+        }
+    )
+
+    supervisor_state = second["supervisor_state"]
+
+    assert second["status"] == "success"
+    assert supervisor_state["stage"] == "agent_execution_ready"
+    assert supervisor_state["missing_fields"] == []
+    assert second["reporting_payload"]["contract_version"] == "reporting_payload.v1"
+    assert {item["node_code"] for item in supervisor_state["agent_input_packages"]} >= {
+        "fine_notice_analysis",
+        "law_ground_search",
+        "objection_report_generation",
+    }
+    fine_notice_input = next(
+        item for item in supervisor_state["agent_input_packages"] if item["node_code"] == "fine_notice_analysis"
+    )
+    assert fine_notice_input["status"] == "ready"
+    assert fine_notice_input["payload"]["notice_amount"] == "12만원"
+    assert "초등학교" in fine_notice_input["payload"]["location"]
+    slot_state = supervisor_state["slot_state"]
+    assert slot_state["contract_version"] == "slot_filling_state.v1"
+    assert slot_state["slots"]["notice_amount"]["value"] == "12만원"
+    assert slot_state["slots"]["notice_amount"]["source"]["type"] == "conversation_turn"
+    assert slot_state["slots"]["evidence_status"]["status"] == "filled"
+    assert slot_state["slots"]["evidence_status"]["confidence"] > 0
+    assert fine_notice_input["payload"]["slot_state"]["slots"]["location"]["editable"] is True
+    assert second["analysis_plan"]["input_summary"]["missing_fields"] == []
+
+
+def test_chatbot_mock_uploaded_attachment_fills_evidence_slot_state():
+    response = submit_message(
+        {
+            "session_id": "ses_attachment_slot",
+            "user_text": "과태료 고지서를 받았고 아이가 아파서 잠깐 정차했습니다.",
+            "attachments": [
+                {
+                    "attachment_id": "att_uploaded_notice",
+                    "purpose": "fine_notice",
+                    "type": "image",
+                    "storage_uri": "mock://uploads/att_uploaded_notice/fine_notice.jpg",
+                }
+            ],
+        }
+    )
+
+    slot = response["supervisor_state"]["slot_state"]["slots"]["evidence_status"]
+    fine_notice_input = next(
+        item for item in response["supervisor_state"]["agent_input_packages"] if item["node_code"] == "fine_notice_analysis"
+    )
+
+    assert response["status"] == "success"
+    assert slot["status"] == "filled"
+    assert slot["source"]["type"] == "attachment"
+    assert slot["source"]["attachment_ids"] == ["att_uploaded_notice"]
+    assert fine_notice_input["payload"]["attachments"][0]["attachment_id"] == "att_uploaded_notice"
 
 
 def test_chatbot_mock_report_download_action_returns_download_url():

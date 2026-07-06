@@ -98,13 +98,26 @@ class TestDeadlineGateNode:
         assert result == {"computed_deadline": None, "deadline_passed": None}
 
 
-# ── law_code_check_node (MVP 스텁, ARCH-001 §9-1) ───────────────────────────
+# ── law_code_check_node (LDB_CHECK, DATA-003 §7) ────────────────────────────
 
 class TestLawCodeCheckNode:
-    @pytest.mark.parametrize("law_code", ["도로교통법 제17조 제1항", None, ""])
-    def test_항상_True_스텁(self, law_code):
-        result = law_code_check_node({"law_code": law_code})
+    @pytest.mark.parametrize("law_code", [None, ""])
+    def test_law_code_없으면_조회없이_False(self, law_code):
+        with patch("etl.legal.search.law_code_exists") as mock_exists:
+            result = law_code_check_node({"law_code": law_code})
+        mock_exists.assert_not_called()
+        assert result == {"law_code_verified": False}
+
+    def test_DB에_존재하면_True(self):
+        with patch("etl.legal.search.law_code_exists", return_value=True) as mock_exists:
+            result = law_code_check_node({"law_code": "도로교통법 제17조 제1항"})
+        mock_exists.assert_called_once_with("도로교통법 제17조 제1항")
         assert result == {"law_code_verified": True}
+
+    def test_DB에_없거나_조회_실패시_False(self):
+        with patch("etl.legal.search.law_code_exists", return_value=False):
+            result = law_code_check_node({"law_code": "존재하지 않는 법 제999조"})
+        assert result == {"law_code_verified": False}
 
 
 # ── reason_intake_node (ARCH-001 §9-7) ──────────────────────────────────────
@@ -208,6 +221,19 @@ class TestReasonIntakeNode:
 # ── law_refs (DATA-003 §5, §9) ───────────────────────────────────────────────
 
 class TestLawRefs:
+    @pytest.fixture(autouse=True)
+    def _force_db_lookup_fallback(self):
+        """법령DB 조회가 실패한 상황을 강제해, 하드코딩 폴백 원문으로 결정론적으로 검증한다.
+
+        DB가 실제로 응답할 때의 동작(원문 그대로 사용)은 별도 테스트
+        (test_DB_조회_성공하면_DB_원문_사용)에서 확인한다.
+        """
+        with patch(
+            "etl.legal.search.get_provision_text",
+            side_effect=RuntimeError("테스트 환경 — DB 조회 불가"),
+        ):
+            yield
+
     @pytest.mark.parametrize("law_code", [
         "도로교통법 제32조 제1항", "도로교통법 제33조", "도로교통법 제34조 제2항",
     ])
@@ -248,6 +274,15 @@ class TestLawRefs:
         assert "질서위반행위규제법 제7조" in ctx
         assert "질서위반행위규제법 제14조" in ctx
         assert "제142조" not in ctx
+
+    def test_DB_조회_성공하면_DB_원문_사용(self):
+        with patch(
+            "etl.legal.search.get_provision_text",
+            return_value="(DB) 실제 법령DB에서 조회된 조문 원문",
+        ):
+            ctx = get_merit_context("사전통지", "도로교통법 제17조 제1항")
+        assert "(DB) 실제 법령DB에서 조회된 조문 원문" in ctx
+        assert "질서위반행위규제법 제7조(고의 또는 과실)" not in ctx
 
 
 # ── risk_classification_node (DATA-003 §8) ──────────────────────────────────

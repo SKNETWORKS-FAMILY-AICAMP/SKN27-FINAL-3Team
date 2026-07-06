@@ -1,5 +1,6 @@
 export const AUTH_TOKEN_STORAGE_KEY = "skn27.auth.accessToken";
 export const GOOGLE_PROFILE_STORAGE_KEY = "skn27.auth.googleProfile";
+export const AUTH_SESSION_STORAGE_KEY = "skn27.auth.session";
 export const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 export const GOOGLE_LOGIN_SCOPE = "openid email profile";
 
@@ -200,20 +201,31 @@ export function readStoredAuthToken() {
   return readStoredValue(AUTH_TOKEN_STORAGE_KEY) || "";
 }
 
+export function readStoredAuthSession() {
+  return readStoredJson(AUTH_SESSION_STORAGE_KEY) || {};
+}
+
 export function readStoredGoogleProfile() {
   return readStoredJson(GOOGLE_PROFILE_STORAGE_KEY);
 }
 
-export function persistAuthSession({ accessToken, googleProfile }) {
+export function persistAuthSession({ accessToken, googleProfile, authSessionId, guestId, sessionId, userId }) {
   if (accessToken) {
     writeStoredValue(AUTH_TOKEN_STORAGE_KEY, accessToken);
   }
   writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null);
+  writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
+    auth_session_id: authSessionId || null,
+    guest_id: guestId || null,
+    session_id: sessionId || null,
+    user_id: userId || null,
+  });
 }
 
 export function clearStoredAuthSession() {
   removeStoredValue(AUTH_TOKEN_STORAGE_KEY);
   removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+  removeStoredValue(AUTH_SESSION_STORAGE_KEY);
 }
 
 export function readStoredValue(key) {

@@ -1,4 +1,8 @@
-from langgraph.graph import StateGraph, END
+try:
+    from langgraph.graph import StateGraph, END
+except ImportError:  # pragma: no cover - exercised only when optional runtime deps are absent.
+    StateGraph = None
+    END = "__end__"
 
 from .agent import ocr_node
 from .state import FineNoticeState
@@ -15,7 +19,20 @@ def _route_after_ocr(state: FineNoticeState) -> str:
     return "confidence_verification_node"
 
 
-def build_graph() -> StateGraph:
+class _FallbackFineNoticeGraph:
+    """Minimal invoke-compatible graph for environments without langgraph installed."""
+
+    def invoke(self, state: FineNoticeState) -> FineNoticeState:
+        next_state = ocr_node(state)
+        if _route_after_ocr(next_state) == END:
+            return next_state
+        return confidence_verification_node(next_state)
+
+
+def build_graph():
+    if StateGraph is None:
+        return _FallbackFineNoticeGraph()
+
     builder = StateGraph(FineNoticeState)
     builder.add_node("ocr_node", ocr_node)
     builder.add_node("confidence_verification_node", confidence_verification_node)

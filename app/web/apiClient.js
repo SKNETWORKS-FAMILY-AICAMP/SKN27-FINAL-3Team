@@ -36,6 +36,30 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     submitChatMessage(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/messages/"), payload, identity);
     },
+    processAgentWorkItems(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "agents/work-items/process/"), payload, identity);
+    },
+    getAnalysisJobDetail({ jobId, identity } = {}) {
+      return getJson(joinApiPath(apiBase, `analysis/jobs/${encodeURIComponent(jobId || "")}/`), identity);
+    },
+    registerFileMetadata(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "files/"), payload, identity);
+    },
+    uploadFile({ file, ...payload } = {}, identity = {}) {
+      const formData = new FormData();
+      Object.entries(payload || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          formData.append(key, value);
+        }
+      });
+      if (file) {
+        formData.append("file", file);
+      }
+      return postFormData(joinApiPath(apiBase, "files/"), formData, identity);
+    },
+    processFileScan({ attachmentId, ...payload } = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, `files/${encodeURIComponent(attachmentId || "")}/scan/`), payload, identity);
+    },
     updateConversationSaveState(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/save-state/"), payload, identity);
     },
@@ -64,6 +88,19 @@ export async function postJson(url, payload, identity = {}, options = {}) {
       ...(options.extraHeaders || {}),
     },
     body: JSON.stringify(payload || {}),
+  });
+
+  return parseJsonResponse(response);
+}
+
+export async function postFormData(url, formData, identity = {}, options = {}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...buildRequestHeaders(identity),
+      ...(options.extraHeaders || {}),
+    },
+    body: formData,
   });
 
   return parseJsonResponse(response);

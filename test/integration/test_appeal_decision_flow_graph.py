@@ -30,6 +30,17 @@ from ai.agents.appeal_decision_flow.graph import graph
 TODAY = datetime.date.today()
 
 
+@pytest.fixture(autouse=True)
+def _mock_law_code_db_lookup():
+    """LDB_CHECK가 하는 실제 Postgres 조회를 목 처리한다.
+
+    그래프 흐름 테스트는 law_code_verified 값이 각 분기에 올바르게 전파되는지만
+    검증하면 되고, 법령DB(law_chunks)가 실제로 채워져 있는지는 관심사가 아니다.
+    """
+    with patch("etl.legal.search.law_code_exists", return_value=True):
+        yield
+
+
 def _iso(days_from_today: int) -> str:
     return (TODAY + datetime.timedelta(days=days_from_today)).isoformat()
 
