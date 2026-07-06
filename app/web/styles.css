@@ -861,6 +861,63 @@ p {
   letter-spacing: 0;
 }
 
+.fault-ratio-insight-panel {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid #b7c2cf;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.fault-ratio-insight-panel.compact {
+  margin: 14px;
+}
+
+.fault-ratio-insight-head,
+.fault-ratio-insight-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.fault-ratio-insight-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fault-ratio-insight-grid p,
+.fault-ratio-insight-section {
+  min-width: min(100%, 180px);
+  margin: 0;
+  padding: 9px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.fault-ratio-insight-grid span,
+.fault-ratio-insight-section > strong {
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.fault-ratio-insight-grid strong,
+.fault-ratio-insight-section p,
+.fault-ratio-insight-section li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fault-ratio-insight-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .report-section-list {
   display: grid;
   gap: 10px;
