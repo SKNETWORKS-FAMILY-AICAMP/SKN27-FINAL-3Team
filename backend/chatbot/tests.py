@@ -546,6 +546,7 @@ class ProductionReadinessTests(TestCase):
         warning_checks = {check["name"] for check in report["checks"] if check["status"] == "warn"}
         self.assertIn("supervisor_llm", warning_checks)
         self.assertIn("legal_rag", warning_checks)
+        self.assertIn("law_ground_search_sync", warning_checks)
         self.assertIn("text_ml_case_search_rag", warning_checks)
         self.assertIn("object_storage", warning_checks)
 
@@ -716,6 +717,37 @@ class ProductionReadinessTests(TestCase):
                     "--require-es",
                     stdout=StringIO(),
                 )
+
+    def test_law_ground_search_smoke_reports_safe_partial_without_results(self):
+        output = StringIO()
+
+        with patch("ai.agents.law_ground_search.agent._get_neo4j_session", return_value=None):
+            with patch("ai.agents.law_ground_search.agent.search_law_provisions", return_value=[]):
+                call_command(
+                    "smoke_law_ground_search",
+                    "--format",
+                    "json",
+                    stdout=output,
+                )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "law_ground_search_smoke.v1")
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["execution_mode"], "sync")
+        self.assertEqual(body["adapter_execution_mode"], "sync")
+        self.assertEqual(body["agent_status"], "partial")
+        self.assertEqual(body["execution_status"], "empty")
+        self.assertEqual(body["law_provision_count"], 0)
+
+    def test_law_ground_search_smoke_require_results_fails_without_results(self):
+        with patch("ai.agents.law_ground_search.agent._get_neo4j_session", return_value=None):
+            with patch("ai.agents.law_ground_search.agent.search_law_provisions", return_value=[]):
+                with self.assertRaises(CommandError):
+                    call_command(
+                        "smoke_law_ground_search",
+                        "--require-results",
+                        stdout=StringIO(),
+                    )
 
     @override_settings(
         DJANGO_DATABASE_ENGINE="postgres",

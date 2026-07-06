@@ -33,10 +33,21 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert fine_notice_node["status"] == "sync_adapter_ready"
     assert "sync" in fine_notice_node["adapter_modes"]
     text_ml_node = next(node for node in nodes if node["node_code"] == "text_ml_case_search")
+    law_node = next(node for node in nodes if node["node_code"] == "law_ground_search")
     vision_node = next(node for node in nodes if node["node_code"] == "vision_media_analysis")
+    objection_node = next(node for node in nodes if node["node_code"] == "objection_report_generation")
+    assert law_node["status"] == "sync_adapter_ready"
+    assert law_node["adapter_modes"] == ["mock", "sync"]
+    assert law_node["adapter_contract"]["execution_modes"] == ["mock", "sync"]
     assert text_ml_node["status"] == "sync_adapter_ready"
     assert text_ml_node["adapter_modes"] == ["mock", "sync"]
+    assert text_ml_node["adapter_contract"]["execution_modes"] == ["mock", "sync"]
+    assert vision_node["status"] == "mock_contract_only"
     assert vision_node["adapter_modes"] == ["mock"]
+    assert vision_node["adapter_contract"]["execution_modes"] == ["mock"]
+    assert objection_node["status"] == "mock_contract_only"
+    assert objection_node["adapter_modes"] == ["mock"]
+    assert objection_node["adapter_contract"]["execution_modes"] == ["mock"]
 
 
 def test_agent_node_registry_exposes_real_adapter_contract():
@@ -520,6 +531,146 @@ def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypa
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"
     assert output["evidence"][0]["source_type"] == "review_case"
     assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
+
+
+def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch):
+    from ai.agents.law_ground_search import agent as law_agent
+
+    calls = []
+
+    def fake_search_law_provisions(
+        *,
+        query_text,
+        article_refs,
+        temporal_basis,
+        scope,
+        neo4j_session=None,
+    ):
+        calls.append(
+            {
+                "query_text": query_text,
+                "article_refs": article_refs,
+                "temporal_basis": temporal_basis,
+                "scope": scope,
+                "neo4j_session": neo4j_session,
+            }
+        )
+        return [
+            {
+                "source_ref": "law_db:road_traffic#article_5",
+                "chunk_id": "road_traffic:article_5",
+                "source_name": "Road Traffic Act",
+                "source_type": "law",
+                "article_no": "5",
+                "article_title": "Signal compliance",
+                "source_url": "https://example.test/law/road-traffic#article-5",
+                "provision_text": "Drivers must follow traffic signals.",
+                "score": 0.82,
+                "match_reason": "query_term_match",
+            }
+        ]
+
+    monkeypatch.setattr(law_agent, "_get_neo4j_session", lambda: None)
+    monkeypatch.setattr(law_agent, "search_law_provisions", fake_search_law_provisions)
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "law_ground_search",
+            "analysis_plan_id": "plan_sync_law",
+            "job_id": "job_sync_law",
+            "session_id": "ses_sync_law",
+            "message_id": "msg_sync_law",
+            "user_text": "road traffic signal violation legal ground",
+            "context": {
+                "query": {
+                    "raw_text": "road traffic signal violation article 5",
+                    "search_query": "road traffic signal violation article 5",
+                },
+                "temporal_basis": {
+                    "mode": "as_of",
+                    "effective_at": "2026-07-06",
+                },
+                "scope": {"jurisdiction": "KR"},
+            },
+        }
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+
+    assert execution["execution_mode"] == "sync"
+    assert execution["adapter_context"]["execution_mode"] == "sync"
+    assert output["node_code"] == "law_ground_search"
+    assert output["status"] == "success"
+    assert calls[0]["query_text"] == "road traffic signal violation article 5"
+    assert structured_result["law_provisions"][0]["chunk_id"] == "road_traffic:article_5"
+    assert structured_result["adapter_trace"]["execution_mode"] == "sync"
+    assert structured_result["adapter_trace"]["input_source"] == "agent_input.context"
+    assert output["evidence"][0]["source_type"] == "law"
+    assert output["evidence"][0]["source_ref"] == "law_db:road_traffic#article_5"
+    assert validate_agent_output_envelope(output, expected_node_code="law_ground_search")["valid"]
+
+
+def test_law_ground_sync_adapter_can_mix_with_mock_objection_when_sync_requested(monkeypatch):
+    from ai.agents.law_ground_search import agent as law_agent
+
+    monkeypatch.setattr(law_agent, "_get_neo4j_session", lambda: None)
+    monkeypatch.setattr(
+        law_agent,
+        "search_law_provisions",
+        lambda **_kwargs: [
+            {
+                "source_ref": "law_db:road_traffic#article_5",
+                "chunk_id": "road_traffic:article_5",
+                "source_name": "Road Traffic Act",
+                "source_type": "law",
+                "article_no": "5",
+                "article_title": "Signal compliance",
+                "source_url": "https://example.test/law/road-traffic#article-5",
+                "provision_text": "Drivers must follow traffic signals.",
+                "score": 0.82,
+            }
+        ],
+    )
+
+    plan = {
+        "plan_id": "plan_law_hybrid",
+        "session_id": "ses_law_hybrid",
+        "message_id": "msg_law_hybrid",
+        "steps": [
+            {
+                "node_code": "law_ground_search",
+                "status": "success",
+                "execution_mode": "sync",
+                "context": {
+                    "query": {"raw_text": "road traffic signal violation article 5"},
+                    "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-06"},
+                    "scope": {"jurisdiction": "KR"},
+                },
+            },
+            {
+                "node_code": "objection_report_generation",
+                "status": "success",
+                "execution_mode": "sync",
+            },
+        ],
+    }
+
+    execution = execute_mock_plan(
+        plan,
+        {
+            "execution_mode": "sync",
+            "user_text": "prepare legal grounds and objection report",
+        },
+    )
+
+    executions_by_node = {item["node_code"]: item for item in execution["executions"]}
+    assert execution["execution_mode"] == "hybrid"
+    assert executions_by_node["law_ground_search"]["execution_mode"] == "sync"
+    assert executions_by_node["objection_report_generation"]["execution_mode"] == "mock"
+    assert executions_by_node["law_ground_search"]["adapter_context"]["execution_mode"] == "sync"
+    assert executions_by_node["objection_report_generation"]["adapter_context"]["execution_mode"] == "mock"
 
 
 def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():

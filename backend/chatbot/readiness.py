@@ -28,6 +28,7 @@ def build_production_readiness_report(*, include_database: bool = True) -> dict[
         _google_oauth_check(),
         _supervisor_llm_check(),
         _legal_rag_check(include_database=include_database, database_state=database_state),
+        _law_ground_search_sync_check(),
         _text_ml_case_search_rag_check(),
         _worker_queue_check(include_database=include_database, database_state=database_state),
         _file_scan_check(),
@@ -206,6 +207,39 @@ def _legal_rag_check(*, include_database: bool, database_state: dict[str, Any]) 
         details,
         ok_message="Legal RAG vector search is configured.",
         metadata={"vector_enabled": enabled, "embedding_provider": provider or None, "embedding_model": model or None},
+    )
+
+
+def _law_ground_search_sync_check() -> dict[str, Any]:
+    details = []
+    legal_rag_enabled = bool(_setting("LEGAL_RAG_VECTOR_ENABLED", False))
+    neo4j_enabled = _truthy(_runtime_setting("LAW_GROUND_SEARCH_ENABLE_NEO4J", ""))
+    neo4j_uri = str(_runtime_setting("NEO4J_URI", "") or "")
+
+    if importlib.util.find_spec("ai.agents.law_ground_search") is None:
+        details.append(_detail(FAIL, "law_ground_search agent package is not importable."))
+    if importlib.util.find_spec("etl.legal.search") is None:
+        details.append(_detail(FAIL, "etl.legal.search is required for law_ground_search sync retrieval."))
+    if neo4j_enabled and not neo4j_uri.strip():
+        details.append(_detail(FAIL, "NEO4J_URI is required when LAW_GROUND_SEARCH_ENABLE_NEO4J is enabled."))
+    if not legal_rag_enabled:
+        details.append(
+            _detail(
+                WARN,
+                "LEGAL_RAG_VECTOR_ENABLED is disabled; law_ground_search sync smoke may return an empty or partial result.",
+            )
+        )
+
+    return _check(
+        "law_ground_search_sync",
+        details,
+        ok_message="law_ground_search sync adapter and legal search port are importable.",
+        metadata={
+            "legal_rag_vector_enabled": legal_rag_enabled,
+            "neo4j_enabled": neo4j_enabled,
+            "neo4j_uri_set": bool(neo4j_uri.strip()),
+            "smoke": "smoke_law_ground_search --require-results",
+        },
     )
 
 
