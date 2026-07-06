@@ -83,6 +83,11 @@ def test_production_env_template_contains_readiness_keys():
         "AGENT_WORKER_LOOP_SLEEP_SECONDS=",
         "SUPERVISOR_LLM_ENABLED=",
         "LEGAL_RAG_VECTOR_ENABLED=",
+        "TEXT_ML_CASE_SEARCH_SYNC_USE_ES=1",
+        "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST=",
+        "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=",
+        "REVIEW_CASE_ES_BM25_INDEX=",
+        "FAULT_RATIO_PRECEDENT_ES_BM25_INDEX=",
         "OBJECT_STORAGE_PROVIDER=s3",
     ]
     missing = [key for key in required_keys if key not in content]
@@ -100,6 +105,10 @@ def test_production_env_doc_references_readiness_command_and_secret_rules():
     assert "load_legal_rag_pgvector" in content
     assert "load_legal_rag_smoke_fixture" in content
     assert "legal_rag_smoke_chunks.jsonl" in content
+    assert "text_ml_case_search_rag" in content
+    assert "smoke_text_ml_case_search" in content
+    assert "TEXT_ML_CASE_SEARCH_SYNC_USE_ES" in content
+    assert "FAULT_RATIO_PRECEDENT_ES_BM25_INDEX" in content
     assert "process_agent_work_items --loop" in content
     assert "smoke_supervisor_llm" in content
     assert "smoke_google_oauth_code" in content

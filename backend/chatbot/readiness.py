@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from typing import Any
 
 from django.conf import settings
@@ -27,6 +28,7 @@ def build_production_readiness_report(*, include_database: bool = True) -> dict[
         _google_oauth_check(),
         _supervisor_llm_check(),
         _legal_rag_check(include_database=include_database, database_state=database_state),
+        _text_ml_case_search_rag_check(),
         _worker_queue_check(include_database=include_database, database_state=database_state),
         _file_scan_check(),
         _object_storage_check(),
@@ -207,6 +209,81 @@ def _legal_rag_check(*, include_database: bool, database_state: dict[str, Any]) 
     )
 
 
+def _text_ml_case_search_rag_check() -> dict[str, Any]:
+    details = []
+    enabled = _truthy(_runtime_setting("TEXT_ML_CASE_SEARCH_SYNC_USE_ES", ""))
+    host = str(
+        _runtime_setting(
+            "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST",
+            _runtime_setting("ELASTICSEARCH_HOST", "http://localhost:9200"),
+        )
+        or ""
+    )
+    user = str(
+        _runtime_setting(
+            "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER",
+            _runtime_setting("ELASTICSEARCH_USER", "elastic"),
+        )
+        or ""
+    )
+    password = str(
+        _runtime_setting(
+            "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD",
+            _runtime_setting("ELASTIC_PASSWORD", ""),
+        )
+        or ""
+    )
+    review_case_index = str(
+        _runtime_setting("REVIEW_CASE_ES_BM25_INDEX", "review_case_chunks_bm25_nori_v1") or ""
+    )
+    fault_ratio_index = str(
+        _runtime_setting("FAULT_RATIO_PRECEDENT_ES_BM25_INDEX", "precedent_fault_ratio_chunks_bm25_nori_v1") or ""
+    )
+
+    if not enabled:
+        details.append(
+            _detail(
+                WARN,
+                "TEXT_ML_CASE_SEARCH_SYNC_USE_ES is disabled; text_ml_case_search will use safe non-ES fallback.",
+            )
+        )
+    else:
+        if not host.strip():
+            details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST is required when ES RAG is enabled."))
+        if _looks_placeholder(host):
+            details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST must not contain a placeholder."))
+        if user.strip() and not password.strip():
+            details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD is required when an Elasticsearch user is set."))
+        if password and _looks_placeholder(password):
+            details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD must not contain a placeholder."))
+        missing_indexes = [
+            name
+            for name, value in {
+                "REVIEW_CASE_ES_BM25_INDEX": review_case_index,
+                "FAULT_RATIO_PRECEDENT_ES_BM25_INDEX": fault_ratio_index,
+            }.items()
+            if not value.strip()
+        ]
+        if missing_indexes:
+            details.append(_detail(FAIL, f"Missing text ML Elasticsearch index settings: {', '.join(missing_indexes)}."))
+        if importlib.util.find_spec("elasticsearch") is None:
+            details.append(_detail(FAIL, "elasticsearch package is required when text_ml_case_search ES RAG is enabled."))
+
+    return _check(
+        "text_ml_case_search_rag",
+        details,
+        ok_message="text_ml_case_search Elasticsearch RAG settings are present.",
+        metadata={
+            "sync_use_es": enabled,
+            "host": host or None,
+            "user_set": bool(user.strip()),
+            "review_case_index": review_case_index or None,
+            "fault_ratio_precedent_index": fault_ratio_index or None,
+            "smoke": "smoke_text_ml_case_search --require-es",
+        },
+    )
+
+
 def _worker_queue_check(*, include_database: bool, database_state: dict[str, Any]) -> dict[str, Any]:
     details = []
     if include_database:
@@ -354,6 +431,16 @@ def _summary(checks: list[dict[str, Any]]) -> dict[str, int]:
 
 def _setting(name: str, default: Any = "") -> Any:
     return getattr(settings, name, default)
+
+
+def _runtime_setting(name: str, default: Any = "") -> Any:
+    if hasattr(settings, name):
+        return getattr(settings, name)
+    return os.getenv(name, default)
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _looks_placeholder(value: Any) -> bool:

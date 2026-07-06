@@ -546,6 +546,7 @@ class ProductionReadinessTests(TestCase):
         warning_checks = {check["name"] for check in report["checks"] if check["status"] == "warn"}
         self.assertIn("supervisor_llm", warning_checks)
         self.assertIn("legal_rag", warning_checks)
+        self.assertIn("text_ml_case_search_rag", warning_checks)
         self.assertIn("object_storage", warning_checks)
 
     @override_settings(
@@ -649,6 +650,29 @@ class ProductionReadinessTests(TestCase):
             any("sentence-transformers package is not installed" in detail["message"] for detail in checks["legal_rag"]["details"])
         )
 
+    @override_settings(
+        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
+        REVIEW_CASE_ES_BM25_INDEX="review_case_chunks_bm25_nori_v1",
+        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="precedent_fault_ratio_chunks_bm25_nori_v1",
+    )
+    def test_readiness_report_requires_elasticsearch_package_for_text_ml_rag(self):
+        def fake_find_spec(name):
+            if name == "elasticsearch":
+                return None
+            return object()
+
+        with patch("chatbot.readiness.importlib.util.find_spec", side_effect=fake_find_spec):
+            report = build_production_readiness_report(include_database=False)
+
+        checks = {check["name"]: check for check in report["checks"]}
+        self.assertEqual(checks["text_ml_case_search_rag"]["status"], "fail")
+        self.assertTrue(
+            any("elasticsearch package is required" in detail["message"] for detail in checks["text_ml_case_search_rag"]["details"])
+        )
+
     def test_readiness_management_command_outputs_json(self):
         output = StringIO()
 
@@ -663,6 +687,35 @@ class ProductionReadinessTests(TestCase):
         body = json.loads(output.getvalue())
         self.assertEqual(body["contract_version"], "production_readiness.v1")
         self.assertIn(body["status"], {"pass", "warn", "fail"})
+
+    def test_text_ml_case_search_smoke_reports_safe_fallback_without_es(self):
+        output = StringIO()
+
+        with patch.dict(os.environ, {"TEXT_ML_CASE_SEARCH_SYNC_USE_ES": ""}):
+            call_command(
+                "smoke_text_ml_case_search",
+                "--format",
+                "json",
+                stdout=output,
+            )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["contract_version"], "text_ml_case_search_smoke.v1")
+        self.assertEqual(body["status"], "pass")
+        self.assertEqual(body["execution_mode"], "sync")
+        self.assertEqual(body["adapter_execution_mode"], "sync")
+        self.assertEqual(body["adapter_source"], "fault_ratio_knowledge_agent")
+        self.assertFalse(body["es_rag_enabled"])
+        self.assertTrue(body["es_rag_fallback"])
+
+    def test_text_ml_case_search_smoke_require_es_fails_without_es(self):
+        with patch.dict(os.environ, {"TEXT_ML_CASE_SEARCH_SYNC_USE_ES": ""}):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "smoke_text_ml_case_search",
+                    "--require-es",
+                    stdout=StringIO(),
+                )
 
     @override_settings(
         DJANGO_DATABASE_ENGINE="postgres",
