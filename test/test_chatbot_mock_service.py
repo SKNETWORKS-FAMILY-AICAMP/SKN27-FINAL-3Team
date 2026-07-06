@@ -63,6 +63,17 @@ def test_chatbot_mock_fine_notice_success_flow_returns_cards_and_report_actions(
         "objection_report",
     }
     assert {link["action"] for link in response["report_links"]} == {"save", "download"}
+    section_titles = {section["title"] for section in response["reporting_payload"]["sections"]}
+    assert section_titles >= {
+        "고지서 OCR 결과",
+        "처분 결과",
+        "이의제기 가능성",
+        "필요 증거",
+        "관련 법령·판례 근거",
+        "예상 결과와 유의사항",
+        "이의신청서 초안",
+        "제출 가이드라인",
+    }
     assert response["limitations"]
 
 
