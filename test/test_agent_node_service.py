@@ -34,7 +34,8 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert "sync" in fine_notice_node["adapter_modes"]
     text_ml_node = next(node for node in nodes if node["node_code"] == "text_ml_case_search")
     vision_node = next(node for node in nodes if node["node_code"] == "vision_media_analysis")
-    assert text_ml_node["adapter_modes"] == ["mock"]
+    assert text_ml_node["status"] == "sync_adapter_ready"
+    assert text_ml_node["adapter_modes"] == ["mock", "sync"]
     assert vision_node["adapter_modes"] == ["mock"]
 
 
@@ -420,7 +421,69 @@ def test_execute_plan_can_mix_sync_fine_notice_with_mock_supervisor_steps():
     assert execution["executions"][0]["execution_mode"] == "mock"
 
 
-def test_unimplemented_text_ml_and_vision_agents_remain_mock_even_when_sync_requested():
+def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypatch):
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    def fake_search_legal_rag(query, *, top_k, source_type):
+        return {
+            "contract_version": "legal_rag_search.v1",
+            "status": "ready",
+            "backend": "django_rag_tables",
+            "query": query,
+            "top_k": top_k,
+            "result_count": 1,
+            "latency_ms": 0,
+            "results": [
+                {
+                    "source_reference": "case_chunk_sync_001",
+                    "source_type": source_type,
+                    "source_name": "Fault review cases",
+                    "title": "Intersection side-entry collision",
+                    "summary": "Visibility and right-of-way are the primary disputed issues.",
+                    "score": 0.82,
+                }
+            ],
+            "error_code": "",
+        }
+
+    monkeypatch.setattr(text_ml_agent, "search_legal_rag", fake_search_legal_rag)
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "text_ml_case_search",
+            "analysis_plan_id": "plan_sync_text_ml",
+            "job_id": "job_sync_text_ml",
+            "session_id": "ses_sync_text_ml",
+            "message_id": "msg_sync_text_ml",
+            "user_text": "intersection accident with side-entry collision and dashcam video",
+            "attachments": [
+                {
+                    "attachment_id": "att_dashcam",
+                    "purpose": "blackbox_video",
+                    "content_type": "video/mp4",
+                }
+            ],
+        }
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+
+    assert execution["execution_mode"] == "sync"
+    assert execution["adapter_context"]["execution_mode"] == "sync"
+    assert output["node_code"] == "text_ml_case_search"
+    assert output["status"] == "success"
+    assert structured_result["similar_cases"][0]["source_ref"] == "case_chunk_sync_001"
+    assert structured_result["top_cases"] == structured_result["similar_cases"]
+    assert structured_result["retrieval"]["source_type"] == "review_case"
+    assert structured_result["adapter_trace"]["execution_mode"] == "sync"
+    assert output["evidence"][0]["source_type"] == "review_case"
+    assert "blackbox" in structured_result["evidence_tags"]
+    assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
+
+
+def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():
     plan = {
         "plan_id": "plan_mock_only_agents",
         "session_id": "ses_mock_only_agents",
@@ -440,8 +503,8 @@ def test_unimplemented_text_ml_and_vision_agents_remain_mock_even_when_sync_requ
     )
 
     executions_by_node = {item["node_code"]: item for item in execution["executions"]}
-    assert execution["execution_mode"] == "mock"
-    assert executions_by_node["text_ml_case_search"]["execution_mode"] == "mock"
+    assert execution["execution_mode"] == "hybrid"
+    assert executions_by_node["text_ml_case_search"]["execution_mode"] == "sync"
     assert executions_by_node["vision_media_analysis"]["execution_mode"] == "mock"
-    assert executions_by_node["text_ml_case_search"]["adapter_context"]["execution_mode"] == "mock"
+    assert executions_by_node["text_ml_case_search"]["adapter_context"]["execution_mode"] == "sync"
     assert executions_by_node["vision_media_analysis"]["adapter_context"]["execution_mode"] == "mock"

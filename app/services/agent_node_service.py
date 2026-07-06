@@ -73,8 +73,8 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["query_text|accident_context"],
         "produces": ["accident_type_candidates", "similar_cases", "reliability_score"],
         "handoff_to": ["law_ground_search", "agent_result_validation"],
-        "status": "mock_ready",
-        "adapter_modes": ["mock"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["mock", "sync"],
     },
     "vision_media_analysis": {
         "order": 50,
@@ -284,7 +284,10 @@ def _requested_execution_mode(payload: dict[str, Any]) -> str:
 
 
 def _should_use_sync_adapter(node_code: str, execution_mode: str) -> bool:
-    return execution_mode == "sync" and node_code == "fine_notice_analysis"
+    return execution_mode == "sync" and node_code in {
+        "fine_notice_analysis",
+        "text_ml_case_search",
+    }
 
 
 def _execute_sync_node(
@@ -332,6 +335,8 @@ def _run_sync_adapter(
     node_code = str(agent_input.get("node_code") or "")
     if node_code == "fine_notice_analysis":
         return _run_fine_notice_analysis_adapter(agent_input, adapter_context)
+    if node_code == "text_ml_case_search":
+        return _run_text_ml_case_search_adapter(agent_input, adapter_context)
     raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
 
 
@@ -366,6 +371,39 @@ def _run_fine_notice_analysis_adapter(
             "execution_mode": "sync",
             "source_status": raw_output.get("status"),
             "input_source": state.get("_input_source"),
+        },
+    )
+
+
+def _run_text_ml_case_search_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    from ai.agents.text_ml_case_search import run_text_ml_case_search
+
+    raw_output = run_text_ml_case_search(agent_input, adapter_context)
+    if not isinstance(raw_output, dict):
+        raw_output = {
+            "status": "partial",
+            "summary": "text_ml_case_search returned without an AgentAdapterOutput envelope.",
+            "structured_result": {
+                "similar_cases": [],
+                "top_cases": [],
+                "reliability_score": 0,
+            },
+            "evidence": [],
+            "next_actions": ["check_text_ml_case_search_agent_output"],
+            "limitations": ["The text_ml_case_search adapter did not return a dictionary."],
+        }
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "ai.agents.text_ml_case_search.run_text_ml_case_search",
+            "execution_mode": "sync",
+            "source_status": raw_output.get("status"),
+            "input_source": "agent_input",
         },
     )
 
@@ -497,10 +535,16 @@ def _adapter_result_status(status: str) -> str:
 
 def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, Any]) -> list[str]:
     limitations = [str(item) for item in raw_output.get("limitations") or [] if str(item)]
-    marker = "fine_notice_analysis real adapter is connected through Supervisor sync execution mode."
+    adapter = str(adapter_trace.get("adapter") or "")
+    if "fine_notice_analysis" in adapter:
+        marker = "fine_notice_analysis real adapter is connected through Supervisor sync execution mode."
+    elif "text_ml_case_search" in adapter:
+        marker = "text_ml_case_search sync adapter is connected through the RAG-backed case-search port."
+    else:
+        marker = "Sync adapter is connected through Supervisor sync execution mode."
     if marker not in limitations:
         limitations.append(marker)
-    if adapter_trace.get("input_source") == "missing":
+    if "fine_notice_analysis" in adapter and adapter_trace.get("input_source") == "missing":
         limitations.append("No fine_notice attachment image was available for OCR.")
     return limitations
 
