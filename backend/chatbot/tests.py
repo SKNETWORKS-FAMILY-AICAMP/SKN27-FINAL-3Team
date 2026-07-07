@@ -3770,6 +3770,51 @@ class ChatbotMockApiTests(TestCase):
         self.assertIn("partial_report: True", download_body)
         self.assertIn("limitation_1:", download_body)
 
+    def test_canonical_report_download_includes_reporting_payload_sections(self):
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_report_payload_download",
+                "conversation_save_state": "saved",
+                "user_text": "어린이보호구역 과태료 이의신청서와 제출 가이드라인을 만들어주세요.",
+                "mock_scenario": "fine_notice",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        message_body = message_response.json()
+        job_id = message_body["persistence"]["job_id"]
+        reporting_payload = message_body["reporting_payload"]
+        section_titles = {section["title"] for section in reporting_payload["sections"]}
+        self.assertIn("고지서 OCR 결과", section_titles)
+        self.assertIn("이의신청서 초안", section_titles)
+        self.assertIn("제출 가이드라인", section_titles)
+
+        with tempfile.TemporaryDirectory() as object_root, override_settings(
+            OBJECT_STORAGE_LOCAL_ROOT=object_root
+        ):
+            report_response = self.client.post(
+                "/api/reports/",
+                data={
+                    "action": "download",
+                    "report_id": "rep_report_payload_download",
+                    "job_id": job_id,
+                    "session_id": "ses_report_payload_download",
+                    "title": reporting_payload["title"],
+                    "reporting_payload": reporting_payload,
+                },
+                content_type="application/json",
+            )
+            self.assertEqual(report_response.status_code, 200)
+
+            download_response = self.client.get("/api/reports/rep_report_payload_download/download/")
+        self.assertEqual(download_response.status_code, 200)
+        download_body = download_response.content.decode("utf-8")
+        self.assertIn("고지서 OCR 결과", download_body)
+        self.assertIn("이의신청서 초안", download_body)
+        self.assertIn("제출 가이드라인", download_body)
+
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")
         Report.objects.create(
