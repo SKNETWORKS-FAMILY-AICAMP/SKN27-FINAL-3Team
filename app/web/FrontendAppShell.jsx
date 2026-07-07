@@ -75,7 +75,7 @@ export default function FrontendAppShell({
 
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
   const storedAuthSession = useMemo(() => readStoredAuthSession(), []);
-  const [activeRoute, setActiveRoute] = useState("entry");
+  const [activeRoute, setActiveRoute] = useState("chatbot");
   const [sessionId, setSessionId] = useState(() => storedAuthSession.session_id || "");
   const [guestId, setGuestId] = useState(() => storedAuthSession.guest_id || "");
   const [authSessionId, setAuthSessionId] = useState(() => storedAuthSession.auth_session_id || "");
