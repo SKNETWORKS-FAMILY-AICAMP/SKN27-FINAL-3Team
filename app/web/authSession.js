@@ -36,8 +36,13 @@ export function buildDevGoogleCodePayload({ guestId, purpose = "LOGIN" }) {
   };
 }
 
-export async function buildGoogleLoginPayload({ googleClientId, guestId, purpose = "LOGIN" }) {
-  if (!googleClientId) {
+export async function buildGoogleLoginPayload({
+  googleClientId,
+  guestId,
+  purpose = "LOGIN",
+  localAuthMode = googleLocalAuthMode(),
+} = {}) {
+  if (!googleClientId || shouldUseLocalMockGoogleAuth({ localAuthMode })) {
     return buildDevGoogleCodePayload({ guestId, purpose });
   }
 
@@ -52,6 +57,31 @@ export async function buildGoogleLoginPayload({ googleClientId, guestId, purpose
     scope: GOOGLE_LOGIN_SCOPE,
     redirect_uri: browserOrigin(),
   };
+}
+
+export function shouldUseLocalMockGoogleAuth({ localAuthMode = googleLocalAuthMode(), origin = browserOrigin() } = {}) {
+  return isLocalDevelopmentOrigin(origin) && normalizedGoogleLocalAuthMode(localAuthMode) !== "real";
+}
+
+export function googleLocalAuthMode() {
+  try {
+    return import.meta.env?.VITE_GOOGLE_LOCAL_AUTH_MODE || "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+export function normalizedGoogleLocalAuthMode(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+export function isLocalDevelopmentOrigin(origin = browserOrigin()) {
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+  } catch (_error) {
+    return false;
+  }
 }
 
 export async function requestGoogleAuthorizationCode({ clientId, scope = GOOGLE_LOGIN_SCOPE, timeoutMs = 60000 }) {

@@ -37,6 +37,9 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
         "readStoredAuthSession",
         "clearStoredAuthSession",
         "AUTH_SESSION_STORAGE_KEY",
+        "shouldUseLocalMockGoogleAuth",
+        "VITE_GOOGLE_LOCAL_AUTH_MODE",
+        "isLocalDevelopmentOrigin",
     ]
 
     missing = [token for token in required_tokens if token not in content]
@@ -58,6 +61,10 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     assert "postFormData" in api_client
     assert 'from "./apiClient.js"' in chatbot
     assert 'from "./authSession.js"' in chatbot
+    assert "shouldUseLocalMockGoogleAuth({ localAuthMode })" in auth_session
+    assert 'normalizedGoogleLocalAuthMode(localAuthMode) !== "real"' in auth_session
+    assert 'hostname === "localhost"' in auth_session
+    assert 'hostname === "127.0.0.1"' in auth_session
 
 
 def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
