@@ -66,6 +66,7 @@ from chatbot.repositories import (
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
+    build_report_download_pdf_body,
     build_history_after_service_summary,
     conversation_save_state_from_payload,
     get_analysis_job_record,
@@ -999,10 +1000,14 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             return response
 
     response = HttpResponse(
-        f"Mock report download for {report_id}\n",
-        content_type="text/plain; charset=utf-8",
+        build_report_download_pdf_body(
+            report_id=report_id,
+            title="Mock report download",
+            body_text=f"Mock report download for {report_id}\n",
+        ),
+        content_type="application/pdf",
     )
-    response["Content-Disposition"] = f'attachment; filename="{report_id}.txt"'
+    response["Content-Disposition"] = f'attachment; filename="{report_id}.pdf"'
     if _is_canonical_mock_request(request):
         response["X-API-Surface"] = "canonical_mock"
         response["X-Execution-Mode"] = "mock"
