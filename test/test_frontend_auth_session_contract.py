@@ -102,6 +102,9 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "conversation_history" in shell
     assert "SupervisorFlowPanel" in shell
     assert "ReportingPreviewPanel" in shell
+    assert "report-document-highlights" in shell
+    assert "isSubmissionDocumentSection" in shell
+    assert "제출 문서" in shell
     assert "FaultRatioInsightPanel" in shell
     assert "fault-ratio-insight-panel" in shell
     assert "similar_cases" in shell
