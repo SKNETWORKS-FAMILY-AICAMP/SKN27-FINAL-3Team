@@ -562,6 +562,11 @@ def _complete_adapter_output(
 ) -> dict[str, Any]:
     source_status = str(raw_output.get("status") or "partial")
     structured_result = deepcopy(raw_output.get("structured_result") or {})
+    structured_result = _normalize_adapter_structured_result(
+        structured_result,
+        node_code=node["node_code"],
+        adapter_trace=adapter_trace,
+    )
     structured_result.setdefault("adapter_trace", adapter_trace)
     return {
         "session_id": agent_input.get("session_id"),
@@ -603,9 +608,33 @@ def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, An
         marker = "Sync adapter is connected through Supervisor sync execution mode."
     if marker not in limitations:
         limitations.append(marker)
+    if "text_ml_case_search" in adapter and not os.getenv("TEXT_ML_CASE_SEARCH_SYNC_USE_ES", "").strip():
+        es_marker = "TEXT_ML_CASE_SEARCH_SYNC_USE_ES is not enabled; ran fault-ratio agent without Elasticsearch RAG."
+        if es_marker not in limitations:
+            limitations.append(es_marker)
     if "fine_notice_analysis" in adapter and adapter_trace.get("input_source") == "missing":
         limitations.append("No fine_notice attachment image was available for OCR.")
     return limitations
+
+
+def _normalize_adapter_structured_result(
+    structured_result: dict[str, Any],
+    *,
+    node_code: str,
+    adapter_trace: dict[str, Any],
+) -> dict[str, Any]:
+    structured = deepcopy(structured_result) if isinstance(structured_result, dict) else {}
+    structured.setdefault("adapter_trace", adapter_trace)
+    if node_code == "text_ml_case_search":
+        retrieval = structured.get("retrieval") if isinstance(structured.get("retrieval"), dict) else {}
+        retrieval.setdefault("adapter_source", "fault_ratio_knowledge_agent")
+        retrieval.setdefault("source_type", "review_case")
+        structured["retrieval"] = retrieval
+        structured.setdefault("similar_cases", [])
+        structured.setdefault("top_cases", deepcopy(structured.get("similar_cases") or []))
+        structured.setdefault("ratio_range_label", "Fault ratio is not fixed; review issues and evidence first.")
+        structured.setdefault("recommended_evidence", [])
+    return structured
 
 
 def _adapter_error_output(
@@ -614,6 +643,15 @@ def _adapter_error_output(
     agent_input: dict[str, Any],
     exc: Exception,
 ) -> dict[str, Any]:
+    adapter_trace = _adapter_error_trace(node["node_code"], agent_input, exc)
+    structured_result = _normalize_adapter_structured_result(
+        {
+            "error_code": exc.__class__.__name__,
+            "error_message": str(exc),
+        },
+        node_code=node["node_code"],
+        adapter_trace=adapter_trace,
+    )
     return {
         "session_id": agent_input.get("session_id"),
         "message_id": agent_input.get("message_id"),
@@ -625,15 +663,40 @@ def _adapter_error_output(
         "status": "failed",
         "execution_status": "adapter_error",
         "summary": f"{node['node_code']} sync adapter failed before returning a usable envelope.",
-        "structured_result": {
-            "error_code": exc.__class__.__name__,
-            "error_message": str(exc),
-        },
+        "structured_result": structured_result,
         "evidence": [],
         "next_actions": ["fallback_to_mock_or_retry_adapter"],
         "limitations": ["Sync adapter exception was normalized for Supervisor result validation."],
         "created_at": _now_iso(),
     }
+
+
+def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Exception) -> dict[str, Any]:
+    adapter_by_node = {
+        "fine_notice_analysis": "ai.agents.fine_notice_analysis.graph",
+        "law_ground_search": "ai.agents.law_ground_search.run_law_ground_search",
+        "text_ml_case_search": "ai.agents.text_ml_case_search.run_text_ml_case_search",
+    }
+    if node_code == "fine_notice_analysis":
+        input_source = "attachment" if _has_fine_notice_attachment(agent_input) else "missing"
+    elif node_code == "law_ground_search":
+        input_source = "agent_input.context"
+    else:
+        input_source = "agent_input"
+    return {
+        "adapter": adapter_by_node.get(node_code, f"unregistered:{node_code}"),
+        "execution_mode": "sync",
+        "source_status": "adapter_error",
+        "input_source": input_source,
+        "error_code": exc.__class__.__name__,
+    }
+
+
+def _has_fine_notice_attachment(agent_input: dict[str, Any]) -> bool:
+    return any(
+        isinstance(attachment, dict) and attachment.get("purpose") == "fine_notice"
+        for attachment in agent_input.get("attachments") or []
+    )
 
 
 def _plan_execution_mode(executions: list[dict[str, Any]]) -> str:
