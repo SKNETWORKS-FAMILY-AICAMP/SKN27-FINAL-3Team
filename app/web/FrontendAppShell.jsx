@@ -381,6 +381,18 @@ export default function FrontendAppShell({
     return filename;
   }
 
+  function prepareMissingEvidenceUpload() {
+    setAttachmentPurpose("fine_notice");
+    setStatusMessage("누락 자료를 추가할 수 있도록 상담 입력으로 이동했습니다. 고지서 원본, 현장 사진, 블랙박스 중 가진 자료를 선택해 주세요.");
+    setActiveRoute("chatbot");
+  }
+
+  function prepareDraftRegeneration() {
+    setQuestion("추가 자료를 반영해 이의신청서 초안과 제출 가이드라인을 다시 정리해줘");
+    setStatusMessage("초안 재생성 요청 문구를 입력창에 준비했습니다. 추가 자료가 있으면 먼저 첨부한 뒤 전송해 주세요.");
+    setActiveRoute("chatbot");
+  }
+
   async function processQueuedWorkerResult(chatResult, requestIdentity) {
     const workItem = chatResult?.work_item || chatResult?.supervisor_execution?.work_item || null;
     if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
@@ -893,6 +905,8 @@ export default function FrontendAppShell({
                 await loadMyPageSummary();
                 await loadHistoryEvents();
               }}
+              onPrepareDraftRegeneration={prepareDraftRegeneration}
+              onPrepareMissingEvidence={prepareMissingEvidenceUpload}
               onRunReportAction={runCurrentReportAction}
               reportActionStatus={reportActionStatus}
               reportingPayload={reportingPayload}
@@ -2076,11 +2090,43 @@ function historyEventMatchesFilter(event, activeFilter) {
   return true;
 }
 
+function reportInspectorDetail(sections, mode) {
+  const selectedSections = reportSectionsForInspector(sections, mode);
+  if (mode === "grounds") {
+    return {
+      label: "근거",
+      title: "판단 근거와 제출 자료",
+      summary: "법령·판례 근거, 이의제기 판단, 필요 증거, 예상 결과를 한 번에 확인합니다.",
+      sections: selectedSections,
+    };
+  }
+  return {
+    label: "리포트",
+    title: "리포트 상세",
+    summary: "선택한 리포트 섹션을 확인합니다.",
+    sections: selectedSections,
+  };
+}
+
+function reportSectionsForInspector(sections, mode) {
+  if (!Array.isArray(sections) || mode === "overview") {
+    return [];
+  }
+  if (mode === "grounds") {
+    return sections.filter((section) =>
+      /근거|법령|판례|증거|이의제기|예상 결과|가이드라인/.test(String(section?.title || ""))
+    );
+  }
+  return sections;
+}
+
 function ReportingScreen({
   analysisCards = [],
   currentReport = null,
   isAuthenticated = false,
   onOpenChat,
+  onPrepareDraftRegeneration,
+  onPrepareMissingEvidence,
   onRefresh,
   onRunReportAction,
   reportActionStatus = "",
@@ -2102,6 +2148,8 @@ function ReportingScreen({
       ? `내 사건 ${reportMetadata.case_id}에 저장된 리포트입니다.`
       : "최신 상담 결과를 리포팅 화면에 연결했습니다.");
   const reportTagClass = currentReport || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber";
+  const [selectedInspectorMode, setSelectedInspectorMode] = useState("overview");
+  const inspectorDetail = reportInspectorDetail(sections, selectedInspectorMode);
 
   return (
     <section className="screen">
@@ -2219,6 +2267,30 @@ function ReportingScreen({
                 </div>
               </div>
               {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
+              {selectedInspectorMode !== "overview" && (
+                <div className="inspector-section report-inspector-detail">
+                  <span className="tag green">{inspectorDetail.label}</span>
+                  <strong>{inspectorDetail.title}</strong>
+                  <p>{inspectorDetail.summary}</p>
+                  <div className="inspector-detail-list">
+                    {inspectorDetail.sections.length > 0 ? (
+                      inspectorDetail.sections.map((section) => (
+                        <article key={`inspector-${section.title}`}>
+                          <strong>{section.title}</strong>
+                          {(section.items || []).slice(0, 5).map((item, index) => (
+                            <p key={`${section.title}-${index}`}>{compactValue(item)}</p>
+                          ))}
+                        </article>
+                      ))
+                    ) : (
+                      <article>
+                        <strong>표시할 항목 없음</strong>
+                        <p>현재 리포트 payload에 해당 섹션이 없습니다. 상담을 이어가면 항목을 다시 채울 수 있습니다.</p>
+                      </article>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <div className="inspector-section">
@@ -2244,7 +2316,20 @@ function ReportingScreen({
             >
               {isAuthenticated ? "리포트 저장" : "로그인 후 저장"}
             </button>
-            <button className="button" type="button" disabled>근거 보기</button>
+            <button
+              className={selectedInspectorMode === "grounds" ? "button active" : "button"}
+              type="button"
+              onClick={() => setSelectedInspectorMode(selectedInspectorMode === "grounds" ? "overview" : "grounds")}
+              disabled={!hasReport}
+            >
+              근거 보기
+            </button>
+            <button className="button" type="button" onClick={onPrepareMissingEvidence} disabled={!hasReport}>
+              누락 자료 추가
+            </button>
+            <button className="button" type="button" onClick={onPrepareDraftRegeneration} disabled={!hasReport}>
+              초안 재생성
+            </button>
           </div>
         </aside>
       </div>

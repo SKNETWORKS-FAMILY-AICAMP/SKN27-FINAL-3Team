@@ -111,6 +111,13 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "api.downloadReport" in shell
     assert "URL.createObjectURL" in shell
     assert "reporting_payload: reportingPayload" in shell
+    assert "prepareMissingEvidenceUpload" in shell
+    assert "prepareDraftRegeneration" in shell
+    assert "selectedInspectorMode" in shell
+    assert "reportInspectorDetail" in shell
+    assert "reportSectionsForInspector" in shell
+    assert "누락 자료 추가" in shell
+    assert "초안 재생성" in shell
     assert "onRunReportAction={runCurrentReportAction}" in shell
     assert "ReportActionPanel" in shell
     assert "registeredAttachments" in shell
@@ -167,6 +174,7 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "비회원 1회 리포팅 가능" in shell
     assert "reportingPayload || analysisCards.length || supervisorExecution || currentReport" in shell
     assert "리포트 내려받기" in shell
+    assert "report-inspector-detail" in shell
     assert "data-partial-report" in shell
     assert "partial_report" in shell
     assert "ready_report" in shell

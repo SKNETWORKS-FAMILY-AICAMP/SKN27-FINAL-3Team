@@ -1650,6 +1650,29 @@ p {
   margin: 14px;
 }
 
+.report-inspector-detail {
+  background: #fff;
+}
+
+.inspector-detail-list {
+  display: grid;
+  gap: 8px;
+}
+
+.inspector-detail-list article {
+  padding: 10px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.inspector-detail-list article strong,
+.inspector-detail-list article p {
+  overflow-wrap: anywhere;
+}
+
 .tag,
 .badge {
   display: inline-flex;
