@@ -999,6 +999,26 @@ p {
   gap: 10px;
 }
 
+.report-document-highlights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.report-document-highlights article {
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid #bddbd6;
+  border-radius: 8px;
+  background: var(--green-soft);
+}
+
+.report-document-highlights p {
+  margin: 0;
+  color: var(--text);
+}
+
 .report-section-list article,
 .report-page {
   padding: 14px;
@@ -1763,6 +1783,7 @@ p {
   .trust-row,
   .policy-grid,
   .inline-panel-grid,
+  .report-document-highlights,
   .result-cards,
   .summary-grid,
   .persona-picker,
