@@ -78,6 +78,86 @@ from chatbot.progress_cache import (
 )
 
 USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
+REPORT_PDF_CONTENT_TYPE = "application/pdf"
+
+
+def build_report_download_pdf_body(
+    *,
+    report_id: str,
+    title: str,
+    body_text: str,
+) -> bytes:
+    """Build a lightweight PDF report from the persisted report text body."""
+
+    try:
+        import fitz
+    except Exception:
+        return _minimal_pdf_bytes(title=title or report_id, body_text=body_text)
+
+    doc = fitz.open()
+    margin = 48
+    page_width = 595
+    page_height = 842
+    line_height = 17
+    font_file = _report_pdf_font_file()
+    fontname = "reportfont" if font_file else "helv"
+
+    page = doc.new_page(width=page_width, height=page_height)
+    if font_file:
+        page.insert_font(fontname=fontname, fontfile=font_file)
+    y = margin
+
+    def ensure_page(required_height: int = line_height):
+        nonlocal page, y
+        if y + required_height <= page_height - margin:
+            return
+        page = doc.new_page(width=page_width, height=page_height)
+        if font_file:
+            page.insert_font(fontname=fontname, fontfile=font_file)
+        y = margin
+
+    def write_line(text: str, *, size: int = 10, bold: bool = False, spacing: int = 0):
+        nonlocal y
+        ensure_page(line_height + spacing)
+        page.insert_text(
+            (margin, y),
+            text,
+            fontsize=size,
+            fontname=fontname,
+            fontfile=font_file,
+            color=(0, 0, 0),
+        )
+        y += line_height + spacing
+
+    title_text = title or "상담 분석 리포트"
+    write_line(title_text, size=16, spacing=8)
+    write_line(f"Report ID: {report_id}", size=9, spacing=8)
+    write_line("본 문서는 Traffic Dispute AI 상담 결과를 바탕으로 생성한 검토용 리포트입니다.", size=9, spacing=10)
+
+    for raw_line in str(body_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            y += 8
+            continue
+        if line.startswith("## "):
+            write_line(line[3:], size=13, spacing=5)
+            continue
+        prefix = "- " if line.startswith("- ") else ""
+        line_body = line[2:] if prefix else line
+        for chunk_index, chunk in enumerate(_wrap_report_pdf_line(line_body, width=72)):
+            write_line(f"{prefix if chunk_index == 0 else '  '}{chunk}", size=10)
+
+    metadata_title = title_text[:120]
+    doc.set_metadata(
+        {
+            "title": metadata_title,
+            "subject": "Traffic Dispute AI report",
+            "creator": "Traffic Dispute AI",
+        }
+    )
+    pdf_bytes = doc.tobytes(deflate=True)
+    doc.close()
+    return pdf_bytes
 USAGE_POLICY_LIMITS = {
     "anonymous": {
         "chat_message": 2,
@@ -1792,23 +1872,29 @@ def get_report_download_metadata(report_id: str) -> dict[str, Any] | None:
     object_storage = _report_object_storage(report)
     storage_uri = object_storage["storage_uri"]
     storage_backend = object_storage["backend"]
+    text_body = _report_download_body(
+        report,
+        storage_backend=storage_backend,
+        object_storage=object_storage,
+    )
     return {
         "report_id": report.report_id,
         "owner_id": report.owner_id,
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
-        "filename": object_storage.get("filename") or f"{report.report_id}.txt",
-        "content_type": object_storage.get("content_type") or "text/plain; charset=utf-8",
+        "filename": f"{report.report_id}.pdf",
+        "content_type": REPORT_PDF_CONTENT_TYPE,
         "storage_uri": storage_uri,
         "storage_backend": storage_backend,
         "object_storage": object_storage,
         "object_key": object_storage.get("key", ""),
         "status": report.status,
-        "body": _report_download_body(
-            report,
-            storage_backend=storage_backend,
-            object_storage=object_storage,
+        "body": build_report_download_pdf_body(
+            report_id=report.report_id,
+            title=report.title or report.report_id,
+            body_text=text_body,
         ),
+        "text_body": text_body,
     }
 
 
@@ -3907,6 +3993,135 @@ def _reporting_payload_item_text(item: Any) -> str:
             if _text(value)
         )
     return _text(item)
+
+
+def _report_pdf_font_file() -> str | None:
+    candidates = [
+        Path("C:/Windows/Fonts/malgun.ttf"),
+        Path("C:/Windows/Fonts/malgunbd.ttf"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansKR-Regular.otf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _wrap_report_pdf_line(text: str, *, width: int) -> list[str]:
+    value = str(text or "")
+    if len(value) <= width:
+        return [value]
+    chunks = []
+    current = ""
+    for word in value.split(" "):
+        if not word:
+            continue
+        if len(word) > width:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(word[index : index + width] for index in range(0, len(word), width))
+            continue
+        next_value = f"{current} {word}".strip()
+        if len(next_value) > width and current:
+            chunks.append(current)
+            current = word
+        else:
+            current = next_value
+    if current:
+        chunks.append(current)
+    return chunks or [value[:width]]
+
+
+def _minimal_pdf_bytes(*, title: str, body_text: str) -> bytes:
+    lines = [title or "Traffic Dispute AI report", ""]
+    for raw_line in str(body_text or "").splitlines():
+        if not raw_line.strip():
+            lines.append("")
+            continue
+        lines.extend(_wrap_report_pdf_line(raw_line.strip(), width=54))
+    pages = []
+    current_page = []
+    for line in lines[:180]:
+        if len(current_page) >= 42:
+            pages.append(current_page)
+            current_page = []
+        current_page.append(line)
+    if current_page:
+        pages.append(current_page)
+    if not pages:
+        pages = [["Traffic Dispute AI report"]]
+
+    objects = [
+        "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+        "",
+        (
+            "3 0 obj << /Type /Font /Subtype /Type0 /BaseFont /HYSMyeongJo-Medium "
+            "/Encoding /UniKS-UCS2-H /DescendantFonts [4 0 R] >> endobj\n"
+        ),
+        (
+            "4 0 obj << /Type /Font /Subtype /CIDFontType0 /BaseFont /HYSMyeongJo-Medium "
+            "/CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >> >> endobj\n"
+        ),
+    ]
+    page_object_ids = []
+    next_object_id = 5
+    for page_lines in pages:
+        page_id = next_object_id
+        content_id = next_object_id + 1
+        next_object_id += 2
+        page_object_ids.append(page_id)
+        stream = _minimal_pdf_page_stream(page_lines)
+        objects.append(
+            f"{page_id} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >> endobj\n"
+        )
+        objects.append(
+            f"{content_id} 0 obj << /Length {len(stream.encode('ascii'))} >> stream\n"
+            f"{stream}endstream endobj\n"
+        )
+    objects[1] = (
+        f"2 0 obj << /Type /Pages /Kids [{' '.join(f'{page_id} 0 R' for page_id in page_object_ids)}] "
+        f"/Count {len(page_object_ids)} >> endobj\n"
+    )
+    body = "%PDF-1.4\n"
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(body.encode("ascii")))
+        body += obj
+    xref_offset = len(body.encode("ascii"))
+    body += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n"
+    for offset in offsets[1:]:
+        body += f"{offset:010d} 00000 n \n"
+    body += f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
+    return body.encode("ascii")
+
+
+def _minimal_pdf_page_stream(lines: list[str]) -> str:
+    commands = ["BT\n", "/F1 11 Tf\n", "50 790 Td\n"]
+    first_line = True
+    for line in lines:
+        if first_line:
+            first_line = False
+        else:
+            commands.append("0 -17 Td\n")
+        if not line:
+            continue
+        if line.startswith("## "):
+            commands.append("/F1 13 Tf\n")
+            commands.append(f"<{_pdf_utf16be_hex(line[3:])}> Tj\n")
+            commands.append("/F1 11 Tf\n")
+        else:
+            commands.append(f"<{_pdf_utf16be_hex(line)}> Tj\n")
+    commands.append("ET\n")
+    return "".join(commands)
+
+
+def _pdf_utf16be_hex(value: Any) -> str:
+    return str(value or "").encode("utf-16-be", errors="replace").hex().upper()
 
 
 def _report_download_body(

@@ -73,6 +73,16 @@ def fixture_value(*parts):
     return "".join(parts)
 
 
+def extract_pdf_text(content: bytes) -> str:
+    try:
+        import fitz
+    except ModuleNotFoundError:
+        return ""
+
+    with fitz.open(stream=content, filetype="pdf") as document:
+        return "\n".join(page.get_text() for page in document)
+
+
 class ChatbotPersistenceModelTests(TestCase):
     def test_storage_foundation_uses_postgresql_erd_table_names(self):
         self.assertEqual(ChatSession._meta.db_table, "chat_sessions")
@@ -1665,9 +1675,13 @@ class ChatbotMockApiTests(TestCase):
 
         download_response = auth_client.get("/api/reports/rep_mvp_e2e_demo/download/")
         self.assertEqual(download_response.status_code, 200)
-        download_body = download_response.content.decode("utf-8")
-        self.assertIn("analysis_job_status:", download_body)
-        self.assertIn("partial_report:", download_body)
+        self.assertEqual(download_response["Content-Type"], "application/pdf")
+        self.assertIn('filename="rep_mvp_e2e_demo.pdf"', download_response["Content-Disposition"])
+        self.assertTrue(download_response.content.startswith(b"%PDF"))
+        download_body = extract_pdf_text(download_response.content)
+        if download_body:
+            self.assertIn("analysis_job_status:", download_body)
+            self.assertIn("partial_report:", download_body)
 
         summary_response = auth_client.get(f"/api/mypage/summary/?session_id={session_id}")
         self.assertEqual(summary_response.status_code, 200)
@@ -3766,9 +3780,13 @@ class ChatbotMockApiTests(TestCase):
 
         download_response = self.client.get("/api/reports/rep_partial_report_quality/download/")
         self.assertEqual(download_response.status_code, 200)
-        download_body = download_response.content.decode("utf-8")
-        self.assertIn("partial_report: True", download_body)
-        self.assertIn("limitation_1:", download_body)
+        self.assertEqual(download_response["Content-Type"], "application/pdf")
+        self.assertIn('filename="rep_partial_report_quality.pdf"', download_response["Content-Disposition"])
+        self.assertTrue(download_response.content.startswith(b"%PDF"))
+        download_body = extract_pdf_text(download_response.content)
+        if download_body:
+            self.assertIn("partial_report: True", download_body)
+            self.assertIn("limitation_1:", download_body)
 
     def test_canonical_report_download_includes_reporting_payload_sections(self):
         message_response = self.client.post(
@@ -3810,10 +3828,14 @@ class ChatbotMockApiTests(TestCase):
 
             download_response = self.client.get("/api/reports/rep_report_payload_download/download/")
         self.assertEqual(download_response.status_code, 200)
-        download_body = download_response.content.decode("utf-8")
-        self.assertIn("고지서 OCR 결과", download_body)
-        self.assertIn("이의신청서 초안", download_body)
-        self.assertIn("제출 가이드라인", download_body)
+        self.assertEqual(download_response["Content-Type"], "application/pdf")
+        self.assertIn('filename="rep_report_payload_download.pdf"', download_response["Content-Disposition"])
+        self.assertTrue(download_response.content.startswith(b"%PDF"))
+        download_body = extract_pdf_text(download_response.content)
+        if download_body:
+            self.assertIn("고지서 OCR 결과", download_body)
+            self.assertIn("이의신청서 초안", download_body)
+            self.assertIn("제출 가이드라인", download_body)
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")
@@ -3843,6 +3865,9 @@ class ChatbotMockApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("attachment", response["Content-Disposition"])
+        self.assertIn('filename="rep_mock.pdf"', response["Content-Disposition"])
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertTrue(response.content.startswith(b"%PDF"))
 
     def test_canonical_report_download_marks_canonical_mock_surface(self):
         response = self.client.get("/api/reports/rep_mock/download/")
