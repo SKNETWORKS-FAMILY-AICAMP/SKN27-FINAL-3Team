@@ -66,9 +66,20 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     runReportAction(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "reports/"), payload, identity);
     },
-    downloadReport({ reportId, sessionId, identity } = {}) {
+    listReports({ sessionId, identity } = {}) {
+      const url = withQuery(joinApiPath(apiBase, "reports/"), { session_id: sessionId });
+      return getJson(url, identity);
+    },
+    getReportDetail({ reportId, sessionId, identity } = {}) {
+      const url = withQuery(joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/`), {
+        session_id: sessionId,
+      });
+      return getJson(url, identity);
+    },
+    downloadReport({ reportId, sessionId, identity, documentType } = {}) {
       const url = withQuery(joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/download/`), {
         session_id: sessionId,
+        document_type: documentType,
       });
       return getBlob(url, identity);
     },
