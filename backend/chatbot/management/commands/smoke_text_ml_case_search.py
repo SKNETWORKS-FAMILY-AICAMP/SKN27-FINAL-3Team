@@ -58,6 +58,7 @@ class Command(BaseCommand):
                 "without Elasticsearch RAG",
                 "Elasticsearch RAG unavailable",
                 "Elasticsearch ping failed",
+                "No review_case RAG chunks were available",
             )
         )
         similar_cases = structured_result.get("similar_cases")
