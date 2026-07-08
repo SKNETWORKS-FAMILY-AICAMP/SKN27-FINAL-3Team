@@ -1,4 +1,4 @@
-"""Django views that expose the mid-demo mock chatbot service."""
+﻿"""Django views that expose the mid-demo mock chatbot service."""
 
 from __future__ import annotations
 
@@ -73,10 +73,12 @@ from chatbot.repositories import (
     get_chat_session_access_metadata,
     get_mycase_summary,
     get_report_download_metadata,
+    get_report_record_detail,
     get_uploaded_file_access_metadata,
     get_uploaded_file,
     history_operating_policy,
     list_history_event_records,
+    list_report_records,
     list_uploaded_files,
     mark_conversation_save_state,
     enqueue_analysis_job_work,
@@ -125,7 +127,7 @@ def guest_session(request: HttpRequest) -> JsonResponse:
         request,
         event_type="guest_session_created",
         status="success",
-        summary="비회원 guest session을 mock 발급했습니다.",
+        summary="??? guest session? mock ??????.",
         actor={
             "guest_id": payload.get("guest", {}).get("guest_id"),
             "auth_state": "guest",
@@ -306,7 +308,7 @@ def auth_me(request: HttpRequest) -> JsonResponse:
         request,
         event_type="auth_me_checked",
         status="success" if status < 400 else "failed",
-        summary="현재 인증 subject를 mock 확인했습니다.",
+        summary="?? ?? subject? mock ??????.",
         actor=_actor_from_auth_me_payload(request, payload),
         subject=subject_from_payload({"session_id": request.GET.get("session_id")}),
         source=_history_source(request),
@@ -373,8 +375,8 @@ def history_events(request: HttpRequest) -> JsonResponse:
             "count": len(events),
             "events": events,
             "limitations": [
-                "사용자 원문, OCR 원문, Agent reasoning 전문은 standard-light history에 저장하지 않습니다.",
-                "보관 기간과 DB table 전환은 사용자 컨펌 후 확정합니다.",
+                "?? ??, OCR ??, Agent reasoning ??? standard-light history? ?????.",
+                "?? ??? DB table ??? ??? ?? ???? ?? ?????.",
             ],
         },
     )
@@ -462,7 +464,7 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
             {
                 "error": {
                     "code": "attachment_not_found",
-                    "message": "요청한 attachment metadata를 찾을 수 없습니다.",
+                    "message": "??? attachment metadata? ?? ? ????.",
                 }
             },
             status=404,
@@ -488,7 +490,7 @@ def process_file_scan(request: HttpRequest, attachment_id: str) -> JsonResponse:
             {
                 "error": {
                     "code": "attachment_not_found",
-                    "message": "?붿껌??attachment metadata瑜?李얠쓣 ???놁뒿?덈떎.",
+                    "message": "??? attachment metadata? ?? ? ????.",
                 }
             },
             status=404,
@@ -538,7 +540,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         request,
         event_type="analysis_job_created",
         status=job.get("status") or "success",
-        summary="분석 job을 mock 생성했습니다.",
+        summary="?? job? mock ??????.",
         actor=actor,
         subject=subject,
         source=source,
@@ -571,7 +573,7 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             {
                 "error": {
                     "code": "analysis_job_not_found",
-                    "message": "요청한 analysis job을 찾을 수 없습니다.",
+                    "message": "??? analysis job? ?? ? ????.",
                 }
             },
             status=404,
@@ -610,7 +612,7 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
         request,
         event_type="chat_session_created",
         status="success",
-        summary="채팅 session을 mock 생성했습니다.",
+        summary="?? session? mock ??????.",
         actor=_history_actor(request, body),
         subject=subject_from_payload(body, session_id=payload.get("session_id")),
         source=_history_source(request),
@@ -719,7 +721,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         request,
         event_type="chat_message_created",
         status=chat_response.get("status") or "success",
-        summary="채팅 메시지를 mock 분석 응답으로 처리했습니다.",
+        summary="?? ???? mock ?? job ???? ??????.",
         actor=_history_actor(request, body),
         subject=subject_from_payload(
             body,
@@ -770,7 +772,7 @@ def update_chat_save_state(request: HttpRequest) -> JsonResponse:
                 request,
                 action="conversation_save",
                 reason="saved_requires_authenticated_user",
-                message="상담을 내 사건으로 저장하려면 로그인이 필요합니다.",
+                message="??? ?? ??? ????? ???? ?????.",
                 policy_version="conversation_save_policy.v1",
                 subject=subject,
             )
@@ -900,8 +902,36 @@ def process_agent_work_items_once(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
+@require_http_methods(["GET", "POST", "OPTIONS"])
 def report_action(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+        subject = access_subject_from_payload(identity_payload)["subject"]
+        if _is_canonical_mock_request(request):
+            guest_violation = _guest_identity_policy_violation(subject)
+            if guest_violation:
+                return _guest_identity_policy_response(request, guest_violation)
+            if subject.get("subject_type") != "user":
+                return _login_required_response(
+                    request,
+                    action="report_list",
+                    reason="report_list_requires_authenticated_user",
+                    message="??? ??? ????? ???? ?????.",
+                    policy_version="report_action_policy.v1",
+                    subject=subject,
+                )
+        reports = list_report_records(
+            session_id=request.GET.get("session_id"),
+            owner_id=str(subject.get("user_id") or "") if _is_canonical_mock_request(request) else request.GET.get("owner_id"),
+        )
+        return _json_response(
+            request,
+            {
+                "api_surface": "canonical_mock" if _is_canonical_mock_request(request) else "mock",
+                "reports": reports,
+            },
+        )
+
     body = _json_body(request)
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     subject = access_subject_from_payload(identity_body)["subject"]
@@ -916,7 +946,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
                 request,
                 action=f"report_{action}",
                 reason=f"guest_report_{action}_requires_login",
-                message="리포트를 저장하거나 다운로드하려면 로그인이 필요합니다.",
+                message="???? ????? ??????? ???? ?????.",
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
@@ -943,7 +973,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
         request,
         event_type=_report_history_event_type(action),
         status=report.get("status") or "success",
-        summary="리포트 action을 mock 처리했습니다.",
+        summary="??? action? mock ??????.",
         actor=_history_actor(request, body),
         subject=subject_from_payload(
             body,
@@ -963,6 +993,51 @@ def report_action(request: HttpRequest) -> JsonResponse:
 
 
 @require_http_methods(["GET", "OPTIONS"])
+def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
+    if _is_canonical_mock_request(request):
+        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+        subject = access_subject_from_payload(identity_payload)["subject"]
+        guest_violation = _guest_identity_policy_violation(subject)
+        if guest_violation:
+            return _guest_identity_policy_response(request, guest_violation)
+        if subject.get("subject_type") != "user":
+            return _login_required_response(
+                request,
+                action="report_detail",
+                reason="report_detail_requires_authenticated_user",
+                message="??? ??? ????? ???? ?????.",
+                policy_version="report_action_policy.v1",
+                subject=subject,
+            )
+        document_type = request.GET.get("document_type")
+        download = get_report_download_metadata(report_id, document_type=document_type)
+        if download is not None:
+            access = authorize_report_download_metadata(download, identity_payload)
+            if not access["allowed"]:
+                return _object_access_denied_response(request, access)
+
+    report = get_report_record_detail(report_id)
+    if report is None:
+        return _json_response(
+            request,
+            {
+                "error": {
+                    "code": "report_not_found",
+                    "message": "Requested report was not found.",
+                }
+            },
+            status=404,
+        )
+    return _json_response(
+        request,
+        {
+            "api_surface": "canonical_mock" if _is_canonical_mock_request(request) else "mock",
+            "report": report,
+        },
+    )
+
+
+@require_http_methods(["GET", "OPTIONS"])
 def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
     if _is_canonical_mock_request(request):
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
@@ -975,11 +1050,12 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
                 request,
                 action="report_download",
                 reason="report_download_requires_authenticated_user",
-                message="리포트를 다운로드하려면 로그인이 필요합니다.",
+                message="???? ??????? ???? ?????.",
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
-        download = get_report_download_metadata(report_id)
+        document_type = request.GET.get("document_type")
+        download = get_report_download_metadata(report_id, document_type=document_type)
         if download is not None:
             access = authorize_report_download_metadata(download, identity_payload)
             if not access["allowed"]:
@@ -997,6 +1073,7 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             response["X-Report-Object-Key"] = download["object_key"]
             response["X-Report-Object-Policy"] = download["object_storage"].get("policy_version", "")
             response["X-Report-Access-Decision"] = access["reason"]
+            response["X-Report-Document-Type"] = download.get("document_type", "")
             return response
 
     response = HttpResponse(
@@ -1139,7 +1216,7 @@ def _rate_limit_response(request: HttpRequest, usage: dict[str, object]) -> Json
                 "type": "rate_limit",
                 "code": "rate_limit_exceeded",
                 "status": 429,
-                "message": "요청 한도를 초과했습니다.",
+                "message": "?? ??? ??????.",
                 "required_action": required_action,
                 "usage": usage,
             }
@@ -1214,7 +1291,7 @@ def _guest_identity_policy_response(
                 "type": "authorization",
                 "code": "guest_session_invalid",
                 "status": 401,
-                "message": "비회원 세션이 만료되었거나 사용할 수 없습니다.",
+                "message": "??? ??? ???? ??? ???????.",
                 "required_action": "refresh_guest_session",
                 "reason": violation.get("reason"),
                 "guest_id": violation.get("guest_id"),
@@ -1255,7 +1332,7 @@ def _object_access_denied_response(request: HttpRequest, access: dict[str, objec
                 "type": "object_access",
                 "code": "object_access_denied",
                 "status": 403,
-                "message": "리포트 다운로드 권한이 없습니다.",
+                "message": "???? ???? ??? ??? ? ????.",
                 "required_action": "login_or_owner_match",
                 "access": access,
             }
