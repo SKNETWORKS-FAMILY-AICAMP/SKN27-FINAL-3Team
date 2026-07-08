@@ -309,7 +309,9 @@ class TestSuccessBranch:
         sr = _structured(result)
         assert sr["risk_trigger_category"] == "B_명시적전환요청"
 
-    def test_비주정차_위반은_MG가_제7조_컨텍스트로_판단(self):
+    def test_비주정차_위반도_MG가_142조_제7조_공통컨텍스트로_판단(self):
+        """(law160-budeuk-hansayu-scope-analysis2.md 확정) 142조는 위반유형 무관 공통
+        조문이라, 비주정차 law_code에서도 제7조뿐 아니라 142조까지 함께 주입돼야 한다."""
         captured_context = {}
 
         def fake_create(*args, **kwargs):
@@ -329,7 +331,7 @@ class TestSuccessBranch:
             })
 
         assert "질서위반행위규제법 제7조" in captured_context["prompt"]
-        assert "시행규칙 제142조" not in captured_context["prompt"]
+        assert "시행규칙 제142조" in captured_context["prompt"]
 
 
 # ── RG ∥ MG 병렬 분기의 실행 순서·독립성 확인 ────────────────────────────────

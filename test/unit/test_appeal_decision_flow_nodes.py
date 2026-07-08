@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 from ai.agents.appeal_decision_flow.deadline import deadline_gate_node
 from ai.agents.appeal_decision_flow.guide import guide_generation_node
 from ai.agents.appeal_decision_flow.law_code_check import law_code_check_node
-from ai.agents.appeal_decision_flow.law_refs import get_merit_context, is_parking_violation
+from ai.agents.appeal_decision_flow.law_refs import get_merit_context
 from ai.agents.appeal_decision_flow.merit_gate import merit_classification_node
 from ai.agents.appeal_decision_flow.reason_intake import reason_intake_node
 from ai.agents.appeal_decision_flow.risk_gate import risk_classification_node
@@ -234,53 +234,26 @@ class TestLawRefs:
         ):
             yield
 
-    @pytest.mark.parametrize("law_code", [
-        "도로교통법 제32조 제1항", "도로교통법 제33조", "도로교통법 제34조 제2항",
-    ])
-    def test_주정차_조항_판별_True(self, law_code):
-        assert is_parking_violation(law_code) is True
-
-    @pytest.mark.parametrize("law_code", [
-        "도로교통법 제17조 제1항", "도로교통법 제5조", "도로교통법 제132조",
-    ])
-    def test_비주정차_조항_판별_False(self, law_code):
-        assert is_parking_violation(law_code) is False
-
-    def test_law_code_none이면_비주정차로_안전폴백(self):
-        assert is_parking_violation(None) is False
-        assert is_parking_violation("") is False
-
-    def test_사전통지_주정차_컨텍스트(self):
-        ctx = get_merit_context("사전통지", "도로교통법 제32조 제1항")
+    def test_사전통지_컨텍스트_위반유형무관_공통조문(self):
+        ctx = get_merit_context("사전통지")
         assert "제160조제4항제1호" in ctx
         assert "시행규칙 제142조" in ctx
-        assert "제14조" not in ctx
-        assert "제7조" not in ctx
-
-    def test_사전통지_비주정차_컨텍스트(self):
-        ctx = get_merit_context("사전통지", "도로교통법 제17조 제1항")
         assert "질서위반행위규제법 제7조" in ctx
-        assert "제142조" not in ctx
         assert "제14조" not in ctx
 
-    def test_1차고지서_주정차_컨텍스트(self):
-        ctx = get_merit_context("1차 고지서", "도로교통법 제32조 제1항")
+    def test_1차고지서_컨텍스트_위반유형무관_공통조문(self):
+        ctx = get_merit_context("1차 고지서")
         assert "제160조제4항제1호" in ctx
         assert "시행규칙 제142조" in ctx
-        assert "질서위반행위규제법 제14조" in ctx
-
-    def test_1차고지서_비주정차_컨텍스트(self):
-        ctx = get_merit_context("1차 고지서", "도로교통법 제17조 제1항")
         assert "질서위반행위규제법 제7조" in ctx
         assert "질서위반행위규제법 제14조" in ctx
-        assert "제142조" not in ctx
 
     def test_DB_조회_성공하면_DB_원문_사용(self):
         with patch(
             "etl.legal.search.get_provision_text",
             return_value="(DB) 실제 법령DB에서 조회된 조문 원문",
         ):
-            ctx = get_merit_context("사전통지", "도로교통법 제17조 제1항")
+            ctx = get_merit_context("사전통지")
         assert "(DB) 실제 법령DB에서 조회된 조문 원문" in ctx
         assert "질서위반행위규제법 제7조(고의 또는 과실)" not in ctx
 
@@ -399,12 +372,14 @@ class TestRiskClassificationNode:
 # ── merit_classification_node (DATA-003 §5) ─────────────────────────────────
 
 class TestMeritClassificationNode:
-    def test_주정차_사전통지면_142조_컨텍스트로_LLM_호출(self):
+    def test_사전통지면_142조_컨텍스트_위반유형무관_포함(self):
+        """142조는 law_code(주정차 여부)로 더 이상 라우팅되지 않고 항상 포함된다
+        (law160-budeuk-hansayu-scope-analysis2.md) — 비주정차 law_code로 검증."""
         with patch("ai.agents.appeal_decision_flow.merit_gate._call_llm_merit") as mock_call:
             mock_call.return_value = {"merit": "강함", "merit_basis": "x"}
             merit_classification_node({
                 "user_appeal_reason": "응급환자를 이송했습니다",
-                "notice_stage": "사전통지", "law_code": "도로교통법 제32조",
+                "notice_stage": "사전통지", "law_code": "도로교통법 제17조",
             })
             called_context = mock_call.call_args[0][1]
             assert "시행규칙 제142조" in called_context
