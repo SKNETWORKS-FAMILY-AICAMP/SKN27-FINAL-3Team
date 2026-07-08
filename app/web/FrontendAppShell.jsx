@@ -2046,6 +2046,8 @@ function NodeResultPill({ node }) {
 
 function ReportingPreviewPanel({ reportingPayload }) {
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
+  const documentSections = sections.filter(isSubmissionDocumentSection);
+  const supportingSections = sections.filter((section) => !isSubmissionDocumentSection(section));
 
   return (
     <section className="reporting-preview" aria-label="리포팅 미리보기">
@@ -2059,8 +2061,21 @@ function ReportingPreviewPanel({ reportingPayload }) {
           {reportingPayload.stage}
         </span>
       </div>
+      {documentSections.length > 0 && (
+        <div className="report-document-highlights" aria-label="제출 문서 미리보기">
+          {documentSections.map((section) => (
+            <article key={`document-${section.title}`}>
+              <span className="tag green">제출 문서</span>
+              <strong>{section.title}</strong>
+              {(section.items || []).slice(0, 6).map((item, index) => (
+                <p key={`${section.title}-document-${index}`}>{compactValue(item)}</p>
+              ))}
+            </article>
+          ))}
+        </div>
+      )}
       <div className="report-section-list">
-        {sections.map((section) => (
+        {supportingSections.map((section) => (
           <article key={section.title}>
             <strong>{section.title}</strong>
             {(section.items || []).slice(0, 4).map((item, index) => (
@@ -2096,6 +2111,7 @@ function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction
     </section>
   );
 }
+
 function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, reportActionStatus }) {
   const reportQuality =
     currentReport?.persistence?.report_quality ||
