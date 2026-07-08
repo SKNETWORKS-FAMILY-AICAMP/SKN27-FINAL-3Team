@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1050" viewBox="0 0 1800 1050">
+  <rect width="1800" height="1050" fill="#f8fafc"/>
+  <text x="70" y="74" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="34" font-weight="700" fill="#0f172a">교통분쟁 AI 시스템 아키텍처</text>
+  <text x="70" y="110" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="17" fill="#475569">Git 브랜치와 실제 코드 기준: React, Django, Supervisor, Agent, RAG, 저장소, 보안 게이트</text>
+  <text x="70" y="1000" font-family="Malgun Gothic, Noto Sans KR, sans-serif" font-size="15" fill="#475569">PNG 원본과 동일한 한글 폰트 기준으로 생성된 발표용 다이어그램입니다. 상세 박스 구성은 PNG를 기준으로 확인하세요.</text>
+</svg>
