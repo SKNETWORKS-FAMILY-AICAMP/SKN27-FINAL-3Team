@@ -100,8 +100,8 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["notice_analysis_result", "law_ground_result", "user_facts"],
         "produces": ["objection_draft", "attachment_list", "report_actions"],
         "handoff_to": ["agent_result_validation", "final_response_merge"],
-        "status": "mock_contract_only",
-        "adapter_modes": ["mock"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["mock", "sync"],
     },
     "agent_result_validation": {
         "order": 70,
@@ -311,6 +311,7 @@ def _should_use_sync_adapter(node_code: str, execution_mode: str) -> bool:
     return execution_mode == "sync" and node_code in {
         "fine_notice_analysis",
         "law_ground_search",
+        "objection_report_generation",
         "text_ml_case_search",
     }
 
@@ -362,6 +363,8 @@ def _run_sync_adapter(
         return _run_fine_notice_analysis_adapter(agent_input, adapter_context)
     if node_code == "law_ground_search":
         return _run_law_ground_search_adapter(agent_input, adapter_context)
+    if node_code == "objection_report_generation":
+        return _run_objection_report_generation_adapter(agent_input, adapter_context)
     if node_code == "text_ml_case_search":
         return _run_text_ml_case_search_adapter(agent_input, adapter_context)
     raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
@@ -371,10 +374,41 @@ def _run_fine_notice_analysis_adapter(
     agent_input: dict[str, Any],
     adapter_context: dict[str, Any],
 ) -> dict[str, Any]:
-    from ai.agents.fine_notice_analysis.graph import graph
-
     state = _fine_notice_state(agent_input)
-    result = graph.invoke(state)
+    try:
+        from ai.agents.fine_notice_analysis.graph import graph
+
+        result = graph.invoke(state)
+    except Exception as exc:
+        raw_output = {
+            "status": "failed",
+            "summary": "fine_notice_analysis adapter failed before completing OCR processing.",
+            "structured_result": {
+                "ocr_status": "failed",
+                "ocr_error": f"{exc.__class__.__name__}: {exc}",
+                "missing_fields": ["notice_image"] if state.get("_input_source") == "missing" else [],
+            },
+            "evidence": [],
+            "next_actions": [
+                "check_fine_notice_agent_dependencies",
+                "fallback_to_mock_or_retry_adapter",
+            ],
+            "limitations": [
+                f"fine_notice_analysis adapter dependency error:{exc.__class__.__name__}",
+            ],
+        }
+        return _complete_adapter_output(
+            raw_output,
+            node=adapter_context["node"],
+            agent_input=agent_input,
+            adapter_trace={
+                "adapter": "ai.agents.fine_notice_analysis.graph",
+                "execution_mode": "sync",
+                "source_status": raw_output.get("status"),
+                "input_source": state.get("_input_source"),
+            },
+        )
+
     raw_output = (
         result.get("agent_results", {}).get("fine_notice_analysis")
         if isinstance(result, dict)
@@ -463,6 +497,39 @@ def _run_text_ml_case_search_adapter(
             "execution_mode": "sync",
             "source_status": raw_output.get("status"),
             "input_source": "agent_input",
+        },
+    )
+
+
+def _run_objection_report_generation_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    from ai.agents.objection_report_generation import run_objection_report_generation
+
+    raw_output = run_objection_report_generation(agent_input, adapter_context)
+    if not isinstance(raw_output, dict):
+        raw_output = {
+            "status": "partial",
+            "summary": "objection_report_generation returned without an AgentAdapterOutput envelope.",
+            "structured_result": {
+                "document_type": "objection_form",
+                "form_sections": [],
+                "report_actions": [],
+            },
+            "evidence": [],
+            "next_actions": ["check_objection_report_generation_agent_output"],
+            "limitations": ["The objection_report_generation adapter did not return a dictionary."],
+        }
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "ai.agents.objection_report_generation.run_objection_report_generation",
+            "execution_mode": "sync",
+            "source_status": raw_output.get("status"),
+            "input_source": "agent_input.upstream_results",
         },
     )
 
@@ -599,6 +666,8 @@ def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, An
         marker = "fine_notice_analysis real adapter is connected through Supervisor sync execution mode."
     elif "text_ml_case_search" in adapter:
         marker = "text_ml_case_search sync adapter is connected through the RAG-backed case-search port."
+    elif "objection_report_generation" in adapter:
+        marker = "objection_report_generation sync adapter is connected through Supervisor sync execution mode."
     else:
         marker = "Sync adapter is connected through Supervisor sync execution mode."
     if marker not in limitations:
