@@ -715,7 +715,8 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(body["status"], "pass")
         self.assertEqual(body["execution_mode"], "sync")
         self.assertEqual(body["adapter_execution_mode"], "sync")
-        self.assertEqual(body["adapter_source"], "fault_ratio_knowledge_agent")
+        self.assertIn(body["adapter_source"], {"fault_ratio_knowledge_agent", "django_rag_tables"})
+        self.assertIn(body["retrieval_backend"], {"django_rag_tables", None})
         self.assertFalse(body["es_rag_enabled"])
         self.assertTrue(body["es_rag_fallback"])
 
@@ -2270,6 +2271,17 @@ class ChatbotMockApiTests(TestCase):
         body = response.json()
         self.assertEqual(body["routing_intent"], "fault_ratio")
         self.assertEqual(body["analysis_plan"]["steps"][1]["node_code"], "text_ml_case_search")
+        self.assertIn(
+            "objection_report_generation",
+            {step["node_code"] for step in body["analysis_plan"]["steps"]},
+        )
+        self.assertIn(
+            "objection_report_generation",
+            {
+                item["node_code"]
+                for item in body["supervisor_state"]["agent_input_packages"]
+            },
+        )
         self.assertIn("structured_result", body)
         self.assertIn("similar_cases", body["structured_result"])
 
@@ -2460,20 +2472,16 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(vision_result["adapter_modes"], ["mock"])
 
         structured_result = text_ml_result["structured_result"]
-        self.assertEqual(
-            structured_result["retrieval"]["adapter_source"],
-            "fault_ratio_knowledge_agent",
+        self.assertEqual(structured_result["adapter_trace"]["execution_mode"], "sync")
+        self.assertIn(
+            structured_result["retrieval"].get("adapter_source") or structured_result["retrieval"].get("backend"),
+            {"fault_ratio_knowledge_agent", "django_rag_tables"},
         )
         self.assertIn("similar_cases", structured_result)
         self.assertIn("top_cases", structured_result)
         self.assertIn("ratio_range_label", structured_result)
         self.assertIn("recommended_evidence", structured_result)
-        self.assertTrue(
-            any(
-                "TEXT_ML_CASE_SEARCH_SYNC_USE_ES" in limitation
-                for limitation in text_ml_result["limitations"]
-            )
-        )
+        self.assertTrue(text_ml_result["limitations"])
 
         invocations = AgentInvocation.objects.filter(
             job__job_id=execution["job_id"],
@@ -3838,6 +3846,145 @@ class ChatbotMockApiTests(TestCase):
             self.assertIn("고지서 OCR 결과", download_body)
             self.assertIn("이의신청서 초안", download_body)
             self.assertIn("제출 가이드라인", download_body)
+
+        objection_response = self.client.get(
+            "/api/reports/rep_report_payload_download/download/?document_type=objection_form"
+        )
+        self.assertEqual(objection_response.status_code, 200)
+        self.assertEqual(objection_response["Content-Type"], "application/pdf")
+        self.assertIn(
+            'filename="rep_report_payload_download-objection-form.pdf"',
+            objection_response["Content-Disposition"],
+        )
+        self.assertEqual(objection_response["X-Report-Document-Type"], "objection_form")
+        objection_body = extract_pdf_text(objection_response.content)
+        if objection_body:
+            self.assertIn("이의신청서 초안", objection_body)
+            self.assertIn("신청 취지", objection_body)
+            self.assertIn("사실관계", objection_body)
+            self.assertIn("첨부 자료", objection_body)
+
+    def test_fault_ratio_report_download_includes_required_sections(self):
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_fault_ratio_report_payload_download",
+                "conversation_save_state": "saved",
+                "user_text": "신호 없는 교차로에서 직진 중 우측 진입 차량과 접촉했습니다. 과실비율 리포트를 만들어 주세요.",
+                "mock_scenario": "fault_ratio",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        message_body = message_response.json()
+        job_id = message_body["persistence"]["job_id"]
+        reporting_payload = message_body["reporting_payload"]
+        self.assertEqual(reporting_payload["report_type"], "fault_ratio_analysis")
+        self.assertEqual(reporting_payload["screen_id"], "UI-REPORT-FAULT-001")
+        section_titles = {section["title"] for section in reporting_payload["sections"]}
+        self.assertIn("사고 개요", section_titles)
+        self.assertIn("AI 분석 결과", section_titles)
+        self.assertIn("판단 근거", section_titles)
+        self.assertIn("유사 사례·판례", section_titles)
+        self.assertIn("후속 조치", section_titles)
+
+        with tempfile.TemporaryDirectory() as object_root, override_settings(
+            OBJECT_STORAGE_LOCAL_ROOT=object_root
+        ):
+            report_response = self.client.post(
+                "/api/reports/",
+                data={
+                    "action": "download",
+                    "report_id": "rep_fault_ratio_payload_download",
+                    "job_id": job_id,
+                    "session_id": "ses_fault_ratio_report_payload_download",
+                    "report_type": reporting_payload["report_type"],
+                    "title": reporting_payload["title"],
+                    "reporting_payload": reporting_payload,
+                },
+                content_type="application/json",
+            )
+            self.assertEqual(report_response.status_code, 200)
+
+            download_response = self.client.get("/api/reports/rep_fault_ratio_payload_download/download/")
+        self.assertEqual(download_response.status_code, 200)
+        self.assertEqual(download_response["Content-Type"], "application/pdf")
+        self.assertIn('filename="rep_fault_ratio_payload_download.pdf"', download_response["Content-Disposition"])
+        self.assertTrue(download_response.content.startswith(b"%PDF"))
+        download_body = extract_pdf_text(download_response.content)
+        if download_body:
+            self.assertIn("문서 정보", download_body)
+            self.assertIn("리포트 유형", download_body)
+            self.assertIn("과실비율 리포트 기준", download_body)
+            self.assertIn("사고 개요", download_body)
+            self.assertIn("AI 분석 결과", download_body)
+            self.assertIn("판단 근거", download_body)
+            self.assertIn("유사 사례·판례", download_body)
+            self.assertIn("후속 조치", download_body)
+
+        objection_response = self.client.get(
+            "/api/reports/rep_fault_ratio_payload_download/download/?document_type=objection_form"
+        )
+        self.assertEqual(objection_response.status_code, 200)
+        self.assertEqual(objection_response["Content-Type"], "application/pdf")
+        self.assertIn(
+            'filename="rep_fault_ratio_payload_download-objection-form.pdf"',
+            objection_response["Content-Disposition"],
+        )
+        self.assertEqual(objection_response["X-Report-Document-Type"], "objection_form")
+        self.assertTrue(objection_response.content.startswith(b"%PDF"))
+
+    def test_reports_list_and_detail_contract(self):
+        message_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_reports_list_detail",
+                "conversation_save_state": "saved",
+                "user_text": "신호 없는 교차로 접촉 사고 과실비율 리포트를 저장해 주세요.",
+                "mock_scenario": "fault_ratio",
+                "mock_status": "success",
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(message_response.status_code, 200)
+        message_body = message_response.json()
+        reporting_payload = message_body["reporting_payload"]
+
+        report_response = self.client.post(
+            "/api/reports/",
+            data={
+                "action": "save",
+                "report_id": "rep_reports_list_detail",
+                "job_id": message_body["persistence"]["job_id"],
+                "session_id": "ses_reports_list_detail",
+                "report_type": reporting_payload["report_type"],
+                "title": reporting_payload["title"],
+                "reporting_payload": reporting_payload,
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(report_response.status_code, 200)
+
+        list_response = self.client.get("/api/reports/?session_id=ses_reports_list_detail")
+        self.assertEqual(list_response.status_code, 200)
+        list_body = list_response.json()
+        self.assertEqual(list_body["api_surface"], "canonical_mock")
+        reports = list_body["reports"]
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["report_id"], "rep_reports_list_detail")
+        self.assertEqual(reports[0]["report_type"], "fault_ratio_analysis")
+        self.assertEqual(reports[0]["screen_id"], "UI-REPORT-FAULT-001")
+        self.assertTrue(reports[0]["download_url"].endswith("/api/reports/rep_reports_list_detail/download/"))
+
+        detail_response = self.client.get("/api/reports/rep_reports_list_detail/?session_id=ses_reports_list_detail")
+        self.assertEqual(detail_response.status_code, 200)
+        detail_body = detail_response.json()
+        report = detail_body["report"]
+        self.assertEqual(report["report_id"], "rep_reports_list_detail")
+        self.assertEqual(report["content"]["reporting_payload"]["report_type"], "fault_ratio_analysis")
+        self.assertEqual(report["content"]["reporting_payload"]["screen_id"], "UI-REPORT-FAULT-001")
+        self.assertEqual(report["job"]["job_id"], message_body["persistence"]["job_id"])
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")

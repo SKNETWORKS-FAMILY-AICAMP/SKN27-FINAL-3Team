@@ -30,6 +30,7 @@ urlpatterns = [
     path("agents/plans/run/", views.run_agent_plan, name="canonical-run-agent-plan"),
     path("agents/work-items/process/", views.process_agent_work_items_once, name="canonical-process-agent-work-items"),
     path("reports/", views.report_action, name="canonical-report-action"),
+    path("reports/<str:report_id>/", views.report_detail, name="canonical-report-detail"),
     path("reports/<str:report_id>/download/", views.download_report, name="canonical-download-report"),
     path("mock/chat/scenarios/", views.demo_scenarios, name="demo-scenarios"),
     path("mock/history/", views.history_events, name="history-events"),

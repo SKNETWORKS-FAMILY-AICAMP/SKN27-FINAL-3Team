@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import ChatbotMockFlow from "./ChatbotMockFlow.jsx";
 import { createFrontendApi } from "./apiClient.js";
 import {
   buildAuthContext,
   buildGoogleLoginPayload,
+  clearStoredAuthSession,
   persistAuthSession,
   readStoredAuthSession,
   readStoredAuthToken,
@@ -100,11 +101,14 @@ export default function FrontendAppShell({
   const [isRegisteringAttachment, setIsRegisteringAttachment] = useState(false);
   const [reportActionStatus, setReportActionStatus] = useState("");
   const [currentReport, setCurrentReport] = useState(null);
+  const [reportList, setReportList] = useState([]);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [workerActionStatus, setWorkerActionStatus] = useState("");
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
+  const [pendingReportScreenDownload, setPendingReportScreenDownload] = useState(null);
+  const reportWorkbenchRef = useRef(null);
 
-  const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";
+  const effectiveAuthToken = activeAuthToken || authToken || "";
   const identity = {
     authToken: effectiveAuthToken,
     guestId,
@@ -129,7 +133,31 @@ export default function FrontendAppShell({
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
+  const isLiveReportingReady = isReportingPayloadReady(reportingPayload, supervisorState);
+  const visibleReportingPayload = isLiveReportingReady ? reportingPayload : null;
+  const visibleAnalysisCards = isLiveReportingReady
+    ? analysisCards
+    : analysisCards.filter((card) => card?.card_type !== "reporting_preview");
   const selectedPersona = DEMO_PERSONAS.find((item) => item.persona_id === selectedPersonaId) || DEMO_PERSONAS[0];
+
+  useEffect(() => {
+    if (!pendingReportScreenDownload || activeRoute !== "reporting" || !reportWorkbenchRef.current) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      try {
+        openReportScreenPrintWindow(reportWorkbenchRef.current, pendingReportScreenDownload);
+        setReportActionStatus("리포트 화면 PDF 저장 창을 열었습니다. 브라우저 인쇄 창에서 PDF로 저장해 주세요.");
+      } catch (error) {
+        setReportActionStatus(`리포트 화면 PDF 저장을 시작하지 못했습니다. ${error?.message || ""}`.trim());
+      } finally {
+        setPendingReportScreenDownload(null);
+      }
+    }, 80);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeRoute, pendingReportScreenDownload]);
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
     setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 임시 세션을 준비하고 있습니다.");
@@ -210,6 +238,45 @@ export default function FrontendAppShell({
       source,
       userId: nextUserId,
     };
+  }
+
+  async function logoutAndResetSession() {
+    setStatusMessage("로그아웃하고 새 계정으로 시작할 준비를 하고 있습니다.");
+    const logoutIdentity = identity;
+    try {
+      if (authSessionId || effectiveAuthToken) {
+        await api.logoutAuthSession(
+          {
+            auth_session_id: authSessionId || undefined,
+            session_id: sessionId || undefined,
+          },
+          logoutIdentity
+        );
+      }
+    } catch (_error) {
+      // Local session reset is still required so another account can sign in cleanly.
+    }
+    clearStoredAuthSession();
+    setActiveAuthToken("");
+    setAuthSessionId("");
+    setGuestId("");
+    setSessionId("");
+    setMypageSummary(null);
+    setHistoryEvents(null);
+    setChatMessages([]);
+    setAnalysisResponse(null);
+    setCurrentReport(null);
+    setReportList([]);
+    setPendingAuthAction(null);
+    setReportActionStatus("");
+    setWorkerActionStatus("");
+    setSavePromptVisible(false);
+    setSaveDecision("undecided");
+    setGuestDetailedReportUsed(false);
+    setSubmittedQuestion("");
+    setQuestion("");
+    setActiveRoute("entry");
+    setStatusMessage("로그아웃했습니다. 새 Google 계정으로 다시 진행할 수 있습니다.");
   }
 
   function useSelectedPersonaSample() {
@@ -301,13 +368,72 @@ export default function FrontendAppShell({
     }
   }
 
-  async function runCurrentReportAction(action = "download") {
+  async function runCurrentReportAction(action = "download_report") {
     const jobId = analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || "";
+    const documentType = action === "download_objection" ? "objection_form" : "report";
+    const reportAction = action === "save" ? "save" : "download";
+    const activeReportingPayload = currentReport?.content?.reporting_payload || visibleReportingPayload;
+    if (action === "download_report") {
+      if (!currentReport && !activeReportingPayload) {
+        setReportActionStatus("PDF로 저장할 리포트 화면이 아직 없습니다.");
+        return;
+      }
+      setPendingReportScreenDownload({
+        title: activeReportingPayload?.title || currentReport?.title || "상담 분석 리포트",
+        filenameBase:
+          currentReport?.report_id ||
+          activeReportingPayload?.screen_id ||
+          jobId ||
+          "report-screen",
+      });
+      setActiveRoute("reporting");
+      setReportActionStatus("리포트 화면 PDF 저장 창을 준비하고 있습니다.");
+      return;
+    }
+    if ((!analysisResponse || !jobId) && currentReport?.report_id && reportAction === "download") {
+      try {
+        let nextIdentity = identity;
+        let activeSessionId = currentReport?.session_id || sessionId;
+        if (!authSessionId) {
+          setPendingAuthAction({ type: `report_${action}`, reportId: currentReport.report_id });
+          const loginState = await loginAndBindCurrentSession({
+            source: `report_${action}`,
+            nextRoute: "reporting",
+          });
+          nextIdentity = loginState.identity;
+          activeSessionId = activeSessionId || loginState.sessionId;
+          setPendingAuthAction(null);
+        }
+        const downloadedFilename = await triggerReportDownload({
+          reportId: currentReport.report_id,
+          sessionId: activeSessionId,
+          requestIdentity: nextIdentity,
+          documentType,
+        });
+        setReportActionStatus(`다운로드 완료: ${downloadedFilename || currentReport.report_id}`);
+      } catch (_error) {
+        setPendingAuthAction(null);
+        setReportActionStatus(`다운로드에 실패했습니다. ${_error?.message || ""}`.trim());
+      }
+      return;
+    }
     if (!analysisResponse || !jobId) {
       setReportActionStatus("리포트 action을 실행할 상담 결과가 아직 없습니다.");
       return;
     }
-    setReportActionStatus(action === "download" ? "리포트 다운로드 metadata를 준비하고 있습니다." : "리포트를 저장하고 있습니다.");
+    if (!currentReport && !activeReportingPayload) {
+      setReportActionStatus("역질문이 끝난 뒤 리포트와 제출 문서를 만들 수 있습니다.");
+      setStatusMessage("필수 확인 질문에 답하면 리포트 다운로드가 열립니다.");
+      setActiveRoute("chatbot");
+      return;
+    }
+    setReportActionStatus(
+      reportAction === "download"
+        ? documentType === "objection_form"
+          ? "이의신청서 PDF를 준비하고 있습니다."
+          : "분석 리포트 PDF를 준비하고 있습니다."
+        : "리포트를 저장하고 있습니다."
+    );
     try {
       let activeSessionId = analysisResponse?.session_id || sessionId;
       let nextIdentity = identity;
@@ -324,33 +450,36 @@ export default function FrontendAppShell({
       }
       const report = await api.runReportAction(
         {
-          action,
+          action: reportAction,
+          document_type: documentType,
           report_id: currentReport?.report_id || `rep_${jobId}`,
           job_id: jobId,
           session_id: activeSessionId,
-          report_type: "general",
-          title: reportingPayload?.title || "상담 분석 리포트",
-          reporting_payload: reportingPayload,
+          report_type: activeReportingPayload?.report_type || currentReport?.report_type || "general",
+          title: activeReportingPayload?.title || currentReport?.title || "상담 분석 리포트",
+          reporting_payload: activeReportingPayload,
         },
         nextIdentity
       );
       setCurrentReport(report);
       let downloadedFilename = "";
-      if (action === "download" && report?.report_id) {
+      if (reportAction === "download" && report?.report_id) {
         downloadedFilename = await triggerReportDownload({
           reportId: report.report_id,
           sessionId: activeSessionId,
           requestIdentity: nextIdentity,
+          documentType,
         });
       }
       setReportActionStatus(
-        action === "download"
+        reportAction === "download"
           ? `다운로드 완료: ${downloadedFilename || report.download_url || report.report_id}`
           : `리포트 저장 완료: ${report.report_id}`
       );
       if (nextIdentity.authSessionId) {
         await loadMyPageSummary({ identity: nextIdentity, sessionId: activeSessionId });
         await loadHistoryEvents({ identity: nextIdentity, sessionId: activeSessionId });
+        await loadReports({ identity: nextIdentity, sessionId: activeSessionId });
       }
       setActiveRoute("reporting");
     } catch (_error) {
@@ -359,11 +488,12 @@ export default function FrontendAppShell({
     }
   }
 
-  async function triggerReportDownload({ reportId, sessionId: activeSessionId, requestIdentity }) {
+  async function triggerReportDownload({ reportId, sessionId: activeSessionId, requestIdentity, documentType = "report" }) {
     const file = await api.downloadReport({
       reportId,
       sessionId: activeSessionId,
       identity: requestIdentity,
+      documentType,
     });
     const filename = file.filename || `${reportId}.txt`;
     if (typeof document === "undefined" || typeof URL === "undefined") {
@@ -720,6 +850,65 @@ export default function FrontendAppShell({
     }
   }
 
+  async function loadReports(options = {}) {
+    const requestIdentity = options?.identity || identity;
+    const requestSessionId = options?.sessionId || sessionId;
+    if (!requestIdentity?.authToken && !requestIdentity?.authSessionId) {
+      setReportList([]);
+      setStatusMessage("저장 리포트 목록은 로그인 후 확인할 수 있습니다.");
+      return { reports: [] };
+    }
+    setStatusMessage("리포트 목록을 불러오고 있습니다.");
+    try {
+      const result = await api.listReports({ sessionId: requestSessionId, identity: requestIdentity });
+      const reports = Array.isArray(result?.reports) ? result.reports : [];
+      setReportList(reports);
+      if (!currentReport && reports[0]) {
+        setCurrentReport(reports[0]);
+      }
+      setStatusMessage("리포트 목록을 업데이트했습니다.");
+      return result;
+    } catch (_error) {
+      setReportList([]);
+      setStatusMessage(
+        _error?.message?.includes("login_required")
+          ? "저장 리포트 목록은 로그인 후 확인할 수 있습니다."
+          : "리포트 목록을 불러오지 못했습니다."
+      );
+      return null;
+    }
+  }
+
+  async function openReportDetail(report) {
+    const reportId = report?.report_id || "";
+    if (!reportId) {
+      return;
+    }
+    const requestSessionId = report?.session_id || sessionId;
+    if (!identity?.authToken && !identity?.authSessionId) {
+      setCurrentReport(report);
+      setReportActionStatus("로그인 후 리포트 상세를 다시 불러올 수 있습니다.");
+      setStatusMessage("리포트 상세는 로그인 후 확인할 수 있습니다.");
+      return;
+    }
+    setStatusMessage("리포트 상세를 불러오고 있습니다.");
+    try {
+      const result = await api.getReportDetail({
+        reportId,
+        sessionId: requestSessionId,
+        identity,
+      });
+      const detail = result?.report || report;
+      setCurrentReport(detail);
+      setReportActionStatus(`선택한 리포트: ${detail.report_id || reportId}`);
+      setStatusMessage("리포트 상세를 미리보기에 반영했습니다.");
+    } catch (_error) {
+      setCurrentReport(report);
+      setReportActionStatus("리포트 상세를 불러오지 못해 목록 요약만 표시합니다.");
+      setStatusMessage("리포트 상세를 불러오지 못했습니다.");
+    }
+  }
+
   async function openSavedCase(item) {
     const jobId = item?.job_id || item?.case_id || "";
     if (jobId) {
@@ -821,6 +1010,7 @@ export default function FrontendAppShell({
             isGuestReady={isGuestReady}
             isSavingConversation={isSavingConversation}
             onLogin={saveConversationAfterLogin}
+            onLogout={logoutAndResetSession}
             onNavigate={setActiveRoute}
             onNewChat={startNewConversation}
             onOpenCase={openSavedCase}
@@ -840,7 +1030,7 @@ export default function FrontendAppShell({
 
           {activeRoute === "chatbot" && (
             <ChatScreenV2
-              analysisCards={analysisCards}
+              analysisCards={visibleAnalysisCards}
               attachmentPurpose={attachmentPurpose}
               assistantAnswer={assistantAnswer}
               authSessionId={authSessionId}
@@ -853,6 +1043,7 @@ export default function FrontendAppShell({
               isSavingConversation={isSavingConversation}
               onKeepTemporary={keepConversationTemporary}
               onRegisterAttachment={registerAttachmentMetadata}
+              onOpenReporting={() => setActiveRoute("reporting")}
               onRunReportAction={runCurrentReportAction}
               onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
@@ -897,19 +1088,23 @@ export default function FrontendAppShell({
 
           {activeRoute === "reporting" && (
             <ReportingScreen
-              analysisCards={analysisCards}
+              analysisCards={visibleAnalysisCards}
               currentReport={currentReport}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
+              onOpenReport={openReportDetail}
               onRefresh={async () => {
                 await loadMyPageSummary();
                 await loadHistoryEvents();
+                await loadReports();
               }}
               onPrepareDraftRegeneration={prepareDraftRegeneration}
               onPrepareMissingEvidence={prepareMissingEvidenceUpload}
               onRunReportAction={runCurrentReportAction}
               reportActionStatus={reportActionStatus}
-              reportingPayload={reportingPayload}
+              reportList={reportList}
+              reportingPayload={visibleReportingPayload}
+              reportWorkbenchRef={reportWorkbenchRef}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
             />
@@ -1187,6 +1382,7 @@ function ConversationSidebar({
   isGuestReady,
   isSavingConversation,
   onLogin,
+  onLogout,
   onNavigate,
   onNewChat,
   onOpenCase,
@@ -1269,7 +1465,11 @@ function ConversationSidebar({
             <div className="profile-meta">{isAuthenticated ? "대화 저장 및 후속 질문 가능" : "비회원 1회 리포팅 가능"}</div>
           </div>
         </div>
-        {!isAuthenticated && (
+        {isAuthenticated ? (
+          <button className="button full" type="button" onClick={onLogout}>
+            로그아웃
+          </button>
+        ) : (
           <button className="button primary full" type="button" onClick={onLogin} disabled={isSavingConversation}>
             {isSavingConversation ? "연결 중" : "Google 로그인"}
           </button>
@@ -1294,6 +1494,7 @@ function ChatScreenV2({
   isSubmitting,
   onKeepTemporary,
   onRegisterAttachment,
+  onOpenReporting,
   onRunReportAction,
   onSaveConversation,
   onSubmit,
@@ -1523,11 +1724,10 @@ function ChatScreenV2({
                                 ))}
                               </div>
                             )}
-                            {reportingPayload && <ReportingPreviewPanel reportingPayload={reportingPayload} />}
-                            {(reportingPayload || analysisCards.length > 0) && (
-                              <ReportActionPanel
-                                currentReport={currentReport}
+                            {visibleReportingPayload && (
+                              <ReportReadyNotice
                                 isAuthenticated={Boolean(authSessionId)}
+                                onOpenReporting={onOpenReporting}
                                 onRunReportAction={onRunReportAction}
                                 reportActionStatus={reportActionStatus}
                               />
@@ -1893,6 +2093,25 @@ function isSubmissionDocumentSection(section) {
   return /이의신청서|의견제출서|제출 가이드라인|제출 가이드|초안/.test(title);
 }
 
+function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportActionStatus }) {
+  return (
+    <section className="report-ready-strip" aria-label="리포트 준비 완료">
+      <div>
+        <span className="tag green">리포트 준비 완료</span>
+        {reportActionStatus && <p>{reportActionStatus}</p>}
+      </div>
+      <div className="report-ready-actions">
+        <button className="button" type="button" onClick={onOpenReporting}>
+          작업대
+        </button>
+        <button className="button primary" type="button" onClick={() => onRunReportAction("download_objection")}>
+          {isAuthenticated ? "이의신청서 PDF" : "로그인 후 PDF"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, reportActionStatus }) {
   const reportQuality =
     currentReport?.persistence?.report_quality ||
@@ -1904,8 +2123,8 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
   const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
   const reportQualityTitle = reportQuality?.partial_report ? "Partial analysis report" : "Ready analysis report";
   const helperText = isAuthenticated
-    ? reportActionStatus || "상담 결과를 reports metadata로 저장하거나 다운로드 경계를 확인할 수 있습니다."
-    : reportActionStatus || "리포트 저장과 다운로드는 Google 로그인 후 사용할 수 있습니다.";
+    ? reportActionStatus || "상담 결과를 저장하거나 제출 문서와 화면 PDF를 준비할 수 있습니다."
+    : reportActionStatus || "화면 PDF 저장은 바로 가능하고, 리포트 저장과 제출 문서 PDF는 Google 로그인 후 사용할 수 있습니다.";
 
   return (
     <section className="report-action-panel" aria-label="리포트 저장과 다운로드">
@@ -1941,8 +2160,11 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
         <button className="button" type="button" onClick={() => onRunReportAction("save")}>
           {isAuthenticated ? "저장" : "로그인 후 저장"}
         </button>
-        <button className="button primary" type="button" onClick={() => onRunReportAction("download")}>
-          {isAuthenticated ? "다운로드" : "로그인 후 다운로드"}
+        <button className="button" type="button" onClick={() => onRunReportAction("download_report")}>
+          화면 PDF 저장
+        </button>
+        <button className="button primary" type="button" onClick={() => onRunReportAction("download_objection")}>
+          {isAuthenticated ? "이의신청서 PDF" : "로그인 후 이의신청서 PDF"}
         </button>
       </div>
     </section>
@@ -2116,14 +2338,22 @@ function reportInspectorDetail(sections, mode) {
     return {
       label: "근거",
       title: "판단 근거와 제출 자료",
-      summary: "법령·판례 근거, 이의제기 판단, 필요 증거, 예상 결과를 한 번에 확인합니다.",
+      summary: "판단 근거, 핵심 쟁점, 유사 사례를 모아서 확인합니다.",
+      sections: selectedSections,
+    };
+  }
+  if (mode === "actions") {
+    return {
+      label: "작업",
+      title: "다음 제출 작업과 정리 순서",
+      summary: "누락 자료 보완, 제출 준비, 재생성 포인트를 모아서 확인합니다.",
       sections: selectedSections,
     };
   }
   return {
     label: "리포트",
     title: "리포트 상세",
-    summary: "선택한 리포트 섹션을 확인합니다.",
+    summary: "선택한 리포트의 섹션과 검토 상태를 확인합니다.",
     sections: selectedSections,
   };
 }
@@ -2134,10 +2364,90 @@ function reportSectionsForInspector(sections, mode) {
   }
   if (mode === "grounds") {
     return sections.filter((section) =>
-      /근거|법령|판례|증거|이의제기|예상 결과|가이드라인/.test(String(section?.title || ""))
+      /근거|법령|판례|증거|이의제기|예상 결과|판단 근거|핵심 쟁점|유사 사례/.test(String(section?.title || ""))
+    );
+  }
+  if (mode === "actions") {
+    return sections.filter((section) =>
+      /후속 조치|가이드라인|AI 작성|제출|첨부 자료|자료 요청|재생성|다운로드|모니터링|활용/.test(
+        String(section?.title || "")
+      )
     );
   }
   return sections;
+}
+
+function reportTypeLabel(value) {
+  const labels = {
+    fine_notice_objection: "과태료 대응",
+    fault_ratio_analysis: "과실비율 분석",
+    generic_supervisor: "상담 요약",
+    objection_draft: "이의신청 초안",
+    fault_analysis: "과실 분석",
+    general: "일반 리포트",
+  };
+  return labels[value] || value || "리포트";
+}
+
+function reportStatusLabel(value) {
+  const labels = {
+    draft: "작성 중",
+    agent_execution_ready: "분석 준비",
+    partial: "보완 필요",
+    success: "분석 완료",
+    ready: "저장 완료",
+    downloaded: "다운로드 완료",
+    report_saved: "저장 완료",
+    metadata_saved: "저장 완료",
+  };
+  return labels[String(value || "").toLowerCase()] || value || "상태 확인";
+}
+
+function reportQualityLabel(report = {}) {
+  if (report.partial_report) {
+    return "검토 필요";
+  }
+  const quality = report?.metadata?.report_quality || report?.persistence?.report_quality || {};
+  return quality.partial_report ? "검토 필요" : "검토 가능";
+}
+
+function sectionToneClass(title) {
+  if (/근거|판례|법령|쟁점|증거|후속|가이드라인/.test(String(title || ""))) {
+    return "report-section-card evidence";
+  }
+  return "report-section-card";
+}
+
+function groupReportSections(sections) {
+  const grouped = {
+    overview: [],
+    grounds: [],
+    actions: [],
+    remainder: [],
+  };
+
+  if (!Array.isArray(sections)) {
+    return grouped;
+  }
+
+  sections.forEach((section) => {
+    const title = String(section?.title || "");
+    if (/후속 조치|가이드라인|AI 작성|제출|첨부 자료|자료 요청|재생성|다운로드|모니터링|활용/.test(title)) {
+      grouped.actions.push(section);
+      return;
+    }
+    if (/근거|법령|판례|증거|이의제기|예상 결과|판단 근거|핵심 쟁점|유사 사례/.test(title)) {
+      grouped.grounds.push(section);
+      return;
+    }
+    if (/사고 개요|OCR 문서 분석|처분 결과|지원 결과|제출 자료 현황|AI 분석 결과|사건 개요|현재 단계|판단/.test(title)) {
+      grouped.overview.push(section);
+      return;
+    }
+    grouped.remainder.push(section);
+  });
+
+  return grouped;
 }
 
 function ReportingScreen({
@@ -2145,30 +2455,45 @@ function ReportingScreen({
   currentReport = null,
   isAuthenticated = false,
   onOpenChat,
+  onOpenReport,
   onPrepareDraftRegeneration,
   onPrepareMissingEvidence,
   onRefresh,
   onRunReportAction,
   reportActionStatus = "",
+  reportList = [],
+  reportWorkbenchRef = null,
   reportingPayload = null,
   supervisorExecution = null,
   supervisorState = null,
 }) {
-  const hasReport = Boolean(reportingPayload || analysisCards.length || supervisorExecution || currentReport);
-  const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
+  const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
+  const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
+  const hasReport = Boolean(activeReportingPayload || analysisCards.length || supervisorExecution || currentReport || hasSavedReports);
+  const sections = Array.isArray(activeReportingPayload?.sections) ? activeReportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
   const reportPersistence = currentReport?.persistence || {};
   const reportMetadata = currentReport?.metadata || {};
-  const reportStatus = reportingPayload?.stage || currentReport?.status || reportPersistence.status || "draft";
+  const reportStatus = activeReportingPayload?.stage || currentReport?.status || reportPersistence.status || "draft";
   const reportTitle = reportingPayload?.title || reportMetadata.title || "Supervisor 상담 분석 리포트";
   const reportSummary =
-    reportingPayload?.summary ||
+    activeReportingPayload?.summary ||
+    currentReport?.summary ||
     (reportMetadata.case_id
       ? `내 사건 ${reportMetadata.case_id}에 저장된 리포트입니다.`
       : "최신 상담 결과를 리포팅 화면에 연결했습니다.");
+  const activeReportTitle = activeReportingPayload?.title || currentReport?.title || reportTitle;
+  const activeReportType = activeReportingPayload?.report_type || currentReport?.report_type || "general";
+  const activeReportTypeLabel = reportTypeLabel(activeReportType);
+  const savedReportCountLabel = hasSavedReports ? `${reportList.length}건` : hasReport ? "1건" : "0건";
   const reportTagClass = currentReport || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber";
   const [selectedInspectorMode, setSelectedInspectorMode] = useState("overview");
+  const groupedSections = groupReportSections(sections);
+  const overviewSections = (groupedSections.overview.length ? groupedSections.overview : groupedSections.remainder).slice(0, 4);
+  const groundsSections = groupedSections.grounds;
+  const actionSections = groupedSections.actions;
+  const supportCards = analysisCards.slice(0, 3);
   const inspectorDetail = reportInspectorDetail(sections, selectedInspectorMode);
 
   return (
@@ -2184,18 +2509,19 @@ function ReportingScreen({
         </div>
       </div>
 
-      <div className="report-workbench">
+      <div className="report-workbench" ref={reportWorkbenchRef}>
         <aside className="report-list" aria-label="리포트 목록">
           <div className="panel-head compact">
             <strong>리포트 목록</strong>
-            <span className="tag">{hasReport ? "1건" : "0건"}</span>
+            <span className="tag">{savedReportCountLabel}</span>
           </div>
           {hasReport ? (
             <div className="report-list-card">
-              <span className={reportTagClass}>
-                {reportStatus}
-              </span>
-              <strong>{reportTitle}</strong>
+              <div className="report-card-tags">
+                <span className="tag">{activeReportTypeLabel}</span>
+                <span className={reportTagClass}>{reportStatusLabel(reportStatus)}</span>
+              </div>
+              <strong>{activeReportTitle}</strong>
               <p>{reportSummary}</p>
               {currentReport && (
                 <p>
@@ -2204,6 +2530,31 @@ function ReportingScreen({
                 </p>
               )}
               {reportActionStatus && <p>{reportActionStatus}</p>}
+              {hasSavedReports && (
+                <div className="report-saved-list">
+                  {reportList.slice(0, 5).map((report) => (
+                    <button
+                      className={
+                        currentReport?.report_id === report.report_id
+                          ? "report-list-card compact active"
+                          : "report-list-card compact"
+                      }
+                      key={report.report_id}
+                      type="button"
+                      onClick={() => onOpenReport?.(report)}
+                    >
+                      <div className="report-card-tags">
+                        <span className="tag">{reportTypeLabel(report.report_type)}</span>
+                        <span className={report.partial_report ? "tag amber" : "tag green"}>
+                          {reportQualityLabel(report)}
+                        </span>
+                      </div>
+                      <strong>{report.title || report.report_id}</strong>
+                      <p>{report.summary || report.status}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="empty-panel report-empty">
@@ -2216,20 +2567,22 @@ function ReportingScreen({
         <article className="report-canvas" aria-label="리포트 미리보기">
           {hasReport ? (
             <div className="report-page">
-              <span className="eyebrow">리포트 미리보기</span>
-              <h3>{reportTitle}</h3>
+              <span className="eyebrow">{activeReportTypeLabel}</span>
+              <h3>{activeReportTitle}</h3>
               <p>{reportSummary}</p>
-              <div className="report-section-list">
-                {sections.map((section) => (
-                  <article key={section.title}>
-                    <strong>{section.title}</strong>
-                    {(section.items || []).map((item, index) => (
-                      <p key={`${section.title}-${index}`}>{compactValue(item)}</p>
-                    ))}
-                  </article>
+              <div className="summary-grid">
+                <MetricCard detail={activeReportTypeLabel} label="리포트 상태" value={reportStatusLabel(reportStatus)} />
+                <MetricCard detail="표시 가능한 주요 섹션" label="리포트 섹션" value={`${sections.length}개`} />
+                <MetricCard detail="법령·증거·판례 중심" label="근거 묶음" value={`${groundsSections.length}개`} />
+                <MetricCard detail="제출·보완·재생성 중심" label="다음 작업" value={`${actionSections.length}개`} />
+              </div>
+
+              <div className="report-story-grid">
+                {overviewSections.map((section) => (
+                  <ReportSectionPreview compact detailLimit={2} key={`overview-${section.title}`} section={section} />
                 ))}
-                {sections.length === 0 && currentReport && (
-                  <article>
+                {overviewSections.length === 0 && currentReport && (
+                  <article className="report-empty-hint">
                     <strong>저장 리포트</strong>
                     <p>
                       리포트 ID {currentReport.report_id}
@@ -2238,15 +2591,63 @@ function ReportingScreen({
                   </article>
                 )}
               </div>
-              {analysisCards.length > 0 && (
-                <div className="result-cards">
-                  {analysisCards.map((card) => (
-                    <div className="result-card" key={`${card.card_type}-${card.title}`}>
-                      <span className={card.status === "success" ? "tag green" : "tag amber"}>{card.card_type}</span>
-                      <strong>{card.title}</strong>
-                      <p>{card.summary}</p>
+
+              <div className="report-focus-columns">
+                <section className="report-focus-panel" aria-label="핵심 근거">
+                  <div className="report-focus-header">
+                    <div>
+                      <span className="eyebrow">Grounds</span>
+                      <strong>핵심 근거</strong>
                     </div>
-                  ))}
+                    <span className="tag">{groundsSections.length}개</span>
+                  </div>
+                  <div className="report-section-list">
+                    {groundsSections.length > 0 ? (
+                      groundsSections.map((section) => (
+                        <ReportSectionPreview detailLimit={3} key={`grounds-${section.title}`} section={section} />
+                      ))
+                    ) : (
+                      <div className="report-empty-hint">
+                        <strong>근거 항목이 아직 정리되지 않았습니다.</strong>
+                        <p>역질문이 더 필요하거나 Agent 결과가 도착하면 이 영역을 채웁니다.</p>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="report-focus-panel" aria-label="다음 작업">
+                  <div className="report-focus-header">
+                    <div>
+                      <span className="eyebrow">Next</span>
+                      <strong>다음 작업</strong>
+                    </div>
+                    <span className="tag">{actionSections.length}개</span>
+                  </div>
+                  <div className="report-section-list">
+                    {actionSections.length > 0 ? (
+                      actionSections.map((section) => (
+                        <ReportSectionPreview detailLimit={3} key={`actions-${section.title}`} section={section} />
+                      ))
+                    ) : (
+                      <div className="report-empty-hint">
+                        <strong>다음 작업 항목이 아직 없습니다.</strong>
+                        <p>리포트 저장 전까지는 제출 단계 대신 상담 요약만 유지합니다.</p>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              {supportCards.length > 0 && (
+                <div className="report-support-strip">
+                  <strong>보조 분석</strong>
+                  <div className="report-support-chips">
+                    {supportCards.map((card) => (
+                      <span className="report-support-chip" key={`${card.card_type}-${card.title}`}>
+                        {card.card_type}: {card.summary}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -2265,12 +2666,79 @@ function ReportingScreen({
           )}
         </article>
 
-        <aside className="report-inspector" aria-label="근거와 작업">
+        <aside className="report-inspector" aria-label="상태와 다운로드">
           <div className="panel-head compact">
-            <strong>근거·작업</strong>
+            <strong>상태·다운로드</strong>
           </div>
           {hasReport ? (
             <>
+              <div className="inspector-actions">
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => onRunReportAction?.("download_report")}
+                  disabled={!hasReport}
+                >
+                  화면 PDF 저장
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => onRunReportAction?.("download_objection")}
+                  disabled={!hasReport}
+                >
+                  {isAuthenticated ? "이의신청서 PDF" : "로그인 후 이의신청서 PDF"}
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => onRunReportAction?.("save")}
+                  disabled={!hasReport}
+                >
+                  {isAuthenticated ? "리포트 저장" : "로그인 후 저장"}
+                </button>
+                <button className="button" type="button" onClick={onPrepareMissingEvidence} disabled={!hasReport}>
+                  누락 자료 추가
+                </button>
+                <button className="button" type="button" onClick={onPrepareDraftRegeneration} disabled={!hasReport}>
+                  초안 재생성
+                </button>
+              </div>
+              <div className="inspector-section">
+                <span className={reportTagClass}>{reportStatusLabel(reportStatus)}</span>
+                <strong>{activeReportTypeLabel}</strong>
+                <p>{reportSummary}</p>
+              </div>
+              <div className="inspector-section">
+                <strong>세부 보기</strong>
+                <p>중앙 문서에서 빠르게 보고, 필요한 경우 아래에서 섹션별로 다시 펼쳐봅니다.</p>
+                <div className="inspector-mode-switch">
+                  <button
+                    className={selectedInspectorMode === "overview" ? "button active" : "button"}
+                    type="button"
+                    onClick={() => setSelectedInspectorMode("overview")}
+                    disabled={!hasReport}
+                  >
+                    개요
+                  </button>
+                  <button
+                    className={selectedInspectorMode === "grounds" ? "button active" : "button"}
+                    type="button"
+                    onClick={() => setSelectedInspectorMode("grounds")}
+                    disabled={!hasReport}
+                  >
+                    근거
+                  </button>
+                  <button
+                    className={selectedInspectorMode === "actions" ? "button active" : "button"}
+                    type="button"
+                    onClick={() => setSelectedInspectorMode("actions")}
+                    disabled={!hasReport}
+                  >
+                    다음 작업
+                  </button>
+                </div>
+              </div>
               <div className="inspector-section">
                 <span className={supervisorState?.stage === "agent_execution_ready" ? "tag green" : "tag amber"}>
                   {supervisorState?.stage || "draft"}
@@ -2295,15 +2763,10 @@ function ReportingScreen({
                   <div className="inspector-detail-list">
                     {inspectorDetail.sections.length > 0 ? (
                       inspectorDetail.sections.map((section) => (
-                        <article key={`inspector-${section.title}`}>
-                          <strong>{section.title}</strong>
-                          {(section.items || []).slice(0, 5).map((item, index) => (
-                            <p key={`${section.title}-${index}`}>{compactValue(item)}</p>
-                          ))}
-                        </article>
+                        <ReportSectionPreview compact detailLimit={4} key={`inspector-${section.title}`} section={section} />
                       ))
                     ) : (
-                      <article>
+                      <article className="report-empty-hint">
                         <strong>표시할 항목 없음</strong>
                         <p>현재 리포트 payload에 해당 섹션이 없습니다. 상담을 이어가면 항목을 다시 채울 수 있습니다.</p>
                       </article>
@@ -2316,44 +2779,30 @@ function ReportingScreen({
             <div className="inspector-section">
               <span className="tag green">대기</span>
               <strong>리포트 선택 필요</strong>
-              <p>선택된 리포트의 제출 자료, 관련 기준, 후속 행동이 이곳에 표시됩니다.</p>
+              <p>선택된 리포트의 상태와 다운로드 버튼이 이곳에 표시됩니다.</p>
             </div>
           )}
-          <div className="inspector-actions">
-            <button
-              className="button"
-              type="button"
-              onClick={() => onRunReportAction?.("download")}
-              disabled={!hasReport}
-            >
-              {isAuthenticated ? "리포트 내려받기" : "로그인 후 내려받기"}
-            </button>
-            <button
-              className="button"
-              type="button"
-              onClick={() => onRunReportAction?.("save")}
-              disabled={!hasReport}
-            >
-              {isAuthenticated ? "리포트 저장" : "로그인 후 저장"}
-            </button>
-            <button
-              className={selectedInspectorMode === "grounds" ? "button active" : "button"}
-              type="button"
-              onClick={() => setSelectedInspectorMode(selectedInspectorMode === "grounds" ? "overview" : "grounds")}
-              disabled={!hasReport}
-            >
-              근거 보기
-            </button>
-            <button className="button" type="button" onClick={onPrepareMissingEvidence} disabled={!hasReport}>
-              누락 자료 추가
-            </button>
-            <button className="button" type="button" onClick={onPrepareDraftRegeneration} disabled={!hasReport}>
-              초안 재생성
-            </button>
-          </div>
         </aside>
       </div>
     </section>
+  );
+}
+
+function ReportSectionPreview({ section, detailLimit = 3, compact = false }) {
+  const items = Array.isArray(section?.items) ? section.items.slice(0, detailLimit) : [];
+  const itemCount = Array.isArray(section?.items) ? section.items.length : 0;
+  return (
+    <article className={`${sectionToneClass(section?.title)} preview${compact ? " compact" : ""}`}>
+      <div className="report-section-heading">
+        <strong>{section?.title || "리포트 섹션"}</strong>
+        {itemCount > 0 && <span className="tag">{itemCount}개</span>}
+      </div>
+      {items.length > 0 ? (
+        items.map((item, index) => <p key={`${section?.title || "section"}-${index}`}>{compactValue(item)}</p>)
+      ) : (
+        <p>표시할 항목이 없습니다.</p>
+      )}
+    </article>
   );
 }
 
@@ -2482,6 +2931,127 @@ function caseStatusLabel(value) {
     failed: "확인 필요",
   };
   return labels[String(value || "").toLowerCase()] || value || "상태 확인";
+}
+
+function isReportingPayloadReady(reportingPayload, supervisorState) {
+  if (!reportingPayload) {
+    return false;
+  }
+  const pendingQuestions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
+  const missingFields = Array.isArray(supervisorState?.missing_fields) ? supervisorState.missing_fields : [];
+  return reportingPayload.stage === "agent_execution_ready" && pendingQuestions.length === 0 && missingFields.length === 0;
+}
+
+function openReportScreenPrintWindow(container, { filenameBase, title } = {}) {
+  if (!container || typeof window === "undefined" || typeof document === "undefined") {
+    throw new Error("현재 화면을 인쇄할 수 없습니다.");
+  }
+
+  const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1440,height=960");
+  if (!printWindow) {
+    throw new Error("브라우저 팝업이 차단되어 인쇄 창을 열지 못했습니다.");
+  }
+
+  const stylesheetMarkup = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+    .map((node) => node.outerHTML)
+    .join("\n");
+  const documentTitle = escapePrintHtml(title || "상담 분석 리포트");
+  const printFilename = safePrintFilename(filenameBase || "report-screen");
+  const printMarkup = `
+    <!doctype html>
+    <html lang="ko">
+      <head>
+        <meta charset="utf-8" />
+        <title>${documentTitle}</title>
+        ${stylesheetMarkup}
+        <style>
+          :root {
+            color-scheme: light;
+          }
+          body {
+            margin: 0;
+            background: #ffffff;
+            color: #182432;
+          }
+          .report-print-shell {
+            padding: 10mm;
+            background: #ffffff;
+          }
+          .report-workbench {
+            min-height: auto !important;
+            grid-template-columns: 260px minmax(0, 1.2fr) minmax(320px, 0.92fr) !important;
+            grid-template-rows: auto !important;
+            background: #ffffff !important;
+          }
+          .report-list,
+          .report-canvas,
+          .report-inspector {
+            background: #ffffff !important;
+          }
+          .report-inspector {
+            border-left: 1px solid #d5dbe5 !important;
+            border-top: 0 !important;
+          }
+          .report-canvas {
+            border-right: 1px solid #d5dbe5;
+          }
+          .report-page {
+            width: 100% !important;
+            max-width: none !important;
+            min-height: auto !important;
+            box-shadow: none !important;
+          }
+          .inspector-actions,
+          .report-list button,
+          button {
+            display: none !important;
+          }
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+        </style>
+      </head>
+      <body>
+        <main class="report-print-shell" data-print-filename="${printFilename}">
+          ${container.outerHTML}
+        </main>
+      </body>
+    </html>
+  `;
+
+  printWindow.document.open();
+  printWindow.document.write(printMarkup);
+  printWindow.document.close();
+  printWindow.document.title = printFilename;
+
+  const launchPrint = () => {
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  printWindow.addEventListener(
+    "load",
+    () => {
+      window.setTimeout(launchPrint, 180);
+    },
+    { once: true }
+  );
+}
+
+function safePrintFilename(value) {
+  const text = String(value || "report-screen").trim();
+  const normalized = text.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return normalized || "report-screen";
+}
+
+function escapePrintHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function latestMessageIndex(messages, role) {
