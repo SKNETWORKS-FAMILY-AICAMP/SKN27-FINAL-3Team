@@ -1724,7 +1724,7 @@ function ChatScreenV2({
                                 ))}
                               </div>
                             )}
-                            {reportingPayload && (
+                            {visibleReportingPayload && (
                               <ReportReadyNotice
                                 isAuthenticated={Boolean(authSessionId)}
                                 onOpenReporting={onOpenReporting}
@@ -2338,7 +2338,15 @@ function reportInspectorDetail(sections, mode) {
     return {
       label: "근거",
       title: "판단 근거와 제출 자료",
-      summary: "판단 근거, 핵심 쟁점, 유사 사례, 후속 조치를 한 번에 확인합니다.",
+      summary: "판단 근거, 핵심 쟁점, 유사 사례를 모아서 확인합니다.",
+      sections: selectedSections,
+    };
+  }
+  if (mode === "actions") {
+    return {
+      label: "작업",
+      title: "다음 제출 작업과 정리 순서",
+      summary: "누락 자료 보완, 제출 준비, 재생성 포인트를 모아서 확인합니다.",
       sections: selectedSections,
     };
   }
@@ -2356,7 +2364,14 @@ function reportSectionsForInspector(sections, mode) {
   }
   if (mode === "grounds") {
     return sections.filter((section) =>
-      /근거|법령|판례|증거|이의제기|예상 결과|가이드라인|판단 근거|핵심 쟁점|유사 사례|후속 조치/.test(String(section?.title || ""))
+      /근거|법령|판례|증거|이의제기|예상 결과|판단 근거|핵심 쟁점|유사 사례/.test(String(section?.title || ""))
+    );
+  }
+  if (mode === "actions") {
+    return sections.filter((section) =>
+      /후속 조치|가이드라인|AI 작성|제출|첨부 자료|자료 요청|재생성|다운로드|모니터링|활용/.test(
+        String(section?.title || "")
+      )
     );
   }
   return sections;
@@ -2403,6 +2418,38 @@ function sectionToneClass(title) {
   return "report-section-card";
 }
 
+function groupReportSections(sections) {
+  const grouped = {
+    overview: [],
+    grounds: [],
+    actions: [],
+    remainder: [],
+  };
+
+  if (!Array.isArray(sections)) {
+    return grouped;
+  }
+
+  sections.forEach((section) => {
+    const title = String(section?.title || "");
+    if (/후속 조치|가이드라인|AI 작성|제출|첨부 자료|자료 요청|재생성|다운로드|모니터링|활용/.test(title)) {
+      grouped.actions.push(section);
+      return;
+    }
+    if (/근거|법령|판례|증거|이의제기|예상 결과|판단 근거|핵심 쟁점|유사 사례/.test(title)) {
+      grouped.grounds.push(section);
+      return;
+    }
+    if (/사고 개요|OCR 문서 분석|처분 결과|지원 결과|제출 자료 현황|AI 분석 결과|사건 개요|현재 단계|판단/.test(title)) {
+      grouped.overview.push(section);
+      return;
+    }
+    grouped.remainder.push(section);
+  });
+
+  return grouped;
+}
+
 function ReportingScreen({
   analysisCards = [],
   currentReport = null,
@@ -2442,6 +2489,11 @@ function ReportingScreen({
   const savedReportCountLabel = hasSavedReports ? `${reportList.length}건` : hasReport ? "1건" : "0건";
   const reportTagClass = currentReport || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber";
   const [selectedInspectorMode, setSelectedInspectorMode] = useState("overview");
+  const groupedSections = groupReportSections(sections);
+  const overviewSections = (groupedSections.overview.length ? groupedSections.overview : groupedSections.remainder).slice(0, 4);
+  const groundsSections = groupedSections.grounds;
+  const actionSections = groupedSections.actions;
+  const supportCards = analysisCards.slice(0, 3);
   const inspectorDetail = reportInspectorDetail(sections, selectedInspectorMode);
 
   return (
@@ -2518,17 +2570,19 @@ function ReportingScreen({
               <span className="eyebrow">{activeReportTypeLabel}</span>
               <h3>{activeReportTitle}</h3>
               <p>{reportSummary}</p>
-              <div className="report-section-list">
-                {sections.map((section) => (
-                  <article className={sectionToneClass(section.title)} key={section.title}>
-                    <strong>{section.title}</strong>
-                    {(section.items || []).map((item, index) => (
-                      <p key={`${section.title}-${index}`}>{compactValue(item)}</p>
-                    ))}
-                  </article>
+              <div className="summary-grid">
+                <MetricCard detail={activeReportTypeLabel} label="리포트 상태" value={reportStatusLabel(reportStatus)} />
+                <MetricCard detail="표시 가능한 주요 섹션" label="리포트 섹션" value={`${sections.length}개`} />
+                <MetricCard detail="법령·증거·판례 중심" label="근거 묶음" value={`${groundsSections.length}개`} />
+                <MetricCard detail="제출·보완·재생성 중심" label="다음 작업" value={`${actionSections.length}개`} />
+              </div>
+
+              <div className="report-story-grid">
+                {overviewSections.map((section) => (
+                  <ReportSectionPreview compact detailLimit={2} key={`overview-${section.title}`} section={section} />
                 ))}
-                {sections.length === 0 && currentReport && (
-                  <article>
+                {overviewSections.length === 0 && currentReport && (
+                  <article className="report-empty-hint">
                     <strong>저장 리포트</strong>
                     <p>
                       리포트 ID {currentReport.report_id}
@@ -2537,15 +2591,63 @@ function ReportingScreen({
                   </article>
                 )}
               </div>
-              {analysisCards.length > 0 && (
-                <div className="result-cards">
-                  {analysisCards.map((card) => (
-                    <div className="result-card" key={`${card.card_type}-${card.title}`}>
-                      <span className={card.status === "success" ? "tag green" : "tag amber"}>{card.card_type}</span>
-                      <strong>{card.title}</strong>
-                      <p>{card.summary}</p>
+
+              <div className="report-focus-columns">
+                <section className="report-focus-panel" aria-label="핵심 근거">
+                  <div className="report-focus-header">
+                    <div>
+                      <span className="eyebrow">Grounds</span>
+                      <strong>핵심 근거</strong>
                     </div>
-                  ))}
+                    <span className="tag">{groundsSections.length}개</span>
+                  </div>
+                  <div className="report-section-list">
+                    {groundsSections.length > 0 ? (
+                      groundsSections.map((section) => (
+                        <ReportSectionPreview detailLimit={3} key={`grounds-${section.title}`} section={section} />
+                      ))
+                    ) : (
+                      <div className="report-empty-hint">
+                        <strong>근거 항목이 아직 정리되지 않았습니다.</strong>
+                        <p>역질문이 더 필요하거나 Agent 결과가 도착하면 이 영역을 채웁니다.</p>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="report-focus-panel" aria-label="다음 작업">
+                  <div className="report-focus-header">
+                    <div>
+                      <span className="eyebrow">Next</span>
+                      <strong>다음 작업</strong>
+                    </div>
+                    <span className="tag">{actionSections.length}개</span>
+                  </div>
+                  <div className="report-section-list">
+                    {actionSections.length > 0 ? (
+                      actionSections.map((section) => (
+                        <ReportSectionPreview detailLimit={3} key={`actions-${section.title}`} section={section} />
+                      ))
+                    ) : (
+                      <div className="report-empty-hint">
+                        <strong>다음 작업 항목이 아직 없습니다.</strong>
+                        <p>리포트 저장 전까지는 제출 단계 대신 상담 요약만 유지합니다.</p>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              {supportCards.length > 0 && (
+                <div className="report-support-strip">
+                  <strong>보조 분석</strong>
+                  <div className="report-support-chips">
+                    {supportCards.map((card) => (
+                      <span className="report-support-chip" key={`${card.card_type}-${card.title}`}>
+                        {card.card_type}: {card.summary}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -2564,16 +2666,78 @@ function ReportingScreen({
           )}
         </article>
 
-        <aside className="report-inspector" aria-label="근거와 작업">
+        <aside className="report-inspector" aria-label="상태와 다운로드">
           <div className="panel-head compact">
-            <strong>근거·작업</strong>
+            <strong>상태·다운로드</strong>
           </div>
           {hasReport ? (
             <>
+              <div className="inspector-actions">
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => onRunReportAction?.("download_report")}
+                  disabled={!hasReport}
+                >
+                  화면 PDF 저장
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => onRunReportAction?.("download_objection")}
+                  disabled={!hasReport}
+                >
+                  {isAuthenticated ? "이의신청서 PDF" : "로그인 후 이의신청서 PDF"}
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => onRunReportAction?.("save")}
+                  disabled={!hasReport}
+                >
+                  {isAuthenticated ? "리포트 저장" : "로그인 후 저장"}
+                </button>
+                <button className="button" type="button" onClick={onPrepareMissingEvidence} disabled={!hasReport}>
+                  누락 자료 추가
+                </button>
+                <button className="button" type="button" onClick={onPrepareDraftRegeneration} disabled={!hasReport}>
+                  초안 재생성
+                </button>
+              </div>
               <div className="inspector-section">
                 <span className={reportTagClass}>{reportStatusLabel(reportStatus)}</span>
                 <strong>{activeReportTypeLabel}</strong>
                 <p>{reportSummary}</p>
+              </div>
+              <div className="inspector-section">
+                <strong>세부 보기</strong>
+                <p>중앙 문서에서 빠르게 보고, 필요한 경우 아래에서 섹션별로 다시 펼쳐봅니다.</p>
+                <div className="inspector-mode-switch">
+                  <button
+                    className={selectedInspectorMode === "overview" ? "button active" : "button"}
+                    type="button"
+                    onClick={() => setSelectedInspectorMode("overview")}
+                    disabled={!hasReport}
+                  >
+                    개요
+                  </button>
+                  <button
+                    className={selectedInspectorMode === "grounds" ? "button active" : "button"}
+                    type="button"
+                    onClick={() => setSelectedInspectorMode("grounds")}
+                    disabled={!hasReport}
+                  >
+                    근거
+                  </button>
+                  <button
+                    className={selectedInspectorMode === "actions" ? "button active" : "button"}
+                    type="button"
+                    onClick={() => setSelectedInspectorMode("actions")}
+                    disabled={!hasReport}
+                  >
+                    다음 작업
+                  </button>
+                </div>
               </div>
               <div className="inspector-section">
                 <span className={supervisorState?.stage === "agent_execution_ready" ? "tag green" : "tag amber"}>
@@ -2599,15 +2763,10 @@ function ReportingScreen({
                   <div className="inspector-detail-list">
                     {inspectorDetail.sections.length > 0 ? (
                       inspectorDetail.sections.map((section) => (
-                        <article key={`inspector-${section.title}`}>
-                          <strong>{section.title}</strong>
-                          {(section.items || []).slice(0, 5).map((item, index) => (
-                            <p key={`${section.title}-${index}`}>{compactValue(item)}</p>
-                          ))}
-                        </article>
+                        <ReportSectionPreview compact detailLimit={4} key={`inspector-${section.title}`} section={section} />
                       ))
                     ) : (
-                      <article>
+                      <article className="report-empty-hint">
                         <strong>표시할 항목 없음</strong>
                         <p>현재 리포트 payload에 해당 섹션이 없습니다. 상담을 이어가면 항목을 다시 채울 수 있습니다.</p>
                       </article>
@@ -2620,52 +2779,30 @@ function ReportingScreen({
             <div className="inspector-section">
               <span className="tag green">대기</span>
               <strong>리포트 선택 필요</strong>
-              <p>선택된 리포트의 제출 자료, 관련 기준, 후속 행동이 이곳에 표시됩니다.</p>
+              <p>선택된 리포트의 상태와 다운로드 버튼이 이곳에 표시됩니다.</p>
             </div>
           )}
-          <div className="inspector-actions">
-            <button
-              className="button"
-              type="button"
-              onClick={() => onRunReportAction?.("download_report")}
-              disabled={!hasReport}
-            >
-              화면 PDF 저장
-            </button>
-            <button
-              className="button"
-              type="button"
-              onClick={() => onRunReportAction?.("download_objection")}
-              disabled={!hasReport}
-            >
-              {isAuthenticated ? "이의신청서 PDF" : "로그인 후 이의신청서 PDF"}
-            </button>
-            <button
-              className="button"
-              type="button"
-              onClick={() => onRunReportAction?.("save")}
-              disabled={!hasReport}
-            >
-              {isAuthenticated ? "리포트 저장" : "로그인 후 저장"}
-            </button>
-            <button
-              className={selectedInspectorMode === "grounds" ? "button active" : "button"}
-              type="button"
-              onClick={() => setSelectedInspectorMode(selectedInspectorMode === "grounds" ? "overview" : "grounds")}
-              disabled={!hasReport}
-            >
-              근거 보기
-            </button>
-            <button className="button" type="button" onClick={onPrepareMissingEvidence} disabled={!hasReport}>
-              누락 자료 추가
-            </button>
-            <button className="button" type="button" onClick={onPrepareDraftRegeneration} disabled={!hasReport}>
-              초안 재생성
-            </button>
-          </div>
         </aside>
       </div>
     </section>
+  );
+}
+
+function ReportSectionPreview({ section, detailLimit = 3, compact = false }) {
+  const items = Array.isArray(section?.items) ? section.items.slice(0, detailLimit) : [];
+  const itemCount = Array.isArray(section?.items) ? section.items.length : 0;
+  return (
+    <article className={`${sectionToneClass(section?.title)} preview${compact ? " compact" : ""}`}>
+      <div className="report-section-heading">
+        <strong>{section?.title || "리포트 섹션"}</strong>
+        {itemCount > 0 && <span className="tag">{itemCount}개</span>}
+      </div>
+      {items.length > 0 ? (
+        items.map((item, index) => <p key={`${section?.title || "section"}-${index}`}>{compactValue(item)}</p>)
+      ) : (
+        <p>표시할 항목이 없습니다.</p>
+      )}
+    </article>
   );
 }
 
