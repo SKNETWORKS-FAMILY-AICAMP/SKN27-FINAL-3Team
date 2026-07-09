@@ -26,6 +26,7 @@ from .validator import (
     build_relations,
     run_quality_gate,
 )
+from etl.legal.extract_extra_relations import build_extra_relations
 from .reporter import (
     write_artifacts,
     write_coverage_report,
@@ -139,6 +140,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
     
     # 10. 상위 버전과 하위 조문 조각 간의 관계 그래프 선언
     relations = build_relations(chunks)
+    extra_relations = build_extra_relations(chunks)
     
     # 11. 무결성 품질 검증(Quality Gate) 실행
     chunks, quality_report = run_quality_gate(chunks)
@@ -156,6 +158,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
         "raw_records": raw_records,
         "chunks": chunks,
         "relations": relations,
+        "extra_relations": extra_relations,
         "embedding_inputs": embedding_inputs,
         "searchable_chunks": searchable_chunks,
         "quality_report": quality_report,
@@ -173,6 +176,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
         chunks=chunks,
         searchable_chunks=searchable_chunks,
         relations=relations,
+        extra_relations=extra_relations,
         embedding_inputs=embedding_inputs,
         quality_report=quality_report,
         failed_items=collected["failed_items"],

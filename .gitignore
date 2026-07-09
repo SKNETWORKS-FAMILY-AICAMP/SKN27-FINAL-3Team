@@ -21,11 +21,16 @@ app/web/.vite/
 app/web/dist/
 tmp/ui-smoke/
 tmp/knia_check/
+tmp/ppt_work/
+tmp/ppt_tech_arch/
+tmp/*.pptx
 output/erd/
+outputs/
 project-progress-report-*.html
 
 # Generated PDF/export scratch artifacts not already tracked
 output/pdf/SKN27_*.pdf
+output/pptx/*.inspect.ndjson
 
 # Ponytail Skills
 .agents/

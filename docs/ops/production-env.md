@@ -105,8 +105,19 @@ LAW_GROUND_SEARCH_ENABLE_NEO4J=0
 Before enabling it, load ETL output into `law_chunks` and `law_embeddings`.
 The runtime falls back to Django `rag_chunks` lexical search when vector search
 is disabled or unavailable, and records that fallback in retrieval metadata.
-Keep `LAW_GROUND_SEARCH_ENABLE_NEO4J=0` unless the Neo4j hint graph is running
-and `NEO4J_URI` points to that service.
+Keep `LAW_GROUND_SEARCH_ENABLE_NEO4J=0` unless the Neo4j hint graph and legal
+relation graph have both been loaded and `NEO4J_URI` points to that service.
+The legal ingestion pipeline writes `relations/law_extra_relations.jsonl` for
+`HAS_PENALTY`, `HAS_APPENDIX`, `HAS_EXCEPTION`, and `RELATED_TO`;
+`export_neo4j.py` imports that file when present. Before enabling Neo4j-backed
+law expansion, verify the target relation counts:
+
+```cypher
+MATCH ()-[r]->()
+WHERE type(r) IN ["HAS_PENALTY", "HAS_APPENDIX", "HAS_EXCEPTION", "RELATED_TO"]
+RETURN type(r), count(*)
+ORDER BY type(r)
+```
 
 Create or refresh the pgvector schema from the Django runtime:
 

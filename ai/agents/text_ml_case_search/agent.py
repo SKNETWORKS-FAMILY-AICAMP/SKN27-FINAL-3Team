@@ -155,9 +155,6 @@ def _run_fault_ratio_knowledge_agent(
         return None
 
     evidence = _knowledge_evidence(raw_output)
-    if not evidence and es_client is None:
-        return None
-
     structured_result = _knowledge_structured_result(raw_output, query_text)
     limitations = [
         str(item)
