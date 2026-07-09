@@ -51,14 +51,27 @@ def merit_classification_node(state: AppealJudgmentState) -> dict:
     except Exception:
         # LLM 호출·파싱 실패 — MG는 애매해도 "보류"로 안전하게 수렴하도록
         # 설계돼 있으므로(RG와 달리 안전 문제가 아님), 판단 불가도 같은
-        # "보류"로 처리한다. 새 상태값을 만들 필요가 없다.
-        return {"merit": "보류", "merit_basis": "LLM 판단 실패로 보류 처리"}
+        # "보류"로 처리한다. merit 값 자체는 새로 안 만들지만, 이 "보류"가
+        # 사유를 실제로 검토한 결과가 아니라 기술적 실패의 기본값이라는 걸
+        # merit_judgment_failed로 구분해둔다 — guide_generation_node가 이걸로
+        # "판단이 애매하다"가 아니라 "판단을 못 했다, 재시도하면 다를 수 있다"고
+        # 사실대로 안내해야, 승산 있는 사유를 사용자가 오해로 포기하지 않는다.
+        return {
+            "merit":                 "보류",
+            "merit_basis":           "LLM 판단 실패로 보류 처리",
+            "merit_judgment_failed": True,
+        }
 
     if merit not in _VALID_MERIT:
-        # 모델이 지정한 3개 값 밖의 응답을 낸 경우도 동일하게 보류 처리
+        # 모델이 지정한 3개 값 밖의 응답을 낸 경우도 동일하게 보류 처리 —
+        # 이 역시 사유를 검토해서 나온 판단이 아니므로 같은 플래그를 세운다.
         merit = "보류"
+        merit_judgment_failed = True
+    else:
+        merit_judgment_failed = False
 
     return {
-        "merit":       merit,
-        "merit_basis": merit_basis,
+        "merit":                 merit,
+        "merit_basis":           merit_basis,
+        "merit_judgment_failed": merit_judgment_failed,
     }

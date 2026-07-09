@@ -47,6 +47,13 @@ class AppealJudgmentState(TypedDict, total=False):
     # ── merit_classification_node (MG) 출력 ───────────────────────────
     merit:                    Optional[MeritLevel]
     merit_basis:               Optional[str]    # LLM이 근거로 인용한 조문 요약
+    merit_judgment_failed:     Optional[bool]   # True면 이 merit="보류"가 사유를 실제로
+                                                # 검토한 결과가 아니라 LLM 호출 실패·응답
+                                                # 파싱 실패로 인한 기본값이라는 뜻 (RG의
+                                                # risk_flag는 이 영향을 안 받음). guide_
+                                                # generation_node가 이 값으로 "판단은
+                                                # 애매하다"는 문구 대신 "판단을 못 했다"는
+                                                # 사실대로 안내한다.
 
     # ── verdict_node (E) 출력 ──────────────────────────────────────────
     judgment_status:           Optional[JudgmentStatus]

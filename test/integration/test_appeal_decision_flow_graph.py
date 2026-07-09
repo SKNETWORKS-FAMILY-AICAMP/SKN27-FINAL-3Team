@@ -341,6 +341,34 @@ class TestSuccessBranch:
         assert "질서위반행위규제법 제7조" in captured_context["prompt"]
         assert "시행규칙 제142조" in captured_context["prompt"]
 
+    def test_MG_LLM_호출실패해도_success로_완료되되_merit_judgment_failed_표시(self):
+        """MG의 LLM 호출이 실패해도 그래프는 여전히 judgment_status=success로
+        끝나야 하고(RG는 정상 동작), merit="보류"가 실제 애매함 판단이 아니라
+        기술적 실패라는 걸 structured_result·disclaimer·next_actions 전부에서
+        구분할 수 있어야 한다."""
+        def fake_create(*args, **kwargs):
+            prompt = kwargs["messages"][0]["content"]
+            if "신원노출" in prompt:
+                return _fake_response('{"category": null, "confidence": "low", "rationale": "무관"}')
+            raise ConnectionError("네트워크 오류")
+
+        with patch("openai.OpenAI") as mock_cls:
+            mock_cls.return_value.chat.completions.create.side_effect = fake_create
+            result = graph.invoke({
+                "fine_type": "과태료", "notice_stage": "사전통지",
+                "opinion_deadline": _iso(8),
+                "user_appeal_reason": "표지판이 가려져 있었습니다",
+            })
+
+        sr = _structured(result)
+        assert sr["judgment_status"] == "success"
+        assert sr["merit"] == "보류"
+        assert sr["merit_judgment_failed"] is True
+        assert "기술 오류로 완료되지 못해" in sr["guide"]["disclaimer"]
+
+        next_actions = _envelope(result)["next_actions"]
+        assert any("재호출" in action for action in next_actions)
+
 
 # ── RG ∥ MG 병렬 분기의 실행 순서·독립성 확인 ────────────────────────────────
 

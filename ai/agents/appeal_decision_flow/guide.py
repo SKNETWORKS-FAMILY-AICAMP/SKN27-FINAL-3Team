@@ -126,22 +126,40 @@ _TONE_STRONG_UNCONDITIONAL = (
 )
 
 
+# 기술적 실패로 merit="보류"가 나왔을 때 붙이는 정정 문구 (RG의 risk_flag는 이 실패와
+# 무관하게 정상 평가된 값이므로 톤 자체는 그대로 두고, 이 문구를 앞에 덧붙이기만 한다) —
+# "판단이 애매하다"가 아니라 "판단을 못 했다"임을 명확히 해서, 승산 있는 사유를 사용자가
+# 오해로 포기하지 않게 한다.
+_MERIT_JUDGMENT_FAILED_NOTICE = (
+    "⚠️ 사유 인정 가능성(merit) 판정이 일시적 기술 오류로 완료되지 못해 잠정적으로 "
+    "'보류'로 표시됩니다 — 사유 내용을 실제로 검토해서 애매하다고 나온 결과가 아니라, "
+    "시스템이 판단 자체를 하지 못한 것입니다. 아래 톤은 안전을 위한 임시 표시일 뿐이니 "
+    "승산 있는 사유를 이것만 보고 포기하지 마시고, 잠시 후 다시 시도해 정확한 판정을 "
+    "받아보세요."
+)
+
+
 def _merit_risk_tone(state: AppealJudgmentState) -> str | None:
     merit = state.get("merit")
     if merit not in ("강함", "보류", "낮음"):
         return None  # not_applicable/denied 경로 — MG가 실행되지 않아 merit이 없음
 
     if not state.get("risk_flag"):
-        return _TONE_SAFE[merit]
+        tone = _TONE_SAFE[merit]
+    elif merit != "강함":
+        tone = _TONE_RISKY_NON_STRONG[merit]
+    else:
+        # merit=강함 & risk=true: 카테고리 C만 조건부, 그 외(A/B, 또는 LLM 예외로
+        # 카테고리를 알 수 없는 경우)는 안전 쪽으로 단정하지 않고 무조건 위험으로 취급
+        if state.get("risk_trigger_category") == "C_본인운전인정형":
+            tone = _TONE_STRONG_CONDITIONAL
+        else:
+            tone = _TONE_STRONG_UNCONDITIONAL
 
-    if merit != "강함":
-        return _TONE_RISKY_NON_STRONG[merit]
+    if state.get("merit_judgment_failed"):
+        tone = f"{_MERIT_JUDGMENT_FAILED_NOTICE}\n\n{tone}"
 
-    # merit=강함 & risk=true: 카테고리 C만 조건부, 그 외(A/B, 또는 LLM 예외로
-    # 카테고리를 알 수 없는 경우)는 안전 쪽으로 단정하지 않고 무조건 위험으로 취급
-    if state.get("risk_trigger_category") == "C_본인운전인정형":
-        return _TONE_STRONG_CONDITIONAL
-    return _TONE_STRONG_UNCONDITIONAL
+    return tone
 
 
 def _disclaimer_text(state: AppealJudgmentState) -> str:
@@ -174,6 +192,7 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "notice_stage":          state.get("notice_stage"),
         "overall_possibility":   state.get("overall_possibility"),
         "merit":                 state.get("merit"),
+        "merit_judgment_failed": state.get("merit_judgment_failed"),
         "risk_flag":             state.get("risk_flag"),
         "risk_confidence":       state.get("risk_confidence"),
         "risk_trigger_category": state.get("risk_trigger_category"),
@@ -202,7 +221,11 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
 
     judgment_status = state.get("judgment_status") or "success"
     structured = _structured_result(state, guide)
-    next_actions = _NEXT_ACTIONS.get(judgment_status, [])
+    next_actions = list(_NEXT_ACTIONS.get(judgment_status, []))
+    if state.get("merit_judgment_failed"):
+        # merit 판정이 기술적 실패로 "보류"에 머문 상태 — Supervisor가 이걸 "판정
+        # 완료"로 오인하지 않고 재호출을 시도할 수 있게 명시적으로 알려준다.
+        next_actions.append("MG(merit) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
     fine_type_label = state.get("fine_type") or "미확인"
     notice_stage_label = state.get("notice_stage") or "미확인"
     summary = f"{fine_type_label} {notice_stage_label} — {judgment_status}"

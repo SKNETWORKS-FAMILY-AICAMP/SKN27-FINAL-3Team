@@ -399,31 +399,40 @@ class TestMeritClassificationNode:
             assert "시행규칙 제142조" in called_context
 
     def test_LLM_예외시_보류로_폴백(self):
+        """LLM 호출 자체가 실패한 "보류"는 merit_judgment_failed=True로 표시돼야
+        한다 — guide_generation_node가 이걸로 실제 애매함과 기술적 실패를 구분한다."""
         with patch("openai.OpenAI", side_effect=ConnectionError("네트워크 오류")):
             result = merit_classification_node({
                 "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
             })
             assert result["merit"] == "보류"
             assert result["merit_basis"]
+            assert result["merit_judgment_failed"] is True
 
     def test_정의되지_않은_merit값은_보류로_정규화(self):
+        """모델이 정의되지 않은 값을 낸 경우도 사유를 실제로 검토한 결과가 아니므로
+        merit_judgment_failed=True로 표시돼야 한다."""
         patcher = _patch_openai('{"merit": "매우강함", "merit_basis": "이상한 응답"}')
         try:
             result = merit_classification_node({
                 "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
             })
             assert result["merit"] == "보류"
+            assert result["merit_judgment_failed"] is True
         finally:
             patcher.stop()
 
     @pytest.mark.parametrize("merit_value", ["강함", "보류", "낮음"])
     def test_정의된_merit값은_그대로_통과(self, merit_value):
+        """LLM이 정상적으로 정의된 값을 냈으면 merit_judgment_failed=False다 —
+        merit="보류"여도 이건 실제로 애매하다고 판단된 정상 결과다."""
         patcher = _patch_openai(f'{{"merit": "{merit_value}", "merit_basis": "근거"}}')
         try:
             result = merit_classification_node({
                 "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
             })
             assert result["merit"] == merit_value
+            assert result["merit_judgment_failed"] is False
         finally:
             patcher.stop()
 
@@ -449,6 +458,7 @@ class TestMeritClassificationNode:
                 "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
             })
             assert result["merit"] == "보류"
+            assert result["merit_judgment_failed"] is True
         finally:
             patcher.stop()
 
@@ -599,6 +609,44 @@ class TestGuideGenerationNode:
         state = {"risk_flag": False, "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지"}
         result = guide_generation_node(state)
         assert "법원의 사실관계 조사로 이어질 수 있으며" in result["guide"]["disclaimer"]
+
+    def test_disclaimer_merit_판정실패시_애매함과_구분되는_안내(self):
+        """merit_judgment_failed=True면 "판단이 애매하다"가 아니라 "판단을
+        못 했다, 재시도하면 다를 수 있다"는 별도 안내가 톤 앞에 붙어야 한다."""
+        state = {
+            "merit": "보류", "merit_judgment_failed": True, "risk_flag": False,
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        disclaimer = result["guide"]["disclaimer"]
+        assert "기술 오류로 완료되지 못해" in disclaimer
+        assert "포기하지 마시고" in disclaimer
+        assert "증거를 보강" in disclaimer  # 기존 "보류" 톤도 그대로 이어붙음
+
+    def test_disclaimer_merit_판정성공한_보류는_실패안내_없음(self):
+        """merit_judgment_failed=False(정상적으로 애매하다고 판단된 "보류")면
+        기술 실패 안내 문구가 붙지 않아야 한다."""
+        state = {
+            "merit": "보류", "merit_judgment_failed": False, "risk_flag": False,
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "기술 오류로 완료되지 못해" not in result["guide"]["disclaimer"]
+
+    def test_next_actions_merit_판정실패시_재호출_권장_추가(self):
+        state = {
+            "merit": "보류", "merit_judgment_failed": True, "risk_flag": False,
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
+        assert any("재호출" in action for action in next_actions)
+
+    def test_next_actions_merit_판정실패_아니면_재호출문구_없음(self):
+        state = {"judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지"}
+        result = guide_generation_node(state)
+        next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
+        assert not any("재호출" in action for action in next_actions)
 
     def test_envelope_구조_확인(self):
         state = {"judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지"}
