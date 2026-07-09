@@ -44,6 +44,15 @@ class AppealJudgmentState(TypedDict, total=False):
     risk_trigger_category:    Optional[RiskTriggerCategory]
     # 여러 카테고리가 동시에 매치되면 A/B(무조건 위험)를 C(조건부 위험)보다 우선 기록.
     # guide_generation_node가 이 값으로 disclaimer 프레이밍(조건부/무조건)을 결정한다.
+    risk_judgment_failed:     Optional[bool]   # True면 이 risk_flag=true가 사유를 실제로
+                                                # 분석해서 나온 결과가 아니라 LLM 호출 실패로
+                                                # 인한 안전 기본값(재현율 우선 폴백)이라는 뜻
+                                                # (merit_judgment_failed와 대칭 — RG는 실패 시
+                                                # risk_flag를 여전히 true로 유지하지만, 그 이유가
+                                                # "위험 감지"가 아니라 "판단 불가"임을 별도로
+                                                # 구분해야 사용자가 불필요하게 위축되거나 재시도
+                                                # 없이 포기하지 않는다). guide_generation_node가
+                                                # 이 값으로 disclaimer에 재시도 안내를 추가한다.
 
     # ── merit_classification_node (MG) 출력 ───────────────────────────
     merit:                    Optional[MeritLevel]

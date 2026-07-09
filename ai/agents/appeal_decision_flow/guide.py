@@ -146,6 +146,16 @@ _MERIT_JUDGMENT_FAILED_NOTICE = (
     "받아보세요."
 )
 
+# merit_judgment_failed와 대칭 — RG는 실패 시에도 risk_flag=true(안전 기본값)를 그대로
+# 유지하지만, "위험을 감지해서"가 아니라 "판단을 못 해서" true인 경우를 사용자에게 밝히지
+# 않으면 불필요하게 위축되거나 재시도 없이 이의제기 자체를 포기할 수 있다.
+_RISK_JUDGMENT_FAILED_NOTICE = (
+    "⚠️ 위험도(신원노출 가능성) 판정이 일시적 기술 오류로 완료되지 못해, 안전을 위해 "
+    "잠정적으로 '위험 있음'으로 표시됩니다 — 사유 내용을 실제로 분석해서 나온 결과가 "
+    "아니라, 시스템이 판단 자체를 하지 못해 보수적으로 처리한 것입니다. 정확한 판정을 "
+    "원하시면 잠시 후 다시 시도해주세요."
+)
+
 
 def _merit_risk_tone(state: AppealJudgmentState) -> str | None:
     merit = state.get("merit")
@@ -169,6 +179,11 @@ def _merit_risk_tone(state: AppealJudgmentState) -> str | None:
 
     if state.get("merit_judgment_failed"):
         tone = f"{_MERIT_JUDGMENT_FAILED_NOTICE}\n\n{tone}"
+
+    # risk_flag를 항상 merit보다 먼저 노출한다는 우선순위 규칙(DATA-003 §4)에 맞춰,
+    # 두 실패 고지가 동시에 붙는 경우 risk 쪽을 맨 앞에 둔다.
+    if state.get("risk_judgment_failed"):
+        tone = f"{_RISK_JUDGMENT_FAILED_NOTICE}\n\n{tone}"
 
     return tone
 
@@ -208,6 +223,7 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "risk_flag":             state.get("risk_flag"),
         "risk_confidence":       state.get("risk_confidence"),
         "risk_trigger_category": state.get("risk_trigger_category"),
+        "risk_judgment_failed":  state.get("risk_judgment_failed"),
         "computed_deadline":     state.get("computed_deadline"),
         "deadline_passed":       state.get("deadline_passed"),
         "law_code_verified":     state.get("law_code_verified"),
@@ -234,6 +250,10 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
     judgment_status = state.get("judgment_status") or "success"
     structured = _structured_result(state, guide)
     next_actions = list(_NEXT_ACTIONS.get(judgment_status, []))
+    if state.get("risk_judgment_failed"):
+        # risk 판정이 기술적 실패로 안전 기본값(risk_flag=true)에 머문 상태 — Supervisor가
+        # 이걸 "실제 위험 감지"로 오인하지 않고 재호출을 시도할 수 있게 명시적으로 알려준다.
+        next_actions.append("RG(risk) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
     if state.get("merit_judgment_failed"):
         # merit 판정이 기술적 실패로 "보류"에 머문 상태 — Supervisor가 이걸 "판정
         # 완료"로 오인하지 않고 재호출을 시도할 수 있게 명시적으로 알려준다.
