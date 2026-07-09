@@ -239,6 +239,9 @@ class TestLawRefs:
         assert "제160조제4항제1호" in ctx
         assert "시행규칙 제142조" in ctx
         assert "질서위반행위규제법 제7조" in ctx
+        assert "질서위반행위규제법 제8조" in ctx
+        assert "질서위반행위규제법 제9조" in ctx
+        assert "질서위반행위규제법 제10조" in ctx
         assert "제14조" not in ctx
 
     def test_1차고지서_컨텍스트_위반유형무관_공통조문(self):
@@ -246,6 +249,9 @@ class TestLawRefs:
         assert "제160조제4항제1호" in ctx
         assert "시행규칙 제142조" in ctx
         assert "질서위반행위규제법 제7조" in ctx
+        assert "질서위반행위규제법 제8조" in ctx
+        assert "질서위반행위규제법 제9조" in ctx
+        assert "질서위반행위규제법 제10조" in ctx
         assert "질서위반행위규제법 제14조" in ctx
 
     def test_DB_조회_성공하면_DB_원문_사용(self):
@@ -374,8 +380,16 @@ class TestRiskClassificationNode:
 class TestMeritClassificationNode:
     def test_사전통지면_142조_컨텍스트_위반유형무관_포함(self):
         """142조는 law_code(주정차 여부)로 더 이상 라우팅되지 않고 항상 포함된다
-        (law160-budeuk-hansayu-scope-analysis2.md) — 비주정차 law_code로 검증."""
-        with patch("ai.agents.appeal_decision_flow.merit_gate._call_llm_merit") as mock_call:
+        (law160-budeuk-hansayu-scope-analysis2.md) — 비주정차 law_code로 검증.
+
+        법령DB 조회를 강제로 실패시켜 하드코딩 폴백 원문으로 결정론적으로 검증한다 —
+        실제 DB가 응답하면 원문에 "시행규칙 제142조"라는 표제가 없어(조문 본문만 저장됨)
+        이 assertion이 DB 가용 여부에 따라 흔들리기 때문.
+        """
+        with patch(
+            "etl.legal.search.get_provision_text",
+            side_effect=RuntimeError("테스트 환경 — DB 조회 불가"),
+        ), patch("ai.agents.appeal_decision_flow.merit_gate._call_llm_merit") as mock_call:
             mock_call.return_value = {"merit": "강함", "merit_basis": "x"}
             merit_classification_node({
                 "user_appeal_reason": "응급환자를 이송했습니다",

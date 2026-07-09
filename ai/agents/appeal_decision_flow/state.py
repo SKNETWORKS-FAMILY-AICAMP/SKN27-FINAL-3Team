@@ -19,9 +19,9 @@ class AppealJudgmentState(TypedDict, total=False):
     opinion_deadline:         Optional[str]    # YYYY-MM-DD, notice_stage별 의미 다름 (DATA-003 §1)
     payment_deadline_2nd:     Optional[str]    # 범칙금 2차 납부기한
     issuing_authority:        Optional[str]    # 가이드 ③에 그대로 노출만 함 (판별 안 함)
-    law_code:                 Optional[str]    # 용도 2가지: ① LDB_CHECK 경량 검증 → ⑥ disclaimer
-                                                # 조건부 문구, ② MG의 위반유형(주정차/비주정차) 판별
-                                                # 라우팅 신호 (인용 근거로는 안 씀, DATA-003 §5)
+    law_code:                 Optional[str]    # (v3.12) 용도 1가지 — LDB_CHECK 경량 검증 → ⑥
+                                                # disclaimer 조건부 문구. MG는 더 이상 이 값으로
+                                                # 위반유형을 판별·라우팅하지 않는다 (DATA-003 §5)
 
     # ── Supervisor 공급 (OCR 결과에 없는 값) ─────────────────────────
     user_appeal_reason:       Optional[str]

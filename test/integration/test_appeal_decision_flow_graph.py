@@ -311,7 +311,12 @@ class TestSuccessBranch:
 
     def test_비주정차_위반도_MG가_142조_제7조_공통컨텍스트로_판단(self):
         """(law160-budeuk-hansayu-scope-analysis2.md 확정) 142조는 위반유형 무관 공통
-        조문이라, 비주정차 law_code에서도 제7조뿐 아니라 142조까지 함께 주입돼야 한다."""
+        조문이라, 비주정차 law_code에서도 제7조뿐 아니라 142조까지 함께 주입돼야 한다.
+
+        법령DB 조회를 강제로 실패시켜 하드코딩 폴백 원문으로 결정론적으로 검증한다 —
+        실제 DB 원문에는 "시행규칙 제142조"/"질서위반행위규제법 제7조" 같은 표제가 없고
+        조문 본문만 저장돼 있어, DB가 살아있으면 이 assertion이 흔들린다.
+        """
         captured_context = {}
 
         def fake_create(*args, **kwargs):
@@ -321,7 +326,10 @@ class TestSuccessBranch:
             captured_context["prompt"] = prompt
             return _fake_response('{"merit": "낮음", "merit_basis": "무관"}')
 
-        with patch("openai.OpenAI") as mock_cls:
+        with patch(
+            "etl.legal.search.get_provision_text",
+            side_effect=RuntimeError("테스트 환경 — DB 조회 불가"),
+        ), patch("openai.OpenAI") as mock_cls:
             mock_cls.return_value.chat.completions.create.side_effect = fake_create
             graph.invoke({
                 "fine_type": "과태료", "notice_stage": "사전통지",
