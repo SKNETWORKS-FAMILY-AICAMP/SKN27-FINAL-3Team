@@ -45,9 +45,9 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert vision_node["status"] == "mock_contract_only"
     assert vision_node["adapter_modes"] == ["mock"]
     assert vision_node["adapter_contract"]["execution_modes"] == ["mock"]
-    assert objection_node["status"] == "mock_contract_only"
-    assert objection_node["adapter_modes"] == ["mock"]
-    assert objection_node["adapter_contract"]["execution_modes"] == ["mock"]
+    assert objection_node["status"] == "sync_adapter_ready"
+    assert objection_node["adapter_modes"] == ["mock", "sync"]
+    assert objection_node["adapter_contract"]["execution_modes"] == ["mock", "sync"]
 
 
 def test_agent_node_registry_exposes_real_adapter_contract():
@@ -715,7 +715,174 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
     assert provisions[0]["match_reason"] == "legal_rag_fallback:django_rag_tables"
 
 
-def test_law_ground_sync_adapter_can_mix_with_mock_objection_when_sync_requested(monkeypatch):
+def test_execute_sync_objection_report_generation_adapter_returns_form_envelope():
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "objection_report_generation",
+            "analysis_plan_id": "plan_sync_objection",
+            "job_id": "job_sync_objection",
+            "session_id": "ses_sync_objection",
+            "message_id": "msg_sync_objection",
+            "user_text": "긴급 정차였고 표지판이 잘 보이지 않았습니다.",
+            "context": {
+                "user_facts": "어린이보호구역에서 갑작스러운 보행자 진입으로 안전 확보를 위해 짧게 정차했습니다.",
+            },
+            "upstream_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "structured_result": {
+                        "notice_fields": {
+                            "agency": "강남구청 교통과",
+                            "violation_text": "어린이보호구역 정차 위반",
+                            "violation_location": "서울특별시 강남구 테헤란로 123",
+                            "violation_datetime": "2026.06.10 13:33",
+                            "payment_deadline": "2026.07.02",
+                        },
+                        "required_documents": ["고지서 원본", "긴급 정차 사유 증빙"],
+                    },
+                    "evidence": [
+                        {
+                            "source_type": "user_uploaded_file",
+                            "title": "과태료 고지서",
+                            "source_reference": "att_notice",
+                            "metadata": {"purpose": "fine_notice"},
+                            "confidence": 0.91,
+                        }
+                    ],
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {
+                        "matched_laws": [
+                            {
+                                "law_name": "도로교통법",
+                                "article": "제32조",
+                                "summary": "정차 및 주차 금지 장소 관련 조항입니다.",
+                                "source_reference": "law:road_traffic:32",
+                                "score": 0.82,
+                            }
+                        ],
+                    },
+                    "evidence": [
+                        {
+                            "source_type": "law",
+                            "title": "도로교통법 제32조",
+                            "source_reference": "law:road_traffic:32",
+                            "metadata": {"article": "제32조"},
+                            "confidence": 0.82,
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+    action_types = {item["type"] for item in structured_result["report_actions"]}
+
+    assert execution["execution_mode"] == "sync"
+    assert execution["adapter_context"]["execution_mode"] == "sync"
+    assert output["node_code"] == "objection_report_generation"
+    assert output["status"] == "success"
+    assert structured_result["document_type"] == "objection_form"
+    assert structured_result["recipient_agency"] == "강남구청 교통과"
+    assert structured_result["readiness"]["ready_for_download"] is True
+    assert {"download_objection", "download_report"} <= action_types
+    assert structured_result["adapter_trace"]["execution_mode"] == "sync"
+    assert output["evidence"][0]["source_type"] == "user_uploaded_file"
+    assert output["evidence"][-1]["source_type"] == "user_statement"
+    assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
+
+
+def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_inputs():
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "objection_report_generation",
+            "analysis_plan_id": "plan_sync_objection_fault_ratio",
+            "job_id": "job_sync_objection_fault_ratio",
+            "session_id": "ses_sync_objection_fault_ratio",
+            "message_id": "msg_sync_objection_fault_ratio",
+            "user_text": "신호 없는 교차로에서 직진 중 우측 골목 차량과 접촉했습니다.",
+            "upstream_results": {
+                "text_ml_case_search": {
+                    "status": "success",
+                    "structured_result": {
+                        "query_text": "신호 없는 교차로에서 직진 중 우측 골목 차량과 접촉했습니다.",
+                        "normalized_description": "무신호 교차로 직진 차량과 우측 진입 차량 접촉 사고",
+                        "accident_type_candidates": ["intersection_no_signal", "side_entry_collision"],
+                        "issue_tags": ["선진입", "일시정지", "시야 제한"],
+                        "similar_cases": [
+                            {
+                                "case_id": "case_fault_001",
+                                "title": "무신호 교차로 직진/진입 사고",
+                                "summary": "선진입과 감속 여부를 함께 본 사례입니다.",
+                                "source_ref": "case_fault_001",
+                            }
+                        ],
+                        "recommended_evidence": [
+                            "original blackbox or dashcam video",
+                            "scene photos including lane, signal, and impact position",
+                        ],
+                    },
+                    "evidence": [
+                        {
+                            "source_type": "review_case",
+                            "title": "무신호 교차로 직진/진입 사고",
+                            "source_reference": "case_fault_001",
+                            "metadata": {"case_id": "case_fault_001"},
+                            "confidence": 0.76,
+                        }
+                    ],
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {
+                        "law_provisions": [
+                            {
+                                "source_name": "도로교통법",
+                                "article_no": "제25조",
+                                "provision_text": "교차로 통행방법 및 우선순위 관련 조항입니다.",
+                                "source_ref": "law:road_traffic:25",
+                                "retrieval_score": 0.79,
+                            }
+                        ],
+                    },
+                    "evidence": [
+                        {
+                            "source_type": "law",
+                            "title": "도로교통법 제25조",
+                            "source_reference": "law:road_traffic:25",
+                            "metadata": {"article": "제25조"},
+                            "confidence": 0.79,
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+
+    assert execution["execution_mode"] == "sync"
+    assert output["node_code"] == "objection_report_generation"
+    assert output["status"] == "success"
+    assert structured_result["document_type"] == "objection_form"
+    assert structured_result["document_variant"] == "traffic_accident"
+    assert structured_result["document_title"] == "교통사고 이의신청서 초안"
+    assert structured_result["recipient_agency"] == "관할 경찰서 또는 분쟁조정 기관"
+    assert structured_result["requested_action"] == "사고 사실관계 재검토 및 과실비율 조정 검토"
+    assert structured_result["readiness"]["ready_for_download"] is True
+    assert any("선진입" in item for item in structured_result["objection_reasons"])
+    assert any("블랙박스" in item for item in structured_result["required_attachments"])
+    assert any(item["source_type"] == "review_case" for item in output["evidence"])
+    assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
+
+
+def test_law_ground_sync_adapter_can_feed_sync_objection_when_sync_requested(monkeypatch):
     from ai.agents.law_ground_search import agent as law_agent
 
     monkeypatch.setattr(law_agent, "_get_neo4j_session", lambda: None)
@@ -769,11 +936,15 @@ def test_law_ground_sync_adapter_can_mix_with_mock_objection_when_sync_requested
     )
 
     executions_by_node = {item["node_code"]: item for item in execution["executions"]}
-    assert execution["execution_mode"] == "hybrid"
+    assert execution["execution_mode"] == "sync"
     assert executions_by_node["law_ground_search"]["execution_mode"] == "sync"
-    assert executions_by_node["objection_report_generation"]["execution_mode"] == "mock"
+    assert executions_by_node["objection_report_generation"]["execution_mode"] == "sync"
     assert executions_by_node["law_ground_search"]["adapter_context"]["execution_mode"] == "sync"
-    assert executions_by_node["objection_report_generation"]["adapter_context"]["execution_mode"] == "mock"
+    assert executions_by_node["objection_report_generation"]["adapter_context"]["execution_mode"] == "sync"
+    assert (
+        executions_by_node["objection_report_generation"]["agent_output"]["structured_result"]["document_type"]
+        == "objection_form"
+    )
 
 
 def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():

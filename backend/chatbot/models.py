@@ -63,6 +63,8 @@ class ReportStatus(models.TextChoices):
 
 
 class ReportType(models.TextChoices):
+    FINE_NOTICE_OBJECTION = "fine_notice_objection", "Fine notice objection"
+    FAULT_RATIO_ANALYSIS = "fault_ratio_analysis", "Fault ratio analysis"
     OBJECTION_DRAFT = "objection_draft", "Objection draft"
     FAULT_ANALYSIS = "fault_analysis", "Fault analysis"
     GENERAL = "general", "General"
