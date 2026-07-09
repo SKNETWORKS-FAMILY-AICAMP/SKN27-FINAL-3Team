@@ -19,6 +19,7 @@ from neo4j import GraphDatabase
 DEFAULT_OUTPUT_DIR = Path("output/law_ingestion")
 DEFAULT_HINT_TERMS = Path("storage/rag/law_query_terms.yaml")
 DEFAULT_BATCH_SIZE = 500
+LAW_GRAPH_RELATION_TYPES = ("HAS_PENALTY", "HAS_APPENDIX", "HAS_EXCEPTION", "RELATED_TO")
 
 SOURCE_FIELDS = [
     "source_id",
@@ -159,13 +160,16 @@ def import_legal_artifacts(session, output_dir: Path, batch_size: int, import_si
     versions_path = output_dir / "normalized" / "legal_source_versions.jsonl"
     chunks_path = output_dir / "chunks" / "law_chunks.jsonl"
     relations_path = output_dir / "relations" / "law_relations.jsonl"
+    extra_relations_path = output_dir / "relations" / "law_extra_relations.jsonl"
 
     require_files([sources_path, versions_path, chunks_path, relations_path])
 
     sources = [to_props(row, SOURCE_FIELDS) for row in read_jsonl(sources_path)]
     versions = [to_props(row, VERSION_FIELDS) for row in read_jsonl(versions_path)]
     chunks = [to_props(row, CHUNK_FIELDS) for row in read_jsonl(chunks_path)]
-    relations = list(read_jsonl(relations_path))
+    base_relations = list(read_jsonl(relations_path))
+    extra_relations = list(read_jsonl(extra_relations_path)) if extra_relations_path.exists() else []
+    relations = dedupe_relations([*base_relations, *extra_relations])
 
     run_batches(
         session,
@@ -214,6 +218,7 @@ def import_legal_artifacts(session, output_dir: Path, batch_size: int, import_si
         "law_versions": len(versions),
         "law_chunks": len(chunks),
         "law_relations": relation_count,
+        "law_extra_relations": len(extra_relations),
         "similarity_relations": similarity_count,
     }
 
@@ -252,6 +257,18 @@ def import_relations(session, relations: list[dict], batch_size: int) -> int:
         run_batches(session, query, rows, batch_size)
         total += len(rows)
     return total
+
+
+def dedupe_relations(relations: list[dict]) -> list[dict]:
+    deduped: dict[tuple[str, str, str], dict] = {}
+    for relation in relations:
+        rel_type = safe_relation_type(relation.get("relation_type") or "RELATED_TO")
+        from_id = relation.get("from_chunk_id")
+        to_id = relation.get("to_chunk_id")
+        if not from_id or not to_id:
+            continue
+        deduped[(rel_type, str(from_id), str(to_id))] = relation
+    return list(deduped.values())
 
 
 def import_hint_terms(session, hint_terms_path: Path) -> dict[str, int]:

@@ -10,7 +10,7 @@ from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import Client, TestCase, override_settings
+from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from app.services.agent_node_service import execute_mock_node
@@ -61,6 +61,7 @@ from chatbot.models import (
 from config.env_loader import load_django_env_file
 from chatbot.readiness import build_production_readiness_report
 from chatbot.repositories import (
+    build_report_download_pdf_body,
     list_history_event_records,
     process_agent_work_item,
     process_agent_work_items,
@@ -81,6 +82,24 @@ def extract_pdf_text(content: bytes) -> str:
 
     with fitz.open(stream=content, filetype="pdf") as document:
         return "\n".join(page.get_text() for page in document)
+
+
+class ReportPdfGenerationTests(SimpleTestCase):
+    def test_korean_report_pdf_avoids_minimal_cid_fallback(self):
+        content = build_report_download_pdf_body(
+            report_id="rep_pdf_font_smoke",
+            title="과태료 부과 처분 이의신청서",
+            body_text=(
+                "## 문서 정보\n"
+                "- 문서 유형: 이의신청서 초안\n"
+                "\n"
+                "## 사실관계\n"
+                "- 6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했고 블랙박스가 있습니다.\n"
+            ),
+        )
+
+        self.assertTrue(content.startswith(b"%PDF"))
+        self.assertNotIn(b"HYSMyeongJo-Medium", content)
 
 
 class ChatbotPersistenceModelTests(TestCase):
