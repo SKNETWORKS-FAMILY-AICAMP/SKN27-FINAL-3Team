@@ -59,9 +59,11 @@ def rebuild_artifacts(
     chunks_path = output_dir / "chunks" / "law_chunks.jsonl"
     searchable_path = output_dir / "publish" / "searchable_law_chunks.jsonl"
     relations_path = output_dir / "relations" / "law_relations.jsonl"
+    extra_relations_path = output_dir / "relations" / "law_extra_relations.jsonl"
     chunks_path.parent.mkdir(parents=True, exist_ok=True)
     searchable_path.parent.mkdir(parents=True, exist_ok=True)
     relations_path.parent.mkdir(parents=True, exist_ok=True)
+    extra_relations_path.parent.mkdir(parents=True, exist_ok=True)
 
     versions: dict[str, dict] = {}
     chunk_type_counts: dict[str, int] = {}
@@ -123,6 +125,7 @@ def rebuild_artifacts(
     write_jsonl(output_dir / "normalized" / "legal_sources.jsonl", sources)
     write_jsonl(output_dir / "normalized" / "legal_source_versions.jsonl", sorted_versions)
     write_jsonl(output_dir / "normalized" / "raw_law_documents.jsonl", build_raw_records(sorted_versions, sources_by_id))
+    write_jsonl(extra_relations_path, [])
 
     run_summary = {
         "run_id": f"legal_embedding_baseline:{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
@@ -136,6 +139,7 @@ def rebuild_artifacts(
         "failed_chunks": 0,
         "partial_chunks": 0,
         "relation_count": relation_count,
+        "extra_relation_count": 0,
         "embedding_input_count": total_chunks,
         "embedding_baseline_path": str(embeddings_path),
         "started_at": started_at,

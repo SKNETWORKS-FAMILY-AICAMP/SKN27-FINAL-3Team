@@ -88,6 +88,7 @@ REPORT_DOWNLOAD_TYPE_REPORT = "report"
 REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
 ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
+REPORT_PDF_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_report_renderer.py"
 
 
 def build_report_download_pdf_body(
@@ -101,6 +102,9 @@ def build_report_download_pdf_body(
     try:
         import fitz
     except Exception:
+        reportlab_pdf = _reportlab_pdf_bytes(report_id=report_id, title=title, body_text=body_text)
+        if reportlab_pdf:
+            return reportlab_pdf
         return _minimal_pdf_bytes(title=title or report_id, body_text=body_text)
 
     doc = fitz.open()
@@ -176,6 +180,162 @@ def build_report_download_pdf_body(
     pdf_bytes = doc.tobytes(deflate=True)
     doc.close()
     return pdf_bytes
+
+
+def _reportlab_pdf_bytes(*, report_id: str, title: str, body_text: str) -> bytes | None:
+    modules = _reportlab_pdf_modules()
+    if modules is None:
+        return _reportlab_pdf_bytes_via_bundled_python(report_id=report_id, title=title, body_text=body_text)
+
+    canvas_cls = modules["canvas"]
+    pdfmetrics = modules["pdfmetrics"]
+    ttfont = modules["ttfont"]
+
+    font_file = _report_pdf_font_file()
+    font_name = "ReportBody"
+    try:
+        if font_file and font_name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(ttfont(font_name, font_file))
+    except Exception:
+        return None
+
+    if font_name not in pdfmetrics.getRegisteredFontNames():
+        return None
+
+    page_width = 595
+    page_height = 842
+    margin_x = 54
+    margin_top = 58
+    margin_bottom = 56
+    max_width = page_width - (margin_x * 2)
+
+    output = BytesIO()
+    pdf_canvas = canvas_cls(output, pagesize=(page_width, page_height))
+    pdf_canvas.setTitle((title or "Traffic Dispute AI report")[:120])
+    pdf_canvas.setAuthor("Traffic Dispute AI")
+    pdf_canvas.setCreator("Traffic Dispute AI")
+
+    y = page_height - margin_top
+
+    def ensure_page(required_height: float) -> None:
+        nonlocal y
+        if y - required_height >= margin_bottom:
+            return
+        pdf_canvas.showPage()
+        y = page_height - margin_top
+
+    def draw_line(text: str, *, size: float = 10.5, leading: float = 16, indent: float = 0) -> None:
+        nonlocal y
+        ensure_page(leading)
+        pdf_canvas.setFont(font_name, size)
+        pdf_canvas.drawString(margin_x + indent, y, text)
+        y -= leading
+
+    def draw_wrapped(
+        text: str,
+        *,
+        size: float = 10.5,
+        leading: float = 16,
+        indent: float = 0,
+        first_prefix: str = "",
+        next_prefix: str = "",
+    ) -> None:
+        available_width = max_width - indent - pdfmetrics.stringWidth(next_prefix, font_name, size)
+        lines = _wrap_reportlab_pdf_line(
+            text,
+            font_name=font_name,
+            font_size=size,
+            max_width=available_width,
+            pdfmetrics=pdfmetrics,
+        )
+        for index, line in enumerate(lines):
+            prefix = first_prefix if index == 0 else next_prefix
+            draw_line(f"{prefix}{line}", size=size, leading=leading, indent=indent)
+
+    title_text = title or "상담 분석 리포트"
+    for line in _wrap_reportlab_pdf_line(
+        title_text,
+        font_name=font_name,
+        font_size=17,
+        max_width=max_width,
+        pdfmetrics=pdfmetrics,
+    ):
+        draw_line(line, size=17, leading=23)
+    y -= 4
+    draw_line(f"Report ID: {report_id}", size=9.2, leading=14)
+    draw_wrapped(
+        "본 문서는 Traffic Dispute AI 상담 결과를 바탕으로 생성한 검토용 리포트입니다.",
+        size=9.2,
+        leading=14,
+    )
+    y -= 12
+
+    for raw_line in str(body_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            y -= 8
+            continue
+        if line.startswith("# "):
+            y -= 6
+            draw_wrapped(line[2:], size=15, leading=21)
+            y -= 4
+            continue
+        if line.startswith("## "):
+            y -= 8
+            draw_wrapped(line[3:], size=13, leading=19)
+            y -= 3
+            continue
+        if line.startswith("### "):
+            y -= 5
+            draw_wrapped(line[4:], size=11.5, leading=17)
+            continue
+        if line.startswith("- "):
+            draw_wrapped(line[2:], first_prefix="- ", next_prefix="  ", indent=8, size=10.2, leading=15.5)
+            continue
+        draw_wrapped(line, size=10.2, leading=15.5)
+
+    pdf_canvas.save()
+    return output.getvalue()
+
+
+def _reportlab_pdf_bytes_via_bundled_python(*, report_id: str, title: str, body_text: str) -> bytes | None:
+    if not REPORT_PDF_RENDERER_PATH.exists():
+        return None
+
+    bundled_python = _bundled_pdf_python_path()
+    if bundled_python is None:
+        return None
+
+    payload = {
+        "report_id": report_id,
+        "title": title,
+        "body_text": body_text,
+        "font_file": _report_pdf_font_file(),
+        "intro": "본 문서는 Traffic Dispute AI 상담 결과를 바탕으로 생성한 검토용 리포트입니다.",
+    }
+    try:
+        with tempfile.TemporaryDirectory(prefix="report-pdf-") as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            payload_path = temp_dir / "payload.json"
+            output_path = temp_dir / "report.pdf"
+            payload_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    str(bundled_python),
+                    str(REPORT_PDF_RENDERER_PATH),
+                    str(payload_path),
+                    str(output_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if completed.returncode != 0 or not output_path.exists():
+                return None
+            return output_path.read_bytes()
+    except Exception:
+        return None
 USAGE_POLICY_LIMITS = {
     "anonymous": {
         "chat_message": 2,
@@ -4167,6 +4327,97 @@ def _report_pdf_font_file() -> str | None:
     return None
 
 
+def _reportlab_pdf_modules() -> dict[str, Any] | None:
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfgen.canvas import Canvas
+    except Exception:
+        for candidate in _bundled_pdf_site_packages_candidates():
+            if candidate.exists() and str(candidate) not in sys.path:
+                sys.path.append(str(candidate))
+        try:
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            from reportlab.pdfgen.canvas import Canvas
+        except Exception:
+            return None
+    return {
+        "pdfmetrics": pdfmetrics,
+        "ttfont": TTFont,
+        "canvas": Canvas,
+    }
+
+
+def _wrap_reportlab_pdf_line(
+    text: str,
+    *,
+    font_name: str,
+    font_size: float,
+    max_width: float,
+    pdfmetrics: Any,
+) -> list[str]:
+    value = " ".join(str(text or "").split())
+    if not value:
+        return [""]
+    if pdfmetrics.stringWidth(value, font_name, font_size) <= max_width:
+        return [value]
+
+    lines: list[str] = []
+    current = ""
+    for word in value.split(" "):
+        candidate = f"{current} {word}".strip()
+        if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+            lines.extend(
+                _wrap_reportlab_pdf_token(
+                    current,
+                    font_name=font_name,
+                    font_size=font_size,
+                    max_width=max_width,
+                    pdfmetrics=pdfmetrics,
+                )
+            )
+            current = word
+            continue
+        current = candidate
+    if current:
+        lines.extend(
+            _wrap_reportlab_pdf_token(
+                current,
+                font_name=font_name,
+                font_size=font_size,
+                max_width=max_width,
+                pdfmetrics=pdfmetrics,
+            )
+        )
+    return lines or [value]
+
+
+def _wrap_reportlab_pdf_token(
+    text: str,
+    *,
+    font_name: str,
+    font_size: float,
+    max_width: float,
+    pdfmetrics: Any,
+) -> list[str]:
+    if pdfmetrics.stringWidth(text, font_name, font_size) <= max_width:
+        return [text]
+
+    chunks: list[str] = []
+    current = ""
+    for char in text:
+        candidate = f"{current}{char}"
+        if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+            chunks.append(current)
+            current = char
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def _wrap_report_pdf_line(text: str, *, width: int) -> list[str]:
     value = str(text or "")
     if len(value) <= width:
@@ -4305,7 +4556,9 @@ def _report_objection_form_body(report: Report) -> str:
         draft_items.get("제목")
         or "과태료 부과 처분에 대한 의견제출서 및 이의신청서"
     )
-    facts = draft_items.get("사실관계") or _text(reporting_payload.get("summary")) or report.content_summary
+    facts = _compact_repeated_fact_text(
+        draft_items.get("사실관계") or _text(reporting_payload.get("summary")) or report.content_summary
+    )
     purpose = (
         draft_items.get("신청 취지")
         or "고지 내용과 실제 사실관계를 재확인해 처분 취소 또는 감경을 요청합니다."
@@ -4638,21 +4891,21 @@ def _accident_objection_template_data(report: Report) -> dict[str, Any]:
     recipient = _first_nonempty(
         draft_items.get("제출 대상"),
         draft_items.get("수신"),
+        "○○경찰서장 귀하",
     )
     police_station = _first_nonempty(
         overview_items.get("담당 경찰서"),
         overview_items.get("해당 경찰서"),
+        "담당 경찰서 확인 필요",
     )
 
     return {
-        "recipient": _first_nonempty(draft_items.get("제출 대상"), "○○경찰서장 귀하"),
         "recipient": recipient,
         "applicant_name": applicant_name,
         "relationship": relationship,
         "case_number": case_number,
         "incident_at": incident_at,
         "location": location,
-        "police_station": _first_nonempty(overview_items.get("담당 경찰서"), "담당 경찰서 확인 필요"),
         "investigator": _text(overview_items.get("담당 조사관")),
         "notice_date": _text(overview_items.get("조사결과 통지일")),
         "police_station": police_station,
@@ -4666,10 +4919,12 @@ def _accident_objection_template_data(report: Report) -> dict[str, Any]:
             draft_items.get("신청 취지"),
             "관련 증거를 재검토하고 필요한 재조사를 통해 조사결과를 재확인해 주시기 바랍니다.",
         ),
-        "summary": _first_nonempty(
-            draft_items.get("사실관계"),
-            report_summary,
-            report.content_summary,
+        "summary": _compact_repeated_fact_text(
+            _first_nonempty(
+                draft_items.get("사실관계"),
+                report_summary,
+                report.content_summary,
+            )
         ),
         "issue_summary": issue_summary,
         "reason_detail": reason_detail,
@@ -4698,6 +4953,31 @@ def _brief_text(value: Any, *, limit: int = 56) -> str:
     if not text or len(text) <= limit:
         return text
     return f"{text[: max(limit - 3, 1)].rstrip()}..."
+
+
+def _compact_repeated_fact_text(value: Any) -> str:
+    text = " ".join(_text(value).replace("\r", " ").replace("\n", " ").split())
+    if not text:
+        return ""
+
+    marker = "에서 "
+    marker_start = 0
+    while True:
+        marker_index = text.find(marker, marker_start)
+        if marker_index < 0:
+            break
+        suffix = text[marker_index + len(marker) :]
+        prefix = text[:marker_index]
+        if len(suffix) >= 20 and any(char.isdigit() for char in suffix) and suffix in prefix:
+            text = suffix
+            break
+        marker_start = marker_index + len(marker)
+
+    words = text.split()
+    for size in range(len(words) // 2, 0, -1):
+        if words[:size] == words[size : size * 2]:
+            return " ".join(words[size:])
+    return text
 
 
 def _objection_evidence_rows(
