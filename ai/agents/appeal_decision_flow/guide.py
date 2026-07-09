@@ -126,6 +126,14 @@ _TONE_STRONG_UNCONDITIONAL = (
 )
 
 
+# merit="강함"이어도 근거 조문이 "감경"형(예: 질서법 제10조②)이면 처분 자체가 없어지는
+# 게 아니라 금액만 줄어드는 것 — "면제·감경 사유 merit 구분 설계.md" 참고. 사용자가
+# "이의제기하면 처분이 취소될 수도 있겠다"고 과도하게 기대하지 않도록 명시적으로 붙인다.
+_RELIEF_TYPE_REDUCTION_NOTICE = (
+    "⚠️ 이 사유는 인정되더라도 과태료 처분 자체가 없어지는 게 아니라 금액이 일부 "
+    "감경되는 사유입니다 — 처분이 취소될 거라 기대하지 마시고, 참고용으로만 활용하세요."
+)
+
 # 기술적 실패로 merit="보류"가 나왔을 때 붙이는 정정 문구 (RG의 risk_flag는 이 실패와
 # 무관하게 정상 평가된 값이므로 톤 자체는 그대로 두고, 이 문구를 앞에 덧붙이기만 한다) —
 # "판단이 애매하다"가 아니라 "판단을 못 했다"임을 명확히 해서, 승산 있는 사유를 사용자가
@@ -155,6 +163,9 @@ def _merit_risk_tone(state: AppealJudgmentState) -> str | None:
             tone = _TONE_STRONG_CONDITIONAL
         else:
             tone = _TONE_STRONG_UNCONDITIONAL
+
+    if merit == "강함" and state.get("merit_relief_type") == "감경":
+        tone = f"{tone}\n\n{_RELIEF_TYPE_REDUCTION_NOTICE}"
 
     if state.get("merit_judgment_failed"):
         tone = f"{_MERIT_JUDGMENT_FAILED_NOTICE}\n\n{tone}"
@@ -193,6 +204,7 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "overall_possibility":   state.get("overall_possibility"),
         "merit":                 state.get("merit"),
         "merit_judgment_failed": state.get("merit_judgment_failed"),
+        "merit_relief_type":     state.get("merit_relief_type"),
         "risk_flag":             state.get("risk_flag"),
         "risk_confidence":       state.get("risk_confidence"),
         "risk_trigger_category": state.get("risk_trigger_category"),

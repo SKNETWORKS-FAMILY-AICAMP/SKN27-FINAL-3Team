@@ -436,6 +436,150 @@ class TestMeritClassificationNode:
         finally:
             patcher.stop()
 
+    @pytest.mark.parametrize("relief_value", ["면제", "감경"])
+    def test_강함이면_relief_type_그대로_통과(self, relief_value):
+        patcher = _patch_openai(
+            f'{{"merit": "강함", "relief_type": "{relief_value}", "merit_basis": "근거"}}'
+        )
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] == relief_value
+        finally:
+            patcher.stop()
+
+    @pytest.mark.parametrize("merit_value", ["보류", "낮음"])
+    def test_강함_아니면_relief_type_모델응답과_무관하게_None(self, merit_value):
+        """relief_type은 merit="강함"일 때만 의미가 있다 — 모델이 실수로 다른
+        merit에 relief_type을 채워도 무시해야 한다."""
+        patcher = _patch_openai(
+            f'{{"merit": "{merit_value}", "relief_type": "감경", "merit_basis": "근거"}}'
+        )
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] is None
+        finally:
+            patcher.stop()
+
+    @pytest.mark.parametrize("hedge_word", ["미약", "약간", "다소", "조금", "일부"])
+    def test_relief_type_사유에_정도완화_표현이_있으면_면제여도_감경으로_재보정(self, hedge_word):
+        """실측으로 확인된 문제: LLM(gpt-4o-mini)이 프롬프트 지시에도 불구하고
+        "미약/다소"류 표현이 있는 사유를 계속 면제(제10조①)로 잘못 분류하는 경우가
+        있었다 — 사용자 표현 자체가 정도를 낮춰 말했으면 안전한 쪽(감경)으로
+        재보정해야 한다."""
+        patcher = _patch_openai(
+            f'{{"merit": "강함", "relief_type": "면제", '
+            f'"merit_basis": "판단능력이 {hedge_word} 저하됨"}}'
+        )
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": f"그 당시 판단력이 {hedge_word} 흐려진 상태였습니다",
+                "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] == "감경"
+        finally:
+            patcher.stop()
+
+    def test_relief_type_정도완화_표현_없으면_면제_그대로_유지(self):
+        patcher = _patch_openai(
+            '{"merit": "강함", "relief_type": "면제", "merit_basis": "판단능력이 전혀 없었음"}'
+        )
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "그 당시 의식이 완전히 없는 상태였습니다",
+                "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] == "면제"
+        finally:
+            patcher.stop()
+
+    @pytest.mark.parametrize("reason", [
+        "장애인 승하차를 돕느라 다소 시간이 걸렸습니다",       # 142조5호 — 감경 개념이 없는 순수 면제형
+        "표지판이 나뭇가지에 일부 가려져 있어서 몰랐습니다",   # 8조(위법성의 착오) — 마찬가지
+        "제 차를 도둑맞았는데 약간 파손된 채로 발견됐습니다",  # 도난(160조4항1호) — 마찬가지
+    ])
+    def test_relief_type_정도완화_표현이_있어도_심신_문맥_아니면_면제_유지(self, reason):
+        """142조/8조/도난처럼 애초에 "감경" 개념 자체가 없는 순수 면제형 조문은,
+        사유에 "다소/일부/약간" 같은 표현이 우연히 섞여 있어도 심신·판단 관련
+        문맥이 아니면 재보정하면 안 된다 — 정당한 면제 사유를 과소평가하게 된다."""
+        patcher = _patch_openai(
+            '{"merit": "강함", "relief_type": "면제", "merit_basis": "근거"}'
+        )
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": reason, "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] == "면제"
+        finally:
+            patcher.stop()
+
+    def test_relief_type_정의되지_않은_값이면_None(self):
+        patcher = _patch_openai('{"merit": "강함", "relief_type": "일부면제", "merit_basis": "근거"}')
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] is None
+        finally:
+            patcher.stop()
+
+    def test_LLM_예외시_relief_type도_None(self):
+        with patch("openai.OpenAI", side_effect=ConnectionError("네트워크 오류")):
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] is None
+
+    @pytest.mark.parametrize("merit_value", ["보류", "낮음"])
+    def test_강함_아니면_relief_type_전용_호출_자체를_안함(self, merit_value):
+        """merit·relief_type을 한 호출에서 같이 물었더니 "미약"류 표현에도
+        면제로 오판하는 게 확인돼 별도 호출로 분리했다 — 다만 그 호출은
+        merit="강함"일 때만 의미가 있으므로, 보류/낮음이면 API 호출 자체를
+        아끼고(비용·지연시간) 곧바로 None으로 처리해야 한다."""
+        with patch("openai.OpenAI") as mock_cls:
+            mock_cls.return_value.chat.completions.create.return_value = _fake_llm_response(
+                f'{{"merit": "{merit_value}", "merit_basis": "근거"}}'
+            )
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] is None
+            assert mock_cls.return_value.chat.completions.create.call_count == 1
+
+    def test_강함이면_relief_type_판단을_위해_2차_호출_발생(self):
+        with patch("openai.OpenAI") as mock_cls:
+            mock_cls.return_value.chat.completions.create.return_value = _fake_llm_response(
+                '{"merit": "강함", "relief_type": "면제", "merit_basis": "근거"}'
+            )
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_relief_type"] == "면제"
+            assert mock_cls.return_value.chat.completions.create.call_count == 2
+
+    def test_relief_type_전용_2차_호출이_실패해도_merit은_그대로_강함_유지(self):
+        """relief_type 세부 구분에만 실패한 것이지 merit(인정 가능성) 판단
+        자체가 실패한 게 아니므로, merit_judgment_failed는 건드리지 않는다."""
+        call_state = {"n": 0}
+
+        def fake_create(*args, **kwargs):
+            call_state["n"] += 1
+            if call_state["n"] == 1:
+                return _fake_llm_response('{"merit": "강함", "merit_basis": "근거"}')
+            raise ConnectionError("relief_type 호출 네트워크 오류")
+
+        with patch("openai.OpenAI") as mock_cls:
+            mock_cls.return_value.chat.completions.create.side_effect = fake_create
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit"] == "강함"
+            assert result["merit_judgment_failed"] is False
+            assert result["merit_relief_type"] is None
+
     def test_마크다운코드펜스로_감싼_응답도_파싱(self):
         """LLM이 프롬프트 지시(순수 JSON만 반환)를 어기고 ```json 코드펜스로
         감싸 응답해도, 정규식 폴백으로 JSON을 추출해 정상 처리해야 한다."""
@@ -609,6 +753,37 @@ class TestGuideGenerationNode:
         state = {"risk_flag": False, "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지"}
         result = guide_generation_node(state)
         assert "법원의 사실관계 조사로 이어질 수 있으며" in result["guide"]["disclaimer"]
+
+    def test_disclaimer_강함_감경이면_처분취소아님_문구_포함(self):
+        """merit=강함이어도 relief_type=감경이면 "처분 자체가 없어지는 게 아니라
+        금액만 줄어든다"는 정정 문구가 붙어야 한다 (예: 질서법 제10조②)."""
+        state = {
+            "merit": "강함", "merit_relief_type": "감경", "risk_flag": False,
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        disclaimer = result["guide"]["disclaimer"]
+        assert "처분 자체가 없어지는 게 아니라" in disclaimer
+        assert "안심하고 진행" in disclaimer  # 기존 강함 톤도 그대로 이어붙음
+
+    @pytest.mark.parametrize("relief_type", ["면제", None])
+    def test_disclaimer_강함_면제거나_구분없으면_감경문구_없음(self, relief_type):
+        state = {
+            "merit": "강함", "merit_relief_type": relief_type, "risk_flag": False,
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "처분 자체가 없어지는 게 아니라" not in result["guide"]["disclaimer"]
+
+    def test_disclaimer_보류나_낮음은_relief_type_있어도_감경문구_없음(self):
+        """relief_type은 merit="강함"일 때만 의미 있다 — 다른 merit엔 감경 문구를
+        붙이지 않는다(방어적: 애초에 merit_gate가 이 조합을 안 만들지만 이중 확인)."""
+        state = {
+            "merit": "보류", "merit_relief_type": "감경", "risk_flag": False,
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "처분 자체가 없어지는 게 아니라" not in result["guide"]["disclaimer"]
 
     def test_disclaimer_merit_판정실패시_애매함과_구분되는_안내(self):
         """merit_judgment_failed=True면 "판단이 애매하다"가 아니라 "판단을

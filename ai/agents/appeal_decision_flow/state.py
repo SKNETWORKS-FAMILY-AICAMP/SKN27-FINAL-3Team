@@ -5,6 +5,7 @@ JudgmentStatus = Literal[
     "success", "denied", "input_required", "not_applicable",
 ]
 MeritLevel          = Literal["강함", "보류", "낮음"]
+MeritReliefType     = Literal["면제", "감경"]
 RiskTriggerCategory = Literal[
     "A_제3자운전주장", "B_명시적전환요청", "C_본인운전인정형",
 ]
@@ -54,6 +55,14 @@ class AppealJudgmentState(TypedDict, total=False):
                                                 # generation_node가 이 값으로 "판단은
                                                 # 애매하다"는 문구 대신 "판단을 못 했다"는
                                                 # 사실대로 안내한다.
+    merit_relief_type:         Optional[MeritReliefType]  # merit="강함"일 때만 의미 있음.
+                                                # "감경"이면 처분 자체가 아니라 금액만 줄어드는
+                                                # 사유라는 뜻(예: 질서법 제10조②) — "면제"(처분
+                                                # 자체 불가, 예: 제10조①·7~9조·142조)와 구분해서
+                                                # 사용자가 "이의제기하면 처분이 없어질 수도
+                                                # 있다"고 오해하지 않게 한다. 설계 근거는
+                                                # `docs/architecture/appeal-judgment/
+                                                # 면제·감경 사유 merit 구분 설계.md` 참고.
 
     # ── verdict_node (E) 출력 ──────────────────────────────────────────
     judgment_status:           Optional[JudgmentStatus]
