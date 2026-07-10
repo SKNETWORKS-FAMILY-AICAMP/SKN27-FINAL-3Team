@@ -514,7 +514,10 @@ def _apply_supervisor_conversation_state(
     use_dynamic_sequence: bool,
 ) -> None:
     fixture["supervisor_state"] = supervisor_state
-    fixture["reporting_payload"] = supervisor_state["reporting_payload"]
+    expose_reporting_payload = _supervisor_report_ready(supervisor_state) or (
+        requested_status == "success" and not use_dynamic_sequence
+    )
+    fixture["reporting_payload"] = supervisor_state["reporting_payload"] if expose_reporting_payload else None
     fixture.setdefault("structured_result", {})
     fixture["structured_result"].update(
         {
@@ -878,9 +881,33 @@ def _agent_input_packages_for_scenario(
                 ["accident_context"] if "accident_context" in missing_codes else [],
             ),
             _agent_input_package(
+                "objection_report_generation",
+                "hi20260204-maker",
+                {
+                    **common_payload,
+                    "draft_goal": "교통사고 이의신청서 초안",
+                    "text_ml_case_result_ref": "text_ml_case_search",
+                    "law_ground_result_ref": "law_ground_search",
+                    "user_facts": _fault_ratio_user_facts(facts),
+                    "evidence_status": facts.get("evidence_status"),
+                },
+                [
+                    field
+                    for field in ("accident_context", "movement_context", "evidence_status")
+                    if field in missing_codes
+                ],
+            ),
+            _agent_input_package(
                 "agent_result_validation",
                 "hi20260204-maker",
-                {**common_payload, "expected_agent_results": ["text_ml_case_search", "law_ground_search"]},
+                {
+                    **common_payload,
+                    "expected_agent_results": [
+                        "text_ml_case_search",
+                        "law_ground_search",
+                        "objection_report_generation",
+                    ],
+                },
                 [],
             ),
         ]
@@ -974,36 +1001,325 @@ def _reporting_payload(
     return {
         "contract_version": "reporting_payload.v1",
         "scenario": scenario,
+        "report_type": _report_type_for_scenario(scenario),
+        "screen_id": _report_screen_id_for_scenario(scenario),
         "stage": stage,
-        "title": "Supervisor 상담 분석 리포트",
+        "title": _report_title_for_scenario(scenario),
         "summary": _conversation_summary(facts.get("raw_conversation", ""), scenario),
-        "sections": [
-            {
-                "title": "수집된 사실관계",
-                "items": _collected_fact_items(facts, slot_state=slot_state),
-            },
-            {
-                "title": "Slot filling 상태",
-                "items": _slot_state_items(slot_state),
-            },
-            {
-                "title": "역질문 필요 항목",
-                "items": missing_fields,
-            },
-            {
-                "title": "Agent 전달 입력",
-                "items": [
-                    {
-                        "node_code": package["node_code"],
-                        "owner": package["owner"],
-                        "status": package["status"],
-                        "missing_fields": package["missing_fields"],
-                    }
-                    for package in agent_input_packages
-                ],
-            },
-        ],
+        "quality": _report_quality(stage=stage, missing_fields=missing_fields),
+        "sections": _report_sections(
+            scenario=scenario,
+            facts=facts,
+            missing_fields=missing_fields,
+            agent_input_packages=agent_input_packages,
+            slot_state=slot_state,
+        ),
     }
+
+
+def _report_type_for_scenario(scenario: str) -> str:
+    if scenario == "fine_notice":
+        return "fine_notice_objection"
+    if scenario == "fault_ratio":
+        return "fault_ratio_analysis"
+    return "generic_supervisor"
+
+
+def _report_screen_id_for_scenario(scenario: str) -> str:
+    if scenario == "fine_notice":
+        return "UI-REPORT-FINE-001"
+    if scenario == "fault_ratio":
+        return "UI-REPORT-FAULT-001"
+    return "UI-REPORT-GENERIC-001"
+
+
+def _report_quality(
+    *,
+    stage: str,
+    missing_fields: list[dict[str, str]],
+) -> dict[str, Any]:
+    partial_report = bool(missing_fields) or stage not in {"agent_execution_ready", "success"}
+    return {
+        "partial_report": partial_report,
+        "review_required": True,
+        "confidence_label": "추가 자료 필요" if partial_report else "검토 가능",
+    }
+
+
+def _report_title_for_scenario(scenario: str) -> str:
+    if scenario == "fine_notice":
+        return "과태료·범칙금 대응 리포트"
+    if scenario == "fault_ratio":
+        return "사고 과실비율 분석 리포트"
+    if scenario == "law_question":
+        return "교통 법령 근거 리포트"
+    return "Supervisor 상담 분석 리포트"
+
+
+def _report_sections(
+    *,
+    scenario: str,
+    facts: dict[str, Any],
+    missing_fields: list[dict[str, str]],
+    agent_input_packages: list[dict[str, Any]],
+    slot_state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if scenario == "fine_notice":
+        return _fine_notice_report_sections(
+            facts=facts,
+            missing_fields=missing_fields,
+            agent_input_packages=agent_input_packages,
+            slot_state=slot_state,
+        )
+    if scenario == "fault_ratio":
+        return _fault_ratio_report_sections(
+            facts=facts,
+            missing_fields=missing_fields,
+            agent_input_packages=agent_input_packages,
+            slot_state=slot_state,
+        )
+    return _generic_report_sections(
+        facts=facts,
+        missing_fields=missing_fields,
+        agent_input_packages=agent_input_packages,
+        slot_state=slot_state,
+    )
+
+
+def _generic_report_sections(
+    *,
+    facts: dict[str, Any],
+    missing_fields: list[dict[str, str]],
+    agent_input_packages: list[dict[str, Any]],
+    slot_state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "title": "수집된 사실관계",
+            "items": _collected_fact_items(facts, slot_state=slot_state),
+        },
+        {
+            "title": "Slot filling 상태",
+            "items": _slot_state_items(slot_state),
+        },
+        {
+            "title": "역질문 필요 항목",
+            "items": missing_fields,
+        },
+        {
+            "title": "Agent 전달 입력",
+            "items": [
+                {
+                    "node_code": package["node_code"],
+                    "owner": package["owner"],
+                    "status": package["status"],
+                    "missing_fields": package["missing_fields"],
+                }
+                for package in agent_input_packages
+            ],
+        },
+    ]
+
+
+def _fault_ratio_report_sections(
+    *,
+    facts: dict[str, Any],
+    missing_fields: list[dict[str, str]],
+    agent_input_packages: list[dict[str, Any]],
+    slot_state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    _ = slot_state
+    accident_context = (
+        facts.get("accident_context")
+        or facts.get("raw_conversation")
+        or "사고 일시, 장소, 진행 방향 확인 필요"
+    )
+    road_context = facts.get("road_context") or "신호, 차선, 도로 구조 확인 필요"
+    movement_context = facts.get("movement_context") or "차량 A/B 진행 방향과 충돌 지점 확인 필요"
+    evidence = facts.get("evidence_status") or "블랙박스, 현장 사진, 보험 접수 자료 확인 필요"
+    missing_labels = [item["label"] for item in missing_fields if item.get("label")]
+    missing_text = ", ".join(missing_labels) if missing_labels else "핵심 입력은 1차 충족"
+    ready_nodes = [
+        package["node_code"]
+        for package in agent_input_packages
+        if package.get("status") == "ready"
+    ]
+    text_ml_package = next(
+        (
+            package
+            for package in agent_input_packages
+            if package.get("node_code") == "text_ml_case_search"
+        ),
+        {},
+    )
+    text_ml_status = text_ml_package.get("status") or "waiting_for_fields"
+
+    return [
+        {
+            "title": "사고 개요",
+            "items": [
+                _report_item("사고 상황", accident_context, "accident_context"),
+                _report_item("도로/신호 맥락", road_context, "road_context"),
+                _report_item("차량 진행 방향", movement_context, "movement_context"),
+                _report_item("보완 필요", missing_text),
+            ],
+        },
+        {
+            "title": "제출 자료",
+            "items": [
+                _report_item("현재 자료", evidence, "evidence_status"),
+                _report_item("권장 자료", "블랙박스 원본, 현장 사진, 보험 접수 내역, 상대 차량 진술"),
+                _report_item("자료 상태", "자료가 부족하면 partial_report로 표시하고 추가 제출 항목을 먼저 안내"),
+            ],
+        },
+        {
+            "title": "AI 분석 결과",
+            "items": [
+                _report_item("예상 과실비율 후보", "확정 수치가 아닌 예상 범위와 쟁점으로만 표시"),
+                _report_item("책임 방향", "신호, 일시정지, 진로 변경, 시야 제한 여부를 기준으로 검토"),
+                _report_item("주의 문구", "본 결과는 법적 확정 판단이 아니라 상담용 분석 초안"),
+            ],
+        },
+        {
+            "title": "판단 근거",
+            "items": [
+                _report_item("Agent 상태", text_ml_status),
+                _report_item("준비된 노드", ", ".join(ready_nodes) or "Agent 입력 대기"),
+                _report_item("적용 한계", "유사 사례와 보험 기준은 참고 근거이며 실제 판단과 다를 수 있음"),
+            ],
+        },
+        {
+            "title": "핵심 쟁점",
+            "items": [
+                _report_item("신호/우선권", "신호 유무, 선진입, 우선 통행권 확인"),
+                _report_item("차선/진로", "차선 변경, 교차로 진입 방향, 충돌 위치 확인"),
+                _report_item("속도/회피 가능성", "감속, 제동, 시야 제한, 회피 가능성 확인"),
+                _report_item("증거 부족 지점", missing_text),
+            ],
+        },
+        {
+            "title": "유사 사례·판례",
+            "items": [
+                _report_item("유사 사례 후보", "text_ml_case_search 결과와 RAG 근거를 연결해 표시"),
+                _report_item("표시 원칙", "유사 사례는 참고 근거로만 표시하고 법적 확정 판단처럼 표현하지 않음"),
+                _report_item("검증 필요", "최신 판례, 보험 기준, 사실관계 차이는 별도 확인 필요"),
+            ],
+        },
+        {
+            "title": "후속 조치",
+            "items": [
+                _report_item("추가 자료 요청", "블랙박스 원본, 사고 직후 사진, 보험사 접수 내역을 보완"),
+                _report_item("리포트 활용", "보험사 상담 또는 이의 제기 전 사실관계 검토용으로 사용"),
+                _report_item("다운로드 조건", "저장된 리포트 payload에 본 섹션들이 포함된 상태로 다운로드"),
+            ],
+        },
+    ]
+
+
+def _fine_notice_report_sections(
+    *,
+    facts: dict[str, Any],
+    missing_fields: list[dict[str, str]],
+    agent_input_packages: list[dict[str, Any]],
+    slot_state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    notice_text = facts.get("notice_or_disposition") or "고지서 원본 OCR 또는 처분 문구 확인 필요"
+    amount = facts.get("notice_amount") or "금액 OCR/고지서 확인 필요"
+    incident_at = facts.get("incident_at") or "위반 일시 확인 필요"
+    location = facts.get("location") or "위반 장소 확인 필요"
+    user_facts = facts.get("user_facts") or "이의제기 사유와 당시 상황 보완 필요"
+    evidence = facts.get("evidence_status") or "고지서 원본, 현장 사진, 블랙박스 등 증빙 확인 필요"
+    missing_labels = [item["label"] for item in missing_fields if item.get("label")]
+    objection_status = "검토 가능" if not missing_labels else "추가 자료 필요"
+    missing_text = ", ".join(missing_labels) if missing_labels else "필수 입력은 충족된 상태"
+    ready_nodes = [
+        package["node_code"]
+        for package in agent_input_packages
+        if package.get("status") == "ready"
+    ]
+
+    return [
+        {
+            "title": "고지서 OCR 결과",
+            "items": [
+                _report_item("처분 내용", notice_text, "notice_or_disposition"),
+                _report_item("위반 일시", incident_at, "incident_at"),
+                _report_item("위반 장소", location, "location"),
+                _report_item("고지 금액", amount, "notice_amount"),
+            ],
+        },
+        {
+            "title": "처분 결과",
+            "items": [
+                _report_item("처분 유형", "과태료·범칙금 고지서 분석 흐름"),
+                _report_item("현재 상태", "의견제출 또는 이의신청 검토 단계"),
+                _report_item("의견제출 기한", "고지서 납부·의견제출 기한을 원본에서 재확인 필요"),
+            ],
+        },
+        {
+            "title": "이의제기 가능성",
+            "items": [
+                _report_item("판단", objection_status),
+                _report_item("주요 사유", user_facts, "user_facts"),
+                _report_item("보완 필요", missing_text),
+            ],
+        },
+        {
+            "title": "필요 증거",
+            "items": [
+                _report_item("현재 증빙", evidence, "evidence_status"),
+                _report_item("현장 자료", "표지판, 노면 표시, 차량 위치, 정차 시간이 함께 보이는 사진"),
+                _report_item("운전자 진술", "정차 사유, 정차 시간, 긴급성 또는 불가피성을 시간 순서로 정리"),
+                _report_item("고지서 원본", "처분 기관, 고지 번호, 금액, 기한이 보이는 원본"),
+            ],
+        },
+        {
+            "title": "관련 법령·판례 근거",
+            "items": [
+                _report_item("검색 쿼리", _law_search_query_for_fine_notice(facts)),
+                _report_item("적용 한계", "실제 법령·판례 RAG 결과 연결 전에는 최신성 확인이 필요"),
+                _report_item("Agent 상태", ", ".join(ready_nodes) or "Agent 입력 대기"),
+            ],
+        },
+        {
+            "title": "예상 결과와 유의사항",
+            "items": [
+                _report_item("수용 가능성", "입증 자료가 충분하면 처분 전 의견제출 또는 감경 검토 가능"),
+                _report_item("기각 리스크", "표지·위반 사실이 명확하거나 긴급성이 부족하면 기각될 수 있음"),
+                _report_item("주의", "확정 판단이 아니라 제출 전 검토용 분석입니다."),
+            ],
+        },
+        {
+            "title": "이의신청서 초안",
+            "items": [
+                _report_item("제목", "과태료 부과 처분 의견제출서 또는 이의신청서 초안"),
+                _report_item("제출 대상", "고지서에 표시된 처분 기관"),
+                _report_item("사실관계", f"{incident_at} {location}에서 {user_facts}"),
+                _report_item("신청 취지", "고지 내용과 실제 정차 사유를 재확인해 처분 취소 또는 감경을 요청합니다."),
+                _report_item("첨부 자료", evidence),
+                _report_item("검토 안내", "본 문서는 제출 전 사용자가 사실관계와 관할 기관 요구 양식을 확인해야 하는 초안입니다."),
+            ],
+        },
+        {
+            "title": "제출 가이드라인",
+            "items": [
+                _report_item("1단계", "고지서 원본의 기관, 기한, 고지 번호를 확인합니다."),
+                _report_item("2단계", "현장 사진과 블랙박스 원본 등 첨부 자료명을 초안에 맞춥니다."),
+                _report_item("3단계", "주장 문구는 감정 표현보다 시간, 장소, 사유 중심으로 정리합니다."),
+                _report_item("4단계", "제출 전 관할 기관 양식과 접수 방법을 다시 확인합니다."),
+            ],
+        },
+    ]
+
+
+def _report_item(label: str, value: Any, field: str | None = None) -> dict[str, Any]:
+    item = {
+        "label": label,
+        "value": value,
+    }
+    if field:
+        item["field"] = field
+    return item
 
 
 def _supervisor_cards(
@@ -1014,7 +1330,7 @@ def _supervisor_cards(
         1 for item in supervisor_state["agent_input_packages"] if item["status"] == "ready"
     )
     total_count = len(supervisor_state["agent_input_packages"])
-    return [
+    cards = [
         {
             "card_type": "supervisor_summary",
             "title": "Supervisor 대화 분석",
@@ -1029,7 +1345,9 @@ def _supervisor_cards(
             "summary": f"{total_count}개 노드 중 {ready_count}개 입력 패키지가 바로 실행 가능한 상태입니다.",
             "evidence_refs": [],
         },
-        {
+    ]
+    if _supervisor_report_ready(supervisor_state):
+        cards.append({
             "card_type": "reporting_preview",
             "title": "프론트 리포팅 반영",
             "status": "success" if not supervisor_state["missing_fields"] else "partial",
@@ -1039,8 +1357,16 @@ def _supervisor_cards(
                 else "리포팅 payload를 생성했습니다."
             ),
             "evidence_refs": [],
-        },
-    ]
+        })
+    return cards
+
+
+def _supervisor_report_ready(supervisor_state: dict[str, Any]) -> bool:
+    return (
+        supervisor_state.get("stage") == "agent_execution_ready"
+        and not supervisor_state.get("missing_fields")
+        and not supervisor_state.get("next_questions")
+    )
 
 
 def build_analysis_plan(
@@ -1136,12 +1462,22 @@ def _infer_scenario(payload: dict[str, Any]) -> str:
     text = _conversation_text(payload)
     if "리포트" in text or "다운로드" in text or "내려받" in text or "내 사건" in text:
         return "report_redownload"
+    if (
+        "과실비율" in text
+        or "과실" in text
+        or "판례" in text
+        or "유사 사례" in text
+        or "유사사례" in text
+        or "심의사례" in text
+        or "사고" in text
+        or "접촉" in text
+        or "충돌" in text
+    ):
+        return "fault_ratio"
     if "법령" in text or "조문" in text or "근거" in text or "도로교통법" in text:
         return "law_question"
     if "고지서" in text or "과태료" in text or "범칙금" in text or "이의" in text:
         return "fine_notice"
-    if "과실" in text or "사고" in text or "접촉" in text or "충돌" in text:
-        return "fault_ratio"
     return "fine_notice"
 
 
@@ -1410,6 +1746,21 @@ def _law_search_query_for_fine_notice(facts: dict[str, Any]) -> str:
     return f"{base} 의견제출 근거"
 
 
+def _fault_ratio_user_facts(facts: dict[str, Any]) -> str:
+    def _normalize(value: Any) -> str:
+        return str(value).strip() if value is not None else ""
+
+    parts = [
+        _normalize(facts.get("accident_context")),
+        _normalize(facts.get("movement_context")),
+        _normalize(facts.get("road_context")),
+    ]
+    merged = " / ".join(part for part in parts if part)
+    if merged:
+        return merged
+    return _normalize(facts.get("raw_conversation"))
+
+
 def _plan_steps_for_persona(persona_run: dict[str, Any], requested_status: str) -> list[dict[str, Any]]:
     expected_nodes = ["input_context_validation"] + [
         node_code
@@ -1475,7 +1826,13 @@ def _plan_steps_for_scenario(scenario: str, requested_status: str) -> list[dict[
             _step(1, "input_context_validation", [], "missing_input_question"),
             _step(2, "text_ml_case_search", ["input_context_validation"], "pending_questions"),
             _step(3, "law_ground_search", ["text_ml_case_search"], "limitations"),
-            _step(4, "agent_result_validation", ["text_ml_case_search"], "limitations"),
+            _step(
+                4,
+                "objection_report_generation",
+                ["text_ml_case_search", "law_ground_search"],
+                "pending_questions",
+            ),
+            _step(5, "agent_result_validation", ["objection_report_generation"], "limitations"),
         ]
     else:
         base_steps = [
@@ -1499,10 +1856,10 @@ def _plan_steps_for_scenario(scenario: str, requested_status: str) -> list[dict[
     }
     if scenario == "fault_ratio":
         status_patterns = {
-            "success": ["success", "success", "partial", "success"],
-            "partial": ["success", "partial", "blocked", "blocked"],
-            "pending": ["running", "blocked", "blocked", "blocked"],
-            "failed": ["failed", "skipped", "skipped", "skipped"],
+            "success": ["success", "success", "partial", "partial", "success"],
+            "partial": ["success", "partial", "blocked", "blocked", "blocked"],
+            "pending": ["running", "blocked", "blocked", "blocked", "blocked"],
+            "failed": ["failed", "skipped", "skipped", "skipped", "skipped"],
         }
     elif scenario == "law_question":
         status_patterns = {
@@ -1547,9 +1904,9 @@ def _required_inputs_for_node(node_code: str) -> list[str]:
         "fine_notice_analysis": ["attachments[purpose=fine_notice]|user_text"],
         "law_ground_search": ["law_code|violation_text|search_query"],
         "objection_report_generation": [
-            "notice_analysis_result",
+            "notice_analysis_result|text_ml_case_result",
             "law_ground_result",
-            "user_facts",
+            "user_facts|query_text",
         ],
         "text_ml_case_search": ["query_text|accident_context"],
         "vision_media_analysis": ["attachments[purpose=accident_scene|blackbox_video|evidence]"],

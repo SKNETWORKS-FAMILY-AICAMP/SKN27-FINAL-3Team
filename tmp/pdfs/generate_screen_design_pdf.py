@@ -27,7 +27,7 @@ from reportlab.platypus import (
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "docs" / "screen-design-specification.md"
-OUTPUT = ROOT / "output" / "pdf" / "screen-design-specification-v0.2-compressed.pdf"
+OUTPUT = ROOT / "output" / "pdf" / "화면설계서_27기_3팀_최신화면_Git반영_상세리포팅유지_2026-07-06.pdf"
 IMAGE_CACHE_DIR = ROOT / "tmp" / "pdfs" / "optimized-images"
 IMAGE_MAX_WIDTH_PX = 1800
 IMAGE_JPEG_QUALITY = 76
@@ -415,7 +415,7 @@ def on_page(canvas, doc) -> None:
     canvas.saveState()
     canvas.setFont(FONT, 7)
     canvas.setFillColor(colors.HexColor("#6b7280"))
-    canvas.drawString(doc.leftMargin, 8 * mm, "교통분쟁 AI 서비스 화면설계서 v0.2")
+    canvas.drawString(doc.leftMargin, 8 * mm, "교통분쟁 AI 서비스 화면설계서 v0.5")
     canvas.drawRightString(PAGE_SIZE[0] - doc.rightMargin, 8 * mm, str(doc.page))
     canvas.restoreState()
 
@@ -450,7 +450,7 @@ def build_pdf() -> None:
         leftMargin=12 * mm,
         topMargin=12 * mm,
         bottomMargin=16 * mm,
-        title="교통분쟁 AI 서비스 화면설계서 v0.2",
+        title="교통분쟁 AI 서비스 화면설계서 v0.5",
         author="Codex",
         subject="화면설계서 PDF",
     )

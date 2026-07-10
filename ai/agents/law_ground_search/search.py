@@ -1,5 +1,7 @@
 from typing import Any
 
+LAW_GRAPH_EXPANSION_RELATION_TYPES = ["HAS_PENALTY", "HAS_APPENDIX", "HAS_EXCEPTION", "RELATED_TO"]
+
 def search_law_provisions(
     query_text: str,
     article_refs: list[str],
@@ -29,6 +31,9 @@ def search_law_provisions(
         print(f"[Warning] Vector Search 실패: {e}")
         core_provisions = []
 
+    if not core_provisions:
+        core_provisions = _search_fallback_legal_rag(query_text=query_text, top_k=top_k)
+
     # Temporal & Scope 검증 (초반 필터)
     # 실제 구현에서는 rule_guard를 통해 거르거나 쿼리 시점에 필터링합니다.
     
@@ -38,6 +43,45 @@ def search_law_provisions(
         core_provisions = _expand_with_law_graph(core_provisions, article_refs, neo4j_session, core_scores)
 
     return core_provisions
+
+def _search_fallback_legal_rag(query_text: str, top_k: int) -> list[dict[str, Any]]:
+    """Django RAG tables fallback for local/dev environments without pgvector."""
+    try:
+        from app.services import legal_rag_service
+
+        rag_response = legal_rag_service.search_legal_rag(
+            query_text,
+            top_k=top_k,
+            source_type="law",
+        )
+    except Exception as e:
+        print(f"[Warning] Django RAG fallback 실패: {e}")
+        return []
+
+    if rag_response.get("status") != "ready":
+        return []
+
+    provisions = []
+    backend = rag_response.get("backend") or "django_rag_tables"
+    for item in rag_response.get("results") or []:
+        source_reference = item.get("source_reference") or item.get("chunk_id") or ""
+        provisions.append(
+            {
+                "chunk_id": source_reference,
+                "source_ref": source_reference,
+                "source_name": item.get("source_name"),
+                "source_type": item.get("source_type") or "law",
+                "article_no": item.get("article") or item.get("section_ref"),
+                "appendix_no": None,
+                "article_title": item.get("title"),
+                "provision_text": item.get("summary") or "",
+                "source_url": item.get("source_url") or "",
+                "retrieval_score": item.get("score", 0.0),
+                "score": item.get("score", 0.0),
+                "match_reason": f"legal_rag_fallback:{backend}",
+            }
+        )
+    return provisions
 
 def evaluate_confidence(provisions: list[dict[str, Any]]) -> dict[str, Any]:
     if not provisions:
@@ -70,13 +114,14 @@ def _expand_with_law_graph(core_provisions: list[dict], article_refs: list[str],
         query_graph = """
         UNWIND $chunk_ids AS cid
         MATCH (c1:LawChunk {chunk_id: cid})-[r]-(c2:LawChunk)
-        WHERE type(r) IN ['HAS_PENALTY', 'HAS_APPENDIX', 'HAS_EXCEPTION', 'RELATED_TO']
-        RETURN cid, c2 LIMIT 100
+        WHERE type(r) IN $relation_types
+        RETURN cid, type(r) AS relation_type, c2 LIMIT 100
         """
         try:
-            result = session.run(query_graph, chunk_ids=chunk_ids)
+            result = session.run(query_graph, chunk_ids=chunk_ids, relation_types=LAW_GRAPH_EXPANSION_RELATION_TYPES)
             for record in result:
                 cid = record["cid"]
+                relation_type = record["relation_type"]
                 node = record["c2"]
                 base_score = core_scores.get(cid, 0.5)
                 expanded_chunks.append({
@@ -90,7 +135,7 @@ def _expand_with_law_graph(core_provisions: list[dict], article_refs: list[str],
                     "source_type": node.get("source_type"),
                     "source_url": node.get("source_url"),
                     "retrieval_score": base_score * 0.9, # 원본 조문 대비 감가
-                    "match_reason": "graph_expansion"
+                    "match_reason": f"graph_expansion:{relation_type}"
                 })
         except Exception as e:
             print(f"[Warning] Neo4j Law Graph 확장 실패: {e}")
@@ -128,7 +173,7 @@ def _expand_with_law_graph(core_provisions: list[dict], article_refs: list[str],
     # 중복 제거 (chunk_id 기준)
     seen = {p["chunk_id"] for p in core_provisions if "chunk_id" in p}
     for chunk in expanded_chunks:
-        if chunk["chunk_id"] not in seen:
+        if chunk.get("chunk_id") and chunk["chunk_id"] not in seen:
             core_provisions.append(chunk)
             seen.add(chunk["chunk_id"])
             

@@ -154,8 +154,8 @@ def _run_fault_ratio_knowledge_agent(
     if not isinstance(raw_output, dict):
         return None
 
-    structured_result = _knowledge_structured_result(raw_output, query_text)
     evidence = _knowledge_evidence(raw_output)
+    structured_result = _knowledge_structured_result(raw_output, query_text)
     limitations = [
         str(item)
         for item in raw_output.get("limitations", []) + adapter_notes

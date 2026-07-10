@@ -37,6 +37,9 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
         "readStoredAuthSession",
         "clearStoredAuthSession",
         "AUTH_SESSION_STORAGE_KEY",
+        "shouldUseLocalMockGoogleAuth",
+        "VITE_GOOGLE_LOCAL_AUTH_MODE",
+        "isLocalDevelopmentOrigin",
     ]
 
     missing = [token for token in required_tokens if token not in content]
@@ -51,10 +54,17 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     assert "processFileScan" in api_client
     assert "processAgentWorkItems" in api_client
     assert "getAnalysisJobDetail" in api_client
+    assert "downloadReport" in api_client
+    assert "getBlob" in api_client
+    assert "filenameFromContentDisposition" in api_client
     assert "FormData" in api_client
     assert "postFormData" in api_client
     assert 'from "./apiClient.js"' in chatbot
     assert 'from "./authSession.js"' in chatbot
+    assert "shouldUseLocalMockGoogleAuth({ localAuthMode })" in auth_session
+    assert 'normalizedGoogleLocalAuthMode(localAuthMode) !== "real"' in auth_session
+    assert 'hostname === "localhost"' in auth_session
+    assert 'hostname === "127.0.0.1"' in auth_session
 
 
 def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
@@ -77,11 +87,12 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
 
     assert "fine-result" not in shell
     assert "FineResult" not in shell
-    assert 'const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";' in shell
+    assert 'const effectiveAuthToken = activeAuthToken || authToken || "";' in shell
     assert "storedAuthSession.session_id" in shell
     assert "storedAuthSession.guest_id" in shell
     assert "storedAuthSession.auth_session_id" in shell
     assert "loginAndBindCurrentSession" in shell
+    assert 'const sessionLabel = authSessionId ? "Google 계정 상담"' in shell
     assert "ensureGuestSession" in shell
     assert "pendingAuthAction" in shell
     assert 'source: "attachment_upload"' in shell
@@ -91,6 +102,9 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "conversation_history" in shell
     assert "SupervisorFlowPanel" in shell
     assert "ReportingPreviewPanel" in shell
+    assert "report-document-highlights" in shell
+    assert "isSubmissionDocumentSection" in shell
+    assert "제출 문서" in shell
     assert "FaultRatioInsightPanel" in shell
     assert "fault-ratio-insight-panel" in shell
     assert "similar_cases" in shell
@@ -103,6 +117,18 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "processFileScan" in shell
     assert "scan_status" in shell
     assert "runReportAction" in shell
+    assert "triggerReportDownload" in shell
+    assert "api.downloadReport" in shell
+    assert "URL.createObjectURL" in shell
+    assert "reporting_payload: reportingPayload" in shell
+    assert "prepareMissingEvidenceUpload" in shell
+    assert "prepareDraftRegeneration" in shell
+    assert "selectedInspectorMode" in shell
+    assert "reportInspectorDetail" in shell
+    assert "reportSectionsForInspector" in shell
+    assert "누락 자료 추가" in shell
+    assert "초안 재생성" in shell
+    assert "onRunReportAction={runCurrentReportAction}" in shell
     assert "ReportActionPanel" in shell
     assert "registeredAttachments" in shell
     assert "selectedUploadFile" in shell
@@ -124,11 +150,18 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "setExecutionMode" in shell
     assert "execution_mode: executionMode" in shell
     assert "execution-mode-control" in shell
-    assert 'const [executionMode, setExecutionMode] = useState("async_worker");' in shell
-    assert '["async_worker", "mock", "sync"]' in shell
+    assert 'const [executionMode, setExecutionMode] = useState("sync");' in shell
+    assert '["sync", "async_worker", "mock"]' in shell
     assert "processQueuedWorkerResult" in shell
     assert "pollQueuedWorkerResult" in shell
     assert "const workerResult = await pollQueuedWorkerResult(result, submitIdentity);" in shell
+    assert "canSaveGuestConversation" in shell
+    assert "workerResult?.persistence?.job_id || workerResult?.session_id || workerResult?.message_id" in shell
+    assert "guestDetailedReportUsed" in shell
+    assert 'source: "guest_followup_question"' in shell
+    assert "비로그인 상담은 1회 리포팅까지 제공됩니다." in shell
+    assert "saveConversationWithGoogle" in shell
+    assert "현재 상태로 저장하거나 답변을 이어갈 수 있습니다." in shell
     assert "getAnalysisJobDetail" in shell
     assert "worker_progress_polling.v1" in shell
     assert "processAgentWorkItems" in shell
@@ -136,6 +169,29 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "worker progress" in shell
     assert "reportQuality" in shell
     assert "report-quality-panel" in shell
+    assert "openSavedCase" in shell
+    assert "onOpenCase={openSavedCase}" in shell
+    assert "restoreConversationMessages" in shell
+    assert "restoreAnalysisResponse" in shell
+    assert "restoreCurrentReport" in shell
+    assert "저장된 상담을 현재 대화로 다시 열었습니다." in shell
+    assert "latest_report_id" in shell
+    assert "내 사건에서 저장된 리포트를 열었습니다." in shell
+    assert 'const [selectedPersonaId, setSelectedPersonaId] = useState("");' in shell
+    assert "<details className=\"persona-control-panel\"" in shell
+    assert "개발용 Agent 점검" in shell
+    assert "Traffic Dispute AI" in shell
+    assert "비회원 1회 리포팅 가능" in shell
+    assert "activeReportingPayload || analysisCards.length || supervisorExecution || currentReport || hasSavedReports" in shell
+    assert "isReportingPayloadReady" in shell
+    assert "visibleReportingPayload" in shell
+    assert "download_report" in shell
+    assert "download_objection" in shell
+    assert "documentType" in shell or "document_type: documentType" in api_client
+    assert "onLogout={logoutAndResetSession}" in shell
+    assert "리포트 PDF" in shell
+    assert "이의신청서 PDF" in shell
+    assert "report-inspector-detail" in shell
     assert "data-partial-report" in shell
     assert "partial_report" in shell
     assert "ready_report" in shell
@@ -152,6 +208,11 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
 def test_vite_proxy_does_not_capture_frontend_api_client_module():
     config = read_text(ROOT / "app" / "web" / "vite.config.js")
 
+    assert 'const repoRoot = resolve(appWebDir, "../..");' in config
+    assert 'loadEnv(mode, repoRoot, "VITE_")' in config
+    assert "envDir: repoRoot" in config
+    assert '"http://127.0.0.1:8010"' in config
+    assert '"http://127.0.0.1:8000"' not in config
     assert 'const apiProxyPrefix = "^/api(/|$)";' in config
     assert "[apiProxyPrefix]: apiProxyTarget" in config
     assert '"/api": apiProxyTarget' not in config

@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+from typing import Final
+
+
+STATUS_SUCCESS: Final = "success"
+STATUS_PARTIAL: Final = "partial"
+STATUS_FAILED: Final = "failed"
+OUTPUT_STATUS_UNKNOWN: Final = "unknown"
+
+DOCUMENT_TYPE_TRAFFIC_ACCIDENT_CONFIRMATION: Final = "traffic_accident_confirmation"
+DOCUMENT_TYPE_UNKNOWN: Final = "unknown"
+
+FAILURE_REASON_UNSUPPORTED_FILE_TYPE: Final = "unsupported_file_type"
+FAILURE_REASON_INVALID_IMAGE_PAYLOAD: Final = "invalid_image_payload"
+FAILURE_REASON_NOT_TARGET_DOCUMENT: Final = "not_target_document"
+FAILURE_REASON_PAGE_1_NOT_FOUND: Final = "page_1_not_found"
+FAILURE_REASON_LOW_IMAGE_QUALITY: Final = "low_image_quality"
+FAILURE_REASON_OCR_FAILED: Final = "ocr_failed"
+FAILURE_REASON_PRIVACY_FILTER_FAILED: Final = "privacy_filter_failed"
+
+IMAGE_QUALITY_READABLE: Final = "readable"
+IMAGE_QUALITY_LOW: Final = "low"
+IMAGE_QUALITY_UNREADABLE: Final = "unreadable"
+IMAGE_QUALITY_UNKNOWN: Final = "unknown"
+
+SCENE_DIAGRAM_NOT_PROVIDED: Final = "not_provided"
+SCENE_DIAGRAM_DEFERRED: Final = "deferred"
+
+STATUS_VALUES: Final = (
+    STATUS_SUCCESS,
+    STATUS_PARTIAL,
+    STATUS_FAILED,
+)
+
+FAILURE_REASON_VALUES: Final = (
+    FAILURE_REASON_UNSUPPORTED_FILE_TYPE,
+    FAILURE_REASON_INVALID_IMAGE_PAYLOAD,
+    FAILURE_REASON_NOT_TARGET_DOCUMENT,
+    FAILURE_REASON_PAGE_1_NOT_FOUND,
+    FAILURE_REASON_LOW_IMAGE_QUALITY,
+    FAILURE_REASON_OCR_FAILED,
+    FAILURE_REASON_PRIVACY_FILTER_FAILED,
+)

@@ -58,6 +58,7 @@ class Command(BaseCommand):
                 "without Elasticsearch RAG",
                 "Elasticsearch RAG unavailable",
                 "Elasticsearch ping failed",
+                "No review_case RAG chunks were available",
             )
         )
         similar_cases = structured_result.get("similar_cases")
@@ -69,6 +70,7 @@ class Command(BaseCommand):
             "adapter_execution_mode": (execution.get("adapter_context") or {}).get("execution_mode"),
             "agent_status": agent_output.get("status"),
             "adapter_source": retrieval.get("adapter_source"),
+            "retrieval_backend": retrieval.get("backend"),
             "ratio_range_label": structured_result.get("ratio_range_label"),
             "similar_case_count": len(similar_cases) if isinstance(similar_cases, list) else 0,
             "recommended_evidence_count": len(recommended_evidence) if isinstance(recommended_evidence, list) else 0,
@@ -101,6 +103,7 @@ def _text_result(result: dict) -> str:
             f"- adapter_execution_mode: {result.get('adapter_execution_mode')}",
             f"- agent_status: {result.get('agent_status')}",
             f"- adapter_source: {result.get('adapter_source')}",
+            f"- retrieval_backend: {result.get('retrieval_backend')}",
             f"- ratio_range_label: {result.get('ratio_range_label')}",
             f"- similar_case_count: {result.get('similar_case_count')}",
             f"- recommended_evidence_count: {result.get('recommended_evidence_count')}",

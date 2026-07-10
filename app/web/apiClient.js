@@ -66,6 +66,23 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     runReportAction(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "reports/"), payload, identity);
     },
+    listReports({ sessionId, identity } = {}) {
+      const url = withQuery(joinApiPath(apiBase, "reports/"), { session_id: sessionId });
+      return getJson(url, identity);
+    },
+    getReportDetail({ reportId, sessionId, identity } = {}) {
+      const url = withQuery(joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/`), {
+        session_id: sessionId,
+      });
+      return getJson(url, identity);
+    },
+    downloadReport({ reportId, sessionId, identity, documentType } = {}) {
+      const url = withQuery(joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/download/`), {
+        session_id: sessionId,
+        document_type: documentType,
+      });
+      return getBlob(url, identity);
+    },
     getMyPageSummary({ sessionId, identity } = {}) {
       const url = withQuery(joinApiPath(apiBase, "mypage/summary/"), { session_id: sessionId });
       return getJson(url, identity);
@@ -115,6 +132,23 @@ export async function getJson(url, identity = {}) {
   return parseJsonResponse(response);
 }
 
+export async function getBlob(url, identity = {}) {
+  const response = await fetch(url, {
+    method: "GET",
+    headers: buildRequestHeaders(identity),
+  });
+
+  if (!response.ok) {
+    await parseJsonResponse(response);
+  }
+
+  return {
+    blob: await response.blob(),
+    contentType: response.headers.get("Content-Type") || "application/octet-stream",
+    filename: filenameFromContentDisposition(response.headers.get("Content-Disposition")),
+  };
+}
+
 export function buildRequestHeaders(
   { authToken, guestId, authSessionId } = {},
   { includeContentType = false } = {}
@@ -156,10 +190,33 @@ export function withQuery(url, params = {}) {
 }
 
 async function parseJsonResponse(response) {
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+  let payload = null;
+  try {
+    payload = await response.clone().json();
+  } catch (_error) {
+    payload = null;
   }
-  return response.json();
+
+  if (!response.ok) {
+    const error = payload?.error || {};
+    const reason = error?.auth?.reason || error?.reason || error?.code || response.statusText;
+    throw new Error(`Request failed: ${response.status}${reason ? ` ${reason}` : ""}`);
+  }
+  return payload ?? response.json();
+}
+
+function filenameFromContentDisposition(value) {
+  const header = String(value || "");
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1].replace(/"/g, ""));
+    } catch (_error) {
+      return encoded[1].replace(/"/g, "");
+    }
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain?.[1] || "";
 }
 
 function trimTrailingSlash(value) {
