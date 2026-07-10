@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>교통분쟁 AI · UI/UX 리디자인 제안</title>
+  <style>
+    :root {
+      --ink: #14263d;
+      --muted: #607086;
+      --subtle: #8794a6;
+      --line: #dbe3ee;
+      --line-strong: #c7d2e2;
+      --surface: #ffffff;
+      --canvas: #f3f6fa;
+      --navy: #14263d;
+      --blue: #235ee7;
+      --blue-dark: #1746b5;
+      --blue-soft: #eaf0ff;
+      --teal: #087d68;
+      --teal-soft: #e7f6f2;
+      --amber: #b96500;
+      --amber-soft: #fff3de;
+      --red: #b83d4a;
+      --red-soft: #fff0f1;
+      --shadow: 0 18px 48px rgba(30, 54, 84, 0.10);
+      --shadow-sm: 0 8px 24px rgba(30, 54, 84, 0.07);
+      --radius-lg: 22px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--canvas); }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      line-height: 1.5;
+      word-break: keep-all;
+    }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    h1, h2, h3, h4, p { margin: 0; }
+    a { color: inherit; text-decoration: none; }
+    svg { display: block; }
+
+    .screen { display: none; min-height: 100vh; }
+    body[data-view="home"] [data-screen="home"],
+    body[data-view="workspace"] [data-screen="workspace"],
+    body[data-view="report"] [data-screen="report"],
+    body[data-view="intake"] [data-screen="intake"] { display: block; }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      font-weight: 900;
+      letter-spacing: -0.03em;
+    }
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      color: #fff;
+      background: linear-gradient(145deg, #285fe4, #087d68);
+      box-shadow: 0 7px 18px rgba(35, 94, 231, 0.25);
+      font-size: 13px;
+      letter-spacing: -0.05em;
+    }
+    .brand-copy { display: grid; line-height: 1.15; }
+    .brand-copy small { color: var(--subtle); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; }
+
+    .topbar {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid rgba(199, 210, 226, 0.9);
+      background: rgba(255,255,255,0.94);
+      backdrop-filter: blur(16px);
+    }
+    .topbar-inner {
+      width: min(1280px, calc(100% - 48px));
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .topnav { display: flex; align-items: center; gap: 8px; }
+    .nav-link {
+      min-height: 42px;
+      padding: 10px 14px;
+      display: inline-flex;
+      align-items: center;
+      border-radius: 10px;
+      color: var(--muted);
+      font-weight: 800;
+      font-size: 14px;
+    }
+    .nav-link.active { color: var(--navy); background: #eef2f7; }
+    .button {
+      min-height: 46px;
+      padding: 11px 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      color: var(--navy);
+      background: #fff;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .button.primary { border-color: var(--blue); color: #fff; background: var(--blue); box-shadow: 0 8px 20px rgba(35,94,231,.18); }
+    .button.teal { border-color: var(--teal); color: #fff; background: var(--teal); }
+    .button.soft { border-color: transparent; color: var(--blue); background: var(--blue-soft); }
+    .button.full { width: 100%; }
+    .button.small { min-height: 38px; padding: 8px 12px; border-radius: 9px; font-size: 13px; }
+    .icon-button { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
+
+    /* Home */
+    .home { background: #fff; }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      min-height: 610px;
+      background:
+        radial-gradient(circle at 82% 16%, rgba(35,94,231,.12), transparent 30%),
+        radial-gradient(circle at 91% 68%, rgba(8,125,104,.12), transparent 27%),
+        linear-gradient(180deg, #fff 0%, #f7f9fd 100%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background-image: linear-gradient(rgba(35,94,231,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(35,94,231,.035) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(90deg, transparent, #000 58%);
+    }
+    .hero-inner {
+      position: relative;
+      z-index: 1;
+      width: min(1280px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 74px 0 66px;
+      display: grid;
+      grid-template-columns: 1.02fr .98fr;
+      align-items: center;
+      gap: 72px;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      width: fit-content;
+      padding: 7px 11px;
+      border-radius: 999px;
+      color: var(--teal);
+      background: var(--teal-soft);
+      font-size: 13px;
+      font-weight: 900;
+    }
+    .eyebrow-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--teal); }
+    .hero h1 {
+      max-width: 660px;
+      margin-top: 19px;
+      font-size: clamp(42px, 4vw, 62px);
+      line-height: 1.14;
+      letter-spacing: -0.055em;
+    }
+    .hero h1 em { color: var(--blue); font-style: normal; }
+    .hero-copy { max-width: 620px; margin-top: 22px; color: var(--muted); font-size: 18px; line-height: 1.72; letter-spacing: -0.018em; }
+    .hero-actions { margin-top: 30px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .hero-note { margin-top: 16px; display: flex; align-items: center; gap: 8px; color: var(--subtle); font-size: 13px; }
+    .trust-check { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 999px; color: #fff; background: var(--teal); font-size: 11px; font-weight: 900; }
+
+    .case-preview {
+      position: relative;
+      padding: 18px;
+      border: 1px solid rgba(199,210,226,.85);
+      border-radius: 26px;
+      background: rgba(255,255,255,.86);
+      box-shadow: 0 26px 70px rgba(30,54,84,.16);
+    }
+    .preview-top { display: flex; align-items: center; justify-content: space-between; padding: 7px 6px 16px; }
+    .preview-top strong { font-size: 15px; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 999px; color: var(--teal); background: var(--teal-soft); font-size: 11px; font-weight: 900; }
+    .status-pill.warning { color: var(--amber); background: var(--amber-soft); }
+    .preview-card { overflow: hidden; border: 1px solid var(--line); border-radius: 17px; background: #fff; }
+    .preview-summary { padding: 20px; display: grid; grid-template-columns: 1fr auto; gap: 16px; border-bottom: 1px solid var(--line); background: linear-gradient(145deg, #f7f9ff, #fff); }
+    .preview-summary small { color: var(--muted); font-weight: 700; }
+    .preview-summary h3 { margin-top: 5px; font-size: 20px; letter-spacing: -0.035em; }
+    .deadline-box { min-width: 98px; padding: 11px 13px; border-radius: 12px; color: var(--amber); background: var(--amber-soft); text-align: center; }
+    .deadline-box strong { display: block; font-size: 24px; line-height: 1.1; }
+    .deadline-box small { color: inherit; font-size: 11px; }
+    .preview-body { padding: 18px 20px 20px; }
+    .preview-insight { padding: 15px; border-radius: 13px; background: var(--teal-soft); }
+    .preview-insight span { color: var(--teal); font-size: 12px; font-weight: 900; }
+    .preview-insight p { margin-top: 6px; color: var(--navy); font-size: 14px; font-weight: 800; }
+    .mini-timeline { margin-top: 16px; display: grid; gap: 12px; }
+    .timeline-row { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 10px; }
+    .timeline-no { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; color: #fff; background: var(--blue); font-size: 11px; font-weight: 900; }
+    .timeline-row p { color: var(--navy); font-size: 13px; font-weight: 800; }
+    .timeline-row small { color: var(--subtle); font-size: 11px; }
+    .preview-cta { margin-top: 18px; min-height: 44px; border-radius: 10px; color: #fff; background: var(--blue); display: grid; place-items: center; font-weight: 900; font-size: 14px; }
+    .float-badge { position: absolute; right: -18px; bottom: 50px; padding: 12px 15px; display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: var(--shadow-sm); font-size: 12px; font-weight: 900; }
+    .float-icon { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 9px; color: var(--teal); background: var(--teal-soft); }
+
+    .home-section { width: min(1280px, calc(100% - 48px)); margin: 0 auto; padding: 74px 0; }
+    .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
+    .section-heading h2 { font-size: 32px; letter-spacing: -0.045em; }
+    .section-heading p { max-width: 580px; color: var(--muted); }
+    .service-grid { margin-top: 28px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .service-card { padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: var(--shadow-sm); }
+    .service-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; color: var(--blue); background: var(--blue-soft); font-weight: 900; }
+    .service-card:nth-child(2) .service-icon { color: var(--teal); background: var(--teal-soft); }
+    .service-card:nth-child(3) .service-icon { color: var(--amber); background: var(--amber-soft); }
+    .service-card h3 { margin-top: 18px; font-size: 19px; letter-spacing: -0.03em; }
+    .service-card p { margin-top: 8px; color: var(--muted); font-size: 14px; line-height: 1.65; }
+    .service-link { margin-top: 18px; display: inline-flex; color: var(--blue); font-size: 13px; font-weight: 900; }
+    .trust-strip { display: grid; grid-template-columns: 1.1fr repeat(3, 1fr); gap: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--navy); color: #fff; }
+    .trust-title { padding: 24px; font-weight: 900; }
+    .trust-item { padding: 24px; border-left: 1px solid rgba(255,255,255,.12); }
+    .trust-item strong { display: block; font-size: 14px; }
+    .trust-item span { margin-top: 4px; display: block; color: #b9c5d4; font-size: 12px; }
+
+    /* App shell */
+    .app-shell { min-height: 100vh; display: grid; grid-template-rows: 72px 1fr; }
+    .app-topbar { border-bottom: 1px solid var(--line); background: #fff; }
+    .app-topbar .topbar-inner { height: 72px; width: calc(100% - 48px); max-width: none; }
+    .case-title { display: flex; align-items: center; gap: 11px; }
+    .case-title-divider { width: 1px; height: 24px; background: var(--line); }
+    .case-title strong { font-size: 14px; }
+    .case-title small { display: block; color: var(--subtle); font-size: 11px; }
+    .app-actions { display: flex; align-items: center; gap: 8px; }
+    .app-grid { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: calc(100vh - 72px); }
+    .sidebar { padding: 24px 18px; border-right: 1px solid var(--line); background: #f8fafc; }
+    .sidebar-label { margin: 0 10px 9px; color: var(--subtle); font-size: 11px; font-weight: 900; letter-spacing: .06em; }
+    .side-nav { display: grid; gap: 5px; }
+    .side-item { min-height: 43px; padding: 10px 11px; display: flex; align-items: center; gap: 11px; border-radius: 10px; color: var(--muted); font-size: 13px; font-weight: 800; }
+    .side-item.active { color: var(--blue); background: var(--blue-soft); }
+    .side-icon { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 8px; background: rgba(255,255,255,.8); font-size: 12px; }
+    .sidebar-divider { height: 1px; margin: 21px 10px; background: var(--line); }
+    .case-mini { margin-top: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+    .case-mini-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .case-mini h4 { margin-top: 8px; font-size: 13px; letter-spacing: -.02em; }
+    .case-mini p { margin-top: 4px; color: var(--subtle); font-size: 11px; }
+    .progress-track { height: 6px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: #e8edf4; }
+    .progress-track span { display: block; width: 72%; height: 100%; border-radius: inherit; background: var(--teal); }
+    .privacy-card { margin-top: 18px; padding: 14px; border-radius: 13px; color: #516176; background: #edf2f7; font-size: 11px; }
+    .privacy-card strong { display: block; margin-bottom: 5px; color: var(--navy); }
+
+    .workspace-main { padding: 24px; }
+    .workspace-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .workspace-header h1 { font-size: 26px; letter-spacing: -0.045em; }
+    .workspace-header p { margin-top: 4px; color: var(--muted); font-size: 13px; }
+    .workspace-meta { display: flex; align-items: center; gap: 8px; }
+    .meta-chip { padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: #fff; font-size: 11px; font-weight: 800; }
+    .summary-grid { margin-top: 20px; display: grid; grid-template-columns: 1.6fr repeat(3, 1fr); gap: 12px; }
+    .metric-card { min-height: 113px; padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: 0 5px 16px rgba(30,54,84,.04); }
+    .metric-card.primary { color: #fff; border-color: var(--navy); background: var(--navy); }
+    .metric-card small { color: var(--subtle); font-size: 11px; font-weight: 900; }
+    .metric-card.primary small { color: #adbbcc; }
+    .metric-card strong { margin-top: 8px; display: block; font-size: 22px; line-height: 1.25; letter-spacing: -.035em; }
+    .metric-card.primary strong { font-size: 18px; }
+    .metric-card p { margin-top: 5px; color: var(--muted); font-size: 11px; }
+    .metric-card.primary p { color: #c8d1dd; }
+    .workspace-columns { margin-top: 14px; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr); gap: 14px; }
+    .panel { border: 1px solid var(--line); border-radius: 16px; background: #fff; box-shadow: 0 5px 18px rgba(30,54,84,.04); }
+    .panel-head { min-height: 58px; padding: 14px 17px; display: flex; align-items: center; justify-content: space-between; gap: 15px; border-bottom: 1px solid var(--line); }
+    .panel-head h2 { font-size: 15px; letter-spacing: -.025em; }
+    .panel-head p { margin-top: 2px; color: var(--subtle); font-size: 10px; }
+    .panel-body { padding: 17px; }
+    .finding-hero { padding: 18px; border-radius: 14px; background: linear-gradient(135deg, var(--blue-soft), #f5f8ff); }
+    .finding-hero-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .finding-hero-label span:first-child { color: var(--blue); font-size: 11px; font-weight: 900; }
+    .finding-hero h3 { margin-top: 9px; font-size: 19px; letter-spacing: -.035em; }
+    .finding-hero p { margin-top: 7px; color: #4f6075; font-size: 13px; }
+    .evidence-grid { margin-top: 13px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .evidence-card { padding: 14px; border: 1px solid var(--line); border-radius: 12px; }
+    .evidence-card.positive { border-color: #b8e0d5; background: #f2fbf8; }
+    .evidence-card.caution { border-color: #f0d2a6; background: #fffaf1; }
+    .evidence-card strong { font-size: 12px; }
+    .evidence-card p { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .source-list { margin-top: 13px; display: grid; gap: 8px; }
+    .source-row { padding: 12px 13px; display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 11px; }
+    .source-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--blue); background: var(--blue-soft); font-size: 11px; font-weight: 900; }
+    .source-row strong { display: block; font-size: 11px; }
+    .source-row small { color: var(--subtle); font-size: 10px; }
+    .source-row a { color: var(--blue); font-size: 10px; font-weight: 900; }
+    .action-list { display: grid; gap: 10px; }
+    .action-card { padding: 14px; display: grid; grid-template-columns: 28px 1fr; gap: 10px; border: 1px solid var(--line); border-radius: 12px; }
+    .action-card.urgent { border-color: #f0d2a6; background: #fffaf1; }
+    .action-no { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: var(--teal); font-size: 11px; font-weight: 900; }
+    .action-card.urgent .action-no { background: var(--amber); }
+    .action-card strong { display: block; font-size: 12px; }
+    .action-card p { margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .missing-box { margin-top: 12px; padding: 14px; border-radius: 12px; color: var(--red); background: var(--red-soft); }
+    .missing-box strong { display: block; font-size: 12px; }
+    .missing-box p { margin-top: 4px; color: #8d4850; font-size: 11px; }
+    .panel-footer { padding: 14px 17px; display: flex; gap: 8px; border-top: 1px solid var(--line); }
+
+    /* Report */
+    .report-wrap { max-width: 1060px; margin: 0 auto; padding: 30px 24px 70px; }
+    .report-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 16px; }
+    .report-toolbar p { color: var(--muted); font-size: 12px; }
+    .paper { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: var(--shadow); }
+    .paper-cover { padding: 34px 38px 26px; color: #fff; background: linear-gradient(135deg, #14263d, #173c6b); }
+    .paper-cover-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .paper-cover small { color: #b7c5d7; font-size: 11px; font-weight: 800; }
+    .paper-cover h1 { margin-top: 24px; font-size: 31px; letter-spacing: -.045em; }
+    .paper-cover p { margin-top: 8px; color: #c5d1df; font-size: 13px; }
+    .paper-tags { margin-top: 22px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .paper-tag { padding: 7px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; color: #dce5ef; background: rgba(255,255,255,.06); font-size: 10px; font-weight: 800; }
+    .paper-body { padding: 28px 38px 38px; }
+    .report-alert { padding: 16px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 13px; border: 1px solid #f0d2a6; border-radius: 13px; background: var(--amber-soft); }
+    .report-alert-icon { width: 35px; height: 35px; display: grid; place-items: center; border-radius: 11px; color: var(--amber); background: #fff; font-weight: 900; }
+    .report-alert strong { display: block; font-size: 12px; }
+    .report-alert p { margin-top: 2px; color: #7a571e; font-size: 11px; }
+    .report-alert > strong:last-child { color: var(--amber); font-size: 19px; }
+    .report-section { margin-top: 25px; }
+    .report-section-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .report-section-no { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 8px; color: #fff; background: var(--blue); font-size: 10px; font-weight: 900; }
+    .report-section h2 { font-size: 15px; letter-spacing: -.025em; }
+    .conclusion-card { padding: 19px; border-radius: 14px; background: var(--blue-soft); }
+    .conclusion-card h3 { color: var(--blue); font-size: 12px; }
+    .conclusion-card p { margin-top: 8px; color: var(--navy); font-size: 14px; font-weight: 800; line-height: 1.65; }
+    .report-table { width: 100%; border-collapse: collapse; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; }
+    .report-table th, .report-table td { padding: 11px 13px; border-bottom: 1px solid var(--line); text-align: left; font-size: 11px; }
+    .report-table th { width: 18%; color: var(--muted); background: #f8fafc; }
+    .report-table tr:last-child th, .report-table tr:last-child td { border-bottom: 0; }
+    .basis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+    .basis-card { padding: 15px; border: 1px solid var(--line); border-radius: 12px; }
+    .basis-card span { color: var(--blue); font-size: 10px; font-weight: 900; }
+    .basis-card strong { margin-top: 5px; display: block; font-size: 12px; }
+    .basis-card p { margin-top: 5px; color: var(--muted); font-size: 11px; }
+    .report-footnote { margin-top: 24px; padding-top: 17px; border-top: 1px solid var(--line); color: var(--subtle); font-size: 10px; line-height: 1.65; }
+
+    /* Intake */
+    .intake-screen { min-height: 100vh; background: linear-gradient(180deg, #f6f9ff, #f3f6fa); }
+    .intake-top { height: 68px; display: flex; align-items: center; border-bottom: 1px solid var(--line); background: #fff; }
+    .intake-top-inner { width: min(1120px, calc(100% - 40px)); margin: 0 auto; display: flex; align-items: center; justify-content: space-between; }
+    .intake-frame { width: min(760px, calc(100% - 40px)); margin: 0 auto; padding: 36px 0 70px; }
+    .step-line { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+    .step-line span { height: 5px; border-radius: 999px; background: #dce3ed; }
+    .step-line span.active { background: var(--blue); }
+    .step-caption { margin-top: 11px; display: flex; align-items: center; justify-content: space-between; color: var(--subtle); font-size: 11px; font-weight: 800; }
+    .intake-card { margin-top: 24px; padding: 30px; border: 1px solid var(--line); border-radius: 20px; background: #fff; box-shadow: var(--shadow-sm); }
+    .intake-card h1 { font-size: 27px; letter-spacing: -.045em; }
+    .intake-card > p { margin-top: 7px; color: var(--muted); font-size: 14px; }
+    .form-label { margin-top: 25px; display: block; color: var(--navy); font-size: 13px; font-weight: 900; }
+    .case-options { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .case-option { min-height: 91px; padding: 15px; display: grid; grid-template-columns: 38px 1fr; align-items: start; gap: 12px; border: 1px solid var(--line); border-radius: 13px; background: #fff; text-align: left; }
+    .case-option.active { border: 2px solid var(--blue); padding: 14px; background: #f7f9ff; }
+    .case-option-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; color: var(--blue); background: var(--blue-soft); font-weight: 900; }
+    .case-option strong { display: block; font-size: 13px; }
+    .case-option span { margin-top: 4px; display: block; color: var(--muted); font-size: 11px; }
+    .upload-zone { margin-top: 10px; padding: 22px; display: grid; place-items: center; border: 1.5px dashed #aebbd0; border-radius: 14px; background: #f8fafc; text-align: center; }
+    .upload-zone-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; color: var(--blue); background: var(--blue-soft); font-size: 20px; font-weight: 400; }
+    .upload-zone strong { margin-top: 11px; font-size: 13px; }
+    .upload-zone p { margin-top: 4px; color: var(--subtle); font-size: 11px; }
+    .secure-note { margin-top: 10px; display: flex; gap: 8px; align-items: flex-start; color: var(--subtle); font-size: 10px; }
+    .intake-actions { margin-top: 24px; display: flex; justify-content: space-between; gap: 10px; }
+    .mobile-bottom { display: none; }
+
+    @media (max-width: 960px) {
+      .hero-inner { grid-template-columns: 1fr; gap: 42px; }
+      .case-preview { max-width: 650px; }
+      .service-grid { grid-template-columns: 1fr; }
+      .trust-strip { grid-template-columns: 1fr; }
+      .trust-item { border-left: 0; border-top: 1px solid rgba(255,255,255,.12); }
+      .app-grid { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .summary-grid { grid-template-columns: 1fr 1fr; }
+      .workspace-columns { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 600px) {
+      .topbar { height: 62px; }
+      .topbar-inner, .home-section, .hero-inner { width: calc(100% - 32px); }
+      .topnav .nav-link { display: none; }
+      .topnav .button { min-height: 40px; padding: 9px 12px; font-size: 12px; }
+      .brand-mark { width: 34px; height: 34px; border-radius: 10px; }
+      .brand-copy small { display: none; }
+      .hero { min-height: auto; }
+      .hero-inner { padding: 47px 0 42px; gap: 34px; }
+      .hero h1 { font-size: 38px; }
+      .hero-copy { font-size: 15px; }
+      .hero-actions .button { width: 100%; }
+      .case-preview { padding: 12px; border-radius: 20px; }
+      .float-badge { right: -8px; bottom: 26px; }
+      .section-heading { display: block; }
+      .section-heading p { margin-top: 9px; }
+      .home-section { padding: 52px 0; }
+      .service-grid { margin-top: 20px; }
+
+      .intake-top { height: 62px; }
+      .intake-top-inner { width: calc(100% - 28px); }
+      .intake-top .button { min-height: 38px; padding: 8px 10px; font-size: 11px; }
+      .intake-frame { width: 100%; padding: 19px 14px 94px; }
+      .intake-card { margin-top: 17px; padding: 22px 18px; border-radius: 17px; }
+      .intake-card h1 { font-size: 23px; }
+      .case-options { grid-template-columns: 1fr; }
+      .intake-actions { display: none; }
+      .mobile-bottom { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); display: flex; gap: 8px; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(12px); }
+      .mobile-bottom .button:first-child { width: 42%; }
+      .mobile-bottom .button:last-child { flex: 1; }
+    }
+  </style>
+</head>
+<body data-view="home">
+  <section class="screen home" data-screen="home">
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="?view=home">
+          <span class="brand-mark">路AI</span>
+          <span class="brand-copy">교통분쟁 AI<small>EVIDENCE-BASED CASE GUIDE</small></span>
+        </a>
+        <nav class="topnav" aria-label="주요 메뉴">
+          <a class="nav-link active" href="#services">서비스 안내</a>
+          <a class="nav-link" href="?view=workspace">내 사건</a>
+          <a class="button primary" href="?view=intake">무료로 분석 시작</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-inner">
+          <div>
+            <span class="eyebrow"><span class="eyebrow-dot"></span> 법령·판례·제출기한을 한 번에 확인</span>
+            <h1>교통 문제,<br><em>근거와 다음 행동</em>이<br>보여야 안심됩니다.</h1>
+            <p class="hero-copy">고지서나 사고 자료를 올리면 AI가 사실관계와 쟁점을 정리하고, 확인 가능한 법적 근거와 제출 준비 순서를 사건 리포트로 안내합니다.</p>
+            <div class="hero-actions">
+              <a class="button primary" href="?view=intake">내 사건 무료 분석</a>
+              <a class="button" href="?view=report">샘플 리포트 보기</a>
+            </div>
+            <p class="hero-note"><span class="trust-check">✓</span> 로그인 없이 시작 · 저장과 다운로드 시에만 계정 연결</p>
+          </div>
+
+          <div class="case-preview" aria-label="사건 리포트 미리보기">
+            <div class="preview-top">
+              <strong>어린이보호구역 주정차 위반</strong>
+              <span class="status-pill"><span class="eyebrow-dot"></span> 분석 완료</span>
+            </div>
+            <div class="preview-card">
+              <div class="preview-summary">
+                <div><small>AI 검토 요약</small><h3>이의제기 전 추가 확인이 필요해요</h3></div>
+                <div class="deadline-box"><strong>D-3</strong><small>의견제출 마감</small></div>
+              </div>
+              <div class="preview-body">
+                <div class="preview-insight"><span>핵심 쟁점</span><p>표지판 식별 가능성과 긴급 정차 사유가 판단의 핵심입니다.</p></div>
+                <div class="mini-timeline">
+                  <div class="timeline-row"><span class="timeline-no">1</span><p>고지서 정보 확인</p><small>완료</small></div>
+                  <div class="timeline-row"><span class="timeline-no">2</span><p>현장 사진 1장 추가</p><small>필요</small></div>
+                  <div class="timeline-row"><span class="timeline-no">3</span><p>의견진술서 검토·제출</p><small>다음</small></div>
+                </div>
+                <div class="preview-cta">사건 리포트 열기</div>
+              </div>
+            </div>
+            <div class="float-badge"><span class="float-icon">✓</span> 근거 출처 4건 확인됨</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-section" id="services">
+        <div class="section-heading">
+          <div><span class="eyebrow">내 사건 중심으로</span><h2>기능보다 해결해야 할 일을 먼저</h2></div>
+          <p>사용자가 분석 기술을 고르지 않아도 됩니다. 자료와 상황을 입력하면 사건 유형에 맞는 분석 흐름을 자동으로 구성합니다.</p>
+        </div>
+        <div class="service-grid">
+          <article class="service-card"><span class="service-icon">告</span><h3>과태료·범칙금 고지서</h3><p>OCR로 처분 내용과 기한을 읽고, 이의제기 검토에 필요한 사실과 자료를 정리합니다.</p><a class="service-link" href="?view=intake">고지서 검토 시작 →</a></article>
+          <article class="service-card"><span class="service-icon">車</span><h3>교통사고 과실 쟁점</h3><p>사고 설명, 사진, 블랙박스에서 진입 순서와 충돌 위치 등 핵심 쟁점을 구조화합니다.</p><a class="service-link" href="?view=intake">사고 쟁점 정리 →</a></article>
+          <article class="service-card"><span class="service-icon">法</span><h3>법령·판례 근거 확인</h3><p>결론을 단정하지 않고 관련 조문과 판례, 적용 조건, 확인 시점을 출처와 함께 보여줍니다.</p><a class="service-link" href="?view=report">근거 표시 방식 보기 →</a></article>
+        </div>
+      </section>
+
+      <section class="home-section" style="padding-top:0">
+        <div class="trust-strip">
+          <div class="trust-title">신뢰를 먼저 설계했습니다.</div>
+          <div class="trust-item"><strong>출처 기반</strong><span>법령명·조문·확인일 표시</span></div>
+          <div class="trust-item"><strong>불확실성 공개</strong><span>부족 자료와 판단 한계 구분</span></div>
+          <div class="trust-item"><strong>개인정보 보호</strong><span>민감정보 마스킹·보관 안내</span></div>
+        </div>
+      </section>
+    </main>
+  </section>
+
+  <section class="screen" data-screen="workspace">
+    <div class="app-shell">
+      <header class="app-topbar">
+        <div class="topbar-inner">
+          <div class="case-title">
+            <a class="brand" href="?view=home"><span class="brand-mark">路AI</span><span class="brand-copy">교통분쟁 AI</span></a>
+            <span class="case-title-divider"></span>
+            <span><strong>어린이보호구역 주정차 위반</strong><small>CASE-2026-0622 · 마지막 업데이트 14:32</small></span>
+          </div>
+          <div class="app-actions"><button class="button small">자료 추가</button><a class="button primary small" href="?view=report">리포트 보기</a><button class="icon-button" aria-label="더보기">•••</button></div>
+        </div>
+      </header>
+
+      <div class="app-grid">
+        <aside class="sidebar">
+          <p class="sidebar-label">WORKSPACE</p>
+          <nav class="side-nav">
+            <a class="side-item" href="?view=home"><span class="side-icon">⌂</span>홈</a>
+            <a class="side-item active" href="?view=workspace"><span class="side-icon">▣</span>내 사건</a>
+            <a class="side-item" href="?view=intake"><span class="side-icon">＋</span>새 분석</a>
+          </nav>
+          <div class="sidebar-divider"></div>
+          <p class="sidebar-label">CURRENT CASE</p>
+          <div class="case-mini">
+            <div class="case-mini-row"><span class="status-pill warning">D-3</span><small style="color:var(--subtle)">72%</small></div>
+            <h4>이의제기 검토</h4><p>현장 사진을 추가하면 초안 생성이 가능합니다.</p>
+            <div class="progress-track"><span></span></div>
+          </div>
+          <div class="privacy-card"><strong>🔒 자료는 사건 단위로 보호됩니다.</strong>리포트 저장 전 보관 범위와 삭제 정책을 다시 확인할 수 있습니다.</div>
+        </aside>
+
+        <main class="workspace-main">
+          <div class="workspace-header">
+            <div><h1>사건 요약</h1><p>AI가 확인한 사실, 불확실한 부분, 지금 해야 할 일을 구분했습니다.</p></div>
+            <div class="workspace-meta"><span class="meta-chip">근거 4건</span><span class="meta-chip">자료 2개</span><span class="status-pill">● 최신 분석</span></div>
+          </div>
+
+          <section class="summary-grid">
+            <article class="metric-card primary"><small>현재 판단</small><strong>이의제기 전<br>추가 확인 필요</strong><p>단정 대신 판단 조건을 제시합니다.</p></article>
+            <article class="metric-card"><small>제출 기한</small><strong style="color:var(--amber)">D-3</strong><p>2026.06.25 18:00까지</p></article>
+            <article class="metric-card"><small>확인된 자료</small><strong>2 / 4</strong><p>고지서·정차 사유 메모</p></article>
+            <article class="metric-card"><small>리포트 상태</small><strong style="color:var(--teal)">부분 완성</strong><p>부족 자료를 명확히 표시</p></article>
+          </section>
+
+          <div class="workspace-columns">
+            <section class="panel">
+              <header class="panel-head"><div><h2>AI 검토 결과</h2><p>자료와 출처를 바탕으로 정리된 현재 시점의 검토 내용</p></div><span class="status-pill">검토 시점 2026.06.22</span></header>
+              <div class="panel-body">
+                <div class="finding-hero">
+                  <div class="finding-hero-label"><span>핵심 쟁점</span><span class="meta-chip" style="background:#fff">근거 강도 · 보통</span></div>
+                  <h3>표지판을 식별하기 어려웠는지가 핵심입니다.</h3>
+                  <p>현재 자료만으로는 이의제기 가능성을 단정하기 어렵습니다. 표지판과 차량 위치가 함께 보이는 현장 사진이 판단 정확도를 크게 높입니다.</p>
+                </div>
+                <div class="evidence-grid">
+                  <article class="evidence-card positive"><strong>✓ 확인된 사실</strong><p>주정차 시간, 위반 장소, 긴급 정차 사유는 고지서와 사용자 설명에서 확인했습니다.</p></article>
+                  <article class="evidence-card caution"><strong>! 아직 불확실</strong><p>현장 표지판의 가시성, 차량과 표지판의 실제 거리는 자료가 부족합니다.</p></article>
+                </div>
+                <div class="source-list">
+                  <div class="source-row"><span class="source-icon">法</span><div><strong>도로교통법 제32조 · 정차 및 주차의 금지</strong><small>국가법령정보센터 · 2026.06.22 확인</small></div><a href="#">원문 ↗</a></div>
+                  <div class="source-row"><span class="source-icon">例</span><div><strong>표지 식별 가능성 관련 행정심판 재결례</strong><small>사실관계 유사도 보통 · 적용 조건 확인 필요</small></div><a href="#">근거 ↗</a></div>
+                </div>
+              </div>
+              <footer class="panel-footer"><button class="button soft small">분석 기준 보기</button><button class="button small">내용 수정 요청</button></footer>
+            </section>
+
+            <aside class="panel">
+              <header class="panel-head"><div><h2>지금 해야 할 일</h2><p>기한과 효과를 기준으로 정렬했습니다.</p></div><span class="status-pill warning">1건 긴급</span></header>
+              <div class="panel-body">
+                <div class="action-list">
+                  <article class="action-card urgent"><span class="action-no">1</span><div><strong>오늘 · 현장 사진 추가</strong><p>표지판과 차량 정차 위치가 한 화면에 보이도록 촬영하세요.</p></div></article>
+                  <article class="action-card"><span class="action-no">2</span><div><strong>내일 · 의견진술서 초안 검토</strong><p>추가 자료를 반영해 사실관계 중심의 초안을 생성합니다.</p></div></article>
+                  <article class="action-card"><span class="action-no">3</span><div><strong>D-1 · 제출 전 최종 점검</strong><p>제출 기관, 기한, 첨부 파일을 다시 확인합니다.</p></div></article>
+                </div>
+                <div class="missing-box"><strong>부족 자료 2건</strong><p>현장 사진, 표지판과 차량 위치 메모가 필요합니다.</p></div>
+              </div>
+              <footer class="panel-footer"><button class="button primary full">현장 사진 추가</button></footer>
+            </aside>
+          </div>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" data-screen="report">
+    <div class="app-shell">
+      <header class="app-topbar">
+        <div class="topbar-inner">
+          <div class="case-title"><a class="brand" href="?view=home"><span class="brand-mark">路AI</span><span class="brand-copy">교통분쟁 AI</span></a><span class="case-title-divider"></span><span><strong>사건 리포트</strong><small>CASE-2026-0622 · 버전 3</small></span></div>
+          <div class="app-actions"><a class="button small" href="?view=workspace">사건으로 돌아가기</a><button class="button primary small">PDF 내려받기</button></div>
+        </div>
+      </header>
+      <main class="report-wrap">
+        <div class="report-toolbar"><p>저장된 자료와 법적 근거를 기준으로 생성된 검토용 리포트입니다.</p><span class="status-pill">● 2026.06.22 최신</span></div>
+        <article class="paper">
+          <header class="paper-cover">
+            <div class="paper-cover-top"><div class="brand"><span class="brand-mark">路AI</span><span>교통분쟁 AI</span></div><small>CASE REVIEW REPORT · V3</small></div>
+            <h1>어린이보호구역 주정차 위반<br>이의제기 검토 리포트</h1>
+            <p>사실관계, 판단 쟁점, 법적 근거, 제출 전 준비사항을 한 문서로 정리했습니다.</p>
+            <div class="paper-tags"><span class="paper-tag">자료 2개 반영</span><span class="paper-tag">법적 근거 4건</span><span class="paper-tag">개인정보 마스킹</span><span class="paper-tag">부분 리포트</span></div>
+          </header>
+          <div class="paper-body">
+            <div class="report-alert"><span class="report-alert-icon">!</span><div><strong>의견제출 기한이 임박했습니다.</strong><p>현장 사진을 보완한 뒤 초안을 검토하고 2026.06.25 18:00까지 제출하세요.</p></div><strong>D-3</strong></div>
+
+            <section class="report-section">
+              <div class="report-section-head"><span class="report-section-no">01</span><h2>검토 결론</h2></div>
+              <div class="conclusion-card"><h3>현재 시점의 AI 검토</h3><p>표지판 식별 가능성과 긴급 정차 사유가 핵심 쟁점입니다. 현재 자료만으로 이의제기 인용 가능성을 단정할 수 없으며, 표지판과 차량 위치가 함께 보이는 현장 사진을 보완한 후 제출 여부를 판단하는 것이 적절합니다.</p></div>
+            </section>
+
+            <section class="report-section">
+              <div class="report-section-head"><span class="report-section-no">02</span><h2>확인된 사실관계</h2></div>
+              <table class="report-table"><tbody><tr><th>처분 유형</th><td>어린이보호구역 주정차 위반 과태료</td><th>부과 금액</th><td>120,000원</td></tr><tr><th>위반 일시</th><td>2026.06.18 16:42</td><th>위반 장소</th><td>서울시 ○○구 ○○초등학교 인근</td></tr><tr><th>사용자 설명</th><td colspan="3">아이의 갑작스러운 통증으로 약 3분간 정차했으며, 표지판 일부가 가려져 있었다고 진술함.</td></tr></tbody></table>
+            </section>
+
+            <section class="report-section">
+              <div class="report-section-head"><span class="report-section-no">03</span><h2>판단 쟁점과 근거</h2></div>
+              <div class="basis-grid"><article class="basis-card"><span>쟁점 A · 표지 식별 가능성</span><strong>현장 조건을 추가 확인해야 합니다.</strong><p>도로교통법 제32조와 유사 재결례를 기준으로 표지 위치·가시성·차량 위치를 함께 비교해야 합니다.</p></article><article class="basis-card"><span>쟁점 B · 긴급 정차 사유</span><strong>객관 자료가 있으면 도움이 됩니다.</strong><p>병원 방문 기록이나 당시 연락 기록은 정차 사유 설명의 신뢰도를 보완할 수 있습니다.</p></article></div>
+            </section>
+
+            <section class="report-section">
+              <div class="report-section-head"><span class="report-section-no">04</span><h2>권장 다음 행동</h2></div>
+              <table class="report-table"><tbody><tr><th>오늘</th><td>표지판과 차량 위치가 함께 보이는 현장 사진 촬영</td></tr><tr><th>내일</th><td>현장 사진과 정차 사유를 반영한 의견진술서 초안 검토</td></tr><tr><th>D-1</th><td>제출 기관·기한·첨부 자료 최종 확인 후 제출</td></tr></tbody></table>
+            </section>
+
+            <p class="report-footnote">본 리포트는 사용자가 제공한 자료와 확인 가능한 법령·판례를 바탕으로 한 정보 제공용 AI 검토 결과이며, 변호사 등 전문가의 법률 자문이나 행정기관의 최종 판단을 대체하지 않습니다. 자료가 추가되거나 법령이 변경되면 검토 결과가 달라질 수 있습니다.</p>
+          </div>
+        </article>
+      </main>
+    </div>
+  </section>
+
+  <section class="screen intake-screen" data-screen="intake">
+    <header class="intake-top"><div class="intake-top-inner"><a class="brand" href="?view=home"><span class="brand-mark">路AI</span><span class="brand-copy">교통분쟁 AI</span></a><button class="button small">저장된 사건</button></div></header>
+    <main class="intake-frame">
+      <div class="step-line" aria-label="4단계 중 1단계"><span class="active"></span><span></span><span></span><span></span></div>
+      <div class="step-caption"><span>1. 사건 선택</span><span>약 3분</span></div>
+      <section class="intake-card">
+        <h1>어떤 교통 문제를 겪고 있나요?</h1>
+        <p>가장 가까운 항목을 선택하면 필요한 자료부터 안내할게요.</p>
+        <span class="form-label">사건 유형</span>
+        <div class="case-options">
+          <button class="case-option active"><span class="case-option-icon">告</span><span><strong>과태료·범칙금</strong><span>고지서 내용과 이의제기 가능성을 확인하고 싶어요.</span></span></button>
+          <button class="case-option"><span class="case-option-icon" style="color:var(--teal);background:var(--teal-soft)">車</span><span><strong>교통사고·과실비율</strong><span>사고 쟁점과 보험사 주장에 필요한 자료를 정리하고 싶어요.</span></span></button>
+          <button class="case-option"><span class="case-option-icon" style="color:var(--amber);background:var(--amber-soft)">法</span><span><strong>법령·절차 질문</strong><span>관련 법적 근거와 처리 절차를 확인하고 싶어요.</span></span></button>
+          <button class="case-option"><span class="case-option-icon" style="color:var(--muted);background:#eef2f7">?</span><span><strong>잘 모르겠어요</strong><span>상황을 설명하면 적절한 분석 흐름을 추천해 드려요.</span></span></button>
+        </div>
+        <span class="form-label">자료가 있다면 먼저 올려주세요 <small style="color:var(--subtle);font-weight:700">(선택)</small></span>
+        <div class="upload-zone"><span class="upload-zone-icon">＋</span><strong>고지서 사진 또는 PDF 추가</strong><p>JPG, PNG, PDF · 최대 20MB</p></div>
+        <p class="secure-note"><span>🔒</span><span>주민번호·차량번호 등 민감정보는 분석 과정에서 마스킹되며, 로그인 전에는 임시 세션에만 보관됩니다.</span></p>
+        <div class="intake-actions"><a class="button" href="?view=home">이전</a><a class="button primary" href="?view=workspace">다음: 상황 설명</a></div>
+      </section>
+    </main>
+    <div class="mobile-bottom"><a class="button" href="?view=home">이전</a><a class="button primary" href="?view=workspace">다음</a></div>
+  </section>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const view = params.get("view") || "home";
+    document.body.dataset.view = ["home", "workspace", "report", "intake"].includes(view) ? view : "home";
+  </script>
+</body>
+</html>
