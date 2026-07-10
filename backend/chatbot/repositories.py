@@ -5,7 +5,12 @@ from __future__ import annotations
 import hashlib
 import base64
 import hmac
+import json
+import subprocess
+import sys
+import tempfile
 from datetime import timedelta, timezone as datetime_timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +84,11 @@ from chatbot.progress_cache import (
 
 USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
 REPORT_PDF_CONTENT_TYPE = "application/pdf"
+REPORT_DOWNLOAD_TYPE_REPORT = "report"
+REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
+ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
+ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
+REPORT_PDF_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_report_renderer.py"
 
 
 def build_report_download_pdf_body(
@@ -92,6 +102,9 @@ def build_report_download_pdf_body(
     try:
         import fitz
     except Exception:
+        reportlab_pdf = _reportlab_pdf_bytes(report_id=report_id, title=title, body_text=body_text)
+        if reportlab_pdf:
+            return reportlab_pdf
         return _minimal_pdf_bytes(title=title or report_id, body_text=body_text)
 
     doc = fitz.open()
@@ -116,11 +129,11 @@ def build_report_download_pdf_body(
             page.insert_font(fontname=fontname, fontfile=font_file)
         y = margin
 
-    def write_line(text: str, *, size: int = 10, bold: bool = False, spacing: int = 0):
+    def write_line(text: str, *, size: int = 10, spacing: int = 0, indent: int = 0):
         nonlocal y
         ensure_page(line_height + spacing)
         page.insert_text(
-            (margin, y),
+            (margin + indent, y),
             text,
             fontsize=size,
             fontname=fontname,
@@ -128,6 +141,10 @@ def build_report_download_pdf_body(
             color=(0, 0, 0),
         )
         y += line_height + spacing
+
+    def write_wrapped(text: str, *, size: int = 10, width: int = 72, prefix: str = "", indent: int = 0):
+        for chunk_index, chunk in enumerate(_wrap_report_pdf_line(text, width=width)):
+            write_line(f"{prefix if chunk_index == 0 else '  '}{chunk}", size=size, indent=indent)
 
     title_text = title or "상담 분석 리포트"
     write_line(title_text, size=16, spacing=8)
@@ -139,13 +156,18 @@ def build_report_download_pdf_body(
         if not line:
             y += 8
             continue
+        if line.startswith("# "):
+            write_line(line[2:], size=15, spacing=6)
+            continue
         if line.startswith("## "):
             write_line(line[3:], size=13, spacing=5)
             continue
+        if line.startswith("### "):
+            write_line(line[4:], size=11, spacing=3)
+            continue
         prefix = "- " if line.startswith("- ") else ""
         line_body = line[2:] if prefix else line
-        for chunk_index, chunk in enumerate(_wrap_report_pdf_line(line_body, width=72)):
-            write_line(f"{prefix if chunk_index == 0 else '  '}{chunk}", size=10)
+        write_wrapped(line_body, width=68 if prefix else 72, prefix=prefix, indent=10 if prefix else 0)
 
     metadata_title = title_text[:120]
     doc.set_metadata(
@@ -158,6 +180,162 @@ def build_report_download_pdf_body(
     pdf_bytes = doc.tobytes(deflate=True)
     doc.close()
     return pdf_bytes
+
+
+def _reportlab_pdf_bytes(*, report_id: str, title: str, body_text: str) -> bytes | None:
+    modules = _reportlab_pdf_modules()
+    if modules is None:
+        return _reportlab_pdf_bytes_via_bundled_python(report_id=report_id, title=title, body_text=body_text)
+
+    canvas_cls = modules["canvas"]
+    pdfmetrics = modules["pdfmetrics"]
+    ttfont = modules["ttfont"]
+
+    font_file = _report_pdf_font_file()
+    font_name = "ReportBody"
+    try:
+        if font_file and font_name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(ttfont(font_name, font_file))
+    except Exception:
+        return None
+
+    if font_name not in pdfmetrics.getRegisteredFontNames():
+        return None
+
+    page_width = 595
+    page_height = 842
+    margin_x = 54
+    margin_top = 58
+    margin_bottom = 56
+    max_width = page_width - (margin_x * 2)
+
+    output = BytesIO()
+    pdf_canvas = canvas_cls(output, pagesize=(page_width, page_height))
+    pdf_canvas.setTitle((title or "Traffic Dispute AI report")[:120])
+    pdf_canvas.setAuthor("Traffic Dispute AI")
+    pdf_canvas.setCreator("Traffic Dispute AI")
+
+    y = page_height - margin_top
+
+    def ensure_page(required_height: float) -> None:
+        nonlocal y
+        if y - required_height >= margin_bottom:
+            return
+        pdf_canvas.showPage()
+        y = page_height - margin_top
+
+    def draw_line(text: str, *, size: float = 10.5, leading: float = 16, indent: float = 0) -> None:
+        nonlocal y
+        ensure_page(leading)
+        pdf_canvas.setFont(font_name, size)
+        pdf_canvas.drawString(margin_x + indent, y, text)
+        y -= leading
+
+    def draw_wrapped(
+        text: str,
+        *,
+        size: float = 10.5,
+        leading: float = 16,
+        indent: float = 0,
+        first_prefix: str = "",
+        next_prefix: str = "",
+    ) -> None:
+        available_width = max_width - indent - pdfmetrics.stringWidth(next_prefix, font_name, size)
+        lines = _wrap_reportlab_pdf_line(
+            text,
+            font_name=font_name,
+            font_size=size,
+            max_width=available_width,
+            pdfmetrics=pdfmetrics,
+        )
+        for index, line in enumerate(lines):
+            prefix = first_prefix if index == 0 else next_prefix
+            draw_line(f"{prefix}{line}", size=size, leading=leading, indent=indent)
+
+    title_text = title or "상담 분석 리포트"
+    for line in _wrap_reportlab_pdf_line(
+        title_text,
+        font_name=font_name,
+        font_size=17,
+        max_width=max_width,
+        pdfmetrics=pdfmetrics,
+    ):
+        draw_line(line, size=17, leading=23)
+    y -= 4
+    draw_line(f"Report ID: {report_id}", size=9.2, leading=14)
+    draw_wrapped(
+        "본 문서는 Traffic Dispute AI 상담 결과를 바탕으로 생성한 검토용 리포트입니다.",
+        size=9.2,
+        leading=14,
+    )
+    y -= 12
+
+    for raw_line in str(body_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            y -= 8
+            continue
+        if line.startswith("# "):
+            y -= 6
+            draw_wrapped(line[2:], size=15, leading=21)
+            y -= 4
+            continue
+        if line.startswith("## "):
+            y -= 8
+            draw_wrapped(line[3:], size=13, leading=19)
+            y -= 3
+            continue
+        if line.startswith("### "):
+            y -= 5
+            draw_wrapped(line[4:], size=11.5, leading=17)
+            continue
+        if line.startswith("- "):
+            draw_wrapped(line[2:], first_prefix="- ", next_prefix="  ", indent=8, size=10.2, leading=15.5)
+            continue
+        draw_wrapped(line, size=10.2, leading=15.5)
+
+    pdf_canvas.save()
+    return output.getvalue()
+
+
+def _reportlab_pdf_bytes_via_bundled_python(*, report_id: str, title: str, body_text: str) -> bytes | None:
+    if not REPORT_PDF_RENDERER_PATH.exists():
+        return None
+
+    bundled_python = _bundled_pdf_python_path()
+    if bundled_python is None:
+        return None
+
+    payload = {
+        "report_id": report_id,
+        "title": title,
+        "body_text": body_text,
+        "font_file": _report_pdf_font_file(),
+        "intro": "본 문서는 Traffic Dispute AI 상담 결과를 바탕으로 생성한 검토용 리포트입니다.",
+    }
+    try:
+        with tempfile.TemporaryDirectory(prefix="report-pdf-") as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            payload_path = temp_dir / "payload.json"
+            output_path = temp_dir / "report.pdf"
+            payload_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    str(bundled_python),
+                    str(REPORT_PDF_RENDERER_PATH),
+                    str(payload_path),
+                    str(output_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if completed.returncode != 0 or not output_path.exists():
+                return None
+            return output_path.read_bytes()
+    except Exception:
+        return None
 USAGE_POLICY_LIMITS = {
     "anonymous": {
         "chat_message": 2,
@@ -1860,7 +2038,7 @@ def persist_report_action(
     }
 
 
-def get_report_download_metadata(report_id: str) -> dict[str, Any] | None:
+def get_report_download_metadata(report_id: str, *, document_type: str | None = None) -> dict[str, Any] | None:
     report = (
         Report.objects.select_related("session", "job", "display_result")
         .filter(report_id=report_id)
@@ -1872,29 +2050,114 @@ def get_report_download_metadata(report_id: str) -> dict[str, Any] | None:
     object_storage = _report_object_storage(report)
     storage_uri = object_storage["storage_uri"]
     storage_backend = object_storage["backend"]
-    text_body = _report_download_body(
-        report,
-        storage_backend=storage_backend,
-        object_storage=object_storage,
-    )
+    normalized_document_type = _report_download_document_type(document_type)
+    if normalized_document_type == REPORT_DOWNLOAD_TYPE_OBJECTION_FORM:
+        text_body = _report_objection_form_body(report)
+        title = "과태료 부과 처분 이의신청서"
+        filename = f"{report.report_id}-objection-form.pdf"
+        pdf_body = _report_objection_form_pdf_body(
+            report,
+            title=title,
+            text_body=text_body,
+        )
+    else:
+        text_body = _report_download_body(
+            report,
+            storage_backend=storage_backend,
+            object_storage=object_storage,
+        )
+        title = report.title or report.report_id
+        filename = f"{report.report_id}.pdf"
+        pdf_body = build_report_download_pdf_body(
+            report_id=report.report_id,
+            title=title,
+            body_text=text_body,
+        )
     return {
         "report_id": report.report_id,
+        "document_type": normalized_document_type,
         "owner_id": report.owner_id,
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
-        "filename": f"{report.report_id}.pdf",
+        "filename": filename,
         "content_type": REPORT_PDF_CONTENT_TYPE,
         "storage_uri": storage_uri,
         "storage_backend": storage_backend,
         "object_storage": object_storage,
         "object_key": object_storage.get("key", ""),
         "status": report.status,
-        "body": build_report_download_pdf_body(
-            report_id=report.report_id,
-            title=report.title or report.report_id,
-            body_text=text_body,
-        ),
+        "body": pdf_body,
         "text_body": text_body,
+    }
+
+
+def list_report_records(
+    *,
+    session_id: str | None = None,
+    owner_id: str | None = None,
+) -> list[dict[str, Any]]:
+    reports = Report.objects.select_related("session", "job", "display_result").order_by("-created_at")
+    if session_id:
+        reports = reports.filter(session__session_id=session_id)
+    if owner_id:
+        reports = reports.filter(owner_id=owner_id)
+    return [_report_record_summary(report) for report in reports]
+
+
+def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
+    report = (
+        Report.objects.select_related("session", "job", "display_result")
+        .filter(report_id=report_id)
+        .first()
+    )
+    if report is None:
+        return None
+
+    content = _dict_or_empty(report.content)
+    metadata = _dict_or_empty(report.metadata)
+    reporting_payload = _dict_or_empty(content.get("reporting_payload"))
+    job = report.job
+    return {
+        **_report_record_summary(report),
+        "content": {
+            "reporting_payload": reporting_payload,
+            "format": _text(content.get("format")),
+            "action": _text(content.get("action")),
+        },
+        "metadata": {
+            "report_quality": _dict_or_empty(metadata.get("report_quality")),
+            "limitations": _list_or_empty(metadata.get("limitations")),
+            "object_storage": _dict_or_empty(metadata.get("object_storage")),
+        },
+        "job": {
+            "job_id": job.job_id,
+            "status": job.status,
+            "routing_intent": job.routing_intent,
+            "mock_scenario": job.mock_scenario,
+        }
+        if job
+        else None,
+    }
+
+
+def _report_record_summary(report: Report) -> dict[str, Any]:
+    metadata = _dict_or_empty(report.metadata)
+    content = _dict_or_empty(report.content)
+    reporting_payload = _dict_or_empty(content.get("reporting_payload"))
+    report_quality = _dict_or_empty(metadata.get("report_quality"))
+    return {
+        "report_id": report.report_id,
+        "report_type": report.report_type,
+        "screen_id": _text(reporting_payload.get("screen_id")),
+        "title": report.title,
+        "status": report.status,
+        "session_id": report.session.session_id if report.session_id else None,
+        "job_id": report.job.job_id if report.job_id else None,
+        "summary": report.content_summary,
+        "download_url": f"/api/reports/{report.report_id}/download/",
+        "partial_report": bool(report_quality.get("partial_report")),
+        "created_at": report.created_at.isoformat(),
+        "updated_at": report.updated_at.isoformat(),
     }
 
 
@@ -3956,10 +4219,34 @@ def _report_content_summary(
 def _reporting_payload_content_summary(reporting_payload: dict[str, Any]) -> str:
     if not reporting_payload:
         return ""
+    report_type = _text(reporting_payload.get("report_type"))
+    screen_id = _text(reporting_payload.get("screen_id"))
+    stage = _text(reporting_payload.get("stage"))
+    quality = _dict_or_empty(reporting_payload.get("quality"))
     lines = [
         _text(reporting_payload.get("title")) or "상담 분석 리포트",
         _text(reporting_payload.get("summary")),
+        "",
+        "## 문서 정보",
+        f"- 리포트 유형: {_report_type_display_label(report_type)}",
     ]
+    if screen_id:
+        lines.append(f"- 화면 ID: {screen_id}")
+    if stage:
+        lines.append(f"- 진행 상태: {_report_stage_display_label(stage)}")
+    if quality:
+        lines.append(f"- 검토 상태: {_report_quality_display_label(quality)}")
+        if quality.get("review_required"):
+            lines.append("- 검토 기준: 제출 전 사실관계와 증거 자료를 다시 확인해야 합니다.")
+    if report_type == ReportType.FAULT_RATIO_ANALYSIS.value:
+        lines.extend(
+            [
+                "",
+                "## 과실비율 리포트 기준",
+                "- 사고 개요, AI 분석 결과, 판단 근거, 유사 사례·판례, 후속 조치를 PDF에 포함합니다.",
+                "- 유사 사례와 보험 기준은 참고 자료이며 법적 확정 판단으로 표현하지 않습니다.",
+            ]
+        )
     for section in _list_or_empty(reporting_payload.get("sections")):
         if not isinstance(section, dict):
             continue
@@ -3971,6 +4258,36 @@ def _reporting_payload_content_summary(reporting_payload: dict[str, Any]) -> str
             if text:
                 lines.append(f"- {text}")
     return "\n".join(line for line in lines if line).strip()
+
+
+def _report_type_display_label(report_type: str) -> str:
+    labels = {
+        ReportType.FINE_NOTICE_OBJECTION.value: "과태료 대응",
+        ReportType.FAULT_RATIO_ANALYSIS.value: "사고 과실비율 분석",
+        "generic_supervisor": "상담 요약",
+        "objection_draft": "이의신청 초안",
+        "fault_analysis": "과실 분석",
+        "general": "일반 리포트",
+    }
+    return labels.get(report_type, report_type or "일반 리포트")
+
+
+def _report_stage_display_label(stage: str) -> str:
+    labels = {
+        "draft": "작성 중",
+        "agent_execution_ready": "분석 준비 완료",
+        "partial": "보완 필요",
+        "success": "분석 완료",
+        "ready": "저장 완료",
+        "downloaded": "다운로드 완료",
+    }
+    return labels.get(str(stage or "").lower(), stage or "상태 확인")
+
+
+def _report_quality_display_label(quality: dict[str, Any]) -> str:
+    if quality.get("partial_report"):
+        return "추가 자료 필요"
+    return _text(quality.get("confidence_label")) or "검토 가능"
 
 
 def _reporting_payload_item_text(item: Any) -> str:
@@ -4008,6 +4325,97 @@ def _report_pdf_font_file() -> str | None:
         if candidate.exists():
             return str(candidate)
     return None
+
+
+def _reportlab_pdf_modules() -> dict[str, Any] | None:
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfgen.canvas import Canvas
+    except Exception:
+        for candidate in _bundled_pdf_site_packages_candidates():
+            if candidate.exists() and str(candidate) not in sys.path:
+                sys.path.append(str(candidate))
+        try:
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            from reportlab.pdfgen.canvas import Canvas
+        except Exception:
+            return None
+    return {
+        "pdfmetrics": pdfmetrics,
+        "ttfont": TTFont,
+        "canvas": Canvas,
+    }
+
+
+def _wrap_reportlab_pdf_line(
+    text: str,
+    *,
+    font_name: str,
+    font_size: float,
+    max_width: float,
+    pdfmetrics: Any,
+) -> list[str]:
+    value = " ".join(str(text or "").split())
+    if not value:
+        return [""]
+    if pdfmetrics.stringWidth(value, font_name, font_size) <= max_width:
+        return [value]
+
+    lines: list[str] = []
+    current = ""
+    for word in value.split(" "):
+        candidate = f"{current} {word}".strip()
+        if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+            lines.extend(
+                _wrap_reportlab_pdf_token(
+                    current,
+                    font_name=font_name,
+                    font_size=font_size,
+                    max_width=max_width,
+                    pdfmetrics=pdfmetrics,
+                )
+            )
+            current = word
+            continue
+        current = candidate
+    if current:
+        lines.extend(
+            _wrap_reportlab_pdf_token(
+                current,
+                font_name=font_name,
+                font_size=font_size,
+                max_width=max_width,
+                pdfmetrics=pdfmetrics,
+            )
+        )
+    return lines or [value]
+
+
+def _wrap_reportlab_pdf_token(
+    text: str,
+    *,
+    font_name: str,
+    font_size: float,
+    max_width: float,
+    pdfmetrics: Any,
+) -> list[str]:
+    if pdfmetrics.stringWidth(text, font_name, font_size) <= max_width:
+        return [text]
+
+    chunks: list[str] = []
+    current = ""
+    for char in text:
+        candidate = f"{current}{char}"
+        if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+            chunks.append(current)
+            current = char
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _wrap_report_pdf_line(text: str, *, width: int) -> list[str]:
@@ -4122,6 +4530,668 @@ def _minimal_pdf_page_stream(lines: list[str]) -> str:
 
 def _pdf_utf16be_hex(value: Any) -> str:
     return str(value or "").encode("utf-16-be", errors="replace").hex().upper()
+
+
+def _report_download_document_type(value: str | None) -> str:
+    normalized = _text(value).lower()
+    if normalized in {"objection", "objection_form", "objection-draft", "application", "form"}:
+        return REPORT_DOWNLOAD_TYPE_OBJECTION_FORM
+    return REPORT_DOWNLOAD_TYPE_REPORT
+
+
+def _report_objection_form_body(report: Report) -> str:
+    content = _dict_or_empty(report.content)
+    reporting_payload = _dict_or_empty(content.get("reporting_payload"))
+    sections = _list_or_empty(reporting_payload.get("sections"))
+    draft_section = _report_section_by_title(sections, ("이의신청서", "의견제출서", "초안"))
+    draft_items = _report_section_item_map(draft_section)
+    evidence_section = _report_section_by_title(sections, ("필요 증거", "제출 자료", "증거"))
+    evidence_items = _report_section_item_map(evidence_section)
+    agency = (
+        draft_items.get("제출 대상")
+        or draft_items.get("수신")
+        or "고지서에 표시된 처분 기관"
+    )
+    title = (
+        draft_items.get("제목")
+        or "과태료 부과 처분에 대한 의견제출서 및 이의신청서"
+    )
+    facts = _compact_repeated_fact_text(
+        draft_items.get("사실관계") or _text(reporting_payload.get("summary")) or report.content_summary
+    )
+    purpose = (
+        draft_items.get("신청 취지")
+        or "고지 내용과 실제 사실관계를 재확인해 처분 취소 또는 감경을 요청합니다."
+    )
+    attachments = draft_items.get("첨부 자료") or evidence_items.get("현재 증빙") or "고지서 원본, 현장 사진, 블랙박스 등 증빙 자료"
+    review_note = (
+        draft_items.get("검토 안내")
+        or "본 문서는 AI가 작성한 제출 전 검토용 초안이며, 실제 제출 전 사실관계와 관할 기관 양식을 확인해야 합니다."
+    )
+    lines = [
+        "## 문서 정보",
+        "- 문서 유형: 이의신청서 초안",
+        f"- 리포트 ID: {report.report_id}",
+        f"- 사건 ID: {report.job.job_id if report.job_id else report.session.session_id if report.session_id else '-'}",
+        "- 작성 기준: 상담 내용과 리포트 payload",
+        "",
+        "## 제출 정보",
+        f"- 수신: {agency}",
+        f"- 제목: {title}",
+        "",
+        "## 신청 취지",
+        f"- {purpose}",
+        "",
+        "## 사실관계",
+        f"- {facts}",
+        "",
+        "## 신청 사유",
+        "- 위반 당시 상황, 긴급성, 표지·신호 상태, 운전자 진술과 제출 증빙을 근거로 처분 재검토를 요청합니다.",
+        "",
+        "## 첨부 자료",
+        f"- {attachments}",
+        "",
+        "## 제출 전 확인",
+        f"- {review_note}",
+        "- 관할 기관의 공식 양식, 접수 기한, 서명 또는 날인 필요 여부를 최종 확인하세요.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _report_objection_form_pdf_body(
+    report: Report,
+    *,
+    title: str,
+    text_body: str,
+) -> bytes:
+    if _should_use_accident_objection_template(report):
+        template_pdf = _build_accident_objection_template_pdf(report)
+        if template_pdf:
+            return template_pdf
+    return build_report_download_pdf_body(
+        report_id=report.report_id,
+        title=title,
+        body_text=text_body,
+    )
+
+
+def _should_use_accident_objection_template(report: Report) -> bool:
+    return report.report_type in {
+        ReportType.FAULT_RATIO_ANALYSIS.value,
+        ReportType.FAULT_ANALYSIS.value,
+    }
+
+
+def _build_accident_objection_template_pdf(report: Report) -> bytes | None:
+    if not ACCIDENT_OBJECTION_TEMPLATE_PATH.exists():
+        return None
+
+    modules = _pdf_overlay_modules()
+    if modules is None:
+        return _build_accident_objection_template_pdf_via_bundled_python(report)
+
+    pdfmetrics = modules["pdfmetrics"]
+    ttfont = modules["ttfont"]
+    canvas_cls = modules["canvas"]
+    pdf_reader_cls = modules["pdf_reader"]
+    pdf_writer_cls = modules["pdf_writer"]
+
+    try:
+        template_reader = pdf_reader_cls(str(ACCIDENT_OBJECTION_TEMPLATE_PATH))
+    except Exception:
+        return None
+
+    if not template_reader.pages:
+        return None
+
+    try:
+        font_name = "ReportOverlay"
+        font_file = _report_pdf_font_file()
+        if font_file and font_name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(ttfont(font_name, font_file))
+    except Exception:
+        font_name = "Helvetica"
+
+    first_page = template_reader.pages[0]
+    page_width = float(first_page.mediabox.width)
+    page_height = float(first_page.mediabox.height)
+    form_data = _accident_objection_template_data(report)
+
+    overlay_stream = BytesIO()
+    overlay_canvas = canvas_cls(overlay_stream, pagesize=(page_width, page_height))
+    overlay_canvas.setFillColorRGB(0, 0, 0)
+
+    total_pages = len(template_reader.pages)
+    for page_index in range(total_pages):
+        if page_index == 1:
+            _draw_accident_objection_template_page_2(
+                overlay_canvas,
+                page_height=page_height,
+                font_name=font_name,
+                data=form_data,
+            )
+        elif page_index == 2:
+            _draw_accident_objection_template_page_3(
+                overlay_canvas,
+                page_height=page_height,
+                font_name=font_name,
+                data=form_data,
+            )
+        elif page_index == 3:
+            _draw_accident_objection_template_page_4(
+                overlay_canvas,
+                page_height=page_height,
+                font_name=font_name,
+                data=form_data,
+            )
+        elif page_index == 4:
+            _draw_accident_objection_template_page_5(
+                overlay_canvas,
+                page_height=page_height,
+                font_name=font_name,
+                data=form_data,
+            )
+        overlay_canvas.showPage()
+    overlay_canvas.save()
+    overlay_stream.seek(0)
+
+    try:
+        overlay_reader = pdf_reader_cls(overlay_stream)
+        writer = pdf_writer_cls()
+        for page_index, template_page in enumerate(template_reader.pages):
+            if page_index < len(overlay_reader.pages):
+                template_page.merge_page(overlay_reader.pages[page_index])
+            writer.add_page(template_page)
+        output = BytesIO()
+        writer.write(output)
+        return output.getvalue()
+    except Exception:
+        return _build_accident_objection_template_pdf_via_bundled_python(report)
+
+
+def _build_accident_objection_template_pdf_via_bundled_python(report: Report) -> bytes | None:
+    if not ACCIDENT_OBJECTION_RENDERER_PATH.exists():
+        return None
+
+    bundled_python = _bundled_pdf_python_path()
+    if bundled_python is None:
+        return None
+
+    payload = {
+        "template_pdf": str(ACCIDENT_OBJECTION_TEMPLATE_PATH),
+        "font_file": _report_pdf_font_file(),
+        "form_data": _json_compatible(_accident_objection_template_data(report)),
+    }
+    try:
+        with tempfile.TemporaryDirectory(prefix="objection-pdf-") as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            payload_path = temp_dir / "payload.json"
+            output_path = temp_dir / "objection-form.pdf"
+            payload_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    str(bundled_python),
+                    str(ACCIDENT_OBJECTION_RENDERER_PATH),
+                    str(payload_path),
+                    str(output_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if completed.returncode != 0 or not output_path.exists():
+                return None
+            return output_path.read_bytes()
+    except Exception:
+        return None
+
+
+def _pdf_overlay_modules() -> dict[str, Any] | None:
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.pdfgen.canvas import Canvas
+        from pypdf import PdfReader, PdfWriter
+    except Exception:
+        for candidate in _bundled_pdf_site_packages_candidates():
+            if candidate.exists() and str(candidate) not in sys.path:
+                sys.path.append(str(candidate))
+        try:
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            from reportlab.pdfgen.canvas import Canvas
+            from pypdf import PdfReader, PdfWriter
+        except Exception:
+            return None
+    return {
+        "pdfmetrics": pdfmetrics,
+        "ttfont": TTFont,
+        "canvas": Canvas,
+        "pdf_reader": PdfReader,
+        "pdf_writer": PdfWriter,
+    }
+
+
+def _bundled_pdf_site_packages_candidates() -> list[Path]:
+    return [
+        Path.home()
+        / ".cache"
+        / "codex-runtimes"
+        / "codex-primary-runtime"
+        / "dependencies"
+        / "python"
+        / "Lib"
+        / "site-packages"
+    ]
+
+
+def _bundled_pdf_python_path() -> Path | None:
+    candidates: list[Path] = []
+    for site_packages in _bundled_pdf_site_packages_candidates():
+        runtime_root = site_packages.parent.parent
+        candidates.extend(
+            [
+                runtime_root / "python.exe",
+                runtime_root / "python",
+                runtime_root / "bin" / "python3",
+                runtime_root / "bin" / "python",
+            ]
+        )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _accident_objection_template_data(report: Report) -> dict[str, Any]:
+    content = _dict_or_empty(report.content)
+    reporting_payload = _dict_or_empty(content.get("reporting_payload"))
+    sections = _list_or_empty(reporting_payload.get("sections"))
+    overview_items = _report_section_item_map(_report_section_by_title(sections, ("사고 개요", "고지서 OCR 결과")))
+    issue_items = _report_section_item_map(_report_section_by_title(sections, ("핵심 쟁점", "이의제기 가능성")))
+    evidence_items = _report_section_item_map(_report_section_by_title(sections, ("필요 증거", "제출 자료", "증거자료")))
+    guide_items = _report_section_item_map(_report_section_by_title(sections, ("후속 조치", "제출 가이드라인")))
+    law_items = _report_section_item_map(_report_section_by_title(sections, ("판단 근거", "관련 법령", "판례")))
+    draft_items = _report_section_item_map(_report_section_by_title(sections, ("이의신청서", "초안")))
+    report_summary = _text(reporting_payload.get("summary")) or report.content_summary
+    issue_values = [value for value in issue_items.values() if _text(value)]
+    evidence_values = [value for value in evidence_items.values() if _text(value)]
+    guide_values = [value for value in guide_items.values() if _text(value)]
+    law_values = [value for value in law_items.values() if _text(value)]
+    issue_summary = " / ".join(
+        value
+        for value in (
+            issue_items.get("판단"),
+            issue_items.get("주요 사유"),
+            issue_items.get("보완 필요"),
+        )
+        if _text(value)
+    )
+    issue_summary = issue_summary or " / ".join(issue_values[:3])
+    evidence_summary = " / ".join(
+        value
+        for value in (
+            evidence_items.get("현재 증빙"),
+            evidence_items.get("현장 자료"),
+            evidence_items.get("운전자 진술"),
+            evidence_items.get("고지서 원본"),
+        )
+        if _text(value)
+    )
+    evidence_summary = evidence_summary or " / ".join(evidence_values[:4])
+    reason_detail = "\n".join(
+        line
+        for line in (
+            _text(law_items.get("적용 한계")),
+            _text(law_items.get("검증 필요")),
+            _text(issue_items.get("주요 사유")),
+            _text(report_summary),
+        )
+        if line
+    )
+    reason_detail = reason_detail or "\n".join(law_values[:2] + [report_summary])
+    action_detail = "\n".join(
+        line
+        for line in (
+            _text(guide_items.get("1단계")),
+            _text(guide_items.get("2단계")),
+            _text(guide_items.get("3단계")),
+            _text(guide_items.get("4단계")),
+        )
+        if line
+    )
+    relationship = "보행자" if "보행" in f"{report_summary} {issue_summary}" else "운전자"
+    action_detail = action_detail or "\n".join(guide_values[:4])
+    incident_at = _first_nonempty(
+        overview_items.get("사고 일시"),
+        overview_items.get("위반 일시"),
+        draft_items.get("사실관계"),
+    )
+    location = _first_nonempty(
+        overview_items.get("사고 장소"),
+        overview_items.get("위반 장소"),
+        draft_items.get("사실관계"),
+    )
+    case_number = _first_nonempty(
+        overview_items.get("사건번호 / 접수번호"),
+        report.job.job_id if report.job_id else "",
+    )
+    write_date = timezone.localtime(timezone.now()).strftime("%Y년 %m월 %d일")
+    applicant_name = _first_nonempty(
+        content.get("applicant_name"),
+        reporting_payload.get("applicant_name"),
+        report.metadata.get("applicant_name"),
+    )
+    evidence_rows = _objection_evidence_rows(evidence_items, law_items, draft_items)
+    objection_targets = _objection_target_labels(f"{issue_summary} {report_summary} {evidence_summary}")
+    rebuttal_brief = _brief_text(_first_nonempty(issue_summary, report_summary), limit=52)
+    response_brief = _brief_text(_first_nonempty(action_detail, report_summary), limit=52)
+    target_brief = _brief_text(", ".join(objection_targets[:2]), limit=28)
+    recipient = _first_nonempty(
+        draft_items.get("제출 대상"),
+        draft_items.get("수신"),
+        "○○경찰서장 귀하",
+    )
+    police_station = _first_nonempty(
+        overview_items.get("담당 경찰서"),
+        overview_items.get("해당 경찰서"),
+        "담당 경찰서 확인 필요",
+    )
+
+    return {
+        "recipient": recipient,
+        "applicant_name": applicant_name,
+        "relationship": relationship,
+        "case_number": case_number,
+        "incident_at": incident_at,
+        "location": location,
+        "investigator": _text(overview_items.get("담당 조사관")),
+        "notice_date": _text(overview_items.get("조사결과 통지일")),
+        "police_station": police_station,
+        "vehicle_parties": _first_nonempty(
+            overview_items.get("관련 차량 / 당사자"),
+            _text(overview_items.get("사고 유형")),
+        ),
+        "insurance_number": _text(overview_items.get("보험사 / 접수번호")),
+        "objection_targets": objection_targets,
+        "purpose": _first_nonempty(
+            draft_items.get("신청 취지"),
+            "관련 증거를 재검토하고 필요한 재조사를 통해 조사결과를 재확인해 주시기 바랍니다.",
+        ),
+        "summary": _compact_repeated_fact_text(
+            _first_nonempty(
+                draft_items.get("사실관계"),
+                report_summary,
+                report.content_summary,
+            )
+        ),
+        "issue_summary": issue_summary,
+        "reason_detail": reason_detail,
+        "action_detail": action_detail,
+        "evidence_summary": evidence_summary,
+        "evidence_rows": evidence_rows,
+        "write_date": write_date,
+        "rebuttal_brief": rebuttal_brief,
+        "response_brief": response_brief,
+        "target_brief": target_brief,
+        "law_summary": " / ".join(
+            value
+            for value in (
+                law_items.get("검색 쿼리"),
+                law_items.get("적용 한계"),
+                law_items.get("Agent 상태"),
+            )
+            if _text(value)
+        ),
+        "rebuttal_summary": _first_nonempty(issue_items.get("판단"), report_summary),
+    }
+
+
+def _brief_text(value: Any, *, limit: int = 56) -> str:
+    text = " ".join(_text(value).replace("\r", " ").replace("\n", " ").split())
+    if not text or len(text) <= limit:
+        return text
+    return f"{text[: max(limit - 3, 1)].rstrip()}..."
+
+
+def _compact_repeated_fact_text(value: Any) -> str:
+    text = " ".join(_text(value).replace("\r", " ").replace("\n", " ").split())
+    if not text:
+        return ""
+
+    marker = "에서 "
+    marker_start = 0
+    while True:
+        marker_index = text.find(marker, marker_start)
+        if marker_index < 0:
+            break
+        suffix = text[marker_index + len(marker) :]
+        prefix = text[:marker_index]
+        if len(suffix) >= 20 and any(char.isdigit() for char in suffix) and suffix in prefix:
+            text = suffix
+            break
+        marker_start = marker_index + len(marker)
+
+    words = text.split()
+    for size in range(len(words) // 2, 0, -1):
+        if words[:size] == words[size : size * 2]:
+            return " ".join(words[size:])
+    return text
+
+
+def _objection_evidence_rows(
+    evidence_items: dict[str, str],
+    law_items: dict[str, str],
+    draft_items: dict[str, str],
+) -> list[dict[str, str]]:
+    raw_values = [
+        evidence_items.get("현재 증빙"),
+        evidence_items.get("현장 자료"),
+        evidence_items.get("운전자 진술"),
+        evidence_items.get("고지서 원본"),
+        draft_items.get("첨부 자료"),
+        law_items.get("검색 쿼리"),
+    ]
+    if not any(_text(value) for value in raw_values):
+        raw_values = list(evidence_items.values()) + list(draft_items.values()) + list(law_items.values())
+    rows = []
+    for index, value in enumerate(_split_listish_values(raw_values, limit=6), start=1):
+        rows.append(
+            {
+                "no": str(index),
+                "name": value,
+                "fact": "신청인 주장과 기존 조사결과 차이를 입증",
+                "format": "PDF / 이미지 / 메모",
+                "note": "",
+            }
+        )
+    return rows
+
+
+def _draw_accident_objection_template_page_2(pdf_canvas, *, page_height: float, font_name: str, data: dict[str, Any]) -> None:
+    _draw_text_block(pdf_canvas, data["recipient"], x=250, top=147, page_height=page_height, width=34, max_lines=1, font_name=font_name, font_size=10)
+    _draw_text_block(pdf_canvas, data["applicant_name"], x=126, top=289, page_height=page_height, width=20, max_lines=1, font_name=font_name)
+    _draw_text_block(pdf_canvas, "", x=428, top=289, page_height=page_height, width=18, max_lines=1, font_name=font_name)
+    _draw_text_block(pdf_canvas, "", x=126, top=329, page_height=page_height, width=28, max_lines=2, font_name=font_name)
+    _draw_text_block(pdf_canvas, "", x=428, top=329, page_height=page_height, width=18, max_lines=1, font_name=font_name)
+    _draw_text_block(pdf_canvas, "", x=126, top=369, page_height=page_height, width=28, max_lines=1, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["relationship"], x=427, top=369, page_height=page_height, width=24, max_lines=2, font_name=font_name)
+
+    _draw_text_block(pdf_canvas, data["case_number"], x=126, top=482, page_height=page_height, width=26, max_lines=1, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["incident_at"], x=428, top=482, page_height=page_height, width=22, max_lines=2, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["location"], x=126, top=522, page_height=page_height, width=30, max_lines=2, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["police_station"], x=428, top=522, page_height=page_height, width=20, max_lines=2, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["investigator"], x=126, top=562, page_height=page_height, width=24, max_lines=1, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["notice_date"], x=428, top=562, page_height=page_height, width=18, max_lines=1, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["vehicle_parties"], x=126, top=603, page_height=page_height, width=30, max_lines=2, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["insurance_number"], x=428, top=603, page_height=page_height, width=20, max_lines=2, font_name=font_name)
+
+    _draw_text_block(
+        pdf_canvas,
+        f"선택 쟁점: {', '.join(data['objection_targets'])}",
+        x=96,
+        top=696,
+        page_height=page_height,
+        width=94,
+        max_lines=2,
+        font_name=font_name,
+        font_size=9,
+        leading=12,
+    )
+    _draw_text_block(pdf_canvas, data["purpose"], x=96, top=780, page_height=page_height, width=94, max_lines=5, font_name=font_name, leading=14)
+    _draw_text_block(pdf_canvas, data["write_date"], x=126, top=927, page_height=page_height, width=20, max_lines=1, font_name=font_name)
+    _draw_text_block(pdf_canvas, data["applicant_name"], x=428, top=927, page_height=page_height, width=16, max_lines=1, font_name=font_name)
+
+
+def _draw_accident_objection_template_page_3(pdf_canvas, *, page_height: float, font_name: str, data: dict[str, Any]) -> None:
+    _draw_text_block(pdf_canvas, data["rebuttal_summary"], x=92, top=180, page_height=page_height, width=92, max_lines=3, font_name=font_name, font_size=10, leading=13)
+
+    issue_rows = [
+        {
+            "dispute": target,
+            "claim": data["summary"],
+            "evidence": row["no"],
+        }
+        for target, row in zip(data["objection_targets"][:3], data["evidence_rows"][:3], strict=False)
+    ]
+    row_tops = [257, 287, 317]
+    for index, row in enumerate(issue_rows[:3]):
+        _draw_text_block(pdf_canvas, str(index + 1), x=118, top=row_tops[index], page_height=page_height, width=3, max_lines=1, font_name=font_name, font_size=9)
+        _draw_text_block(pdf_canvas, row["dispute"], x=148, top=row_tops[index], page_height=page_height, width=18, max_lines=2, font_name=font_name, font_size=9, leading=11)
+        _draw_text_block(pdf_canvas, row["claim"], x=282, top=row_tops[index], page_height=page_height, width=22, max_lines=2, font_name=font_name, font_size=9, leading=11)
+        _draw_text_block(pdf_canvas, row["evidence"], x=503, top=row_tops[index], page_height=page_height, width=5, max_lines=1, font_name=font_name, font_size=9)
+
+    _draw_text_block(pdf_canvas, data["summary"], x=92, top=410, page_height=page_height, width=94, max_lines=5, font_name=font_name, leading=14)
+    _draw_text_block(pdf_canvas, data["evidence_summary"], x=92, top=533, page_height=page_height, width=94, max_lines=4, font_name=font_name, leading=14)
+    _draw_text_block(pdf_canvas, data["action_detail"], x=92, top=655, page_height=page_height, width=94, max_lines=3, font_name=font_name, leading=14)
+
+
+def _draw_accident_objection_template_page_4(pdf_canvas, *, page_height: float, font_name: str, data: dict[str, Any]) -> None:
+    evidence_row_tops = [164, 196, 228, 260, 292, 324]
+    for index, row in enumerate(data["evidence_rows"][:6]):
+        top = evidence_row_tops[index]
+        _draw_text_block(pdf_canvas, row["name"], x=100, top=top, page_height=page_height, width=18, max_lines=2, font_name=font_name, font_size=8, leading=9.5)
+        _draw_text_block(pdf_canvas, row["fact"], x=260, top=top, page_height=page_height, width=20, max_lines=2, font_name=font_name, font_size=8, leading=9.5)
+        _draw_text_block(pdf_canvas, row["format"], x=425, top=top, page_height=page_height, width=12, max_lines=2, font_name=font_name, font_size=8, leading=9.5)
+
+    _draw_text_block(pdf_canvas, data.get("rebuttal_brief", data["rebuttal_summary"]), x=92, top=473, page_height=page_height, width=20, max_lines=2, font_name=font_name, font_size=8, leading=9.5)
+    _draw_text_block(pdf_canvas, data.get("response_brief", data["summary"]), x=280, top=473, page_height=page_height, width=20, max_lines=2, font_name=font_name, font_size=8, leading=9.5)
+    _draw_text_block(pdf_canvas, "1-3", x=469, top=473, page_height=page_height, width=6, max_lines=1, font_name=font_name, font_size=8.5)
+    _draw_text_block(pdf_canvas, "재조사 요청", x=514, top=473, page_height=page_height, width=10, max_lines=2, font_name=font_name, font_size=8.5, leading=10)
+
+
+
+def _draw_accident_objection_template_page_5(pdf_canvas, *, page_height: float, font_name: str, data: dict[str, Any]) -> None:
+    _draw_text_block(pdf_canvas, data.get("target_brief", ""), x=372, top=551, page_height=page_height, width=16, max_lines=2, font_name=font_name, font_size=8.5, leading=9.5)
+    _draw_text_block(pdf_canvas, data["reason_detail"], x=92, top=657, page_height=page_height, width=90, max_lines=4, font_name=font_name, font_size=8.5, leading=11)
+
+
+def _draw_text_block(
+    pdf_canvas,
+    text: str,
+    *,
+    x: float,
+    top: float,
+    page_height: float,
+    width: int,
+    max_lines: int,
+    font_name: str,
+    font_size: float = 10,
+    leading: float = 12,
+) -> None:
+    lines = _pdf_block_lines(text, width=width, max_lines=max_lines)
+    if not lines:
+        return
+    pdf_canvas.setFont(font_name, font_size)
+    baseline = page_height - top
+    for index, line in enumerate(lines):
+        pdf_canvas.drawString(x, baseline - (index * leading), line)
+
+
+def _pdf_block_lines(text: str, *, width: int, max_lines: int) -> list[str]:
+    if not _text(text):
+        return []
+    lines = []
+    for raw_line in str(text).replace("\r", "").split("\n"):
+        wrapped = _wrap_report_pdf_line(raw_line.strip(), width=width)
+        lines.extend(wrapped or [""])
+    compact_lines = [line for line in lines if line]
+    if not compact_lines:
+        return []
+    if len(compact_lines) <= max_lines:
+        return compact_lines
+    truncated = compact_lines[:max_lines]
+    if len(truncated[-1]) >= max(width - 3, 1):
+        truncated[-1] = truncated[-1][: width - 3].rstrip()
+    truncated[-1] = f"{truncated[-1]}..."
+    return truncated
+
+
+def _objection_target_labels(text: str) -> list[str]:
+    keyword_map = [
+        ("블랙박스 / CCTV 등 증거 미반영", ("블랙박스", "cctv", "증거", "영상")),
+        ("신호위반 판단", ("신호",)),
+        ("진로변경 / 끼어들기 판단", ("진로변경", "끼어들기", "차선 변경", "차선변경")),
+        ("안전거리 / 전방주시 판단", ("안전거리", "전방주시")),
+        ("속도 / 제한속도 판단", ("속도", "제동거리", "제한속도")),
+        ("현장조사 미흡", ("현장", "사진", "로드뷰")),
+        ("목격자 진술 누락", ("목격자", "진술")),
+        ("교통법규 적용 오류", ("법령", "법규", "판례")),
+    ]
+    normalized = _text(text).lower()
+    matches = [label for label, keywords in keyword_map if any(keyword in normalized for keyword in keywords)]
+    if not matches:
+        matches.append("교통법규 적용 오류")
+    return matches[:4]
+
+
+def _split_listish_values(values: list[Any], *, limit: int) -> list[str]:
+    parts: list[str] = []
+    for value in values:
+        text = _text(value)
+        if not text:
+            continue
+        normalized = text.replace("\n", ", ").replace("·", ", ").replace(" / ", ", ")
+        for piece in normalized.split(","):
+            cleaned = piece.strip()
+            if cleaned and cleaned not in parts:
+                parts.append(cleaned)
+            if len(parts) >= limit:
+                return parts
+    return parts
+
+
+def _first_nonempty(*values: Any) -> str:
+    for value in values:
+        text = _text(value)
+        if text:
+            return text
+    return ""
+
+
+def _report_section_by_title(sections: list[Any], keywords: tuple[str, ...]) -> dict[str, Any]:
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        title = _text(section.get("title"))
+        if any(keyword in title for keyword in keywords):
+            return section
+    return {}
+
+
+def _report_section_item_map(section: dict[str, Any]) -> dict[str, str]:
+    items: dict[str, str] = {}
+    for item in _list_or_empty(section.get("items")):
+        if not isinstance(item, dict):
+            continue
+        label = _text(item.get("label") or item.get("title") or item.get("field"))
+        value = _reporting_payload_item_text(item)
+        if label and value:
+            if value.startswith(f"{label}: "):
+                value = value[len(label) + 2 :]
+            items[label] = value
+    return items
 
 
 def _report_download_body(

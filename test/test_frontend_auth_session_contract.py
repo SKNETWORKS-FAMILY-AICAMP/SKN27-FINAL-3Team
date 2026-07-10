@@ -37,6 +37,9 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
         "readStoredAuthSession",
         "clearStoredAuthSession",
         "AUTH_SESSION_STORAGE_KEY",
+        "shouldUseLocalMockGoogleAuth",
+        "VITE_GOOGLE_LOCAL_AUTH_MODE",
+        "isLocalDevelopmentOrigin",
     ]
 
     missing = [token for token in required_tokens if token not in content]
@@ -58,6 +61,10 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     assert "postFormData" in api_client
     assert 'from "./apiClient.js"' in chatbot
     assert 'from "./authSession.js"' in chatbot
+    assert "shouldUseLocalMockGoogleAuth({ localAuthMode })" in auth_session
+    assert 'normalizedGoogleLocalAuthMode(localAuthMode) !== "real"' in auth_session
+    assert 'hostname === "localhost"' in auth_session
+    assert 'hostname === "127.0.0.1"' in auth_session
 
 
 def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
@@ -80,7 +87,7 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
 
     assert "fine-result" not in shell
     assert "FineResult" not in shell
-    assert 'const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";' in shell
+    assert 'const effectiveAuthToken = activeAuthToken || authToken || "";' in shell
     assert "storedAuthSession.session_id" in shell
     assert "storedAuthSession.guest_id" in shell
     assert "storedAuthSession.auth_session_id" in shell
@@ -95,6 +102,9 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "conversation_history" in shell
     assert "SupervisorFlowPanel" in shell
     assert "ReportingPreviewPanel" in shell
+    assert "report-document-highlights" in shell
+    assert "isSubmissionDocumentSection" in shell
+    assert "제출 문서" in shell
     assert "FaultRatioInsightPanel" in shell
     assert "fault-ratio-insight-panel" in shell
     assert "similar_cases" in shell
@@ -172,8 +182,15 @@ def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
     assert "개발용 Agent 점검" in shell
     assert "Traffic Dispute AI" in shell
     assert "비회원 1회 리포팅 가능" in shell
-    assert "reportingPayload || analysisCards.length || supervisorExecution || currentReport" in shell
-    assert "리포트 내려받기" in shell
+    assert "activeReportingPayload || analysisCards.length || supervisorExecution || currentReport || hasSavedReports" in shell
+    assert "isReportingPayloadReady" in shell
+    assert "visibleReportingPayload" in shell
+    assert "download_report" in shell
+    assert "download_objection" in shell
+    assert "documentType" in shell or "document_type: documentType" in api_client
+    assert "onLogout={logoutAndResetSession}" in shell
+    assert "리포트 PDF" in shell
+    assert "이의신청서 PDF" in shell
     assert "report-inspector-detail" in shell
     assert "data-partial-report" in shell
     assert "partial_report" in shell

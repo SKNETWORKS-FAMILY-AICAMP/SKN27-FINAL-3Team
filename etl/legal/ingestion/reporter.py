@@ -38,6 +38,7 @@ def write_artifacts(result: dict, output_dir: str | Path) -> None:
     write_jsonl(base / "normalized" / "raw_law_documents.jsonl", result["raw_records"])
     write_jsonl(base / "chunks" / "law_chunks.jsonl", result["chunks"])
     write_jsonl(base / "relations" / "law_relations.jsonl", result["relations"])
+    write_jsonl(base / "relations" / "law_extra_relations.jsonl", result.get("extra_relations", []))
     write_jsonl(base / "embeddings" / "embedding_inputs.jsonl", result["embedding_inputs"])
     write_jsonl(base / "publish" / "searchable_law_chunks.jsonl", result["searchable_chunks"])
     write_json(base / "reports" / "quality_report.json", result["quality_report"])
@@ -73,6 +74,7 @@ def build_run_summary(
     chunks: list[dict],
     searchable_chunks: list[dict],
     relations: list[dict],
+    extra_relations: list[dict] | None = None,
     embedding_inputs: list[dict],
     quality_report: dict,
     failed_items: list[dict],
@@ -96,6 +98,7 @@ def build_run_summary(
         "failed_chunks": failed_chunks,
         "partial_chunks": quality_report.get("status_counts", {}).get("partial_text_only", 0),
         "relation_count": len(relations),
+        "extra_relation_count": len(extra_relations or []),
         "embedding_input_count": len(embedding_inputs),
         "started_at": started_at,
         "finished_at": datetime.now(timezone.utc).isoformat(),

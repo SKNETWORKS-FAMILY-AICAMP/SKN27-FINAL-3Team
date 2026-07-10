@@ -68,6 +68,6 @@ sequenceDiagram
 | **Query Understanding** | `query_understanding.py` | 정규식 추출 + Neo4j 힌트 부스팅 | ✅ 완료 |
 | **Neo4j Hint Graph** | Neo4j DB | 일상어 → 법률용어 변환 | ✅ 코드 완료 / ⚠️ 테스트 데이터만 적재 |
 | **Vector Search** | `etl/legal/search.py` | OpenAI 임베딩 기반 코사인 유사도 검색 | ✅ 완료 (10만 건) |
-| **Neo4j Law Graph** | Neo4j DB | 조항 간 위임·처벌 관계 확장 | ✅ 코드 완료 / ❌ 데이터 미구축 (MVP 제외) |
+| **Neo4j Law Graph** | Neo4j DB | 조항 간 처벌·별표·예외·일반 참조 관계 확장 | ✅ extra relation ETL/export 연결 / ⚠️ 산출물 적재 후 count 검증 필요 |
 | **Confidence Eval** | `search.py` | Top-1 점수(0.50) 기준 신뢰도 판정 | ✅ 완료 |
 | **LLM Fallback** | `agent.py` | 신뢰도 부족 시 LLM 키워드 추출 2차 검색 | ✅ 완료 (LLM 외부 주입 필요) |
