@@ -4,10 +4,10 @@
 | 항목 | 값 |
 |------|-----|
 | 문서 번호 | API-004 |
-| 버전 | v3.6 |
+| 버전 | v3.7 |
 | 작성일 | 2026-07-02 (최초 작성 2026-07-01) |
 | 근거 문서 | ARCH-001 v4.2, DATA-003 v3.11, 설계 정리 문서 v22 |
-| 변경 요약 | v2.0 → v3.0: 출력 페이로드에 `law_code_verified` 필드 복원 (경량 검증). 입력 페이로드·재호출 시나리오는 변경 없음 — `LDB_CHECK`는 Supervisor 왕복을 유발하지 않으므로 `law_code_reverification_attempted` 같은 재호출용 입력 필드는 되살아나지 않았다. v3.0 → v3.1: 입력 페이로드에 기한 기산일(수령일) 필드가 빠져있음을 미결 사항으로 표시 (ARCH-001 §9-3 참고). v3.1 → v3.2: 미결 사항 해소 — `notice_received_date`를 `user_appeal_reason`과 동일하게 Supervisor 공급 필드로 확정, 케이스 A·B 예시 페이로드 갱신. v3.2 → v3.3 (최종 검수): 근거 문서 버전 표기가 ARCH-001/DATA-003/설계 정리 문서 최신본과 어긋나 있던 것 동기화, `law_code` 주석에 위반유형 판별 용도 추가, 출력 페이로드에 `risk_trigger_category` 필드 추가. v3.3 → v3.4: 1차 고지서 경로 순서 오류 수정 반영 — `deadline_gate_node`가 필드 확인보다 먼저 실행될 수 없다는 문제 해소에 따라, 1차 고지서의 `input_required` 응답은 `computed_deadline`/`deadline_passed` 없이 `law_code_verified`만 포함하도록 출력 스키마 주석 정정. v3.4 → v3.5: 구현 중 발견 — §4 status×next_actions 표가 사전통지·1차 고지서를 한 행에 뭉뚱그려 "이의신청 사유"로만 안내하고 있었음. 사전통지는 법적으로 "의견제출"이라 별도 행으로 분리하고 문구를 "의견제출 사유"로 정정. v3.5 → v3.6: `notice_received_date`를 하드 블로커에서 선택 필드로 완화 — 1차 고지서도 `user_appeal_reason`만 있으면 `status=success`로 판정이 나가고, 수령일 부재는 `guide.timeline` 경고 문구 + 정보성 `missing_fields`로만 반영된다. §2 케이스 B, §3 출력 스키마, §4 status 표, §5 시퀀스 다이어그램 갱신. 상세는 ARCH-001 §9-8 참고. |
+| 변경 요약 | v2.0 → v3.0: 출력 페이로드에 `law_code_verified` 필드 복원 (경량 검증). 입력 페이로드·재호출 시나리오는 변경 없음 — `LDB_CHECK`는 Supervisor 왕복을 유발하지 않으므로 `law_code_reverification_attempted` 같은 재호출용 입력 필드는 되살아나지 않았다. v3.0 → v3.1: 입력 페이로드에 기한 기산일(수령일) 필드가 빠져있음을 미결 사항으로 표시 (ARCH-001 §9-3 참고). v3.1 → v3.2: 미결 사항 해소 — `notice_received_date`를 `user_appeal_reason`과 동일하게 Supervisor 공급 필드로 확정, 케이스 A·B 예시 페이로드 갱신. v3.2 → v3.3 (최종 검수): 근거 문서 버전 표기가 ARCH-001/DATA-003/설계 정리 문서 최신본과 어긋나 있던 것 동기화, `law_code` 주석에 위반유형 판별 용도 추가, 출력 페이로드에 `risk_trigger_category` 필드 추가. v3.3 → v3.4: 1차 고지서 경로 순서 오류 수정 반영 — `deadline_gate_node`가 필드 확인보다 먼저 실행될 수 없다는 문제 해소에 따라, 1차 고지서의 `input_required` 응답은 `computed_deadline`/`deadline_passed` 없이 `law_code_verified`만 포함하도록 출력 스키마 주석 정정. v3.4 → v3.5: 구현 중 발견 — §4 status×next_actions 표가 사전통지·1차 고지서를 한 행에 뭉뚱그려 "이의신청 사유"로만 안내하고 있었음. 사전통지는 법적으로 "의견제출"이라 별도 행으로 분리하고 문구를 "의견제출 사유"로 정정. v3.5 → v3.6: `notice_received_date`를 하드 블로커에서 선택 필드로 완화 — 1차 고지서도 `user_appeal_reason`만 있으면 `status=success`로 판정이 나가고, 수령일 부재는 `guide.timeline` 경고 문구 + 정보성 `missing_fields`로만 반영된다. §2 케이스 B, §3 출력 스키마, §4 status 표, §5 시퀀스 다이어그램 갱신. 상세는 ARCH-001 §9-8 참고. v3.6 → v3.7: `law_code` 필드 주석 정정 — 142조 적용범위 재검증(ARCH-001 §9-2 v4.4)으로 `law_code` 기반 MG 위반유형 라우팅이 폐기되어, 이제 `law_code`는 disclaimer 조건부 문구(LDB_CHECK) 용도 하나만 남는다. §2-1 예시 페이로드 주석 갱신. |
 
 ---
 
@@ -32,8 +32,9 @@ Agent(`fine_notice_analysis`)의 envelope 포맷(`make_envelope()`)을 그대로
     "opinion_deadline":       "2026-07-20",   # 인쇄된 납부기한
     "payment_deadline_2nd":   None,
     "issuing_authority":      "○○구청",       # 가이드에 그대로 노출만, 판별하지 않음
-    "law_code":                "도로교통법 제17조 제1항",  # (v3.7) 용도 2가지: disclaimer 조건부 문구 +
-                                                          # MG 위반유형(주정차/비주정차) 판별 라우팅 신호
+    "law_code":                "도로교통법 제17조 제1항",  # (v3.7 정정) 용도 1가지: disclaimer 조건부 문구
+                                                          # (LDB_CHECK). MG는 더 이상 이 값으로 위반유형을
+                                                          # 판별·라우팅하지 않는다 (DATA-003 §5 v3.12 참고)
 
     # Supervisor가 별도로 수집해 함께 전달 (OCR 결과에 없는 값)
     "user_appeal_reason": None,          # 아직 안 물어봤으면 None
