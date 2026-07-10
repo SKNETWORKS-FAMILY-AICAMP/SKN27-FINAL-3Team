@@ -156,6 +156,29 @@ def test_chatbot_mock_infers_fault_ratio_before_law_or_fine_notice_terms():
     )
 
 
+def test_chatbot_mock_routes_objection_eligibility_and_procedure_to_general_consultation():
+    response = submit_message(
+        {
+            "session_id": "ses_general_guidance",
+            "user_text": (
+                "6월 25일 화요일에 딸 아이가 고열로 주정차 금지 구역에 정차를 하고 "
+                "인근 병원 응급실을 다녀왔어요. 이의신청 가능 사항인지도 모르겠고 "
+                "어떻게 이의신청해야 할지도 모르겠어요."
+            ),
+        }
+    )
+
+    assert response["mock_scenario"] == "general_consultation"
+    assert response["routing_intent"] == "general_consultation"
+    assert response["case_status"] == "guidance_only"
+    assert response["cards"] == []
+    assert response["report_links"] == []
+    assert response["reporting_payload"] is None
+    assert response["supervisor_state"] is None
+    assert response["structured_result"]["report_ready"] is False
+    assert "제출 기한" in response["assistant_message"]
+
+
 def test_chatbot_mock_partial_flow_returns_pending_question():
     response = submit_message(
         {

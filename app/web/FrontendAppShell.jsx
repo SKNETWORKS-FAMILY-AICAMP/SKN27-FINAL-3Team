@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 
-import ChatbotMockFlow from "./ChatbotMockFlow.jsx";
 import { createFrontendApi } from "./apiClient.js";
 import {
   buildAuthContext,
@@ -27,38 +26,11 @@ const FALLBACK_ANALYSIS_CARDS = [
   },
 ];
 const DEMO_PERSONA_ID = "school_zone_fine_notice_parent";
-const DEMO_PERSONAS = [
-  {
-    persona_id: "school_zone_fine_notice_parent",
-    label: "과태료 이의제기",
-    name: "정민서",
-    sample: "어린이보호구역 정차 과태료 고지서를 받았고 아이가 아파 잠깐 정차했습니다.",
-  },
-  {
-    persona_id: "accident_scene_photo_driver",
-    label: "사고 사진",
-    name: "박도윤",
-    sample: "신호 없는 교차로에서 직진 중 우측 차량과 접촉했고 현장 사진이 있습니다.",
-  },
-  {
-    persona_id: "blackbox_video_fault_driver",
-    label: "블랙박스 영상",
-    name: "이현우",
-    sample: "블랙박스 원본이 있고 상대 차량이 갑자기 차선 변경했습니다.",
-  },
-  {
-    persona_id: "traffic_law_question_citizen",
-    label: "법령 질문",
-    name: "최서연",
-    sample: "어린이보호구역 정차 과태료에서 긴급 정차 예외 근거가 있는지 법령만 보고 싶습니다.",
-  },
-  {
-    persona_id: "saved_report_returning_user",
-    label: "리포트 재다운로드",
-    name: "오지훈",
-    sample: "지난번 저장한 사고 리포트를 다시 내려받고 싶습니다.",
-  },
-];
+const CONFIGURED_EXECUTION_MODE = ["sync", "async_worker", "mock"].includes(
+  import.meta.env.VITE_AGENT_EXECUTION_MODE
+)
+  ? import.meta.env.VITE_AGENT_EXECUTION_MODE
+  : "sync";
 const ATTACHMENT_PURPOSES = [
   { value: "fine_notice", label: "고지서" },
   { value: "accident_scene", label: "사고 사진" },
@@ -71,8 +43,6 @@ export default function FrontendAppShell({
   authToken = "",
   googleClientId = "",
 }) {
-  void ChatbotMockFlow;
-
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
   const storedAuthSession = useMemo(() => readStoredAuthSession(), []);
   const [activeRoute, setActiveRoute] = useState("chatbot");
@@ -91,9 +61,8 @@ export default function FrontendAppShell({
   const [statusMessage, setStatusMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingConversation, setIsSavingConversation] = useState(false);
-  const [selectedPersonaId, setSelectedPersonaId] = useState("");
   const [attachmentPurpose, setAttachmentPurpose] = useState("fine_notice");
-  const [executionMode, setExecutionMode] = useState("sync");
+  const executionMode = CONFIGURED_EXECUTION_MODE;
   const [selectedUploadFile, setSelectedUploadFile] = useState(null);
   const [uploadInputResetKey, setUploadInputResetKey] = useState(0);
   const [registeredAttachments, setRegisteredAttachments] = useState([]);
@@ -101,7 +70,6 @@ export default function FrontendAppShell({
   const [reportActionStatus, setReportActionStatus] = useState("");
   const [currentReport, setCurrentReport] = useState(null);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
-  const [workerActionStatus, setWorkerActionStatus] = useState("");
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
 
   const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";
@@ -129,7 +97,7 @@ export default function FrontendAppShell({
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
-  const selectedPersona = DEMO_PERSONAS.find((item) => item.persona_id === selectedPersonaId) || DEMO_PERSONAS[0];
+  const caseType = detectCaseType({ analysisCards, analysisResponse, currentReport });
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
     setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 임시 세션을 준비하고 있습니다.");
@@ -210,12 +178,6 @@ export default function FrontendAppShell({
       source,
       userId: nextUserId,
     };
-  }
-
-  function useSelectedPersonaSample() {
-    setQuestion(selectedPersona.sample);
-    setStatusMessage(`${selectedPersona.name} persona 샘플 입력을 채웠습니다.`);
-    setActiveRoute("chatbot");
   }
 
   async function registerAttachmentMetadata() {
@@ -399,11 +361,11 @@ export default function FrontendAppShell({
       return chatResult;
     }
     if (!requestIdentity?.authToken) {
-      setWorkerActionStatus("Agent worker queued. 로그인 전 상담은 별도 worker 세션에서 처리됩니다.");
+      logDeveloperDiagnostic("worker.status", { status: "queued", authenticated: false });
       return chatResult;
     }
 
-    setWorkerActionStatus("Agent worker queued. 로컬 worker 세션이 분석을 처리하고 있습니다.");
+    logDeveloperDiagnostic("worker.status", { status: "processing", authenticated: true });
     try {
       const workerResult = await api.processAgentWorkItems({ limit: 1 }, requestIdentity);
       const processedItem =
@@ -430,14 +392,13 @@ export default function FrontendAppShell({
         },
         work_item: nextWorkItem,
       };
-      setWorkerActionStatus(
-        processedItem.job_status
-          ? `Agent worker 처리 완료: ${processedItem.job_status}`
-          : "Agent worker 처리 요청을 보냈습니다."
-      );
+      logDeveloperDiagnostic("worker.status", {
+        jobStatus: processedItem.job_status || null,
+        status: processedItem.status || "requested",
+      });
       return enrichedResult;
     } catch (_error) {
-      setWorkerActionStatus("Agent worker 자동 처리를 실행하지 못했습니다. 별도 worker 세션을 확인해 주세요.");
+      logDeveloperDiagnostic("worker.error", { message: _error?.message || "automatic processing failed" });
       return chatResult;
     }
   }
@@ -448,11 +409,11 @@ export default function FrontendAppShell({
       return chatResult;
     }
     if (!requestIdentity?.authToken) {
-      setWorkerActionStatus("Agent worker가 큐에 등록되었습니다. 진행 조회는 Google 로그인 후 사용할 수 있습니다.");
+      logDeveloperDiagnostic("worker.status", { status: "queued", authenticated: false });
       return chatResult;
     }
 
-    setWorkerActionStatus("Agent worker 진행 상태를 조회하고 있습니다.");
+    logDeveloperDiagnostic("worker.status", { status: "polling", authenticated: true });
     try {
       const jobDetailResult = await api.getAnalysisJobDetail({ jobId: workItem.job_id, identity: requestIdentity });
       const jobDetail = jobDetailResult?.job || {};
@@ -480,14 +441,13 @@ export default function FrontendAppShell({
         },
         work_item: nextWorkItem,
       };
-      setWorkerActionStatus(
-        jobDetail.status
-          ? `Agent worker 진행 상태: ${jobDetail.status}`
-          : "Agent worker가 처리 대기 중입니다."
-      );
+      logDeveloperDiagnostic("worker.status", {
+        jobStatus: jobDetail.status || null,
+        status: processedItem.status || "waiting",
+      });
       return enrichedResult;
     } catch (_error) {
-      setWorkerActionStatus("Agent worker 진행 조회에 실패했습니다. worker 세션을 확인해 주세요.");
+      logDeveloperDiagnostic("worker.error", { message: _error?.message || "progress polling failed" });
       return chatResult;
     }
   }
@@ -541,6 +501,12 @@ export default function FrontendAppShell({
         guestId: activeGuestId,
         authSessionId: effectiveAuthSessionId,
       };
+      logDeveloperDiagnostic("chat.submit", {
+        attachmentCount: registeredAttachments.length,
+        authenticated: Boolean(effectiveAuthSessionId),
+        executionMode,
+        sessionId: activeSession,
+      });
       const result = await api.submitChatMessage(
         {
           session_id: activeSession,
@@ -555,13 +521,12 @@ export default function FrontendAppShell({
             type: attachment.type,
             storage_uri: attachment.storage_uri,
           })),
-          ...(selectedPersonaId || shouldUseDemoPersona(trimmedQuestion)
-            ? { persona_id: selectedPersonaId || DEMO_PERSONA_ID }
-            : {}),
+          ...(shouldUseDemoPersona(trimmedQuestion) ? { persona_id: DEMO_PERSONA_ID } : {}),
         },
         submitIdentity
       );
       const workerResult = await pollQueuedWorkerResult(result, submitIdentity);
+      logDeveloperDiagnostic("chat.result", buildDeveloperDiagnostic(workerResult));
       setChatMessages([
         ...conversationHistory,
         {
@@ -586,9 +551,12 @@ export default function FrontendAppShell({
             ? workerResult?.status === "success"
               ? "상담 응답을 받았습니다. 저장 여부를 선택할 수 있습니다."
               : "상담 응답을 받았습니다. 현재 상태로 저장하거나 답변을 이어갈 수 있습니다."
-            : "Supervisor가 역질문을 만들었습니다. 답변을 이어서 입력해 주세요."
+            : "추가 정보가 필요합니다. 답변을 이어서 입력해 주세요."
       );
     } catch (_error) {
+      logDeveloperDiagnostic("chat.error", {
+        message: _error?.message || "unknown error",
+      });
       setChatMessages([
         ...conversationHistory,
         {
@@ -846,8 +814,7 @@ export default function FrontendAppShell({
               authSessionId={authSessionId}
               chatMessages={chatMessages}
               currentReport={currentReport}
-              demoPersonas={DEMO_PERSONAS}
-              executionMode={executionMode}
+              onOpenCaseResult={(route) => setActiveRoute(route)}
               isRegisteringAttachment={isRegisteringAttachment}
               isSubmitting={isSubmitting}
               isSavingConversation={isSavingConversation}
@@ -856,28 +823,42 @@ export default function FrontendAppShell({
               onRunReportAction={runCurrentReportAction}
               onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
-              onUsePersonaSample={useSelectedPersonaSample}
               pendingAuthAction={pendingAuthAction}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
               saveDecision={saveDecision}
               savePromptVisible={savePromptVisible}
-              selectedPersonaId={selectedPersonaId}
               selectedUploadFile={selectedUploadFile}
               personaRun={personaRun}
               reportingPayload={reportingPayload}
               setAttachmentPurpose={setAttachmentPurpose}
-              setExecutionMode={setExecutionMode}
               setQuestion={setQuestion}
-              setSelectedPersonaId={setSelectedPersonaId}
               setSelectedUploadFile={setSelectedUploadFile}
               statusMessage={statusMessage}
               submittedQuestion={submittedQuestion}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
               uploadInputResetKey={uploadInputResetKey}
-              workerActionStatus={workerActionStatus}
+            />
+          )}
+
+          {(activeRoute === "fineResult" || activeRoute === "faultResult") && (
+            <CaseResultScreen
+              analysisCards={analysisCards}
+              caseType={activeRoute === "faultResult" ? "fault" : caseType}
+              currentReport={currentReport}
+              isAuthenticated={Boolean(authSessionId)}
+              onOpenChat={() => setActiveRoute("chatbot")}
+              onOpenReport={() => setActiveRoute("reporting")}
+              onPrepareDraftRegeneration={prepareDraftRegeneration}
+              onPrepareMissingEvidence={prepareMissingEvidenceUpload}
+              onRunReportAction={runCurrentReportAction}
+              registeredAttachments={registeredAttachments}
+              reportingPayload={reportingPayload}
+              reportActionStatus={reportActionStatus}
+              supervisorExecution={supervisorExecution}
+              supervisorState={supervisorState}
             />
           )}
 
@@ -1198,13 +1179,14 @@ function ConversationSidebar({
   const currentConversationTitle = currentTitle || "새 상담";
 
   return (
-    <aside className="sidebar chat-sidebar" aria-label="대화 목록과 계정">
-      <div className="sidebar-brand">
-        <button className="brand compact" type="button" onClick={() => onNavigate("chatbot")}>
-          <span className="brand-mark">AI</span>
-          <span>Traffic Dispute AI</span>
-        </button>
-      </div>
+    <>
+      <aside className="sidebar chat-sidebar" aria-label="대화 목록과 계정">
+        <div className="sidebar-brand">
+          <button className="brand compact" type="button" onClick={() => onNavigate("chatbot")}>
+            <span className="brand-mark">AI</span>
+            <span>교통분쟁 AI</span>
+          </button>
+        </div>
 
       <div className="sidebar-actions">
         <button className="nav-item primary-action" type="button" onClick={onNewChat}>
@@ -1261,22 +1243,46 @@ function ConversationSidebar({
         </button>
       </nav>
 
-      <section className="sidebar-auth" aria-label="계정 상태">
-        <div className="profile-row">
-          <span className="avatar">{isAuthenticated ? "G" : isGuestReady ? "비" : "AI"}</span>
-          <div>
-            <div className="profile-name">{sessionLabel}</div>
-            <div className="profile-meta">{isAuthenticated ? "대화 저장 및 후속 질문 가능" : "비회원 1회 리포팅 가능"}</div>
+        <section className="sidebar-auth" aria-label="계정 상태">
+          <div className="profile-row">
+            <span className="avatar">{isAuthenticated ? "G" : isGuestReady ? "비" : "AI"}</span>
+            <div>
+              <div className="profile-name">{sessionLabel}</div>
+              <div className="profile-meta">{isAuthenticated ? "대화 저장 및 후속 질문 가능" : "비회원 1회 리포팅 가능"}</div>
+            </div>
           </div>
-        </div>
-        {!isAuthenticated && (
-          <button className="button primary full" type="button" onClick={onLogin} disabled={isSavingConversation}>
-            {isSavingConversation ? "연결 중" : "Google 로그인"}
-          </button>
-        )}
-        {statusMessage && <p className="sidebar-status">{statusMessage}</p>}
-      </section>
-    </aside>
+          {!isAuthenticated && (
+            <button className="button primary full" type="button" onClick={onLogin} disabled={isSavingConversation}>
+              {isSavingConversation ? "연결 중" : "Google 로그인"}
+            </button>
+          )}
+
+          {statusMessage && <p className="sidebar-status">{statusMessage}</p>}
+        </section>
+      </aside>
+      <nav className="mobile-bottom-nav" aria-label="모바일 주요 메뉴">
+        <button className="mobile-bottom-nav__item" type="button" onClick={onNewChat}>
+          <span aria-hidden="true">＋</span>
+          <strong>새 상담</strong>
+        </button>
+        <button
+          className={activeRoute === "mypage" ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
+          type="button"
+          onClick={() => onNavigate("mypage")}
+        >
+          <span aria-hidden="true">▣</span>
+          <strong>내 사건</strong>
+        </button>
+        <button
+          className={activeRoute === "reporting" || activeRoute === "fineResult" || activeRoute === "faultResult" ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
+          type="button"
+          onClick={() => onNavigate("reporting")}
+        >
+          <span aria-hidden="true">▤</span>
+          <strong>리포트</strong>
+        </button>
+      </nav>
+    </>
   );
 }
 
@@ -1287,8 +1293,7 @@ function ChatScreenV2({
   authSessionId,
   chatMessages,
   currentReport,
-  demoPersonas,
-  executionMode,
+  onOpenCaseResult,
   isRegisteringAttachment,
   isSavingConversation,
   isSubmitting,
@@ -1297,28 +1302,23 @@ function ChatScreenV2({
   onRunReportAction,
   onSaveConversation,
   onSubmit,
-  onUsePersonaSample,
   pendingAuthAction,
   question,
   registeredAttachments,
   reportActionStatus,
   saveDecision,
   savePromptVisible,
-  selectedPersonaId,
   selectedUploadFile,
   personaRun,
   reportingPayload,
   setAttachmentPurpose,
-  setExecutionMode,
   setQuestion,
-  setSelectedPersonaId,
   setSelectedUploadFile,
   statusMessage,
   submittedQuestion,
   supervisorExecution,
   supervisorState,
   uploadInputResetKey,
-  workerActionStatus,
 }) {
   const visibleMessages = chatMessages.length
     ? chatMessages
@@ -1344,6 +1344,7 @@ function ChatScreenV2({
     "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어",
     "블랙박스 원본과 보험사 접수 내역이 있어",
   ];
+  const [isReportingExpanded, setIsReportingExpanded] = useState(false);
 
   return (
     <section className="screen">
@@ -1362,6 +1363,59 @@ function ChatScreenV2({
         </div>
       </div>
 
+      <section className="chat-attachment-bar" aria-label="상담 자료 첨부">
+        <div className="attachment-tools">
+          <label>
+            <span>첨부 목적</span>
+            <select value={attachmentPurpose} onChange={(event) => setAttachmentPurpose(event.target.value)}>
+              {ATTACHMENT_PURPOSES.map((item) => (
+                <option value={item.value} key={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="file-picker">
+            <span>파일</span>
+            <input
+              key={uploadInputResetKey}
+              accept="image/*,application/pdf,video/*"
+              type="file"
+              onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
+            />
+          </label>
+          <button
+            className="button"
+            type="button"
+            onClick={onRegisterAttachment}
+            disabled={isRegisteringAttachment || !selectedUploadFile}
+          >
+            {uploadButtonLabel}
+          </button>
+          <span className="tag">자료 {registeredAttachments.length}건</span>
+        </div>
+        {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
+          <p className="attachment-help" role="status">
+            자료 분석은 Google 로그인 후 현재 상담에 그대로 연결됩니다.
+          </p>
+        )}
+        {pendingAuthAction && (
+          <p className="attachment-help" role="status">
+            로그인 후 요청한 작업을 같은 상담에서 이어갑니다.
+          </p>
+        )}
+        {registeredAttachments.length > 0 && (
+          <div className="attachment-list" aria-label="상담 연결 자료">
+            {registeredAttachments.slice(-3).map((attachment) => (
+              <span key={attachment.attachment_id}>
+                {attachment.original_filename || attachment.filename || attachment.purpose}
+                <em>{attachmentStatusLabel(attachment.scan_status || attachment.status)}</em>
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
       <div className="chat-shell">
         <div className="conversation-list">
           <div className="section-label">현재 상담</div>
@@ -1374,102 +1428,7 @@ function ChatScreenV2({
             </p>
           </div>
         </div>
-
         <div className="chat-main">
-          <details className="persona-control-panel" aria-label="개발용 Agent 점검">
-            <summary>개발용 Agent 점검</summary>
-            <div className="panel-head compact">
-              <strong>persona smoke와 실행 모드</strong>
-              <button className="button" type="button" onClick={onUsePersonaSample}>
-                샘플 입력
-              </button>
-            </div>
-            <div className="persona-picker">
-              {demoPersonas.map((persona) => (
-                <button
-                  className={selectedPersonaId === persona.persona_id ? "persona-option active" : "persona-option"}
-                  key={persona.persona_id}
-                  onClick={() => setSelectedPersonaId(persona.persona_id)}
-                  type="button"
-                >
-                  <span>{persona.label}</span>
-                  <strong>{persona.name}</strong>
-                </button>
-              ))}
-            </div>
-            <div className="attachment-tools">
-              <label>
-                <span>첨부 목적</span>
-                <select value={attachmentPurpose} onChange={(event) => setAttachmentPurpose(event.target.value)}>
-                  {ATTACHMENT_PURPOSES.map((item) => (
-                    <option value={item.value} key={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="file-picker">
-                <span>파일</span>
-                <input
-                  key={uploadInputResetKey}
-                  accept="image/*,application/pdf,video/*"
-                  type="file"
-                  onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
-                />
-              </label>
-              <button
-                className="button"
-                type="button"
-                onClick={onRegisterAttachment}
-                disabled={isRegisteringAttachment || !selectedUploadFile}
-              >
-                {uploadButtonLabel}
-              </button>
-              <span className="tag">{registeredAttachments.length}건 연결</span>
-            </div>
-            {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
-              <p className="status-message inside" role="status">
-                자료 분석은 로그인 후 현재 상담 세션에 이어서 진행됩니다.
-              </p>
-            )}
-            {pendingAuthAction && (
-              <p className="status-message inside" role="status">
-                로그인 후 {pendingAuthAction.type} 작업을 같은 상담 세션으로 이어갑니다.
-              </p>
-            )}
-            {workerActionStatus && (
-              <p className="status-message inside" role="status">
-                {workerActionStatus}
-              </p>
-            )}
-            {registeredAttachments.length > 0 && (
-              <div className="attachment-list" aria-label="상담 연결 자료">
-                {registeredAttachments.slice(-3).map((attachment) => (
-                  <span key={attachment.attachment_id}>
-                    {attachment.original_filename || attachment.filename || attachment.purpose}
-                    <em>{attachment.scan_status || attachment.status}</em>
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="execution-mode-control" role="group" aria-label="Agent execution mode">
-              <span>Agent mode</span>
-              {["sync", "async_worker", "mock"].map((mode) => (
-                <button
-                  className={executionMode === mode ? "mode-option active" : "mode-option"}
-                  key={mode}
-                  onClick={() => setExecutionMode(mode)}
-                  type="button"
-                >
-                  <strong>{mode}</strong>
-                  <small>
-                    {mode === "sync" ? "sync adapter" : mode === "async_worker" ? "worker progress" : "safe mock"}
-                  </small>
-                </button>
-              ))}
-            </div>
-          </details>
-
           <div className="messages">
             {!hasConversation && (
               <section className="chat-empty-state" aria-label="상담 시작">
@@ -1494,9 +1453,9 @@ function ChatScreenV2({
                         {!isUser && (
                           <strong>
                             {personaRun
-                              ? "데모 페르소나 상담을 진행했습니다."
+                              ? "예시 사건 기준으로 상담을 진행했습니다."
                               : supervisorState
-                                ? "Supervisor가 대화 내용을 Agent 입력으로 정리했습니다."
+                                ? "상담 내용을 분석에 필요한 정보로 정리했습니다."
                                 : "상담 내용을 기준으로 확인 가능한 항목을 정리했습니다."}
                           </strong>
                         )}
@@ -1504,12 +1463,6 @@ function ChatScreenV2({
                         {!isUser && isLatestAssistant && (
                           <>
                             {personaRun && <PersonaRunTimeline personaRun={personaRun} />}
-                            {supervisorState && (
-                              <SupervisorFlowPanel
-                                supervisorExecution={supervisorExecution}
-                                supervisorState={supervisorState}
-                              />
-                            )}
                             {analysisCards.length > 0 && (
                               <div className="result-cards">
                                 {analysisCards.map((card) => (
@@ -1519,18 +1472,56 @@ function ChatScreenV2({
                                     </span>
                                     <strong>{card.title}</strong>
                                     <p>{card.summary}</p>
+                                    {caseResultRoute(card) && (
+                                      <div className="result-card-actions">
+                                        <button
+                                          className="button primary small"
+                                          type="button"
+                                          onClick={() => onOpenCaseResult(caseResultRoute(card))}
+                                        >
+                                          결과 화면 열기
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>
                             )}
-                            {reportingPayload && <ReportingPreviewPanel reportingPayload={reportingPayload} />}
-                            {(reportingPayload || analysisCards.length > 0) && (
-                              <ReportActionPanel
-                                currentReport={currentReport}
-                                isAuthenticated={Boolean(authSessionId)}
-                                onRunReportAction={onRunReportAction}
-                                reportActionStatus={reportActionStatus}
-                              />
+                            {(supervisorState || reportingPayload || analysisCards.length > 0) && (
+                              <details
+                                className="reporting-disclosure"
+                                open={isReportingExpanded}
+                                onToggle={(event) => setIsReportingExpanded(event.currentTarget.open)}
+                              >
+                                <summary className="reporting-disclosure__summary">
+                                  <span className="reporting-disclosure__title">
+                                    <span className="reporting-disclosure__icon" aria-hidden="true">↗</span>
+                                    <span>
+                                      <strong>분석·리포팅 보기</strong>
+                                      <small>핵심 답변은 위에 두고, 근거와 저장 작업은 필요할 때 확인하세요.</small>
+                                    </span>
+                                  </span>
+                                  <span className="reporting-disclosure__action">{isReportingExpanded ? "접기" : "펼쳐보기"}</span>
+                                </summary>
+                                <div className="reporting-disclosure__body">
+                                  {supervisorState && (
+                                    <AnalysisProgressPanel
+                                      analysisCards={analysisCards}
+                                      reportingPayload={reportingPayload}
+                                      supervisorState={supervisorState}
+                                    />
+                                  )}
+                                  {reportingPayload && <ReportingPreviewPanel reportingPayload={reportingPayload} />}
+                                  {(reportingPayload || analysisCards.length > 0) && (
+                                    <ReportActionPanel
+                                      currentReport={currentReport}
+                                      isAuthenticated={Boolean(authSessionId)}
+                                      onRunReportAction={onRunReportAction}
+                                      reportActionStatus={reportActionStatus}
+                                    />
+                                  )}
+                                </div>
+                              </details>
                             )}
                           </>
                         )}
@@ -1577,6 +1568,13 @@ function ChatScreenV2({
 
           <div className="chat-input">
             <div className="input-stack">
+              <div className="chat-input__context">
+                <div>
+                  <span>지금 필요한 건 완벽한 문장이 아니에요</span>
+                  <strong>사고·고지서 상황을 아는 만큼만 적어주세요</strong>
+                </div>
+                <small>장소 · 시간 · 상대방 행동 · 받은 안내 내용을 떠오르는 대로 적으면 됩니다.</small>
+              </div>
               <div className="attachment-strip">
                 <span>자료 업로드와 정밀 분석은 상담 중 필요한 시점에 로그인 후 진행합니다.</span>
               </div>
@@ -1659,25 +1657,49 @@ function PersonaRunTimeline({ personaRun }) {
   );
 }
 
-function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
+function AnalysisProgressPanel({ analysisCards, reportingPayload, supervisorState }) {
   const facts = Array.isArray(supervisorState?.collected_facts) ? supervisorState.collected_facts : [];
   const questions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
-  const packages = Array.isArray(supervisorState?.agent_input_packages) ? supervisorState.agent_input_packages : [];
-  const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
-  const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
-  const workItem = supervisorExecution?.work_item || null;
+  const hasAnalysis = analysisCards.length > 0;
+  const hasReport = Boolean(reportingPayload);
+  const steps = [
+    { label: "입력 확인", description: "상담 내용과 첨부 자료를 확인했습니다.", status: "완료" },
+    {
+      label: "자료 분석",
+      description: "사건 유형에 필요한 정보를 정리합니다.",
+      status: hasAnalysis ? "완료" : "진행 중",
+    },
+    {
+      label: "근거 확인",
+      description: "관련 법령과 사례의 적용 조건을 확인합니다.",
+      status: hasAnalysis ? "완료" : "대기",
+    },
+    {
+      label: "리포트 준비",
+      description: "확인된 결과와 다음 행동을 정리합니다.",
+      status: hasReport ? "완료" : "대기",
+    },
+  ];
 
   return (
-    <section className="supervisor-flow" aria-label="Supervisor Agent 전달 흐름">
+    <section className="analysis-progress" aria-label="분석 진행 상태">
       <div className="flow-panel-head">
         <div>
-          <span className="eyebrow">Supervisor</span>
-          <strong>{supervisorState.stage === "agent_execution_ready" ? "Agent 실행 입력 준비 완료" : "역질문 필요"}</strong>
+          <span className="eyebrow">분석 진행</span>
+          <strong>{questions.length > 0 ? "추가 정보가 필요합니다" : "상담 내용을 순서대로 확인하고 있습니다"}</strong>
           <p>{supervisorState.conversation_summary}</p>
         </div>
-        <span className={supervisorState.stage === "agent_execution_ready" ? "tag green" : "tag amber"}>
-          {supervisorState.stage}
-        </span>
+        <span className={questions.length > 0 ? "tag amber" : "tag green"}>{questions.length > 0 ? "답변 필요" : "진행 중"}</span>
+      </div>
+
+      <div className="agent-plan">
+        {steps.map((step, index) => (
+          <div className="plan-step" key={step.label}>
+            <span className="plan-index">{step.status === "완료" ? "✓" : index + 1}</span>
+            <div><strong>{step.label}</strong><p>{step.description}</p></div>
+            <span className="plan-status">{step.status}</span>
+          </div>
+        ))}
       </div>
 
       {facts.length > 0 && (
@@ -1693,54 +1715,10 @@ function SupervisorFlowPanel({ supervisorExecution, supervisorState }) {
 
       {questions.length > 0 && (
         <div className="question-list">
-          <strong>다음 역질문</strong>
+          <strong>추가로 알려주세요</strong>
           {questions.map((item) => (
             <p key={item.field}>{item.question}</p>
           ))}
-        </div>
-      )}
-
-      <div className="agent-input-list">
-        {packages.map((item) => (
-          <article className="agent-input-card" key={item.node_code}>
-            <div>
-              <span>{item.owner}</span>
-              <strong>{item.node_code}</strong>
-            </div>
-            <span className={item.status === "ready" ? "tag green" : "tag amber"}>{item.status}</span>
-            <div className="schema-rows">
-              {Object.entries(item.payload || {}).slice(0, 5).map(([key, value]) => (
-                <p key={key}>
-                  <span>{key}</span>
-                  {compactValue(value)}
-                </p>
-              ))}
-            </div>
-          </article>
-        ))}
-      </div>
-
-      {nodeResults.length > 0 && (
-        <div className="node-result-list">
-          {nodeResults.map((node) => (
-            <NodeResultPill key={node.execution_id || node.node_code} node={node} />
-          ))}
-        </div>
-      )}
-
-      {faultRatioNode && <FaultRatioInsightPanel node={faultRatioNode} />}
-
-      {workItem && nodeResults.length === 0 && (
-        <div className="node-result-list">
-          <NodeResultPill
-            node={{
-              node_code: workItem.work_item_id || workItem.job_id || "agent_worker",
-              status: workItem.status || "queued",
-              execution_mode: "async_worker",
-              adapter_execution_mode: "async_worker",
-              adapter_modes: ["async_worker"],
-            }}
-          />
         </div>
       )}
     </section>
@@ -1766,8 +1744,7 @@ function FaultRatioInsightPanel({ node, compact = false }) {
       ? structuredResult.limitations
       : [];
   const ratioRangeLabel = structuredResult.ratio_range_label || "pending review";
-  const adapterSource = retrieval.adapter_source || "not reported";
-  const sourceCountSummary = Object.keys(sourceCounts).length ? compactValue(sourceCounts) : "not reported";
+  const sourceCount = Object.values(sourceCounts).reduce((total, count) => total + Number(count || 0), 0);
 
   if (!node || node.node_code !== "text_ml_case_search") {
     return null;
@@ -1776,27 +1753,26 @@ function FaultRatioInsightPanel({ node, compact = false }) {
   return (
     <article className={compact ? "fault-ratio-insight-panel compact" : "fault-ratio-insight-panel"}>
       <div className="fault-ratio-insight-head">
-        <span className="tag">text_ml_case_search</span>
-        <strong>Fault ratio evidence</strong>
-        <span className="tag">{normalizeExecutionMode(node.adapter_execution_mode || node.execution_mode)}</span>
+        <span className="tag">과실 쟁점</span>
+        <strong>유사 사례와 제출 자료 검토</strong>
       </div>
       <div className="fault-ratio-insight-grid">
         <p>
-          <span>ratio_range_label</span>
+          <span>검토 범위</span>
           <strong>{compactValue(ratioRangeLabel)}</strong>
         </p>
         <p>
-          <span>retrieval.adapter_source</span>
-          <strong>{compactValue(adapterSource)}</strong>
+          <span>참고 자료</span>
+          <strong>{sourceCount || similarCases.length}건</strong>
         </p>
         <p>
-          <span>source_summary</span>
-          <strong>{sourceCountSummary}</strong>
+          <span>추가하면 좋은 자료</span>
+          <strong>{recommendedEvidence.length}건</strong>
         </p>
       </div>
       {similarCases.length > 0 && (
         <div className="fault-ratio-insight-section">
-          <strong>similar_cases</strong>
+          <strong>참고한 유사 사례</strong>
           {similarCases.slice(0, compact ? 2 : 3).map((item, index) => (
             <p key={item.source_ref || item.source_reference || item.case_id || `similar-case-${index}`}>
               {compactValue(item)}
@@ -1806,13 +1782,13 @@ function FaultRatioInsightPanel({ node, compact = false }) {
       )}
       {recommendedEvidence.length > 0 && (
         <div className="fault-ratio-insight-section">
-          <strong>recommended_evidence</strong>
+          <strong>추가하면 좋은 자료</strong>
           <p>{compactValue(recommendedEvidence)}</p>
         </div>
       )}
       {limitations.length > 0 && (
         <div className="fault-ratio-insight-section">
-          <strong>limitations</strong>
+          <strong>검토 시 확인할 한계</strong>
           <ul>
             {limitations.slice(0, compact ? 2 : 3).map((item, index) => (
               <li key={`fault-ratio-limitation-${index}`}>{compactValue(item)}</li>
@@ -1824,26 +1800,6 @@ function FaultRatioInsightPanel({ node, compact = false }) {
   );
 }
 
-function NodeResultPill({ node }) {
-  const executionMode = normalizeExecutionMode(node.execution_mode || node.adapter_execution_mode);
-  const adapterMode = normalizeExecutionMode(node.adapter_execution_mode || executionMode);
-  const modeLabel = adapterMode === executionMode ? executionMode : `${executionMode}/${adapterMode}`;
-  const adapterModes = Array.isArray(node.adapter_modes) ? node.adapter_modes.join(", ") : adapterMode;
-
-  return (
-    <span
-      className={`node-result-pill is-${executionMode}`}
-      title={`execution: ${executionMode}, adapter: ${adapterModes}`}
-    >
-      <span className="node-result-main">
-        <strong>{node.node_code}</strong>
-        <span>{node.status}</span>
-      </span>
-      <span className="node-mode-badge">{modeLabel}</span>
-    </span>
-  );
-}
-
 function ReportingPreviewPanel({ reportingPayload }) {
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
 
@@ -1851,12 +1807,12 @@ function ReportingPreviewPanel({ reportingPayload }) {
     <section className="reporting-preview" aria-label="리포팅 미리보기">
       <div className="flow-panel-head">
         <div>
-          <span className="eyebrow">Reporting</span>
+          <span className="eyebrow">리포트 미리보기</span>
           <strong>{reportingPayload.title || "상담 분석 리포트"}</strong>
           <p>{reportingPayload.summary}</p>
         </div>
         <span className={reportingPayload.stage === "agent_execution_ready" ? "tag green" : "tag amber"}>
-          {reportingPayload.stage}
+          {reportStatusLabel(reportingPayload.stage)}
         </span>
       </div>
       <div className="report-section-list">
@@ -1879,10 +1835,9 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
     currentReport?.report_quality ||
     currentReport?.metadata?.report_quality ||
     null;
-  const agentStatusCounts = reportQuality?.agent_status_counts || {};
   const hasReportQuality = Boolean(reportQuality);
   const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
-  const reportQualityTitle = reportQuality?.partial_report ? "Partial analysis report" : "Ready analysis report";
+  const reportQualityTitle = reportQuality?.partial_report ? "일부 자료가 부족한 리포트" : "검토 준비가 완료된 리포트";
   const helperText = isAuthenticated
     ? reportActionStatus || "상담 결과를 reports metadata로 저장하거나 다운로드 경계를 확인할 수 있습니다."
     : reportActionStatus || "리포트 저장과 다운로드는 Google 로그인 후 사용할 수 있습니다.";
@@ -1890,22 +1845,19 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
   return (
     <section className="report-action-panel" aria-label="리포트 저장과 다운로드">
       <div>
-        <span className="eyebrow">Report action</span>
-        <strong>{currentReport?.report_id || "리포트 metadata 준비"}</strong>
+        <span className="eyebrow">리포트 상태</span>
+        <strong>{currentReport?.report_id || "리포트 준비 중"}</strong>
         <p>{helperText}</p>
         {hasReportQuality && (
           <div className="report-quality-panel" data-partial-report={String(Boolean(reportQuality.partial_report))}>
             <span className={reportQuality.partial_report ? "tag amber" : "tag green"}>
-              {reportQuality.partial_report ? "partial_report" : "ready_report"}
+              {reportQuality.partial_report ? "일부 자료 부족" : "검토 준비 완료"}
             </span>
             <strong className="report-quality-title">{reportQualityTitle}</strong>
-            <span className="tag">analysis_job_status: {reportQuality.analysis_job_status || "unknown"}</span>
-            <span className="tag">limitations: {reportQuality.limitation_count ?? 0}</span>
-            {Object.keys(agentStatusCounts).length > 0 && (
-              <span className="tag">agent_status_counts: {compactValue(agentStatusCounts)}</span>
-            )}
+            <span className="tag">분석 상태 · {caseStatusLabel(reportQuality.analysis_job_status)}</span>
+            <span className="tag">확인할 한계 · {reportQuality.limitation_count ?? 0}건</span>
             {reportQuality.partial_report && (
-              <p className="report-quality-warning">Review required before final submission.</p>
+              <p className="report-quality-warning">최종 제출 전에 부족한 자료와 사실관계를 확인해 주세요.</p>
             )}
             {reportLimitations.length > 0 && (
               <ul className="report-quality-limitations" aria-label="report quality limitations">
@@ -1934,6 +1886,13 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
   const savedReports = summary?.saved_reports ?? 0;
   const recentCount = summary?.recent_analysis_count ?? cases.length;
   const hasCases = cases.length > 0;
+  const [showActionableOnly, setShowActionableOnly] = useState(false);
+  const visibleCases = showActionableOnly
+    ? cases.filter((item) => {
+        const status = String(item.case_status || item.status || "").toLowerCase();
+        return /partial|pending|queued|running|draft|review|기한|추가|확인|대기|진행|작성/.test(status);
+      })
+    : cases;
 
   return (
     <section className="screen">
@@ -1961,7 +1920,15 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
         <article className="table-panel">
           <div className="panel-head">
             <strong>최근 분석 이력</strong>
-            <button className="button" type="button" disabled={!hasCases}>필터</button>
+            <button
+              className={showActionableOnly ? "button active" : "button"}
+              type="button"
+              disabled={!hasCases}
+              aria-pressed={showActionableOnly}
+              onClick={() => setShowActionableOnly((value) => !value)}
+            >
+              {showActionableOnly ? "전체 보기" : "필터"}
+            </button>
           </div>
           <div className="table-scroll">
             <table className="history-table">
@@ -1975,7 +1942,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                 </tr>
               </thead>
               <tbody>
-                {cases.length === 0 ? (
+                {visibleCases.length === 0 ? (
                   <tr>
                     <td colSpan="5">
                       <div className="table-empty">
@@ -1985,7 +1952,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                     </td>
                   </tr>
                 ) : (
-                  cases.map((item) => (
+                  visibleCases.map((item) => (
                     <tr key={item.case_id || item.job_id || item.title}>
                       <td><span className="tag">{item.type || "상담"}</span></td>
                       <td>{item.title || item.case_id}</td>
@@ -2120,6 +2087,147 @@ function reportSectionsForInspector(sections, mode) {
   return sections;
 }
 
+function CaseResultScreen({
+  analysisCards = [],
+  caseType = "fine",
+  currentReport = null,
+  isAuthenticated = false,
+  onOpenChat,
+  onOpenReport,
+  onPrepareDraftRegeneration,
+  onPrepareMissingEvidence,
+  onRunReportAction,
+  registeredAttachments = [],
+  reportingPayload = null,
+  reportActionStatus = "",
+  supervisorExecution = null,
+  supervisorState = null,
+}) {
+  const isFault = caseType === "fault";
+  const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
+  const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
+  const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
+  const reportStatus = reportingPayload?.stage || currentReport?.status || "draft";
+  const reportStatusText = reportStatusLabel(reportStatus);
+  const facts = Array.isArray(supervisorState?.collected_facts) ? supervisorState.collected_facts : [];
+  const metrics = isFault
+    ? [
+        { label: "사고 유형", value: findReportText(sections, /사고 유형|사고 개요|교차로|차선/, "사고 유형 확인 필요"), detail: "사고 설명과 자료 기준" },
+        { label: "주요 쟁점", value: `${Math.max(analysisCards.length, 1)}건`, detail: "진입 순서·충돌 위치·시야" },
+        { label: "제출 자료", value: `${registeredAttachments.length}건`, detail: "사진·영상·진술 자료" },
+        { label: "검토 상태", value: reportStatusText, detail: "리포트 연결 가능" },
+      ]
+    : [
+        { label: "처분 유형", value: findReportText(sections, /처분 유형|과태료|범칙금/, "과태료·범칙금"), detail: "고지서 분석 기준" },
+        { label: "의견제출 기한", value: findReportText(sections, /제출 기한|의견제출|마감|D-/, "기한 확인 필요"), detail: "고지서 원문 확인 필요" },
+        { label: "검토 상태", value: reportStatusText, detail: "확인된 사실과 누락 자료" },
+        { label: "필요 자료", value: facts.length > 0 ? `${facts.length}건 확인` : "추가 확인", detail: "현장 사진·정차 사유" },
+      ];
+  const nextActions = isFault
+    ? [
+        ["사고 사실관계 고정", "시간·장소·진입 방향·충돌 위치를 리포트에 고정합니다."],
+        ["보험사 주장 비교", "보험사 안내 과실비율과 AI가 찾은 쟁점을 나란히 확인합니다."],
+        ["추가 증거 요청", "블랙박스 원본과 사고 직후 사진을 보완합니다."],
+      ]
+    : [
+        ["현장 자료 보강", "표지판과 차량 위치가 함께 보이는 사진을 추가합니다."],
+        ["의견제출서 초안 확인", "사실관계 중심의 초안을 검토하고 수정합니다."],
+        ["제출 전 최종 점검", "제출 기관·기한·첨부 파일을 다시 확인합니다."],
+      ];
+
+  return (
+    <section className="screen case-result-screen">
+      <div className="screen-header">
+        <div className="screen-title">
+          <h2>{isFault ? "사고 과실비율 분석 결과" : "과태료·범칙금 분석 결과"}</h2>
+          <p>{isFault ? "사고 장면과 쟁점, 보험사 대응에 필요한 후속 조치를 확인합니다." : "고지서에서 읽은 처분 정보와 이의제기 검토 결과를 확인합니다."}</p>
+        </div>
+        <div className="screen-actions">
+          <button className="button" type="button" onClick={onOpenChat}>상담으로 돌아가기</button>
+          <button className="button primary" type="button" onClick={onOpenReport}>리포트 작업대 열기</button>
+        </div>
+      </div>
+
+      <div className="dashboard case-result-dashboard">
+        <div className="summary-grid">
+          {metrics.map((metric) => (
+            <MetricCard key={metric.label} label={metric.label} value={metric.value} detail={metric.detail} />
+          ))}
+        </div>
+
+        <div className="case-result-grid">
+          <article className="case-result-panel">
+            <div className="panel-head">
+              <strong>{isFault ? "사고 장면과 쟁점" : "고지서·사실관계 정리"}</strong>
+              <span className={reportStatus === "success" || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber"}>{reportStatusText}</span>
+            </div>
+            <div className="case-result-panel__body">
+              <div className="case-result-lead">
+                <span className="eyebrow">현재 검토 요약</span>
+                <strong>{isFault ? "진입 순서와 충돌 위치를 먼저 고정해야 합니다." : "처분 내용과 제출기한을 확인한 뒤 추가 자료를 보완해야 합니다."}</strong>
+                <p>{reportingPayload?.summary || supervisorState?.conversation_summary || "현재 상담에서 확인된 사실과 다음 행동을 정리했습니다."}</p>
+              </div>
+
+              {isFault && faultRatioNode ? (
+                <FaultRatioInsightPanel node={faultRatioNode} />
+              ) : (
+                <div className="case-result-facts">
+                  {(facts.length > 0 ? facts.slice(0, 4) : [
+                    { field: "확인된 사실", value: "상담 내용과 첨부 자료를 기준으로 정리 중" },
+                    { field: "추가 확인", value: isFault ? "사고 장면 자료" : "표지판·차량 위치 사진" },
+                  ]).map((fact, index) => (
+                    <div className="case-result-fact" key={`${fact.field || "fact"}-${index}`}>
+                      <span>{fact.field || fact.label || "확인 항목"}</span>
+                      <strong>{compactValue(fact.value || fact.description || fact)}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {analysisCards.length > 0 && (
+                <div className="case-result-card-list">
+                  {analysisCards.slice(0, 4).map((card) => (
+                    <article className="case-result-card" key={`${card.card_type}-${card.title}`}>
+                      <span className={card.status === "success" ? "tag green" : "tag amber"}>{card.card_type}</span>
+                      <strong>{card.title}</strong>
+                      <p>{card.summary}</p>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </article>
+
+          <aside className="case-result-panel case-result-next-panel">
+            <div className="panel-head">
+              <strong>다음 행동</strong>
+              <span className="tag amber">우선순위</span>
+            </div>
+            <div className="case-result-panel__body">
+              <div className="case-action-list">
+                {nextActions.map(([title, description], index) => (
+                  <div className="case-action" key={title}>
+                    <span className="case-action__number">{index + 1}</span>
+                    <div><strong>{title}</strong><p>{description}</p></div>
+                  </div>
+                ))}
+              </div>
+              <div className="case-result-cta">
+                <button className="button primary full" type="button" onClick={onPrepareMissingEvidence}>자료 추가하기</button>
+                <button className="button full" type="button" onClick={onPrepareDraftRegeneration}>초안 다시 만들기</button>
+                <button className="button full" type="button" onClick={() => onRunReportAction?.("download")} disabled={!currentReport && !reportingPayload}>
+                  {isAuthenticated ? "리포트 다운로드" : "로그인 후 다운로드"}
+                </button>
+              </div>
+              {reportActionStatus && <p className="status-message inside" role="status">{reportActionStatus}</p>}
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ReportingScreen({
   analysisCards = [],
   currentReport = null,
@@ -2141,7 +2249,7 @@ function ReportingScreen({
   const reportPersistence = currentReport?.persistence || {};
   const reportMetadata = currentReport?.metadata || {};
   const reportStatus = reportingPayload?.stage || currentReport?.status || reportPersistence.status || "draft";
-  const reportTitle = reportingPayload?.title || reportMetadata.title || "Supervisor 상담 분석 리포트";
+  const reportTitle = reportingPayload?.title || reportMetadata.title || "상담 분석 리포트";
   const reportSummary =
     reportingPayload?.summary ||
     (reportMetadata.case_id
@@ -2173,14 +2281,14 @@ function ReportingScreen({
           {hasReport ? (
             <div className="report-list-card">
               <span className={reportTagClass}>
-                {reportStatus}
+                {reportStatusLabel(reportStatus)}
               </span>
               <strong>{reportTitle}</strong>
               <p>{reportSummary}</p>
               {currentReport && (
                 <p>
                   저장 리포트: {currentReport.report_id}
-                  {reportPersistence.status ? ` · ${reportPersistence.status}` : ""}
+                  {reportPersistence.status ? ` · ${reportStatusLabel(reportPersistence.status)}` : ""}
                 </p>
               )}
               {reportActionStatus && <p>{reportActionStatus}</p>}
@@ -2252,19 +2360,13 @@ function ReportingScreen({
           {hasReport ? (
             <>
               <div className="inspector-section">
-                <span className={supervisorState?.stage === "agent_execution_ready" ? "tag green" : "tag amber"}>
-                  {supervisorState?.stage || "draft"}
-                </span>
-                <strong>Supervisor 상태</strong>
+                <span className={reportTagClass}>{reportStatusLabel(reportStatus)}</span>
+                <strong>리포트 검토 상태</strong>
                 <p>{supervisorState?.conversation_summary || "최신 상담 상태를 확인했습니다."}</p>
               </div>
               <div className="inspector-section">
-                <strong>Agent 결과</strong>
-                <div className="node-result-list vertical">
-                  {nodeResults.map((node) => (
-                    <NodeResultPill key={node.execution_id || node.node_code} node={node} />
-                  ))}
-                </div>
+                <strong>반영된 분석 결과</strong>
+                <p>분석 항목 {analysisCards.length}건과 근거·누락 자료를 리포트에 반영했습니다.</p>
               </div>
               {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
               {selectedInspectorMode !== "overview" && (
@@ -2435,6 +2537,38 @@ function normalizeAnalysisCards(cards) {
   }));
 }
 
+function detectCaseType({ analysisCards = [], analysisResponse = null, currentReport = null } = {}) {
+  const source = [
+    ...analysisCards.flatMap((card) => [card?.card_type, card?.title, card?.summary]),
+    analysisResponse?.routing_intent,
+    analysisResponse?.reporting_payload?.title,
+    currentReport?.metadata?.title,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return /사고|과실|교차로|블랙박스|보험/.test(source) ? "fault" : "fine";
+}
+
+function caseResultRoute(card = {}) {
+  const source = [card.card_type, card.title, card.summary].filter(Boolean).join(" ");
+  if (/사고|과실|교차로|블랙박스|보험/.test(source)) {
+    return "faultResult";
+  }
+  if (/과태료|고지서|범칙금|이의/.test(source)) {
+    return "fineResult";
+  }
+  return null;
+}
+
+function findReportText(sections, pattern, fallback) {
+  const values = (Array.isArray(sections) ? sections : []).flatMap((section) => [
+    section?.title,
+    ...(Array.isArray(section?.items) ? section.items : []),
+  ]);
+  const match = values.find((value) => pattern.test(String(compactValue(value))));
+  return match ? compactValue(match) : fallback;
+}
+
 function normalizeLabel(value) {
   const labels = {
     fine_notice: "고지서 분석",
@@ -2446,11 +2580,48 @@ function normalizeLabel(value) {
     persona_media_boundary: "사진/영상 한계",
     persona_law_summary: "법령 근거",
     persona_report_summary: "리포트",
-    supervisor_summary: "Supervisor 요약",
-    agent_input_schema: "Agent 입력",
-    reporting_preview: "리포팅",
+    supervisor_summary: "분석 요약",
+    agent_input_schema: "입력 확인",
+    reporting_preview: "리포트 준비",
   };
   return labels[value] || value || "분석";
+}
+
+function attachmentStatusLabel(value) {
+  const labels = {
+    clean: "안전 확인 완료",
+    failed: "파일 확인 필요",
+    pending: "안전 확인 중",
+    rejected: "다른 파일 필요",
+    scan_pending: "안전 확인 중",
+    success: "연결 완료",
+  };
+  return labels[String(value || "").toLowerCase()] || "연결됨";
+}
+
+function buildDeveloperDiagnostic(result = {}) {
+  const nodeResults = Array.isArray(result?.supervisor_execution?.node_results)
+    ? result.supervisor_execution.node_results
+    : [];
+  return {
+    executionMode: result.execution_mode || result?.supervisor_execution?.execution_mode || null,
+    nodeResults: nodeResults.map((node) => ({
+      code: node.node_code,
+      mode: node.adapter_execution_mode || node.execution_mode,
+      status: node.status,
+    })),
+    personaId: result?.persona_run?.persona?.persona_id || null,
+    reportStage: result?.reporting_payload?.stage || null,
+    status: result.status || null,
+    supervisorStage: result?.supervisor_state?.stage || null,
+  };
+}
+
+function logDeveloperDiagnostic(event, payload) {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+  console.debug(`[TrafficDisputeAI] ${event}`, payload);
 }
 
 function caseStatusLabel(value) {
@@ -2464,6 +2635,20 @@ function caseStatusLabel(value) {
   return labels[String(value || "").toLowerCase()] || value || "상태 확인";
 }
 
+function reportStatusLabel(value) {
+  const labels = {
+    agent_execution_ready: "리포트 준비 완료",
+    downloaded: "내려받기 완료",
+    draft: "작성 중",
+    failed: "확인 필요",
+    partial: "일부 자료 부족",
+    report_saved: "저장 완료",
+    saved: "저장 완료",
+    success: "검토 완료",
+  };
+  return labels[String(value || "").toLowerCase()] || "검토 중";
+}
+
 function latestMessageIndex(messages, role) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     if (messages[index]?.role === role) {
@@ -2471,14 +2656,6 @@ function latestMessageIndex(messages, role) {
     }
   }
   return -1;
-}
-
-function normalizeExecutionMode(value) {
-  const mode = String(value || "mock").toLowerCase();
-  if (["sync", "hybrid", "async_worker"].includes(mode)) {
-    return mode;
-  }
-  return "mock";
 }
 
 function compactValue(value) {
