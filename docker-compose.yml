@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     image: skn27-demo-backend
     container_name: skn27-demo-backend
+    restart: unless-stopped
     environment:
       PYTHONUTF8: "1"
       DJANGO_DEBUG: "1"
@@ -69,9 +70,12 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - redis
-      - postgres
-      - neo4j
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
 
   frontend:
     image: node:22-alpine
