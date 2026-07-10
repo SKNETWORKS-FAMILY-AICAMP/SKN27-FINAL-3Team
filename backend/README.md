@@ -5,10 +5,8 @@
 ## 실행
 
 ```powershell
-python backend/manage.py runserver 127.0.0.1:8010
+python backend/manage.py runserver 127.0.0.1:8000
 ```
-
-`app/web/vite.config.js`의 프록시 기본값(`VITE_API_PROXY_TARGET`)이 `127.0.0.1:8010`이므로, 로컬(non-Docker) 개발에서는 반드시 이 포트로 백엔드를 띄워야 프론트(`http://127.0.0.1:5173`)의 `/api` 요청이 정상 전달된다.
 
 ## Docker 실행
 
