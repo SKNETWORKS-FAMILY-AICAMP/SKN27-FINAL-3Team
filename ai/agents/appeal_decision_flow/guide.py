@@ -218,6 +218,7 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "notice_stage":          state.get("notice_stage"),
         "overall_possibility":   state.get("overall_possibility"),
         "merit":                 state.get("merit"),
+        "merit_basis":           state.get("merit_basis"),
         "merit_judgment_failed": state.get("merit_judgment_failed"),
         "merit_relief_type":     state.get("merit_relief_type"),
         "risk_flag":             state.get("risk_flag"),
