@@ -1,10 +1,10 @@
-"""Build 5-second accident-centered clips for VideoMAE training.
+"""Build accident-centered clips for VideoMAE training.
 
-Input is the downloaded video manifest. Output is another CSV with local_path
-pointing to the generated 5-second clip, so train_videomae_classifier.py can
-read it without knowing how clips were built.
+Long videos are re-encoded to a centered clip. Short videos keep the original
+file as local_path, with clip_start/end set to the full file duration.
 """
 from pathlib import Path
+from functools import lru_cache
 import argparse
 import csv
 import math
@@ -40,15 +40,20 @@ def centered_window(duration: float, center_sec: float, clip_sec: float) -> tupl
     return start, end
 
 
+@lru_cache(maxsize=4)
+def load_yolo_model(model_name: str):
+    from ultralytics import YOLO
+
+    return YOLO(model_name)
+
+
 def estimate_accident_sec(video_path: Path, duration: float, source: str, model_name: str) -> tuple[float, str]:
     if source == "center":
         return duration / 2, "center"
 
     # ponytail: ByteTrack is optional here; fall back to center if ultralytics/tracker fails.
     try:
-        from ultralytics import YOLO
-
-        model = YOLO(model_name)
+        model = load_yolo_model(model_name)
         previous = None
         best_score = -1.0
         best_frame = 0
@@ -113,12 +118,28 @@ def build_training_clips(args: argparse.Namespace) -> None:
             continue
 
         _, _, duration = video_info(src)
+        if duration <= 0:
+            copied = dict(row)
+            copied.update({
+                "source_video_path": src.as_posix(),
+                "local_path": src.as_posix(),
+                "clip_start_sec": "0.000",
+                "clip_end_sec": "0.000",
+                "clip_duration_sec": "0.000",
+                "clip_basis": "invalid_video_duration",
+                "clip_status": "invalid_video",
+                "file_exists": str(src.exists()),
+            })
+            output_rows.append(copied)
+            continue
+
         accident_sec, basis = estimate_accident_sec(src, duration, args.accident_source, args.model_name)
         start_sec, end_sec = centered_window(duration, accident_sec, args.clip_sec)
         label = row.get(args.label_column) or row.get("label") or "unknown"
         asset_id = row.get("asset_id") or src.stem
         if duration <= args.short_video_sec:
-            # ponytail: short videos already contain the full context; do not re-encode and risk losing them.
+            # ponytail: short videos already contain full context; keep metadata aligned with the actual file.
+            start_sec, end_sec = 0.0, duration
             clip_path = src
             ok = True
             basis = f"{basis}_short_video_full_context"
@@ -140,7 +161,7 @@ def build_training_clips(args: argparse.Namespace) -> None:
                 "clip_basis": basis,
                 "clip_status": "ok" if ok else "failed",
                 "file_exists": str(clip_path.exists()),
-                "planned_use": "videomae_training_clip_5s",
+                "planned_use": "videomae_training_clip_or_short_full_context",
             }
         )
         output_rows.append(copied)
@@ -153,7 +174,7 @@ def build_training_clips(args: argparse.Namespace) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build 5-second training clips from downloaded videos.")
+    parser = argparse.ArgumentParser(description="Build accident-centered training clips from downloaded videos.")
     parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--clip-dir", type=Path, default=DEFAULT_CLIP_DIR)

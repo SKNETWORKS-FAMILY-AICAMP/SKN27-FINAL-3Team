@@ -1,4 +1,4 @@
-﻿"""Fine-tune VideoMAE for coarse accident type classification.
+"""Fine-tune VideoMAE for coarse accident type classification.
 
 This uses video clips directly from the download manifest. Keep the first run
 small; VideoMAE is much heavier than the ResNet18 frame baseline.
@@ -58,6 +58,8 @@ def choose_device(device_arg: str) -> torch.device:
 def filter_rows(rows: list[dict], root_dir: Path, label_column: str) -> list[dict]:
     valid = []
     for row in rows:
+        if row.get("clip_status") and row.get("clip_status") != "ok":
+            continue
         label = row.get(label_column)
         local_path = row.get("local_path")
         if not label or not local_path:
