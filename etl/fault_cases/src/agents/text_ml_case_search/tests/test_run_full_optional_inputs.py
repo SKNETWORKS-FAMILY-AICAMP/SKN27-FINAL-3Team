@@ -59,10 +59,15 @@ def test_build_run_summary_counts_status_and_evidence(tmp_path) -> None:
                 "job_id": "j1",
                 "status": "success",
                 "evidence_count": 2,
+                "review_case_evidence_count": 1,
+                "fault_ratio_precedent_evidence_count": 1,
                 "similar_case_count": 2,
                 "display_evidence_count": 2,
                 "ratio_range_label": "A 70 : B 30",
                 "insurer_claim_review_exists": True,
+                "source_summary": {
+                    "source_counts": {"review_case": 1, "fault_ratio_precedent": 1}
+                },
             },
             {
                 "run_index": 2,
@@ -71,10 +76,13 @@ def test_build_run_summary_counts_status_and_evidence(tmp_path) -> None:
                 "job_id": "j2",
                 "status": "partial",
                 "evidence_count": 0,
+                "review_case_evidence_count": 0,
+                "fault_ratio_precedent_evidence_count": 0,
                 "similar_case_count": 0,
                 "display_evidence_count": 0,
                 "ratio_range_label": "",
                 "insurer_claim_review_exists": True,
+                "source_summary": {"source_counts": {}},
             },
         ],
     )
@@ -82,5 +90,7 @@ def test_build_run_summary_counts_status_and_evidence(tmp_path) -> None:
     assert summary["active_input_count"] == 2
     assert summary["status_counts"] == {"success": 1, "partial": 1}
     assert summary["total_evidence_count"] == 2
+    assert summary["total_review_case_evidence_count"] == 1
+    assert summary["total_fault_ratio_precedent_evidence_count"] == 1
     assert summary["total_display_evidence_count"] == 2
     assert summary["zero_evidence_count"] == 1

@@ -26,22 +26,14 @@ const FALLBACK_ANALYSIS_CARDS = [
     summary: "상담 입력을 접수했습니다. 자료 분석은 로그인 후 이어서 진행할 수 있습니다.",
   },
 ];
-const DEMO_PERSONA_ID = "school_zone_fine_notice_parent";
-const CONFIGURED_EXECUTION_MODE = ["sync", "async_worker", "mock"].includes(
-  import.meta.env.VITE_AGENT_EXECUTION_MODE
-)
-  ? import.meta.env.VITE_AGENT_EXECUTION_MODE
-  : "sync";
-const ATTACHMENT_PURPOSES = [
-  { value: "fine_notice", label: "고지서" },
-  { value: "accident_scene", label: "사고 사진" },
-  { value: "blackbox_video", label: "블랙박스" },
-  { value: "insurance_record", label: "보험 접수" },
-];
+const EXECUTION_MODE = "async_worker";
+const ATTACHMENT_PURPOSE_LABELS = {
+  fine_notice: "고지서",
+  supporting_evidence: "보조 자료",
+};
 
 export default function FrontendAppShell({
   apiBase = "/api",
-  authToken = "",
   googleClientId = "",
 }) {
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
@@ -60,10 +52,12 @@ export default function FrontendAppShell({
   const [savePromptVisible, setSavePromptVisible] = useState(false);
   const [saveDecision, setSaveDecision] = useState("undecided");
   const [statusMessage, setStatusMessage] = useState("");
+  const [capabilityCatalog, setCapabilityCatalog] = useState(null);
+  const [capabilityError, setCapabilityError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingConversation, setIsSavingConversation] = useState(false);
   const [attachmentPurpose, setAttachmentPurpose] = useState("fine_notice");
-  const executionMode = CONFIGURED_EXECUTION_MODE;
+  const executionMode = EXECUTION_MODE;
   const [selectedUploadFile, setSelectedUploadFile] = useState(null);
   const [uploadInputResetKey, setUploadInputResetKey] = useState(0);
   const [registeredAttachments, setRegisteredAttachments] = useState([]);
@@ -76,7 +70,7 @@ export default function FrontendAppShell({
   const [pendingReportScreenDownload, setPendingReportScreenDownload] = useState(null);
   const reportWorkbenchRef = useRef(null);
 
-  const effectiveAuthToken = activeAuthToken || authToken || "";
+  const effectiveAuthToken = activeAuthToken || "";
   const identity = {
     authToken: effectiveAuthToken,
     guestId,
@@ -96,7 +90,6 @@ export default function FrontendAppShell({
   const analysisCards = analysisResponse?.cards?.length
     ? normalizeAnalysisCards(analysisResponse.cards)
     : [];
-  const personaRun = analysisResponse?.persona_run || null;
   const assistantAnswer = analysisResponse?.assistant_message || "";
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
@@ -107,7 +100,27 @@ export default function FrontendAppShell({
   const visibleAnalysisCards = isLiveReportingReady
     ? analysisCards
     : analysisCards.filter((card) => card?.card_type !== "reporting_preview");
-  const selectedPersona = DEMO_PERSONAS.find((item) => item.persona_id === selectedPersonaId) || DEMO_PERSONAS[0];
+  const attachmentPurposes = Array.from(
+    new Set((capabilityCatalog?.capabilities || []).flatMap((capability) => capability.attachment_purposes || []))
+  ).map((value) => ({ value, label: ATTACHMENT_PURPOSE_LABELS[value] || value }));
+
+  useEffect(() => {
+    let active = true;
+    api.getCapabilities()
+      .then((catalog) => {
+        if (!active) return;
+        setCapabilityCatalog(catalog);
+        setCapabilityError("");
+      })
+      .catch(() => {
+        if (!active) return;
+        setCapabilityCatalog(null);
+        setCapabilityError("현재 지원 기능을 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [api]);
 
   useEffect(() => {
     if (!pendingReportScreenDownload || activeRoute !== "reporting" || !reportWorkbenchRef.current) {
@@ -248,12 +261,6 @@ export default function FrontendAppShell({
     setStatusMessage("로그아웃했습니다. 새 Google 계정으로 다시 진행할 수 있습니다.");
   }
 
-  function useSelectedPersonaSample() {
-    setQuestion(selectedPersona.sample);
-    setStatusMessage(`${selectedPersona.name} persona 샘플 입력을 채웠습니다.`);
-    setActiveRoute("chatbot");
-  }
-
   async function registerAttachmentMetadata() {
     setIsRegisteringAttachment(true);
     setStatusMessage(selectedUploadFile ? "첨부 파일을 업로드하고 있습니다." : "첨부 metadata를 등록하고 있습니다.");
@@ -307,21 +314,10 @@ export default function FrontendAppShell({
           );
       let attachment = result?.attachment;
       if (attachment) {
-        try {
-          const scanResult = await api.processFileScan(
-            {
-              attachmentId: attachment.attachment_id,
-              session_id: activeSession,
-            },
-            nextIdentity
-          );
-          attachment = scanResult?.attachment || attachment;
-        } catch (_scanError) {
-          attachment = {
-            ...attachment,
-            scan_status: attachment.scan_status || "scan_pending",
-          };
-        }
+        attachment = {
+          ...attachment,
+          scan_status: attachment.scan_status || "scan_pending",
+        };
         setRegisteredAttachments((items) => [...items, attachment]);
         setSelectedUploadFile(null);
         setUploadInputResetKey((value) => value + 1);
@@ -482,7 +478,7 @@ export default function FrontendAppShell({
 
   function prepareMissingEvidenceUpload() {
     setAttachmentPurpose("fine_notice");
-    setStatusMessage("누락 자료를 추가할 수 있도록 상담 입력으로 이동했습니다. 고지서 원본, 현장 사진, 블랙박스 중 가진 자료를 선택해 주세요.");
+    setStatusMessage("누락 자료를 추가할 수 있도록 상담 입력으로 이동했습니다. 고지서 원본이나 보조 문서를 선택해 주세요.");
     setActiveRoute("chatbot");
   }
 
@@ -490,54 +486,6 @@ export default function FrontendAppShell({
     setQuestion("추가 자료를 반영해 이의신청서 초안과 제출 가이드라인을 다시 정리해줘");
     setStatusMessage("초안 재생성 요청 문구를 입력창에 준비했습니다. 추가 자료가 있으면 먼저 첨부한 뒤 전송해 주세요.");
     setActiveRoute("chatbot");
-  }
-
-  async function processQueuedWorkerResult(chatResult, requestIdentity) {
-    const workItem = chatResult?.work_item || chatResult?.supervisor_execution?.work_item || null;
-    if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
-      return chatResult;
-    }
-    if (!requestIdentity?.authToken) {
-      logDeveloperDiagnostic("worker.status", { status: "queued", authenticated: false });
-      return chatResult;
-    }
-
-    logDeveloperDiagnostic("worker.status", { status: "processing", authenticated: true });
-    try {
-      const workerResult = await api.processAgentWorkItems({ limit: 1 }, requestIdentity);
-      const processedItem =
-        (workerResult?.work_items || []).find((item) => item.work_item_id === workItem.work_item_id) ||
-        workerResult?.work_items?.[0] ||
-        {};
-      const nextWorkItem = {
-        ...workItem,
-        status: processedItem.status || workItem.status,
-        job_status: processedItem.job_status || workItem.job_status,
-      };
-      const enrichedResult = {
-        ...chatResult,
-        status: processedItem.job_status || chatResult.status,
-        worker_result: workerResult,
-        supervisor_execution: {
-          ...(chatResult.supervisor_execution || {}),
-          work_item: nextWorkItem,
-          worker_result: {
-            processed: workerResult?.processed || 0,
-            status: processedItem.status || null,
-            job_status: processedItem.job_status || null,
-          },
-        },
-        work_item: nextWorkItem,
-      };
-      logDeveloperDiagnostic("worker.status", {
-        jobStatus: processedItem.job_status || null,
-        status: processedItem.status || "requested",
-      });
-      return enrichedResult;
-    } catch (_error) {
-      logDeveloperDiagnostic("worker.error", { message: _error?.message || "automatic processing failed" });
-      return chatResult;
-    }
   }
 
   async function pollQueuedWorkerResult(chatResult, requestIdentity) {
@@ -552,8 +500,8 @@ export default function FrontendAppShell({
 
     logDeveloperDiagnostic("worker.status", { status: "polling", authenticated: true });
     try {
-      const jobDetailResult = await api.getAnalysisJobDetail({ jobId: workItem.job_id, identity: requestIdentity });
-      const jobDetail = jobDetailResult?.job || {};
+      const jobDetailResult = await api.getAnalysisResult({ jobId: workItem.job_id, identity: requestIdentity });
+      const jobDetail = jobDetailResult?.result || jobDetailResult?.job || {};
       const processedItem = jobDetail.work_item || {};
       const progressState = jobDetail.progress_state || processedItem.progress_state || {};
       const nextWorkItem = {
@@ -658,7 +606,6 @@ export default function FrontendAppShell({
             type: attachment.type,
             storage_uri: attachment.storage_uri,
           })),
-          ...(shouldUseDemoPersona(trimmedQuestion) ? { persona_id: DEMO_PERSONA_ID } : {}),
         },
         submitIdentity
       );
@@ -1007,6 +954,7 @@ export default function FrontendAppShell({
             <ChatScreenV2
               analysisCards={visibleAnalysisCards}
               attachmentPurpose={attachmentPurpose}
+              attachmentPurposes={attachmentPurposes}
               assistantAnswer={assistantAnswer}
               authSessionId={authSessionId}
               chatMessages={chatMessages}
@@ -1028,12 +976,12 @@ export default function FrontendAppShell({
               saveDecision={saveDecision}
               savePromptVisible={savePromptVisible}
               selectedUploadFile={selectedUploadFile}
-              personaRun={personaRun}
               reportingPayload={reportingPayload}
               setAttachmentPurpose={setAttachmentPurpose}
               setQuestion={setQuestion}
               setSelectedUploadFile={setSelectedUploadFile}
               statusMessage={statusMessage}
+              capabilityError={capabilityError}
               submittedQuestion={submittedQuestion}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
@@ -1116,7 +1064,7 @@ function EntryScreen({ onGuestStart, onOpenChat }) {
         <span className="eyebrow">로그인 후 바로 상담 시작</span>
         <h1>사고와 과태료 자료를 올리면 AI가 필요한 다음 행동을 정리합니다.</h1>
         <p className="lead">
-          고지서, 사고 사진, 블랙박스 설명을 입력하면 과태료 이의제기 가능성, 과실비율 쟁점,
+          고지서와 사고 상황을 입력하면 과태료 이의제기 가능성, 과실비율 쟁점,
           관련 근거와 작성 초안을 한 화면에서 확인할 수 있습니다.
         </p>
         <div className="entry-actions">
@@ -1153,7 +1101,7 @@ function EntryScreen({ onGuestStart, onOpenChat }) {
             <div className="preview-bubble answer">질문 입력 전</div>
             <div className="preview-result">
               <strong>자료 분석 대기</strong>
-              <p>로그인 후 고지서, 현장 사진, 블랙박스 자료를 연결합니다.</p>
+              <p>로그인 후 고지서와 보조 문서를 연결합니다.</p>
               <button className="button primary" type="button" onClick={onOpenChat}>
                 상담 화면 열기
               </button>
@@ -1216,7 +1164,7 @@ function ChatScreen({
                   <div className="policy-card">
                     <span>회원</span>
                     <strong>명령문 + 자료 분석</strong>
-                    <p>고지서, 현장 사진, 블랙박스 자료를 분석 목적과 함께 제출합니다.</p>
+                    <p>고지서와 보조 문서를 분석 목적과 함께 제출합니다.</p>
                   </div>
                   <div className="policy-card is-disabled">
                     <span>비회원</span>
@@ -1486,26 +1434,15 @@ function ConversationSidebar({
         </button>
       </nav>
     </>
-        </div>
-        {isAuthenticated ? (
-          <button className="button full" type="button" onClick={onLogout}>
-            로그아웃
-          </button>
-        ) : (
-          <button className="button primary full" type="button" onClick={onLogin} disabled={isSavingConversation}>
-            {isSavingConversation ? "연결 중" : "Google 로그인"}
-          </button>
-        )}
-        {statusMessage && <p className="sidebar-status">{statusMessage}</p>}
-      </section>
-    </aside>
   );
 }
 
 function ChatScreenV2({
   analysisCards,
   attachmentPurpose,
+  attachmentPurposes,
   assistantAnswer,
+  capabilityError,
   authSessionId,
   chatMessages,
   currentReport,
@@ -1526,7 +1463,6 @@ function ChatScreenV2({
   saveDecision,
   savePromptVisible,
   selectedUploadFile,
-  personaRun,
   reportingPayload,
   setAttachmentPurpose,
   setQuestion,
@@ -1557,9 +1493,9 @@ function ChatScreenV2({
       : "파일 선택 필요";
   const quickQuestions = [
     "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
-    "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했고 블랙박스가 있어",
+    "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했어",
     "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어",
-    "블랙박스 원본과 보험사 접수 내역이 있어",
+    "보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘",
   ];
   const [isReportingExpanded, setIsReportingExpanded] = useState(false);
 
@@ -1585,7 +1521,7 @@ function ChatScreenV2({
           <label>
             <span>첨부 목적</span>
             <select value={attachmentPurpose} onChange={(event) => setAttachmentPurpose(event.target.value)}>
-              {ATTACHMENT_PURPOSES.map((item) => (
+              {attachmentPurposes.map((item) => (
                 <option value={item.value} key={item.value}>
                   {item.label}
                 </option>
@@ -1596,7 +1532,7 @@ function ChatScreenV2({
             <span>파일</span>
             <input
               key={uploadInputResetKey}
-              accept="image/*,application/pdf,video/*"
+              accept="image/*,application/pdf"
               type="file"
               onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
             />
@@ -1605,12 +1541,13 @@ function ChatScreenV2({
             className="button"
             type="button"
             onClick={onRegisterAttachment}
-            disabled={isRegisteringAttachment || !selectedUploadFile}
+            disabled={isRegisteringAttachment || !selectedUploadFile || Boolean(capabilityError)}
           >
             {uploadButtonLabel}
           </button>
           <span className="tag">자료 {registeredAttachments.length}건</span>
         </div>
+        {capabilityError && <p className="attachment-help" role="alert">{capabilityError}</p>}
         {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
           <p className="attachment-help" role="status">
             자료 분석은 Google 로그인 후 현재 상담에 그대로 연결됩니다.
@@ -1669,17 +1606,14 @@ function ChatScreenV2({
                       <div className={isUser ? "bubble" : "bubble wide"}>
                         {!isUser && (
                           <strong>
-                            {personaRun
-                              ? "예시 사건 기준으로 상담을 진행했습니다."
-                              : supervisorState
-                                ? "상담 내용을 분석에 필요한 정보로 정리했습니다."
-                                : "상담 내용을 기준으로 확인 가능한 항목을 정리했습니다."}
+                            {supervisorState
+                              ? "상담 내용을 분석에 필요한 정보로 정리했습니다."
+                              : "상담 내용을 기준으로 확인 가능한 항목을 정리했습니다."}
                           </strong>
                         )}
                         <p>{message.content}</p>
                         {!isUser && isLatestAssistant && (
                           <>
-                            {personaRun && <PersonaRunTimeline personaRun={personaRun} />}
                             {analysisCards.length > 0 && (
                               <div className="result-cards">
                                 {analysisCards.map((card) => (
@@ -1739,6 +1673,7 @@ function ChatScreenV2({
                                   )}
                                 </div>
                               </details>
+                            )}
                             {visibleReportingPayload && (
                               <ReportReadyNotice
                                 isAuthenticated={Boolean(authSessionId)}
@@ -1821,62 +1756,6 @@ function ChatScreenV2({
           )}
         </div>
       </div>
-    </section>
-  );
-}
-
-function PersonaRunTimeline({ personaRun }) {
-  const persona = personaRun?.persona || {};
-  const snapshot = personaRun?.case_snapshot || {};
-  const turns = Array.isArray(personaRun?.turns) ? personaRun.turns : [];
-  const suggestions = Array.isArray(personaRun?.next_reply_suggestions) ? personaRun.next_reply_suggestions : [];
-
-  return (
-    <section className="persona-run" aria-label="데모 페르소나 상담 진행">
-      <div className="persona-head">
-        <div>
-          <span className="eyebrow">Demo persona</span>
-          <strong>{persona.name || "데모 사용자"} · {persona.case_type || "교통 상담"}</strong>
-          <p>{persona.tone || "실제 상담 흐름 검증용 페르소나입니다."}</p>
-        </div>
-        <span className="tag green">{personaRun.stage || "ready"}</span>
-      </div>
-
-      <div className="persona-case-grid">
-        <div>
-          <span>고지 유형</span>
-          <strong>{snapshot.notice_type || "-"}</strong>
-        </div>
-        <div>
-          <span>금액</span>
-          <strong>{snapshot.notice_amount || "-"}</strong>
-        </div>
-        <div>
-          <span>장소</span>
-          <strong>{snapshot.location || "-"}</strong>
-        </div>
-        <div>
-          <span>핵심 주장</span>
-          <strong>{snapshot.user_context || "-"}</strong>
-        </div>
-      </div>
-
-      <div className="persona-turns">
-        {turns.map((turn, index) => (
-          <div className={turn.role === "assistant" ? "persona-turn ai" : "persona-turn user"} key={`${turn.role}-${index}`}>
-            <span>{turn.speaker || (turn.role === "assistant" ? "AI" : "사용자")}</span>
-            <p>{turn.message}</p>
-          </div>
-        ))}
-      </div>
-
-      {suggestions.length > 0 && (
-        <div className="persona-suggestions">
-          {suggestions.map((item) => (
-            <span key={item}>{item}</span>
-          ))}
-        </div>
-      )}
     </section>
   );
 }
@@ -2304,7 +2183,6 @@ function historyEventMatchesFilter(event, activeFilter) {
     event?.status,
     event?.subject_type,
     event?.resource_type,
-    event?.metadata?.mock_scenario,
     event?.metadata?.routing_intent,
   ]
     .filter(Boolean)
@@ -2408,7 +2286,7 @@ function CaseResultScreen({
     ? [
         ["사고 사실관계 고정", "시간·장소·진입 방향·충돌 위치를 리포트에 고정합니다."],
         ["보험사 주장 비교", "보험사 안내 과실비율과 AI가 찾은 쟁점을 나란히 확인합니다."],
-        ["추가 증거 요청", "블랙박스 원본과 사고 직후 사진을 보완합니다."],
+        ["추가 증거 요청", "보험사 접수 내역과 사고 경위 설명을 보완합니다."],
       ]
     : [
         ["현장 자료 보강", "표지판과 차량 위치가 함께 보이는 사진을 추가합니다."],
@@ -2507,6 +2385,7 @@ function CaseResultScreen({
       </div>
     </section>
   );
+}
 function reportTypeLabel(value) {
   const labels = {
     fine_notice_objection: "과태료 대응",
@@ -2605,10 +2484,8 @@ function ReportingScreen({
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
   const reportPersistence = currentReport?.persistence || {};
   const reportMetadata = currentReport?.metadata || {};
-  const reportStatus = reportingPayload?.stage || currentReport?.status || reportPersistence.status || "draft";
-  const reportTitle = reportingPayload?.title || reportMetadata.title || "상담 분석 리포트";
   const reportStatus = activeReportingPayload?.stage || currentReport?.status || reportPersistence.status || "draft";
-  const reportTitle = reportingPayload?.title || reportMetadata.title || "Supervisor 상담 분석 리포트";
+  const reportTitle = activeReportingPayload?.title || reportMetadata.title || "상담 분석 리포트";
   const reportSummary =
     activeReportingPayload?.summary ||
     currentReport?.summary ||
@@ -3028,9 +2905,9 @@ function restoreCurrentReport(job = {}, item = {}) {
 function normalizeAnalysisCards(cards) {
   return cards.map((card) => ({
     card_type: normalizeLabel(card.card_type),
-    title: stripMockText(card.title || "분석 항목"),
+    title: normalizeDisplayText(card.title || "분석 항목"),
     status: card.status || "partial",
-    summary: stripMockText(card.summary || "추가 확인이 필요합니다."),
+    summary: normalizeDisplayText(card.summary || "추가 확인이 필요합니다."),
   }));
 }
 
@@ -3043,12 +2920,12 @@ function detectCaseType({ analysisCards = [], analysisResponse = null, currentRe
   ]
     .filter(Boolean)
     .join(" ");
-  return /사고|과실|교차로|블랙박스|보험/.test(source) ? "fault" : "fine";
+  return /사고|과실|교차로|보험/.test(source) ? "fault" : "fine";
 }
 
 function caseResultRoute(card = {}) {
   const source = [card.card_type, card.title, card.summary].filter(Boolean).join(" ");
-  if (/사고|과실|교차로|블랙박스|보험/.test(source)) {
+  if (/사고|과실|교차로|보험/.test(source)) {
     return "faultResult";
   }
   if (/과태료|고지서|범칙금|이의/.test(source)) {
@@ -3071,12 +2948,6 @@ function normalizeLabel(value) {
     fine_notice: "고지서 분석",
     law_ground: "근거 확인",
     objection_report: "초안 작성",
-    persona_case_summary: "사례 요약",
-    persona_next_questions: "추가 질문",
-    persona_draft_outline: "초안 방향",
-    persona_media_boundary: "사진/영상 한계",
-    persona_law_summary: "법령 근거",
-    persona_report_summary: "리포트",
     supervisor_summary: "분석 요약",
     agent_input_schema: "입력 확인",
     reporting_preview: "리포트 준비",
@@ -3107,7 +2978,6 @@ function buildDeveloperDiagnostic(result = {}) {
       mode: node.adapter_execution_mode || node.execution_mode,
       status: node.status,
     })),
-    personaId: result?.persona_run?.persona?.persona_id || null,
     reportStage: result?.reporting_payload?.stage || null,
     status: result.status || null,
     supervisorStage: result?.supervisor_state?.stage || null,
@@ -3132,18 +3002,6 @@ function caseStatusLabel(value) {
   return labels[String(value || "").toLowerCase()] || value || "상태 확인";
 }
 
-function reportStatusLabel(value) {
-  const labels = {
-    agent_execution_ready: "리포트 준비 완료",
-    downloaded: "내려받기 완료",
-    draft: "작성 중",
-    failed: "확인 필요",
-    partial: "일부 자료 부족",
-    report_saved: "저장 완료",
-    saved: "저장 완료",
-    success: "검토 완료",
-  };
-  return labels[String(value || "").toLowerCase()] || "검토 중";
 function isReportingPayloadReady(reportingPayload, supervisorState) {
   if (!reportingPayload) {
     return false;
@@ -3301,16 +3159,8 @@ function compactValue(value) {
   return String(value);
 }
 
-function shouldUseDemoPersona(value) {
-  const text = String(value || "");
-  return ["페르소나", "데모", "샘플 상담", "끝까지 진행", "정민서"].some((keyword) => text.includes(keyword));
-}
-
-function stripMockText(value) {
-  return String(value || "")
-    .replace(/mock\s*/gi, "")
-    .replace(/중간발표용\s*/g, "")
-    .trim();
+function normalizeDisplayText(value) {
+  return String(value || "").trim();
 }
 
 function formatDate(value) {

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import base64
-import hmac
 import json
 import subprocess
 import sys
@@ -53,7 +51,6 @@ from chatbot.models import (
     GuestIdentityStatus,
     HistoryEvent,
     MessageRole,
-    OAuthConnection,
     RetrievalEvent,
     Report,
     ReportStatus,
@@ -1154,12 +1151,8 @@ def _upsert_google_oauth_subject(
 
     google = _dict_or_empty(auth_payload.get("google"))
     social_payload = _dict_or_empty(google.get("social_account"))
-    oauth_payload = _dict_or_empty(google.get("oauth_connection"))
-    private_tokens = _dict_or_empty(auth_payload.get("_private_oauth_tokens"))
     provider = _text(
         social_payload.get("provider")
-        or oauth_payload.get("provider")
-        or private_tokens.get("provider")
         or auth_payload.get("provider")
     ).lower()
     if provider != "google":
@@ -1186,69 +1179,14 @@ def _upsert_google_oauth_subject(
             },
         },
     )
-    if not google.get("connected") and not private_tokens:
-        return {
-            "backend": "postgresql",
-            "tables": [SocialAccount._meta.db_table],
-            "social_account_table": SocialAccount._meta.db_table,
-            "oauth_connection_table": None,
-            "social_account_id": social_account.social_account_id,
-            "oauth_connection_id": None,
-            "status": "saved",
-        }
-
-    existing_connection = OAuthConnection.objects.filter(user=user, provider=provider).first()
-    granted_scopes = _normalize_scope_text(
-        private_tokens.get("granted_scopes")
-        or oauth_payload.get("granted_scopes")
-        or google.get("granted_scopes")
-    )
-    access_token = _text(private_tokens.get("access_token"))
-    refresh_token = _text(private_tokens.get("refresh_token"))
-    access_token_encrypted = (
-        _protect_oauth_secret(access_token)
-        if access_token
-        else (existing_connection.access_token_encrypted if existing_connection else "")
-    )
-    refresh_token_encrypted = (
-        _protect_oauth_secret(refresh_token)
-        if refresh_token
-        else (existing_connection.refresh_token_encrypted if existing_connection else "")
-    )
-    connection_id = (
-        existing_connection.connection_id
-        if existing_connection
-        else f"oauth_google_{hashlib.sha256(user.user_id.encode('utf-8')).hexdigest()[:16]}"
-    )
-    oauth_connection, _oauth_created = OAuthConnection.objects.update_or_create(
-        user=user,
-        provider=provider,
-        defaults={
-            "connection_id": connection_id,
-            "access_token_encrypted": access_token_encrypted,
-            "refresh_token_encrypted": refresh_token_encrypted,
-            "token_type": _text(private_tokens.get("token_type")) or "Bearer",
-            "expires_at": _datetime_or_none(private_tokens.get("expires_at") or oauth_payload.get("expires_at")),
-            "granted_scopes": granted_scopes,
-            "revoked_at": _datetime_or_none(oauth_payload.get("revoked_at")),
-            "metadata": {
-                "source": "google_auth_code",
-                "purpose": _text(private_tokens.get("purpose") or google.get("purpose")) or "LOGIN",
-                "has_access_token": bool(access_token_encrypted),
-                "has_refresh_token": bool(refresh_token_encrypted),
-                "token_storage": "backend_only",
-                "scope_policy": "incremental_authorization",
-            },
-        },
-    )
-
     return {
         "backend": "postgresql",
-        "tables": [SocialAccount._meta.db_table, OAuthConnection._meta.db_table],
+        "tables": [SocialAccount._meta.db_table],
         "social_account_table": SocialAccount._meta.db_table,
-        "oauth_connection_table": OAuthConnection._meta.db_table,
+        "oauth_connection_table": None,
         "social_account_id": social_account.social_account_id,
-        "oauth_connection_id": oauth_connection.connection_id,
+        "oauth_connection_id": None,
+        "token_storage": "discarded_after_login",
         "status": "saved",
     }
 
@@ -1269,48 +1207,12 @@ def _safe_google_connection_metadata(auth_payload: dict[str, Any]) -> dict[str, 
 def _google_oauth_persistence_skipped(reason: str) -> dict[str, Any]:
     return {
         "backend": "postgresql",
-        "tables": [SocialAccount._meta.db_table, OAuthConnection._meta.db_table],
+        "tables": [SocialAccount._meta.db_table],
         "social_account_table": SocialAccount._meta.db_table,
-        "oauth_connection_table": OAuthConnection._meta.db_table,
+        "oauth_connection_table": None,
         "status": "skipped",
         "reason": reason,
     }
-
-
-def _normalize_scope_text(value: Any) -> str:
-    if isinstance(value, list):
-        return " ".join(_text(item) for item in value if _text(item))
-    return " ".join(_text(value).split())
-
-
-def _protect_oauth_secret(value: str) -> str:
-    if not value:
-        return ""
-    plaintext = value.encode("utf-8")
-    secret = _oauth_token_secret().encode("utf-8")
-    nonce = hashlib.sha256(f"{timezone.now().timestamp()}:{value}".encode("utf-8")).digest()[:16]
-    key_stream = _hmac_stream(secret, nonce, len(plaintext))
-    ciphertext = bytes(byte ^ key_stream[index] for index, byte in enumerate(plaintext))
-    tag = hmac.new(secret, nonce + ciphertext, hashlib.sha256).digest()[:16]
-    return "v1." + base64.urlsafe_b64encode(nonce + tag + ciphertext).decode("ascii").rstrip("=")
-
-
-def _hmac_stream(secret: bytes, nonce: bytes, length: int) -> bytes:
-    chunks: list[bytes] = []
-    counter = 0
-    while sum(len(chunk) for chunk in chunks) < length:
-        chunks.append(hmac.new(secret, nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest())
-        counter += 1
-    return b"".join(chunks)[:length]
-
-
-def _oauth_token_secret() -> str:
-    return (
-        _text(getattr(settings, "OAUTH_TOKEN_SECRET", ""))
-        or _text(getattr(settings, "APP_JWT_SECRET", ""))
-        or _text(getattr(settings, "SECRET_KEY", ""))
-        or "dev-only-change-before-deploy"
-    )
 
 
 def record_usage_event(
@@ -3204,7 +3106,7 @@ def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
 
 
 def _execute_agent_work_item_plan(work_item: AgentWorkItem) -> dict[str, Any]:
-    from app.services.agent_node_service import execute_mock_plan
+    from app.services.agent_node_service import execute_agent_plan
 
     queue_payload = _dict_or_empty(work_item.payload)
     analysis_plan = _dict_or_empty(queue_payload.get("analysis_plan"))
@@ -3213,7 +3115,7 @@ def _execute_agent_work_item_plan(work_item: AgentWorkItem) -> dict[str, Any]:
     execution_payload.setdefault("job_id", work_item.job.job_id)
     execution_payload.setdefault("session_id", work_item.job.session.session_id)
     execution_payload.setdefault("message_id", _text(job_payload.get("message_id")))
-    return execute_mock_plan(analysis_plan, execution_payload)
+    return execute_agent_plan(analysis_plan, execution_payload)
 
 
 def _completed_job_payload_for_work_item(
@@ -4158,7 +4060,12 @@ def _report_type(value: Any) -> str:
     report_type = _text(value)
     if report_type in {choice.value for choice in ReportType}:
         return report_type
-    return ReportType.OBJECTION_DRAFT
+    legacy_aliases = {
+        "objection_draft": ReportType.FINE_NOTICE_OBJECTION,
+        "fault_analysis": ReportType.FAULT_RATIO_ANALYSIS,
+        "generic_supervisor": ReportType.GENERAL,
+    }
+    return legacy_aliases.get(report_type, ReportType.FINE_NOTICE_OBJECTION)
 
 
 def _report_status(value: Any) -> str:
@@ -4616,10 +4523,7 @@ def _report_objection_form_pdf_body(
 
 
 def _should_use_accident_objection_template(report: Report) -> bool:
-    return report.report_type in {
-        ReportType.FAULT_RATIO_ANALYSIS.value,
-        ReportType.FAULT_ANALYSIS.value,
-    }
+    return report.report_type == ReportType.FAULT_RATIO_ANALYSIS.value
 
 
 def _build_accident_objection_template_pdf(report: Report) -> bytes | None:

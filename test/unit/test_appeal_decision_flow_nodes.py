@@ -255,7 +255,7 @@ class TestLawRefs:
         assert "질서위반행위규제법 제14조" in ctx
 
     def test_DB_조회_성공하면_DB_원문_사용(self):
-        with patch(
+        with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
             "etl.legal.search.get_provision_text",
             return_value="(DB) 실제 법령DB에서 조회된 조문 원문",
         ):

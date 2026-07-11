@@ -2290,6 +2290,8 @@ button.report-list-card.active {
 
   .case-result-panel__body {
     padding: 14px;
+  }
+
   .report-ready-actions {
     justify-content: stretch;
   }

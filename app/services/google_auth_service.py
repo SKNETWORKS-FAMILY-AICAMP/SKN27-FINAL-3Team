@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
-import hmac
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -12,6 +10,8 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
+
+import jwt
 
 from app.services.auth_error_contract import build_auth_error
 
@@ -39,20 +39,18 @@ def create_google_login(payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     if google_profile is None:
         return 401, build_auth_error("token_invalid", reason="google_identity_missing")
 
-    allow_mock = _google_auth_allow_mock()
-
     return 200, _build_google_auth_payload(
         payload=payload,
         google_profile=google_profile,
         contract_version=GOOGLE_AUTH_CONTRACT_VERSION,
-        auth_mode="mock_allowed" if allow_mock else "google_id_token_required",
+        auth_mode="google_id_token",
         google={
             "connected": False,
             "purpose": "LOGIN",
             "granted_scopes": [],
             "connection_policy": "legacy_id_token_login_only",
         },
-        limitations=_google_login_limitations(google_profile["verification"], allow_mock=allow_mock),
+        limitations=_google_login_limitations(google_profile["verification"]),
     )
 
 
@@ -88,28 +86,18 @@ def create_google_code_login(
     granted_scopes = _scope_list(token_payload.get("scope") or payload.get("scope") or GOOGLE_DEFAULT_LOGIN_SCOPE)
     purpose = _text(payload.get("purpose")) or "LOGIN"
 
-    private_oauth_tokens = {
-        "provider": "google",
-        "access_token": _text(token_payload.get("access_token")),
-        "refresh_token": _text(token_payload.get("refresh_token")),
-        "token_type": _text(token_payload.get("token_type")) or "Bearer",
-        "expires_at": expires_at.isoformat() if expires_at else None,
-        "granted_scopes": granted_scopes,
-        "purpose": purpose,
-    }
-
     response = _build_google_auth_payload(
         payload=payload,
         google_profile=google_profile,
         contract_version=GOOGLE_AUTH_CODE_CONTRACT_VERSION,
-        auth_mode="authorization_code_mock" if token_payload.get("mock") else "authorization_code",
+        auth_mode="authorization_code",
         google={
             "connected": True,
             "purpose": purpose,
             "granted_scopes": granted_scopes,
-            "has_refresh_token": bool(private_oauth_tokens["refresh_token"]),
-            "token_expires_at": private_oauth_tokens["expires_at"],
-            "connection_policy": "backend_token_exchange",
+            "has_refresh_token": False,
+            "token_expires_at": expires_at.isoformat() if expires_at else None,
+            "connection_policy": "login_tokens_discarded_after_identity_verification",
             "social_account": {
                 "provider": "google",
                 "provider_user_id": google_profile["sub"],
@@ -119,17 +107,16 @@ def create_google_code_login(
             "oauth_connection": {
                 "provider": "google",
                 "granted_scopes": granted_scopes,
-                "expires_at": private_oauth_tokens["expires_at"],
+                "expires_at": expires_at.isoformat() if expires_at else None,
                 "revoked_at": None,
-                "token_storage": "backend_only",
+                "token_storage": "discarded_after_login",
             },
         },
         limitations=[
-            "Frontend receives only the authorization code and this app JWT; Google access and refresh tokens stay on the backend.",
-            "Feature-specific Google API scopes must be requested only when the user starts that feature.",
+            "Google login tokens are discarded after identity verification.",
+            "Feature-specific Google API scopes require a separate explicit connection flow.",
         ],
     )
-    response["_private_oauth_tokens"] = private_oauth_tokens
     return 200, response
 
 
@@ -244,12 +231,8 @@ def issue_access_token(
     }
     if extra_claims:
         claims.update(extra_claims)
-    header = {"alg": APP_JWT_ALGORITHM, "typ": "JWT"}
-    signing_input = f"{_b64_json(header)}.{_b64_json(claims)}"
-    signature = _b64_bytes(
-        hmac.new(_jwt_secret().encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
-    )
-    return f"{signing_input}.{signature}", claims
+    token = jwt.encode(claims, _jwt_secret(), algorithm=APP_JWT_ALGORITHM)
+    return token, claims
 
 
 def create_token_refresh(
@@ -411,32 +394,25 @@ def create_logout(
 
 
 def decode_access_token(token: str) -> tuple[bool, dict[str, Any]]:
-    parts = token.split(".")
-    if len(parts) != 3:
-        return False, {"reason": "not_app_jwt"}
-
-    signing_input = f"{parts[0]}.{parts[1]}"
-    expected_signature = _b64_bytes(
-        hmac.new(_jwt_secret().encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
-    )
-    if not hmac.compare_digest(parts[2], expected_signature):
-        return False, {"reason": "invalid_signature"}
-
     try:
-        claims = json.loads(_b64_decode(parts[1]).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return False, {"reason": "invalid_claims"}
-
-    if claims.get("iss") != APP_JWT_ISSUER or claims.get("aud") != APP_JWT_AUDIENCE:
-        return False, {"reason": "invalid_issuer_or_audience"}
-    try:
-        expires_at = int(claims.get("exp") or 0)
-    except (TypeError, ValueError):
-        return False, {"reason": "invalid_exp"}
-    if expires_at <= int(_now().timestamp()):
+        claims = jwt.decode(
+            token,
+            _jwt_secret(),
+            algorithms=[APP_JWT_ALGORITHM],
+            audience=APP_JWT_AUDIENCE,
+            issuer=APP_JWT_ISSUER,
+            options={"require": ["iss", "aud", "sub", "jti", "iat", "exp"]},
+        )
+    except jwt.ExpiredSignatureError:
         return False, {"reason": "expired_token"}
-    if not _text(claims.get("sub")) or not _text(claims.get("jti")):
-        return False, {"reason": "missing_required_claim"}
+    except jwt.InvalidSignatureError:
+        return False, {"reason": "invalid_signature"}
+    except (jwt.InvalidIssuerError, jwt.InvalidAudienceError):
+        return False, {"reason": "invalid_issuer_or_audience"}
+    except jwt.DecodeError:
+        return False, {"reason": "not_app_jwt"}
+    except jwt.InvalidTokenError:
+        return False, {"reason": "invalid_claims"}
     return True, claims
 
 
@@ -463,9 +439,6 @@ def _auth_error_from_decode_reason(decoded: dict[str, Any]) -> tuple[int, dict[s
 
 
 def _google_token_response_from_code(payload: dict[str, Any], code: str) -> tuple[int, dict[str, Any]]:
-    if _google_auth_allow_mock() and code.startswith("mock_google_code:"):
-        return 200, _mock_google_code_token_response(payload, code)
-
     client_id = _text(_django_setting("GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_CLIENT_ID"))
     client_secret = _text(_django_setting("GOOGLE_CLIENT_SECRET") or os.environ.get("GOOGLE_CLIENT_SECRET"))
     redirect_uri = _google_redirect_uri(payload)
@@ -515,47 +488,10 @@ def _google_token_response_from_code(payload: dict[str, Any], code: str) -> tupl
     return 200, token_payload
 
 
-def _mock_google_code_token_response(payload: dict[str, Any], code: str) -> dict[str, Any]:
-    suffix = _text(code.split(":", 1)[1]) or _text(payload.get("guest_id")) or "guest"
-    google_sub = _text(payload.get("google_sub") or payload.get("sub") or f"mock-code-{suffix}")
-    email = _text(payload.get("email")) or f"driver.{_digest(google_sub, length=8)}@example.com"
-    display_name = _text(payload.get("display_name") or payload.get("name")) or "Google Demo User"
-    granted_scope = _text(payload.get("scope")) or GOOGLE_DEFAULT_LOGIN_SCOPE
-    return {
-        "mock": True,
-        "access_token": f"mock_google_access_{_digest(google_sub)}",
-        "refresh_token": f"mock_google_refresh_{_digest(google_sub, length=24)}",
-        "token_type": "Bearer",
-        "expires_in": 3600,
-        "scope": granted_scope,
-        "profile": {
-            "sub": google_sub,
-            "email": email,
-            "email_verified": True,
-            "display_name": display_name,
-            "picture": _text(payload.get("picture")),
-            "aud": _text(payload.get("aud")),
-            "verification": "mock_google_authorization_code",
-        },
-    }
-
-
 def _google_profile_from_code_tokens(
     token_payload: dict[str, Any],
     payload: dict[str, Any],
 ) -> dict[str, Any] | None:
-    profile = token_payload.get("profile")
-    if isinstance(profile, dict) and _text(profile.get("sub")):
-        return {
-            "sub": _text(profile.get("sub")),
-            "email": _text(profile.get("email")),
-            "email_verified": bool(profile.get("email_verified")),
-            "display_name": _text(profile.get("display_name") or profile.get("name")) or "Google user",
-            "picture": _text(profile.get("picture")),
-            "aud": _text(profile.get("aud")),
-            "verification": _text(profile.get("verification")) or "mock_google_authorization_code",
-        }
-
     id_token = _text(token_payload.get("id_token"))
     if id_token:
         verified = _verified_google_profile(id_token)
@@ -569,8 +505,6 @@ def _google_profile_from_code_tokens(
         if userinfo is not None:
             return userinfo
 
-    if _google_auth_allow_mock():
-        return _mock_google_profile(payload, id_token)
     return None
 
 
@@ -608,41 +542,9 @@ def _fetch_google_userinfo(access_token: str) -> dict[str, Any] | None:
 
 def _google_profile_from_payload(payload: dict[str, Any]) -> dict[str, str] | None:
     id_token = _text(payload.get("id_token") or payload.get("credential") or payload.get("google_id_token"))
-    allow_mock = _google_auth_allow_mock()
-    if allow_mock:
-        profile = _mock_google_profile(payload, id_token)
-        if profile is not None:
-            return profile
     if not id_token:
         return None
     return _verified_google_profile(id_token)
-
-
-def _mock_google_profile(payload: dict[str, Any], id_token: str) -> dict[str, str] | None:
-    token_claims = _unverified_jwt_claims(id_token)
-    google_sub = _text(
-        payload.get("google_sub")
-        or payload.get("sub")
-        or token_claims.get("sub")
-    )
-    email = _text(payload.get("email") or token_claims.get("email"))
-    display_name = _text(payload.get("display_name") or payload.get("name") or token_claims.get("name"))
-    picture = _text(payload.get("picture") or token_claims.get("picture"))
-    aud = _text(token_claims.get("aud"))
-    if not google_sub and id_token.startswith("mock_google:"):
-        google_sub = id_token.split(":", 1)[1]
-    if not google_sub and email:
-        google_sub = f"email:{email.lower()}"
-    if not google_sub:
-        return None
-    return {
-        "sub": google_sub,
-        "email": email or f"{_digest(google_sub, length=8)}@example.local",
-        "display_name": display_name or "Google user",
-        "picture": picture,
-        "aud": aud,
-        "verification": "mock_google_subject",
-    }
 
 
 def _verified_google_profile(id_token: str) -> dict[str, str] | None:
@@ -677,28 +579,6 @@ def _verified_google_profile(id_token: str) -> dict[str, str] | None:
     }
 
 
-def _unverified_jwt_claims(token: str) -> dict[str, Any]:
-    parts = token.split(".")
-    if len(parts) < 2:
-        return {}
-    try:
-        return json.loads(_b64_decode(parts[1]).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return {}
-
-
-def _b64_json(value: dict[str, Any]) -> str:
-    return _b64_bytes(json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-
-
-def _b64_bytes(value: bytes) -> str:
-    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
-
-
-def _b64_decode(value: str) -> bytes:
-    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-
-
 def _jwt_secret() -> str:
     return (
         _text(_django_setting("APP_JWT_SECRET"))
@@ -707,13 +587,6 @@ def _jwt_secret() -> str:
         or _text(_django_setting("SECRET_KEY"))
         or "dev-only-change-before-deploy"
     )
-
-
-def _google_auth_allow_mock() -> bool:
-    configured_value = _django_setting("GOOGLE_AUTH_ALLOW_MOCK", None)
-    if configured_value is not None:
-        return bool(configured_value)
-    return os.environ.get("GOOGLE_AUTH_ALLOW_MOCK", "1") != "0"
 
 
 def _google_redirect_uri(payload: dict[str, Any]) -> str:
@@ -825,15 +698,10 @@ def _merge_policy() -> dict[str, Any]:
     }
 
 
-def _google_login_limitations(verification: str, *, allow_mock: bool) -> list[str]:
+def _google_login_limitations(verification: str) -> list[str]:
     if verification == "google_id_token_verified":
         return [
             "Google ID token was verified at the login boundary; the app JWT is issued by this backend.",
-        ]
-    if allow_mock:
-        return [
-            "Local Google login accepts mock Google profile fields while GOOGLE_AUTH_ALLOW_MOCK=1.",
-            "Set GOOGLE_AUTH_ALLOW_MOCK=0 and GOOGLE_CLIENT_ID to require real Google ID token verification.",
         ]
     return [
         "Google ID token verification is required, but the provided credential could not be verified.",

@@ -18,7 +18,6 @@ def _positive_int_env(name: str, default: int) -> int:
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-change-before-deploy")
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
-MOCK_REQUIRE_AUTH = os.environ.get("MOCK_REQUIRE_AUTH", "1") != "0"
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
@@ -66,11 +65,6 @@ GOOGLE_USERINFO_ENDPOINT = os.environ.get(
     "GOOGLE_USERINFO_ENDPOINT",
     "https://openidconnect.googleapis.com/v1/userinfo",
 )
-GOOGLE_AUTH_ALLOW_MOCK = os.environ.get("GOOGLE_AUTH_ALLOW_MOCK", "1") != "0"
-APP_AUTH_ALLOW_MOCK_BEARER = os.environ.get(
-    "APP_AUTH_ALLOW_MOCK_BEARER",
-    "1" if GOOGLE_AUTH_ALLOW_MOCK else "0",
-) != "0"
 APP_JWT_SECRET = os.environ.get("APP_JWT_SECRET", SECRET_KEY)
 OAUTH_TOKEN_SECRET = os.environ.get("OAUTH_TOKEN_SECRET", APP_JWT_SECRET)
 SUPERVISOR_LLM_ENABLED = os.environ.get("SUPERVISOR_LLM_ENABLED", "0") == "1"
@@ -103,10 +97,33 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "config.middleware.DemoCorsMiddleware",
-    "config.middleware.MockJwtAuthMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "config.middleware.SameOriginCorsMiddleware",
+    "config.middleware.JwtAuthMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = "Lax"
+SECURE_HSTS_SECONDS = 31_536_000 if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+SECURE_SSL_REDIRECT = os.environ.get("DJANGO_SECURE_SSL_REDIRECT", "0" if DEBUG else "1") == "1"
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
