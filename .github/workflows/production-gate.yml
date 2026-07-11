@@ -1,0 +1,62 @@
+name: production-gate
+
+on:
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+jobs:
+  offline-verification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Offline pytest
+        run: python -m pytest -q --timeout=30
+
+      - name: Django tests
+        run: python backend/manage.py test chatbot -v 1
+
+      - name: Python static errors
+        run: ruff check --select E9,F63,F7,F82 .
+
+      - name: Secret and deployment artifacts
+        run: python -m pytest test/test_deployment_readiness_artifacts.py -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+
+      - name: Frontend production build
+        working-directory: app/web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+
+      - name: Terraform format and validate
+        run: |
+          terraform -chdir=infra/terraform fmt -check
+          terraform -chdir=infra/terraform init -backend=false -input=false
+          terraform -chdir=infra/terraform validate
+
+      - name: Docker build and import smoke
+        run: |
+          docker build -t skn27-production-gate .
+          docker run --rm skn27-production-gate python -c "import app.services.chat_orchestration_service; import chatbot.runtime_health"

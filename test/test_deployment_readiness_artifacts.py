@@ -69,8 +69,8 @@ def test_production_env_template_contains_readiness_keys():
         "DJANGO_SECRET_KEY=",
         "DJANGO_ALLOWED_HOSTS=",
         "DJANGO_DATABASE_ENGINE=postgres",
-        "GOOGLE_AUTH_ALLOW_MOCK=0",
-        "APP_AUTH_ALLOW_MOCK_BEARER=0",
+        "CORS_ALLOWED_ORIGINS=",
+        "CSRF_TRUSTED_ORIGINS=",
         "GOOGLE_CLIENT_ID=",
         "GOOGLE_CLIENT_SECRET=",
         "GOOGLE_POPUP_REDIRECT_URI=",
@@ -120,8 +120,10 @@ def test_repository_text_files_do_not_contain_obvious_secret_assignments():
     scanned_suffixes = {".md", ".py", ".html", ".txt", ".yml", ".yaml", ".json"}
     excluded_parts = {".git", ".venv", ".pytest_cache", ".worktrees", "assets"}
     secret_pattern = re.compile(
-        r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"][^'\"\n]{8,}['\"]"
+        r"(?i)(?P<name>api[_-]?key|secret|token|password)\s*[:=]\s*"
+        r"['\"](?P<value>[^'\"\n]{8,})['\"]"
     )
+    safe_sentinels = {"[MASKED]"}
 
     matches = []
     for path in ROOT.rglob("*"):
@@ -131,6 +133,8 @@ def test_repository_text_files_do_not_contain_obvious_secret_assignments():
             continue
         content = path.read_text(encoding="utf-8", errors="ignore")
         for match in secret_pattern.finditer(content):
-            matches.append(f"{path.relative_to(ROOT)}:{match.group(1)}")
+            if match.group("value") in safe_sentinels:
+                continue
+            matches.append(f"{path.relative_to(ROOT)}:{match.group('name')}")
 
     assert matches == []

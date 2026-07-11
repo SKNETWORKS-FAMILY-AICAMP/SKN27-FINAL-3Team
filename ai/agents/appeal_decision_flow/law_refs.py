@@ -9,6 +9,8 @@
 이 v2 재검증으로 폐기됨).
 """
 
+import os
+
 # ── 폴백 원문 (DB 조회 실패 시에만 사용) ──────────────────────────────
 
 # 도로교통법 시행규칙 제142조(부득이한 사유)
@@ -97,6 +99,9 @@ def _fetch_provision_text(source_name: str, article_no: str, fallback: str) -> s
     라벨로 붙인다. 폴백 원문(_FALLBACK_* 상수)은 이미 법령명을 포함해 직접 쓴 텍스트라
     그대로 반환한다.
     """
+    if os.environ.get("LEGAL_PROVISION_DB_ENABLED", "0").strip().lower() not in {"1", "true", "yes"}:
+        return fallback
+
     try:
         from etl.legal.search import get_provision_text
 

@@ -29,19 +29,19 @@ from app.services.auth_session_mock_service import (
     get_current_auth_subject as _get_current_auth_subject,
 )
 from app.services.auth_error_contract import build_www_authenticate_header
+from app.services.capability_catalog import capability_catalog_payload
+from app.services.chat_orchestration_service import (
+    compose_agent_response,
+    create_session,
+    submit_message,
+)
 from app.services.google_auth_service import (
     create_google_code_login as _create_google_code_login,
     create_google_login as _create_google_login,
     create_logout as _create_logout,
     create_token_refresh as _create_token_refresh,
 )
-from app.services.chatbot_mock_service import (
-    create_session,
-    list_demo_personas,
-    list_demo_scenarios,
-    perform_report_action,
-    submit_message,
-)
+from app.services.chatbot_mock_service import perform_report_action
 from app.services.history_event_mock_service import (
     HISTORY_EVENT_VERSION,
     actor_from_payload,
@@ -62,6 +62,7 @@ from chatbot.request_parsing import (
     json_body as _json_body,
     request_payload as _request_payload,
 )
+from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
     access_subject_from_payload,
     authorize_resource_access,
@@ -102,19 +103,24 @@ from chatbot.progress_cache import read_analysis_job_progress, read_chat_session
 
 @require_http_methods(["GET", "OPTIONS"])
 def health_check(_request: HttpRequest) -> JsonResponse:
-    return JsonResponse(
-        {
-            "ok": True,
-            "service": "SKN27 demo backend",
-            "available_scenarios": list_demo_scenarios(),
-            "available_personas": list_demo_personas(),
-        }
-    )
+    return JsonResponse({"ok": True, "service": "skn27-api"})
 
 
 @require_http_methods(["GET", "OPTIONS"])
-def demo_scenarios(_request: HttpRequest) -> JsonResponse:
-    return JsonResponse({"scenarios": list_demo_scenarios(), "personas": list_demo_personas()})
+def health_live(_request: HttpRequest) -> JsonResponse:
+    return JsonResponse({"status": "live", "service": "skn27-api"})
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def health_ready(_request: HttpRequest) -> JsonResponse:
+    payload = build_runtime_health()
+    status = 200 if payload["status"] == "ready" else 503
+    return JsonResponse(payload, status=status)
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def capabilities(_request: HttpRequest) -> JsonResponse:
+    return JsonResponse(capability_catalog_payload())
 
 
 @csrf_exempt
@@ -564,9 +570,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
-    job = get_analysis_job(job_id)
-    if not job and _is_canonical_mock_request(request):
-        job = get_analysis_job_record(job_id)
+    job = get_analysis_job_record(job_id)
     if not job:
         return _json_response(
             request,
@@ -578,15 +582,14 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    if _is_canonical_mock_request(request):
-        job["progress_cache"] = read_analysis_job_progress(job_id)
+    job["progress_cache"] = read_analysis_job_progress(job_id)
     return _json_response(request, {"job": job})
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
-    result = get_analysis_result(job_id)
-    if not result:
+    job = get_analysis_job_record(job_id)
+    if not job:
         return _json_response(
             request,
             {
@@ -597,9 +600,35 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    if _is_canonical_mock_request(request):
-        result = _canonicalize_mock_paths(result)
-        result["persistence"] = persist_analysis_display_result(result)
+    if job.get("status") in {"queued", "running"}:
+        return _json_response(
+            request,
+            {
+                "result": {
+                    "contract_version": "analysis_result.v2",
+                    "job_id": job_id,
+                    "status": job.get("status"),
+                    "assistant_message": None,
+                    "structured_results": {},
+                    "evidence": [],
+                    "limitations": [],
+                }
+            },
+            status=202,
+        )
+
+    executions = [
+        {"node_code": item.get("node_code"), "agent_output": item}
+        for item in job.get("agent_results", [])
+        if isinstance(item, dict)
+    ]
+    result = compose_agent_response(
+        {
+            "job_id": job_id,
+            "status_counts": job.get("status_counts") or {},
+            "executions": executions,
+        }
+    )
     return _json_response(request, {"result": result})
 
 
@@ -625,103 +654,83 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def submit_chat_message(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
-    usage = None
-    if _is_canonical_mock_request(request):
-        policy_response = _canonical_guest_identity_policy_response(request, identity_body)
-        if policy_response is not None:
-            return policy_response
-        usage = record_usage_event(identity_body, scope="chat_message")
-        if not usage["allowed"]:
-            return _rate_limit_response(request, usage)
-        identity_body = apply_attachment_scan_gate(identity_body)
+    identity_body = _payload_with_request_identity(request, body)
+    policy_response = _canonical_guest_identity_policy_response(request, identity_body)
+    if policy_response is not None:
+        return policy_response
+    usage = record_usage_event(identity_body, scope="chat_message")
+    if not usage["allowed"]:
+        return _rate_limit_response(request, usage)
+    identity_body = apply_attachment_scan_gate(identity_body)
     chat_response = submit_message(identity_body)
     conversation_save_state = conversation_save_state_from_payload(identity_body)
-    node_execution = None
-    if _is_canonical_mock_request(request):
-        execution_payload = {
-            **identity_body,
-            "session_id": chat_response.get("session_id"),
-            "message_id": chat_response.get("message_id"),
-            "attachments": chat_response.get("attachments", []),
-            "context": {
-                **(
-                    identity_body.get("context")
-                    if isinstance(identity_body.get("context"), dict)
-                    else {}
-                ),
-                "supervisor_handoff": chat_response.get("supervisor_state", {}),
-            },
-        }
-        if _uses_async_worker(identity_body):
-            if _has_blocked_attachments(chat_response):
-                chat_response = _scan_blocked_chat_response(chat_response)
-                node_execution = _scan_blocked_node_execution(identity_body, chat_response)
-                persistence = persist_chat_message_analysis_boundary(identity_body, chat_response)
-                conversation_save_state = persistence["conversation_save_state"]
-                chat_response["persistence"] = persistence
-                chat_response["supervisor_execution"] = _supervisor_execution_response(
-                    node_execution,
-                    persistence=persistence,
-                )
-                chat_response["usage"] = usage
-                chat_response["execution_mode"] = "async_worker"
-            else:
-                node_execution = _queued_node_execution_placeholder(
-                    execution_payload,
-                    analysis_plan=chat_response.get("analysis_plan") or {},
-                    chat_response=chat_response,
-                )
-                job_payload = _agent_plan_job_payload(
-                    execution_payload,
-                    {
-                        "analysis_plan": chat_response.get("analysis_plan") or {},
-                        "chat_response": chat_response,
-                        "node_execution": node_execution,
-                    },
-                )
-                job_payload["status"] = "queued"
-                job_payload["active_node"] = _analysis_plan_active_node(chat_response.get("analysis_plan") or {})
-                job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
-                job_payload["node_execution"] = {}
-                persistence = enqueue_analysis_job_work(execution_payload, job_payload)
-                conversation_save_state = conversation_save_state_from_payload(identity_body)
-                chat_response["persistence"] = persistence
-                chat_response["node_execution"] = node_execution
-                chat_response["work_item"] = {
-                    "contract_version": "agent_worker_queue.v1",
-                    "work_item_id": persistence["work_item_id"],
-                    "status": persistence["work_item_status"],
-                    "job_id": persistence["job_id"],
-                }
-                chat_response["supervisor_execution"] = _supervisor_execution_response(
-                    node_execution,
-                    persistence=persistence,
-                )
-                chat_response["usage"] = usage
-                chat_response["execution_mode"] = "async_worker"
-                chat_response["status"] = "queued"
-        else:
-            persistence_seed = persist_chat_message_analysis_boundary(identity_body, chat_response)
-            execution_payload["job_id"] = persistence_seed["job_id"]
-            node_execution = execute_mock_plan(chat_response.get("analysis_plan") or {}, execution_payload)
-            persistence = persist_chat_message_analysis_boundary(
-                identity_body,
-                chat_response,
-                node_execution=node_execution,
-            )
-            conversation_save_state = persistence["conversation_save_state"]
-            chat_response["persistence"] = persistence
-            chat_response["supervisor_execution"] = _supervisor_execution_response(
-                node_execution,
-                persistence=persistence,
-            )
-            chat_response["usage"] = usage
+
+    if chat_response["status"] == "needs_input":
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "input_collection"
+        return _json_response(request, chat_response)
+
+    execution_payload = {
+        **identity_body,
+        "session_id": chat_response.get("session_id"),
+        "message_id": chat_response.get("message_id"),
+        "attachments": chat_response.get("attachments", []),
+        "execution_mode": "sync",
+        "context": {
+            **(
+                identity_body.get("context")
+                if isinstance(identity_body.get("context"), dict)
+                else {}
+            ),
+            "supervisor_handoff": chat_response.get("supervisor_state", {}),
+        },
+    }
+
+    if _has_blocked_attachments(chat_response):
+        chat_response = _scan_blocked_chat_response(chat_response)
+        persistence = persist_chat_message_analysis_boundary(identity_body, chat_response)
+        chat_response["persistence"] = persistence
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "scan_blocked"
+        return _json_response(request, chat_response, status=409)
+
+    node_execution = _queued_node_execution_placeholder(
+        execution_payload,
+        analysis_plan=chat_response.get("analysis_plan") or {},
+        chat_response=chat_response,
+    )
+    job_payload = _agent_plan_job_payload(
+        execution_payload,
+        {
+            "analysis_plan": chat_response.get("analysis_plan") or {},
+            "chat_response": chat_response,
+            "node_execution": node_execution,
+        },
+    )
+    job_payload["status"] = "queued"
+    job_payload["active_node"] = _analysis_plan_active_node(chat_response.get("analysis_plan") or {})
+    job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
+    job_payload["node_execution"] = {}
+    persistence = enqueue_analysis_job_work(execution_payload, job_payload)
+    chat_response["persistence"] = persistence
+    chat_response["node_execution"] = node_execution
+    chat_response["work_item"] = {
+        "contract_version": "agent_worker_queue.v1",
+        "work_item_id": persistence["work_item_id"],
+        "status": persistence["work_item_status"],
+        "job_id": persistence["job_id"],
+    }
+    chat_response["supervisor_execution"] = _supervisor_execution_response(
+        node_execution,
+        persistence=persistence,
+    )
+    chat_response["usage"] = usage
+    chat_response["execution_mode"] = "async_worker"
     _record_history_safely(
         request,
         event_type="chat_message_created",
         status=chat_response.get("status") or "success",
-        summary="?? ???? mock ?? job ???? ??????.",
+        summary="Chat message was accepted and queued for Agent execution.",
         actor=_history_actor(request, body),
         subject=subject_from_payload(
             body,
@@ -731,8 +740,6 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         source=_history_source(request),
         metadata={
             "routing_intent": chat_response.get("routing_intent"),
-            "mock_scenario": chat_response.get("mock_scenario"),
-            "mock_status": body.get("mock_status"),
             "response_status": chat_response.get("status"),
             "conversation_save_state": conversation_save_state,
             "conversation_save_policy": "conversation_save_policy.v1",
@@ -746,7 +753,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         },
         privacy={"risk_level": "medium"},
     )
-    return _json_response(request, chat_response)
+    return _json_response(request, chat_response, status=202)
 
 
 @csrf_exempt

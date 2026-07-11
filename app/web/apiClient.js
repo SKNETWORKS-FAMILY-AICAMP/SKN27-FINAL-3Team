@@ -7,12 +7,6 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     createGuestSession(payload = {}) {
       return postJson(joinApiPath(authApiBase, "auth/guest-session/"), payload);
     },
-    loginWithGoogle(payload = {}) {
-      return postJson(joinApiPath(authApiBase, "auth/login/"), {
-        provider: "google",
-        ...payload,
-      });
-    },
     loginWithGoogleCode(payload = {}) {
       return postJson(
         joinApiPath(authApiBase, "auth/google/code/"),
@@ -36,11 +30,14 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     submitChatMessage(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/messages/"), payload, identity);
     },
-    processAgentWorkItems(payload = {}, identity = {}) {
-      return postJson(joinApiPath(apiBase, "agents/work-items/process/"), payload, identity);
+    getCapabilities() {
+      return getJson(joinApiPath(apiBase, "capabilities/"));
     },
     getAnalysisJobDetail({ jobId, identity } = {}) {
       return getJson(joinApiPath(apiBase, `analysis/jobs/${encodeURIComponent(jobId || "")}/`), identity);
+    },
+    getAnalysisResult({ jobId, identity } = {}) {
+      return getJson(joinApiPath(apiBase, `analysis/results/${encodeURIComponent(jobId || "")}/`), identity);
     },
     registerFileMetadata(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "files/"), payload, identity);
@@ -56,9 +53,6 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
         formData.append("file", file);
       }
       return postFormData(joinApiPath(apiBase, "files/"), formData, identity);
-    },
-    processFileScan({ attachmentId, ...payload } = {}, identity = {}) {
-      return postJson(joinApiPath(apiBase, `files/${encodeURIComponent(attachmentId || "")}/scan/`), payload, identity);
     },
     updateConversationSaveState(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/save-state/"), payload, identity);
@@ -174,8 +168,7 @@ export function joinApiPath(apiBase, path) {
 }
 
 export function toCanonicalApiBase(apiBase) {
-  const normalized = trimTrailingSlash(apiBase);
-  return normalized.endsWith("/mock") ? normalized.slice(0, -"/mock".length) : normalized;
+  return trimTrailingSlash(apiBase);
 }
 
 export function withQuery(url, params = {}) {

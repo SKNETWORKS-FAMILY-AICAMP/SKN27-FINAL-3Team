@@ -1,10 +1,10 @@
-FROM python:3.13-slim
+FROM python:3.13-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DJANGO_DEBUG=1 \
-    MOCK_REQUIRE_AUTH=1 \
-    DJANGO_ALLOWED_HOSTS=*
+    DJANGO_DEBUG=0 \
+    DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1 \
+    PORT=8000
 
 WORKDIR /app
 
@@ -14,9 +14,21 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY app ./app
 COPY backend ./backend
+COPY ai ./ai
+COPY etl ./etl
+COPY storage ./storage
 
 RUN python backend/manage.py check
 
+RUN groupadd --system app \
+    && useradd --system --gid app --home-dir /app app \
+    && chown -R app:app /app
+
+USER app
+
 EXPOSE 8000
 
-CMD ["python", "backend/manage.py", "runserver", "0.0.0.0:8000", "--noreload"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/live/', timeout=3)"
+
+CMD ["gunicorn", "--chdir", "backend", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120", "config.wsgi:application"]

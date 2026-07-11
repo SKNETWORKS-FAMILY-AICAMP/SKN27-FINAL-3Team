@@ -1,4 +1,3 @@
-export const AUTH_TOKEN_STORAGE_KEY = "skn27.auth.accessToken";
 export const GOOGLE_PROFILE_STORAGE_KEY = "skn27.auth.googleProfile";
 export const AUTH_SESSION_STORAGE_KEY = "skn27.auth.session";
 export const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
@@ -14,38 +13,10 @@ export function buildAuthContext({ authState, guestId, authSessionId, sessionId,
   };
 }
 
-export function buildDevGoogleProfile({ guestId }) {
-  const suffix = String(guestId || "guest").replace(/^gst_/, "") || Date.now();
-  return {
-    google_sub: `dev-google-${suffix}`,
-    email: `driver.${suffix}@example.com`,
-    display_name: "Google Demo User",
-  };
-}
-
-export function buildDevGoogleCodePayload({ guestId, purpose = "LOGIN" }) {
-  const profile = buildDevGoogleProfile({ guestId });
-  const suffix = String(guestId || profile.google_sub || "guest").replace(/^gst_/, "") || Date.now();
-  return {
-    auth_flow: "google_authorization_code_mock",
-    code: `mock_google_code:${suffix}`,
-    purpose,
-    scope: GOOGLE_LOGIN_SCOPE,
-    redirect_uri: browserOrigin(),
-    ...profile,
-  };
-}
-
 export async function buildGoogleLoginPayload({
   googleClientId,
-  guestId,
   purpose = "LOGIN",
-  localAuthMode = googleLocalAuthMode(),
 } = {}) {
-  if (!googleClientId || shouldUseLocalMockGoogleAuth({ localAuthMode })) {
-    return buildDevGoogleCodePayload({ guestId, purpose });
-  }
-
   const code = await requestGoogleAuthorizationCode({
     clientId: googleClientId,
     scope: GOOGLE_LOGIN_SCOPE,
@@ -57,31 +28,6 @@ export async function buildGoogleLoginPayload({
     scope: GOOGLE_LOGIN_SCOPE,
     redirect_uri: browserOrigin(),
   };
-}
-
-export function shouldUseLocalMockGoogleAuth({ localAuthMode = googleLocalAuthMode(), origin = browserOrigin() } = {}) {
-  return isLocalDevelopmentOrigin(origin) && normalizedGoogleLocalAuthMode(localAuthMode) !== "real";
-}
-
-export function googleLocalAuthMode() {
-  try {
-    return import.meta.env?.VITE_GOOGLE_LOCAL_AUTH_MODE || "";
-  } catch (_error) {
-    return "";
-  }
-}
-
-export function normalizedGoogleLocalAuthMode(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
-export function isLocalDevelopmentOrigin(origin = browserOrigin()) {
-  try {
-    const hostname = new URL(origin).hostname;
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
-  } catch (_error) {
-    return false;
-  }
 }
 
 export async function requestGoogleAuthorizationCode({ clientId, scope = GOOGLE_LOGIN_SCOPE, timeoutMs = 60000 }) {
@@ -228,7 +174,7 @@ export function browserOrigin() {
 }
 
 export function readStoredAuthToken() {
-  return readStoredValue(AUTH_TOKEN_STORAGE_KEY) || "";
+  return "";
 }
 
 export function readStoredAuthSession() {
@@ -240,9 +186,6 @@ export function readStoredGoogleProfile() {
 }
 
 export function persistAuthSession({ accessToken, googleProfile, authSessionId, guestId, sessionId, userId }) {
-  if (accessToken) {
-    writeStoredValue(AUTH_TOKEN_STORAGE_KEY, accessToken);
-  }
   writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null);
   writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
     auth_session_id: authSessionId || null,
@@ -253,7 +196,6 @@ export function persistAuthSession({ accessToken, googleProfile, authSessionId, 
 }
 
 export function clearStoredAuthSession() {
-  removeStoredValue(AUTH_TOKEN_STORAGE_KEY);
   removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
   removeStoredValue(AUTH_SESSION_STORAGE_KEY);
 }

@@ -1,4 +1,4 @@
-"""Small development CORS middleware for the demo API workspace."""
+"""CORS and JWT boundaries shared by local and deployed API processes."""
 
 from __future__ import annotations
 
@@ -8,14 +8,18 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from app.services.auth_error_contract import (
     build_auth_error,
     build_www_authenticate_header,
-    is_valid_mock_bearer_header,
 )
 from app.services.google_auth_service import decode_access_token
 
 
-MOCK_AUTH_PUBLIC_PATHS = (
+PUBLIC_PATHS = (
     "/api/health/",
-    "/api/mock/chat/scenarios/",
+    "/api/health/live/",
+    "/api/health/ready/",
+    "/api/capabilities/",
+    "/api/auth/guest-session/",
+    "/api/auth/google/code/",
+    "/api/auth/refresh/",
 )
 
 GUEST_ALLOWED_PATHS = (
@@ -26,20 +30,19 @@ GUEST_ALLOWED_PATHS = (
     "/api/reports/",
 )
 
-MOCK_AUTH_PROTECTED_PREFIXES = (
+PROTECTED_PREFIXES = (
     "/api/agents/",
     "/api/analysis/",
     "/api/chat/",
     "/api/files/",
     "/api/history/",
     "/api/mypage/",
-    "/api/mock/",
     "/api/reports/",
 )
 
 
-class DemoCorsMiddleware:
-    """Allow local frontend apps to call the mock API during the mid-demo build."""
+class SameOriginCorsMiddleware:
+    """Return CORS headers only for explicitly configured browser origins."""
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -50,22 +53,26 @@ class DemoCorsMiddleware:
         else:
             response = self.get_response(request)
 
-        response["Access-Control-Allow-Origin"] = "*"
-        response["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        response["Access-Control-Allow-Headers"] = (
-            "Content-Type, Authorization, X-Guest-Id, X-Auth-Session-Id, X-Requested-With"
-        )
+        origin = request.headers.get("Origin", "")
+        if origin and origin in getattr(settings, "CORS_ALLOWED_ORIGINS", ()):
+            response["Access-Control-Allow-Origin"] = origin
+            response["Access-Control-Allow-Credentials"] = "true"
+            response["Vary"] = "Origin"
+            response["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
+            response["Access-Control-Allow-Headers"] = (
+                "Content-Type, Authorization, X-Guest-Id, X-Auth-Session-Id, X-Requested-With"
+            )
         return response
 
 
-class MockJwtAuthMiddleware:
-    """Require a real app JWT, legacy mock Bearer, or guest-safe identity."""
+class JwtAuthMiddleware:
+    """Require an app JWT or an explicitly guest-safe identity."""
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        if not _requires_mock_auth(request):
+        if not _requires_auth(request):
             return self.get_response(request)
 
         valid, error_body = _is_valid_api_auth(request)
@@ -78,14 +85,12 @@ class MockJwtAuthMiddleware:
         return response
 
 
-def _requires_mock_auth(request: HttpRequest) -> bool:
-    if not getattr(settings, "MOCK_REQUIRE_AUTH", True):
-        return False
+def _requires_auth(request: HttpRequest) -> bool:
     if request.method == "OPTIONS":
         return False
-    if request.path in MOCK_AUTH_PUBLIC_PATHS:
+    if request.path in PUBLIC_PATHS:
         return False
-    return request.path.startswith(MOCK_AUTH_PROTECTED_PREFIXES)
+    return request.path.startswith(PROTECTED_PREFIXES)
 
 
 def _is_valid_api_auth(request: HttpRequest) -> tuple[bool, dict | None]:
@@ -98,8 +103,6 @@ def _is_valid_api_auth(request: HttpRequest) -> tuple[bool, dict | None]:
         app_jwt_valid, app_jwt_claims = decode_access_token(token)
         if app_jwt_valid:
             return True, None
-        if _allow_legacy_mock_bearer():
-            return is_valid_mock_bearer_header(authorization_header)
         reason = str(app_jwt_claims.get("reason") or "invalid_app_jwt")
         if reason == "expired_token":
             return False, build_auth_error("token_expired")
@@ -129,8 +132,4 @@ def _bearer_token_from_header(header_value: str | None) -> str:
     if len(parts) != 2 or parts[0].lower() != "bearer":
         return ""
     return parts[1].strip()
-
-
-def _allow_legacy_mock_bearer() -> bool:
-    return bool(getattr(settings, "APP_AUTH_ALLOW_MOCK_BEARER", True))
 
