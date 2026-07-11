@@ -115,3 +115,9 @@ def test_pull_request_gate_runs_offline_runtime_build_and_infrastructure_checks(
         assert command in workflow
     assert "--run-live" not in workflow
     assert "--run-aws" not in workflow
+
+
+def test_docker_runtime_exposes_repo_and_backend_python_packages() -> None:
+    dockerfile = read("Dockerfile")
+
+    assert "PYTHONPATH=/app:/app/backend" in dockerfile
