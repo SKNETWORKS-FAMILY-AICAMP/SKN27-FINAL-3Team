@@ -39,6 +39,8 @@ from chatbot.models import (
     AuthEvent,
     AuthSession,
     AuthSessionStatus,
+    Case,
+    ConfirmedFactVersion,
     ChatMessage,
     ChatSession,
     ChatSessionStatus,
@@ -261,6 +263,14 @@ def persist_uploaded_file_metadata(
     raw_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     session = _get_or_create_session(attachment.get("session_id"), owner_id=owner_id)
+    case = None
+    case_id = _text((raw_payload or {}).get("case_id"))
+    if case_id:
+        case = Case.objects.filter(case_id=case_id).first()
+        if case is None:
+            raise ValueError("case_id does not reference an existing case")
+        if owner_id and case.owner_id != owner_id:
+            raise PermissionError("case owner does not match uploaded file owner")
     metadata = _metadata_snapshot(attachment, raw_payload=raw_payload)
     object_storage = build_upload_storage_reference(
         attachment,
@@ -286,6 +296,7 @@ def persist_uploaded_file_metadata(
             attachment_id=_text(attachment.get("attachment_id")),
             defaults={
                 "owner_id": owner_id or (session.owner_id if session else ""),
+                "case": case or (session.case if session else None),
                 "session": session,
                 "purpose": _text(attachment.get("purpose")) or "unknown",
                 "file_type": _text(attachment.get("type")),
@@ -298,6 +309,8 @@ def persist_uploaded_file_metadata(
                 "scan_status": "not_started",
                 "agent_handoff": agent_handoff,
                 "metadata": metadata,
+                "retention_expires_at": timezone.now() + timedelta(days=30),
+                "deleted_at": None,
             },
         )
 
@@ -309,7 +322,7 @@ def list_uploaded_files(
     *,
     owner_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    queryset = UploadedFile.objects.select_related("session").order_by("-created_at")
+    queryset = UploadedFile.objects.select_related("session", "case").filter(deleted_at__isnull=True).order_by("-created_at")
     if session_id:
         queryset = queryset.filter(session__session_id=session_id)
     if owner_id is not None:
@@ -319,8 +332,8 @@ def list_uploaded_files(
 
 def get_uploaded_file(attachment_id: str) -> dict[str, Any] | None:
     uploaded_file = (
-        UploadedFile.objects.select_related("session")
-        .filter(attachment_id=attachment_id)
+        UploadedFile.objects.select_related("session", "case")
+        .filter(attachment_id=attachment_id, deleted_at__isnull=True)
         .first()
     )
     if uploaded_file is None:
@@ -1790,6 +1803,25 @@ def persist_report_action(
     display_result = _display_result_for_job(job)
     report_quality = _report_quality_snapshot(job, display_result, report_payload)
     report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
+    case = None
+    requested_case_id = _text(payload.get("case_id"))
+    if requested_case_id:
+        case = Case.objects.filter(case_id=requested_case_id).first()
+    if case is None and job is not None:
+        case = job.case
+    if case is None and session is not None:
+        case = session.case
+    source_fact_version = None
+    requested_fact_version = _text(payload.get("source_fact_version"))
+    if requested_fact_version:
+        source_fact_version = ConfirmedFactVersion.objects.filter(
+            fact_version_id=requested_fact_version,
+            case=case,
+        ).first()
+    version_no = _positive_int_or_default(
+        payload.get("version_no"),
+        default=(case.current_report_version + 1 if case else 1),
+    )
     source_storage_uri = _text(payload.get("storage_uri")) or f"mock://reports/{report_id}"
     object_storage = build_report_storage_reference(
         report_id=report_id,
@@ -1817,9 +1849,12 @@ def persist_report_action(
         report_id=report_id,
         defaults={
             "owner_id": report_owner_id,
+            "case": case,
             "session": session,
             "job": job,
             "display_result": display_result,
+            "source_fact_version": source_fact_version,
+            "version_no": version_no,
             "report_type": _report_type(payload.get("report_type")),
             "status": _report_status(report_payload.get("status")),
             "title": _report_title(payload, report_payload),
@@ -1848,6 +1883,10 @@ def persist_report_action(
             },
         },
     )
+
+    if case is not None and version_no > case.current_report_version:
+        case.current_report_version = version_no
+        case.save(update_fields=["current_report_version", "updated_at"])
 
     return {
         "backend": "postgresql",
@@ -2292,6 +2331,7 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
 
     attachment = {
         "attachment_id": uploaded_file.attachment_id,
+        "case_id": uploaded_file.case.case_id if uploaded_file.case_id else None,
         "session_id": session_id,
         "message_id": metadata.get("message_id"),
         "purpose": uploaded_file.purpose,
@@ -2304,6 +2344,12 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
         "object_storage": object_storage,
         "status": uploaded_file.status,
         "scan_status": uploaded_file.scan_status,
+        "retention_expires_at": (
+            uploaded_file.retention_expires_at.isoformat()
+            if uploaded_file.retention_expires_at
+            else None
+        ),
+        "deleted_at": uploaded_file.deleted_at.isoformat() if uploaded_file.deleted_at else None,
         "privacy_risk": uploaded_file.privacy_risk,
         "scan_result": metadata.get("scan_result"),
         "created_at": uploaded_file.created_at.isoformat(),

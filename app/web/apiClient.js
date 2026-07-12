@@ -42,6 +42,32 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     getAnalysisJobDetail({ jobId, identity } = {}) {
       return getJson(joinApiPath(apiBase, `analysis/jobs/${encodeURIComponent(jobId || "")}/`), identity);
     },
+    createCase(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "cases/"), payload, identity);
+    },
+    listCases({ sessionId, identity } = {}) {
+      return getJson(withQuery(joinApiPath(apiBase, "cases/"), { session_id: sessionId }), identity);
+    },
+    getCaseWorkspace({ caseId, sessionId, identity } = {}) {
+      const url = withQuery(joinApiPath(apiBase, `cases/${encodeURIComponent(caseId || "")}/workspace/`), {
+        session_id: sessionId,
+      });
+      return getJson(url, identity);
+    },
+    confirmCaseFacts({ caseId, ...payload } = {}, identity = {}) {
+      return postJson(
+        joinApiPath(apiBase, `cases/${encodeURIComponent(caseId || "")}/facts/confirm/`),
+        payload,
+        identity
+      );
+    },
+    startCaseAnalysis({ caseId, ...payload } = {}, identity = {}) {
+      return postJson(
+        joinApiPath(apiBase, `cases/${encodeURIComponent(caseId || "")}/analysis/jobs/`),
+        payload,
+        identity
+      );
+    },
     registerFileMetadata(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "files/"), payload, identity);
     },
@@ -60,11 +86,30 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     processFileScan({ attachmentId, ...payload } = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, `files/${encodeURIComponent(attachmentId || "")}/scan/`), payload, identity);
     },
+    deleteFile({ attachmentId, sessionId, identity } = {}) {
+      const url = withQuery(joinApiPath(apiBase, `files/${encodeURIComponent(attachmentId || "")}/`), {
+        session_id: sessionId,
+      });
+      return deleteJson(url, identity);
+    },
     updateConversationSaveState(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/save-state/"), payload, identity);
     },
     runReportAction(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "reports/"), payload, identity);
+    },
+    listReports({ caseId, sessionId, identity } = {}) {
+      const url = withQuery(joinApiPath(apiBase, "reports/"), {
+        case_id: caseId,
+        session_id: sessionId,
+      });
+      return getJson(url, identity);
+    },
+    getReport({ reportId, sessionId, identity } = {}) {
+      const url = withQuery(joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/`), {
+        session_id: sessionId,
+      });
+      return getJson(url, identity);
     },
     downloadReport({ reportId, sessionId, identity } = {}) {
       const url = withQuery(joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/download/`), {
@@ -115,6 +160,15 @@ export async function postFormData(url, formData, identity = {}, options = {}) {
 export async function getJson(url, identity = {}) {
   const response = await fetch(url, {
     method: "GET",
+    headers: buildRequestHeaders(identity),
+  });
+
+  return parseJsonResponse(response);
+}
+
+export async function deleteJson(url, identity = {}) {
+  const response = await fetch(url, {
+    method: "DELETE",
     headers: buildRequestHeaders(identity),
   });
 

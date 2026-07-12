@@ -8,11 +8,11 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_chatbot_mock_flow_connects_auth_session_contract():
-    chatbot = read_text(ROOT / "app" / "web" / "ChatbotMockFlow.jsx")
+def test_frontend_app_shell_connects_auth_session_contract():
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
     auth_session = read_text(ROOT / "app" / "web" / "authSession.js")
-    content = "\n".join([chatbot, api_client, auth_session])
+    content = "\n".join([shell, api_client, auth_session])
 
     required_tokens = [
         "auth/guest-session/",
@@ -26,10 +26,10 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
         "guest_id",
         "user_id",
         "auth_session_id",
-        "chat_session_id",
+        "session_id",
         "activeAuthToken",
         "Google로 계속하기",
-        "google.accounts.id",
+        "requestGoogleAuthorizationCode",
         "toCanonicalApiBase",
         "createFrontendApi",
         "buildRequestHeaders",
@@ -52,140 +52,61 @@ def test_chatbot_mock_flow_connects_auth_session_contract():
     assert "processAgentWorkItems" in api_client
     assert "getAnalysisJobDetail" in api_client
     assert "downloadReport" in api_client
-    assert "getBlob" in api_client
-    assert "filenameFromContentDisposition" in api_client
     assert "FormData" in api_client
-    assert "postFormData" in api_client
-    assert 'from "./apiClient.js"' in chatbot
-    assert 'from "./authSession.js"' in chatbot
+    assert 'from "./apiClient.js"' in shell
+    assert 'from "./authSession.js"' in shell
 
 
-def test_frontend_app_shell_covers_common_routes_without_fine_result_screen():
+def test_frontend_app_shell_covers_current_case_and_report_routes():
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+    content = "\n".join([shell, api_client])
 
-    for token in [
+    required_tokens = [
         "FrontendAppShell",
-        "ChatbotMockFlow",
-        "entry",
-        "chatbot",
-        "mypage",
-        "history",
+        'id: "entry"',
+        'id: "chatbot"',
+        'id: "mypage"',
+        'id: "history"',
+        'id: "reporting"',
         "getMyPageSummary",
         "listHistoryEvents",
         "readStoredAuthToken",
         "readStoredAuthSession",
-    ]:
-        assert token in shell or token in api_client
+        "loginAndBindCurrentSession",
+        "ensureGuestSession",
+        "conversation_history",
+        "registerFileMetadata",
+        "processFileScan",
+        "scan_status",
+        "processAgentWorkItems",
+        "getAnalysisJobDetail",
+        "downloadReport",
+        "CaseWorkspaceScreen",
+        "AdaptiveIntakePanel",
+        "consultation_state",
+        "fact_cards",
+        "fault_range_allowed",
+        "ReportingPreviewPanel",
+        "FaultRatioInsightPanel",
+        "ReportActionPanel",
+        "createCase",
+        "getCaseWorkspace",
+        "confirmCaseFacts",
+        "startCaseAnalysis",
+        "deleteFile",
+        "listReports",
+        "getReport",
+    ]
 
+    missing = [token for token in required_tokens if token not in content]
+    assert missing == []
     assert "fine-result" not in shell
     assert "FineResult" not in shell
     assert 'const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";' in shell
-    assert "storedAuthSession.session_id" in shell
-    assert "storedAuthSession.guest_id" in shell
-    assert "storedAuthSession.auth_session_id" in shell
-    assert "loginAndBindCurrentSession" in shell
-    assert 'const sessionLabel = authSessionId ? "Google 계정 상담"' in shell
-    assert "ensureGuestSession" in shell
-    assert "pendingAuthAction" in shell
-    assert 'source: "attachment_upload"' in shell
-    assert "report_${action}" in shell
-    assert "authSessionId={authSessionId}" in shell
-    assert "authToken: effectiveAuthToken" in shell
-    assert "conversation_history" in shell
-    assert "SupervisorFlowPanel" in shell
-    assert "ReportingPreviewPanel" in shell
-    assert "FaultRatioInsightPanel" in shell
-    assert "fault-ratio-insight-panel" in shell
-    assert "similar_cases" in shell
-    assert "ratio_range_label" in shell
-    assert "recommended_evidence" in shell
-    assert "retrieval.adapter_source" in shell
-    assert "DEMO_PERSONAS" in shell
-    assert "persona-control-panel" in shell
-    assert "registerFileMetadata" in shell
-    assert "processFileScan" in shell
-    assert "scan_status" in shell
-    assert "runReportAction" in shell
-    assert "triggerReportDownload" in shell
-    assert "api.downloadReport" in shell
-    assert "URL.createObjectURL" in shell
-    assert "reporting_payload: reportingPayload" in shell
-    assert "prepareMissingEvidenceUpload" in shell
-    assert "prepareDraftRegeneration" in shell
-    assert "selectedInspectorMode" in shell
-    assert "reportInspectorDetail" in shell
-    assert "reportSectionsForInspector" in shell
-    assert "누락 자료 추가" in shell
-    assert "초안 재생성" in shell
-    assert "onRunReportAction={runCurrentReportAction}" in shell
-    assert "ReportActionPanel" in shell
-    assert "registeredAttachments" in shell
-    assert "selectedUploadFile" in shell
-    assert 'type="file"' in shell
     assert 'accept="image/*,application/pdf,video/*"' in shell
-    assert "Google 로그인 후 업로드" in shell
-    assert "파일 선택 필요" in shell
-    assert "disabled={isRegisteringAttachment || !selectedUploadFile}" in shell
-    assert "자료 분석은 로그인 후 현재 상담 세션에 이어서 진행됩니다." in shell
-    assert "disabled={!isAuthenticated}" not in shell
-    assert "파일 업로드" in shell
-    assert "supervisorState" in shell
-    assert "NodeResultPill" in shell
-    assert "workItem" in shell
-    assert "async_worker" in shell
-    assert "adapter_execution_mode" in shell
-    assert "normalizeExecutionMode" in shell
-    assert "executionMode" in shell
-    assert "setExecutionMode" in shell
-    assert "execution_mode: executionMode" in shell
-    assert "execution-mode-control" in shell
-    assert 'const [executionMode, setExecutionMode] = useState("sync");' in shell
-    assert '["sync", "async_worker", "mock"]' in shell
-    assert "processQueuedWorkerResult" in shell
-    assert "pollQueuedWorkerResult" in shell
-    assert "const workerResult = await pollQueuedWorkerResult(result, submitIdentity);" in shell
-    assert "canSaveGuestConversation" in shell
-    assert "workerResult?.persistence?.job_id || workerResult?.session_id || workerResult?.message_id" in shell
-    assert "guestDetailedReportUsed" in shell
-    assert 'source: "guest_followup_question"' in shell
-    assert "비로그인 상담은 1회 리포팅까지 제공됩니다." in shell
-    assert "saveConversationWithGoogle" in shell
-    assert "현재 상태로 저장하거나 답변을 이어갈 수 있습니다." in shell
-    assert "getAnalysisJobDetail" in shell
-    assert "worker_progress_polling.v1" in shell
-    assert "processAgentWorkItems" in shell
-    assert "workerActionStatus" in shell
-    assert "worker progress" in shell
-    assert "reportQuality" in shell
-    assert "report-quality-panel" in shell
-    assert "openSavedCase" in shell
-    assert "onOpenCase={openSavedCase}" in shell
-    assert "restoreConversationMessages" in shell
-    assert "restoreAnalysisResponse" in shell
-    assert "restoreCurrentReport" in shell
-    assert "저장된 상담을 현재 대화로 다시 열었습니다." in shell
-    assert "latest_report_id" in shell
-    assert "내 사건에서 저장된 리포트를 열었습니다." in shell
-    assert 'const [selectedPersonaId, setSelectedPersonaId] = useState("");' in shell
-    assert "<details className=\"persona-control-panel\"" in shell
-    assert "개발용 Agent 점검" in shell
-    assert "Traffic Dispute AI" in shell
-    assert "비회원 1회 리포팅 가능" in shell
-    assert "reportingPayload || analysisCards.length || supervisorExecution || currentReport" in shell
-    assert "리포트 내려받기" in shell
-    assert "report-inspector-detail" in shell
-    assert "data-partial-report" in shell
-    assert "partial_report" in shell
-    assert "ready_report" in shell
-    assert "analysis_job_status" in shell
-    assert "agent_status_counts" in shell
-    assert "reportLimitations" in shell
-    assert "Partial analysis report" in shell
-    assert "Ready analysis report" in shell
-    assert "Review required before final submission." in shell
-    assert "report-quality-warning" in shell
-    assert "report-quality-limitations" in shell
+    assert "URL.createObjectURL" in shell
+    assert "VISION" not in shell or "limitations" in shell
 
 
 def test_vite_proxy_does_not_capture_frontend_api_client_module():

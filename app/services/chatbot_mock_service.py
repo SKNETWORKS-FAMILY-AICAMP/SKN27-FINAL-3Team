@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.services.attachment_mock_service import resolve_attachment_references
+from app.services.consultation_v2_service import apply_consultation_state_v2
 from app.services.persona_catalog_service import (
     DEFAULT_PERSONA_ID,
     default_demo_persona,
@@ -293,7 +294,11 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
     if persona_run:
         scenario = persona_run["scenario"]
     if scenario == "general_consultation" and not persona_run:
-        return _general_consultation_response(payload)
+        return apply_consultation_state_v2(
+            _general_consultation_response(payload),
+            payload,
+            intent="general_consultation",
+        )
     supervisor_state = build_supervisor_state_with_optional_llm(
         payload=payload,
         scenario=scenario,
@@ -349,7 +354,11 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
             ),
         }
     )
-    return fixture
+    return apply_consultation_state_v2(
+        fixture,
+        payload,
+        intent=routing_intent,
+    )
 
 
 def _general_consultation_response(payload: dict[str, Any]) -> dict[str, Any]:

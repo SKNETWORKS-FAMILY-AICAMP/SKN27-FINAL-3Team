@@ -57,6 +57,20 @@ from chatbot.api_response import (
     json_response as _json_response,
 )
 from chatbot.file_scan_service import apply_attachment_scan_gate, scan_uploaded_file
+from chatbot.case_repository import (
+    CaseConflict,
+    CaseQuotaExceeded,
+    confirm_case_facts as _confirm_case_facts,
+    create_case as _create_case,
+    get_case_access_metadata,
+    get_case_workspace as _get_case_workspace,
+    get_report as _get_report_v2,
+    get_report_access_metadata as _get_report_access_metadata_v2,
+    list_cases as _list_cases,
+    list_reports as _list_reports_v2,
+    soft_delete_uploaded_file,
+    start_case_analysis as _start_case_analysis,
+)
 from chatbot.request_parsing import (
     first_upload_file as _first_upload_file,
     json_body as _json_body,
@@ -444,7 +458,8 @@ def attachments(request: HttpRequest) -> JsonResponse:
     return _json_response(request, {"attachment": attachment})
 
 
-@require_http_methods(["GET", "OPTIONS"])
+@csrf_exempt
+@require_http_methods(["GET", "DELETE", "OPTIONS"])
 def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
     if _is_canonical_mock_request(request):
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
@@ -453,7 +468,19 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
             access = authorize_resource_access(access_metadata, identity_payload)
             if not access["allowed"]:
                 return _object_access_denied_response(request, access)
-        attachment = get_uploaded_file(attachment_id)
+        if request.method == "DELETE":
+            attachment = soft_delete_uploaded_file(attachment_id)
+            if attachment:
+                return _json_response(
+                    request,
+                    {
+                        "schema_version": "file_deletion.v2",
+                        "attachment": attachment,
+                        "deleted": True,
+                    },
+                )
+        else:
+            attachment = get_uploaded_file(attachment_id)
     else:
         attachment = get_mock_attachment(attachment_id)
     if not attachment:
@@ -900,8 +927,31 @@ def process_agent_work_items_once(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
+@require_http_methods(["GET", "POST", "OPTIONS"])
 def report_action(request: HttpRequest) -> JsonResponse:
+    if request.method == "GET":
+        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+        subject = access_subject_from_payload(identity_payload)["subject"]
+        if subject.get("subject_type") != "user" or not subject.get("user_id"):
+            return _login_required_response(
+                request,
+                action="report_list",
+                reason="report_list_requires_authenticated_user",
+                message="요약서 목록을 보려면 로그인이 필요합니다.",
+                policy_version="consultation_report.v2",
+                subject=subject,
+            )
+        return _json_response(
+            request,
+            {
+                "schema_version": "consultation_report_list.v2",
+                "reports": _list_reports_v2(
+                    owner_id=str(subject["user_id"]),
+                    case_id=request.GET.get("case_id"),
+                ),
+            },
+        )
+
     body = _json_body(request)
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     subject = access_subject_from_payload(identity_body)["subject"]
@@ -960,6 +1010,141 @@ def report_action(request: HttpRequest) -> JsonResponse:
         privacy={"risk_level": "medium"},
     )
     return _json_response(request, report)
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
+    identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+    access_metadata = _get_report_access_metadata_v2(report_id)
+    if access_metadata is not None:
+        access = authorize_resource_access(access_metadata, identity_payload)
+        if not access["allowed"]:
+            return _object_access_denied_response(request, access)
+    report = _get_report_v2(report_id)
+    if report is None:
+        return _json_response(
+            request,
+            {"error": {"code": "report_not_found", "message": "요청한 요약서를 찾을 수 없습니다."}},
+            status=404,
+        )
+    return _json_response(request, report)
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST", "OPTIONS"])
+def cases_collection(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request) if request.method == "POST" else {}
+    identity_payload = (
+        _payload_with_request_identity(request, body)
+        if request.method == "POST"
+        else _request_access_payload(request, session_id=request.GET.get("session_id"))
+    )
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    if subject.get("subject_type") != "user" or not subject.get("user_id"):
+        return _login_required_response(
+            request,
+            action="case_create" if request.method == "POST" else "case_list",
+            reason="case_requires_authenticated_user",
+            message="정밀분석 사건을 만들거나 보려면 로그인이 필요합니다.",
+            policy_version="case.v2",
+            subject=subject,
+        )
+
+    owner_id = str(subject["user_id"])
+    if request.method == "GET":
+        return _json_response(
+            request,
+            {"schema_version": "case_list.v2", "cases": _list_cases(owner_id=owner_id)},
+        )
+    try:
+        result = _create_case(identity_payload, owner_id=owner_id)
+    except CaseQuotaExceeded as exc:
+        return _json_response(
+            request,
+            {
+                "error": {
+                    "code": "case_quota_exceeded",
+                    "message": str(exc),
+                    "quota": {"scope": "new_case_per_day", "limit": 3},
+                }
+            },
+            status=429,
+        )
+    except PermissionError as exc:
+        return _json_response(request, {"error": {"code": "forbidden", "message": str(exc)}}, status=403)
+    return _json_response(request, result, status=201)
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def case_workspace(request: HttpRequest, case_id: str) -> JsonResponse:
+    identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+    denied = _case_access_denied_response(request, case_id, identity_payload)
+    if denied is not None:
+        return denied
+    workspace = _get_case_workspace(case_id)
+    if workspace is None:
+        return _json_response(
+            request,
+            {"error": {"code": "case_not_found", "message": "요청한 사건을 찾을 수 없습니다."}},
+            status=404,
+        )
+    return _json_response(request, workspace)
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def case_fact_confirmation(request: HttpRequest, case_id: str) -> JsonResponse:
+    body = _json_body(request)
+    identity_payload = _payload_with_request_identity(request, body)
+    denied = _case_access_denied_response(request, case_id, identity_payload)
+    if denied is not None:
+        return denied
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    try:
+        fact_version = _confirm_case_facts(
+            case_id,
+            body,
+            confirmed_by=str(subject.get("user_id") or subject.get("subject_id") or ""),
+        )
+    except ValueError as exc:
+        return _json_response(
+            request,
+            {"error": {"code": "invalid_confirmed_facts", "message": str(exc)}},
+            status=400,
+        )
+    return _json_response(request, fact_version, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def case_analysis_jobs(request: HttpRequest, case_id: str) -> JsonResponse:
+    body = _json_body(request)
+    identity_payload = _payload_with_request_identity(request, body)
+    denied = _case_access_denied_response(request, case_id, identity_payload)
+    if denied is not None:
+        return denied
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    try:
+        result = _start_case_analysis(case_id, body, owner_id=str(subject.get("user_id") or ""))
+    except CaseConflict as exc:
+        return _json_response(
+            request,
+            {"error": {"code": "confirmed_facts_required", "message": str(exc)}},
+            status=409,
+        )
+    except CaseQuotaExceeded as exc:
+        return _json_response(
+            request,
+            {
+                "error": {
+                    "code": "analysis_quota_exceeded",
+                    "message": str(exc),
+                    "quota": {"scope": "analysis_per_case", "limit": 3},
+                }
+            },
+            status=429,
+        )
+    return _json_response(request, result, status=202)
 
 
 @require_http_methods(["GET", "OPTIONS"])
@@ -1127,6 +1312,20 @@ def _authorize_session_query(
         return authorize_resource_access({"type": resource_type, "session_id": session_id}, identity_payload)
     session_access["type"] = resource_type
     return authorize_resource_access(session_access, identity_payload)
+
+
+def _case_access_denied_response(
+    request: HttpRequest,
+    case_id: str,
+    identity_payload: dict[str, object],
+) -> JsonResponse | None:
+    access_metadata = get_case_access_metadata(case_id)
+    if access_metadata is None:
+        return None
+    access = authorize_resource_access(access_metadata, identity_payload)
+    if access["allowed"]:
+        return None
+    return _object_access_denied_response(request, access)
 
 
 def _rate_limit_response(request: HttpRequest, usage: dict[str, object]) -> JsonResponse:

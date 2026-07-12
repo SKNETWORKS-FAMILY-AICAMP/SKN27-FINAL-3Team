@@ -3636,11 +3636,12 @@ class ChatbotMockApiTests(TestCase):
         self.assertEqual(download_response["X-Report-Object-Key"], report.metadata["object_storage"]["key"])
         self.assertEqual(download_response["X-Report-Object-Policy"], "object_storage_adapter.v1")
         self.assertEqual(download_response["X-Report-Access-Decision"], "owner_match")
+        download_body = extract_pdf_text(download_response.content)
         self.assertIn(
             "Report metadata download for rep_canonical_smoke",
-            download_response.content.decode("utf-8"),
+            download_body,
         )
-        self.assertIn("object_storage_policy: object_storage_adapter.v1", download_response.content.decode("utf-8"))
+        self.assertIn("object_storage_policy: object_storage_adapter.v1", download_body)
 
         summary_response = self.client.get(f"/api/mypage/summary/?session_id={session_id}")
         self.assertEqual(summary_response.status_code, 200)

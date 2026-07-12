@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 import { createFrontendApi } from "./apiClient.js";
 import {
@@ -71,6 +73,9 @@ export default function FrontendAppShell({
   const [currentReport, setCurrentReport] = useState(null);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
+  const [activeCaseId, setActiveCaseId] = useState("");
+  const [caseWorkspace, setCaseWorkspace] = useState(null);
+  const [isCreatingCase, setIsCreatingCase] = useState(false);
 
   const effectiveAuthToken = authSessionId ? activeAuthToken || authToken : "";
   const identity = {
@@ -97,6 +102,7 @@ export default function FrontendAppShell({
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
+  const consultationState = analysisResponse?.consultation_state?.v2 || null;
   const caseType = detectCaseType({ analysisCards, analysisResponse, currentReport });
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
@@ -689,6 +695,19 @@ export default function FrontendAppShell({
   }
 
   async function openSavedCase(item) {
+    if (item?.case_id) {
+      setStatusMessage("사건 워크스페이스를 불러오고 있습니다.");
+      try {
+        const workspace = await api.getCaseWorkspace({ caseId: item.case_id, sessionId, identity });
+        setActiveCaseId(item.case_id);
+        setCaseWorkspace(workspace);
+        setActiveRoute("caseWorkspace");
+        setStatusMessage("사건 워크스페이스를 열었습니다.");
+        return;
+      } catch (_workspaceError) {
+        // Legacy mypage rows continue through the existing analysis-job restore path.
+      }
+    }
     const jobId = item?.job_id || item?.case_id || "";
     if (jobId) {
       setStatusMessage("저장된 상담과 리포트를 불러오고 있습니다.");
@@ -743,6 +762,92 @@ export default function FrontendAppShell({
     });
     setReportActionStatus("내 사건에서 저장된 리포트를 열었습니다.");
     setActiveRoute("reporting");
+  }
+
+  async function createPreciseAnalysisCase() {
+    if (!analysisResponse || !consultationState) {
+      setStatusMessage("먼저 사고 상황을 상담 메시지로 알려 주세요.");
+      return;
+    }
+    setIsCreatingCase(true);
+    setStatusMessage("현재 상담을 정밀분석 사건으로 전환하고 있습니다.");
+    try {
+      let requestIdentity = identity;
+      let activeSessionId = sessionId;
+      if (!authSessionId) {
+        const loginState = await loginAndBindCurrentSession({ source: "case_workspace_v2", nextRoute: "chatbot" });
+        requestIdentity = loginState.identity;
+        activeSessionId = loginState.sessionId;
+      }
+      const created = await api.createCase(
+        {
+          session_id: activeSessionId,
+          case_type: "fault_ratio",
+          title: submittedQuestion || "교통사고 과실 초기상담",
+          consultation_state: { v2: consultationState },
+          email_notification_enabled: false,
+        },
+        requestIdentity
+      );
+      const workspace = await api.getCaseWorkspace({
+        caseId: created.case_id,
+        sessionId: activeSessionId,
+        identity: requestIdentity,
+      });
+      setActiveCaseId(created.case_id);
+      setCaseWorkspace(workspace);
+      setActiveRoute("caseWorkspace");
+      setStatusMessage("사건을 만들었습니다. 사실 카드를 확인한 뒤 분석을 시작해 주세요.");
+    } catch (_error) {
+      setStatusMessage(`사건 전환에 실패했습니다. ${_error?.message || ""}`.trim());
+    } finally {
+      setIsCreatingCase(false);
+    }
+  }
+
+  async function refreshCaseWorkspace() {
+    if (!activeCaseId) return null;
+    const workspace = await api.getCaseWorkspace({ caseId: activeCaseId, sessionId, identity });
+    setCaseWorkspace(workspace);
+    return workspace;
+  }
+
+  async function confirmWorkspaceFacts(factCards) {
+    if (!activeCaseId) return;
+    const facts = Object.fromEntries(
+      (factCards || [])
+        .filter((item) => item?.field && item?.value)
+        .map((item) => [item.field, item.value])
+    );
+    await api.confirmCaseFacts(
+      {
+        caseId: activeCaseId,
+        facts,
+        sources: (factCards || []).filter((item) => item?.value).map((item) => ({
+          field: item.field,
+          source: item.source || item.classification,
+        })),
+        conflicts: (factCards || []).filter((item) => item?.classification === "conflict"),
+        user_edit_history: [],
+      },
+      identity
+    );
+    await refreshCaseWorkspace();
+    setStatusMessage("사실관계 버전을 확정했습니다.");
+  }
+
+  async function startWorkspaceAnalysis() {
+    if (!activeCaseId) return;
+    try {
+      await api.startCaseAnalysis(
+        { caseId: activeCaseId, idempotency_key: `${activeCaseId}-${Date.now()}` },
+        identity
+      );
+      await refreshCaseWorkspace();
+      setStatusMessage("정밀분석을 대기열에 등록했습니다.");
+    } catch (_error) {
+      setStatusMessage(`분석을 시작하지 못했습니다. ${_error?.message || ""}`.trim());
+    }
   }
 
   return (
@@ -814,6 +919,9 @@ export default function FrontendAppShell({
               authSessionId={authSessionId}
               chatMessages={chatMessages}
               currentReport={currentReport}
+              consultationState={consultationState}
+              isCreatingCase={isCreatingCase}
+              onCreateCase={createPreciseAnalysisCase}
               onOpenCaseResult={(route) => setActiveRoute(route)}
               isRegisteringAttachment={isRegisteringAttachment}
               isSubmitting={isSubmitting}
@@ -859,6 +967,17 @@ export default function FrontendAppShell({
               reportActionStatus={reportActionStatus}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
+            />
+          )}
+
+          {activeRoute === "caseWorkspace" && (
+            <CaseWorkspaceScreen
+              key={activeCaseId || "case-workspace"}
+              workspace={caseWorkspace}
+              onBack={() => setActiveRoute("chatbot")}
+              onConfirmFacts={confirmWorkspaceFacts}
+              onRefresh={refreshCaseWorkspace}
+              onStartAnalysis={startWorkspaceAnalysis}
             />
           )}
 
@@ -1292,8 +1411,11 @@ function ChatScreenV2({
   assistantAnswer,
   authSessionId,
   chatMessages,
+  consultationState,
   currentReport,
+  isCreatingCase,
   onOpenCaseResult,
+  onCreateCase,
   isRegisteringAttachment,
   isSavingConversation,
   isSubmitting,
@@ -1487,6 +1609,13 @@ function ChatScreenV2({
                                 ))}
                               </div>
                             )}
+                            {consultationState?.schema_version === "consultation_state.v2" && (
+                              <AdaptiveIntakePanel
+                                consultationState={consultationState}
+                                isCreatingCase={isCreatingCase}
+                                onCreateCase={onCreateCase}
+                              />
+                            )}
                             {(supervisorState || reportingPayload || analysisCards.length > 0) && (
                               <details
                                 className="reporting-disclosure"
@@ -1599,6 +1728,248 @@ function ChatScreenV2({
       </div>
     </section>
   );
+}
+
+function AdaptiveIntakePanel({ consultationState, isCreatingCase, onCreateCase }) {
+  const riskGate = consultationState?.risk_gate || {};
+  const readiness = consultationState?.readiness || {};
+  const factCards = Array.isArray(consultationState?.fact_cards) ? consultationState.fact_cards : [];
+  const nextQuestions = Array.isArray(consultationState?.next_questions) ? consultationState.next_questions : [];
+  const isHighRisk = riskGate.decision === "high_risk_handoff";
+
+  return (
+    <section className="adaptive-intake" aria-label="선택적 핵심 입력">
+      <div className="adaptive-intake__head">
+        <div>
+          <span className="eyebrow">선택적 핵심 입력</span>
+          <strong>{isHighRisk ? "고위험 사건 안내가 먼저 필요합니다" : "확인된 사실과 부족한 항목"}</strong>
+        </div>
+        <span className={isHighRisk ? "tag red" : readiness.fault_range_allowed ? "tag green" : "tag amber"}>
+          자료 충족도 {readiness.completed_count || 0}/{readiness.required_count || 4}
+        </span>
+      </div>
+      {riskGate.immediate_actions?.length > 0 && (
+        <ul className="adaptive-intake__actions">
+          {riskGate.immediate_actions.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      )}
+      <div className="fact-card-grid">
+        {factCards.slice(0, 6).map((item) => (
+          <article className={`fact-card is-${item.classification || "unconfirmed"}`} key={item.field}>
+            <span>{factClassificationLabel(item.classification)}</span>
+            <strong>{item.label}</strong>
+            <p>{item.value || "아직 확인되지 않았습니다."}</p>
+          </article>
+        ))}
+      </div>
+      {nextQuestions.length > 0 && !isHighRisk && (
+        <div className="adaptive-question-list">
+          <strong>다음으로 확인할 내용</strong>
+          {nextQuestions.map((item) => <p key={item.field}>{item.question}</p>)}
+        </div>
+      )}
+      {consultationState.intent === "fault_ratio" && (
+        <div className="adaptive-intake__footer">
+          <p>
+            {isHighRisk
+              ? "과실 범위 대신 증거 보존과 전문가 전달용 상담자료를 준비합니다."
+              : readiness.fault_range_allowed
+                ? "핵심 4요소가 확인되었습니다. 사실을 직접 확인한 뒤 정밀분석을 시작할 수 있습니다."
+                : "부족한 항목을 계속 대화로 보완할 수 있으며, 현재 상태로도 부분 상담을 저장할 수 있습니다."}
+          </p>
+          <button className="button primary" type="button" onClick={onCreateCase} disabled={isCreatingCase}>
+            {isCreatingCase ? "사건 만드는 중" : isHighRisk ? "전문가 상담자료 준비" : "정밀분석으로 전환"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CaseWorkspaceScreen({ workspace, onBack, onConfirmFacts, onRefresh, onStartAnalysis }) {
+  const initialCards = Array.isArray(workspace?.fact_cards) ? workspace.fact_cards : [];
+  const [factCards, setFactCards] = useState(initialCards);
+  const summary = workspace?.summary || {};
+  const caseInfo = workspace?.case || {};
+  const confirmedFacts = workspace?.confirmed_facts || null;
+  const readiness = summary.evidence_readiness || {};
+  const faultAssessment = workspace?.fault_assessment || {};
+  const externalEvidence = Array.isArray(workspace?.external_evidence) ? workspace.external_evidence : [];
+  const missingMaterials = Array.isArray(workspace?.missing_materials) ? workspace.missing_materials : [];
+  const reports = Array.isArray(workspace?.reports) ? workspace.reports : [];
+  const stages = ["자료 확인", "장면 분석", "사례·근거 확인", "요약서 준비"];
+
+  useEffect(() => {
+    setFactCards(initialCards);
+  }, [workspace?.case?.updated_at]);
+
+  if (!workspace) {
+    return (
+      <section className="screen case-workspace-screen">
+        <div className="empty-panel"><strong>사건 워크스페이스를 불러오는 중입니다.</strong></div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="screen case-workspace-screen">
+      <div className="screen-header">
+        <div className="screen-title">
+          <span className="eyebrow">AI 교통분쟁 초기상담</span>
+          <h2>{caseInfo.title || "사고 직후 과실 초기상담"}</h2>
+          <p>확인된 사실, 장면 근거, 과실 변동 요인과 웹 요약서를 한곳에서 관리합니다.</p>
+        </div>
+        <div className="screen-actions">
+          <button className="button" type="button" onClick={onBack}>상담으로 돌아가기</button>
+          <button className="button" type="button" onClick={onRefresh}>상태 새로고침</button>
+          <button className="button primary" type="button" onClick={onStartAnalysis} disabled={!confirmedFacts}>
+            정밀분석 시작
+          </button>
+        </div>
+      </div>
+
+      <div className="workspace-summary-grid">
+        <WorkspaceSummaryCard label="즉시 행동" value={`${summary.immediate_actions?.length || 0}건`} detail={summary.immediate_actions?.[0] || "안전과 증거 보존을 먼저 확인하세요."} />
+        <WorkspaceSummaryCard label="현재 판단" value={summary.current_assessment?.label || "분석 전"} detail={summary.current_assessment?.reason || "확정 과실 판단이 아닙니다."} />
+        <WorkspaceSummaryCard label="자료 충족도" value={`${readiness.completed_count || 0}/${readiness.required_count || 4}`} detail={readiness.fault_range_allowed ? "범위 분석 가능" : "핵심 사실 보완 필요"} />
+        <WorkspaceSummaryCard label="분석 상태" value={summary.analysis_status?.stage || "자료 확인"} detail={summary.analysis_status?.message || caseStatusLabel(caseInfo.status)} />
+      </div>
+
+      <div className="workspace-stage-bar" aria-label="분석 단계">
+        {stages.map((stage) => (
+          <span className={stage === summary.analysis_status?.stage ? "active" : ""} key={stage}>{stage}</span>
+        ))}
+      </div>
+
+      <div className="case-workspace-grid">
+        <article className="workspace-panel fact-confirmation-panel">
+          <div className="panel-head">
+            <div><span className="eyebrow">confirmed_facts.v1</span><strong>사실관계 확인</strong></div>
+            <span className={confirmedFacts ? "tag green" : "tag amber"}>{confirmedFacts ? `v${confirmedFacts.version_no} 확정` : "사용자 확인 필요"}</span>
+          </div>
+          <div className="fact-card-grid">
+            {factCards.map((item, index) => (
+              <label className={`fact-card editable is-${item.classification || "unconfirmed"}`} key={item.field || index}>
+                <span>{factClassificationLabel(item.classification)}</span>
+                <strong>{item.label || item.field}</strong>
+                <textarea
+                  value={item.value || ""}
+                  placeholder="확인한 사실을 입력해 주세요."
+                  onChange={(event) => setFactCards((cards) => cards.map((card, cardIndex) =>
+                    cardIndex === index ? { ...card, value: event.target.value, classification: "user_statement" } : card
+                  ))}
+                />
+              </label>
+            ))}
+          </div>
+          <button className="button primary" type="button" onClick={() => onConfirmFacts(factCards)}>
+            사실 카드 수정·확정
+          </button>
+        </article>
+
+        <article className="workspace-panel location-panel">
+          <div className="panel-head"><div><span className="eyebrow">Leaflet + VWorld</span><strong>사고 위치 확인</strong></div></div>
+          <VWorldMap location={caseInfo.location} />
+          <p>{caseInfo.location?.address || "주소 후보와 좌표를 확인한 뒤 저장하는 영역입니다."}</p>
+        </article>
+
+        <article className="workspace-panel annotated-frame-panel">
+          <div className="panel-head"><strong>주석 프레임</strong><span className="tag">최대 3개</span></div>
+          <div className="annotated-frame-grid">
+            {(workspace.annotated_frames || []).length > 0
+              ? workspace.annotated_frames.map((item) => <div key={item.artifact_id}><strong>{item.artifact_type}</strong><p>{item.source_timestamp_ms || 0}ms</p></div>)
+              : <div className="empty-panel"><strong>확정된 주석 프레임이 없습니다.</strong><p>자료가 있으면 Vision 분석 후 표시됩니다.</p></div>}
+          </div>
+        </article>
+
+        <article className="workspace-panel accident-diagram-panel">
+          <div className="panel-head"><strong>SVG 사고 도식</strong><span className="tag green">데이터 기반</span></div>
+          <div className="accident-svg" dangerouslySetInnerHTML={{ __html: workspace.accident_diagram?.svg || "" }} />
+          <p>생성형 사고 이미지가 아니라 확정 사실을 좌표와 화살표로 표현합니다.</p>
+        </article>
+
+        <article className="workspace-panel fault-assessment-panel">
+          <div className="panel-head"><strong>과실 범위·변동 요인</strong><span className="tag">fault_assessment.v2</span></div>
+          <strong className="workspace-big-value">
+            {faultAssessment.fault_range?.display || "수치 표시 전"}
+          </strong>
+          <p>{faultAssessment.unavailable_reason || "범위는 확정 판단이 아니며 자료와 근거에 따라 달라집니다."}</p>
+          <ul>{(faultAssessment.change_factors || []).map((item) => <li key={item}>{item}</li>)}</ul>
+        </article>
+
+        <article className="workspace-panel evidence-panel">
+          <div className="panel-head"><strong>외부 근거</strong><span className="tag">출처 필수</span></div>
+          {externalEvidence.length > 0 ? externalEvidence.map((item, index) => (
+            <div className="evidence-item" key={`${item.provider}-${index}`}>
+              <strong>{item.provider}</strong>
+              {item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer">원문 출처</a> : <span>출처 확인 필요</span>}
+              <p>{item.limitation}</p>
+            </div>
+          )) : <div className="empty-panel"><strong>아직 연결된 외부 근거가 없습니다.</strong><p>사례·근거 확인 단계에서 갱신됩니다.</p></div>}
+        </article>
+
+        <article className="workspace-panel missing-panel">
+          <div className="panel-head"><strong>부족 자료</strong><span className="tag amber">{missingMaterials.length}건</span></div>
+          {missingMaterials.length > 0
+            ? <ul>{missingMaterials.map((item) => <li key={item.field}>{item.label}</li>)}</ul>
+            : <p>핵심 4요소가 모두 확인되었습니다.</p>}
+        </article>
+
+        <article className="workspace-panel report-list-panel">
+          <div className="panel-head"><div><span className="eyebrow">웹 자동 생성 · PDF 요청 시 생성</span><strong>초기상담 요약서</strong></div></div>
+          {reports.length > 0 ? reports.map((report) => (
+            <div className="report-version-row" key={report.report_id}>
+              <div><strong>v{report.version_no} · {report.title}</strong><p>{report.content_summary}</p></div>
+              <span className="tag">{report.status}</span>
+            </div>
+          )) : <div className="empty-panel"><strong>분석 완료 후 웹 요약서가 자동 생성됩니다.</strong><p>PDF는 사용자가 요청할 때 같은 버전으로 생성합니다.</p></div>}
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function VWorldMap({ location = {} }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const lat = Number(location?.latitude || location?.lat);
+  const lng = Number(location?.longitude || location?.lng);
+  const apiKey = import.meta.env.VITE_VWORLD_API_KEY || "";
+
+  useEffect(() => {
+    if (!mapRef.current || !Number.isFinite(lat) || !Number.isFinite(lng) || !apiKey) return undefined;
+    if (mapInstanceRef.current) mapInstanceRef.current.remove();
+    const map = L.map(mapRef.current, { zoomControl: true }).setView([lat, lng], 17);
+    L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${apiKey}/Base/{z}/{y}/{x}.png`, {
+      attribution: "© VWorld",
+      maxZoom: 19,
+    }).addTo(map);
+    L.marker([lat, lng]).addTo(map).bindPopup("사용자가 확인한 사고 위치").openPopup();
+    mapInstanceRef.current = map;
+    return () => {
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+  }, [apiKey, lat, lng]);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !apiKey) {
+    return <div className="map-placeholder"><strong>지도 좌표 확인 대기</strong><p>VWorld 키와 사용자가 선택한 좌표가 준비되면 지도를 표시합니다.</p></div>;
+  }
+  return <div className="vworld-map" ref={mapRef} aria-label="사고 위치 지도" />;
+}
+
+function WorkspaceSummaryCard({ label, value, detail }) {
+  return <article><span>{label}</span><strong>{value}</strong><p>{detail}</p></article>;
+}
+
+function factClassificationLabel(value) {
+  return {
+    user_statement: "사용자 진술",
+    evidence_received: "자료에서 확인",
+    evidence_confirmed: "자료에서 확인",
+    unconfirmed: "미확인",
+    conflict: "상충 정보",
+  }[value] || "미확인";
 }
 
 function PersonaRunTimeline({ personaRun }) {
