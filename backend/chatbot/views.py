@@ -457,7 +457,10 @@ def attachments(request: HttpRequest) -> JsonResponse:
         usage = record_usage_event(identity_payload, scope="file_upload")
         if not usage["allowed"]:
             return _rate_limit_response(request, usage)
-        attachment = register_uploaded_file(identity_payload, upload_file=upload_file)
+        try:
+            attachment = register_uploaded_file(identity_payload, upload_file=upload_file)
+        except PermissionError:
+            return _persistence_access_denied_response(request)
         attachment["usage"] = usage
     else:
         attachment = register_mock_attachment(payload, upload_file=upload_file)
@@ -1119,7 +1122,12 @@ def report_action(request: HttpRequest) -> JsonResponse:
             }
             report["object_storage"] = None
         else:
-            report["persistence"] = persist_report_action(identity_body, report)
+            try:
+                report["persistence"] = persist_report_action(identity_body, report)
+            except PermissionError:
+                return _persistence_access_denied_response(request)
+            except ValueError as exc:
+                return _report_reference_conflict_response(request, str(exc))
             report["object_storage"] = report["persistence"].get("object_storage")
         report["usage"] = usage
     _record_history_safely(
@@ -1564,6 +1572,33 @@ def _object_access_denied_response(request: HttpRequest, access: dict[str, objec
             }
         },
         status=403,
+    )
+
+
+def _persistence_access_denied_response(request: HttpRequest) -> JsonResponse:
+    return _object_access_denied_response(
+        request,
+        {
+            "allowed": False,
+            "decision": "owner_mismatch",
+            "policy_version": "case_persistence.v1",
+        },
+    )
+
+
+def _report_reference_conflict_response(request: HttpRequest, message: str) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "consultation_report_error.v2",
+                "type": "report",
+                "code": "invalid_report_reference",
+                "status": 409,
+                "message": message,
+            }
+        },
+        status=409,
     )
 
 

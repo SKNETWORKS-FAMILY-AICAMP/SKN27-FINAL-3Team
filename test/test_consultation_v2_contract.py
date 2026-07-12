@@ -21,6 +21,7 @@ def test_case_domain_schema_contains_canonical_v2_entities_and_links() -> None:
         "deleted_at",
         "source_fact_version",
         "version_no",
+        "report_case_version_uniq",
     ):
         assert token in models
 
@@ -52,29 +53,13 @@ def test_frontend_uses_canonical_capability_and_async_result_contracts() -> None
     assert "/scan/" not in api_client
 
 
-def test_vision_pipeline_uses_redacted_frames_responses_api_and_strict_v2_schema() -> None:
-    vision = read_text(ROOT / "app" / "services" / "vision_pipeline_service.py")
-
-    for token in (
-        "vision_media_result.v2",
-        "gpt-5.6-terra",
-        "client.responses.create",
-        '"store": False',
-        '"strict": True',
-        '"detail": "high"',
-        '"detail": "original"',
-        "selected_redacted_frames",
-        "MAX_VIDEO_BYTES = 50 * 1024 * 1024",
-        "audio_removed",
-        "RT-DETRv2-S",
-        "YOLO26n",
-    ):
-        assert token in vision
+def test_deferred_vision_and_aws_ops_are_not_runtime_modules() -> None:
+    assert not (ROOT / "app" / "services" / "vision_pipeline_service.py").exists()
+    assert not (ROOT / "app" / "services" / "aws_ops_mcp_service.py").exists()
 
 
-def test_evidence_and_ops_mcp_boundaries_are_separate_and_source_aware() -> None:
+def test_evidence_mcp_boundary_is_source_aware() -> None:
     evidence = read_text(ROOT / "app" / "services" / "evidence_mcp_service.py")
-    ops = read_text(ROOT / "app" / "services" / "aws_ops_mcp_service.py")
 
     for token in (
         "traffic_context_mcp",
@@ -89,20 +74,7 @@ def test_evidence_and_ops_mcp_boundaries_are_separate_and_source_aware() -> None
     ):
         assert token in evidence
 
-    for token in (
-        "staging",
-        "approval_token",
-        "ecs_status",
-        "cloudwatch_errors",
-        "sqs_dlq_depth",
-        "restart_worker",
-        "replay_failed_work_item",
-        "production changes are not allowed",
-    ):
-        assert token in ops
-
     assert "aws_ops_mcp" not in evidence
-    assert "consultation" not in ops
 
 
 def test_design_doc_and_feature_flags_are_versioned() -> None:
@@ -116,10 +88,12 @@ def test_design_doc_and_feature_flags_are_versioned() -> None:
 
     for token in (
         "CASE_WORKSPACE_V2_ENABLED",
-        "VISION_PIPELINE_ENABLED",
         "EVIDENCE_MCP_ENABLED",
-        "SQS_WORKER_ENABLED",
-        "EMAIL_NOTIFICATION_ENABLED",
+        "RAW_MEDIA_RETENTION_DAYS",
+        "USER_RETENTION_DAYS",
     ):
         assert token in design
         assert token in env_example
+
+    assert "VISION_PIPELINE_ENABLED" not in env_example
+    assert "AWS_OPS_MCP_ENABLED" not in env_example

@@ -5,9 +5,20 @@ from pathlib import Path
 
 from django.apps import apps
 from django.test import Client, SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
 
 from app.services.google_auth_service import issue_access_token
-from chatbot.models import ChatSession, ChatSessionStatus, ReportType
+from chatbot.case_repository import CaseOwnerMismatch, create_case
+from chatbot.models import (
+    Case,
+    ChatSession,
+    ChatSessionStatus,
+    ConfirmedFactVersion,
+    Report,
+    ReportType,
+    UploadedFile,
+)
+from chatbot.repositories import persist_report_action, persist_uploaded_file_metadata
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -423,3 +434,240 @@ class ConsultationV2DesignContractTests(SimpleTestCase):
 
         migration = ROOT / "backend/chatbot/migrations/0009_consultation_case_v2.py"
         self.assertTrue(migration.exists())
+
+
+@override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)
+class ConsultationPersistenceSafetyTests(TestCase):
+    def setUp(self) -> None:
+        self.owner_id = "usr_case_owner"
+        self.case = Case.objects.create(
+            case_id="case_persistence_safety",
+            owner_id=self.owner_id,
+            title="Persistence safety",
+        )
+        self.session = ChatSession.objects.create(
+            session_id="ses_persistence_safety",
+            owner_id=self.owner_id,
+            case=self.case,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        self.fact_version = ConfirmedFactVersion.objects.create(
+            fact_version_id="fact_persistence_safety",
+            case=self.case,
+            version_no=1,
+            status="confirmed",
+            facts={"road_layout": "intersection"},
+            confirmed_by=self.owner_id,
+            confirmed_at=timezone.now(),
+        )
+
+    def _attachment(self, *, attachment_id: str, file_type: str, content_type: str) -> dict:
+        return {
+            "attachment_id": attachment_id,
+            "session_id": self.session.session_id,
+            "purpose": "supporting_evidence",
+            "type": file_type,
+            "original_filename": f"{attachment_id}.{file_type}",
+            "content_type": content_type,
+            "size_bytes": 128,
+            "storage_uri": f"mock://uploads/{attachment_id}",
+            "status": "uploaded",
+            "agent_handoff": {},
+        }
+
+    def test_case_repository_rejects_empty_owner_even_for_ownerless_session(self) -> None:
+        guest_session = ChatSession.objects.create(
+            session_id="ses_ownerless_case",
+            owner_id="",
+            status=ChatSessionStatus.ACTIVE,
+        )
+
+        with self.assertRaises(CaseOwnerMismatch):
+            create_case(owner_id="", payload={"session_id": guest_session.session_id})
+
+    def test_case_upload_rejects_missing_authenticated_owner(self) -> None:
+        with self.assertRaises(PermissionError):
+            persist_uploaded_file_metadata(
+                self._attachment(
+                    attachment_id="att_missing_owner",
+                    file_type="image",
+                    content_type="image/jpeg",
+                ),
+                owner_id="",
+                raw_payload={"case_id": self.case.case_id},
+            )
+
+    @override_settings(GUEST_RETENTION_DAYS=7, USER_RETENTION_DAYS=365)
+    def test_guest_document_is_relinked_and_extended_when_session_becomes_a_case(self) -> None:
+        guest_session = ChatSession.objects.create(
+            session_id="ses_guest_promotion",
+            owner_id="",
+            status=ChatSessionStatus.ACTIVE,
+        )
+        attachment = self._attachment(
+            attachment_id="att_guest_promotion",
+            file_type="pdf",
+            content_type="application/pdf",
+        )
+        attachment["session_id"] = guest_session.session_id
+        persist_uploaded_file_metadata(
+            attachment,
+            owner_id="",
+            raw_payload={"guest_id": "gst_promotion"},
+        )
+
+        created_case = create_case(
+            owner_id="usr_promoted",
+            payload={"session_id": guest_session.session_id},
+        )
+
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment["attachment_id"])
+        remaining_days = (uploaded_file.retention_expires_at - timezone.now()).days
+        expected_case_id = Case.objects.get(case_id=created_case["case_id"]).id
+        self.assertEqual(uploaded_file.case_id, expected_case_id)
+        self.assertIn(remaining_days, {364, 365})
+
+    @override_settings(RAW_MEDIA_RETENTION_DAYS=45, USER_RETENTION_DAYS=365)
+    def test_upload_retention_uses_media_and_authenticated_document_settings(self) -> None:
+        media = persist_uploaded_file_metadata(
+            self._attachment(
+                attachment_id="att_media_retention",
+                file_type="image",
+                content_type="image/jpeg",
+            ),
+            owner_id=self.owner_id,
+            raw_payload={"case_id": self.case.case_id},
+        )
+        document = persist_uploaded_file_metadata(
+            self._attachment(
+                attachment_id="att_document_retention",
+                file_type="pdf",
+                content_type="application/pdf",
+            ),
+            owner_id=self.owner_id,
+            raw_payload={"case_id": self.case.case_id},
+        )
+
+        media_record = UploadedFile.objects.get(attachment_id=media["attachment_id"])
+        document_record = UploadedFile.objects.get(attachment_id=document["attachment_id"])
+        media_days = (media_record.retention_expires_at - timezone.now()).days
+        document_days = (document_record.retention_expires_at - timezone.now()).days
+        self.assertIn(media_days, {44, 45})
+        self.assertIn(document_days, {364, 365})
+
+    def test_report_rejects_case_owner_mismatch_and_unknown_fact_version(self) -> None:
+        with self.assertRaises(PermissionError):
+            persist_report_action(
+                {
+                    "owner_id": "usr_other",
+                    "session_id": self.session.session_id,
+                    "case_id": self.case.case_id,
+                    "action": "save",
+                },
+                {"report_id": "rep_wrong_owner", "status": "ready"},
+            )
+
+        with self.assertRaises(ValueError):
+            persist_report_action(
+                {
+                    "owner_id": self.owner_id,
+                    "session_id": self.session.session_id,
+                    "case_id": self.case.case_id,
+                    "source_fact_version": "fact_unknown",
+                    "action": "save",
+                },
+                {"report_id": "rep_unknown_fact", "status": "ready"},
+            )
+
+    def test_report_version_is_server_managed_and_advances_case_atomically(self) -> None:
+        persist_report_action(
+            {
+                "owner_id": self.owner_id,
+                "session_id": self.session.session_id,
+                "case_id": self.case.case_id,
+                "source_fact_version": self.fact_version.fact_version_id,
+                "version_no": 99,
+                "action": "save",
+            },
+            {"report_id": "rep_server_version_1", "status": "ready"},
+        )
+        persist_report_action(
+            {
+                "owner_id": self.owner_id,
+                "session_id": self.session.session_id,
+                "case_id": self.case.case_id,
+                "source_fact_version": self.fact_version.fact_version_id,
+                "version_no": 99,
+                "action": "save",
+            },
+            {"report_id": "rep_server_version_2", "status": "ready"},
+        )
+
+        versions = list(
+            Report.objects.filter(case=self.case)
+            .order_by("version_no")
+            .values_list("version_no", flat=True)
+        )
+        self.case.refresh_from_db()
+        self.assertEqual(versions, [1, 2])
+        self.assertEqual(self.case.current_report_version, 2)
+
+    def test_file_api_returns_forbidden_for_another_users_case(self) -> None:
+        other_client = authenticated_client("usr_other")
+        other_client.raise_request_exception = False
+        other_session = ChatSession.objects.create(
+            session_id="ses_other_upload",
+            owner_id="usr_other",
+            status=ChatSessionStatus.ACTIVE,
+        )
+
+        response = other_client.post(
+            "/api/files/",
+            data={
+                "session_id": other_session.session_id,
+                "case_id": self.case.case_id,
+                "purpose": "supporting_evidence",
+                "filename": "other.pdf",
+                "content_type": "application/pdf",
+                "size_bytes": 128,
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+
+    def test_report_api_returns_forbidden_for_another_users_case(self) -> None:
+        other_client = authenticated_client("usr_other")
+        other_client.raise_request_exception = False
+
+        response = other_client.post(
+            "/api/reports/",
+            data={
+                "session_id": self.session.session_id,
+                "case_id": self.case.case_id,
+                "action": "save",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+
+    def test_report_api_returns_conflict_for_unknown_fact_version(self) -> None:
+        client = authenticated_client(self.owner_id)
+        client.raise_request_exception = False
+
+        response = client.post(
+            "/api/reports/",
+            data={
+                "session_id": self.session.session_id,
+                "case_id": self.case.case_id,
+                "source_fact_version": "fact_unknown",
+                "action": "save",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "invalid_report_reference")

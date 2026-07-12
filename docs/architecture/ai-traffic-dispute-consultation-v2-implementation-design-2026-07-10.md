@@ -149,6 +149,10 @@ Risk Gate
 - `NEO4J_EVIDENCE_ENABLED`
 - `SQS_WORKER_ENABLED`
 - `EMAIL_NOTIFICATION_ENABLED`
+- `ANONYMOUS_RETENTION_DAYS=1`
+- `GUEST_RETENTION_DAYS=7`
+- `USER_RETENTION_DAYS=365`
+- `RAW_MEDIA_RETENTION_DAYS=30`
 
 플래그는 목표를 축소하기 위한 장치가 아니라 실연동 전 거짓 성공을 막기 위한 release gate다.
 Vision과 Neo4j는 v2 제품의 필수 목표이며 staging 실연동과 대표 사건 검증 후 활성화한다.

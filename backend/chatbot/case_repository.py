@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -17,6 +16,7 @@ from chatbot.models import (
     ChatSession,
     ConfirmedFactVersion,
 )
+from chatbot.retention_policy import upload_retention_expires_at
 from chatbot.repositories import enqueue_analysis_job_work
 
 
@@ -53,6 +53,8 @@ class FactReadinessNotMet(CaseConflict):
 
 
 def create_case(*, owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not _text(owner_id):
+        raise CaseOwnerMismatch("authenticated owner_id is required")
     session_id = _text(payload.get("session_id"))
     if not session_id:
         raise CaseConflict("session_id is required")
@@ -94,10 +96,14 @@ def create_case(*, owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         session.save(update_fields=["owner_id", "case", "updated_at"])
         session.analysis_jobs.update(case=case)
         session.reports.update(case=case)
-        session.uploaded_files.filter(retention_expires_at__isnull=True).update(
-            case=case,
-            retention_expires_at=timezone.now() + timedelta(days=30),
-        )
+        for uploaded_file in session.uploaded_files.filter(deleted_at__isnull=True):
+            uploaded_file.case = case
+            uploaded_file.retention_expires_at = upload_retention_expires_at(
+                owner_id=owner_id,
+                file_type=uploaded_file.file_type,
+                content_type=uploaded_file.content_type,
+            )
+            uploaded_file.save(update_fields=["case", "retention_expires_at", "updated_at"])
     return case_to_api(case)
 
 
