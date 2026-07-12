@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.services.consultation_v2_service import build_consultation_state_v2
 from app.services.supervisor_llm_service import build_supervisor_state_with_optional_llm
 
 
@@ -20,8 +21,23 @@ NODE_PLANS: dict[str, tuple[str, ...]] = {
 }
 
 ROUTING_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("fine_notice_objection", ("과태료", "고지서", "의견제출", "이의신청")),
-    ("fault_ratio_text", ("과실", "사고", "충돌", "접촉", "교차로")),
+    ("fine_notice_objection", ("과태료", "고지서", "범칙금", "의견제출", "이의신청")),
+    (
+        "fault_ratio_text",
+        (
+            "과실",
+            "사고",
+            "충돌",
+            "접촉",
+            "교차로",
+            "보행자",
+            "구급차",
+            "다쳐",
+            "accident",
+            "collision",
+            "fault",
+        ),
+    ),
     ("traffic_law_search", ("법령", "조문", "도로교통법", "근거")),
 )
 
@@ -46,6 +62,45 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
         return _needs_input_response(session_id=session_id, message_id=message_id)
 
     routing_intent = _routing_intent(user_text, attachments)
+    if routing_intent == "fault_ratio_text":
+        consultation_state = build_consultation_state_v2(
+            user_text=user_text,
+            facts=dict(payload.get("facts") or {}) if isinstance(payload.get("facts"), dict) else {},
+            sources=[
+                dict(item)
+                for item in payload.get("fact_sources") or []
+                if isinstance(item, dict)
+            ],
+            conflicts=[
+                dict(item)
+                for item in payload.get("fact_conflicts") or []
+                if isinstance(item, dict)
+            ],
+        )
+        if consultation_state["risk_gate"]["level"] == "high_risk":
+            return _consultation_hold_response(
+                session_id=session_id,
+                message_id=message_id,
+                routing_intent=routing_intent,
+                consultation_state=consultation_state,
+                status="high_risk_handoff",
+            )
+        if not consultation_state["readiness"]["ready_for_fault_range"]:
+            return _consultation_hold_response(
+                session_id=session_id,
+                message_id=message_id,
+                routing_intent=routing_intent,
+                consultation_state=consultation_state,
+                status="needs_input",
+            )
+        return _consultation_hold_response(
+            session_id=session_id,
+            message_id=message_id,
+            routing_intent=routing_intent,
+            consultation_state=consultation_state,
+            status="case_ready",
+        )
+
     supervisor_state = build_supervisor_state_with_optional_llm(
         payload={**payload, "user_text": user_text, "attachments": attachments},
         scenario=routing_intent,
@@ -58,7 +113,7 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
         supervisor_state=supervisor_state,
     )
 
-    return {
+    response = {
         "contract_version": "chat_message_accepted.v2",
         "message_id": message_id,
         "session_id": session_id,
@@ -83,6 +138,7 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
         "analysis_plan": analysis_plan,
         "limitations": [],
     }
+    return response
 
 
 def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
@@ -152,11 +208,57 @@ def _needs_input_response(*, session_id: str, message_id: str) -> dict[str, Any]
     }
 
 
+def _consultation_hold_response(
+    *,
+    session_id: str,
+    message_id: str,
+    routing_intent: str,
+    consultation_state: dict[str, Any],
+    status: str,
+) -> dict[str, Any]:
+    high_risk = status == "high_risk_handoff"
+    pending_questions = list(consultation_state.get("next_questions") or [])
+    if high_risk:
+        answer = "인명 피해가 우려되는 사건입니다. 긴급 조치와 증거 보존을 우선하고 전문가 이관 자료를 준비합니다."
+    elif status == "case_ready":
+        answer = "핵심 사실이 준비되었습니다. 로그인 후 사건으로 저장하고 사실을 확정해 주세요."
+    else:
+        answer = pending_questions[0]["question"] if pending_questions else "사실관계를 추가로 확인해 주세요."
+    return {
+        "contract_version": "chat_message_accepted.v2",
+        "message_id": message_id,
+        "session_id": session_id,
+        "routing_intent": routing_intent,
+        "status": status,
+        "created_at": _now_iso(),
+        "assistant_message": {"answer": answer, "summary": answer},
+        "progress": {"status": status, "active_node": "risk_gate", "message": answer},
+        "pending_questions": pending_questions,
+        "cards": list(consultation_state.get("fact_cards") or []),
+        "report_links": [],
+        "attachments": [],
+        "blocked_attachments": [],
+        "supervisor_state": {},
+        "reporting_payload": None,
+        "consultation_state": {"v2": consultation_state},
+        "analysis_plan": {
+            "contract_version": "analysis_plan.v2",
+            "plan_id": f"plan_{uuid4().hex[:12]}",
+            "session_id": session_id,
+            "message_id": message_id,
+            "routing_intent": routing_intent,
+            "steps": [],
+        },
+        "limitations": list(consultation_state.get("limitations") or []),
+    }
+
+
 def _routing_intent(user_text: str, attachments: list[dict[str, Any]]) -> str:
     if any(item.get("purpose") == "fine_notice" for item in attachments):
         return "fine_notice_objection"
+    normalized_text = user_text.lower()
     for intent, keywords in ROUTING_KEYWORDS:
-        if any(keyword in user_text for keyword in keywords):
+        if any(keyword.lower() in normalized_text for keyword in keywords):
             return intent
     return "traffic_law_search"
 

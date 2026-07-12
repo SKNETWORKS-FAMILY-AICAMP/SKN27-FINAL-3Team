@@ -75,14 +75,20 @@ class ProductionApiContractTests(SimpleTestCase):
     def test_report_type_has_one_canonical_value_per_product_report(self) -> None:
         self.assertEqual(
             set(ReportType.values),
-            {"fine_notice_objection", "fault_ratio_analysis", "general"},
+            {
+                "fine_notice_objection",
+                "fault_ratio_analysis",
+                "general",
+                "initial_consultation",
+                "expert_handoff",
+            },
         )
 
     @patch("chatbot.views._record_history_safely")
     @patch("chatbot.views.enqueue_analysis_job_work")
     @patch("chatbot.views.record_usage_event")
     @patch("chatbot.views._canonical_guest_identity_policy_response")
-    def test_chat_message_queues_real_plan_and_returns_202(
+    def test_non_case_chat_message_queues_real_plan_and_returns_202(
         self,
         guest_policy,
         usage,
@@ -100,7 +106,7 @@ class ProductionApiContractTests(SimpleTestCase):
             "/api/chat/messages/",
             data={
                 "session_id": "ses_1",
-                "user_text": "교차로 충돌 사고 과실비율이 궁금합니다.",
+                "user_text": "도로교통법 신호위반 조문과 근거가 궁금합니다.",
             },
             content_type="application/json",
         )
@@ -116,7 +122,7 @@ class ProductionApiContractTests(SimpleTestCase):
         queued_payload = enqueue.call_args.args[1]
         self.assertEqual(
             [step["node_code"] for step in queued_payload["analysis_plan"]["steps"]],
-            ["text_ml_case_search", "law_ground_search"],
+            ["law_ground_search"],
         )
 
     @patch("chatbot.views.get_analysis_job_record")

@@ -33,16 +33,16 @@ def test_fine_notice_message_queues_only_supported_real_agents() -> None:
     assert "mock" not in str(response).lower()
 
 
-def test_fault_ratio_message_does_not_enable_unsupported_media_analysis() -> None:
+def test_fault_ratio_message_requires_case_and_does_not_enable_unsupported_media_analysis() -> None:
     response = submit_message(
         {"session_id": "ses_1", "user_text": "교차로에서 충돌했는데 과실비율이 궁금합니다."}
     )
 
     assert response["routing_intent"] == "fault_ratio_text"
-    assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
-        "text_ml_case_search",
-        "law_ground_search",
-    ]
+    assert response["status"] == "needs_input"
+    assert response["analysis_plan"]["steps"] == []
+    assert response["consultation_state"]["v2"]["schema_version"] == "consultation_state.v2"
+    assert "vision_media_analysis" not in str(response)
 
 
 def test_agent_response_is_composed_from_execution_results() -> None:

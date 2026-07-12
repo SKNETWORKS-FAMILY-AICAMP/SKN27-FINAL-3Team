@@ -21,6 +21,22 @@ urlpatterns = [
     path("chat/sessions/", views.create_chat_session, name="canonical-create-chat-session"),
     path("chat/messages/", views.submit_chat_message, name="canonical-submit-chat-message"),
     path("chat/save-state/", views.update_chat_save_state, name="canonical-chat-save-state"),
+    path("cases/", views.consultation_cases, name="canonical-consultation-cases"),
+    path(
+        "cases/<str:case_id>/workspace/",
+        views.consultation_case_workspace,
+        name="canonical-consultation-case-workspace",
+    ),
+    path(
+        "cases/<str:case_id>/facts/confirm/",
+        views.consultation_case_fact_confirmation,
+        name="canonical-consultation-case-fact-confirmation",
+    ),
+    path(
+        "cases/<str:case_id>/analysis/jobs/",
+        views.consultation_case_analysis_jobs,
+        name="canonical-consultation-case-analysis-jobs",
+    ),
     path("files/", views.attachments, name="canonical-files"),
     path("files/<str:attachment_id>/", views.attachment_detail, name="canonical-file-detail"),
     path("analysis/jobs/", views.analysis_jobs, name="canonical-analysis-jobs"),
