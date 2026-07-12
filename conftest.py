@@ -8,6 +8,7 @@ import pytest
 collect_ignore = [
     "backend/chatbot/test_consultation_v2.py",
     "backend/chatbot/test_production_hardening.py",
+    "backend/chatbot/test_report_version_migration.py",
 ]
 
 

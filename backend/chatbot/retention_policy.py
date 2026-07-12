@@ -1,4 +1,8 @@
-"""Configurable retention rules shared by Case and file persistence."""
+"""Configurable retention deadlines shared by Case and file persistence.
+
+This module only calculates ``retention_expires_at``. Physical DB and S3 purge
+is deliberately deferred to the next retention-enforcement PR.
+"""
 
 from __future__ import annotations
 

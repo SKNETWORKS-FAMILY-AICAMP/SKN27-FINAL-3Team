@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from importlib import import_module, util
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.apps import apps
 from django.test import Client, SimpleTestCase, TestCase, override_settings
@@ -10,6 +12,7 @@ from django.utils import timezone
 from app.services.google_auth_service import issue_access_token
 from chatbot.case_repository import CaseOwnerMismatch, create_case
 from chatbot.models import (
+    AnalysisJob,
     Case,
     ChatSession,
     ChatSessionStatus,
@@ -18,7 +21,11 @@ from chatbot.models import (
     ReportType,
     UploadedFile,
 )
-from chatbot.repositories import persist_report_action, persist_uploaded_file_metadata
+from chatbot.repositories import (
+    list_uploaded_files,
+    persist_report_action,
+    persist_uploaded_file_metadata,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -439,6 +446,13 @@ class ConsultationV2DesignContractTests(SimpleTestCase):
 @override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)
 class ConsultationPersistenceSafetyTests(TestCase):
     def setUp(self) -> None:
+        self.object_storage_dir = TemporaryDirectory()
+        self.addCleanup(self.object_storage_dir.cleanup)
+        storage_settings = override_settings(
+            OBJECT_STORAGE_LOCAL_ROOT=self.object_storage_dir.name,
+        )
+        storage_settings.enable()
+        self.addCleanup(storage_settings.disable)
         self.owner_id = "usr_case_owner"
         self.case = Case.objects.create(
             case_id="case_persistence_safety",
@@ -485,6 +499,21 @@ class ConsultationPersistenceSafetyTests(TestCase):
         with self.assertRaises(CaseOwnerMismatch):
             create_case(owner_id="", payload={"session_id": guest_session.session_id})
 
+    def test_guest_case_promotion_requires_matching_guest_identity(self) -> None:
+        guest_session = ChatSession.objects.create(
+            session_id="ses_guest_identity_guard",
+            owner_id="",
+            status=ChatSessionStatus.ACTIVE,
+            metadata={"auth_context": {"guest_id": "gst_original"}},
+        )
+
+        with self.assertRaises(CaseOwnerMismatch):
+            create_case(
+                owner_id="usr_attacker",
+                guest_id="gst_other",
+                payload={"session_id": guest_session.session_id},
+            )
+
     def test_case_upload_rejects_missing_authenticated_owner(self) -> None:
         with self.assertRaises(PermissionError):
             persist_uploaded_file_metadata(
@@ -503,6 +532,7 @@ class ConsultationPersistenceSafetyTests(TestCase):
             session_id="ses_guest_promotion",
             owner_id="",
             status=ChatSessionStatus.ACTIVE,
+            metadata={"auth_context": {"guest_id": "gst_promotion"}},
         )
         attachment = self._attachment(
             attachment_id="att_guest_promotion",
@@ -518,6 +548,7 @@ class ConsultationPersistenceSafetyTests(TestCase):
 
         created_case = create_case(
             owner_id="usr_promoted",
+            guest_id="gst_promotion",
             payload={"session_id": guest_session.session_id},
         )
 
@@ -525,7 +556,126 @@ class ConsultationPersistenceSafetyTests(TestCase):
         remaining_days = (uploaded_file.retention_expires_at - timezone.now()).days
         expected_case_id = Case.objects.get(case_id=created_case["case_id"]).id
         self.assertEqual(uploaded_file.case_id, expected_case_id)
+        self.assertEqual(uploaded_file.owner_id, "usr_promoted")
         self.assertIn(remaining_days, {364, 365})
+        self.assertEqual(
+            [item["attachment_id"] for item in list_uploaded_files(owner_id="usr_promoted")],
+            [attachment["attachment_id"]],
+        )
+
+    def test_guest_case_promotion_transfers_job_and_report_ownership(self) -> None:
+        guest_session = ChatSession.objects.create(
+            session_id="ses_guest_related_records",
+            owner_id="",
+            status=ChatSessionStatus.ACTIVE,
+            metadata={"auth_context": {"guest_id": "gst_related_records"}},
+        )
+        job = AnalysisJob.objects.create(
+            job_id="job_guest_related_records",
+            session=guest_session,
+            owner_id="",
+        )
+        report = Report.objects.create(
+            report_id="rep_guest_related_records",
+            session=guest_session,
+            owner_id="",
+            version_no=1,
+        )
+
+        created_case = create_case(
+            owner_id="usr_promoted_records",
+            guest_id="gst_related_records",
+            payload={"session_id": guest_session.session_id},
+        )
+
+        expected_case = Case.objects.get(case_id=created_case["case_id"])
+        job.refresh_from_db()
+        report.refresh_from_db()
+        self.assertEqual((job.owner_id, job.case_id), ("usr_promoted_records", expected_case.id))
+        self.assertEqual(
+            (report.owner_id, report.case_id, report.version_no),
+            ("usr_promoted_records", expected_case.id, 1),
+        )
+        self.assertEqual(expected_case.current_report_version, 1)
+
+    def test_attachment_id_collision_is_rejected_before_object_write(self) -> None:
+        other_session = ChatSession.objects.create(
+            session_id="ses_existing_attachment_owner",
+            owner_id="usr_existing_attachment_owner",
+            status=ChatSessionStatus.ACTIVE,
+        )
+        existing = UploadedFile.objects.create(
+            attachment_id="att_owner_collision",
+            owner_id="usr_existing_attachment_owner",
+            session=other_session,
+            original_filename="existing.pdf",
+        )
+
+        with patch(
+            "chatbot.repositories.write_object_from_source_uri",
+            return_value={
+                "status": "written",
+                "writes_binary": True,
+                "persistence_state": "persisted",
+            },
+        ) as storage_write:
+            with self.assertRaises(PermissionError):
+                persist_uploaded_file_metadata(
+                    self._attachment(
+                        attachment_id=existing.attachment_id,
+                        file_type="pdf",
+                        content_type="application/pdf",
+                    ),
+                    owner_id=self.owner_id,
+                    raw_payload={"case_id": self.case.case_id},
+                )
+
+        storage_write.assert_not_called()
+        existing.refresh_from_db()
+        self.assertEqual(existing.owner_id, "usr_existing_attachment_owner")
+
+    def test_file_api_ignores_client_supplied_attachment_id(self) -> None:
+        client = authenticated_client(self.owner_id)
+        server_attachment = self._attachment(
+            attachment_id="att_server_generated",
+            file_type="pdf",
+            content_type="application/pdf",
+        )
+        with (
+            patch(
+                "chatbot.repositories.register_mock_attachment",
+                return_value=server_attachment,
+            ) as register_attachment,
+            patch(
+                "chatbot.repositories.write_object_from_source_uri",
+                return_value={
+                    "status": "written",
+                    "writes_binary": True,
+                    "persistence_state": "persisted",
+                },
+            ),
+        ):
+            response = client.post(
+                "/api/files/",
+                data={
+                    "attachment_id": "att_client_controlled",
+                    "session_id": self.session.session_id,
+                    "case_id": self.case.case_id,
+                    "purpose": "supporting_evidence",
+                    "filename": "evidence.pdf",
+                    "content_type": "application/pdf",
+                    "size_bytes": 128,
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        registration_payload = register_attachment.call_args.args[0]
+        self.assertNotIn("attachment_id", registration_payload)
+        self.assertNotEqual(
+            response.json()["attachment"]["attachment_id"],
+            "att_client_controlled",
+        )
 
     @override_settings(RAW_MEDIA_RETENTION_DAYS=45, USER_RETENTION_DAYS=365)
     def test_upload_retention_uses_media_and_authenticated_document_settings(self) -> None:
@@ -578,6 +728,257 @@ class ConsultationPersistenceSafetyTests(TestCase):
                 },
                 {"report_id": "rep_unknown_fact", "status": "ready"},
             )
+
+    def test_report_rejects_cross_case_job_provenance_before_object_write(self) -> None:
+        other_case = Case.objects.create(
+            case_id="case_same_owner_other_context",
+            owner_id=self.owner_id,
+        )
+        ChatSession.objects.create(
+            session_id="ses_same_owner_other_context",
+            owner_id=self.owner_id,
+            case=other_case,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        job = AnalysisJob.objects.create(
+            job_id="job_original_case_context",
+            session=self.session,
+            case=self.case,
+            owner_id=self.owner_id,
+        )
+        other_fact = ConfirmedFactVersion.objects.create(
+            fact_version_id="fact_same_owner_other_context",
+            case=other_case,
+            version_no=1,
+            status="confirmed",
+            facts={"road_layout": "other"},
+        )
+
+        with patch(
+            "chatbot.repositories.write_object",
+            return_value={
+                "status": "written",
+                "writes_binary": True,
+                "persistence_state": "persisted",
+            },
+        ) as storage_write:
+            with self.assertRaises(ValueError):
+                persist_report_action(
+                    {
+                        "owner_id": self.owner_id,
+                        "job_id": job.job_id,
+                        "case_id": other_case.case_id,
+                        "source_fact_version": other_fact.fact_version_id,
+                        "action": "save",
+                    },
+                    {"report_id": "rep_cross_case_provenance", "status": "ready"},
+                )
+
+        storage_write.assert_not_called()
+
+    def test_report_id_is_idempotent_only_for_the_same_request(self) -> None:
+        storage_result = {
+            "status": "written",
+            "writes_binary": True,
+            "persistence_state": "persisted",
+        }
+        base_payload = {
+            "owner_id": self.owner_id,
+            "session_id": self.session.session_id,
+            "case_id": self.case.case_id,
+            "source_fact_version": self.fact_version.fact_version_id,
+            "reporting_payload": {"summary": "same"},
+            "action": "save",
+        }
+        report_payload = {"report_id": "rep_idempotent_request", "status": "ready"}
+
+        with (
+            patch("chatbot.repositories.write_object", return_value=storage_result) as storage_write,
+            patch(
+                "chatbot.repositories.copy_object",
+                return_value={
+                    "status": "copied",
+                    "writes_binary": True,
+                    "persistence_state": "persisted",
+                },
+            ),
+            patch(
+                "chatbot.repositories.delete_object",
+                return_value={"status": "deleted"},
+            ),
+        ):
+            first = persist_report_action(dict(base_payload), dict(report_payload))
+            second = persist_report_action(dict(base_payload), dict(report_payload))
+            with self.assertRaises(ValueError):
+                persist_report_action(
+                    {**base_payload, "reporting_payload": {"summary": "changed"}},
+                    dict(report_payload),
+                )
+
+        self.assertEqual(first["report_id"], second["report_id"])
+        self.assertEqual(storage_write.call_count, 1)
+        self.assertEqual(Report.objects.get(report_id=first["report_id"]).version_no, 1)
+
+    def test_report_storage_is_staged_only_after_database_reservation(self) -> None:
+        def assert_reserved_before_write(reference, *_args, **_kwargs):
+            self.assertTrue(Report.objects.filter(report_id="rep_staged_write").exists())
+            self.assertIn("/staging/", f"/{reference['key']}")
+            return {
+                "status": "written",
+                "writes_binary": True,
+                "persistence_state": "persisted",
+            }
+
+        with (
+            patch("chatbot.repositories.write_object", side_effect=assert_reserved_before_write),
+            patch(
+                "chatbot.repositories.copy_object",
+                create=True,
+                return_value={
+                    "status": "copied",
+                    "writes_binary": True,
+                    "persistence_state": "persisted",
+                },
+            ) as promote_object,
+            patch("chatbot.repositories.delete_object", create=True, return_value={"status": "deleted"}) as cleanup,
+        ):
+            persist_report_action(
+                {
+                    "owner_id": self.owner_id,
+                    "session_id": self.session.session_id,
+                    "case_id": self.case.case_id,
+                    "source_fact_version": self.fact_version.fact_version_id,
+                    "action": "save",
+                },
+                {"report_id": "rep_staged_write", "status": "ready"},
+            )
+
+        promote_object.assert_called_once()
+        cleanup.assert_called_once()
+
+    def test_idempotent_report_retry_resumes_failed_storage_finalization(self) -> None:
+        failed_write = {
+            "status": "skipped",
+            "writes_binary": False,
+            "persistence_state": "metadata_only_adapter",
+        }
+        successful_write = {
+            "status": "written",
+            "writes_binary": True,
+            "persistence_state": "binary_adapter",
+        }
+        promoted = {
+            "status": "copied",
+            "writes_binary": True,
+            "persistence_state": "binary_adapter",
+        }
+        payload = {
+            "owner_id": self.owner_id,
+            "session_id": self.session.session_id,
+            "case_id": self.case.case_id,
+            "source_fact_version": self.fact_version.fact_version_id,
+            "action": "save",
+        }
+        report_payload = {"report_id": "rep_retry_storage", "status": "ready"}
+
+        with (
+            patch(
+                "chatbot.repositories.write_object",
+                side_effect=[failed_write, successful_write],
+            ) as storage_write,
+            patch("chatbot.repositories.copy_object", return_value=promoted) as promote_object,
+            patch("chatbot.repositories.delete_object", return_value={"status": "deleted"}),
+        ):
+            persist_report_action(dict(payload), dict(report_payload))
+            persist_report_action(dict(payload), dict(report_payload))
+
+        report = Report.objects.get(report_id=report_payload["report_id"])
+        self.assertEqual(storage_write.call_count, 2)
+        promote_object.assert_called_once()
+        self.assertEqual(report.metadata["persistence_state"], "finalized")
+
+    def test_report_storage_exception_marks_reservation_failed_and_cleans_staging(self) -> None:
+        with (
+            patch("chatbot.repositories.write_object", side_effect=OSError("storage down")),
+            patch("chatbot.repositories.delete_object", return_value={"status": "not_found"}) as cleanup,
+        ):
+            with self.assertRaises(OSError):
+                persist_report_action(
+                    {
+                        "owner_id": self.owner_id,
+                        "session_id": self.session.session_id,
+                        "case_id": self.case.case_id,
+                        "source_fact_version": self.fact_version.fact_version_id,
+                        "action": "save",
+                    },
+                    {"report_id": "rep_storage_exception", "status": "ready"},
+                )
+
+        cleanup.assert_called_once()
+        report = Report.objects.get(report_id="rep_storage_exception")
+        self.assertEqual(report.metadata["persistence_state"], "storage_failed")
+        self.assertEqual(report.metadata["object_storage_status"], "failed")
+
+    def test_report_promotion_exception_cleans_staging_and_marks_failure(self) -> None:
+        with (
+            patch(
+                "chatbot.repositories.write_object",
+                return_value={
+                    "status": "written",
+                    "writes_binary": True,
+                    "persistence_state": "binary_adapter",
+                },
+            ),
+            patch("chatbot.repositories.copy_object", side_effect=OSError("copy down")),
+            patch("chatbot.repositories.delete_object", return_value={"status": "deleted"}) as cleanup,
+        ):
+            with self.assertRaises(OSError):
+                persist_report_action(
+                    {
+                        "owner_id": self.owner_id,
+                        "session_id": self.session.session_id,
+                        "case_id": self.case.case_id,
+                        "source_fact_version": self.fact_version.fact_version_id,
+                        "action": "save",
+                    },
+                    {"report_id": "rep_promotion_exception", "status": "ready"},
+                )
+
+        cleanup.assert_called_once()
+        report = Report.objects.get(report_id="rep_promotion_exception")
+        self.assertEqual(report.metadata["persistence_state"], "storage_failed")
+        self.assertEqual(report.metadata["object_storage_status"], "failed")
+
+    def test_foreign_report_id_is_rejected_before_object_write(self) -> None:
+        other_case = Case.objects.create(case_id="case_foreign_report", owner_id="usr_other")
+        Report.objects.create(
+            report_id="rep_foreign_existing",
+            owner_id="usr_other",
+            case=other_case,
+            version_no=1,
+        )
+
+        with patch(
+            "chatbot.repositories.write_object",
+            return_value={
+                "status": "written",
+                "writes_binary": True,
+                "persistence_state": "persisted",
+            },
+        ) as storage_write:
+            with self.assertRaises(PermissionError):
+                persist_report_action(
+                    {
+                        "owner_id": self.owner_id,
+                        "session_id": self.session.session_id,
+                        "case_id": self.case.case_id,
+                        "source_fact_version": self.fact_version.fact_version_id,
+                        "action": "save",
+                    },
+                    {"report_id": "rep_foreign_existing", "status": "ready"},
+                )
+
+        storage_write.assert_not_called()
 
     def test_report_version_is_server_managed_and_advances_case_atomically(self) -> None:
         persist_report_action(
@@ -658,16 +1059,32 @@ class ConsultationPersistenceSafetyTests(TestCase):
         client = authenticated_client(self.owner_id)
         client.raise_request_exception = False
 
-        response = client.post(
-            "/api/reports/",
-            data={
-                "session_id": self.session.session_id,
-                "case_id": self.case.case_id,
-                "source_fact_version": "fact_unknown",
-                "action": "save",
-            },
-            content_type="application/json",
-        )
+        with self.assertLogs("chatbot.views", level="WARNING") as captured_logs:
+            response = client.post(
+                "/api/reports/",
+                data={
+                    "session_id": self.session.session_id,
+                    "case_id": self.case.case_id,
+                    "source_fact_version": "fact_unknown",
+                    "action": "save",
+                },
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["error"]["code"], "invalid_report_reference")
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "invalid_report_reference")
+        self.assertEqual(error["reason"], "fact_version_not_found")
+        self.assertEqual(error["message"], "리포트의 사건·분석·확정 사실 연결을 확인해 주세요.")
+        self.assertNotIn("fact_unknown", error["message"])
+        self.assertIn("fact_unknown", "\n".join(captured_logs.output))
+
+    def test_object_access_denied_message_is_readable_korean(self) -> None:
+        other_client = authenticated_client("usr_other")
+        response = other_client.get(f"/api/cases/{self.case.case_id}/workspace/")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["error"]["message"],
+            "요청한 데이터에 접근할 권한이 없습니다.",
+        )

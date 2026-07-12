@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from django.db import DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
@@ -77,6 +79,7 @@ from chatbot.request_parsing import (
 )
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
+    ReportReferenceError,
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
@@ -111,6 +114,9 @@ from chatbot.repositories import (
 )
 from chatbot.models import GuestIdentity, GuestIdentityStatus, UploadedFile
 from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
+
+
+logger = logging.getLogger(__name__)
 
 
 @require_http_methods(["GET", "OPTIONS"])
@@ -855,7 +861,11 @@ def consultation_cases(request: HttpRequest) -> JsonResponse:
     if validation_response is not None:
         return validation_response
     try:
-        case = create_case(owner_id=owner_id, payload=validated)
+        case = create_case(
+            owner_id=owner_id,
+            guest_id=str(subject.get("guest_id") or ""),
+            payload=validated,
+        )
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
     return _json_response(
@@ -1126,8 +1136,13 @@ def report_action(request: HttpRequest) -> JsonResponse:
                 report["persistence"] = persist_report_action(identity_body, report)
             except PermissionError:
                 return _persistence_access_denied_response(request)
-            except ValueError as exc:
-                return _report_reference_conflict_response(request, str(exc))
+            except ReportReferenceError as exc:
+                logger.warning(
+                    "Rejected report reference: reason=%s detail=%s",
+                    exc.reason,
+                    str(exc),
+                )
+                return _report_reference_conflict_response(request, exc.reason)
             report["object_storage"] = report["persistence"].get("object_storage")
         report["usage"] = usage
     _record_history_safely(
@@ -1566,7 +1581,7 @@ def _object_access_denied_response(request: HttpRequest, access: dict[str, objec
                 "type": "object_access",
                 "code": "object_access_denied",
                 "status": 403,
-                "message": "???? ???? ??? ??? ? ????.",
+                "message": "요청한 데이터에 접근할 권한이 없습니다.",
                 "required_action": "login_or_owner_match",
                 "access": access,
             }
@@ -1586,7 +1601,7 @@ def _persistence_access_denied_response(request: HttpRequest) -> JsonResponse:
     )
 
 
-def _report_reference_conflict_response(request: HttpRequest, message: str) -> JsonResponse:
+def _report_reference_conflict_response(request: HttpRequest, reason: str) -> JsonResponse:
     return _json_response(
         request,
         {
@@ -1595,7 +1610,8 @@ def _report_reference_conflict_response(request: HttpRequest, message: str) -> J
                 "type": "report",
                 "code": "invalid_report_reference",
                 "status": 409,
-                "message": message,
+                "message": "리포트의 사건·분석·확정 사실 연결을 확인해 주세요.",
+                "reason": reason,
             }
         },
         status=409,

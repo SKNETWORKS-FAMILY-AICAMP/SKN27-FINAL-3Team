@@ -36,7 +36,10 @@ AI 교통분쟁 사건 워크스페이스를 지향한다.
 - `ConfirmedFactVersion`: 사용자가 확정한 사실, 출처, 상충정보, 수정 이력을 불변 버전으로 보관한다.
 - `MediaArtifact`: 선별 프레임, 마스킹 결과, 객체탐지 결과를 원본 자료와 분리한다.
 - `Report`: `initial_consultation`, `expert_handoff`, 기존 제품 리포트를 버전별로 보관한다.
-- 원본과 추출 프레임은 기본 30일 보관 후 삭제하고 구조화 사실과 요약서는 Case 삭제 전까지 보관한다.
+- 원본 이미지·영상은 인증 여부와 관계없이 30일, anonymous 문서는 1일, guest 문서는 7일,
+  인증 사용자 문서·구조화 사실·리포트는 365일 보관한다. 사용자 명시 삭제는 이 기한보다 우선한다.
+- 이번 저장 안전성 PR은 `retention_expires_at` 계산까지만 담당한다. DB·S3 실제 삭제 worker와
+  staging 삭제 smoke는 `docs/ops/retention-enforcement-follow-up.md`에 정의한 다음 PR에서 구현한다.
 
 Case 상태는 다음 값으로 고정한다.
 
