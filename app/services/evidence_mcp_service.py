@@ -108,4 +108,3 @@ def _unavailable_result(reason: str, *, retrieved_at: str | None) -> dict[str, A
         "limitations": [reason],
         "retrieved_at": timestamp,
     }
-

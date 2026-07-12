@@ -1,171 +1,172 @@
-# AI 교통분쟁 상담 v2 구현 설계
+# AI 교통분쟁 초기상담 v2 구현 설계
 
-- 기준일: 2026-07-10
-- 갱신일: 2026-07-12
-- 상태: 계약 및 비활성 기본 구현
-- 상위 로드맵: GitHub #178
-- 관련 이슈: #170, #171, #172, #173, #174, #175, #176
+## 1. 제품 정체성
 
-## 1. 목표
+이 서비스의 대표 경험은 사고 직후 사용자가 사진·블랙박스·진술을 바탕으로 사실을 정리하고,
+근거가 있는 과실 범위와 다음 행동을 얻는 것이다. 단순 법률 챗봇이나 고지서 OCR이 아니라
+`상담 → 증거 해석 → 사실 확정 → 근거 분석 → 사건 워크스페이스 → 실행 결과물`을 잇는
+AI 교통분쟁 사건 워크스페이스를 지향한다.
 
-상담 v2는 사용자의 문장에 고정 답변을 붙이는 기능이 아니다. 사건 단위로
-입력, 파일, 확인된 사실, Vision 관찰 결과, 법령·판례·외부 근거, 분석 작업과
-리포트를 연결하는 운영 계약이다.
+고지서 이의신청은 계속 지원하지만 대표 제품 경험은 사고 초기상담이다. 고위험 사건은
+긴급 안내, 증거 보존, 전문가 이관 자료까지만 제공하며 과실 범위를 산출하지 않는다.
 
-핵심 처리 순서는 다음과 같다.
+## 2. 사용자 흐름
 
-1. 사용자 입력과 첨부 파일을 Case에 연결한다.
-2. 파일을 quarantine 영역에 저장하고 악성 파일 검사를 수행한다.
-3. 개인정보가 제거된 프레임만 Vision 경계에 전달한다.
-4. 사용자 진술과 OCR/Vision 관찰 결과를 사실 카드로 분리한다.
-5. 외부 근거는 출처와 조회 시각을 보존한 `external_evidence.v1`로 변환한다.
-6. 핵심 사실이 충분할 때만 잠정 과실 범위를 표시한다.
-7. Agent 결과와 한계를 리포트에 함께 저장한다.
+```text
+게스트 자유상담
+→ Risk Gate
+→ 적응형 문진
+→ 로그인 및 Case 생성
+→ 위치 확인과 자료 업로드
+→ Vision·도로정보 추출
+→ 사실 카드 사용자 수정·확정
+→ OpenSearch + pgvector + Neo4j 근거 분석
+→ 과실 범위와 변동 요인
+→ 사건 워크스페이스
+→ 웹 요약서
+→ 요청 시 PDF와 완료 알림
+```
 
-## 2. 점진적 활성화 원칙
+일반 교통질문은 Case를 만들지 않고 출처가 있는 짧은 답변으로 끝낸다. 사고상담은
+도로 형태, 양 차량 행동, 신호·우선권, 충돌 위치가 모두 확인되기 전에는 수치를 숨긴다.
 
-다음 feature flag는 모두 기본값이 `0`이다.
+## 3. 핵심 도메인
 
-| 환경변수 | 책임 | 활성화 조건 |
-|---|---|---|
-| `CASE_WORKSPACE_V2_ENABLED` | Case workspace API와 UI | migration·소유권·회귀 테스트 통과 |
-| `VISION_PIPELINE_ENABLED` | 비식별 프레임 Vision 분석 | scan·redaction·strict schema 검증 통과 |
-| `EVIDENCE_MCP_ENABLED` | 교통·경찰·법령 외부 근거 | source metadata·partial 계약 검증 통과 |
-| `SQS_WORKER_ENABLED` | 비동기 Agent worker | retry·stale recovery·graceful shutdown 검증 |
-| `EMAIL_NOTIFICATION_ENABLED` | 완료 알림 | 수신 동의·재시도·중복 방지 검증 |
+- `Case`: 상담, 자료, 분석, 리포트를 묶는 사건 aggregate다.
+- `ConfirmedFactVersion`: 사용자가 확정한 사실, 출처, 상충정보, 수정 이력을 불변 버전으로 보관한다.
+- `MediaArtifact`: 선별 프레임, 마스킹 결과, 객체탐지 결과를 원본 자료와 분리한다.
+- `Report`: `initial_consultation`, `expert_handoff`, 기존 제품 리포트를 버전별로 보관한다.
+- 원본과 추출 프레임은 기본 30일 보관 후 삭제하고 구조화 사실과 요약서는 Case 삭제 전까지 보관한다.
 
-flag가 꺼졌거나 의존 서비스가 없으면 mock 성공을 반환하지 않는다. 기능별로
-`partial`, `dependency_unavailable` 또는 명시적인 disabled 상태를 반환한다.
+Case 상태는 다음 값으로 고정한다.
 
-## 3. Vision v2 경계
+```text
+intake
+awaiting_fact_confirmation
+queued
+analyzing
+needs_input
+ready
+high_risk_handoff
+closed
+deleted
+```
 
-### 3.1 입력 정책
+## 4. 공개 계약
 
-- 원본 이미지·영상 경로를 OpenAI 요청에 직접 전달하지 않는다.
-- ClamAV 또는 지정된 scan provider가 clean으로 판정한 파일만 처리한다.
-- 얼굴·차량번호 등 식별 정보가 제거된 `selected_redacted_frames`만 전달한다.
-- 영상은 최대 50MiB로 제한하고 분석 전에 오디오를 제거한다.
-- 공간 위치 판단이 중요한 프레임은 `original`, 일반 프레임은 `high` detail을
-  사용한다.
+### consultation_state.v2
 
-### 3.2 모델 호출
+자유입력 직후 intent, risk gate, 사실 카드, 핵심 4요소 충족도, 다음 질문을 제공한다.
 
-- 기본 모델은 `VISION_PIPELINE_MODEL=gpt-5.6-terra`이며 환경변수로 교체한다.
-- OpenAI Responses API를 사용한다.
-- `store=False`로 요청 저장을 비활성화한다.
-- `text.format`의 strict JSON Schema로 `vision_media_result.v2`를 요구한다.
-- detector 정책 이름은 `RT-DETRv2-S`, `YOLO26n`으로 기록하되, 모델 설치나
-  GPU 가용성을 성공으로 가정하지 않는다.
+### confirmed_facts.v1
 
-### 3.3 출력 정책
+확정 사실, 각 사실의 출처, 상충 항목, 사용자 수정 이력과 확정자를 제공한다. 모든 분석은
+명시적인 fact version을 입력으로 사용한다.
 
-`vision_media_result.v2`는 다음 항목을 포함한다.
+### vision_media_result.v2
 
-- 관찰 요약
-- 시간 순서 사건
-- 객체 탐지 결과
-- 후속 사실 카드로 변환할 evidence
-- 한계와 불확실성
-- redaction, audio removal, 선택 프레임 수
+event window, key frame, detection box, 장면 후보, 품질 문제, 비식별화 결과를 제공한다.
 
-Vision 결과는 법률 판단이나 확정 과실비율이 아니다. 사용자가 확인하기 전에는
-`confirmed_fact`로 승격하지 않는다.
+### external_evidence.v1
 
-## 4. 외부 근거 MCP 경계
+provider, source URL 또는 내부 source reference, 데이터 기준일, 조회시각, 제한사항을 제공한다.
 
-상담 근거와 운영 명령은 서로 다른 서비스로 분리한다.
+### fault_assessment.v2
 
-### 4.1 Evidence MCP
+과실 범위, 변동 요인, 유사사례·법령, 자료 충족도, 분석 한계를 제공한다.
 
-`evidence_mcp_service.py`는 다음 provider 결과만 취합한다.
+### consultation_report.v2
 
-- `traffic_context_mcp`
-- `police_context_mcp`
-- `court_law_mcp`
+웹과 PDF가 공유하는 섹션, 주석 프레임, SVG 사고 도식, 근거와 한계를 제공한다.
 
-모든 evidence에는 다음 필드가 필요하다.
+## 5. Vision 파이프라인
 
-- `source_type`
-- `source_url` 또는 내부 `source_ref`
-- `retrieved_at`
-- `data_revision`
-- `limitation`
+Vision은 부가기능이 아니라 증거를 구조화 사실로 바꾸는 핵심 계층이다.
 
-TAAS와 대법원 provider는 접근 방식과 자격증명이 검증될 때까지 disabled로
-표시한다. 일부 provider만 성공하면 `partial`, 근거가 하나도 없으면
-`dependency_unavailable`을 반환한다.
+1. S3 quarantine 객체의 ClamAV clean 판정을 확인한다.
+2. FFmpeg/OpenCV로 event window와 후보 프레임을 추출한다.
+3. 얼굴·번호판 등 식별자를 마스킹한다.
+4. RunPod 객체탐지로 차량·보행자·신호·표지판 후보를 추출한다.
+5. OpenAI Responses API를 `store:false`와 strict schema로 호출해 장면을 요약한다.
+6. 객체탐지·장면요약·품질정보를 `vision_media_result.v2`로 병합한다.
+7. 사용자가 사실 카드를 수정·확정하기 전에는 과실분석을 시작하지 않는다.
 
-### 4.2 AWS Ops MCP
+원본 영상 전체를 외부 provider에 전달하지 않는다. 비식별화된 선별 프레임만 제한시간이 짧은
+signed URL 또는 직접 이미지 입력으로 전달한다.
 
-`aws_ops_mcp_service.py`는 애플리케이션 근거 검색에 사용하지 않는다. 허용된
-조회 명령은 ECS 상태, CloudWatch 오류, SQS DLQ 깊이로 제한한다. worker 재시작과
-실패 work item 재처리는 staging에서만 허용하고 별도의 approval token을 요구한다.
-production 변경은 token 유무와 관계없이 차단한다.
+## 6. 검색과 Neo4j
 
-## 5. 과실 범위 안전 게이트
+세 검색 계층은 대체 관계가 아니라 역할 분리 관계다.
 
-다음 네 요소가 모두 사용자 확인 또는 검증된 근거로 채워져야 잠정 범위를
-표시할 수 있다.
+- OpenSearch: 법조문·사례의 정확한 용어와 BM25/Nori 검색
+- pgvector: 사용자 표현과 의미가 가까운 법령·사례 검색
+- Neo4j: 행위, 도로상황, 의무, 위반 가능성, 과실 요인, 법령·사례 관계 확장
 
-1. 도로 형태
-2. 양 차량 행동
-3. 신호 또는 우선권
-4. 최초 충돌 위치
+Supervisor는 세 결과를 하나의 `external_evidence.v1` 목록으로 정규화한다. Neo4j가 unavailable이면
+성공으로 위장하지 않고 `partial`과 누락된 관계 추론 범위를 반환한다. v2 staging 활성화 조건에는
+Neo4j 적재, 관계 질의, source reference 검증이 포함된다.
 
-하나라도 없으면 범위를 표시하지 않고 보완 질문을 반환한다. 사망·중상·도주·
-음주 또는 무면허 의심 등 고위험 표지가 있으면 자동 산출을 중지하고 전문가
-연계와 증거 보존 절차를 우선한다.
+초기 graph schema는 다음 관계를 포함한다.
 
-## 6. 데이터와 보안
+```text
+(RoadContext)-[:IMPLIES_DUTY]->(Duty)
+(VehicleAction)-[:MAY_VIOLATE]->(Duty)
+(Duty)-[:GROUNDED_IN]->(LawProvision)
+(FaultFactor)-[:SUPPORTED_BY]->(Precedent)
+(Precedent)-[:APPLIES_WHEN]->(RoadContext)
+```
 
-- access token은 브라우저 메모리, refresh token은 HttpOnly Secure cookie로
-  분리한다.
-- Case, file, report, notification 조회는 소유자 검사를 통과해야 한다.
-- 원본 media와 redacted derivative를 서로 다른 object key로 관리한다.
-- API key, approval token, OAuth token, 개인정보를 로그에 기록하지 않는다.
-- 익명·guest·회원 보관 기간은 환경 설정과 cleanup job으로 적용한다.
+## 7. Agent 실행 순서
 
-## 7. Worker와 알림
+```text
+Risk Gate
+→ Input Validation
+→ Vision / Road Context
+→ Fact Confirmation
+→ OpenSearch / pgvector / Neo4j Evidence
+→ Fault Assessment
+→ Result Validation
+→ Report Composer
+```
 
-SQS worker는 idempotency key로 중복 실행을 방지한다. 실패는 retry 가능 여부와
-원인을 기록하며 stale work recovery와 graceful shutdown을 지원해야 한다.
-이메일 알림은 사용자 동의가 있는 경우에만 발송하고 같은 job 완료를 중복
-발송하지 않는다.
+모든 Agent 결과는 `status`, `structured_result.schema_version`, `evidence`, `limitations`를 가진다.
+외부 의존성 장애는 `dependency_unavailable` 또는 `partial`로 반환한다.
 
-## 8. 테스트와 활성화 게이트
+## 8. API
 
-### Offline
+- `POST /api/cases/`: 인증 후 상담 session을 Case로 승격
+- `GET /api/cases/`: 소유자의 Case 목록
+- `GET /api/cases/{case_id}/workspace/`: 사건 집계
+- `POST /api/cases/{case_id}/facts/confirm/`: 사실 버전 확정
+- `POST /api/cases/{case_id}/analysis/jobs/`: 확정 fact version으로 worker queue 등록
+- 기존 chat, file, analysis result, report API는 유지하고 Case 식별자를 additive하게 연결
 
-- Case schema와 공개 route 계약
-- redacted frame 강제 및 50MiB 제한
-- Responses API request 구조와 strict schema
-- MCP source metadata와 partial/dependency unavailable 처리
-- production Ops 변경 차단
-- 과실 범위 네 요소와 고위험 차단
+## 9. 기능 플래그와 활성화 원칙
 
-### Integration
+- `CASE_WORKSPACE_V2_ENABLED`
+- `VISION_PIPELINE_ENABLED`
+- `EVIDENCE_MCP_ENABLED`
+- `NEO4J_EVIDENCE_ENABLED`
+- `SQS_WORKER_ENABLED`
+- `EMAIL_NOTIFICATION_ENABLED`
 
-- PostgreSQL/pgvector, Redis, ClamAV, OpenSearch/Nori
-- quarantine→scan→redaction→Vision job→evidence→report
-- worker retry와 stale recovery
+플래그는 목표를 축소하기 위한 장치가 아니라 실연동 전 거짓 성공을 막기 위한 release gate다.
+Vision과 Neo4j는 v2 제품의 필수 목표이며 staging 실연동과 대표 사건 검증 후 활성화한다.
 
-### Staging
+## 10. 구현 순서
 
-- Google authorization code 1회 교환
-- S3 binary write/presign과 EICAR 차단
-- OpenAI Responses API Vision 결과
-- MCP 실제 provider와 source metadata
-- ECS/CloudWatch/SQS 조회 및 승인된 worker 복구
+1. Case, confirmed facts, 상담 상태와 canonical API
+2. Vision, 비식별화, RunPod/OpenAI provider
+3. OpenSearch + pgvector + Neo4j 통합 evidence
+4. 사건 워크스페이스, consultation_report.v2, PDF, 알림
+5. AWS staging, 대표 사건셋, 보안·성능·복구 검증
 
-실제 자격증명과 staging runtime 검증이 끝나기 전에는 운영 완료로 표시하지
-않는다.
+## 11. 완료 기준
 
-## 9. 현재 제한
-
-- Vision 서비스는 비활성 기본이며 실제 frame extraction/redaction worker 연결이
-  남아 있다.
-- Evidence MCP는 source-aware aggregation 계약이며 실제 provider adapter가 남아
-  있다.
-- AWS Ops MCP는 allowlist와 승인 경계만 제공하며 실제 boto3 adapter가 남아 있다.
-- Neo4j 사건 그래프와 통합 RAG mapper는 #171, #172에서 구현한다.
-
+- 사용자 확정 전 과실 범위를 표시하지 않는다.
+- 고위험 사건에서 과실 범위를 산출하지 않는다.
+- 표시된 법령·사례는 100% source reference를 가진다.
+- Vision 원본은 clean 판정과 비식별화 전 Agent에 전달되지 않는다.
+- Neo4j 장애는 관계 근거가 없는 정상 성공으로 기록되지 않는다.
+- 다른 사용자의 Case, fact version, 파일, 분석, 리포트 접근을 차단한다.
+- 실제 Vision·Neo4j 자격증명 smoke와 대표 사건 E2E 전에는 v2를 운영 완료로 표시하지 않는다.

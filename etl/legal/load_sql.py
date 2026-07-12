@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import argparse
 from pathlib import Path
 from etl.common.utils import load_env_file, read_jsonl_iter as read_jsonl
 
@@ -207,5 +208,22 @@ def infer_vector_dimensions(embeddings_file: Path) -> int:
     raise ValueError(f"No embedding vectors found in {embeddings_file}")
 
 
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--chunks-path", default=str(DEFAULT_CHUNKS_PATH))
+    parser.add_argument("--embeddings-path", default=str(DEFAULT_EMBEDDINGS_PATH))
+    parser.add_argument("--env-file", default=".env")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--no-replace", action="store_true", help="Upsert without clearing existing law_chunks first.")
+    args = parser.parse_args(argv)
+    return load_to_postgres(
+        chunks_path=args.chunks_path,
+        embeddings_path=args.embeddings_path,
+        env_file=args.env_file,
+        batch_size=args.batch_size,
+        replace=not args.no_replace,
+    )
+
+
 if __name__ == "__main__":
-    sys.exit(load_to_postgres())
+    sys.exit(main())

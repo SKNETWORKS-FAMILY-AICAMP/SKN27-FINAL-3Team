@@ -96,4 +96,3 @@ def _result(
         "reason": reason,
         "data": data or {},
     }
-

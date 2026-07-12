@@ -89,8 +89,7 @@ def _config_status(options: dict) -> dict:
     missing = [key for key, value in required.items() if not str(value or "").strip()]
     placeholders = [key for key, value in required.items() if _looks_placeholder(value)]
     return {
-        "ready": not missing and not placeholders and not bool(getattr(settings, "GOOGLE_AUTH_ALLOW_MOCK", True)),
-        "mock_allowed": bool(getattr(settings, "GOOGLE_AUTH_ALLOW_MOCK", True)),
+        "ready": not missing and not placeholders,
         "missing": missing,
         "placeholders": placeholders,
         "redirect_uri": redirect_uri,

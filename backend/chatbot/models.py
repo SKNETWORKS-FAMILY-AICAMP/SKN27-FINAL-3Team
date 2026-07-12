@@ -1,9 +1,4 @@
-"""Persistence models for production storage integration.
-
-These models are intentionally not wired into the mock services yet. They define
-the durable storage boundary that will replace local sidecar JSON files in later
-branches.
-"""
+"""Persistence models for the canonical API and consultation Case v2."""
 
 from __future__ import annotations
 
@@ -63,8 +58,8 @@ class ReportStatus(models.TextChoices):
 
 
 class ReportType(models.TextChoices):
-    OBJECTION_DRAFT = "objection_draft", "Objection draft"
-    FAULT_ANALYSIS = "fault_analysis", "Fault analysis"
+    FINE_NOTICE_OBJECTION = "fine_notice_objection", "Fine notice objection"
+    FAULT_RATIO_ANALYSIS = "fault_ratio_analysis", "Fault ratio analysis"
     GENERAL = "general", "General"
     INITIAL_CONSULTATION = "initial_consultation", "Initial consultation"
     EXPERT_HANDOFF = "expert_handoff", "Expert handoff"
@@ -130,7 +125,7 @@ class Case(TimestampedModel):
     case_id = models.CharField(max_length=64, unique=True, db_index=True)
     owner_id = models.CharField(max_length=128, db_index=True)
     title = models.CharField(max_length=200, blank=True)
-    case_type = models.CharField(max_length=64, default="fault_ratio", db_index=True)
+    case_type = models.CharField(max_length=64, default="accident_fault", db_index=True)
     status = models.CharField(
         max_length=40,
         choices=CaseStatus.choices,
@@ -186,13 +181,6 @@ class ConfirmedFactVersion(TimestampedModel):
 class ChatSession(TimestampedModel):
     session_id = models.CharField(max_length=64, unique=True, db_index=True)
     owner_id = models.CharField(max_length=128, blank=True, db_index=True)
-    case = models.ForeignKey(
-        Case,
-        related_name="chat_sessions",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-    )
     title = models.CharField(max_length=200, blank=True)
     status = models.CharField(
         max_length=32,
@@ -200,6 +188,13 @@ class ChatSession(TimestampedModel):
         default=ChatSessionStatus.DRAFT,
     )
     current_intent = models.CharField(max_length=64, blank=True)
+    case = models.ForeignKey(
+        Case,
+        related_name="chat_sessions",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -246,15 +241,15 @@ class ChatMessage(models.Model):
 class UploadedFile(TimestampedModel):
     attachment_id = models.CharField(max_length=64, unique=True, db_index=True)
     owner_id = models.CharField(max_length=128, blank=True, db_index=True)
-    case = models.ForeignKey(
-        Case,
+    session = models.ForeignKey(
+        ChatSession,
         related_name="uploaded_files",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
     )
-    session = models.ForeignKey(
-        ChatSession,
+    case = models.ForeignKey(
+        Case,
         related_name="uploaded_files",
         null=True,
         blank=True,
@@ -298,6 +293,7 @@ class UploadedFile(TimestampedModel):
 
 class AnalysisJob(TimestampedModel):
     job_id = models.CharField(max_length=64, unique=True, db_index=True)
+    session = models.ForeignKey(ChatSession, related_name="analysis_jobs", on_delete=models.CASCADE)
     case = models.ForeignKey(
         Case,
         related_name="analysis_jobs",
@@ -305,7 +301,6 @@ class AnalysisJob(TimestampedModel):
         blank=True,
         on_delete=models.SET_NULL,
     )
-    session = models.ForeignKey(ChatSession, related_name="analysis_jobs", on_delete=models.CASCADE)
     message = models.ForeignKey(
         ChatMessage,
         related_name="analysis_jobs",
@@ -344,43 +339,6 @@ class AnalysisJob(TimestampedModel):
 
     def __str__(self) -> str:
         return self.job_id
-
-
-class MediaArtifact(TimestampedModel):
-    artifact_id = models.CharField(max_length=64, unique=True, db_index=True)
-    case = models.ForeignKey(Case, related_name="media_artifacts", on_delete=models.CASCADE)
-    uploaded_file = models.ForeignKey(
-        UploadedFile,
-        related_name="media_artifacts",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-    )
-    job = models.ForeignKey(
-        AnalysisJob,
-        related_name="media_artifacts",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-    )
-    artifact_type = models.CharField(max_length=64, db_index=True)
-    storage_uri = models.CharField(max_length=512, blank=True)
-    source_timestamp_ms = models.PositiveBigIntegerField(null=True, blank=True)
-    checksum = models.CharField(max_length=128, blank=True)
-    metadata = models.JSONField(default=dict, blank=True)
-    retention_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
-    deleted_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        db_table = "media_artifacts"
-        ordering = ["created_at"]
-        indexes = [
-            models.Index(fields=["case", "artifact_type"], name="media_case_type_idx"),
-            models.Index(fields=["retention_expires_at", "deleted_at"], name="media_retention_idx"),
-        ]
-
-    def __str__(self) -> str:
-        return self.artifact_id
 
 
 class AnalysisJobEvent(models.Model):
@@ -472,13 +430,6 @@ class AnalysisDisplayResult(TimestampedModel):
 class Report(TimestampedModel):
     report_id = models.CharField(max_length=64, unique=True, db_index=True)
     owner_id = models.CharField(max_length=128, blank=True, db_index=True)
-    case = models.ForeignKey(
-        Case,
-        related_name="reports",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-    )
     session = models.ForeignKey(
         ChatSession,
         related_name="reports",
@@ -493,8 +444,8 @@ class Report(TimestampedModel):
         blank=True,
         on_delete=models.SET_NULL,
     )
-    display_result = models.ForeignKey(
-        AnalysisDisplayResult,
+    case = models.ForeignKey(
+        Case,
         related_name="reports",
         null=True,
         blank=True,
@@ -507,12 +458,19 @@ class Report(TimestampedModel):
         blank=True,
         on_delete=models.SET_NULL,
     )
-    version_no = models.PositiveIntegerField(default=1)
+    display_result = models.ForeignKey(
+        AnalysisDisplayResult,
+        related_name="reports",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     report_type = models.CharField(
         max_length=64,
         choices=ReportType.choices,
-        default=ReportType.OBJECTION_DRAFT,
+        default=ReportType.FINE_NOTICE_OBJECTION,
     )
+    version_no = models.PositiveIntegerField(default=1)
     status = models.CharField(
         max_length=32,
         choices=ReportStatus.choices,
@@ -541,52 +499,6 @@ class Report(TimestampedModel):
 
     def __str__(self) -> str:
         return self.report_id
-
-
-class CaseNotificationPreference(TimestampedModel):
-    case = models.OneToOneField(
-        Case,
-        related_name="notification_preference",
-        on_delete=models.CASCADE,
-    )
-    email_enabled = models.BooleanField(default=False)
-    email_address = models.EmailField(blank=True)
-    consented_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        db_table = "case_notification_preferences"
-
-    def __str__(self) -> str:
-        return f"{self.case.case_id}:email={self.email_enabled}"
-
-
-class NotificationDelivery(TimestampedModel):
-    delivery_id = models.CharField(max_length=64, unique=True, db_index=True)
-    case = models.ForeignKey(Case, related_name="notification_deliveries", on_delete=models.CASCADE)
-    report = models.ForeignKey(
-        Report,
-        related_name="notification_deliveries",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-    )
-    channel = models.CharField(max_length=32, default="email")
-    status = models.CharField(max_length=32, default="queued", db_index=True)
-    recipient_masked = models.CharField(max_length=255, blank=True)
-    provider_message_id = models.CharField(max_length=255, blank=True)
-    error_code = models.CharField(max_length=128, blank=True)
-    sent_at = models.DateTimeField(null=True, blank=True)
-    metadata = models.JSONField(default=dict, blank=True)
-
-    class Meta:
-        db_table = "notification_deliveries"
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["case", "status"], name="notify_case_status_idx"),
-        ]
-
-    def __str__(self) -> str:
-        return self.delivery_id
 
 
 class UserAccount(TimestampedModel):

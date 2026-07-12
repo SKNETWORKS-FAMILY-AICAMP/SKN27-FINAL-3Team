@@ -1,4 +1,4 @@
-"""Django views that expose the mid-demo mock chatbot service."""
+﻿"""Django views that expose the mid-demo mock chatbot service."""
 
 from __future__ import annotations
 
@@ -7,7 +7,13 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from pydantic import BaseModel, ValidationError
 
+from app.contracts.consultation_case import (
+    ConfirmCaseFactsRequest,
+    CreateConsultationCaseRequest,
+    StartCaseAnalysisRequest,
+)
 from app.services.agent_node_service import (
     execute_mock_node,
     execute_mock_plan,
@@ -15,8 +21,6 @@ from app.services.agent_node_service import (
 )
 from app.services.analysis_job_mock_service import (
     create_analysis_job,
-    get_analysis_job,
-    get_analysis_result,
     list_analysis_jobs,
 )
 from app.services.attachment_mock_service import (
@@ -29,19 +33,19 @@ from app.services.auth_session_mock_service import (
     get_current_auth_subject as _get_current_auth_subject,
 )
 from app.services.auth_error_contract import build_www_authenticate_header
+from app.services.capability_catalog import capability_catalog_payload
+from app.services.chat_orchestration_service import (
+    compose_agent_response,
+    create_session,
+    submit_message,
+)
 from app.services.google_auth_service import (
     create_google_code_login as _create_google_code_login,
     create_google_login as _create_google_login,
     create_logout as _create_logout,
     create_token_refresh as _create_token_refresh,
 )
-from app.services.chatbot_mock_service import (
-    create_session,
-    list_demo_personas,
-    list_demo_scenarios,
-    perform_report_action,
-    submit_message,
-)
+from app.services.chatbot_mock_service import perform_report_action
 from app.services.history_event_mock_service import (
     HISTORY_EVENT_VERSION,
     actor_from_payload,
@@ -56,26 +60,22 @@ from chatbot.api_response import (
     is_canonical_mock_request as _is_canonical_mock_request,
     json_response as _json_response,
 )
-from chatbot.file_scan_service import apply_attachment_scan_gate, scan_uploaded_file
 from chatbot.case_repository import (
-    CaseConflict,
-    CaseQuotaExceeded,
-    confirm_case_facts as _confirm_case_facts,
-    create_case as _create_case,
+    CaseRepositoryError,
+    confirm_case_facts,
+    create_case,
     get_case_access_metadata,
-    get_case_workspace as _get_case_workspace,
-    get_report as _get_report_v2,
-    get_report_access_metadata as _get_report_access_metadata_v2,
-    list_cases as _list_cases,
-    list_reports as _list_reports_v2,
-    soft_delete_uploaded_file,
-    start_case_analysis as _start_case_analysis,
+    get_case_workspace,
+    list_cases,
+    start_case_analysis,
 )
+from chatbot.file_scan_service import apply_attachment_scan_gate, scan_uploaded_file
 from chatbot.request_parsing import (
     first_upload_file as _first_upload_file,
     json_body as _json_body,
     request_payload as _request_payload,
 )
+from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
     access_subject_from_payload,
     authorize_resource_access,
@@ -87,10 +87,12 @@ from chatbot.repositories import (
     get_chat_session_access_metadata,
     get_mycase_summary,
     get_report_download_metadata,
+    get_report_record_detail,
     get_uploaded_file_access_metadata,
     get_uploaded_file,
     history_operating_policy,
     list_history_event_records,
+    list_report_records,
     list_uploaded_files,
     mark_conversation_save_state,
     enqueue_analysis_job_work,
@@ -98,7 +100,6 @@ from chatbot.repositories import (
     persist_current_auth_subject,
     persist_auth_logout,
     persist_auth_token_refresh,
-    persist_analysis_display_result,
     persist_analysis_job_execution,
     persist_chat_message_analysis_boundary,
     persist_guest_session_identity,
@@ -114,19 +115,24 @@ from chatbot.progress_cache import read_analysis_job_progress, read_chat_session
 
 @require_http_methods(["GET", "OPTIONS"])
 def health_check(_request: HttpRequest) -> JsonResponse:
-    return JsonResponse(
-        {
-            "ok": True,
-            "service": "SKN27 demo backend",
-            "available_scenarios": list_demo_scenarios(),
-            "available_personas": list_demo_personas(),
-        }
-    )
+    return JsonResponse({"ok": True, "service": "skn27-api"})
 
 
 @require_http_methods(["GET", "OPTIONS"])
-def demo_scenarios(_request: HttpRequest) -> JsonResponse:
-    return JsonResponse({"scenarios": list_demo_scenarios(), "personas": list_demo_personas()})
+def health_live(_request: HttpRequest) -> JsonResponse:
+    return JsonResponse({"status": "live", "service": "skn27-api"})
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def health_ready(_request: HttpRequest) -> JsonResponse:
+    payload = build_runtime_health()
+    status = 200 if payload["status"] == "ready" else 503
+    return JsonResponse(payload, status=status)
+
+
+@require_http_methods(["GET", "OPTIONS"])
+def capabilities(_request: HttpRequest) -> JsonResponse:
+    return JsonResponse(capability_catalog_payload())
 
 
 @csrf_exempt
@@ -139,7 +145,7 @@ def guest_session(request: HttpRequest) -> JsonResponse:
         request,
         event_type="guest_session_created",
         status="success",
-        summary="비회원 guest session을 mock 발급했습니다.",
+        summary="??? guest session? mock ??????.",
         actor={
             "guest_id": payload.get("guest", {}).get("guest_id"),
             "auth_state": "guest",
@@ -320,7 +326,7 @@ def auth_me(request: HttpRequest) -> JsonResponse:
         request,
         event_type="auth_me_checked",
         status="success" if status < 400 else "failed",
-        summary="현재 인증 subject를 mock 확인했습니다.",
+        summary="?? ?? subject? mock ??????.",
         actor=_actor_from_auth_me_payload(request, payload),
         subject=subject_from_payload({"session_id": request.GET.get("session_id")}),
         source=_history_source(request),
@@ -387,8 +393,8 @@ def history_events(request: HttpRequest) -> JsonResponse:
             "count": len(events),
             "events": events,
             "limitations": [
-                "사용자 원문, OCR 원문, Agent reasoning 전문은 standard-light history에 저장하지 않습니다.",
-                "보관 기간과 DB table 전환은 사용자 컨펌 후 확정합니다.",
+                "?? ??, OCR ??, Agent reasoning ??? standard-light history? ?????.",
+                "?? ??? DB table ??? ??? ?? ???? ?? ?????.",
             ],
         },
     )
@@ -458,8 +464,7 @@ def attachments(request: HttpRequest) -> JsonResponse:
     return _json_response(request, {"attachment": attachment})
 
 
-@csrf_exempt
-@require_http_methods(["GET", "DELETE", "OPTIONS"])
+@require_http_methods(["GET", "OPTIONS"])
 def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
     if _is_canonical_mock_request(request):
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
@@ -468,19 +473,7 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
             access = authorize_resource_access(access_metadata, identity_payload)
             if not access["allowed"]:
                 return _object_access_denied_response(request, access)
-        if request.method == "DELETE":
-            attachment = soft_delete_uploaded_file(attachment_id)
-            if attachment:
-                return _json_response(
-                    request,
-                    {
-                        "schema_version": "file_deletion.v2",
-                        "attachment": attachment,
-                        "deleted": True,
-                    },
-                )
-        else:
-            attachment = get_uploaded_file(attachment_id)
+        attachment = get_uploaded_file(attachment_id)
     else:
         attachment = get_mock_attachment(attachment_id)
     if not attachment:
@@ -489,7 +482,7 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
             {
                 "error": {
                     "code": "attachment_not_found",
-                    "message": "요청한 attachment metadata를 찾을 수 없습니다.",
+                    "message": "??? attachment metadata? ?? ? ????.",
                 }
             },
             status=404,
@@ -515,7 +508,7 @@ def process_file_scan(request: HttpRequest, attachment_id: str) -> JsonResponse:
             {
                 "error": {
                     "code": "attachment_not_found",
-                    "message": "?붿껌??attachment metadata瑜?李얠쓣 ???놁뒿?덈떎.",
+                    "message": "??? attachment metadata? ?? ? ????.",
                 }
             },
             status=404,
@@ -565,7 +558,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         request,
         event_type="analysis_job_created",
         status=job.get("status") or "success",
-        summary="분석 job을 mock 생성했습니다.",
+        summary="?? job? mock ??????.",
         actor=actor,
         subject=subject,
         source=source,
@@ -589,29 +582,26 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
-    job = get_analysis_job(job_id)
-    if not job and _is_canonical_mock_request(request):
-        job = get_analysis_job_record(job_id)
+    job = get_analysis_job_record(job_id)
     if not job:
         return _json_response(
             request,
             {
                 "error": {
                     "code": "analysis_job_not_found",
-                    "message": "요청한 analysis job을 찾을 수 없습니다.",
+                    "message": "??? analysis job? ?? ? ????.",
                 }
             },
             status=404,
         )
-    if _is_canonical_mock_request(request):
-        job["progress_cache"] = read_analysis_job_progress(job_id)
+    job["progress_cache"] = read_analysis_job_progress(job_id)
     return _json_response(request, {"job": job})
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
-    result = get_analysis_result(job_id)
-    if not result:
+    job = get_analysis_job_record(job_id)
+    if not job:
         return _json_response(
             request,
             {
@@ -622,9 +612,35 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    if _is_canonical_mock_request(request):
-        result = _canonicalize_mock_paths(result)
-        result["persistence"] = persist_analysis_display_result(result)
+    if job.get("status") in {"queued", "running"}:
+        return _json_response(
+            request,
+            {
+                "result": {
+                    "contract_version": "analysis_result.v2",
+                    "job_id": job_id,
+                    "status": job.get("status"),
+                    "assistant_message": None,
+                    "structured_results": {},
+                    "evidence": [],
+                    "limitations": [],
+                }
+            },
+            status=202,
+        )
+
+    executions = [
+        {"node_code": item.get("node_code"), "agent_output": item}
+        for item in job.get("agent_results", [])
+        if isinstance(item, dict)
+    ]
+    result = compose_agent_response(
+        {
+            "job_id": job_id,
+            "status_counts": job.get("status_counts") or {},
+            "executions": executions,
+        }
+    )
     return _json_response(request, {"result": result})
 
 
@@ -637,7 +653,7 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
         request,
         event_type="chat_session_created",
         status="success",
-        summary="채팅 session을 mock 생성했습니다.",
+        summary="?? session? mock ??????.",
         actor=_history_actor(request, body),
         subject=subject_from_payload(body, session_id=payload.get("session_id")),
         source=_history_source(request),
@@ -650,103 +666,88 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def submit_chat_message(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
-    usage = None
-    if _is_canonical_mock_request(request):
-        policy_response = _canonical_guest_identity_policy_response(request, identity_body)
-        if policy_response is not None:
-            return policy_response
-        usage = record_usage_event(identity_body, scope="chat_message")
-        if not usage["allowed"]:
-            return _rate_limit_response(request, usage)
-        identity_body = apply_attachment_scan_gate(identity_body)
+    identity_body = _payload_with_request_identity(request, body)
+    policy_response = _canonical_guest_identity_policy_response(request, identity_body)
+    if policy_response is not None:
+        return policy_response
+    usage = record_usage_event(identity_body, scope="chat_message")
+    if not usage["allowed"]:
+        return _rate_limit_response(request, usage)
+    identity_body = apply_attachment_scan_gate(identity_body)
     chat_response = submit_message(identity_body)
     conversation_save_state = conversation_save_state_from_payload(identity_body)
-    node_execution = None
-    if _is_canonical_mock_request(request):
-        execution_payload = {
-            **identity_body,
-            "session_id": chat_response.get("session_id"),
-            "message_id": chat_response.get("message_id"),
-            "attachments": chat_response.get("attachments", []),
-            "context": {
-                **(
-                    identity_body.get("context")
-                    if isinstance(identity_body.get("context"), dict)
-                    else {}
-                ),
-                "supervisor_handoff": chat_response.get("supervisor_state", {}),
-            },
+
+    if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
+        chat_response["usage"] = usage
+        execution_modes = {
+            "needs_input": "input_collection",
+            "high_risk_handoff": "expert_handoff",
+            "case_ready": "case_creation_required",
         }
-        if _uses_async_worker(identity_body):
-            if _has_blocked_attachments(chat_response):
-                chat_response = _scan_blocked_chat_response(chat_response)
-                node_execution = _scan_blocked_node_execution(identity_body, chat_response)
-                persistence = persist_chat_message_analysis_boundary(identity_body, chat_response)
-                conversation_save_state = persistence["conversation_save_state"]
-                chat_response["persistence"] = persistence
-                chat_response["supervisor_execution"] = _supervisor_execution_response(
-                    node_execution,
-                    persistence=persistence,
-                )
-                chat_response["usage"] = usage
-                chat_response["execution_mode"] = "async_worker"
-            else:
-                node_execution = _queued_node_execution_placeholder(
-                    execution_payload,
-                    analysis_plan=chat_response.get("analysis_plan") or {},
-                    chat_response=chat_response,
-                )
-                job_payload = _agent_plan_job_payload(
-                    execution_payload,
-                    {
-                        "analysis_plan": chat_response.get("analysis_plan") or {},
-                        "chat_response": chat_response,
-                        "node_execution": node_execution,
-                    },
-                )
-                job_payload["status"] = "queued"
-                job_payload["active_node"] = _analysis_plan_active_node(chat_response.get("analysis_plan") or {})
-                job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
-                job_payload["node_execution"] = {}
-                persistence = enqueue_analysis_job_work(execution_payload, job_payload)
-                conversation_save_state = conversation_save_state_from_payload(identity_body)
-                chat_response["persistence"] = persistence
-                chat_response["node_execution"] = node_execution
-                chat_response["work_item"] = {
-                    "contract_version": "agent_worker_queue.v1",
-                    "work_item_id": persistence["work_item_id"],
-                    "status": persistence["work_item_status"],
-                    "job_id": persistence["job_id"],
-                }
-                chat_response["supervisor_execution"] = _supervisor_execution_response(
-                    node_execution,
-                    persistence=persistence,
-                )
-                chat_response["usage"] = usage
-                chat_response["execution_mode"] = "async_worker"
-                chat_response["status"] = "queued"
-        else:
-            persistence_seed = persist_chat_message_analysis_boundary(identity_body, chat_response)
-            execution_payload["job_id"] = persistence_seed["job_id"]
-            node_execution = execute_mock_plan(chat_response.get("analysis_plan") or {}, execution_payload)
-            persistence = persist_chat_message_analysis_boundary(
-                identity_body,
-                chat_response,
-                node_execution=node_execution,
-            )
-            conversation_save_state = persistence["conversation_save_state"]
-            chat_response["persistence"] = persistence
-            chat_response["supervisor_execution"] = _supervisor_execution_response(
-                node_execution,
-                persistence=persistence,
-            )
-            chat_response["usage"] = usage
+        chat_response["execution_mode"] = execution_modes[chat_response["status"]]
+        return _json_response(request, chat_response)
+
+    execution_payload = {
+        **identity_body,
+        "session_id": chat_response.get("session_id"),
+        "message_id": chat_response.get("message_id"),
+        "attachments": chat_response.get("attachments", []),
+        "execution_mode": "sync",
+        "context": {
+            **(
+                identity_body.get("context")
+                if isinstance(identity_body.get("context"), dict)
+                else {}
+            ),
+            "supervisor_handoff": chat_response.get("supervisor_state", {}),
+        },
+    }
+
+    if _has_blocked_attachments(chat_response):
+        chat_response = _scan_blocked_chat_response(chat_response)
+        persistence = persist_chat_message_analysis_boundary(identity_body, chat_response)
+        chat_response["persistence"] = persistence
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "scan_blocked"
+        return _json_response(request, chat_response, status=409)
+
+    node_execution = _queued_node_execution_placeholder(
+        execution_payload,
+        analysis_plan=chat_response.get("analysis_plan") or {},
+        chat_response=chat_response,
+    )
+    job_payload = _agent_plan_job_payload(
+        execution_payload,
+        {
+            "analysis_plan": chat_response.get("analysis_plan") or {},
+            "chat_response": chat_response,
+            "node_execution": node_execution,
+        },
+    )
+    job_payload["status"] = "queued"
+    job_payload["active_node"] = _analysis_plan_active_node(chat_response.get("analysis_plan") or {})
+    job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
+    job_payload["node_execution"] = {}
+    persistence = enqueue_analysis_job_work(execution_payload, job_payload)
+    chat_response["persistence"] = persistence
+    chat_response["node_execution"] = node_execution
+    chat_response["work_item"] = {
+        "contract_version": "agent_worker_queue.v1",
+        "work_item_id": persistence["work_item_id"],
+        "status": persistence["work_item_status"],
+        "job_id": persistence["job_id"],
+    }
+    chat_response["supervisor_execution"] = _supervisor_execution_response(
+        node_execution,
+        persistence=persistence,
+    )
+    chat_response["usage"] = usage
+    chat_response["execution_mode"] = "async_worker"
     _record_history_safely(
         request,
         event_type="chat_message_created",
         status=chat_response.get("status") or "success",
-        summary="채팅 메시지를 mock 분석 응답으로 처리했습니다.",
+        summary="Chat message was accepted and queued for Agent execution.",
         actor=_history_actor(request, body),
         subject=subject_from_payload(
             body,
@@ -756,8 +757,6 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         source=_history_source(request),
         metadata={
             "routing_intent": chat_response.get("routing_intent"),
-            "mock_scenario": chat_response.get("mock_scenario"),
-            "mock_status": body.get("mock_status"),
             "response_status": chat_response.get("status"),
             "conversation_save_state": conversation_save_state,
             "conversation_save_policy": "conversation_save_policy.v1",
@@ -771,7 +770,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         },
         privacy={"risk_level": "medium"},
     )
-    return _json_response(request, chat_response)
+    return _json_response(request, chat_response, status=202)
 
 
 @csrf_exempt
@@ -797,7 +796,7 @@ def update_chat_save_state(request: HttpRequest) -> JsonResponse:
                 request,
                 action="conversation_save",
                 reason="saved_requires_authenticated_user",
-                message="상담을 내 사건으로 저장하려면 로그인이 필요합니다.",
+                message="??? ?? ??? ????? ???? ?????.",
                 policy_version="conversation_save_policy.v1",
                 subject=subject,
             )
@@ -823,6 +822,135 @@ def update_chat_save_state(request: HttpRequest) -> JsonResponse:
             },
         )
     return _json_response(request, {"conversation_save": result})
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST", "OPTIONS"])
+def consultation_cases(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request) if request.method == "POST" else {}
+    identity_payload = _payload_with_request_identity(request, body)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    login_response = _case_login_required_response(request, subject, action="case_access")
+    if login_response is not None:
+        return login_response
+    owner_id = str(subject.get("user_id") or "")
+
+    if request.method == "GET":
+        return _json_response(
+            request,
+            {
+                "contract_version": "consultation_case_list.v2",
+                "cases": list_cases(owner_id=owner_id),
+            },
+        )
+
+    validated, validation_response = _validate_request_dto(
+        request,
+        CreateConsultationCaseRequest,
+        body,
+    )
+    if validation_response is not None:
+        return validation_response
+    try:
+        case = create_case(owner_id=owner_id, payload=validated)
+    except CaseRepositoryError as exc:
+        return _case_repository_error_response(request, exc)
+    return _json_response(
+        request,
+        {"contract_version": "consultation_case.v2", "case": case},
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_http_methods(["GET", "OPTIONS"])
+def consultation_case_workspace(request: HttpRequest, case_id: str) -> JsonResponse:
+    identity_payload = _request_access_payload(request)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    login_response = _case_login_required_response(request, subject, action="case_workspace")
+    if login_response is not None:
+        return login_response
+    access = authorize_resource_access(
+        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
+        identity_payload,
+    )
+    if not access["allowed"]:
+        return _object_access_denied_response(request, access)
+    try:
+        workspace = get_case_workspace(case_id)
+    except CaseRepositoryError as exc:
+        return _case_repository_error_response(request, exc)
+    return _json_response(request, {"workspace": workspace})
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def consultation_case_fact_confirmation(request: HttpRequest, case_id: str) -> JsonResponse:
+    body = _json_body(request)
+    identity_payload = _payload_with_request_identity(request, body)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    login_response = _case_login_required_response(request, subject, action="case_fact_confirmation")
+    if login_response is not None:
+        return login_response
+    access = authorize_resource_access(
+        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
+        identity_payload,
+    )
+    if not access["allowed"]:
+        return _object_access_denied_response(request, access)
+    validated, validation_response = _validate_request_dto(
+        request,
+        ConfirmCaseFactsRequest,
+        body,
+    )
+    if validation_response is not None:
+        return validation_response
+    try:
+        fact_version = confirm_case_facts(
+            case_id,
+            owner_id=str(subject.get("user_id") or ""),
+            payload=validated,
+        )
+    except CaseRepositoryError as exc:
+        return _case_repository_error_response(request, exc)
+    return _json_response(
+        request,
+        {"contract_version": "confirmed_facts.v1", "fact_version": fact_version},
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def consultation_case_analysis_jobs(request: HttpRequest, case_id: str) -> JsonResponse:
+    body = _json_body(request)
+    identity_payload = _payload_with_request_identity(request, body)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    login_response = _case_login_required_response(request, subject, action="case_analysis")
+    if login_response is not None:
+        return login_response
+    access = authorize_resource_access(
+        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
+        identity_payload,
+    )
+    if not access["allowed"]:
+        return _object_access_denied_response(request, access)
+    validated, validation_response = _validate_request_dto(
+        request,
+        StartCaseAnalysisRequest,
+        body,
+    )
+    if validation_response is not None:
+        return validation_response
+    try:
+        result = start_case_analysis(
+            case_id,
+            owner_id=str(subject.get("user_id") or ""),
+            payload=validated,
+        )
+    except CaseRepositoryError as exc:
+        return _case_repository_error_response(request, exc)
+    return _json_response(request, result, status=202)
 
 
 @csrf_exempt
@@ -932,23 +1060,28 @@ def report_action(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
         subject = access_subject_from_payload(identity_payload)["subject"]
-        if subject.get("subject_type") != "user" or not subject.get("user_id"):
-            return _login_required_response(
-                request,
-                action="report_list",
-                reason="report_list_requires_authenticated_user",
-                message="요약서 목록을 보려면 로그인이 필요합니다.",
-                policy_version="consultation_report.v2",
-                subject=subject,
-            )
+        if _is_canonical_mock_request(request):
+            guest_violation = _guest_identity_policy_violation(subject)
+            if guest_violation:
+                return _guest_identity_policy_response(request, guest_violation)
+            if subject.get("subject_type") != "user":
+                return _login_required_response(
+                    request,
+                    action="report_list",
+                    reason="report_list_requires_authenticated_user",
+                    message="??? ??? ????? ???? ?????.",
+                    policy_version="report_action_policy.v1",
+                    subject=subject,
+                )
+        reports = list_report_records(
+            session_id=request.GET.get("session_id"),
+            owner_id=str(subject.get("user_id") or "") if _is_canonical_mock_request(request) else request.GET.get("owner_id"),
+        )
         return _json_response(
             request,
             {
-                "schema_version": "consultation_report_list.v2",
-                "reports": _list_reports_v2(
-                    owner_id=str(subject["user_id"]),
-                    case_id=request.GET.get("case_id"),
-                ),
+                "api_surface": "canonical_mock" if _is_canonical_mock_request(request) else "mock",
+                "reports": reports,
             },
         )
 
@@ -966,7 +1099,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
                 request,
                 action=f"report_{action}",
                 reason=f"guest_report_{action}_requires_login",
-                message="리포트를 저장하거나 다운로드하려면 로그인이 필요합니다.",
+                message="???? ????? ??????? ???? ?????.",
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
@@ -993,7 +1126,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
         request,
         event_type=_report_history_event_type(action),
         status=report.get("status") or "success",
-        summary="리포트 action을 mock 처리했습니다.",
+        summary="??? action? mock ??????.",
         actor=_history_actor(request, body),
         subject=subject_from_payload(
             body,
@@ -1014,137 +1147,47 @@ def report_action(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
-    identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-    access_metadata = _get_report_access_metadata_v2(report_id)
-    if access_metadata is not None:
-        access = authorize_resource_access(access_metadata, identity_payload)
-        if not access["allowed"]:
-            return _object_access_denied_response(request, access)
-    report = _get_report_v2(report_id)
+    if _is_canonical_mock_request(request):
+        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+        subject = access_subject_from_payload(identity_payload)["subject"]
+        guest_violation = _guest_identity_policy_violation(subject)
+        if guest_violation:
+            return _guest_identity_policy_response(request, guest_violation)
+        if subject.get("subject_type") != "user":
+            return _login_required_response(
+                request,
+                action="report_detail",
+                reason="report_detail_requires_authenticated_user",
+                message="??? ??? ????? ???? ?????.",
+                policy_version="report_action_policy.v1",
+                subject=subject,
+            )
+        document_type = request.GET.get("document_type")
+        download = get_report_download_metadata(report_id, document_type=document_type)
+        if download is not None:
+            access = authorize_report_download_metadata(download, identity_payload)
+            if not access["allowed"]:
+                return _object_access_denied_response(request, access)
+
+    report = get_report_record_detail(report_id)
     if report is None:
         return _json_response(
             request,
-            {"error": {"code": "report_not_found", "message": "요청한 요약서를 찾을 수 없습니다."}},
+            {
+                "error": {
+                    "code": "report_not_found",
+                    "message": "Requested report was not found.",
+                }
+            },
             status=404,
         )
-    return _json_response(request, report)
-
-
-@csrf_exempt
-@require_http_methods(["GET", "POST", "OPTIONS"])
-def cases_collection(request: HttpRequest) -> JsonResponse:
-    body = _json_body(request) if request.method == "POST" else {}
-    identity_payload = (
-        _payload_with_request_identity(request, body)
-        if request.method == "POST"
-        else _request_access_payload(request, session_id=request.GET.get("session_id"))
+    return _json_response(
+        request,
+        {
+            "api_surface": "canonical_mock" if _is_canonical_mock_request(request) else "mock",
+            "report": report,
+        },
     )
-    subject = access_subject_from_payload(identity_payload)["subject"]
-    if subject.get("subject_type") != "user" or not subject.get("user_id"):
-        return _login_required_response(
-            request,
-            action="case_create" if request.method == "POST" else "case_list",
-            reason="case_requires_authenticated_user",
-            message="정밀분석 사건을 만들거나 보려면 로그인이 필요합니다.",
-            policy_version="case.v2",
-            subject=subject,
-        )
-
-    owner_id = str(subject["user_id"])
-    if request.method == "GET":
-        return _json_response(
-            request,
-            {"schema_version": "case_list.v2", "cases": _list_cases(owner_id=owner_id)},
-        )
-    try:
-        result = _create_case(identity_payload, owner_id=owner_id)
-    except CaseQuotaExceeded as exc:
-        return _json_response(
-            request,
-            {
-                "error": {
-                    "code": "case_quota_exceeded",
-                    "message": str(exc),
-                    "quota": {"scope": "new_case_per_day", "limit": 3},
-                }
-            },
-            status=429,
-        )
-    except PermissionError as exc:
-        return _json_response(request, {"error": {"code": "forbidden", "message": str(exc)}}, status=403)
-    return _json_response(request, result, status=201)
-
-
-@require_http_methods(["GET", "OPTIONS"])
-def case_workspace(request: HttpRequest, case_id: str) -> JsonResponse:
-    identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-    denied = _case_access_denied_response(request, case_id, identity_payload)
-    if denied is not None:
-        return denied
-    workspace = _get_case_workspace(case_id)
-    if workspace is None:
-        return _json_response(
-            request,
-            {"error": {"code": "case_not_found", "message": "요청한 사건을 찾을 수 없습니다."}},
-            status=404,
-        )
-    return _json_response(request, workspace)
-
-
-@csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
-def case_fact_confirmation(request: HttpRequest, case_id: str) -> JsonResponse:
-    body = _json_body(request)
-    identity_payload = _payload_with_request_identity(request, body)
-    denied = _case_access_denied_response(request, case_id, identity_payload)
-    if denied is not None:
-        return denied
-    subject = access_subject_from_payload(identity_payload)["subject"]
-    try:
-        fact_version = _confirm_case_facts(
-            case_id,
-            body,
-            confirmed_by=str(subject.get("user_id") or subject.get("subject_id") or ""),
-        )
-    except ValueError as exc:
-        return _json_response(
-            request,
-            {"error": {"code": "invalid_confirmed_facts", "message": str(exc)}},
-            status=400,
-        )
-    return _json_response(request, fact_version, status=201)
-
-
-@csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
-def case_analysis_jobs(request: HttpRequest, case_id: str) -> JsonResponse:
-    body = _json_body(request)
-    identity_payload = _payload_with_request_identity(request, body)
-    denied = _case_access_denied_response(request, case_id, identity_payload)
-    if denied is not None:
-        return denied
-    subject = access_subject_from_payload(identity_payload)["subject"]
-    try:
-        result = _start_case_analysis(case_id, body, owner_id=str(subject.get("user_id") or ""))
-    except CaseConflict as exc:
-        return _json_response(
-            request,
-            {"error": {"code": "confirmed_facts_required", "message": str(exc)}},
-            status=409,
-        )
-    except CaseQuotaExceeded as exc:
-        return _json_response(
-            request,
-            {
-                "error": {
-                    "code": "analysis_quota_exceeded",
-                    "message": str(exc),
-                    "quota": {"scope": "analysis_per_case", "limit": 3},
-                }
-            },
-            status=429,
-        )
-    return _json_response(request, result, status=202)
 
 
 @require_http_methods(["GET", "OPTIONS"])
@@ -1160,11 +1203,12 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
                 request,
                 action="report_download",
                 reason="report_download_requires_authenticated_user",
-                message="리포트를 다운로드하려면 로그인이 필요합니다.",
+                message="???? ??????? ???? ?????.",
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
-        download = get_report_download_metadata(report_id)
+        document_type = request.GET.get("document_type")
+        download = get_report_download_metadata(report_id, document_type=document_type)
         if download is not None:
             access = authorize_report_download_metadata(download, identity_payload)
             if not access["allowed"]:
@@ -1182,6 +1226,7 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             response["X-Report-Object-Key"] = download["object_key"]
             response["X-Report-Object-Policy"] = download["object_storage"].get("policy_version", "")
             response["X-Report-Access-Decision"] = access["reason"]
+            response["X-Report-Document-Type"] = download.get("document_type", "")
             return response
 
     response = HttpResponse(
@@ -1314,20 +1359,6 @@ def _authorize_session_query(
     return authorize_resource_access(session_access, identity_payload)
 
 
-def _case_access_denied_response(
-    request: HttpRequest,
-    case_id: str,
-    identity_payload: dict[str, object],
-) -> JsonResponse | None:
-    access_metadata = get_case_access_metadata(case_id)
-    if access_metadata is None:
-        return None
-    access = authorize_resource_access(access_metadata, identity_payload)
-    if access["allowed"]:
-        return None
-    return _object_access_denied_response(request, access)
-
-
 def _rate_limit_response(request: HttpRequest, usage: dict[str, object]) -> JsonResponse:
     required_action = "login" if usage.get("subject_type") in {"anonymous", "guest"} else "wait_or_upgrade"
     return _json_response(
@@ -1338,7 +1369,7 @@ def _rate_limit_response(request: HttpRequest, usage: dict[str, object]) -> Json
                 "type": "rate_limit",
                 "code": "rate_limit_exceeded",
                 "status": 429,
-                "message": "요청 한도를 초과했습니다.",
+                "message": "?? ??? ??????.",
                 "required_action": required_action,
                 "usage": usage,
             }
@@ -1382,6 +1413,79 @@ def _login_required_response(
     )
 
 
+def _case_login_required_response(
+    request: HttpRequest,
+    subject: dict[str, object],
+    *,
+    action: str,
+) -> JsonResponse | None:
+    if subject.get("subject_type") == "user" and subject.get("user_id"):
+        return None
+    return _login_required_response(
+        request,
+        action=action,
+        reason="case_requires_authenticated_user",
+        message="사건 저장과 분석은 로그인 후 이용할 수 있습니다.",
+        policy_version="consultation_case_policy.v2",
+        subject=subject,
+    )
+
+
+def _validate_request_dto(
+    request: HttpRequest,
+    dto_type: type[BaseModel],
+    payload: dict[str, object],
+) -> tuple[dict[str, object], JsonResponse | None]:
+    try:
+        dto = dto_type.model_validate(payload)
+    except ValidationError as exc:
+        details = [
+            {
+                "field": ".".join(str(part) for part in error["loc"]),
+                "type": error["type"],
+                "message": error["msg"],
+            }
+            for error in exc.errors(include_url=False, include_input=False)
+        ]
+        return {}, _json_response(
+            request,
+            {
+                "error": {
+                    "contract_version": "request_validation_error.v1",
+                    "type": "validation",
+                    "code": "validation_error",
+                    "status": 422,
+                    "message": "요청 필드를 확인해 주세요.",
+                    "details": details,
+                }
+            },
+            status=422,
+        )
+    return dto.model_dump(mode="python"), None
+
+
+def _case_repository_error_response(
+    request: HttpRequest,
+    error: CaseRepositoryError,
+) -> JsonResponse:
+    payload = {
+        "error": {
+            "contract_version": "consultation_case_error.v2",
+            "type": "case",
+            "code": error.code,
+            "status": error.status,
+            "message": str(error),
+        }
+    }
+    if error.details:
+        payload["error"]["details"] = error.details
+    return _json_response(
+        request,
+        payload,
+        status=error.status,
+    )
+
+
 def _guest_identity_policy_violation(subject: dict[str, object]) -> dict[str, object] | None:
     if subject.get("subject_type") != "guest":
         return None
@@ -1413,7 +1517,7 @@ def _guest_identity_policy_response(
                 "type": "authorization",
                 "code": "guest_session_invalid",
                 "status": 401,
-                "message": "비회원 세션이 만료되었거나 사용할 수 없습니다.",
+                "message": "??? ??? ???? ??? ???????.",
                 "required_action": "refresh_guest_session",
                 "reason": violation.get("reason"),
                 "guest_id": violation.get("guest_id"),
@@ -1454,7 +1558,7 @@ def _object_access_denied_response(request: HttpRequest, access: dict[str, objec
                 "type": "object_access",
                 "code": "object_access_denied",
                 "status": 403,
-                "message": "리포트 다운로드 권한이 없습니다.",
+                "message": "???? ???? ??? ??? ? ????.",
                 "required_action": "login_or_owner_match",
                 "access": access,
             }

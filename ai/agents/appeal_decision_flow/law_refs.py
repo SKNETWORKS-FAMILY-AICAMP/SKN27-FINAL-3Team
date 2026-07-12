@@ -3,16 +3,22 @@
 법령DB(law_chunks)에서 조회하는 게 우선이고, 조회 실패(DB 연결 오류 등)나 해당 조문이
 아직 적재되지 않은 경우에만 아래 하드코딩 상수로 폴백한다 — 법령DB가 항상 최신본을
 반영하지만, 일시적으로 접근이 안 될 때 MG가 컨텍스트 없이 판단하는 사태는 막는다.
-원문 출처·적용범위 검증 근거는 `docs/architecture/appeal-judgment/법조문_참고자료_142조_14조.md` 참고.
+원문 출처·적용범위 검증 근거는
+`docs/architecture/appeal-judgment/law160-budeuk-hansayu-scope-analysis2.md` 참고
+(구 버전 `법조문_참고자료_142조_14조.md`·`...analysis.md`의 "142조=주정차 전용" 전제는
+이 v2 재검증으로 폐기됨).
 """
 
-import re
+import os
 
 # ── 폴백 원문 (DB 조회 실패 시에만 사용) ──────────────────────────────
 
 # 도로교통법 시행규칙 제142조(부득이한 사유)
 # 위임 근거: 도로교통법 제160조제4항제1호 "그 밖의 부득이한 사유"
-# 적용범위: 주정차 위반(법 제32~34조)에 한정 (제160조 제3·4항이 그 예외 규정이라서)
+# 적용범위: 위반유형 무관 공통 적용 — §160④는 "§160③에도 불구하고"로 §160③
+# 전체(1호 주정차·전용차로·긴급차량 + 2호 범칙금통고 불가 전반=속도위반·신호위반
+# 등 무인단속)에 걸리는 예외라, 142조 문언에도 주정차 한정 문구가 없다
+# (law160-budeuk-hansayu-scope-analysis2.md §4 확정).
 _FALLBACK_RULE_142_TEXT = """\
 도로교통법 시행규칙 제142조(부득이한 사유)
 「도로교통법」제160조제4항제1호에서 "그 밖의 부득이한 사유"란 해당 위반행위가 다음 각 호의
@@ -26,18 +32,43 @@ _FALLBACK_RULE_142_TEXT = """\
 
 # 도로교통법 제160조제4항제1호 본문 (도난 포함)
 # 142조 목록과 별개로, "도난"은 이 본문에 부득이한 사유와 병렬로 직접 명시돼 있다.
-# 142조 목록만 주입하면 도난 사례를 놓치므로 주정차 위반 컨텍스트에는 이것도 함께 주입한다.
+# 142조 목록만 주입하면 도난 사례를 놓치므로 위반유형 무관하게 이것도 함께 주입한다.
 _FALLBACK_ARTICLE_160_4_1_TEXT = """\
 도로교통법 제160조제4항제1호
 제3항에도 불구하고 차를 도난당하였거나 그 밖의 부득이한 사유가 있는 경우에는
 과태료 처분을 할 수 없다."""
 
-# 질서위반행위규제법 제7조(고의 또는 과실)
-# 위반유형과 무관하게 모든 과태료(질서위반행위)에 보편 적용되는 일반 원칙.
-# 비주정차 위반(과속·신호위반 등)에서 142조를 대체하는 참조 조문 — 도난도 이 원칙에 포함됨.
+# 질서위반행위규제법 제7~10조(질서위반행위의 성립 등 — 일반 면책·감경 사유)
+# 위반유형과 무관하게 모든 과태료(질서위반행위)에 보편 적용되는 일반 원칙들.
+# 142조(구체적 열거 목록)와 양자택일이 아니라, 142조 6개 항목에 해당하지 않는
+# 경우의 보충 근거로 위반유형 무관하게 항상 함께 주입한다.
+# (2026-07-08 발견) 그래프DB 텍스트 매칭으로 "질서위반행위규제법 중 과태료 관련 조문"을
+# 전수 조사한 결과, 이미 참조 중인 7조(고의·과실)와 같은 장(제2장 질서위반행위의 성립 등)에
+# 속한 8·9·10조가 MG 참조 목록에서 빠져있었다 — "표지판이 안 보였다"류 사유는 7조보다
+# 8조(위법성의 착오)가 더 정확한 근거일 수 있는데도 지금까지 LLM에게 8조 원문 자체를
+# 보여준 적이 없었다. 상세는
+# `docs/architecture/appeal-judgment/오늘 한 일 제8조~10조 merit변경.md` 참고.
 _FALLBACK_ARTICLE_7_TEXT = """\
 질서위반행위규제법 제7조(고의 또는 과실)
 고의 또는 과실이 없는 질서위반행위는 과태료를 부과하지 아니한다."""
+
+_FALLBACK_ARTICLE_8_TEXT = """\
+질서위반행위규제법 제8조(위법성의 착오)
+자신의 행위가 위법하지 아니한 것으로 오인하고 행한 질서위반행위는 그 오인에 정당한
+이유가 있는 때에 한하여 과태료를 부과하지 아니한다."""
+
+_FALLBACK_ARTICLE_9_TEXT = """\
+질서위반행위규제법 제9조(책임연령)
+14세가 되지 아니한 자의 질서위반행위는 과태료를 부과하지 아니한다. 다만, 다른
+법률에 특별한 규정이 있는 경우에는 그러하지 아니하다."""
+
+_FALLBACK_ARTICLE_10_TEXT = """\
+질서위반행위규제법 제10조(심신장애)
+① 심신(心神)장애로 인하여 행위의 옳고 그름을 판단할 능력이 없거나 그 판단에 따른
+행위를 할 능력이 없는 자의 질서위반행위는 과태료를 부과하지 아니한다.
+② 심신장애로 인하여 제1항에 따른 능력이 미약한 자의 질서위반행위는 과태료를 감경한다.
+③ 스스로 심신장애 상태를 일으켜 질서위반행위를 한 자에 대하여는 제1항 및 제2항을
+적용하지 아니한다."""
 
 # 질서위반행위규제법 제14조(과태료의 산정)
 # 위반유형 무관 공통 적용. 1차 고지서(법원 비송사건절차) 단계의 정황요소 판단에 추가 주입.
@@ -59,22 +90,18 @@ APPEAL_DEADLINE_BASIS = (
     "과태료 부과 통지를 받은 날부터 60일 이내 서면 이의제기"
 )
 
-# ── 위반유형 판별: law_code가 주정차·정차 금지 조항(제32~34조)에 해당하는지 ─
-# MG는 이 값을 인용 근거가 아니라 참조 법조문 선택용 라우팅 신호로만 쓴다 (DATA-003 §9).
-PARKING_VIOLATION_LAW_CODE_PATTERN = re.compile(
-    r"도로교통법\s*제3[234]조"
-)
-
-
-def is_parking_violation(law_code: str | None) -> bool:
-    """law_code가 주정차·정차 금지(도로교통법 제32~34조) 조항에 해당하는지 판별한다."""
-    if not law_code:
-        return False
-    return bool(PARKING_VIOLATION_LAW_CODE_PATTERN.search(law_code))
-
 
 def _fetch_provision_text(source_name: str, article_no: str, fallback: str) -> str:
-    """법령DB에서 (source_name, article_no) 원문을 조회하고, 실패하면 fallback을 쓴다."""
+    """법령DB에서 (source_name, article_no) 원문을 조회하고, 실패하면 fallback을 쓴다.
+
+    DB 원문은 조문 본문만 담고 법령명을 포함하지 않는다(법령명은 별도 컬럼으로 관리) —
+    여러 조문을 이어붙여 LLM 프롬프트로 주입할 때 어느 법인지 구분되도록 앞에 source_name을
+    라벨로 붙인다. 폴백 원문(_FALLBACK_* 상수)은 이미 법령명을 포함해 직접 쓴 텍스트라
+    그대로 반환한다.
+    """
+    if os.environ.get("LEGAL_PROVISION_DB_ENABLED", "0").strip().lower() not in {"1", "true", "yes"}:
+        return fallback
+
     try:
         from etl.legal.search import get_provision_text
 
@@ -82,26 +109,42 @@ def _fetch_provision_text(source_name: str, article_no: str, fallback: str) -> s
     except Exception as exc:
         print(f"[Warning] law_refs DB 조회 실패, 폴백 원문 사용: {exc}")
         return fallback
-    return text or fallback
+    if not text:
+        return fallback
+    return f"{source_name} {text}"
 
 
-def get_merit_context(notice_stage: str, law_code: str | None) -> str:
+def get_merit_context(notice_stage: str) -> str:
     """MG(merit_classification_node)가 LLM에 주입할 참조 법조문 컨텍스트를 조립한다.
 
-    DATA-003 §5 매핑표:
-        사전통지 × 주정차   → 160조4항1호 + 142조
-        사전통지 × 비주정차 → 제7조
-        1차 고지서 × 주정차   → 160조4항1호 + 142조 + 제14조
-        1차 고지서 × 비주정차 → 제7조 + 제14조
+    (law160-budeuk-hansayu-scope-analysis2.md 확정) 142조는 §160④1호("부득이한
+    사유")의 정의 조항이고, §160④는 §160③ 전체(주정차+비주정차)에 적용되는
+    예외라 위반유형 무관하게 공통 1차 검토 대상이다. 질서법 제7조는 142조 미해당
+    시 보조적으로 병존 적용되는 일반원칙이라 양자택일하지 않고 항상 함께 넣는다.
+    이전 버전(analysis.md)의 law_code 기반 주정차/비주정차 배타적 라우팅 전제는
+    v2 재검증으로 폐기됐다.
+
+    (2026-07-08) 질서법 8·9·10조(위법성의 착오·책임연령·심신장애)도 7조와 같은 장
+    (제2장 질서위반행위의 성립 등)에 속한 일반 면책·감경 사유라 함께 주입한다 — 상세는
+    `docs/architecture/appeal-judgment/오늘 한 일 제8조~10조 merit변경.md` 참고.
+
+        사전통지   → 160조4항1호 + 142조 + 제7~10조
+        1차 고지서 → 160조4항1호 + 142조 + 제7~10조 + 제14조
     """
-    parking = is_parking_violation(law_code)
-    if parking:
-        parts = [
-            _fetch_provision_text("도로교통법", "제160조", _FALLBACK_ARTICLE_160_4_1_TEXT),
-            _fetch_provision_text("도로교통법 시행규칙", "제142조", _FALLBACK_RULE_142_TEXT),
-        ]
-    else:
-        parts = [_fetch_provision_text("질서위반행위규제법", "제7조", _FALLBACK_ARTICLE_7_TEXT)]
+    parts = [
+        # 제160조는 DB 조회 없이 항상 폴백을 쓴다 — 법령DB가 조(article) 단위까지만 저장하고
+        # 항(paragraph) 단위 주소를 안 갖고 있어(ingestion 파서가 paragraph_no를 채우지 않음),
+        # get_provision_text("도로교통법", "제160조")가 우리가 필요한 제4항제1호(부득이한 사유)가
+        # 아니라 제1항(과태료 대상 열거) 같은 다른 항을 반환할 수 있다 — 실측 확인됨: 반환된
+        # 원문에 "도난"·"부득이한 사유"가 없었음. 항 단위 저장·조회가 갖춰지기 전까지는 검증된
+        # 폴백 원문만 신뢰한다.
+        _FALLBACK_ARTICLE_160_4_1_TEXT,
+        _fetch_provision_text("도로교통법 시행규칙", "제142조", _FALLBACK_RULE_142_TEXT),
+        _fetch_provision_text("질서위반행위규제법", "제7조", _FALLBACK_ARTICLE_7_TEXT),
+        _fetch_provision_text("질서위반행위규제법", "제8조", _FALLBACK_ARTICLE_8_TEXT),
+        _fetch_provision_text("질서위반행위규제법", "제9조", _FALLBACK_ARTICLE_9_TEXT),
+        _fetch_provision_text("질서위반행위규제법", "제10조", _FALLBACK_ARTICLE_10_TEXT),
+    ]
 
     if notice_stage == "1차 고지서":
         parts.append(_fetch_provision_text("질서위반행위규제법", "제14조", _FALLBACK_ARTICLE_14_TEXT))

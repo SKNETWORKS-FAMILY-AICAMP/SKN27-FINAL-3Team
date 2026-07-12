@@ -125,89 +125,51 @@ def test_chatbot_mock_fault_ratio_success_flow_returns_schema_fields_without_rat
     assert response["mock_scenario"] == "fault_ratio"
     assert response["routing_intent"] == "fault_ratio"
     assert response["status"] == "success"
+    assert response["reporting_payload"]["report_type"] == "fault_ratio_analysis"
+    assert response["reporting_payload"]["screen_id"] == "UI-REPORT-FAULT-001"
+    assert response["reporting_payload"]["quality"]["review_required"] is True
     assert response["analysis_plan"]["steps"][1]["node_code"] == "text_ml_case_search"
+    assert {step["node_code"] for step in response["analysis_plan"]["steps"]} >= {
+        "text_ml_case_search",
+        "law_ground_search",
+        "objection_report_generation",
+    }
     assert {card["card_type"] for card in response["cards"]} >= {
         "fault_ratio",
         "similar_case",
         "recommended_evidence",
     }
+    assert {item["node_code"] for item in response["supervisor_state"]["agent_input_packages"]} >= {
+        "text_ml_case_search",
+        "law_ground_search",
+        "objection_report_generation",
+    }
+    objection_input = next(
+        item
+        for item in response["supervisor_state"]["agent_input_packages"]
+        if item["node_code"] == "objection_report_generation"
+    )
+    assert objection_input["payload"]["text_ml_case_result_ref"] == "text_ml_case_search"
+    assert objection_input["payload"]["law_ground_result_ref"] == "law_ground_search"
     assert structured_result["accident_type_candidates"]
     assert structured_result["issue_tags"]
     assert structured_result["similar_cases"]
     assert structured_result["reliability_score"] > 0
-    assert structured_result["fault_range"] is None
-    assert structured_result["fault_range_unavailable_reason"].startswith(
-        "missing_core_elements:"
-    )
-    assert "확인 전" in structured_result["ratio_range_label"]
+    assert "확정" in structured_result["ratio_range_label"]
     assert any("수치로 확정하지 않습니다" in item for item in structured_result["limitations"])
 
 
-def test_fault_consultation_v2_exposes_risk_fact_cards_and_four_element_readiness():
-    response = submit_message(
-        {
-            "session_id": "ses_fault_v2_partial",
-            "user_text": "신호 없는 교차로에서 저는 직진했고 상대 차량은 좌회전했습니다.",
-            "mock_scenario": "fault_ratio",
-            "mock_status": "partial",
-        }
-    )
-
-    state = response["consultation_state"]["v2"]
-
-    assert state["schema_version"] == "consultation_state.v2"
-    assert state["intent"] == "fault_ratio"
-    assert state["risk_gate"]["decision"] == "standard_consultation"
-    assert state["fact_cards"]
-    assert set(state["readiness"]["core_elements"]) == {
-        "road_type",
-        "vehicle_movements",
-        "signal_priority",
-        "collision_location",
-    }
-    assert state["readiness"]["fault_range_allowed"] is False
-    assert "collision_location" in state["readiness"]["missing_elements"]
-    assert state["next_questions"]
-
-
-def test_fault_consultation_v2_high_risk_case_never_returns_fault_range():
-    response = submit_message(
-        {
-            "session_id": "ses_fault_v2_high_risk",
-            "user_text": "사망자가 발생한 사고이고 음주운전이 의심됩니다.",
-            "mock_scenario": "fault_ratio",
-            "mock_status": "success",
-        }
-    )
-
-    state = response["consultation_state"]["v2"]
-
-    assert state["risk_gate"]["decision"] == "high_risk_handoff"
-    assert state["readiness"]["fault_range_allowed"] is False
-    assert response["case_status"] == "high_risk_handoff"
-    assert response["structured_result"].get("fault_range") is None
-    assert any("전문가" in action for action in state["risk_gate"]["immediate_actions"])
-
-
-def test_fault_consultation_v2_allows_range_only_when_four_core_elements_are_present():
-    response = submit_message(
-        {
-            "session_id": "ses_fault_v2_ready",
-            "user_text": (
-                "신호등 있는 사거리 교차로에서 저는 녹색 신호에 직진했고 "
-                "상대 차량은 비보호 좌회전했습니다. 충돌 부위는 제 차 앞 범퍼와 "
-                "상대 차 오른쪽 앞문입니다."
-            ),
-            "mock_scenario": "fault_ratio",
-            "mock_status": "success",
-        }
-    )
-
-    state = response["consultation_state"]["v2"]
-
-    assert state["readiness"]["missing_elements"] == []
-    assert state["readiness"]["fault_range_allowed"] is True
-    assert state["readiness"]["completed_count"] == 4
+    section_titles = [section["title"] for section in response["reporting_payload"]["sections"]]
+    assert section_titles == [
+        "사고 개요",
+        "제출 자료",
+        "AI 분석 결과",
+        "판단 근거",
+        "핵심 쟁점",
+        "유사 사례·판례",
+        "후속 조치",
+    ]
+    assert "Slot filling ?곹깭" not in section_titles
 
 
 def test_chatbot_mock_infers_fault_ratio_before_law_or_fine_notice_terms():
@@ -264,6 +226,8 @@ def test_chatbot_mock_partial_flow_returns_pending_question():
     assert response["status"] == "partial"
     assert response["case_status"] == "needs_more_input"
     assert response["pending_questions"][0]["field"] == "accident_context"
+    assert response["reporting_payload"] is None
+    assert "reporting_preview" not in {card["card_type"] for card in response["cards"]}
     assert response["analysis_plan"]["blocked_reason"]
     assert any(step["status"] == "blocked" for step in response["analysis_plan"]["steps"])
     assert response["report_links"] == []
