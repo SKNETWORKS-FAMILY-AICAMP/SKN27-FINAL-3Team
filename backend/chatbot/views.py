@@ -7,7 +7,13 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from pydantic import BaseModel, ValidationError
 
+from app.contracts.consultation_case import (
+    ConfirmCaseFactsRequest,
+    CreateConsultationCaseRequest,
+    StartCaseAnalysisRequest,
+)
 from app.services.agent_node_service import (
     execute_mock_node,
     execute_mock_plan,
@@ -15,8 +21,6 @@ from app.services.agent_node_service import (
 )
 from app.services.analysis_job_mock_service import (
     create_analysis_job,
-    get_analysis_job,
-    get_analysis_result,
     list_analysis_jobs,
 )
 from app.services.attachment_mock_service import (
@@ -56,6 +60,15 @@ from chatbot.api_response import (
     is_canonical_mock_request as _is_canonical_mock_request,
     json_response as _json_response,
 )
+from chatbot.case_repository import (
+    CaseRepositoryError,
+    confirm_case_facts,
+    create_case,
+    get_case_access_metadata,
+    get_case_workspace,
+    list_cases,
+    start_case_analysis,
+)
 from chatbot.file_scan_service import apply_attachment_scan_gate, scan_uploaded_file
 from chatbot.request_parsing import (
     first_upload_file as _first_upload_file,
@@ -87,7 +100,6 @@ from chatbot.repositories import (
     persist_current_auth_subject,
     persist_auth_logout,
     persist_auth_token_refresh,
-    persist_analysis_display_result,
     persist_analysis_job_execution,
     persist_chat_message_analysis_boundary,
     persist_guest_session_identity,
@@ -665,9 +677,14 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     chat_response = submit_message(identity_body)
     conversation_save_state = conversation_save_state_from_payload(identity_body)
 
-    if chat_response["status"] == "needs_input":
+    if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
         chat_response["usage"] = usage
-        chat_response["execution_mode"] = "input_collection"
+        execution_modes = {
+            "needs_input": "input_collection",
+            "high_risk_handoff": "expert_handoff",
+            "case_ready": "case_creation_required",
+        }
+        chat_response["execution_mode"] = execution_modes[chat_response["status"]]
         return _json_response(request, chat_response)
 
     execution_payload = {
@@ -805,6 +822,135 @@ def update_chat_save_state(request: HttpRequest) -> JsonResponse:
             },
         )
     return _json_response(request, {"conversation_save": result})
+
+
+@csrf_exempt
+@require_http_methods(["GET", "POST", "OPTIONS"])
+def consultation_cases(request: HttpRequest) -> JsonResponse:
+    body = _json_body(request) if request.method == "POST" else {}
+    identity_payload = _payload_with_request_identity(request, body)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    login_response = _case_login_required_response(request, subject, action="case_access")
+    if login_response is not None:
+        return login_response
+    owner_id = str(subject.get("user_id") or "")
+
+    if request.method == "GET":
+        return _json_response(
+            request,
+            {
+                "contract_version": "consultation_case_list.v2",
+                "cases": list_cases(owner_id=owner_id),
+            },
+        )
+
+    validated, validation_response = _validate_request_dto(
+        request,
+        CreateConsultationCaseRequest,
+        body,
+    )
+    if validation_response is not None:
+        return validation_response
+    try:
+        case = create_case(owner_id=owner_id, payload=validated)
+    except CaseRepositoryError as exc:
+        return _case_repository_error_response(request, exc)
+    return _json_response(
+        request,
+        {"contract_version": "consultation_case.v2", "case": case},
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_http_methods(["GET", "OPTIONS"])
+def consultation_case_workspace(request: HttpRequest, case_id: str) -> JsonResponse:
+    identity_payload = _request_access_payload(request)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    login_response = _case_login_required_response(request, subject, action="case_workspace")
+    if login_response is not None:
+        return login_response
+    access = authorize_resource_access(
+        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
+        identity_payload,
+    )
+    if not access["allowed"]:
+        return _object_access_denied_response(request, access)
+    try:
+        workspace = get_case_workspace(case_id)
+    except CaseRepositoryError as exc:
+        return _case_repository_error_response(request, exc)
+    return _json_response(request, {"workspace": workspace})
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def consultation_case_fact_confirmation(request: HttpRequest, case_id: str) -> JsonResponse:
+    body = _json_body(request)
+    identity_payload = _payload_with_request_identity(request, body)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    login_response = _case_login_required_response(request, subject, action="case_fact_confirmation")
+    if login_response is not None:
+        return login_response
+    access = authorize_resource_access(
+        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
+        identity_payload,
+    )
+    if not access["allowed"]:
+        return _object_access_denied_response(request, access)
+    validated, validation_response = _validate_request_dto(
+        request,
+        ConfirmCaseFactsRequest,
+        body,
+    )
+    if validation_response is not None:
+        return validation_response
+    try:
+        fact_version = confirm_case_facts(
+            case_id,
+            owner_id=str(subject.get("user_id") or ""),
+            payload=validated,
+        )
+    except CaseRepositoryError as exc:
+        return _case_repository_error_response(request, exc)
+    return _json_response(
+        request,
+        {"contract_version": "confirmed_facts.v1", "fact_version": fact_version},
+        status=201,
+    )
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def consultation_case_analysis_jobs(request: HttpRequest, case_id: str) -> JsonResponse:
+    body = _json_body(request)
+    identity_payload = _payload_with_request_identity(request, body)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    login_response = _case_login_required_response(request, subject, action="case_analysis")
+    if login_response is not None:
+        return login_response
+    access = authorize_resource_access(
+        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
+        identity_payload,
+    )
+    if not access["allowed"]:
+        return _object_access_denied_response(request, access)
+    validated, validation_response = _validate_request_dto(
+        request,
+        StartCaseAnalysisRequest,
+        body,
+    )
+    if validation_response is not None:
+        return validation_response
+    try:
+        result = start_case_analysis(
+            case_id,
+            owner_id=str(subject.get("user_id") or ""),
+            payload=validated,
+        )
+    except CaseRepositoryError as exc:
+        return _case_repository_error_response(request, exc)
+    return _json_response(request, result, status=202)
 
 
 @csrf_exempt
@@ -1264,6 +1410,79 @@ def _login_required_response(
             }
         },
         status=status,
+    )
+
+
+def _case_login_required_response(
+    request: HttpRequest,
+    subject: dict[str, object],
+    *,
+    action: str,
+) -> JsonResponse | None:
+    if subject.get("subject_type") == "user" and subject.get("user_id"):
+        return None
+    return _login_required_response(
+        request,
+        action=action,
+        reason="case_requires_authenticated_user",
+        message="사건 저장과 분석은 로그인 후 이용할 수 있습니다.",
+        policy_version="consultation_case_policy.v2",
+        subject=subject,
+    )
+
+
+def _validate_request_dto(
+    request: HttpRequest,
+    dto_type: type[BaseModel],
+    payload: dict[str, object],
+) -> tuple[dict[str, object], JsonResponse | None]:
+    try:
+        dto = dto_type.model_validate(payload)
+    except ValidationError as exc:
+        details = [
+            {
+                "field": ".".join(str(part) for part in error["loc"]),
+                "type": error["type"],
+                "message": error["msg"],
+            }
+            for error in exc.errors(include_url=False, include_input=False)
+        ]
+        return {}, _json_response(
+            request,
+            {
+                "error": {
+                    "contract_version": "request_validation_error.v1",
+                    "type": "validation",
+                    "code": "validation_error",
+                    "status": 422,
+                    "message": "요청 필드를 확인해 주세요.",
+                    "details": details,
+                }
+            },
+            status=422,
+        )
+    return dto.model_dump(mode="python"), None
+
+
+def _case_repository_error_response(
+    request: HttpRequest,
+    error: CaseRepositoryError,
+) -> JsonResponse:
+    payload = {
+        "error": {
+            "contract_version": "consultation_case_error.v2",
+            "type": "case",
+            "code": error.code,
+            "status": error.status,
+            "message": str(error),
+        }
+    }
+    if error.details:
+        payload["error"]["details"] = error.details
+    return _json_response(
+        request,
+        payload,
+        status=error.status,
     )
 
 
