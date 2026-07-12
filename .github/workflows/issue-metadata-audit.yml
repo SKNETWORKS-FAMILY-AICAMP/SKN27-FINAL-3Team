@@ -1,0 +1,44 @@
+name: issue-metadata-audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * 1"
+  issues:
+    types:
+      - opened
+      - reopened
+      - assigned
+      - unassigned
+      - labeled
+      - unlabeled
+      - milestoned
+      - demilestoned
+      - typed
+      - untyped
+      - field_added
+      - field_removed
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: issue-metadata-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Audit open issue metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/issue_metadata_audit.py
