@@ -6,20 +6,20 @@
 
 연결 이슈: #177, #180
 
+## 정책의 단일 원천
+
+`.github/issue-metadata-policy.yml`을 감사 규칙의 유일한 원천으로 사용한다. 스크립트, 테스트와 워크플로는 필드명·라벨·날짜·API 버전을 별도로 선언하지 않고 이 파일을 읽는다.
+
+- 조직 Issue Fields가 Priority·Status·일정의 canonical source of truth다.
+- Project v2는 동일 Issue Fields를 보여주는 `view_only` 운영 화면으로 사용한다.
+- Project 전용 Status·일정 필드를 새로 만들거나 병렬로 유지하지 않는다.
+- 과거 `start`와 `fin`은 정책에 legacy field로 기록하고 이관 후 제거한다.
+
 ## 필수 기준
 
-모든 열린 실행 이슈는 다음 값을 가져야 한다.
+필수 담당자·라벨·마일스톤·Issue Type·Issue Fields·본문 날짜 목록은 정책 파일의 `required`에서 관리한다. 날짜 상호 일치와 동시에 허용하지 않는 라벨은 `consistency`와 `exclusive_label_prefixes`에서 관리한다.
 
-- 담당자 1명 이상
-- `wbs` 라벨
-- `domain:*` 라벨 1개 이상
-- `phase:*` 라벨 1개 이상
-- 마일스톤
-- Issue Type
-- 공식 Issue Field: `Priority`, `Status`, `Start date`, `Target date`
-- 본문 일정: `기준일: YYYY-MM-DD`, `시작일: YYYY-MM-DD`, `목표일: YYYY-MM-DD`
-
-Pull Request와 닫힌 이슈는 감사 대상에서 제외한다. `Size`와 `Estimate`는 기존 백로그 보정이 끝날 때까지 실패 조건으로 사용하지 않는다.
+Pull Request와 닫힌 이슈는 기본 감사 대상에서 제외한다. 감사 범위는 정책 파일의 `scope`를 따른다.
 
 ## 실행 방법
 
@@ -27,14 +27,17 @@ GitHub Actions에서는 기본 `GITHUB_TOKEN`의 `issues: read` 권한으로 실
 
 ```bash
 GITHUB_TOKEN=... python scripts/issue_metadata_audit.py \
-  --repository SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team
+  --repository SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team \
+  --policy .github/issue-metadata-policy.yml
 ```
 
 PowerShell:
 
 ```powershell
 $env:GITHUB_TOKEN = "..."
-python scripts/issue_metadata_audit.py --repository SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team
+python scripts/issue_metadata_audit.py `
+  --repository SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team `
+  --policy .github/issue-metadata-policy.yml
 ```
 
 누락이 없으면 종료 코드 `0`, 하나라도 있으면 종료 코드 `1`을 반환한다. Actions에서는 누락 이슈 링크와 위반 코드가 Job Summary에 기록된다.
@@ -47,7 +50,7 @@ python scripts/issue_metadata_audit.py --repository SKNETWORKS-FAMILY-AICAMP/SKN
 - 수동 `workflow_dispatch`
 - 이슈 생성·재개와 담당자·라벨·마일스톤·유형·Issue Field 변경
 
-GitHub Issue Field 조회에는 REST API 버전 `2026-03-10`의 `/issue-field-values` 엔드포인트를 사용한다.
+GitHub Issue Field 조회 API 버전도 정책 파일의 `api.version`에서 읽는다.
 
 ## 상태 전환 기준
 
@@ -83,3 +86,8 @@ GitHub Issue Field 조회에는 REST API 버전 `2026-03-10`의 `/issue-field-va
 | `missing_type` | Issue Type 없음 |
 | `missing_field:<name>` | 공식 Issue Field 값 없음 |
 | `missing_body_date:<label>` | 본문 일정 항목이 없거나 ISO 날짜 형식이 아님 |
+| `invalid_body_date:<label>` | 본문 날짜가 실제 달력 날짜가 아님 |
+| `invalid_field_date:<name>` | Issue Field 날짜가 실제 달력 날짜가 아님 |
+| `date_mismatch:<label>:<field>` | 본문 날짜와 canonical Issue Field 날짜가 다름 |
+| `conflicting_labels:<prefix>*` | 동시에 허용하지 않는 라벨이 둘 이상 설정됨 |
+| `milestone_due_mismatch:<field>` | 마일스톤 기한과 canonical 목표일이 다름 |

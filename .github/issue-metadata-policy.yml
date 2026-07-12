@@ -1,0 +1,43 @@
+version: issue_metadata_policy.v1
+
+api:
+  version: "2026-03-10"
+
+source_of_truth:
+  kind: organization_issue_fields
+  project_v2_role: view_only
+  legacy_fields:
+    - start
+    - fin
+
+scope:
+  states:
+    - open
+  exclude_pull_requests: true
+
+required:
+  assignee_min_count: 1
+  exact_labels:
+    - wbs
+  label_prefixes:
+    - "domain:"
+    - "phase:"
+  exclusive_label_prefixes:
+    - "phase:"
+  milestone: true
+  issue_type: true
+  issue_fields:
+    - Priority
+    - Status
+    - Start date
+    - Target date
+  body_dates:
+    - 기준일
+    - 시작일
+    - 목표일
+
+consistency:
+  body_to_field:
+    시작일: Start date
+    목표일: Target date
+  milestone_due_field: Target date
