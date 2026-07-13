@@ -5,12 +5,13 @@ services:
       dockerfile: Dockerfile
     image: skn27-demo-backend
     container_name: skn27-demo-backend
+    command: sh -c "python backend/manage.py migrate --noinput && exec gunicorn --chdir backend --bind 0.0.0.0:8000 --workers 3 --timeout 120 config.wsgi:application"
     environment: &backend-environment
       PYTHONUTF8: "1"
       DJANGO_DEBUG: "1"
       MOCK_REQUIRE_AUTH: "1"
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1]"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1],backend"
       DJANGO_DATABASE_ENGINE: "postgres"
       POSTGRES_HOST: "postgres"
       POSTGRES_PORT: "5432"
@@ -78,9 +79,12 @@ services:
     volumes:
       - object_storage_data:/app/backend/media/mock_object_storage
     depends_on:
-      - redis
-      - postgres
-      - neo4j
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
 
   agent-worker:
     build:
@@ -88,7 +92,7 @@ services:
       dockerfile: Dockerfile
     image: skn27-demo-backend
     container_name: skn27-agent-worker
-    command: sh -c "python backend/manage.py migrate --check && exec python backend/manage.py process_agent_work_items --loop"
+    command: sh -c "python backend/manage.py migrate --check && exec python backend/manage.py process_agent_work_items --loop --limit 10"
     environment: *backend-environment
     volumes:
       - object_storage_data:/app/backend/media/mock_object_storage
@@ -99,6 +103,8 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_started
+    healthcheck:
+      disable: true
     restart: unless-stopped
 
   file-scan-worker:
@@ -198,7 +204,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./storage/schemas/law_db_schema.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-law_db}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-law_db}"]
       interval: 5s
       timeout: 5s
       retries: 5

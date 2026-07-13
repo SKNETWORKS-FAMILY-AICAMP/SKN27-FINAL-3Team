@@ -1972,7 +1972,16 @@ def _analysis_job_access_response(
     metadata = get_analysis_job_access_metadata(job_id)
     if metadata is None:
         return None
-    access = authorize_resource_access(metadata, identity_payload)
+    session_id = str(metadata.get("session_id") or "").strip()
+    access = (
+        _authorize_session_query(
+            session_id,
+            identity_payload,
+            resource_type="analysis_result",
+        )
+        if session_id
+        else authorize_resource_access(metadata, identity_payload)
+    )
     if access["allowed"]:
         return None
     return _object_access_denied_response(request, access)

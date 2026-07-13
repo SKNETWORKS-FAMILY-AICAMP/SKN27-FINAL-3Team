@@ -2129,6 +2129,14 @@ def enqueue_analysis_job_work(
     if owner_id and session.owner_id and session.owner_id != owner_id:
         raise PermissionError("analysis job session belongs to another owner")
 
+    conversation_save_state = conversation_save_state_from_payload(payload)
+    session.metadata = _metadata_with_conversation_save_state(
+        session.metadata,
+        conversation_save_state,
+        raw_payload=payload,
+    )
+    session.save(update_fields=["metadata", "updated_at"])
+
     job_id = _text(job_payload.get("job_id"))
     if not job_id:
         raise ValueError("job_payload must include job_id")

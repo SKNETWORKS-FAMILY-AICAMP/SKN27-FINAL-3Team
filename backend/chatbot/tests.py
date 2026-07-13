@@ -62,6 +62,7 @@ from config.env_loader import load_django_env_file
 from chatbot.readiness import build_production_readiness_report
 from chatbot.repositories import (
     build_report_download_pdf_body,
+    enqueue_analysis_job_work,
     list_history_event_records,
     process_agent_work_item,
     process_agent_work_items,
@@ -131,6 +132,38 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(UsageQuota._meta.db_table, "usage_quotas")
         self.assertEqual(UsageEvent._meta.db_table, "usage_events")
         self.assertEqual(HistoryEvent._meta.db_table, "history_events")
+
+    def test_enqueue_analysis_job_work_binds_guest_identity_to_session(self):
+        enqueue_analysis_job_work(
+            {
+                "session_id": "ses_guest_worker_owner",
+                "user_text": "게스트 작업 소유권을 보존해 주세요.",
+                "conversation_save_state": "pending",
+                "auth_context": {
+                    "auth_state": "guest",
+                    "subject_type": "guest",
+                    "subject_id": "guest:gst_worker_owner",
+                    "guest_id": "gst_worker_owner",
+                },
+            },
+            {
+                "session_id": "ses_guest_worker_owner",
+                "message_id": "msg_guest_worker_owner",
+                "job_id": "job_guest_worker_owner",
+                "routing_intent": "traffic_law_search",
+                "analysis_plan": {
+                    "plan_id": "plan_guest_worker_owner",
+                    "steps": [],
+                },
+                "chat_response": {},
+            },
+        )
+
+        session = ChatSession.objects.get(session_id="ses_guest_worker_owner")
+        self.assertEqual(
+            session.metadata["auth_context"]["guest_id"],
+            "gst_worker_owner",
+        )
 
     def test_knowledge_rag_tables_link_source_chunks_and_retrieval_events(self):
         source = SourceDocument.objects.create(

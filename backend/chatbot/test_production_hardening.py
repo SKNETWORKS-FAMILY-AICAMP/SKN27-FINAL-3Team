@@ -556,6 +556,12 @@ class ProductionApiContractTests(SimpleTestCase):
                     "limitations": ["추가 확인 필요"],
                 },
             ],
+            "cards": [{"card_type": "law", "title": "법령 근거"}],
+            "pending_questions": [{"field": "evidence", "question": "자료가 더 있나요?"}],
+            "reporting_payload": {"report_type": "initial_consultation"},
+            "supervisor_state": {"status": "completed"},
+            "work_item": {"work_item_id": "work_1", "status": "success"},
+            "progress_state": {"state": "success"},
         }
         request = RequestFactory().get("/api/analysis/results/job_1/")
 
@@ -568,7 +574,111 @@ class ProductionApiContractTests(SimpleTestCase):
             body["assistant_message"]["answer"],
             "유사 사례를 찾았습니다.\n\n법령 후보를 확인했습니다.",
         )
+        self.assertEqual(body["cards"][0]["title"], "법령 근거")
+        self.assertEqual(body["pending_questions"][0]["field"], "evidence")
+        self.assertEqual(body["reporting_payload"]["report_type"], "initial_consultation")
+        self.assertEqual(body["work_item"]["status"], "success")
+        self.assertEqual(body["progress_state"]["state"], "success")
         self.assertNotIn("mock", str(body).lower())
+
+    @patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None)
+    @patch("chatbot.views._get_current_auth_subject")
+    @patch("chatbot.views.get_chat_session_access_metadata")
+    @patch("chatbot.views.get_analysis_job_access_metadata")
+    @patch("chatbot.views.get_analysis_job_record")
+    def test_guest_can_poll_its_own_queued_analysis_result(
+        self,
+        get_job,
+        get_access_metadata,
+        get_session_access,
+        get_auth_subject,
+        _guest_policy,
+    ) -> None:
+        get_job.return_value = {
+            "job_id": "job_guest_owned",
+            "session_id": "ses_guest_owned",
+            "status": "queued",
+        }
+        get_access_metadata.return_value = {
+            "type": "analysis_job",
+            "job_id": "job_guest_owned",
+            "owner_id": "",
+            "session_id": "ses_guest_owned",
+        }
+        get_session_access.return_value = {
+            "type": "chat_session",
+            "session_id": "ses_guest_owned",
+            "owner_id": "",
+            "guest_id": "gst_owner",
+        }
+        get_auth_subject.return_value = (
+            200,
+            {
+                "subject": {
+                    "subject_type": "guest",
+                    "subject_id": "guest:gst_owner",
+                    "guest_id": "gst_owner",
+                }
+            },
+        )
+
+        response = self.client.get(
+            "/api/analysis/results/job_guest_owned/",
+            HTTP_X_GUEST_ID="gst_owner",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["result"]["status"], "queued")
+
+    @patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None)
+    @patch("chatbot.views._get_current_auth_subject")
+    @patch("chatbot.views.get_chat_session_access_metadata")
+    @patch("chatbot.views.get_analysis_job_access_metadata")
+    @patch("chatbot.views.get_analysis_job_record")
+    def test_guest_cannot_poll_another_guests_analysis_result(
+        self,
+        get_job,
+        get_access_metadata,
+        get_session_access,
+        get_auth_subject,
+        _guest_policy,
+    ) -> None:
+        get_job.return_value = {
+            "job_id": "job_guest_owned",
+            "session_id": "ses_guest_owned",
+            "status": "queued",
+        }
+        get_access_metadata.return_value = {
+            "type": "analysis_job",
+            "job_id": "job_guest_owned",
+            "owner_id": "",
+            "session_id": "ses_guest_owned",
+        }
+        get_session_access.return_value = {
+            "type": "chat_session",
+            "session_id": "ses_guest_owned",
+            "owner_id": "",
+            "guest_id": "gst_owner",
+        }
+        get_auth_subject.return_value = (
+            200,
+            {
+                "subject": {
+                    "subject_type": "guest",
+                    "subject_id": "guest:gst_other",
+                    "guest_id": "gst_other",
+                }
+            },
+        )
+
+        response = self.client.get(
+            "/api/analysis/results/job_guest_owned/",
+            HTTP_X_GUEST_ID="gst_other",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+        self.assertEqual(response.json()["error"]["access"]["reason"], "guest_mismatch")
 
 
 class RuntimeHealthTests(SimpleTestCase):

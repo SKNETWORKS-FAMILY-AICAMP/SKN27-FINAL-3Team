@@ -53,6 +53,59 @@ def test_frontend_uses_canonical_capability_and_async_result_contracts() -> None
     assert "/scan/" not in api_client
 
 
+def test_chat_report_ready_notice_uses_a_locally_declared_gated_payload() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    chat_start = shell.index("function ChatScreenV2(")
+    chat_end = shell.index("function AnalysisProgressPanel", chat_start)
+    chat_screen = shell[chat_start:chat_end]
+
+    assert (
+        "const visibleReportingPayload = "
+        "isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;"
+    ) in chat_screen
+    assert "{visibleReportingPayload && (" in chat_screen
+
+
+def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    for token in (
+        'function assistantMessageText(value, fallback = "")',
+        'typeof value === "string"',
+        "value.answer || value.summary",
+        "const assistantAnswer = assistantMessageText(analysisResponse?.assistant_message);",
+        'content: assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),',
+        "const assistantMessage = assistantMessageText(",
+        "assistant_message: assistantMessageText(",
+    ):
+        assert token in shell
+
+
+def test_frontend_polls_guest_worker_jobs_until_a_terminal_result() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    poll_start = shell.index("async function pollQueuedWorkerResult")
+    poll_end = shell.index("async function submitServiceMessage", poll_start)
+    polling = shell[poll_start:poll_end]
+
+    assert "const WORKER_POLL_MAX_ATTEMPTS = 60;" in shell
+    assert "setChatMessages(conversationHistory);" in shell
+    assert "if (!requestIdentity?.authToken)" not in polling
+    assert (
+        "for (let attempt = 0; attempt < WORKER_POLL_MAX_ATTEMPTS; attempt += 1)"
+        in polling
+    )
+    assert "await api.getAnalysisResult" in polling
+    assert "...jobDetail," in polling
+    assert "await waitForWorkerPoll();" in polling
+
+
+def test_repeated_analysis_cards_use_unique_react_keys() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    assert "function analysisCardKey(card, index)" in shell
+    assert shell.count("key={analysisCardKey(card, index)}") == 4
+
+
 def test_deferred_vision_and_aws_ops_are_not_runtime_modules() -> None:
     assert not (ROOT / "app" / "services" / "vision_pipeline_service.py").exists()
     assert not (ROOT / "app" / "services" / "aws_ops_mcp_service.py").exists()

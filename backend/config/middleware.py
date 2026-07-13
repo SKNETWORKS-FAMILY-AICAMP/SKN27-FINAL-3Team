@@ -231,6 +231,8 @@ def _is_guest_allowed_request(request: HttpRequest, authorization_header: str | 
         return False
     if request.path in GUEST_ALLOWED_PATHS:
         return True
+    if request.path.startswith("/api/analysis/results/"):
+        return True
     return request.path.startswith("/api/reports/") and request.path.endswith("/download/")
 
 

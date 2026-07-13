@@ -19,7 +19,7 @@ def test_compose_runs_the_canonical_agent_worker_continuously() -> None:
     assert worker["image"] == compose["services"]["backend"]["image"]
     assert worker["command"] == (
         "sh -c \"python backend/manage.py migrate --check && "
-        "exec python backend/manage.py process_agent_work_items --loop\""
+        "exec python backend/manage.py process_agent_work_items --loop --limit 10\""
     )
     assert worker["restart"] == "unless-stopped"
     assert worker["depends_on"]["postgres"]["condition"] == "service_healthy"
