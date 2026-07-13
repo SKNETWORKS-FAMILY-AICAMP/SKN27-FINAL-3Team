@@ -1,9 +1,4 @@
-"""Persistence models for production storage integration.
-
-These models are intentionally not wired into the mock services yet. They define
-the durable storage boundary that will replace local sidecar JSON files in later
-branches.
-"""
+"""Persistence models for the canonical API and consultation Case v2."""
 
 from __future__ import annotations
 
@@ -65,9 +60,21 @@ class ReportStatus(models.TextChoices):
 class ReportType(models.TextChoices):
     FINE_NOTICE_OBJECTION = "fine_notice_objection", "Fine notice objection"
     FAULT_RATIO_ANALYSIS = "fault_ratio_analysis", "Fault ratio analysis"
-    OBJECTION_DRAFT = "objection_draft", "Objection draft"
-    FAULT_ANALYSIS = "fault_analysis", "Fault analysis"
     GENERAL = "general", "General"
+    INITIAL_CONSULTATION = "initial_consultation", "Initial consultation"
+    EXPERT_HANDOFF = "expert_handoff", "Expert handoff"
+
+
+class CaseStatus(models.TextChoices):
+    INTAKE = "intake", "Intake"
+    AWAITING_FACT_CONFIRMATION = "awaiting_fact_confirmation", "Awaiting fact confirmation"
+    QUEUED = "queued", "Queued"
+    ANALYZING = "analyzing", "Analyzing"
+    NEEDS_INPUT = "needs_input", "Needs input"
+    READY = "ready", "Ready"
+    HIGH_RISK_HANDOFF = "high_risk_handoff", "High risk handoff"
+    CLOSED = "closed", "Closed"
+    DELETED = "deleted", "Deleted"
 
 
 class UserAccountStatus(models.TextChoices):
@@ -114,6 +121,63 @@ class AgentWorkItemStatus(models.TextChoices):
     CANCELED = "canceled", "Canceled"
 
 
+class Case(TimestampedModel):
+    case_id = models.CharField(max_length=64, unique=True, db_index=True)
+    owner_id = models.CharField(max_length=128, db_index=True)
+    title = models.CharField(max_length=200, blank=True)
+    case_type = models.CharField(max_length=64, default="accident_fault", db_index=True)
+    status = models.CharField(
+        max_length=40,
+        choices=CaseStatus.choices,
+        default=CaseStatus.INTAKE,
+        db_index=True,
+    )
+    risk_level = models.CharField(max_length=32, default="standard", db_index=True)
+    location = models.JSONField(default=dict, blank=True)
+    current_fact_version = models.PositiveIntegerField(default=0)
+    current_report_version = models.PositiveIntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "cases"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["owner_id", "status"], name="cases_owner_status_idx"),
+            models.Index(fields=["case_type", "status"], name="cases_type_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return self.case_id
+
+
+class ConfirmedFactVersion(TimestampedModel):
+    fact_version_id = models.CharField(max_length=64, unique=True, db_index=True)
+    case = models.ForeignKey(Case, related_name="fact_versions", on_delete=models.CASCADE)
+    version_no = models.PositiveIntegerField()
+    status = models.CharField(max_length=32, default="confirmed", db_index=True)
+    facts = models.JSONField(default=dict, blank=True)
+    sources = models.JSONField(default=list, blank=True)
+    conflicts = models.JSONField(default=list, blank=True)
+    user_edit_history = models.JSONField(default=list, blank=True)
+    confirmed_by = models.CharField(max_length=128, blank=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "confirmed_fact_versions"
+        ordering = ["case", "-version_no"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case", "version_no"],
+                name="confirmed_fact_case_version_uniq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.fact_version_id
+
+
 class ChatSession(TimestampedModel):
     session_id = models.CharField(max_length=64, unique=True, db_index=True)
     owner_id = models.CharField(max_length=128, blank=True, db_index=True)
@@ -124,6 +188,13 @@ class ChatSession(TimestampedModel):
         default=ChatSessionStatus.DRAFT,
     )
     current_intent = models.CharField(max_length=64, blank=True)
+    case = models.ForeignKey(
+        Case,
+        related_name="chat_sessions",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
@@ -177,6 +248,13 @@ class UploadedFile(TimestampedModel):
         blank=True,
         on_delete=models.SET_NULL,
     )
+    case = models.ForeignKey(
+        Case,
+        related_name="uploaded_files",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     purpose = models.CharField(max_length=64, default="unknown", db_index=True)
     file_type = models.CharField(max_length=32, blank=True)
     original_filename = models.CharField(max_length=255, blank=True)
@@ -192,6 +270,8 @@ class UploadedFile(TimestampedModel):
     scan_status = models.CharField(max_length=32, default="not_started")
     agent_handoff = models.JSONField(default=dict, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    retention_expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "uploaded_files"
@@ -214,6 +294,13 @@ class UploadedFile(TimestampedModel):
 class AnalysisJob(TimestampedModel):
     job_id = models.CharField(max_length=64, unique=True, db_index=True)
     session = models.ForeignKey(ChatSession, related_name="analysis_jobs", on_delete=models.CASCADE)
+    case = models.ForeignKey(
+        Case,
+        related_name="analysis_jobs",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     message = models.ForeignKey(
         ChatMessage,
         related_name="analysis_jobs",
@@ -357,6 +444,20 @@ class Report(TimestampedModel):
         blank=True,
         on_delete=models.SET_NULL,
     )
+    case = models.ForeignKey(
+        Case,
+        related_name="reports",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
+    source_fact_version = models.ForeignKey(
+        ConfirmedFactVersion,
+        related_name="reports",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+    )
     display_result = models.ForeignKey(
         AnalysisDisplayResult,
         related_name="reports",
@@ -367,8 +468,9 @@ class Report(TimestampedModel):
     report_type = models.CharField(
         max_length=64,
         choices=ReportType.choices,
-        default=ReportType.OBJECTION_DRAFT,
+        default=ReportType.FINE_NOTICE_OBJECTION,
     )
+    version_no = models.PositiveIntegerField(default=1)
     status = models.CharField(
         max_length=32,
         choices=ReportStatus.choices,
@@ -392,6 +494,12 @@ class Report(TimestampedModel):
             models.Index(
                 fields=["report_type", "status"],
                 name="reports_type_status_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case", "version_no"],
+                name="report_case_version_uniq",
             ),
         ]
 

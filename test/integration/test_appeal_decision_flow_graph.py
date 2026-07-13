@@ -309,7 +309,14 @@ class TestSuccessBranch:
         sr = _structured(result)
         assert sr["risk_trigger_category"] == "B_명시적전환요청"
 
-    def test_비주정차_위반은_MG가_제7조_컨텍스트로_판단(self):
+    def test_비주정차_위반도_MG가_142조_제7조_공통컨텍스트로_판단(self):
+        """(law160-budeuk-hansayu-scope-analysis2.md 확정) 142조는 위반유형 무관 공통
+        조문이라, 비주정차 law_code에서도 제7조뿐 아니라 142조까지 함께 주입돼야 한다.
+
+        법령DB 조회를 강제로 실패시켜 하드코딩 폴백 원문으로 결정론적으로 검증한다 —
+        실제 DB 원문에는 "시행규칙 제142조"/"질서위반행위규제법 제7조" 같은 표제가 없고
+        조문 본문만 저장돼 있어, DB가 살아있으면 이 assertion이 흔들린다.
+        """
         captured_context = {}
 
         def fake_create(*args, **kwargs):
@@ -319,7 +326,10 @@ class TestSuccessBranch:
             captured_context["prompt"] = prompt
             return _fake_response('{"merit": "낮음", "merit_basis": "무관"}')
 
-        with patch("openai.OpenAI") as mock_cls:
+        with patch(
+            "etl.legal.search.get_provision_text",
+            side_effect=RuntimeError("테스트 환경 — DB 조회 불가"),
+        ), patch("openai.OpenAI") as mock_cls:
             mock_cls.return_value.chat.completions.create.side_effect = fake_create
             graph.invoke({
                 "fine_type": "과태료", "notice_stage": "사전통지",
@@ -329,7 +339,35 @@ class TestSuccessBranch:
             })
 
         assert "질서위반행위규제법 제7조" in captured_context["prompt"]
-        assert "시행규칙 제142조" not in captured_context["prompt"]
+        assert "시행규칙 제142조" in captured_context["prompt"]
+
+    def test_MG_LLM_호출실패해도_success로_완료되되_merit_judgment_failed_표시(self):
+        """MG의 LLM 호출이 실패해도 그래프는 여전히 judgment_status=success로
+        끝나야 하고(RG는 정상 동작), merit="보류"가 실제 애매함 판단이 아니라
+        기술적 실패라는 걸 structured_result·disclaimer·next_actions 전부에서
+        구분할 수 있어야 한다."""
+        def fake_create(*args, **kwargs):
+            prompt = kwargs["messages"][0]["content"]
+            if "신원노출" in prompt:
+                return _fake_response('{"category": null, "confidence": "low", "rationale": "무관"}')
+            raise ConnectionError("네트워크 오류")
+
+        with patch("openai.OpenAI") as mock_cls:
+            mock_cls.return_value.chat.completions.create.side_effect = fake_create
+            result = graph.invoke({
+                "fine_type": "과태료", "notice_stage": "사전통지",
+                "opinion_deadline": _iso(8),
+                "user_appeal_reason": "표지판이 가려져 있었습니다",
+            })
+
+        sr = _structured(result)
+        assert sr["judgment_status"] == "success"
+        assert sr["merit"] == "보류"
+        assert sr["merit_judgment_failed"] is True
+        assert "기술 오류로 완료되지 못해" in sr["guide"]["disclaimer"]
+
+        next_actions = _envelope(result)["next_actions"]
+        assert any("재호출" in action for action in next_actions)
 
 
 # ── RG ∥ MG 병렬 분기의 실행 순서·독립성 확인 ────────────────────────────────

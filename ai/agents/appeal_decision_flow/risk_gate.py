@@ -73,6 +73,7 @@ def risk_classification_node(state: AppealJudgmentState) -> dict:
             "risk_flag":             False,
             "risk_stage_matched":    "keyword",
             "risk_trigger_category": None,
+            "risk_judgment_failed":  False,
         }
 
     # ── 1단계: 카테고리 A/B/C 키워드 매칭 ─────────────────────────────
@@ -89,6 +90,7 @@ def risk_classification_node(state: AppealJudgmentState) -> dict:
             "risk_flag":             True,
             "risk_stage_matched":    "keyword",
             "risk_trigger_category": _CATEGORY_LABELS[matched_category],
+            "risk_judgment_failed":  False,
         }
 
     # ── 2단계: LLM 구조화 분류 ─────────────────────────────────────────
@@ -104,11 +106,15 @@ def risk_classification_node(state: AppealJudgmentState) -> dict:
         # LLM 호출·파싱 실패(네트워크 오류·레이트리밋·잘못된 응답 등) — 재현율 우선
         # 원칙에 따라 "판단 불가"를 안전이 아니라 위험 쪽으로 보수적 처리한다.
         # 놓쳤을 때(false negative) 실제 불이익으로 이어지는 안전 문제이기 때문이다.
+        # risk_judgment_failed=True로 "위험을 감지한 것"과 "판단 자체를 못 한 것"을
+        # 구분해둔다 — merit_judgment_failed와 대칭 (guide_generation_node가 이 값으로
+        # disclaimer에 재시도 안내를 붙인다). risk_flag 자체(안전 기본값)는 바꾸지 않는다.
         return {
             "risk_flag":             True,
             "risk_stage_matched":    "llm",
             "risk_confidence":       None,
             "risk_trigger_category": None,
+            "risk_judgment_failed":  True,
         }
 
     # 재현율 우선: confidence가 "low"로 명시적으로 확인된 경우에만 안전 처리.
@@ -122,4 +128,5 @@ def risk_classification_node(state: AppealJudgmentState) -> dict:
         "risk_stage_matched":    "llm",
         "risk_confidence":       _CONFIDENCE_SCORE.get(confidence),
         "risk_trigger_category": _CATEGORY_LABELS.get(category) if risk_flag else None,
+        "risk_judgment_failed":  False,
     }

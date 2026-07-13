@@ -3,6 +3,7 @@
 !.env.example
 !.env.production.example
 .venv/
+.terraform/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -26,6 +27,7 @@ tmp/ppt_tech_arch/
 tmp/*.pptx
 output/erd/
 outputs/
+etl/fault_cases/artifacts/OCR_output/
 project-progress-report-*.html
 
 # Generated PDF/export scratch artifacts not already tracked

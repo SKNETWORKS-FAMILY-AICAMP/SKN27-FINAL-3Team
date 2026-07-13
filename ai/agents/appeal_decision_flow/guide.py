@@ -1,6 +1,30 @@
 from .state import AppealJudgmentState
 from .utils import make_envelope, update_agent_results
 
+# fine_type=="범칙금"이 아니면 전부 "과태료"로, notice_stage는 각 노드가 알려진 값과의
+# 일치 여부로만 분기해 매핑 안 되는 값은 조용히 else로 흡수된다 — 오탈자·공백·None 같은
+# 예상 밖 값이 와도 크래시 없이 판정을 계속 진행하는 게 의도된 설계(v22 "하드 블로커
+# 없음" 원칙)이지만, 그 사실 자체를 사용자에게 알리지 않는 건 "침묵하는 오분류"였다.
+# 라우팅·계산 로직은 그대로 두고, guide_generation_node에서 경고만 명시적으로 덧붙인다
+# (이의가능성_판단_에이전트_미비점_조사_2026-07-09.md 🟡5).
+_VALID_FINE_TYPES = {"과태료", "범칙금"}
+_VALID_NOTICE_STAGES = {"사전통지", "1차 고지서", "즉결심판"}
+
+
+def _unrecognized_schema_fields(state: AppealJudgmentState) -> list[str]:
+    unrecognized = []
+    if state.get("fine_type") not in _VALID_FINE_TYPES:
+        unrecognized.append("fine_type")
+    if state.get("notice_stage") not in _VALID_NOTICE_STAGES:
+        unrecognized.append("notice_stage")
+    return unrecognized
+
+
+_SCHEMA_WARNING_NOTICE = (
+    "⚠️ 위반 종류 또는 처리 단계 값이 예상된 형식과 달라, 아래 안내가 실제 상황과 다르게 "
+    "표시될 수 있습니다 — 고지서 원본을 직접 확인하거나 상담원에게 재확인을 요청하세요."
+)
+
 # ── ② 기대치 조정 (공용, fine_type·notice_stage 무관 고정 텍스트) ────
 _EXPECTATION_TEXT = """\
 이의제기가 항상 유리한 선택은 아닙니다. 과태료 이의제기는 처분 효력을 상실시킬 뿐 \
@@ -42,6 +66,15 @@ _PENALTY_MYTH_TEXT = (
     "사전 단계 성격이라 통상 전과기록(범죄경력자료)에는 남지 않습니다 — '이의신청하면 "
     "전과 남는다'는 흔한 오해입니다. 다만 출석·납부기한 만료일로부터 60일이 지나도록 "
     "즉결심판을 받지 않으면 별도로 벌점 40점이 부과됩니다."
+)
+
+# reason_intake_node가 길이만으로 걸러낸 신호 — "판단을 못 한 것"(merit_judgment_failed류)이
+# 아니라 "판단은 했는데 입력이 빈약해 신뢰도가 낮을 수 있는 것"이라 별도 문구로 구분한다
+# (이의가능성_판단_에이전트_미비점_조사_2026-07-09.md 🔴2).
+_REASON_QUALITY_NOTICE = (
+    "⚠️ 입력하신 사유가 짧아 판단 근거가 충분하지 않을 수 있습니다 — 아래 판정 결과는 "
+    "입력하신 내용만으로 나온 것이니, 날짜·장소·경위 등 구체적인 정황을 추가로 제공하시면 "
+    "더 정확한 판단을 받을 수 있습니다."
 )
 
 _RESIDUAL_RISK_NOTICE = (
@@ -126,22 +159,78 @@ _TONE_STRONG_UNCONDITIONAL = (
 )
 
 
+# merit="강함"이어도 근거 조문이 "감경"형(예: 질서법 제10조②)이면 처분 자체가 없어지는
+# 게 아니라 금액만 줄어드는 것 — "면제·감경 사유 merit 구분 설계.md" 참고. 사용자가
+# "이의제기하면 처분이 취소될 수도 있겠다"고 과도하게 기대하지 않도록 명시적으로 붙인다.
+_RELIEF_TYPE_REDUCTION_NOTICE = (
+    "⚠️ 이 사유는 인정되더라도 과태료 처분 자체가 없어지는 게 아니라 금액이 일부 "
+    "감경되는 사유입니다 — 처분이 취소될 거라 기대하지 마시고, 참고용으로만 활용하세요."
+)
+
+# merit_judgment_failed와 대칭 — merit="강함"까지는 정상 판단됐지만, 그게 면제(처분 자체
+# 불가)인지 감경(금액만 축소)인지 구분하는 2차 판정이 기술적으로 실패한 경우다. 이 구분이
+# 없으면 사용자가 "처분이 아예 없어질 수도 있다"고 과신할 위험이 남는다.
+_RELIEF_TYPE_JUDGMENT_FAILED_NOTICE = (
+    "⚠️ 이 사유가 면제(처분 자체 불가)인지 감경(금액만 축소)인지 구분하는 판정이 일시적 "
+    "기술 오류로 완료되지 못했습니다 — 사유 인정 가능성 판단 자체는 정상 결과이지만, "
+    "처분이 아예 없어지는지 금액만 줄어드는지는 아직 확정되지 않았으니 결과를 과신하지 "
+    "말고 잠시 후 다시 시도해 정확한 구분을 받아보세요."
+)
+
+# 기술적 실패로 merit="보류"가 나왔을 때 붙이는 정정 문구 (RG의 risk_flag는 이 실패와
+# 무관하게 정상 평가된 값이므로 톤 자체는 그대로 두고, 이 문구를 앞에 덧붙이기만 한다) —
+# "판단이 애매하다"가 아니라 "판단을 못 했다"임을 명확히 해서, 승산 있는 사유를 사용자가
+# 오해로 포기하지 않게 한다.
+_MERIT_JUDGMENT_FAILED_NOTICE = (
+    "⚠️ 사유 인정 가능성(merit) 판정이 일시적 기술 오류로 완료되지 못해 잠정적으로 "
+    "'보류'로 표시됩니다 — 사유 내용을 실제로 검토해서 애매하다고 나온 결과가 아니라, "
+    "시스템이 판단 자체를 하지 못한 것입니다. 아래 톤은 안전을 위한 임시 표시일 뿐이니 "
+    "승산 있는 사유를 이것만 보고 포기하지 마시고, 잠시 후 다시 시도해 정확한 판정을 "
+    "받아보세요."
+)
+
+# merit_judgment_failed와 대칭 — RG는 실패 시에도 risk_flag=true(안전 기본값)를 그대로
+# 유지하지만, "위험을 감지해서"가 아니라 "판단을 못 해서" true인 경우를 사용자에게 밝히지
+# 않으면 불필요하게 위축되거나 재시도 없이 이의제기 자체를 포기할 수 있다.
+_RISK_JUDGMENT_FAILED_NOTICE = (
+    "⚠️ 위험도(신원노출 가능성) 판정이 일시적 기술 오류로 완료되지 못해, 안전을 위해 "
+    "잠정적으로 '위험 있음'으로 표시됩니다 — 사유 내용을 실제로 분석해서 나온 결과가 "
+    "아니라, 시스템이 판단 자체를 하지 못해 보수적으로 처리한 것입니다. 정확한 판정을 "
+    "원하시면 잠시 후 다시 시도해주세요."
+)
+
+
 def _merit_risk_tone(state: AppealJudgmentState) -> str | None:
     merit = state.get("merit")
     if merit not in ("강함", "보류", "낮음"):
         return None  # not_applicable/denied 경로 — MG가 실행되지 않아 merit이 없음
 
     if not state.get("risk_flag"):
-        return _TONE_SAFE[merit]
+        tone = _TONE_SAFE[merit]
+    elif merit != "강함":
+        tone = _TONE_RISKY_NON_STRONG[merit]
+    else:
+        # merit=강함 & risk=true: 카테고리 C만 조건부, 그 외(A/B, 또는 LLM 예외로
+        # 카테고리를 알 수 없는 경우)는 안전 쪽으로 단정하지 않고 무조건 위험으로 취급
+        if state.get("risk_trigger_category") == "C_본인운전인정형":
+            tone = _TONE_STRONG_CONDITIONAL
+        else:
+            tone = _TONE_STRONG_UNCONDITIONAL
 
-    if merit != "강함":
-        return _TONE_RISKY_NON_STRONG[merit]
+    if merit == "강함" and state.get("merit_relief_type") == "감경":
+        tone = f"{tone}\n\n{_RELIEF_TYPE_REDUCTION_NOTICE}"
+    elif merit == "강함" and state.get("relief_type_judgment_failed"):
+        tone = f"{tone}\n\n{_RELIEF_TYPE_JUDGMENT_FAILED_NOTICE}"
 
-    # merit=강함 & risk=true: 카테고리 C만 조건부, 그 외(A/B, 또는 LLM 예외로
-    # 카테고리를 알 수 없는 경우)는 안전 쪽으로 단정하지 않고 무조건 위험으로 취급
-    if state.get("risk_trigger_category") == "C_본인운전인정형":
-        return _TONE_STRONG_CONDITIONAL
-    return _TONE_STRONG_UNCONDITIONAL
+    if state.get("merit_judgment_failed"):
+        tone = f"{_MERIT_JUDGMENT_FAILED_NOTICE}\n\n{tone}"
+
+    # risk_flag를 항상 merit보다 먼저 노출한다는 우선순위 규칙(DATA-003 §4)에 맞춰,
+    # 두 실패 고지가 동시에 붙는 경우 risk 쪽을 맨 앞에 둔다.
+    if state.get("risk_judgment_failed"):
+        tone = f"{_RISK_JUDGMENT_FAILED_NOTICE}\n\n{tone}"
+
+    return tone
 
 
 def _disclaimer_text(state: AppealJudgmentState) -> str:
@@ -152,13 +241,28 @@ def _disclaimer_text(state: AppealJudgmentState) -> str:
         _RESIDUAL_RISK_NOTICE,
     ]
 
+    if _unrecognized_schema_fields(state):
+        parts.append(_SCHEMA_WARNING_NOTICE)
+
     if state.get("law_code_verified") is False:
-        parts.append(
-            "이의신청서에 인용된 법조항이 확인되지 않았습니다 — 고지서 원본과 대조해 "
-            "직접 확인하세요."
-        )
+        if state.get("law_code"):
+            # law_code는 있는데 법령DB에 없는 경우 — OCR 오독·오기일 가능성이 "애초에
+            # 조항을 못 읽은 경우"보다 높으므로 별도 문구로 구분한다
+            # (이의가능성_판단_에이전트_미비점_조사_2026-07-09.md 🟡4).
+            parts.append(
+                "이의신청서에 인용된 법조항이 법령DB에서 확인되지 않았습니다 — 고지서에 "
+                "인쇄된 조문 표기(오탈자·오독 가능성 포함)를 원본과 직접 대조해 확인하세요."
+            )
+        else:
+            parts.append(
+                "고지서에서 법조항 표기 자체를 인식하지 못했습니다 — 고지서 원본과 대조해 "
+                "직접 확인하세요."
+            )
     elif state.get("law_code_verified") is True:
         parts.append("이의신청서에 인용될 법조항은 법령DB로 확인됐습니다.")
+
+    if state.get("reason_quality_insufficient"):
+        parts.append(_REASON_QUALITY_NOTICE)
 
     tone = _merit_risk_tone(state)
     if tone:
@@ -174,12 +278,19 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "notice_stage":          state.get("notice_stage"),
         "overall_possibility":   state.get("overall_possibility"),
         "merit":                 state.get("merit"),
+        "merit_basis":           state.get("merit_basis"),
+        "merit_judgment_failed": state.get("merit_judgment_failed"),
+        "merit_relief_type":     state.get("merit_relief_type"),
+        "relief_type_judgment_failed": state.get("relief_type_judgment_failed"),
         "risk_flag":             state.get("risk_flag"),
         "risk_confidence":       state.get("risk_confidence"),
         "risk_trigger_category": state.get("risk_trigger_category"),
+        "risk_judgment_failed":  state.get("risk_judgment_failed"),
         "computed_deadline":     state.get("computed_deadline"),
         "deadline_passed":       state.get("deadline_passed"),
         "law_code_verified":     state.get("law_code_verified"),
+        "reason_quality_insufficient": state.get("reason_quality_insufficient"),
+        "schema_fields_unrecognized": _unrecognized_schema_fields(state),
         "guide":                 guide,
     }
 
@@ -202,7 +313,23 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
 
     judgment_status = state.get("judgment_status") or "success"
     structured = _structured_result(state, guide)
-    next_actions = _NEXT_ACTIONS.get(judgment_status, [])
+    next_actions = list(_NEXT_ACTIONS.get(judgment_status, []))
+    if state.get("risk_judgment_failed"):
+        # risk 판정이 기술적 실패로 안전 기본값(risk_flag=true)에 머문 상태 — Supervisor가
+        # 이걸 "실제 위험 감지"로 오인하지 않고 재호출을 시도할 수 있게 명시적으로 알려준다.
+        next_actions.append("RG(risk) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
+    if state.get("merit_judgment_failed"):
+        # merit 판정이 기술적 실패로 "보류"에 머문 상태 — Supervisor가 이걸 "판정
+        # 완료"로 오인하지 않고 재호출을 시도할 수 있게 명시적으로 알려준다.
+        next_actions.append("MG(merit) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
+    if state.get("relief_type_judgment_failed"):
+        # merit="강함"까지는 정상 판단됐지만 면제/감경 2차 구분만 기술적으로 실패한
+        # 상태 — merit_judgment_failed와 별개 원인이므로 별도 재호출 안내를 남긴다.
+        next_actions.append("MG(relief_type) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
+    if _unrecognized_schema_fields(state):
+        # fine_type·notice_stage가 알려진 값 밖이면 판정은 그대로(기본 분기로) 진행했지만,
+        # Supervisor가 OCR 결과를 재확인하도록 명시적으로 알려준다.
+        next_actions.append("fine_type/notice_stage 값이 예상 밖 — OCR 결과 재확인 필요")
     fine_type_label = state.get("fine_type") or "미확인"
     notice_stage_label = state.get("notice_stage") or "미확인"
     summary = f"{fine_type_label} {notice_stage_label} — {judgment_status}"

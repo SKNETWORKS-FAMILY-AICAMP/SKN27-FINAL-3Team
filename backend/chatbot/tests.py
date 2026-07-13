@@ -62,6 +62,7 @@ from config.env_loader import load_django_env_file
 from chatbot.readiness import build_production_readiness_report
 from chatbot.repositories import (
     build_report_download_pdf_body,
+    enqueue_analysis_job_work,
     list_history_event_records,
     process_agent_work_item,
     process_agent_work_items,
@@ -131,6 +132,38 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(UsageQuota._meta.db_table, "usage_quotas")
         self.assertEqual(UsageEvent._meta.db_table, "usage_events")
         self.assertEqual(HistoryEvent._meta.db_table, "history_events")
+
+    def test_enqueue_analysis_job_work_binds_guest_identity_to_session(self):
+        enqueue_analysis_job_work(
+            {
+                "session_id": "ses_guest_worker_owner",
+                "user_text": "게스트 작업 소유권을 보존해 주세요.",
+                "conversation_save_state": "pending",
+                "auth_context": {
+                    "auth_state": "guest",
+                    "subject_type": "guest",
+                    "subject_id": "guest:gst_worker_owner",
+                    "guest_id": "gst_worker_owner",
+                },
+            },
+            {
+                "session_id": "ses_guest_worker_owner",
+                "message_id": "msg_guest_worker_owner",
+                "job_id": "job_guest_worker_owner",
+                "routing_intent": "traffic_law_search",
+                "analysis_plan": {
+                    "plan_id": "plan_guest_worker_owner",
+                    "steps": [],
+                },
+                "chat_response": {},
+            },
+        )
+
+        session = ChatSession.objects.get(session_id="ses_guest_worker_owner")
+        self.assertEqual(
+            session.metadata["auth_context"]["guest_id"],
+            "gst_worker_owner",
+        )
 
     def test_knowledge_rag_tables_link_source_chunks_and_retrieval_events(self):
         source = SourceDocument.objects.create(
@@ -472,7 +505,7 @@ class ChatbotPersistenceModelTests(TestCase):
             session=session,
             job=job,
             display_result=display_result,
-            report_type=ReportType.OBJECTION_DRAFT,
+            report_type=ReportType.FINE_NOTICE_OBJECTION,
             status=ReportStatus.READY,
             title="Objection draft",
             storage_uri="s3://mock-bucket/reports/usr_db/rep_db_foundation.txt",
@@ -884,13 +917,14 @@ class ProductionReadinessTests(TestCase):
     def test_file_scan_smoke_command_requires_clean_scan(self):
         output = StringIO()
 
-        call_command(
-            "smoke_file_scan",
-            "--require-clean",
-            "--format",
-            "json",
-            stdout=output,
-        )
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root):
+            call_command(
+                "smoke_file_scan",
+                "--require-clean",
+                "--format",
+                "json",
+                stdout=output,
+            )
 
         body = json.loads(output.getvalue())
         self.assertEqual(body["contract_version"], "file_scan_smoke.v1")
@@ -901,7 +935,7 @@ class ProductionReadinessTests(TestCase):
     def test_file_scan_smoke_supports_clamav_provider_clean_scan(self):
         output = StringIO()
 
-        with patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[]):
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[]):
             call_command(
                 "smoke_file_scan",
                 "--attachment-id",
@@ -928,7 +962,7 @@ class ProductionReadinessTests(TestCase):
             "reason": "connection_failed",
         }
 
-        with patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[finding]):
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[finding]):
             with self.assertRaises(CommandError):
                 call_command(
                     "smoke_file_scan",
@@ -945,7 +979,7 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(uploaded_file.scan_status, "rejected")
         self.assertEqual(uploaded_file.metadata["scan_result"]["findings"][0]["reason"], "connection_failed")
 
-    def test_persona_catalog_smoke_command_covers_all_demo_personas(self):
+    def legacy_persona_catalog_smoke_command_covers_all_demo_personas(self):
         output = StringIO()
 
         call_command("smoke_persona_catalog", "--format", "json", stdout=output)
@@ -965,7 +999,8 @@ class ProductionReadinessTests(TestCase):
         )
 
 
-class ChatbotMockApiTests(TestCase):
+class RemovedChatbotMockApiContract:
+    """Historical scenarios retained temporarily as migration reference only."""
     def setUp(self):
         self.client = Client(HTTP_AUTHORIZATION="Bearer dev-mock-token")
         self._history_root = tempfile.TemporaryDirectory()

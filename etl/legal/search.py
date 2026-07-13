@@ -33,12 +33,19 @@ def parse_law_code(law_code: str) -> tuple[str, str] | None:
 def _connect_law_db():
     import psycopg2
 
+    try:
+        connect_timeout = max(1, int(os.environ.get("LEGAL_DB_CONNECT_TIMEOUT_SECONDS", "3")))
+    except ValueError:
+        connect_timeout = 3
+
     return psycopg2.connect(
         host=os.environ.get("POSTGRES_HOST", "localhost"),
         port=os.environ.get("POSTGRES_PORT", "5432"),
         user=os.environ.get("POSTGRES_USER", "postgres"),
         password=os.environ.get("POSTGRES_PASSWORD", "change-me"),
         dbname=os.environ.get("POSTGRES_DB", "law_db"),
+        connect_timeout=connect_timeout,
+        application_name="skn27-legal-search",
     )
 
 

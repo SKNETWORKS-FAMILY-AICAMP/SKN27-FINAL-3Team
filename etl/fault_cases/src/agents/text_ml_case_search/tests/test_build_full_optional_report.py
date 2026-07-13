@@ -10,7 +10,29 @@ from etl.fault_cases.src.agents.text_ml_case_search.build_full_optional_report i
 )
 
 
-def sample_record(*, status: str = "success", evidence_count: int = 1) -> dict:
+def sample_record(*, status: str = "success", evidence_count: int = 2) -> dict:
+    display_evidence = []
+    source_counts = {}
+    if evidence_count:
+        display_evidence = [
+            {
+                "source_type": "review_case",
+                "source_reference": "review_case_db:case1#chunk1",
+                "title": "sample review title",
+                "summary": "sample review summary",
+                "ratio_label": "A 70 : B 30",
+            },
+            {
+                "source_type": "fault_ratio_precedent",
+                "source_reference": "precedent_db:case2#chunk2",
+                "title": "sample precedent title",
+                "summary": "sample precedent summary",
+                "ratio_label": "A 70 : B 30",
+                "case_number": "2026-test",
+            },
+        ]
+        source_counts = {"review_case": 1, "fault_ratio_precedent": 1}
+
     return {
         "run_index": 1,
         "session_id": "s1",
@@ -24,17 +46,10 @@ def sample_record(*, status: str = "success", evidence_count: int = 1) -> dict:
         "ratio_range_label": "A 70 : B 30" if evidence_count else "",
         "insurer_claim_review_exists": True,
         "result": {
+            "contract_version": "text_ml_case_search_v2",
             "structured_result": {
-                "display_evidence": [
-                    {
-                        "source_reference": "review_case_db:case1#chunk1",
-                        "title": "sample title",
-                        "summary": "sample summary",
-                        "ratio_label": "A 70 : B 30",
-                    }
-                ]
-                if evidence_count
-                else []
+                "display_evidence": display_evidence,
+                "source_summary": {"source_counts": source_counts},
             },
             "limitations": [],
             "next_actions": ["check evidence"],
