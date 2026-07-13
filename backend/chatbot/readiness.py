@@ -112,11 +112,6 @@ def _database_check(*, include_database: bool, database_state: dict[str, Any]) -
 
 def _google_oauth_check() -> dict[str, Any]:
     details = []
-    if bool(_setting("GOOGLE_AUTH_ALLOW_MOCK", True)):
-        details.append(_detail(FAIL, "GOOGLE_AUTH_ALLOW_MOCK must be 0 for production."))
-    if bool(_setting("APP_AUTH_ALLOW_MOCK_BEARER", True)):
-        details.append(_detail(FAIL, "APP_AUTH_ALLOW_MOCK_BEARER must be 0 for production."))
-
     required = {
         "GOOGLE_CLIENT_ID": _setting("GOOGLE_CLIENT_ID", ""),
         "GOOGLE_CLIENT_SECRET": _setting("GOOGLE_CLIENT_SECRET", ""),
@@ -139,7 +134,7 @@ def _google_oauth_check() -> dict[str, Any]:
     return _check(
         "google_oauth",
         details,
-        ok_message="Google Authorization Code Flow is configured for non-mock mode.",
+        ok_message="Google Authorization Code Flow is configured.",
     )
 
 

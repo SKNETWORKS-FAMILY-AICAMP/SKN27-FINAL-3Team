@@ -125,7 +125,20 @@ class TestLawCodeCheckNode:
 class TestReasonIntakeNode:
     def test_사전통지_사유있으면_통과(self):
         state = {"notice_stage": "사전통지", "user_appeal_reason": "표지판이 안 보였습니다"}
-        assert reason_intake_node(state) == {}
+        assert reason_intake_node(state) == {"reason_quality_insufficient": False}
+
+    def test_사유가_짧으면_reason_quality_insufficient_True(self):
+        """"그냥요"류 한두 단어 사유는 재질문 대상은 아니지만(존재 자체는 하므로), 판단
+        근거가 빈약하다는 신호는 남겨야 guide_generation_node가 사실대로 안내할 수 있다
+        (이의가능성_판단_에이전트_미비점_조사_2026-07-09.md 🔴2)."""
+        state = {"notice_stage": "사전통지", "user_appeal_reason": "그냥요"}
+        assert reason_intake_node(state) == {"reason_quality_insufficient": True}
+
+    def test_사유_길이_임계값_경계(self):
+        state_short = {"notice_stage": "사전통지", "user_appeal_reason": "a" * 9}
+        state_long = {"notice_stage": "사전통지", "user_appeal_reason": "a" * 10}
+        assert reason_intake_node(state_short) == {"reason_quality_insufficient": True}
+        assert reason_intake_node(state_long) == {"reason_quality_insufficient": False}
 
     def test_사전통지_사유없으면_input_required(self):
         state = {"notice_stage": "사전통지", "user_appeal_reason": None, "fine_type": "과태료"}
@@ -158,7 +171,7 @@ class TestReasonIntakeNode:
             "user_appeal_reason": "표지판이 안 보였습니다",
             "notice_received_date": _iso(-10),
         }
-        assert reason_intake_node(state) == {}
+        assert reason_intake_node(state) == {"reason_quality_insufficient": False}
 
     def test_1차고지서_사유만있고_수령일없어도_통과(self):
         """(v22) notice_received_date는 선택 필드 — 사유만 있으면 수령일이
@@ -168,7 +181,7 @@ class TestReasonIntakeNode:
             "user_appeal_reason": "표지판이 안 보였습니다",
             "notice_received_date": None,
         }
-        assert reason_intake_node(state) == {}
+        assert reason_intake_node(state) == {"reason_quality_insufficient": False}
 
     @pytest.mark.parametrize(
         "reason,received,expected_missing",
@@ -255,7 +268,7 @@ class TestLawRefs:
         assert "질서위반행위규제법 제14조" in ctx
 
     def test_DB_조회_성공하면_DB_원문_사용(self):
-        with patch(
+        with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
             "etl.legal.search.get_provision_text",
             return_value="(DB) 실제 법령DB에서 조회된 조문 원문",
         ):
@@ -526,12 +539,62 @@ class TestMeritClassificationNode:
         finally:
             patcher.stop()
 
+    def test_relief_type_정의되지_않은_값이면_relief_type_judgment_failed_True(self):
+        """merit="강함"이면 참조 법조문은 항상 면제/감경 중 하나로 확정되므로,
+        정의 밖의 값이 나온 시점의 None은 "구분 불필요"가 아니라 판정 실패다 —
+        merit_judgment_failed와 대칭으로 플래그가 서야 한다."""
+        patcher = _patch_openai('{"merit": "강함", "relief_type": "일부면제", "merit_basis": "근거"}')
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["relief_type_judgment_failed"] is True
+        finally:
+            patcher.stop()
+
     def test_LLM_예외시_relief_type도_None(self):
         with patch("openai.OpenAI", side_effect=ConnectionError("네트워크 오류")):
             result = merit_classification_node({
                 "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
             })
             assert result["merit_relief_type"] is None
+
+    @pytest.mark.parametrize("relief_value", ["면제", "감경"])
+    def test_relief_type_정상_판정시_relief_type_judgment_failed_False(self, relief_value):
+        patcher = _patch_openai(
+            f'{{"merit": "강함", "relief_type": "{relief_value}", "merit_basis": "근거"}}'
+        )
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["relief_type_judgment_failed"] is False
+        finally:
+            patcher.stop()
+
+    @pytest.mark.parametrize("merit_value", ["보류", "낮음"])
+    def test_강함_아니면_relief_type_judgment_failed_None(self, merit_value):
+        """relief_type 호출 자체가 애초에 일어나지 않는 경우(merit != 강함)는
+        "적용 대상 아님"이지 판정 실패가 아니므로 None이어야 한다."""
+        patcher = _patch_openai(f'{{"merit": "{merit_value}", "merit_basis": "근거"}}')
+        try:
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["relief_type_judgment_failed"] is None
+        finally:
+            patcher.stop()
+
+    def test_merit_1차_호출_자체_실패시_relief_type_judgment_failed_None(self):
+        """merit 판정 자체가 실패하면(merit_judgment_failed=True) relief_type
+        호출까지 가지도 못했으므로, 원인은 merit_judgment_failed로 이미 드러난다 —
+        relief_type_judgment_failed는 별개 실패로 이중 표시하지 않고 None을 유지한다."""
+        with patch("openai.OpenAI", side_effect=ConnectionError("네트워크 오류")):
+            result = merit_classification_node({
+                "user_appeal_reason": "사유", "notice_stage": "사전통지", "law_code": None,
+            })
+            assert result["merit_judgment_failed"] is True
+            assert result["relief_type_judgment_failed"] is None
 
     @pytest.mark.parametrize("merit_value", ["보류", "낮음"])
     def test_강함_아니면_relief_type_전용_호출_자체를_안함(self, merit_value):
@@ -579,6 +642,7 @@ class TestMeritClassificationNode:
             assert result["merit"] == "강함"
             assert result["merit_judgment_failed"] is False
             assert result["merit_relief_type"] is None
+            assert result["relief_type_judgment_failed"] is True
 
     def test_마크다운코드펜스로_감싼_응답도_파싱(self):
         """LLM이 프롬프트 지시(순수 JSON만 반환)를 어기고 ```json 코드펜스로
@@ -675,16 +739,88 @@ class TestGuideGenerationNode:
         result = guide_generation_node(state)
         assert "법령DB로 확인됐습니다" in result["guide"]["disclaimer"]
 
-    def test_disclaimer_law_code_verified_false(self):
-        state = {"law_code_verified": False, "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지"}
+    def test_disclaimer_law_code_verified_false_law_code_없음(self):
+        """law_code 자체가 없는 경우(OCR이 애초에 조항을 못 읽음)는 "표기 자체를
+        인식하지 못했다"는 문구를 써야 한다 — 있는데 DB에 없는 경우와 구분
+        (이의가능성_판단_에이전트_미비점_조사_2026-07-09.md 🟡4)."""
+        state = {
+            "law_code_verified": False, "law_code": None, "judgment_status": "success",
+            "fine_type": "과태료", "notice_stage": "사전통지",
+        }
         result = guide_generation_node(state)
-        assert "확인되지 않았습니다" in result["guide"]["disclaimer"]
+        assert "표기 자체를 인식하지 못했습니다" in result["guide"]["disclaimer"]
+        assert "법령DB에서 확인되지 않았습니다" not in result["guide"]["disclaimer"]
+
+    def test_disclaimer_law_code_verified_false_law_code_있음(self):
+        """law_code는 있는데 법령DB에 없는 경우(오독·오기 가능성)는 별도 문구를
+        써야 한다."""
+        state = {
+            "law_code_verified": False, "law_code": "존재하지 않는 법 제999조",
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "법령DB에서 확인되지 않았습니다" in result["guide"]["disclaimer"]
+        assert "표기 자체를 인식하지 못했습니다" not in result["guide"]["disclaimer"]
 
     def test_disclaimer_law_code_verified_none일땐_해당문구없음(self):
         state = {"law_code_verified": None, "judgment_status": "not_applicable", "fine_type": "범칙금", "notice_stage": "즉결심판"}
         result = guide_generation_node(state)
         assert "법령DB" not in result["guide"]["disclaimer"]
         assert "확인되지 않았습니다" not in result["guide"]["disclaimer"]
+
+    def test_disclaimer_사유_부실하면_보강안내_포함(self):
+        state = {
+            "reason_quality_insufficient": True, "judgment_status": "success",
+            "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "판단 근거가 충분하지 않을 수 있습니다" in result["guide"]["disclaimer"]
+
+    def test_disclaimer_사유_충분하면_보강안내_없음(self):
+        state = {
+            "reason_quality_insufficient": False, "judgment_status": "success",
+            "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "판단 근거가 충분하지 않을 수 있습니다" not in result["guide"]["disclaimer"]
+
+    @pytest.mark.parametrize("fine_type,notice_stage", [
+        ("과태료", "사전통지"), ("범칙금", "즉결심판"), ("과태료", "1차 고지서"),
+    ])
+    def test_disclaimer_알려진_스키마값이면_경고없음(self, fine_type, notice_stage):
+        state = {
+            "judgment_status": "success", "fine_type": fine_type, "notice_stage": notice_stage,
+        }
+        result = guide_generation_node(state)
+        assert "예상된 형식과 달라" not in result["guide"]["disclaimer"]
+
+    @pytest.mark.parametrize("fine_type,notice_stage", [
+        ("과태료 ", "사전통지"),   # 공백 오타
+        ("과태료", "1챠 고지서"),  # 오탈자
+        (None, "사전통지"),        # 누락
+        ("과태료", None),
+    ])
+    def test_disclaimer_알려지지않은_스키마값이면_경고문구_포함(self, fine_type, notice_stage):
+        """오탈자·공백·None 같은 예상 밖 값이 와도 판정 자체는 그대로 진행하되
+        (하드 블로커 없음), 침묵하는 오분류가 아니라 명시적 경고를 남겨야 한다
+        (이의가능성_판단_에이전트_미비점_조사_2026-07-09.md 🟡5)."""
+        state = {
+            "judgment_status": "success", "fine_type": fine_type, "notice_stage": notice_stage,
+        }
+        result = guide_generation_node(state)
+        assert "예상된 형식과 달라" in result["guide"]["disclaimer"]
+
+    def test_next_actions_스키마값_예상밖이면_재확인_권장_추가(self):
+        state = {"judgment_status": "success", "fine_type": "과태료", "notice_stage": "오탈자단계"}
+        result = guide_generation_node(state)
+        next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
+        assert any("OCR 결과 재확인" in action for action in next_actions)
+
+    def test_structured_result_schema_fields_unrecognized_노출(self):
+        state = {"judgment_status": "success", "fine_type": "범칙금", "notice_stage": "오탈자단계"}
+        result = guide_generation_node(state)
+        structured = result["agent_results"]["appeal_judgment"]["structured_result"]
+        assert structured["schema_fields_unrecognized"] == ["notice_stage"]
 
     def test_disclaimer_강함_카테고리C는_조건부위험문구(self):
         """merit=강함일 때만 카테고리 C의 조건부 프레이밍이 적용된다."""
@@ -808,6 +944,39 @@ class TestGuideGenerationNode:
         result = guide_generation_node(state)
         assert "기술 오류로 완료되지 못해" not in result["guide"]["disclaimer"]
 
+    def test_disclaimer_relief_type_판정실패시_감경문구와_구분되는_안내(self):
+        """relief_type_judgment_failed=True면 확정된 "감경" 문구가 아니라 "면제/감경
+        구분이 기술 오류로 확정되지 못했다"는 별도 안내가 붙어야 한다."""
+        state = {
+            "merit": "강함", "merit_relief_type": None, "relief_type_judgment_failed": True,
+            "risk_flag": False, "judgment_status": "success", "fine_type": "과태료",
+            "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        disclaimer = result["guide"]["disclaimer"]
+        assert "면제(처분 자체 불가)인지 감경(금액만 축소)인지" in disclaimer
+        assert "처분 자체가 없어지는 게 아니라" not in disclaimer  # 확정된 감경 문구는 아님
+        assert "안심하고 진행" in disclaimer  # 기존 강함 톤도 그대로 이어붙음
+
+    def test_disclaimer_relief_type_판정성공시_실패안내_없음(self):
+        state = {
+            "merit": "강함", "merit_relief_type": "면제", "relief_type_judgment_failed": False,
+            "risk_flag": False, "judgment_status": "success", "fine_type": "과태료",
+            "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "기술 오류로 완료되지 못했습니다" not in result["guide"]["disclaimer"]
+
+    def test_disclaimer_merit_강함_아니면_relief_type_판정실패여도_안내없음(self):
+        """relief_type은 merit="강함"일 때만 의미 있다 — merit_gate가 이 조합을
+        만들지 않지만, guide 쪽에서도 방어적으로 merit 조건을 확인해야 한다."""
+        state = {
+            "merit": "보류", "relief_type_judgment_failed": True, "risk_flag": False,
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "기술 오류로 완료되지 못했습니다" not in result["guide"]["disclaimer"]
+
     def test_next_actions_merit_판정실패시_재호출_권장_추가(self):
         state = {
             "merit": "보류", "merit_judgment_failed": True, "risk_flag": False,
@@ -816,6 +985,15 @@ class TestGuideGenerationNode:
         result = guide_generation_node(state)
         next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
         assert any("재호출" in action for action in next_actions)
+
+    def test_next_actions_relief_type_판정실패시_재호출_권장_추가(self):
+        state = {
+            "merit": "강함", "relief_type_judgment_failed": True, "risk_flag": False,
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
+        assert any("relief_type" in action and "재호출" in action for action in next_actions)
 
     def test_next_actions_merit_판정실패_아니면_재호출문구_없음(self):
         state = {"judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지"}

@@ -224,6 +224,137 @@ def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) ->
     }
 
 
+def execute_agent_node(payload: dict[str, Any]) -> dict[str, Any]:
+    """Execute one production Agent through a registered synchronous adapter."""
+
+    node_code = _payload_node_code(payload)
+    node = _production_node(node_code)
+    execution_id = f"exec_{uuid4().hex[:12]}"
+    agent_input = _agent_input(payload, node)
+    adapter_context = build_adapter_context(
+        execution_id=execution_id,
+        execution_mode="sync",
+        node=node,
+        plan_step=payload.get("plan_step"),
+    )
+    if node_code not in _sync_adapter_node_codes():
+        return {
+            "execution_id": execution_id,
+            "execution_mode": "sync",
+            "job_id": payload.get("job_id"),
+            "node_code": node_code,
+            "node": node,
+            "adapter_context": adapter_context,
+            "agent_input": agent_input,
+            "agent_output": _unregistered_adapter_output(node=node, agent_input=agent_input),
+            "created_at": _now_iso(),
+        }
+    return _execute_sync_node(
+        payload=payload,
+        node=node,
+        agent_input=agent_input,
+        adapter_context=adapter_context,
+        execution_id=execution_id,
+    )
+
+
+def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Execute a canonical plan without fixture or heuristic output fallbacks."""
+
+    executions = []
+    upstream_results = deepcopy(payload.get("upstream_results", {}))
+    for step in analysis_plan.get("steps", []):
+        step_payload = deepcopy(payload)
+        step_payload.update(
+            {
+                "analysis_plan_id": analysis_plan.get("plan_id"),
+                "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
+                "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
+                "node_code": step.get("node_code"),
+                "execution_mode": "sync",
+                "required_inputs": step.get("required_inputs", []),
+                "depends_on": step.get("depends_on", []),
+                "plan_step": step,
+                "upstream_results": deepcopy(upstream_results),
+            }
+        )
+        if isinstance(step.get("context"), dict):
+            context = deepcopy(payload.get("context") if isinstance(payload.get("context"), dict) else {})
+            context.update(deepcopy(step["context"]))
+            step_payload["context"] = context
+        execution = execute_agent_node(step_payload)
+        execution["plan_step"] = deepcopy(step)
+        executions.append(execution)
+        upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
+
+    limitations = []
+    for execution in executions:
+        for limitation in execution["agent_output"].get("limitations", []):
+            text = str(limitation).strip()
+            if text and text not in limitations:
+                limitations.append(text)
+    return {
+        "execution_mode": "sync",
+        "job_id": payload.get("job_id"),
+        "plan_id": analysis_plan.get("plan_id"),
+        "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
+        "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
+        "executions": executions,
+        "status_counts": _status_counts(executions),
+        "completed_node_codes": [
+            execution["node_code"]
+            for execution in executions
+            if execution["agent_output"]["status"] == "success"
+        ],
+        "limitations": limitations,
+        "created_at": _now_iso(),
+    }
+
+
+def _sync_adapter_node_codes() -> set[str]:
+    return {
+        "fine_notice_analysis",
+        "law_ground_search",
+        "objection_report_generation",
+        "text_ml_case_search",
+    }
+
+
+def _production_node(node_code: str) -> dict[str, Any]:
+    node = deepcopy(NODE_REGISTRY.get(node_code, _unknown_node(node_code)))
+    supported = node_code in _sync_adapter_node_codes()
+    node["status"] = "sync_adapter_ready" if supported else "unavailable"
+    node["adapter_modes"] = ["sync"] if supported else []
+    return node
+
+
+def _unregistered_adapter_output(
+    *,
+    node: dict[str, Any],
+    agent_input: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "session_id": agent_input.get("session_id"),
+        "message_id": agent_input.get("message_id"),
+        "job_id": agent_input.get("job_id"),
+        "node_name": node.get("node_name"),
+        "node_code": node.get("node_code"),
+        "node_type": node.get("node_type"),
+        "owner": node.get("owner"),
+        "status": "failed",
+        "execution_status": "failed",
+        "summary": "요청한 Agent는 운영 환경에서 사용할 수 없습니다.",
+        "structured_result": {
+            "error_code": "sync_adapter_unregistered",
+            "node_code": node.get("node_code"),
+        },
+        "evidence": [],
+        "next_actions": ["remove_unsupported_capability_or_register_adapter"],
+        "limitations": ["The requested Agent has no production adapter."],
+        "created_at": _now_iso(),
+    }
+
+
 def build_agent_output(
     *,
     node_code: str,

@@ -12,13 +12,10 @@ langgraph
 PyMuPDF
 python-dotenv
 typing_extensions
-opencv-python
-Pillow
-torch
-torchvision
-transformers
-tqdm
-ultralytics
+gunicorn>=23,<24
+PyJWT>=2.10,<3
+pydantic>=2.12,<3
+opensearch-py>=3,<4
 
 
 #########재강#######

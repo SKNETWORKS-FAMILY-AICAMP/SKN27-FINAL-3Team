@@ -134,6 +134,61 @@ def copy_object(source_reference: dict[str, Any], target_reference: dict[str, An
     return _write_skipped(target_reference, reason="unsupported_provider")
 
 
+def delete_object(reference: dict[str, Any]) -> dict[str, Any]:
+    """Delete a staged object and its local metadata sidecar when present."""
+
+    provider = _text(reference.get("provider")) or object_storage_provider()
+    if provider == "mock_s3":
+        object_path = _local_object_path(reference)
+        metadata_path = object_path.with_suffix(object_path.suffix + ".metadata.json")
+        existed = object_path.exists()
+        if object_path.exists():
+            object_path.unlink()
+        if metadata_path.exists():
+            metadata_path.unlink()
+        return {
+            "contract_version": "object_storage_delete.v1",
+            "status": "deleted" if existed else "not_found",
+            "provider": provider,
+            "bucket": _text(reference.get("bucket")) or object_storage_bucket(),
+            "key": _text(reference.get("key")),
+        }
+    if provider == "s3":
+        client = _boto3_client()
+        if client is None:
+            return {
+                "contract_version": "object_storage_delete.v1",
+                "status": "skipped",
+                "provider": provider,
+                "reason": "boto3_unavailable",
+            }
+        try:
+            client.delete_object(
+                Bucket=_text(reference.get("bucket")) or object_storage_bucket(),
+                Key=_text(reference.get("key")),
+            )
+        except Exception as exc:
+            return {
+                "contract_version": "object_storage_delete.v1",
+                "status": "skipped",
+                "provider": provider,
+                **_storage_error_kwargs(exc),
+            }
+        return {
+            "contract_version": "object_storage_delete.v1",
+            "status": "deleted",
+            "provider": provider,
+            "bucket": _text(reference.get("bucket")) or object_storage_bucket(),
+            "key": _text(reference.get("key")),
+        }
+    return {
+        "contract_version": "object_storage_delete.v1",
+        "status": "skipped",
+        "provider": provider,
+        "reason": "unsupported_provider",
+    }
+
+
 def object_exists(reference: dict[str, Any]) -> bool:
     provider = _text(reference.get("provider")) or object_storage_provider()
     if provider == "mock_s3":

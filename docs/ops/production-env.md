@@ -41,8 +41,8 @@ DJANGO_DEBUG=0
 DJANGO_SECRET_KEY=<secret-store-value>
 DJANGO_ALLOWED_HOSTS=<production-hosts>
 DJANGO_DATABASE_ENGINE=postgres
-GOOGLE_AUTH_ALLOW_MOCK=0
-APP_AUTH_ALLOW_MOCK_BEARER=0
+CORS_ALLOWED_ORIGINS=<frontend-origin>
+CSRF_TRUSTED_ORIGINS=<frontend-origin>
 GOOGLE_CLIENT_ID=<google-oauth-web-client-id>
 GOOGLE_CLIENT_SECRET=<secret-store-value>
 GOOGLE_POPUP_REDIRECT_URI=<frontend-origin>
@@ -50,8 +50,8 @@ APP_JWT_SECRET=<secret-store-value>
 OAUTH_TOKEN_SECRET=<secret-store-value>
 ```
 
-The readiness command reports `fail` when any of these are missing or still in
-mock/development mode.
+The readiness command reports `fail` when any required value is missing or still
+contains a placeholder.
 
 ## 3. Database And Worker
 

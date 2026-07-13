@@ -27,6 +27,7 @@ SCENARIO_INTENTS = {
     "fault_ratio": "fault_ratio",
     "law_question": "law_question",
     "report_redownload": "report_redownload",
+    "general_consultation": "general_consultation",
 }
 
 DEMO_PERSONA_ID = DEFAULT_PERSONA_ID
@@ -291,6 +292,8 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
     )
     if persona_run:
         scenario = persona_run["scenario"]
+    if scenario == "general_consultation" and not persona_run:
+        return _general_consultation_response(payload)
     supervisor_state = build_supervisor_state_with_optional_llm(
         payload=payload,
         scenario=scenario,
@@ -347,6 +350,54 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
         }
     )
     return fixture
+
+
+def _general_consultation_response(payload: dict[str, Any]) -> dict[str, Any]:
+    """Answer an eligibility/procedure question before any report work is requested."""
+    session_id = payload.get("session_id") or f"ses_{uuid4().hex[:12]}"
+    return {
+        "message_id": f"msg_{uuid4().hex[:12]}",
+        "session_id": session_id,
+        "mock_scenario": "general_consultation",
+        "routing_intent": "general_consultation",
+        "status": "success",
+        "created_at": _now_iso(),
+        "assistant_message": (
+            "지금 단계에서는 리포트를 만들기보다 이의신청 대상 여부와 절차부터 확인하는 게 맞습니다. "
+            "말씀하신 자녀의 고열과 응급실 방문 사정은 부득이한 정차 사유로 검토될 수 있지만, "
+            "현재 정보만으로 이의신청 가능 여부를 확정할 수는 없습니다.\n\n"
+            "먼저 고지서의 발행기관과 제출 기한, 정차 시각·장소를 확인하고, "
+            "응급실 진료기록·영수증·방문 시각 자료와 당시 정차가 불가피했다는 설명을 준비하세요. "
+            "일반적으로는 고지서에 적힌 관할 기관의 의견제출 또는 이의신청 창구에 사건번호, 사유, 증빙을 함께 제출합니다. "
+            "기한을 놓치지 않는 것이 가장 먼저입니다.\n\n"
+            "원하시면 다음 메시지에서 고지서 발행기관, 제출 기한, 정차 시각, 응급실 방문 증빙 유무만 확인한 뒤 "
+            "이의신청 대상 여부와 실제 제출 순서를 이어서 안내하겠습니다."
+        ),
+        "progress": {
+            "status": "success",
+            "active_node": "general_consultation",
+            "message": "이의신청 대상 여부와 제출 방법을 일반 상담으로 안내했습니다.",
+        },
+        "case_status": "guidance_only",
+        "cards": [],
+        "report_links": [],
+        "pending_questions": [],
+        "reporting_payload": None,
+        "supervisor_state": None,
+        "structured_result": {
+            "consultation_mode": "general_guidance",
+            "report_ready": False,
+            "next_step": "collect_notice_deadline_and_evidence",
+        },
+        "limitations": [
+            "일반 상담 안내이며 실제 처분 취소나 이의신청 인용을 보장하지 않습니다.",
+            "고지서 발행기관과 제출 기한을 확인한 뒤 구체적인 절차를 이어서 안내해야 합니다.",
+        ],
+        "attachments": deepcopy(payload.get("attachments", [])),
+        "blocked_attachments": deepcopy(payload.get("blocked_attachments", [])),
+        "attachment_scan_policy": deepcopy(payload.get("attachment_scan_policy", {})),
+        "attachment_resolution": deepcopy(payload.get("attachment_resolution", {})),
+    }
 
 
 def _persona_run_for_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -1462,6 +1513,8 @@ def _infer_scenario(payload: dict[str, Any]) -> str:
     text = _conversation_text(payload)
     if "리포트" in text or "다운로드" in text or "내려받" in text or "내 사건" in text:
         return "report_redownload"
+    if _is_general_guidance_request(text):
+        return "general_consultation"
     if (
         "과실비율" in text
         or "과실" in text
@@ -1479,6 +1532,37 @@ def _infer_scenario(payload: dict[str, Any]) -> str:
     if "고지서" in text or "과태료" in text or "범칙금" in text or "이의" in text:
         return "fine_notice"
     return "fine_notice"
+
+
+def _is_general_guidance_request(text: str) -> bool:
+    normalized = str(text or "").replace(" ", "")
+    if not ("이의신청" in normalized or "의견제출" in normalized or "이의" in normalized):
+        return False
+    guidance_markers = (
+        "가능한지",
+        "가능사항",
+        "대상인지",
+        "해당하는지",
+        "할수있는지",
+        "어떻게이의신청",
+        "이의신청방법",
+        "제출방법",
+        "절차",
+        "문의",
+        "모르겠",
+    )
+    report_markers = (
+        "리포트",
+        "보고서",
+        "초안작성",
+        "작성해줘",
+        "제출서작성",
+        "다운로드",
+        "정리해줘",
+    )
+    return any(marker in normalized for marker in guidance_markers) and not any(
+        marker in normalized for marker in report_markers
+    )
 
 
 def _slot_labels() -> dict[str, str]:
