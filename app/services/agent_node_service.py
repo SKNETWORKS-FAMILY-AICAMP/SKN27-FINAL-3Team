@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app.contracts.agent_registry import AgentCapabilityContract
 from app.services.agent_adapter_contract import (
     build_adapter_context,
     build_agent_adapter_input,
@@ -117,6 +118,13 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
     },
 }
 
+PRODUCTION_AGENT_TIMEOUT_SECONDS = {
+    "fine_notice_analysis": 120,
+    "law_ground_search": 30,
+    "objection_report_generation": 30,
+    "text_ml_case_search": 60,
+}
+
 
 def list_agent_nodes() -> list[dict[str, Any]]:
     """Return the current Agent/Node registry in execution-friendly order."""
@@ -125,6 +133,29 @@ def list_agent_nodes() -> list[dict[str, Any]]:
         _node_with_adapter_contract(NODE_REGISTRY[node_code])
         for node_code in sorted(NODE_REGISTRY, key=lambda code: NODE_REGISTRY[code]["order"])
     ]
+
+
+def list_public_agent_nodes() -> list[dict[str, Any]]:
+    """Return only production-callable Agents under a strict public contract."""
+
+    capabilities = []
+    for node_code in sorted(
+        _sync_adapter_node_codes(),
+        key=lambda code: NODE_REGISTRY[code]["order"],
+    ):
+        node = _production_node(node_code)
+        capability = AgentCapabilityContract(
+            node_code=node_code,
+            node_name=str(node["node_name"]),
+            owner=str(node["owner"]),
+            description=str(node["description"]),
+            timeout_seconds=PRODUCTION_AGENT_TIMEOUT_SECONDS[node_code],
+            required_inputs=list(node.get("required_inputs") or []),
+            produces=list(node.get("produces") or []),
+            handoff_to=list(node.get("handoff_to") or []),
+        )
+        capabilities.append(capability.model_dump(mode="json"))
+    return capabilities
 
 
 def get_agent_node(node_code: str) -> dict[str, Any]:

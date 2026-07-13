@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     image: skn27-demo-backend
     container_name: skn27-demo-backend
-    environment:
+    environment: &backend-environment
       PYTHONUTF8: "1"
       DJANGO_DEBUG: "1"
       MOCK_REQUIRE_AUTH: "1"
@@ -72,6 +72,23 @@ services:
       - redis
       - postgres
       - neo4j
+
+  agent-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: skn27-demo-backend
+    container_name: skn27-agent-worker
+    command: sh -c "python backend/manage.py migrate --check && exec python backend/manage.py process_agent_work_items --loop"
+    environment: *backend-environment
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
+    restart: unless-stopped
 
   frontend:
     image: node:22-alpine

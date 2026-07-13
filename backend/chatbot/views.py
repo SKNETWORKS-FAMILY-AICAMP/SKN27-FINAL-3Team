@@ -19,7 +19,7 @@ from app.contracts.consultation_case import (
 from app.services.agent_node_service import (
     execute_mock_node,
     execute_mock_plan,
-    list_agent_nodes,
+    list_public_agent_nodes,
 )
 from app.services.analysis_job_mock_service import (
     create_analysis_job,
@@ -428,7 +428,13 @@ def mypage_summary(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def agent_nodes(request: HttpRequest) -> JsonResponse:
-    return _json_response(request, {"nodes": list_agent_nodes()})
+    return _json_response(
+        request,
+        {
+            "contract_version": "agent_capability_catalog.v1",
+            "nodes": list_public_agent_nodes(),
+        },
+    )
 
 
 @csrf_exempt

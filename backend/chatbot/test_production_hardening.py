@@ -11,7 +11,7 @@ from django.urls import Resolver404, resolve
 from chatbot.api_response import json_response
 from chatbot.models import ReportType
 from chatbot.runtime_health import build_runtime_health
-from chatbot.views import analysis_result, submit_chat_message
+from chatbot.views import agent_nodes, analysis_result, submit_chat_message
 
 
 class ProductionApiContractTests(SimpleTestCase):
@@ -54,6 +54,24 @@ class ProductionApiContractTests(SimpleTestCase):
                 "traffic_law_search",
                 "saved_report",
             ],
+        )
+        self.assertNotIn("vision_media_analysis", str(body))
+        self.assertNotIn("mock", str(body).lower())
+
+    def test_agent_catalog_exposes_only_typed_production_adapters(self) -> None:
+        response = agent_nodes(RequestFactory().get("/api/agents/nodes/"))
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body["contract_version"], "agent_capability_catalog.v1")
+        self.assertEqual(
+            {item["node_code"] for item in body["nodes"]},
+            {
+                "fine_notice_analysis",
+                "law_ground_search",
+                "objection_report_generation",
+                "text_ml_case_search",
+            },
         )
         self.assertNotIn("vision_media_analysis", str(body))
         self.assertNotIn("mock", str(body).lower())
