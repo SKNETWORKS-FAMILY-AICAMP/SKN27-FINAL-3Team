@@ -27,10 +27,31 @@ const FALLBACK_ANALYSIS_CARDS = [
   },
 ];
 const EXECUTION_MODE = "async_worker";
+const WORKER_POLL_INTERVAL_MS = 500;
+const WORKER_POLL_MAX_ATTEMPTS = 60;
+const WORKER_PENDING_JOB_STATUSES = new Set(["queued", "running", "retrying"]);
 const ATTACHMENT_PURPOSE_LABELS = {
   fine_notice: "고지서",
   supporting_evidence: "보조 자료",
 };
+
+function waitForWorkerPoll() {
+  return new Promise((resolve) => window.setTimeout(resolve, WORKER_POLL_INTERVAL_MS));
+}
+
+function assistantMessageText(value, fallback = "") {
+  if (typeof value === "string") {
+    return value.trim() || fallback;
+  }
+  if (value && typeof value === "object") {
+    return String(value.answer || value.summary || "").trim() || fallback;
+  }
+  return fallback;
+}
+
+function analysisCardKey(card, index) {
+  return `${card?.card_type || "analysis"}-${card?.title || "card"}-${index}`;
+}
 
 export default function FrontendAppShell({
   apiBase = "/api",
@@ -90,7 +111,7 @@ export default function FrontendAppShell({
   const analysisCards = analysisResponse?.cards?.length
     ? normalizeAnalysisCards(analysisResponse.cards)
     : [];
-  const assistantAnswer = analysisResponse?.assistant_message || "";
+  const assistantAnswer = assistantMessageText(analysisResponse?.assistant_message);
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -493,47 +514,64 @@ export default function FrontendAppShell({
     if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
       return chatResult;
     }
-    if (!requestIdentity?.authToken) {
-      logDeveloperDiagnostic("worker.status", { status: "queued", authenticated: false });
-      return chatResult;
-    }
-
-    logDeveloperDiagnostic("worker.status", { status: "polling", authenticated: true });
+    let latestResult = chatResult;
+    logDeveloperDiagnostic("worker.status", {
+      status: "polling",
+      authenticated: Boolean(requestIdentity?.authToken),
+    });
     try {
-      const jobDetailResult = await api.getAnalysisResult({ jobId: workItem.job_id, identity: requestIdentity });
-      const jobDetail = jobDetailResult?.result || jobDetailResult?.job || {};
-      const processedItem = jobDetail.work_item || {};
-      const progressState = jobDetail.progress_state || processedItem.progress_state || {};
-      const nextWorkItem = {
-        ...workItem,
-        status: processedItem.status || workItem.status,
-        job_status: progressState.job_status || jobDetail.status || workItem.job_status,
-        progress_state: progressState,
-      };
-      const enrichedResult = {
-        ...chatResult,
-        status: jobDetail.status || progressState.job_status || chatResult.status,
-        job_detail: jobDetail,
-        supervisor_execution: {
-          ...(chatResult.supervisor_execution || {}),
-          work_item: nextWorkItem,
-          worker_poll: {
-            contract_version: "worker_progress_polling.v1",
-            status: processedItem.status || null,
-            job_status: jobDetail.status || null,
-            progress_state: progressState,
+      for (let attempt = 0; attempt < WORKER_POLL_MAX_ATTEMPTS; attempt += 1) {
+        const jobDetailResult = await api.getAnalysisResult({
+          jobId: workItem.job_id,
+          identity: requestIdentity,
+        });
+        const jobDetail = jobDetailResult?.result || jobDetailResult?.job || {};
+        const processedItem = jobDetail.work_item || {};
+        const progressState = jobDetail.progress_state || processedItem.progress_state || {};
+        const jobStatus = jobDetail.status || progressState.job_status || latestResult.status;
+        const nextWorkItem = {
+          ...workItem,
+          ...processedItem,
+          status: processedItem.status || workItem.status,
+          job_status: progressState.job_status || jobStatus || workItem.job_status,
+          progress_state: progressState,
+        };
+        latestResult = {
+          ...latestResult,
+          ...jobDetail,
+          execution_mode: chatResult.execution_mode,
+          persistence: chatResult.persistence,
+          status: jobStatus,
+          job_detail: jobDetail,
+          supervisor_execution: {
+            ...(latestResult.supervisor_execution || {}),
+            ...(jobDetail.supervisor_execution || {}),
+            work_item: nextWorkItem,
+            worker_poll: {
+              contract_version: "worker_progress_polling.v1",
+              status: processedItem.status || null,
+              job_status: jobStatus || null,
+              progress_state: progressState,
+            },
           },
-        },
-        work_item: nextWorkItem,
-      };
-      logDeveloperDiagnostic("worker.status", {
-        jobStatus: jobDetail.status || null,
-        status: processedItem.status || "waiting",
-      });
-      return enrichedResult;
+          work_item: nextWorkItem,
+        };
+        logDeveloperDiagnostic("worker.status", {
+          attempt: attempt + 1,
+          jobStatus: jobStatus || null,
+          status: processedItem.status || "waiting",
+        });
+        if (!WORKER_PENDING_JOB_STATUSES.has(jobStatus)) {
+          return latestResult;
+        }
+        if (attempt < WORKER_POLL_MAX_ATTEMPTS - 1) {
+          await waitForWorkerPoll();
+        }
+      }
+      return latestResult;
     } catch (_error) {
       logDeveloperDiagnostic("worker.error", { message: _error?.message || "progress polling failed" });
-      return chatResult;
+      return latestResult;
     }
   }
 
@@ -579,6 +617,7 @@ export default function FrontendAppShell({
       sessionId: activeSession,
       userId: followupLoginState?.userId || null,
     });
+    setChatMessages(conversationHistory);
 
     try {
       const submitIdentity = {
@@ -615,7 +654,7 @@ export default function FrontendAppShell({
         ...conversationHistory,
         {
           role: "assistant",
-          content: workerResult?.assistant_message || "상담 내용을 접수했습니다.",
+          content: assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
           status: workerResult?.status || "partial",
           pending_questions: workerResult?.pending_questions || [],
         },
@@ -1194,8 +1233,8 @@ function ChatScreen({
                     </p>
                     {analysisCards.length > 0 && (
                       <div className="result-cards">
-                        {analysisCards.map((card) => (
-                          <div className="result-card" key={`${card.card_type}-${card.title}`}>
+                        {analysisCards.map((card, index) => (
+                          <div className="result-card" key={analysisCardKey(card, index)}>
                             <span className={card.status === "success" ? "tag green" : "tag amber"}>
                               {card.card_type}
                             </span>
@@ -1484,6 +1523,7 @@ function ChatScreenV2({
   const hasConversation = visibleMessages.length > 0;
   const latestAssistantIndex = latestMessageIndex(visibleMessages, "assistant");
   const isAuthenticated = Boolean(authSessionId);
+  const visibleReportingPayload = isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;
   const uploadButtonLabel = isRegisteringAttachment
     ? "등록 중"
     : selectedUploadFile
@@ -1616,8 +1656,8 @@ function ChatScreenV2({
                           <>
                             {analysisCards.length > 0 && (
                               <div className="result-cards">
-                                {analysisCards.map((card) => (
-                                  <div className="result-card" key={`${card.card_type}-${card.title}`}>
+                                {analysisCards.map((card, index) => (
+                                  <div className="result-card" key={analysisCardKey(card, index)}>
                                     <span className={card.status === "success" ? "tag green" : "tag amber"}>
                                       {card.card_type}
                                     </span>
@@ -2345,8 +2385,8 @@ function CaseResultScreen({
 
               {analysisCards.length > 0 && (
                 <div className="case-result-card-list">
-                  {analysisCards.slice(0, 4).map((card) => (
-                    <article className="case-result-card" key={`${card.card_type}-${card.title}`}>
+                  {analysisCards.slice(0, 4).map((card, index) => (
+                    <article className="case-result-card" key={analysisCardKey(card, index)}>
                       <span className={card.status === "success" ? "tag green" : "tag amber"}>{card.card_type}</span>
                       <strong>{card.title}</strong>
                       <p>{card.summary}</p>
@@ -2655,8 +2695,8 @@ function ReportingScreen({
                 <div className="report-support-strip">
                   <strong>보조 분석</strong>
                   <div className="report-support-chips">
-                    {supportCards.map((card) => (
-                      <span className="report-support-chip" key={`${card.card_type}-${card.title}`}>
+                    {supportCards.map((card, index) => (
+                      <span className="report-support-chip" key={analysisCardKey(card, index)}>
                         {card.card_type}: {card.summary}
                       </span>
                     ))}
@@ -2832,11 +2872,10 @@ function restoreConversationMessages(job = {}, item = {}) {
       status: message?.metadata?.response_status || job.status || "success",
     }))
     .filter((message) => message.content);
-  const assistantMessage =
-    job.assistant_message ||
-    job.assistant_message_payload?.answer ||
-    job.progress_message ||
-    "저장된 상담 결과를 불러왔습니다.";
+  const assistantMessage = assistantMessageText(
+    job.assistant_message || job.assistant_message_payload,
+    job.progress_message || "저장된 상담 결과를 불러왔습니다."
+  );
 
   if (!messages.some((message) => message.role === "user")) {
     messages.unshift({
@@ -2860,11 +2899,10 @@ function restoreAnalysisResponse(job = {}, item = {}) {
   return {
     ...job,
     cards: Array.isArray(job.cards) ? job.cards : [],
-    assistant_message:
-      job.assistant_message ||
-      job.assistant_message_payload?.answer ||
-      job.progress_message ||
-      "저장된 상담 결과를 불러왔습니다.",
+    assistant_message: assistantMessageText(
+      job.assistant_message || job.assistant_message_payload,
+      job.progress_message || "저장된 상담 결과를 불러왔습니다."
+    ),
     pending_questions: Array.isArray(job.pending_questions) ? job.pending_questions : [],
     reporting_payload: reportingPayload,
     supervisor_state: job.supervisor_state || null,
@@ -2895,7 +2933,10 @@ function restoreCurrentReport(job = {}, item = {}) {
     },
     metadata: {
       case_id: job.job_id || item?.case_id || item?.job_id || "",
-      title: latestReport?.title || item?.title || job.assistant_message || "저장된 상담 리포트",
+      title:
+        latestReport?.title ||
+        item?.title ||
+        assistantMessageText(job.assistant_message || job.assistant_message_payload, "저장된 상담 리포트"),
       updated_at: latestReport?.updated_at || job.updated_at || item?.updated_at || item?.last_event_at || "",
       report_count: job.report_count || item?.report_count || 1,
     },
