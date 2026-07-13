@@ -1,0 +1,81 @@
+"""Application service for reading analysis jobs and their public results."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Any, Callable, Literal
+
+
+AnalysisQueryKind = Literal["not_found", "detail", "pending", "completed"]
+JobLoader = Callable[[str], dict[str, Any] | None]
+ProgressLoader = Callable[[str], dict[str, Any] | None]
+ResponseComposer = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisJobQueryOutcome:
+    kind: AnalysisQueryKind
+    payload: dict[str, Any]
+
+
+def load_analysis_job_detail(
+    job_id: str,
+    *,
+    load_job: JobLoader,
+    load_progress: ProgressLoader,
+) -> AnalysisJobQueryOutcome:
+    """Load one job and attach transient progress without mutating storage data."""
+
+    stored_job = load_job(job_id)
+    if stored_job is None:
+        return AnalysisJobQueryOutcome(kind="not_found", payload={})
+
+    job = deepcopy(stored_job)
+    job["progress_cache"] = deepcopy(load_progress(job_id))
+    return AnalysisJobQueryOutcome(kind="detail", payload=job)
+
+
+def load_analysis_result(
+    job_id: str,
+    *,
+    load_job: JobLoader,
+    compose_response: ResponseComposer,
+) -> AnalysisJobQueryOutcome:
+    """Return a pending placeholder or compose the persisted production outputs."""
+
+    job = load_job(job_id)
+    if job is None:
+        return AnalysisJobQueryOutcome(kind="not_found", payload={})
+
+    status = str(job.get("status") or "")
+    if status in {"queued", "running"}:
+        return AnalysisJobQueryOutcome(
+            kind="pending",
+            payload={
+                "contract_version": "analysis_result.v2",
+                "job_id": job_id,
+                "status": status,
+                "assistant_message": None,
+                "structured_results": {},
+                "evidence": [],
+                "limitations": [],
+            },
+        )
+
+    executions = [
+        {
+            "node_code": item.get("node_code"),
+            "agent_output": deepcopy(item),
+        }
+        for item in job.get("agent_results", [])
+        if isinstance(item, dict)
+    ]
+    result = compose_response(
+        {
+            "job_id": job_id,
+            "status_counts": deepcopy(job.get("status_counts") or {}),
+            "executions": executions,
+        }
+    )
+    return AnalysisJobQueryOutcome(kind="completed", payload=result)

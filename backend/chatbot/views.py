@@ -25,6 +25,10 @@ from app.services.analysis_job_mock_service import (
     create_analysis_job,
     list_analysis_jobs,
 )
+from app.services.analysis_job_query_service import (
+    load_analysis_job_detail,
+    load_analysis_result,
+)
 from app.services.attachment_mock_service import (
     get_attachment as get_mock_attachment,
     list_attachments as list_mock_attachments,
@@ -597,8 +601,12 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
-    job = get_analysis_job_record(job_id)
-    if not job:
+    outcome = load_analysis_job_detail(
+        job_id,
+        load_job=get_analysis_job_record,
+        load_progress=read_analysis_job_progress,
+    )
+    if outcome.kind == "not_found":
         return _json_response(
             request,
             {
@@ -609,14 +617,17 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    job["progress_cache"] = read_analysis_job_progress(job_id)
-    return _json_response(request, {"job": job})
+    return _json_response(request, {"job": outcome.payload})
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
-    job = get_analysis_job_record(job_id)
-    if not job:
+    outcome = load_analysis_result(
+        job_id,
+        load_job=get_analysis_job_record,
+        compose_response=compose_agent_response,
+    )
+    if outcome.kind == "not_found":
         return _json_response(
             request,
             {
@@ -627,36 +638,8 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    if job.get("status") in {"queued", "running"}:
-        return _json_response(
-            request,
-            {
-                "result": {
-                    "contract_version": "analysis_result.v2",
-                    "job_id": job_id,
-                    "status": job.get("status"),
-                    "assistant_message": None,
-                    "structured_results": {},
-                    "evidence": [],
-                    "limitations": [],
-                }
-            },
-            status=202,
-        )
-
-    executions = [
-        {"node_code": item.get("node_code"), "agent_output": item}
-        for item in job.get("agent_results", [])
-        if isinstance(item, dict)
-    ]
-    result = compose_agent_response(
-        {
-            "job_id": job_id,
-            "status_counts": job.get("status_counts") or {},
-            "executions": executions,
-        }
-    )
-    return _json_response(request, {"result": result})
+    status = 202 if outcome.kind == "pending" else 200
+    return _json_response(request, {"result": outcome.payload}, status=status)
 
 
 @csrf_exempt
