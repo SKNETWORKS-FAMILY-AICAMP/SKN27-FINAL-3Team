@@ -62,6 +62,17 @@ SECRET_FIELD_KEYS = {
     "x_api_key",
 }
 
+SECRET_FIELD_KEY_MARKERS = (
+    "api_key",
+    "authorization",
+    "cookie",
+    "credential",
+    "password",
+    "private_key",
+    "secret",
+    "token",
+)
+
 SENSITIVE_CONTENT_FIELD_KEYS = {
     "completion",
     "error_detail",
@@ -225,8 +236,14 @@ def _should_mask_whole_field(normalized_key: str, value: Any) -> bool:
     return (
         normalized_key in SENSITIVE_FIELD_KEYS
         or normalized_key in SECRET_FIELD_KEYS
+        or _contains_secret_field_marker(normalized_key)
         or normalized_key in SENSITIVE_CONTENT_FIELD_KEYS
     )
+
+
+def _contains_secret_field_marker(normalized_key: str) -> bool:
+    padded_key = f"_{normalized_key}_"
+    return any(f"_{marker}_" in padded_key for marker in SECRET_FIELD_KEY_MARKERS)
 
 
 def _mask_nonempty(value: str | None) -> str | None:

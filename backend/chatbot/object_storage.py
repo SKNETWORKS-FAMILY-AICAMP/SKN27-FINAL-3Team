@@ -532,17 +532,8 @@ def _storage_error_kwargs(exc: Exception) -> dict[str, str]:
     return {
         "reason": reason_by_class.get(class_name, "s3_operation_failed"),
         "error_class": class_name,
-        "message": _truncate_error_message(exc),
+        "message": "Object storage provider operation failed.",
     }
-
-
-def _truncate_error_message(exc: Exception) -> str:
-    message = " ".join(str(exc).split())
-    if not message:
-        return ""
-    if len(message) > 180:
-        return f"{message[:177]}..."
-    return message
 
 
 def _local_object_path(reference: dict[str, Any]) -> Path:

@@ -18,6 +18,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from app.security.pii_masking import sanitize_pii
 from chatbot.models import UploadedFile, UploadedFileStatus
 
 
@@ -391,11 +392,7 @@ def _external_scan_payload(uploaded_file: UploadedFile) -> dict[str, Any]:
 
 
 def _safe_external_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    safe = dict(metadata)
-    for key in list(safe):
-        if any(token in key.lower() for token in ("secret", "token", "password", "api_key")):
-            safe[key] = "[redacted]"
-    return safe
+    return sanitize_pii(metadata)
 
 
 def _clamav_findings_from_response(response: str) -> list[dict[str, Any]]:
@@ -413,7 +410,13 @@ def _clamav_findings_from_response(response: str) -> list[dict[str, Any]]:
                 "signature": signature,
             }
         ]
-    return [_scanner_unavailable_finding(provider="clamav", reason="unexpected_response", message=normalized)]
+    return [
+        _scanner_unavailable_finding(
+            provider="clamav",
+            reason="unexpected_response",
+            message="ClamAV returned an unexpected response.",
+        )
+    ]
 
 
 def _external_findings_from_response(response: dict[str, Any]) -> list[dict[str, Any]]:
@@ -430,24 +433,32 @@ def _external_findings_from_response(response: dict[str, Any]) -> list[dict[str,
         return [
             {
                 "category": "virus",
-                "code": str(response.get("code") or "external_scan_rejected"),
+                "code": "external_scan_rejected",
                 "severity": "critical",
-                "message": str(response.get("message") or "External scan provider rejected the file."),
+                "message": "External scan provider rejected the file.",
             }
         ]
-    return [_scanner_unavailable_finding(provider="external", reason="unexpected_response", message=json.dumps(response, ensure_ascii=False)[:180])]
+    return [
+        _scanner_unavailable_finding(
+            provider="external",
+            reason="unexpected_response",
+            message="External scan provider returned an unexpected response.",
+        )
+    ]
 
 
 def _normalize_provider_finding(item: dict[str, Any], *, provider: str) -> dict[str, Any]:
+    category = str(item.get("category") or "provider").lower()
+    if category not in {"malware", "policy", "provider", "scanner", "virus"}:
+        category = "provider"
     severity = str(item.get("severity") or "").lower()
     if severity not in {"low", "medium", "high", "critical"}:
-        severity = "critical" if str(item.get("category") or "").lower() in {"virus", "malware"} else "medium"
+        severity = "critical" if category in {"virus", "malware"} else "medium"
     return {
-        "category": str(item.get("category") or "provider"),
-        "code": str(item.get("code") or f"{provider}_finding"),
+        "category": category,
+        "code": f"{provider}_finding",
         "severity": severity,
-        "message": str(item.get("message") or "File scan provider returned a finding."),
-        **{key: value for key, value in item.items() if key not in {"category", "code", "severity", "message"}},
+        "message": "File scan provider returned a finding.",
     }
 
 

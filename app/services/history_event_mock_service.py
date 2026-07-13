@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app.security.pii_masking import mask_text, sanitize_pii
+
 
 HISTORY_EVENT_VERSION = "history_event.v1"
 DEFAULT_RETENTION_POLICY = "review_required"
@@ -255,12 +257,12 @@ def sanitize_metadata(value: Any) -> Any:
             if normalized_key.lower() in SENSITIVE_METADATA_KEYS:
                 continue
             sanitized[normalized_key] = sanitize_metadata(item)
-        return sanitized
+        return sanitize_pii(sanitized)
     if isinstance(value, list):
         return [sanitize_metadata(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
+        return sanitize_pii(value)
+    return sanitize_pii(str(value))
 
 
 def _normalize_actor(actor: dict[str, Any] | None) -> dict[str, Any]:
@@ -363,7 +365,7 @@ def _safe_segment(value: Any) -> str:
 
 
 def _safe_summary(value: Any) -> str:
-    summary = _text(value)
+    summary = mask_text(_text(value))
     return summary[:280] if summary else "history event recorded"
 
 

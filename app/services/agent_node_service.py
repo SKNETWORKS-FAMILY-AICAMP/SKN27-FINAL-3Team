@@ -497,7 +497,7 @@ def _execute_sync_node(
         )
         adapter_error = {
             "error_code": exc.__class__.__name__,
-            "message": str(exc),
+            "message": "Sync adapter execution failed.",
         }
 
     result = {
@@ -547,7 +547,7 @@ def _run_fine_notice_analysis_adapter(
             "summary": "fine_notice_analysis adapter failed before completing OCR processing.",
             "structured_result": {
                 "ocr_status": "failed",
-                "ocr_error": f"{exc.__class__.__name__}: {exc}",
+                "ocr_error": "Fine notice analysis failed.",
                 "missing_fields": ["notice_image"] if state.get("_input_source") == "missing" else [],
             },
             "evidence": [],
@@ -878,7 +878,7 @@ def _adapter_error_output(
     structured_result = _normalize_adapter_structured_result(
         {
             "error_code": exc.__class__.__name__,
-            "error_message": str(exc),
+            "error_message": "Sync adapter execution failed.",
         },
         node_code=node["node_code"],
         adapter_trace=adapter_trace,
