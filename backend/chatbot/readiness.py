@@ -351,10 +351,49 @@ def _file_scan_check() -> dict[str, Any]:
         timeout_seconds = int(_setting("FILE_SCAN_TIMEOUT_SECONDS", 0))
     except (TypeError, ValueError):
         timeout_seconds = 0
+    try:
+        claim_stale_seconds = int(_setting("FILE_SCAN_CLAIM_STALE_AFTER_SECONDS", 0))
+    except (TypeError, ValueError):
+        claim_stale_seconds = 0
+    try:
+        retry_backoff_seconds = int(_setting("FILE_SCAN_RETRY_BACKOFF_SECONDS", 0))
+    except (TypeError, ValueError):
+        retry_backoff_seconds = 0
+    try:
+        upload_max_bytes = int(_setting("FILE_UPLOAD_MAX_BYTES", 0))
+    except (TypeError, ValueError):
+        upload_max_bytes = 0
+    try:
+        retention_purge_limit = int(_setting("FILE_RETENTION_PURGE_LIMIT", 0))
+    except (TypeError, ValueError):
+        retention_purge_limit = 0
     if max_bytes <= 0:
         details.append(_detail(FAIL, "FILE_SCAN_MAX_BYTES must be a positive integer."))
     if timeout_seconds <= 0:
         details.append(_detail(FAIL, "FILE_SCAN_TIMEOUT_SECONDS must be a positive integer."))
+    if claim_stale_seconds <= 0:
+        details.append(
+            _detail(
+                FAIL,
+                "FILE_SCAN_CLAIM_STALE_AFTER_SECONDS must be a positive integer.",
+            )
+        )
+    if retry_backoff_seconds <= 0:
+        details.append(
+            _detail(
+                FAIL,
+                "FILE_SCAN_RETRY_BACKOFF_SECONDS must be a positive integer.",
+            )
+        )
+    if upload_max_bytes <= 0:
+        details.append(_detail(FAIL, "FILE_UPLOAD_MAX_BYTES must be a positive integer."))
+    if retention_purge_limit <= 0:
+        details.append(
+            _detail(
+                FAIL,
+                "FILE_RETENTION_PURGE_LIMIT must be a positive integer.",
+            )
+        )
     if provider not in {"local_policy", "clamav", "external"}:
         details.append(_detail(FAIL, f"Unsupported FILE_SCAN_PROVIDER: {provider}."))
     if provider == "local_policy":
@@ -376,7 +415,14 @@ def _file_scan_check() -> dict[str, Any]:
             "provider": provider,
             "max_bytes": max_bytes,
             "timeout_seconds": timeout_seconds,
-            "smoke": "smoke_file_scan --require-clean",
+            "claim_stale_seconds": claim_stale_seconds,
+            "retry_backoff_seconds": retry_backoff_seconds,
+            "upload_max_bytes": upload_max_bytes,
+            "retention_purge_limit": retention_purge_limit,
+            "smoke_phases": [
+                "smoke_file_scan --phase upload --attachment-id att_release_scan",
+                "smoke_file_scan --phase scan --attachment-id att_release_scan --require-clean",
+            ],
         },
     )
 
@@ -385,10 +431,25 @@ def _object_storage_check() -> dict[str, Any]:
     provider = str(_setting("OBJECT_STORAGE_PROVIDER", "mock_s3") or "mock_s3")
     policy = object_storage_policy()
     details = []
+    clean_bucket = str(_setting("OBJECT_STORAGE_BUCKET", "") or "").strip()
+    quarantine_bucket = str(
+        _setting("OBJECT_STORAGE_QUARANTINE_BUCKET", "") or ""
+    ).strip()
     if provider == "mock_s3":
         details.append(_detail(WARN, "OBJECT_STORAGE_PROVIDER is mock_s3; replace with real object storage before production."))
-    if not str(_setting("OBJECT_STORAGE_BUCKET", "") or "").strip():
+    if not clean_bucket:
         details.append(_detail(FAIL, "OBJECT_STORAGE_BUCKET is required."))
+    if not quarantine_bucket:
+        details.append(
+            _detail(FAIL, "OBJECT_STORAGE_QUARANTINE_BUCKET is required.")
+        )
+    elif quarantine_bucket == clean_bucket:
+        details.append(
+            _detail(
+                FAIL,
+                "OBJECT_STORAGE_QUARANTINE_BUCKET must differ from OBJECT_STORAGE_BUCKET.",
+            )
+        )
     if not policy.get("writes_binary"):
         details.append(_detail(FAIL, "Object storage adapter must support binary writes for production."))
     if provider == "s3" and importlib.util.find_spec("boto3") is None:
@@ -412,6 +473,10 @@ def _object_storage_check() -> dict[str, Any]:
         ok_message="Object storage adapter settings are present and binary-write capable.",
         metadata={
             "provider": provider,
+            "quarantine_bucket_configured": bool(quarantine_bucket),
+            "quarantine_bucket_isolated": bool(
+                quarantine_bucket and quarantine_bucket != clean_bucket
+            ),
             "writes_binary": policy.get("writes_binary"),
             "persistence_state": policy.get("persistence_state"),
             "smoke": "smoke_object_storage --require-binary",

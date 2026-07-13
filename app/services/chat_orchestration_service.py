@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.consultation_v2_service import build_consultation_state_v2
 from app.services.supervisor_llm_service import build_supervisor_state_with_optional_llm
 
@@ -53,6 +54,7 @@ def create_session(user_id: str | None = None) -> dict[str, Any]:
 
 
 def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = resolve_attachment_references(payload)
     session_id = str(payload.get("session_id") or f"ses_{uuid4().hex[:12]}")
     message_id = f"msg_{uuid4().hex[:12]}"
     attachments = [item for item in payload.get("attachments", []) if isinstance(item, dict)]

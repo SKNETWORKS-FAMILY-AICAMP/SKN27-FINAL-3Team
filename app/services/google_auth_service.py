@@ -10,6 +10,7 @@ from typing import Any
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
+from uuid import uuid4
 
 import jwt
 
@@ -240,7 +241,7 @@ def create_token_refresh(
     authorization_header: str | None,
     payload: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Refresh a valid app JWT into a new app JWT for the same auth session."""
+    """Rotate a valid app JWT into a new, single-use auth session."""
 
     header_value = _text(authorization_header)
     token = _bearer_token_from_header(authorization_header)
@@ -256,9 +257,11 @@ def create_token_refresh(
 
     issued_at = _now()
     expires_at = issued_at + timedelta(seconds=APP_JWT_TTL_SECONDS)
+    previous_auth_session_id = _text(claims.get("jti"))
+    auth_session_id = f"auth_refresh_{uuid4().hex[:24]}"
     refreshed_token, refreshed_claims = issue_access_token(
         user_id=_text(claims.get("sub")),
-        auth_session_id=_text(claims.get("jti")),
+        auth_session_id=auth_session_id,
         email=_text(claims.get("email")),
         display_name=_text(claims.get("name")),
         provider_subject=_text(claims.get("provider_subject")),
@@ -295,16 +298,20 @@ def create_token_refresh(
             "subject_type": "user",
             "user_id": _text(claims.get("sub")),
             "guest_id": guest_id,
-            "auth_session_id": _text(claims.get("jti")),
+            "auth_session_id": auth_session_id,
             "is_authenticated": True,
         },
         "auth_session": {
-            "auth_session_id": _text(claims.get("jti")),
-            "jwt_jti": _text(claims.get("jti")),
+            "auth_session_id": auth_session_id,
+            "jwt_jti": auth_session_id,
             "status": "active",
             "verification": "app_jwt_hmac",
             "provider": _text(claims.get("auth_provider")) or "google",
-            "refresh_policy": "valid_app_jwt_required",
+            "refresh_policy": "active_persisted_session_single_use",
+            "rotation": {
+                "previous_auth_session_id": previous_auth_session_id,
+                "rotated_at": issued_at.isoformat(),
+            },
             "app_jwt_claims": {
                 "iss": refreshed_claims["iss"],
                 "aud": refreshed_claims["aud"],
@@ -320,7 +327,7 @@ def create_token_refresh(
         "rate_limit": _rate_limit_policy(subject_id=f"user:{_text(claims.get('sub'))}"),
         "merge_policy": _merge_policy(),
         "limitations": [
-            "MVP refresh requires a valid app JWT; separate refresh tokens and silent expired-token refresh are not enabled.",
+            "MVP refresh rotates a valid, persisted app JWT session; separate refresh tokens and silent expired-token refresh are not enabled.",
         ],
     }
 
@@ -388,7 +395,7 @@ def create_logout(
             "next_auth_state": "guest" if guest_id else "anonymous",
         },
         "limitations": [
-            "Stateless JWTs cannot be invalidated client-side after issuance; backend marks auth_session revoked and clients must clear the token.",
+            "Backend session state invalidates the JWT after logout; clients must also clear their local token.",
         ],
     }
 
@@ -661,7 +668,8 @@ def _user_id_for_google_subject(google_sub: str) -> str:
 
 
 def _auth_session_id_for_google_subject(google_sub: str, session_id: Any) -> str:
-    return f"auth_google_{_digest(f'{google_sub}:{_text(session_id)}')}"
+    subject_digest = _digest(f"{google_sub}:{_text(session_id)}", length=10)
+    return f"auth_google_{subject_digest}_{uuid4().hex[:20]}"
 
 
 def _digest(value: str, *, length: int = 16) -> str:

@@ -1,0 +1,1016 @@
+openapi: 3.2.0
+info:
+  title: SKN27 Traffic Dispute AI API
+  version: 1.0.0
+  description: Generated shadow contract for executable Django API behavior. It does not replace urlpatterns
+    while route specs remain shadow-only.
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+x-contract-mode: shadow
+paths:
+  /api/cases/:
+    get:
+      tags:
+      - Cases
+      summary: List consultation cases owned by the authenticated user
+      operationId: listConsultationCases
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-consultation-cases
+      x-django-view: consultation_cases
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsultationCaseListResponse'
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - login_required
+    post:
+      tags:
+      - Cases
+      summary: Promote an authenticated consultation session to a Case
+      operationId: createConsultationCase
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-consultation-cases
+      x-django-view: consultation_cases
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateConsultationCaseResponse'
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - login_required
+          - case_owner_mismatch
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - case_not_found
+        '409':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - case_conflict
+        '422':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - validation_error
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConsultationCaseRequest'
+  /api/cases/{case_id}/workspace/:
+    get:
+      tags:
+      - Cases
+      summary: Read the authenticated owner's Case workspace
+      operationId: getConsultationCaseWorkspace
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-consultation-case-workspace
+      x-django-view: consultation_case_workspace
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsultationCaseWorkspaceResponse'
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - login_required
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - case_not_found
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        description: Canonical consultation Case identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+  /api/cases/{case_id}/facts/confirm/:
+    post:
+      tags:
+      - Cases
+      summary: Create an immutable confirmed-facts version for a Case
+      operationId: confirmConsultationCaseFacts
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-consultation-case-fact-confirmation
+      x-django-view: consultation_case_fact_confirmation
+      responses:
+        '201':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmCaseFactsResponse'
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - login_required
+          - object_access_denied
+          - case_owner_mismatch
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - case_not_found
+        '409':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - case_conflict
+        '422':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - validation_error
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        description: Canonical consultation Case identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmCaseFactsRequest'
+  /api/cases/{case_id}/analysis/jobs/:
+    post:
+      tags:
+      - Cases
+      summary: Queue analysis from an authenticated owner's confirmed facts
+      operationId: startConsultationCaseAnalysis
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-consultation-case-analysis-jobs
+      x-django-view: consultation_case_analysis_jobs
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartCaseAnalysisResponse'
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - login_required
+          - object_access_denied
+          - case_owner_mismatch
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - case_not_found
+        '409':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - case_conflict
+          - confirmed_facts_required
+          - fact_readiness_not_met
+        '422':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseApiErrorResponse'
+          x-error-codes:
+          - validation_error
+      parameters:
+      - name: case_id
+        in: path
+        required: true
+        description: Canonical consultation Case identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartCaseAnalysisRequest'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    CaseLoginRequiredError:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: login_required.v1
+          title: Contract Version
+          type: string
+        type:
+          const: authorization
+          title: Type
+          type: string
+        code:
+          const: login_required
+          title: Code
+          type: string
+        status:
+          const: 403
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: login
+          title: Required Action
+          type: string
+        action:
+          title: Action
+          type: string
+        reason:
+          title: Reason
+          type: string
+        policy_version:
+          title: Policy Version
+          type: string
+        subject:
+          additionalProperties: true
+          title: Subject
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - action
+      - reason
+      - policy_version
+      - subject
+      title: CaseLoginRequiredError
+      type: object
+    CaseLoginRequiredErrorResponse:
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/CaseLoginRequiredError'
+      required:
+      - error
+      title: CaseLoginRequiredErrorResponse
+      type: object
+    CaseObjectAccessDeniedError:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: object_access.v1
+          title: Contract Version
+          type: string
+        type:
+          const: object_access
+          title: Type
+          type: string
+        code:
+          const: object_access_denied
+          title: Code
+          type: string
+        status:
+          const: 403
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: login_or_owner_match
+          title: Required Action
+          type: string
+        access:
+          additionalProperties: true
+          title: Access
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - access
+      title: CaseObjectAccessDeniedError
+      type: object
+    CaseObjectAccessDeniedErrorResponse:
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/CaseObjectAccessDeniedError'
+      required:
+      - error
+      title: CaseObjectAccessDeniedErrorResponse
+      type: object
+    CaseRequestValidationError:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: request_validation_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: validation
+          title: Type
+          type: string
+        code:
+          const: validation_error
+          title: Code
+          type: string
+        status:
+          const: 422
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        details:
+          items:
+            $ref: '#/components/schemas/RequestValidationIssue'
+          title: Details
+          type: array
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - details
+      title: CaseRequestValidationError
+      type: object
+    CaseRequestValidationErrorResponse:
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/CaseRequestValidationError'
+      required:
+      - error
+      title: CaseRequestValidationErrorResponse
+      type: object
+    ConsultationCaseRepositoryError:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: consultation_case_error.v2
+          title: Contract Version
+          type: string
+        type:
+          const: case
+          title: Type
+          type: string
+        code:
+          enum:
+          - case_repository_error
+          - case_not_found
+          - case_conflict
+          - case_owner_mismatch
+          - confirmed_facts_required
+          - fact_readiness_not_met
+          title: Code
+          type: string
+        status:
+          enum:
+          - 400
+          - 403
+          - 404
+          - 409
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        details:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Details
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      title: ConsultationCaseRepositoryError
+      type: object
+    ConsultationCaseRepositoryErrorResponse:
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/ConsultationCaseRepositoryError'
+      required:
+      - error
+      title: ConsultationCaseRepositoryErrorResponse
+      type: object
+    RequestValidationIssue:
+      additionalProperties: false
+      properties:
+        field:
+          title: Field
+          type: string
+        type:
+          title: Type
+          type: string
+        message:
+          title: Message
+          type: string
+      required:
+      - field
+      - type
+      - message
+      title: RequestValidationIssue
+      type: object
+    CaseApiErrorResponse:
+      anyOf:
+      - $ref: '#/components/schemas/CaseLoginRequiredErrorResponse'
+      - $ref: '#/components/schemas/CaseRequestValidationErrorResponse'
+      - $ref: '#/components/schemas/ConsultationCaseRepositoryErrorResponse'
+      - $ref: '#/components/schemas/CaseObjectAccessDeniedErrorResponse'
+      description: Strict union of the error envelopes emitted by Case v2 endpoints.
+      title: CaseApiErrorResponse
+    ConfirmCaseFactsRequest:
+      additionalProperties: false
+      properties:
+        facts:
+          additionalProperties: true
+          minProperties: 1
+          title: Facts
+          type: object
+        sources:
+          items:
+            additionalProperties: true
+            type: object
+          title: Sources
+          type: array
+        conflicts:
+          items:
+            additionalProperties: true
+            type: object
+          title: Conflicts
+          type: array
+        user_edit_history:
+          items:
+            additionalProperties: true
+            type: object
+          title: User Edit History
+          type: array
+      required:
+      - facts
+      title: ConfirmCaseFactsRequest
+      type: object
+    ConfirmedFactRecord:
+      additionalProperties: false
+      properties:
+        schema_version:
+          const: confirmed_facts.v1
+          title: Schema Version
+          type: string
+        fact_version_id:
+          maxLength: 64
+          minLength: 1
+          title: Fact Version Id
+          type: string
+        case_id:
+          maxLength: 64
+          minLength: 1
+          title: Case Id
+          type: string
+        version_no:
+          minimum: 1
+          title: Version No
+          type: integer
+        status:
+          const: confirmed
+          title: Status
+          type: string
+        facts:
+          additionalProperties: true
+          title: Facts
+          type: object
+        sources:
+          items:
+            additionalProperties: true
+            type: object
+          title: Sources
+          type: array
+        conflicts:
+          items:
+            additionalProperties: true
+            type: object
+          title: Conflicts
+          type: array
+        user_edit_history:
+          items:
+            additionalProperties: true
+            type: object
+          title: User Edit History
+          type: array
+        confirmed_by:
+          maxLength: 128
+          title: Confirmed By
+          type: string
+        confirmed_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Confirmed At
+      required:
+      - schema_version
+      - fact_version_id
+      - case_id
+      - version_no
+      - status
+      - facts
+      - sources
+      - conflicts
+      - user_edit_history
+      - confirmed_by
+      - confirmed_at
+      title: ConfirmedFactRecord
+      type: object
+    ConfirmCaseFactsResponse:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: confirmed_facts.v1
+          title: Contract Version
+          type: string
+        fact_version:
+          $ref: '#/components/schemas/ConfirmedFactRecord'
+      required:
+      - contract_version
+      - fact_version
+      title: ConfirmCaseFactsResponse
+      type: object
+    ConsultationCaseRecord:
+      additionalProperties: false
+      properties:
+        case_id:
+          maxLength: 64
+          minLength: 1
+          title: Case Id
+          type: string
+        owner_id:
+          maxLength: 128
+          minLength: 1
+          title: Owner Id
+          type: string
+        title:
+          maxLength: 200
+          title: Title
+          type: string
+        case_type:
+          const: accident_fault
+          title: Case Type
+          type: string
+        status:
+          enum:
+          - intake
+          - awaiting_fact_confirmation
+          - queued
+          - analyzing
+          - needs_input
+          - ready
+          - high_risk_handoff
+          - closed
+          - deleted
+          title: Status
+          type: string
+        risk_level:
+          enum:
+          - standard
+          - high_risk
+          title: Risk Level
+          type: string
+        location:
+          additionalProperties: true
+          title: Location
+          type: object
+        current_fact_version:
+          minimum: 0
+          title: Current Fact Version
+          type: integer
+        current_report_version:
+          minimum: 0
+          title: Current Report Version
+          type: integer
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - case_id
+      - owner_id
+      - title
+      - case_type
+      - status
+      - risk_level
+      - location
+      - current_fact_version
+      - current_report_version
+      - created_at
+      - updated_at
+      title: ConsultationCaseRecord
+      type: object
+    ConsultationCaseListResponse:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: consultation_case_list.v2
+          title: Contract Version
+          type: string
+        cases:
+          items:
+            $ref: '#/components/schemas/ConsultationCaseRecord'
+          title: Cases
+          type: array
+      required:
+      - contract_version
+      - cases
+      title: ConsultationCaseListResponse
+      type: object
+    CaseWorkspace:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: case_workspace.v2
+          title: Contract Version
+          type: string
+        case:
+          $ref: '#/components/schemas/ConsultationCaseRecord'
+        consultation_state:
+          additionalProperties: true
+          title: Consultation State
+          type: object
+        confirmed_facts:
+          items:
+            $ref: '#/components/schemas/ConfirmedFactRecord'
+          title: Confirmed Facts
+          type: array
+        analysis_jobs:
+          items:
+            $ref: '#/components/schemas/CaseWorkspaceAnalysisJob'
+          title: Analysis Jobs
+          type: array
+        reports:
+          items:
+            $ref: '#/components/schemas/CaseWorkspaceReport'
+          title: Reports
+          type: array
+        attachments:
+          items:
+            $ref: '#/components/schemas/CaseWorkspaceAttachment'
+          title: Attachments
+          type: array
+      required:
+      - contract_version
+      - case
+      - consultation_state
+      - confirmed_facts
+      - analysis_jobs
+      - reports
+      - attachments
+      title: CaseWorkspace
+      type: object
+    CaseWorkspaceAnalysisJob:
+      additionalProperties: false
+      properties:
+        job_id:
+          maxLength: 64
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          enum:
+          - queued
+          - running
+          - success
+          - partial
+          - failed
+          title: Status
+          type: string
+        active_node:
+          maxLength: 120
+          title: Active Node
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - job_id
+      - status
+      - active_node
+      - updated_at
+      title: CaseWorkspaceAnalysisJob
+      type: object
+    CaseWorkspaceAttachment:
+      additionalProperties: false
+      properties:
+        attachment_id:
+          maxLength: 64
+          minLength: 1
+          title: Attachment Id
+          type: string
+        status:
+          enum:
+          - pending
+          - uploaded
+          - scanning
+          - ready
+          - rejected
+          - deleted
+          title: Status
+          type: string
+        purpose:
+          maxLength: 64
+          minLength: 1
+          title: Purpose
+          type: string
+        retention_expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Retention Expires At
+      required:
+      - attachment_id
+      - status
+      - purpose
+      - retention_expires_at
+      title: CaseWorkspaceAttachment
+      type: object
+    CaseWorkspaceReport:
+      additionalProperties: false
+      properties:
+        report_id:
+          maxLength: 64
+          minLength: 1
+          title: Report Id
+          type: string
+        report_type:
+          enum:
+          - fine_notice_objection
+          - fault_ratio_analysis
+          - general
+          - initial_consultation
+          - expert_handoff
+          title: Report Type
+          type: string
+        version_no:
+          minimum: 1
+          title: Version No
+          type: integer
+        status:
+          enum:
+          - draft
+          - generating
+          - ready
+          - failed
+          - deleted
+          title: Status
+          type: string
+      required:
+      - report_id
+      - report_type
+      - version_no
+      - status
+      title: CaseWorkspaceReport
+      type: object
+    ConsultationCaseWorkspaceResponse:
+      additionalProperties: false
+      properties:
+        workspace:
+          $ref: '#/components/schemas/CaseWorkspace'
+      required:
+      - workspace
+      title: ConsultationCaseWorkspaceResponse
+      type: object
+    CreateConsultationCaseRequest:
+      additionalProperties: false
+      properties:
+        session_id:
+          maxLength: 64
+          minLength: 1
+          title: Session Id
+          type: string
+        title:
+          default: ''
+          maxLength: 200
+          title: Title
+          type: string
+        case_type:
+          const: accident_fault
+          default: accident_fault
+          title: Case Type
+          type: string
+        consultation_state:
+          additionalProperties: true
+          title: Consultation State
+          type: object
+        location:
+          additionalProperties: true
+          title: Location
+          type: object
+      required:
+      - session_id
+      title: CreateConsultationCaseRequest
+      type: object
+    CreateConsultationCaseResponse:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: consultation_case.v2
+          title: Contract Version
+          type: string
+        case:
+          $ref: '#/components/schemas/ConsultationCaseRecord'
+      required:
+      - contract_version
+      - case
+      title: CreateConsultationCaseResponse
+      type: object
+    StartCaseAnalysisRequest:
+      additionalProperties: false
+      properties:
+        fact_version_id:
+          default: ''
+          maxLength: 64
+          title: Fact Version Id
+          type: string
+      title: StartCaseAnalysisRequest
+      type: object
+    CaseAnalysisJob:
+      additionalProperties: false
+      properties:
+        job_id:
+          maxLength: 64
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          enum:
+          - queued
+          - running
+          - success
+          - partial
+          - failed
+          title: Status
+          type: string
+      required:
+      - job_id
+      - status
+      title: CaseAnalysisJob
+      type: object
+    CaseAnalysisPlanSummary:
+      additionalProperties: false
+      properties:
+        plan_id:
+          maxLength: 64
+          minLength: 1
+          title: Plan Id
+          type: string
+        node_codes:
+          items:
+            type: string
+          minItems: 1
+          title: Node Codes
+          type: array
+      required:
+      - plan_id
+      - node_codes
+      title: CaseAnalysisPlanSummary
+      type: object
+    CaseAnalysisWorkItem:
+      additionalProperties: false
+      properties:
+        work_item_id:
+          maxLength: 64
+          minLength: 1
+          title: Work Item Id
+          type: string
+        status:
+          enum:
+          - queued
+          - running
+          - success
+          - failed
+          - retrying
+          - canceled
+          title: Status
+          type: string
+      required:
+      - work_item_id
+      - status
+      title: CaseAnalysisWorkItem
+      type: object
+    StartCaseAnalysisResponse:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: case_analysis_job.v2
+          title: Contract Version
+          type: string
+        job:
+          $ref: '#/components/schemas/CaseAnalysisJob'
+        work_item:
+          $ref: '#/components/schemas/CaseAnalysisWorkItem'
+        analysis_plan:
+          $ref: '#/components/schemas/CaseAnalysisPlanSummary'
+      required:
+      - contract_version
+      - job
+      - work_item
+      - analysis_plan
+      title: StartCaseAnalysisResponse
+      type: object

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.core.files.uploadhandler import FileUploadHandler, StopUpload
 from django.http import HttpRequest, HttpResponse, JsonResponse
 
 from app.services.auth_error_contract import (
@@ -10,6 +11,7 @@ from app.services.auth_error_contract import (
     build_www_authenticate_header,
 )
 from app.services.google_auth_service import decode_access_token
+from chatbot.auth_session_policy import validate_persisted_auth_session
 
 
 PUBLIC_PATHS = (
@@ -18,6 +20,7 @@ PUBLIC_PATHS = (
     "/api/health/ready/",
     "/api/capabilities/",
     "/api/auth/guest-session/",
+    "/api/auth/login/",
     "/api/auth/google/code/",
     "/api/auth/refresh/",
 )
@@ -28,9 +31,11 @@ GUEST_ALLOWED_PATHS = (
     "/api/chat/save-state/",
     "/api/files/",
     "/api/reports/",
+    "/api/auth/me/",
 )
 
 PROTECTED_PREFIXES = (
+    "/api/auth/",
     "/api/agents/",
     "/api/analysis/",
     "/api/chat/",
@@ -39,6 +44,107 @@ PROTECTED_PREFIXES = (
     "/api/mypage/",
     "/api/reports/",
 )
+
+FILE_UPLOAD_REQUEST_OVERHEAD_BYTES = 1024 * 1024
+
+
+class BoundedFileUploadHandler(FileUploadHandler):
+    """Stop multipart streaming before temporary storage exceeds the file cap."""
+
+    chunk_size = 64 * 1024
+
+    def __init__(self, request: HttpRequest, *, max_bytes: int) -> None:
+        super().__init__(request)
+        self.max_bytes = max_bytes
+        self.total_file_bytes = 0
+
+    def new_file(self, *args, **kwargs) -> None:
+        super().new_file(*args, **kwargs)
+        content_length = kwargs.get("content_length")
+        if content_length is None and len(args) >= 4:
+            content_length = args[3]
+        if content_length is not None and int(content_length) > self.max_bytes:
+            self._stop_upload(int(content_length))
+
+    def receive_data_chunk(self, raw_data: bytes, start: int) -> bytes:
+        del start
+        self.total_file_bytes += len(raw_data)
+        if self.total_file_bytes > self.max_bytes:
+            self._stop_upload(self.total_file_bytes)
+        return raw_data
+
+    def file_complete(self, file_size: int):
+        del file_size
+        return None
+
+    def _stop_upload(self, size_bytes: int) -> None:
+        self.request.file_upload_limit_violation = {
+            "size_bytes": size_bytes,
+            "limit_bytes": self.max_bytes,
+        }
+        raise StopUpload(connection_reset=True)
+
+
+class FileUploadLimitMiddleware:
+    """Apply an early Content-Length guard and a bounded streaming handler."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        if not _is_canonical_multipart_upload(request):
+            return self.get_response(request)
+
+        max_bytes = int(getattr(settings, "FILE_UPLOAD_MAX_BYTES", 20 * 1024 * 1024))
+        content_length = _positive_content_length(request)
+        if (
+            content_length is not None
+            and content_length > max_bytes + FILE_UPLOAD_REQUEST_OVERHEAD_BYTES
+        ):
+            return _file_upload_limit_response(
+                size_bytes=content_length,
+                limit_bytes=max_bytes,
+            )
+
+        request.upload_handlers.insert(
+            0,
+            BoundedFileUploadHandler(request, max_bytes=max_bytes),
+        )
+        return self.get_response(request)
+
+
+def _is_canonical_multipart_upload(request: HttpRequest) -> bool:
+    return (
+        request.method == "POST"
+        and request.path == "/api/files/"
+        and str(request.content_type or "").startswith("multipart/")
+    )
+
+
+def _positive_content_length(request: HttpRequest) -> int | None:
+    try:
+        value = int(request.META.get("CONTENT_LENGTH") or 0)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _file_upload_limit_response(*, size_bytes: int, limit_bytes: int) -> JsonResponse:
+    return JsonResponse(
+        {
+            "error": {
+                "contract_version": "file_upload_error.v1",
+                "type": "validation",
+                "code": "file_too_large",
+                "status": 413,
+                "message": "The uploaded file exceeds the configured size limit.",
+                "size_bytes": size_bytes,
+                "limit_bytes": limit_bytes,
+                "required_action": "select_smaller_file",
+            }
+        },
+        status=413,
+    )
 
 
 class SameOriginCorsMiddleware:
@@ -102,7 +208,10 @@ def _is_valid_api_auth(request: HttpRequest) -> tuple[bool, dict | None]:
     if token:
         app_jwt_valid, app_jwt_claims = decode_access_token(token)
         if app_jwt_valid:
-            return True, None
+            session_valid, reason = validate_persisted_auth_session(app_jwt_claims)
+            if session_valid:
+                return True, None
+            return False, build_auth_error("token_invalid", reason=reason)
         reason = str(app_jwt_claims.get("reason") or "invalid_app_jwt")
         if reason == "expired_token":
             return False, build_auth_error("token_expired")

@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta, timezone as datetime_timezone
 from io import BytesIO
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
 
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, close_old_connections, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -68,11 +72,15 @@ from chatbot.models import (
     UploadedFileStatus,
 )
 from chatbot.object_storage import (
+    build_quarantine_upload_storage_reference,
     build_report_storage_reference,
     build_upload_storage_reference,
     copy_object,
     delete_object,
+    delete_source_uri,
+    object_storage_bucket,
     object_storage_policy,
+    object_storage_prefix,
     storage_reference_from_uri,
     write_object,
     write_object_from_source_uri,
@@ -91,6 +99,11 @@ REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
 ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
 REPORT_PDF_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_report_renderer.py"
+UPLOAD_STORAGE_LIFECYCLE_VERSION = "upload_storage_lifecycle.v1"
+REPORT_STAGING_CLEANUP_BATCH_VERSION = "report_staging_cleanup_batch.v1"
+REPORT_STAGING_CLEANUP_PENDING = "staging_cleanup_pending"
+SUCCESSFUL_STORAGE_DELETE_STATUSES = {"deleted", "not_found"}
+DEFAULT_REPORT_STAGING_CLEANUP_LIMIT = 100
 
 
 class ReportReferenceError(ValueError):
@@ -98,6 +111,38 @@ class ReportReferenceError(ValueError):
 
     def __init__(self, reason: str, internal_message: str) -> None:
         super().__init__(internal_message)
+        self.reason = reason
+
+
+class AuthSessionStateError(ValueError):
+    """Fail-closed auth-session persistence error safe to expose as a reason code."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class UploadStorageUnavailableError(RuntimeError):
+    """Retryable upload error raised when quarantine persistence did not finish."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__("quarantine object storage is unavailable")
+        self.reason = reason or "quarantine_write_failed"
+
+
+class AttachmentScanGateError(RuntimeError):
+    """Queued work item no longer has access to every requested attachment."""
+
+    def __init__(self) -> None:
+        super().__init__("queued attachment is no longer available")
+        self.reason = "attachment_scan_gate_blocked"
+
+
+class UploadValidationError(ValueError):
+    """Stable validation error for canonical upload boundary requirements."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
         self.reason = reason
 
 
@@ -437,11 +482,28 @@ def register_uploaded_file(
     metadata exposes the object-storage adapter URI and fallback envelope.
     """
 
+    if not _text(payload.get("session_id")):
+        raise UploadValidationError("session_id_required")
+    owner_id = _owner_id(payload)
+    guest_id = _payload_guest_id(payload)
+    _get_or_create_session(
+        payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=guest_id,
+    )
     registration_payload = dict(payload)
     registration_payload.pop("attachment_id", None)
-    attachment = register_mock_attachment(registration_payload, upload_file=upload_file)
-    owner_id = _owner_id(payload)
-    return persist_uploaded_file_metadata(attachment, owner_id=owner_id, raw_payload=payload)
+    attachment = register_mock_attachment(
+        registration_payload,
+        upload_file=upload_file,
+        max_upload_bytes=int(getattr(settings, "FILE_UPLOAD_MAX_BYTES", 20 * 1024 * 1024)),
+    )
+    return persist_uploaded_file_metadata(
+        attachment,
+        owner_id=owner_id,
+        raw_payload=payload,
+        binary_upload=upload_file is not None,
+    )
 
 
 def persist_uploaded_file_metadata(
@@ -449,8 +511,16 @@ def persist_uploaded_file_metadata(
     *,
     owner_id: str = "",
     raw_payload: dict[str, Any] | None = None,
+    binary_upload: bool | None = None,
 ) -> dict[str, Any]:
-    session = _get_or_create_session(attachment.get("session_id"), owner_id=owner_id)
+    if not _text(attachment.get("session_id")):
+        raise UploadValidationError("session_id_required")
+    guest_id = _payload_guest_id(raw_payload or {})
+    session = _get_or_create_session(
+        attachment.get("session_id"),
+        owner_id=owner_id,
+        guest_id=guest_id,
+    )
     if session is not None and session.owner_id and session.owner_id != owner_id:
         raise PermissionError("session does not belong to authenticated owner")
     case = None
@@ -487,7 +557,7 @@ def persist_uploaded_file_metadata(
         )
     retention_expires_at = upload_retention_expires_at(
         owner_id=effective_owner_id,
-        guest_id=_text((raw_payload or {}).get("guest_id")),
+        guest_id=guest_id,
         file_type=_text(attachment.get("type")),
         content_type=_text(attachment.get("content_type")),
     )
@@ -496,20 +566,77 @@ def persist_uploaded_file_metadata(
         attachment,
         owner_id=effective_owner_id,
     )
-    object_storage_write = write_object_from_source_uri(
-        object_storage,
+    quarantine_storage = build_quarantine_upload_storage_reference(
+        attachment,
+        owner_id=effective_owner_id,
+    )
+    quarantine_write = write_object_from_source_uri(
+        quarantine_storage,
         fallback_payload=attachment,
     )
-    object_storage["write_result"] = object_storage_write
-    object_storage["status"] = object_storage_write["status"]
-    object_storage["writes_binary"] = object_storage_write["writes_binary"]
-    object_storage["persistence_state"] = object_storage_write["persistence_state"]
-    metadata["source_storage_uri"] = _text(attachment.get("storage_uri"))
+    quarantine_ready = (
+        quarantine_write.get("status") == "written"
+        and bool(quarantine_write.get("exists"))
+    )
+    source_storage_uri = _text(attachment.get("storage_uri"))
+    has_binary_upload = (
+        binary_upload
+        if binary_upload is not None
+        else source_storage_uri.startswith("mock://uploads/")
+    )
+    if not quarantine_ready and has_binary_upload:
+        delete_source_uri(source_storage_uri, attachment_id=attachment_id)
+        raise UploadStorageUnavailableError(
+            _text(quarantine_write.get("reason")) or "quarantine_write_failed"
+        )
+    source_cleanup = (
+        delete_source_uri(source_storage_uri, attachment_id=attachment_id)
+        if quarantine_ready or not has_binary_upload
+        else {"status": "retained", "reason": "quarantine_write_incomplete"}
+    )
+    upload_scan_status = (
+        "not_started"
+        if quarantine_ready
+        else (
+            "awaiting_upload"
+            if quarantine_write.get("reason") == "source_file_unavailable"
+            else "upload_error"
+        )
+    )
+    upload_status = (
+        UploadedFileStatus.UPLOADED
+        if quarantine_ready
+        else UploadedFileStatus.PENDING
+    )
+    object_storage.update(
+        {
+            "status": "pending_scan" if quarantine_ready else "awaiting_upload",
+            "writes_binary": False,
+            "persistence_state": "quarantine_pending",
+        }
+    )
+    quarantine_storage.update(
+        {
+            "status": quarantine_write.get("status"),
+            "writes_binary": bool(quarantine_write.get("writes_binary")),
+            "persistence_state": quarantine_write.get("persistence_state"),
+        }
+    )
+    metadata["source_storage_uri"] = source_storage_uri
     metadata["object_storage"] = object_storage
-    metadata["object_storage_write"] = object_storage_write
+    metadata["object_storage_write"] = quarantine_write
+    metadata["upload_storage_lifecycle"] = {
+        "contract_version": UPLOAD_STORAGE_LIFECYCLE_VERSION,
+        "state": "quarantined" if quarantine_ready else upload_scan_status,
+        "quarantine": quarantine_storage,
+        "clean": object_storage,
+        "quarantine_write": quarantine_write,
+        "source_cleanup": source_cleanup,
+    }
     agent_handoff = dict(attachment.get("agent_handoff") or {})
     agent_handoff["storage_uri"] = object_storage["storage_uri"]
     agent_handoff["object_storage"] = object_storage
+    agent_handoff["scan_status"] = upload_scan_status
 
     with transaction.atomic():
         existing_file = (
@@ -536,8 +663,8 @@ def persist_uploaded_file_metadata(
                 "size_bytes": _positive_int_or_none(attachment.get("size_bytes")),
                 "storage_uri": object_storage["storage_uri"],
                 "privacy_risk": True,
-                "status": _model_status(attachment.get("status")),
-                "scan_status": "not_started",
+                "status": upload_status,
+                "scan_status": upload_scan_status,
                 "agent_handoff": agent_handoff,
                 "metadata": metadata,
                 "retention_expires_at": retention_expires_at,
@@ -713,7 +840,11 @@ def persist_chat_message_analysis_boundary(
     """Persist the canonical chat message and its analysis-job boundary."""
 
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(chat_response.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        chat_response.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("chat_response must include session_id")
 
@@ -916,6 +1047,31 @@ def persist_guest_session_identity(
     }
 
 
+def _locked_active_auth_session(
+    *,
+    auth_session_id: str,
+    user_id: str,
+) -> AuthSession:
+    auth_session = (
+        AuthSession.objects.select_for_update()
+        .select_related("user")
+        .filter(auth_session_id=auth_session_id)
+        .first()
+    )
+    if auth_session is None:
+        raise AuthSessionStateError("auth_session_not_persisted")
+    if auth_session.status != AuthSessionStatus.ACTIVE or auth_session.revoked_at is not None:
+        raise AuthSessionStateError("auth_session_revoked")
+    if auth_session.expires_at and auth_session.expires_at <= timezone.now():
+        raise AuthSessionStateError("auth_session_expired")
+    expected_subject_id = f"user:{user_id}"
+    if auth_session.subject_type != "user" or auth_session.subject_id != expected_subject_id:
+        raise AuthSessionStateError("auth_session_subject_mismatch")
+    if auth_session.user is not None and auth_session.user.user_id != user_id:
+        raise AuthSessionStateError("auth_session_subject_mismatch")
+    return auth_session
+
+
 def persist_current_auth_subject(
     auth_payload: dict[str, Any],
     *,
@@ -929,8 +1085,15 @@ def persist_current_auth_subject(
     user_id = _text(subject.get("user_id"))
     guest_id = _normalize_guest_id(subject.get("guest_id"))
     auth_session_id = _text(subject.get("auth_session_id"))
-    auth_source = "auth_google_code" if auth_payload.get("contract_version") == "google_auth_code.v1" else "auth_me"
-    auth_event_type = "auth_google_code_completed" if auth_source == "auth_google_code" else "auth_me_checked"
+    contract_version = _text(auth_payload.get("contract_version"))
+    login_sources = {
+        "google_auth.v1": ("auth_google_login", "auth_google_login_completed"),
+        "google_auth_code.v1": ("auth_google_code", "auth_google_code_completed"),
+    }
+    auth_source, auth_event_type = login_sources.get(
+        contract_version,
+        ("auth_me", "auth_me_checked"),
+    )
 
     with transaction.atomic():
         user = _get_or_create_user_account(user_id)
@@ -939,29 +1102,40 @@ def persist_current_auth_subject(
         guest = _get_or_create_guest_identity(guest_id)
         auth_session = None
         if auth_session_id:
-            auth_session, _created = AuthSession.objects.update_or_create(
-                auth_session_id=auth_session_id,
-                defaults={
-                    "user": user,
-                    "guest": guest,
-                    "subject_type": subject_type,
-                    "subject_id": subject_id,
-                    "status": AuthSessionStatus.ACTIVE,
-                    "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
-                    "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
-                    "revoked_at": None,
-                    "metadata": {
-                        "source": auth_source,
-                        "auth_state": auth_payload.get("auth_state"),
-                        "verification": _dict_or_empty(auth_payload.get("auth_session")).get(
-                            "verification"
-                        ),
-                        "google": _safe_google_connection_metadata(auth_payload),
-                        "rate_limit": auth_payload.get("rate_limit") or {},
-                        "merge_policy": auth_payload.get("merge_policy") or {},
-                    },
-                },
-            )
+            session_metadata = {
+                "source": auth_source,
+                "auth_state": auth_payload.get("auth_state"),
+                "verification": _dict_or_empty(auth_payload.get("auth_session")).get(
+                    "verification"
+                ),
+                "google": _safe_google_connection_metadata(auth_payload),
+                "rate_limit": auth_payload.get("rate_limit") or {},
+                "merge_policy": auth_payload.get("merge_policy") or {},
+            }
+            if contract_version in login_sources:
+                auth_session = AuthSession.objects.create(
+                    auth_session_id=auth_session_id,
+                    user=user,
+                    guest=guest,
+                    subject_type=subject_type,
+                    subject_id=subject_id,
+                    status=AuthSessionStatus.ACTIVE,
+                    issued_at=_datetime_or_none(auth_payload.get("issued_at")),
+                    expires_at=_datetime_or_none(auth_payload.get("expires_at")),
+                    revoked_at=None,
+                    metadata=session_metadata,
+                )
+            else:
+                auth_session = _locked_active_auth_session(
+                    auth_session_id=auth_session_id,
+                    user_id=user_id,
+                )
+                auth_session.user = user
+                auth_session.guest = guest
+                existing_metadata = dict(auth_session.metadata or {})
+                existing_metadata.update(session_metadata)
+                auth_session.metadata = existing_metadata
+                auth_session.save(update_fields=["user", "guest", "metadata", "updated_at"])
         google_persistence = _upsert_google_oauth_subject(user, auth_payload)
         chat_session = _bind_chat_session_auth_context(
             session_id=session_id,
@@ -1030,32 +1204,52 @@ def persist_auth_token_refresh(
     user_id = _text(subject.get("user_id"))
     guest_id = _normalize_guest_id(subject.get("guest_id"))
     auth_session_id = _text(subject.get("auth_session_id"))
-    if not user_id or not auth_session_id:
-        return _auth_persistence_skipped("missing_refresh_subject")
+    auth_session_payload = _dict_or_empty(auth_payload.get("auth_session"))
+    rotation = _dict_or_empty(auth_session_payload.get("rotation"))
+    previous_auth_session_id = _text(rotation.get("previous_auth_session_id"))
+    if not user_id or not auth_session_id or not previous_auth_session_id:
+        raise AuthSessionStateError("missing_refresh_subject")
+    if auth_session_id == previous_auth_session_id:
+        raise AuthSessionStateError("auth_session_rotation_required")
 
     with transaction.atomic():
-        user = _get_or_create_user_account(user_id)
+        previous_auth_session = _locked_active_auth_session(
+            auth_session_id=previous_auth_session_id,
+            user_id=user_id,
+        )
+        user = previous_auth_session.user or _get_or_create_user_account(user_id)
         if user is not None:
             _update_user_account_from_auth_payload(user, auth_payload)
         guest = _get_or_create_guest_identity(guest_id)
-        auth_session, _created = AuthSession.objects.update_or_create(
+        revoked_at = timezone.now()
+        previous_metadata = dict(previous_auth_session.metadata or {})
+        previous_metadata["rotation"] = {
+            "rotated_to": auth_session_id,
+            "rotated_at": revoked_at.isoformat(),
+        }
+        previous_auth_session.status = AuthSessionStatus.REVOKED
+        previous_auth_session.revoked_at = revoked_at
+        previous_auth_session.metadata = previous_metadata
+        previous_auth_session.save(
+            update_fields=["status", "revoked_at", "metadata", "updated_at"]
+        )
+        auth_session = AuthSession.objects.create(
             auth_session_id=auth_session_id,
-            defaults={
-                "user": user,
-                "guest": guest,
-                "subject_type": "user",
-                "subject_id": f"user:{user_id}",
-                "status": AuthSessionStatus.ACTIVE,
-                "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
-                "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
-                "revoked_at": None,
-                "metadata": {
-                    "source": "auth_refresh",
-                    "auth_state": auth_payload.get("auth_state"),
-                    "verification": _dict_or_empty(auth_payload.get("auth_session")).get("verification"),
-                    "refresh_policy": _dict_or_empty(auth_payload.get("auth_session")).get("refresh_policy"),
-                    "rate_limit": auth_payload.get("rate_limit") or {},
-                },
+            user=user,
+            guest=guest,
+            subject_type="user",
+            subject_id=f"user:{user_id}",
+            status=AuthSessionStatus.ACTIVE,
+            issued_at=_datetime_or_none(auth_payload.get("issued_at")),
+            expires_at=_datetime_or_none(auth_payload.get("expires_at")),
+            revoked_at=None,
+            metadata={
+                "source": "auth_refresh",
+                "auth_state": auth_payload.get("auth_state"),
+                "verification": auth_session_payload.get("verification"),
+                "refresh_policy": auth_session_payload.get("refresh_policy"),
+                "rotated_from": previous_auth_session_id,
+                "rate_limit": auth_payload.get("rate_limit") or {},
             },
         )
         chat_session = _bind_chat_session_auth_context(
@@ -1081,6 +1275,7 @@ def persist_auth_token_refresh(
                 "auth_state": auth_payload.get("auth_state"),
                 "chat_session_id": chat_session.session_id if chat_session else None,
                 "expires_at": auth_payload.get("expires_at"),
+                "previous_auth_session_id": previous_auth_session_id,
             },
         )
 
@@ -1099,6 +1294,7 @@ def persist_auth_token_refresh(
         "user_id": user.user_id if user else None,
         "guest_id": guest.guest_id if guest else None,
         "auth_session_id": auth_session.auth_session_id,
+        "previous_auth_session_id": previous_auth_session_id,
         "auth_session_status": auth_session.status,
         "event_id": event.event_id,
         "session_id": chat_session.session_id if chat_session else None,
@@ -1319,7 +1515,7 @@ def record_usage_event(
     now = timezone.now()
 
     with transaction.atomic():
-        quota, _created = UsageQuota.objects.get_or_create(
+        quota, _created = UsageQuota.objects.select_for_update().get_or_create(
             quota_id=_usage_quota_id(subject_id, scope),
             defaults={
                 "subject_id": subject_id,
@@ -1338,6 +1534,8 @@ def record_usage_event(
                 },
             },
         )
+        if not _created:
+            quota = UsageQuota.objects.select_for_update().get(pk=quota.pk)
         if not _created and quota.metadata.get("policy_managed"):
             quota.metadata = {
                 **quota.metadata,
@@ -1401,6 +1599,52 @@ def record_usage_event(
         else None,
         "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
         "status": "allowed" if allowed else "blocked",
+    }
+
+
+def refund_usage_event(usage: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    """Refund one allowed usage reservation exactly once after a rejected request."""
+
+    usage_event_id = _text(usage.get("usage_event_id"))
+    quota_id = _text(usage.get("quota_id"))
+    if not usage_event_id or not quota_id:
+        return {"status": "skipped", "reason": "missing_usage_reference"}
+
+    with transaction.atomic():
+        usage_event = (
+            UsageEvent.objects.select_for_update()
+            .filter(usage_event_id=usage_event_id)
+            .first()
+        )
+        if usage_event is None:
+            return {"status": "skipped", "reason": "usage_event_not_found"}
+        metadata = _dict_or_empty(usage_event.metadata)
+        if usage_event.amount <= 0 or metadata.get("status") != "allowed":
+            return {"status": "skipped", "reason": "usage_not_refundable"}
+        quota = UsageQuota.objects.select_for_update().filter(quota_id=quota_id).first()
+        if quota is None:
+            return {"status": "skipped", "reason": "usage_quota_not_found"}
+
+        refunded_amount = usage_event.amount
+        quota.used_count = max(0, quota.used_count - refunded_amount)
+        quota.save(update_fields=["used_count", "updated_at"])
+        usage_event.amount = 0
+        usage_event.metadata = {
+            **metadata,
+            "status": "refunded",
+            "refund_reason": _text(reason) or "request_rejected",
+            "refunded_amount": refunded_amount,
+            "refunded_at": timezone.now().isoformat(),
+            "used_count": quota.used_count,
+        }
+        usage_event.save(update_fields=["amount", "metadata"])
+
+    return {
+        "status": "refunded",
+        "usage_event_id": usage_event.usage_event_id,
+        "quota_id": quota.quota_id,
+        "refunded_amount": refunded_amount,
+        "used_count": quota.used_count,
     }
 
 
@@ -1563,7 +1807,11 @@ def persist_analysis_job_execution(
     """Persist a canonical analysis job and its agent execution outputs."""
 
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        job_payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("job_payload must include session_id")
 
@@ -1580,6 +1828,18 @@ def persist_analysis_job_execution(
     }
 
     with transaction.atomic():
+        existing_job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=job_id)
+            .only("metadata")
+            .first()
+        )
+        existing_metadata = _dict_or_empty(existing_job.metadata if existing_job else None)
+        preserved_metadata = {
+            key: existing_metadata[key]
+            for key in ("idempotency", "work_queue")
+            if isinstance(existing_metadata.get(key), dict)
+        }
         message = None
         if message_id:
             message, _message_created = ChatMessage.objects.update_or_create(
@@ -1618,6 +1878,7 @@ def persist_analysis_job_execution(
                 "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
                 "status_counts": job_payload.get("status_counts") or {},
                 "metadata": {
+                    **preserved_metadata,
                     "source": "canonical_analysis_job",
                     "analysis_plan": analysis_plan,
                     "assistant_message": chat_response.get("assistant_message"),
@@ -1683,6 +1944,172 @@ def persist_analysis_job_execution(
     }
 
 
+def reserve_analysis_job_request(
+    payload: dict[str, Any],
+    *,
+    job_id: str,
+    request_fingerprint: str,
+) -> dict[str, Any]:
+    """Reserve a caller-supplied job id before quota use or plan generation."""
+
+    normalized_job_id = _text(job_id)
+    normalized_fingerprint = _text(request_fingerprint)
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(
+        payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
+    if not normalized_job_id or not normalized_fingerprint or session is None:
+        raise ValueError("job_id, request_fingerprint, and session_id are required")
+    if owner_id and session.owner_id and session.owner_id != owner_id:
+        raise PermissionError("analysis job session belongs to another owner")
+
+    now = timezone.now()
+    reservation_token = secrets.token_urlsafe(32)
+    reservation_metadata = {
+        "source": "canonical_analysis_job_reservation",
+        "idempotency": {
+            "contract_version": "analysis_job_idempotency.v1",
+            "request_fingerprint": normalized_fingerprint,
+            "state": "reserved",
+            "reserved_at": now.isoformat(),
+            "reservation_token": reservation_token,
+            "reservation_generation": 1,
+        },
+    }
+    with transaction.atomic():
+        job, created = AnalysisJob.objects.select_for_update().get_or_create(
+            job_id=normalized_job_id,
+            defaults={
+                "session": session,
+                "owner_id": owner_id or session.owner_id,
+                "status": AnalysisJobStatus.QUEUED.value,
+                "progress_message": "Analysis request reserved.",
+                "metadata": reservation_metadata,
+            },
+        )
+        if not created:
+            job = AnalysisJob.objects.select_for_update().select_related("session").get(pk=job.pk)
+            effective_owner = job.owner_id or job.session.owner_id
+            if owner_id and effective_owner and effective_owner != owner_id:
+                raise PermissionError("analysis job belongs to another owner")
+            if job.session_id != session.pk:
+                raise ValueError("analysis job id is already bound to another session")
+            metadata = _dict_or_empty(job.metadata)
+            idempotency = _dict_or_empty(metadata.get("idempotency"))
+            if _text(idempotency.get("request_fingerprint")) != normalized_fingerprint:
+                raise ValueError("analysis job id is already bound to another request")
+            stale_after = _agent_worker_setting(
+                "ANALYSIS_JOB_RESERVATION_STALE_AFTER_SECONDS",
+                300,
+            )
+            stale_cutoff = now - timedelta(seconds=stale_after)
+            is_recoverable_stale_reservation = (
+                metadata.get("source") == "canonical_analysis_job_reservation"
+                and not job.work_items.exists()
+                and job.updated_at <= stale_cutoff
+            )
+            if is_recoverable_stale_reservation:
+                recovered_token = secrets.token_urlsafe(32)
+                recovered_generation = max(
+                    1,
+                    _positive_int_or_default(
+                        idempotency.get("reservation_generation"),
+                        default=1,
+                    )
+                    + 1,
+                )
+                job.progress_message = "Analysis request reservation recovered."
+                job.metadata = {
+                    **reservation_metadata,
+                    "idempotency": {
+                        **reservation_metadata["idempotency"],
+                        "reservation_token": recovered_token,
+                        "reservation_generation": recovered_generation,
+                    },
+                }
+                job.save(update_fields=["progress_message", "metadata", "updated_at"])
+                return {
+                    "status": "reserved",
+                    "created": False,
+                    "acquired": True,
+                    "recovered": True,
+                    "job_id": job.job_id,
+                    "reservation_token": recovered_token,
+                    "reservation_generation": recovered_generation,
+                }
+            return {
+                "status": "existing",
+                "created": False,
+                "acquired": False,
+                "recovered": False,
+                "job_id": job.job_id,
+                "reservation_token": "",
+                "reservation_generation": idempotency.get("reservation_generation"),
+            }
+    return {
+        "status": "reserved",
+        "created": True,
+        "acquired": True,
+        "recovered": False,
+        "job_id": normalized_job_id,
+        "reservation_token": reservation_token,
+        "reservation_generation": 1,
+    }
+
+
+def release_analysis_job_reservation(
+    *,
+    job_id: str,
+    request_fingerprint: str,
+    reservation_token: str,
+) -> bool:
+    """Delete an unqueued reservation so a rejected or failed plan can be retried."""
+
+    with transaction.atomic():
+        job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=_text(job_id), metadata__source="canonical_analysis_job_reservation")
+            .first()
+        )
+        if job is None or job.work_items.exists():
+            return False
+        idempotency = _dict_or_empty(_dict_or_empty(job.metadata).get("idempotency"))
+        if _text(idempotency.get("request_fingerprint")) != _text(request_fingerprint):
+            return False
+        if _text(idempotency.get("reservation_token")) != _text(reservation_token):
+            return False
+        job.delete()
+        return True
+
+
+def renew_analysis_job_reservation(
+    *,
+    job_id: str,
+    request_fingerprint: str,
+    reservation_token: str,
+) -> bool:
+    """Refresh only the current reservation holder's lease before quota use."""
+
+    with transaction.atomic():
+        job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=_text(job_id), metadata__source="canonical_analysis_job_reservation")
+            .first()
+        )
+        if job is None or job.work_items.exists():
+            return False
+        idempotency = _dict_or_empty(_dict_or_empty(job.metadata).get("idempotency"))
+        if _text(idempotency.get("request_fingerprint")) != _text(request_fingerprint):
+            return False
+        if _text(idempotency.get("reservation_token")) != _text(reservation_token):
+            return False
+        job.progress_message = "Analysis request reservation active."
+        job.save(update_fields=["progress_message", "updated_at"])
+        return True
+
+
 def enqueue_analysis_job_work(
     payload: dict[str, Any],
     job_payload: dict[str, Any],
@@ -1692,9 +2119,15 @@ def enqueue_analysis_job_work(
     """Persist a queued worker item without executing the agent plan inline."""
 
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        job_payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("job_payload must include session_id")
+    if owner_id and session.owner_id and session.owner_id != owner_id:
+        raise PermissionError("analysis job session belongs to another owner")
 
     conversation_save_state = conversation_save_state_from_payload(payload)
     session.metadata = _metadata_with_conversation_save_state(
@@ -1711,9 +2144,14 @@ def enqueue_analysis_job_work(
     message_id = _text(job_payload.get("message_id"))
     chat_response = _dict_or_empty(job_payload.get("chat_response"))
     analysis_plan = _dict_or_empty(job_payload.get("analysis_plan") or chat_response.get("analysis_plan"))
-    active_node = _text(job_payload.get("active_node")) or _analysis_plan_first_node(analysis_plan)
+    active_node = _text(job_payload.get("active_node")) or _analysis_plan_first_executable_node(
+        analysis_plan
+    )
     progress_message = _text(job_payload.get("progress_message")) or "Agent worker item queued."
     work_item_id = _agent_work_item_id(job_id)
+    requested_idempotency = _dict_or_empty(job_payload.get("idempotency"))
+    requested_fingerprint = _text(requested_idempotency.get("request_fingerprint"))
+    requested_reservation_token = _text(requested_idempotency.get("reservation_token"))
 
     with transaction.atomic():
         message = None
@@ -1740,52 +2178,108 @@ def enqueue_analysis_job_work(
                 },
             )
 
-        job, _job_created = AnalysisJob.objects.update_or_create(
-            job_id=job_id,
-            defaults={
-                "session": session,
-                "message": message,
-                "owner_id": owner_id or session.owner_id,
-                "routing_intent": _text(job_payload.get("routing_intent")),
-                "mock_scenario": _text(job_payload.get("mock_scenario")),
-                "status": AnalysisJobStatus.QUEUED.value,
-                "active_node": active_node,
-                "progress_message": progress_message,
-                "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
-                "status_counts": _analysis_plan_status_counts(analysis_plan),
-                "metadata": {
-                    "source": "canonical_analysis_job_queue",
-                    "analysis_plan": analysis_plan,
-                    "assistant_message": chat_response.get("assistant_message"),
-                    "case_status": chat_response.get("case_status"),
-                    "cards": chat_response.get("cards", []),
-                    "pending_questions": chat_response.get("pending_questions", []),
-                    "report_links": chat_response.get("report_links", []),
-                    "supervisor_state": chat_response.get("supervisor_state", {}),
-                    "reporting_payload": chat_response.get("reporting_payload", {}),
-                    "attachments": job_payload.get("attachments", []),
-                    "blocked_attachments": job_payload.get("blocked_attachments", []),
-                    "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
-                    "attachment_resolution": job_payload.get("attachment_resolution", {}),
-                    "scan_gate": job_payload.get("scan_gate", {}),
-                    "limitations": job_payload.get("limitations", []),
-                    "work_queue": {
-                        "contract_version": "agent_worker_queue.v1",
-                        "work_item_id": work_item_id,
-                        "status": AgentWorkItemStatus.QUEUED.value,
-                    },
-                },
+        queue_metadata = {
+            "source": "canonical_analysis_job_queue",
+            "analysis_plan": analysis_plan,
+            "assistant_message": chat_response.get("assistant_message"),
+            "case_status": chat_response.get("case_status"),
+            "cards": chat_response.get("cards", []),
+            "pending_questions": chat_response.get("pending_questions", []),
+            "report_links": chat_response.get("report_links", []),
+            "supervisor_state": chat_response.get("supervisor_state", {}),
+            "reporting_payload": chat_response.get("reporting_payload", {}),
+            "attachments": job_payload.get("attachments", []),
+            "blocked_attachments": job_payload.get("blocked_attachments", []),
+            "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
+            "attachment_resolution": job_payload.get("attachment_resolution", {}),
+            "scan_gate": job_payload.get("scan_gate", {}),
+            "limitations": job_payload.get("limitations", []),
+            "work_queue": {
+                "contract_version": "agent_worker_queue.v1",
+                "work_item_id": work_item_id,
+                "status": AgentWorkItemStatus.QUEUED.value,
             },
+        }
+        if requested_idempotency:
+            queue_metadata["idempotency"] = {
+                **requested_idempotency,
+                "contract_version": "analysis_job_idempotency.v1",
+                "state": "queued",
+            }
+        job_defaults = {
+            "session": session,
+            "message": message,
+            "owner_id": owner_id or session.owner_id,
+            "routing_intent": _text(job_payload.get("routing_intent")),
+            "mock_scenario": _text(job_payload.get("mock_scenario")),
+            "status": AnalysisJobStatus.QUEUED.value,
+            "active_node": active_node,
+            "progress_message": progress_message,
+            "analysis_plan_id": _text(
+                job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")
+            ),
+            "status_counts": _queued_analysis_plan_status_counts(analysis_plan),
+            "metadata": queue_metadata,
+        }
+        job, job_created = AnalysisJob.objects.select_for_update().get_or_create(
+            job_id=job_id,
+            defaults=job_defaults,
         )
-        _append_analysis_job_event(
-            job,
-            status=AnalysisJobStatus.QUEUED.value,
-            active_node=active_node,
-            message=progress_message,
-            source="agent_worker_queue",
-            metadata={"work_item_id": work_item_id},
-        )
-        work_item, _work_item_created = AgentWorkItem.objects.update_or_create(
+        requested_owner_id = owner_id or session.owner_id
+        reservation_promoted = False
+        if not job_created:
+            effective_owner_id = job.owner_id or job.session.owner_id
+            if requested_owner_id and effective_owner_id and effective_owner_id != requested_owner_id:
+                raise PermissionError("analysis job belongs to another owner")
+            if job.session_id != session.pk:
+                raise ValueError("analysis job id is already bound to another session")
+            existing_metadata = _dict_or_empty(job.metadata)
+            existing_idempotency = _dict_or_empty(existing_metadata.get("idempotency"))
+            existing_fingerprint = _text(existing_idempotency.get("request_fingerprint"))
+            existing_reservation_token = _text(
+                existing_idempotency.get("reservation_token")
+            )
+            if requested_fingerprint or existing_fingerprint:
+                if not requested_fingerprint or requested_fingerprint != existing_fingerprint:
+                    raise ValueError("analysis job id is already bound to another request")
+            if existing_reservation_token or requested_reservation_token:
+                if (
+                    not requested_reservation_token
+                    or requested_reservation_token != existing_reservation_token
+                ):
+                    raise ValueError("analysis job reservation holder is stale")
+
+            if existing_metadata.get("source") == "canonical_analysis_job_reservation":
+                if not requested_fingerprint or not requested_reservation_token:
+                    raise ValueError("analysis job reservation requires a request fingerprint")
+                if job.work_items.exists():
+                    raise ValueError("analysis job reservation has an invalid work item binding")
+                for field_name, field_value in job_defaults.items():
+                    setattr(job, field_name, field_value)
+                job.save(update_fields=[*job_defaults, "updated_at"])
+                reservation_promoted = True
+
+            requested_plan_id = _text(
+                job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")
+            )
+            if (
+                not requested_fingerprint
+                and job.analysis_plan_id
+                and requested_plan_id != job.analysis_plan_id
+            ):
+                raise ValueError("analysis job id is already bound to another plan")
+            if (
+                job.status
+                in {
+                    AnalysisJobStatus.SUCCESS.value,
+                    AnalysisJobStatus.PARTIAL.value,
+                    AnalysisJobStatus.FAILED.value,
+                }
+                and not job.work_items.exists()
+            ):
+                raise ValueError("terminal analysis job cannot create a new work item")
+
+        work_item, work_item_created = AgentWorkItem.objects.get_or_create(
             work_item_id=work_item_id,
             defaults={
                 "job": job,
@@ -1830,12 +2324,23 @@ def enqueue_analysis_job_work(
                 },
             },
         )
+        if work_item.job_id != job.pk:
+            raise ValueError("agent work item is already bound to another analysis job")
+        if job_created or work_item_created or reservation_promoted:
+            _append_analysis_job_event(
+                job,
+                status=AnalysisJobStatus.QUEUED.value,
+                active_node=active_node,
+                message=progress_message,
+                source="agent_worker_queue",
+                metadata={"work_item_id": work_item_id},
+            )
 
     progress_cache = write_analysis_job_progress(job)
     session_cache = write_chat_session_state(session, latest_job=job)
     return {
         "backend": "postgresql",
-        "status": AgentWorkItemStatus.QUEUED.value,
+        "status": work_item.status,
         "execution_mode": "async_worker",
         "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "tables": [AnalysisJob._meta.db_table, AgentWorkItem._meta.db_table],
@@ -1890,30 +2395,55 @@ def process_agent_work_item(work_item_id: str) -> dict[str, Any]:
     claimed = _claim_agent_work_item(normalized_work_item_id)
     if not claimed["claimed"]:
         return claimed
+    claimed_attempt_no = int(claimed.get("attempt_no") or 0)
 
     try:
         work_item = AgentWorkItem.objects.select_related("job", "job__session").get(
             work_item_id=normalized_work_item_id
         )
-        node_execution = _execute_agent_work_item_plan(work_item)
+        with _agent_work_item_lease_heartbeat(
+            normalized_work_item_id,
+            expected_attempt_no=claimed_attempt_no,
+        ):
+            node_execution = _execute_agent_work_item_plan(work_item)
         final_status = _analysis_job_status_from_node_execution(node_execution)
         completed_job_payload = _completed_job_payload_for_work_item(
             work_item,
             node_execution=node_execution,
             final_status=final_status,
         )
-        persistence = persist_analysis_job_execution(
-            _dict_or_empty(work_item.payload.get("request_payload")),
-            completed_job_payload,
-        )
-        return _complete_agent_work_item(
-            normalized_work_item_id,
-            final_status=final_status,
-            node_execution=node_execution,
-            persistence=persistence,
-        )
+        with transaction.atomic():
+            leased_work_item = (
+                AgentWorkItem.objects.select_for_update()
+                .select_related("job", "job__session")
+                .get(work_item_id=normalized_work_item_id)
+            )
+            if not _worker_lease_is_current(
+                leased_work_item,
+                expected_attempt_no=claimed_attempt_no,
+            ):
+                return _agent_work_item_skipped(
+                    "stale_worker_lease",
+                    work_item_id=normalized_work_item_id,
+                    current_status=leased_work_item.status,
+                )
+            persistence = persist_analysis_job_execution(
+                _dict_or_empty(work_item.payload.get("request_payload")),
+                completed_job_payload,
+            )
+            return _complete_agent_work_item(
+                normalized_work_item_id,
+                final_status=final_status,
+                node_execution=node_execution,
+                persistence=persistence,
+                expected_attempt_no=claimed_attempt_no,
+            )
     except Exception as exc:  # pragma: no cover - exercised through retry smoke tests.
-        return _fail_agent_work_item(normalized_work_item_id, exc)
+        return _fail_agent_work_item(
+            normalized_work_item_id,
+            exc,
+            expected_attempt_no=claimed_attempt_no,
+        )
 
 
 def persist_analysis_display_result(result_payload: dict[str, Any]) -> dict[str, Any]:
@@ -1961,7 +2491,15 @@ def persist_report_action(
 
     owner_id = _owner_id(payload)
     job = AnalysisJob.objects.filter(job_id=_text(payload.get("job_id"))).first()
-    session = job.session if job else _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
+    session = (
+        job.session
+        if job
+        else _get_or_create_session(
+            payload.get("session_id"),
+            owner_id=owner_id,
+            guest_id=_payload_guest_id(payload),
+        )
+    )
     display_result = _display_result_for_job(job)
     report_quality = _report_quality_snapshot(job, display_result, report_payload)
     report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
@@ -1993,6 +2531,7 @@ def persist_report_action(
         source_uri=source_storage_uri,
     )
 
+    cleanup_pending_report_pk: int | None = None
     with transaction.atomic():
         locked_case = (
             Case.objects.select_for_update().get(pk=case.pk)
@@ -2025,6 +2564,15 @@ def persist_report_action(
                     existing_report,
                     report_quality=report_quality,
                 )
+            if (
+                _text(
+                    _dict_or_empty(existing_report.metadata).get(
+                        "persistence_state"
+                    )
+                )
+                == REPORT_STAGING_CLEANUP_PENDING
+            ):
+                cleanup_pending_report_pk = existing_report.pk
             report = existing_report
         else:
             version_no = locked_case.current_report_version + 1 if locked_case is not None else 1
@@ -2080,6 +2628,11 @@ def persist_report_action(
                 locked_case.current_report_version = version_no
                 locked_case.save(update_fields=["current_report_version", "updated_at"])
 
+    if cleanup_pending_report_pk is not None:
+        _purge_pending_report_staging_object(cleanup_pending_report_pk)
+        report = Report.objects.get(pk=cleanup_pending_report_pk)
+        return _report_persistence_result(report, report_quality=report_quality)
+
     staging_storage = _staging_report_storage_reference(object_storage)
     try:
         staging_write = write_object(
@@ -2095,14 +2648,22 @@ def persist_report_action(
         )
     except Exception:
         cleanup = _safe_delete_staged_object(staging_storage)
-        _mark_report_storage_failure(report.pk, cleanup=cleanup)
+        _mark_report_storage_failure(
+            report.pk,
+            cleanup=cleanup,
+            staging_storage=staging_storage,
+        )
         raise
     if staging_write.get("writes_binary"):
         try:
             promotion = copy_object(staging_storage, object_storage)
         except Exception:
             cleanup = _safe_delete_staged_object(staging_storage)
-            _mark_report_storage_failure(report.pk, cleanup=cleanup)
+            _mark_report_storage_failure(
+                report.pk,
+                cleanup=cleanup,
+                staging_storage=staging_storage,
+            )
             raise
     else:
         promotion = {
@@ -2111,10 +2672,18 @@ def persist_report_action(
             "persistence_state": "staging_write_failed",
             "reason": "staging_write_failed",
         }
-    cleanup = (
-        _safe_delete_staged_object(staging_storage)
-        if staging_write.get("writes_binary")
-        else {"status": "not_required"}
+    cleanup = _safe_delete_staged_object(staging_storage)
+    cleanup_completed = _report_staging_cleanup_completed(
+        cleanup,
+        reference=staging_storage,
+    )
+    cleanup_target_state = (
+        "finalized" if promotion.get("writes_binary") else "storage_failed"
+    )
+    persistence_state = (
+        cleanup_target_state
+        if cleanup_completed
+        else REPORT_STAGING_CLEANUP_PENDING
     )
     finalized_storage = {
         **object_storage,
@@ -2136,11 +2705,15 @@ def persist_report_action(
                 "object_storage_write": promotion,
                 "object_storage_staging_write": staging_write,
                 "object_storage_staging_cleanup": cleanup,
-                "persistence_state": (
-                    "finalized" if promotion.get("writes_binary") else "storage_failed"
+                "object_storage_staging": _minimal_report_storage_reference(
+                    staging_storage
                 ),
+                "staging_cleanup_target_state": cleanup_target_state,
+                "persistence_state": persistence_state,
             }
         )
+        if persistence_state != REPORT_STAGING_CLEANUP_PENDING:
+            metadata.pop("staging_cleanup_target_state", None)
         report.content = content
         report.metadata = metadata
         report.save(update_fields=["content", "metadata", "updated_at"])
@@ -2180,17 +2753,33 @@ def _mark_report_storage_failure(
     report_pk: int,
     *,
     cleanup: dict[str, Any],
+    staging_storage: dict[str, Any],
 ) -> None:
     with transaction.atomic():
         failed_report = Report.objects.select_for_update().get(pk=report_pk)
         metadata = dict(failed_report.metadata or {})
+        cleanup_completed = _report_staging_cleanup_completed(
+            cleanup,
+            reference=staging_storage,
+        )
         metadata.update(
             {
                 "object_storage_status": "failed",
                 "object_storage_staging_cleanup": cleanup,
-                "persistence_state": "storage_failed",
+                "object_storage_staging": _minimal_report_storage_reference(
+                    staging_storage
+                ),
+                "persistence_state": (
+                    "storage_failed"
+                    if cleanup_completed
+                    else REPORT_STAGING_CLEANUP_PENDING
+                ),
             }
         )
+        if cleanup_completed:
+            metadata.pop("staging_cleanup_target_state", None)
+        else:
+            metadata["staging_cleanup_target_state"] = "storage_failed"
         failed_report.metadata = metadata
         failed_report.save(update_fields=["metadata", "updated_at"])
 
@@ -2204,6 +2793,145 @@ def _staging_report_storage_reference(reference: dict[str, Any]) -> dict[str, An
     staging["storage_uri"] = f"s3://{bucket}/{staging_key}" if bucket else staging_key
     staging["resource_id"] = f"{_text(reference.get('resource_id'))}:staging"
     return staging
+
+
+def purge_pending_report_staging(*, limit: int | None = None) -> dict[str, Any]:
+    """Retry deletion of staged report objects before finalizing their state."""
+
+    resolved_limit = _positive_report_staging_cleanup_limit(limit)
+    queryset = (
+        Report.objects.filter(
+            metadata__persistence_state=REPORT_STAGING_CLEANUP_PENDING
+        )
+        .order_by("updated_at", "pk")
+        .values_list("pk", flat=True)
+    )
+    selected_pks = list(queryset[:resolved_limit])
+    batch = {
+        "contract_version": REPORT_STAGING_CLEANUP_BATCH_VERSION,
+        "status": "pass",
+        "selected": len(selected_pks),
+        "cleaned": 0,
+        "retryable": 0,
+        "skipped": 0,
+    }
+    for report_pk in selected_pks:
+        outcome = _purge_pending_report_staging_object(report_pk)
+        batch[outcome] += 1
+    if batch["retryable"]:
+        batch["status"] = "warn"
+    return batch
+
+
+def _purge_pending_report_staging_object(report_pk: int) -> str:
+    report = Report.objects.filter(pk=report_pk).first()
+    if report is None:
+        return "skipped"
+    metadata = _dict_or_empty(report.metadata)
+    if _text(metadata.get("persistence_state")) != REPORT_STAGING_CLEANUP_PENDING:
+        return "skipped"
+    staging_reference = _validated_report_staging_reference(report)
+    if not staging_reference:
+        cleanup = {"status": "skipped", "reason": "staging_reference_invalid"}
+    else:
+        cleanup = _safe_delete_staged_object(staging_reference)
+    cleanup_completed = bool(staging_reference) and _report_staging_cleanup_completed(
+        cleanup,
+        reference=staging_reference,
+    )
+
+    with transaction.atomic():
+        locked_report = Report.objects.select_for_update().filter(pk=report_pk).first()
+        if locked_report is None:
+            return "skipped"
+        locked_metadata = _dict_or_empty(locked_report.metadata)
+        if (
+            _text(locked_metadata.get("persistence_state"))
+            != REPORT_STAGING_CLEANUP_PENDING
+        ):
+            return "skipped"
+        locked_metadata["object_storage_staging_cleanup"] = cleanup
+        if cleanup_completed:
+            locked_metadata["persistence_state"] = (
+                _text(locked_metadata.get("staging_cleanup_target_state"))
+                or "finalized"
+            )
+            locked_metadata.pop("staging_cleanup_target_state", None)
+        locked_report.metadata = locked_metadata
+        locked_report.save(update_fields=["metadata", "updated_at"])
+    return "cleaned" if cleanup_completed else "retryable"
+
+
+def _validated_report_staging_reference(report: Report) -> dict[str, Any]:
+    metadata = _dict_or_empty(report.metadata)
+    final_reference = _dict_or_empty(metadata.get("object_storage"))
+    if (
+        _text(final_reference.get("resource_type")) != "report"
+        or _text(final_reference.get("resource_id")) != report.report_id
+        or _text(final_reference.get("bucket")) != object_storage_bucket()
+    ):
+        return {}
+    final_key = _text(final_reference.get("key"))
+    prefix = object_storage_prefix().strip("/")
+    expected_prefix = f"{prefix}/reports/" if prefix else "reports/"
+    if (
+        not final_key.startswith(expected_prefix)
+        or ".." in final_key.split("/")
+        or "\\" in final_key
+    ):
+        return {}
+    expected = _staging_report_storage_reference(final_reference)
+    stored = _dict_or_empty(metadata.get("object_storage_staging"))
+    for field in ("provider", "bucket", "key", "resource_type", "resource_id"):
+        if stored and _text(stored.get(field)) != _text(expected.get(field)):
+            return {}
+    return expected
+
+
+def _report_staging_cleanup_completed(
+    cleanup: dict[str, Any],
+    *,
+    reference: dict[str, Any],
+) -> bool:
+    if cleanup.get("status") not in SUCCESSFUL_STORAGE_DELETE_STATUSES:
+        return False
+    provider = _text(reference.get("provider")) or _text(
+        object_storage_policy().get("provider")
+    )
+    return provider != "s3" or bool(cleanup.get("permanent"))
+
+
+def _minimal_report_storage_reference(reference: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: reference[key]
+        for key in (
+            "policy_version",
+            "backend",
+            "provider",
+            "bucket",
+            "key",
+            "resource_type",
+            "resource_id",
+        )
+        if reference.get(key) not in (None, "")
+    }
+
+
+def _positive_report_staging_cleanup_limit(value: int | None) -> int:
+    raw_value = (
+        value
+        if value is not None
+        else getattr(
+            settings,
+            "REPORT_STAGING_CLEANUP_LIMIT",
+            DEFAULT_REPORT_STAGING_CLEANUP_LIMIT,
+        )
+    )
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return DEFAULT_REPORT_STAGING_CLEANUP_LIMIT
+    return parsed if parsed > 0 else DEFAULT_REPORT_STAGING_CLEANUP_LIMIT
 
 
 def _report_request_fingerprint(
@@ -2461,10 +3189,25 @@ def authorize_report_download_metadata(
 
 def access_subject_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     auth_context = _dict_or_empty(payload.get("auth_context"))
-    user_id = _owner_id(payload) or _text(auth_context.get("user_id"))
-    guest_id = _normalize_guest_id(payload.get("guest_id") or auth_context.get("guest_id"))
+    context_has_identity = any(
+        key in auth_context
+        for key in (
+            "subject_id",
+            "subject_type",
+            "user_id",
+            "guest_id",
+            "auth_session_id",
+        )
+    )
+    if context_has_identity:
+        user_id = _text(auth_context.get("user_id"))
+        guest_id = _normalize_guest_id(auth_context.get("guest_id"))
+        auth_session_id = _text(auth_context.get("auth_session_id"))
+    else:
+        user_id = _owner_id(payload)
+        guest_id = _normalize_guest_id(payload.get("guest_id"))
+        auth_session_id = _text(payload.get("auth_session_id"))
     session_id = _text(payload.get("session_id") or auth_context.get("session_id"))
-    auth_session_id = _text(payload.get("auth_session_id") or auth_context.get("auth_session_id"))
 
     if user_id:
         subject_type = "user"
@@ -2514,8 +3257,13 @@ def authorize_resource_access(
         allowed = bool(session_id and session_id == resource_session_id)
         reason = "session_match" if allowed else "session_mismatch"
     else:
-        allowed = True
-        reason = "legacy_unowned_resource"
+        object_identifiers = (
+            resource.get("attachment_id"),
+            resource.get("job_id"),
+            resource.get("report_id"),
+        )
+        allowed = not any(_text(value) for value in object_identifiers)
+        reason = "unscoped_collection" if allowed else "unbound_resource"
 
     return {
         "contract_version": "object_access.v1",
@@ -2528,6 +3276,7 @@ def authorize_resource_access(
                 "type": resource.get("type"),
                 "report_id": resource.get("report_id"),
                 "attachment_id": resource.get("attachment_id"),
+                "job_id": resource.get("job_id"),
                 "session_id": resource_session_id or None,
                 "owner_id": resource_owner_id or None,
                 "guest_id": resource_guest_id or None,
@@ -2607,6 +3356,63 @@ def get_mycase_summary(
             "authorization is still mock bearer/guest-shape based.",
         ],
     }
+
+
+def get_analysis_job_access_metadata(job_id: str) -> dict[str, Any] | None:
+    """Return the minimum ownership record needed before exposing a job."""
+
+    job = (
+        AnalysisJob.objects.select_related("session")
+        .filter(job_id=_text(job_id))
+        .only("job_id", "owner_id", "session__session_id", "session__owner_id")
+        .first()
+    )
+    if job is None:
+        return None
+    return {
+        "type": "analysis_job",
+        "job_id": job.job_id,
+        "owner_id": job.owner_id or job.session.owner_id,
+        "session_id": job.session.session_id,
+    }
+
+
+def list_analysis_job_records(
+    *,
+    owner_id: str,
+    session_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List only jobs owned by the authenticated principal."""
+
+    normalized_owner_id = _text(owner_id)
+    if not normalized_owner_id:
+        return []
+    queryset = (
+        AnalysisJob.objects.select_related("session")
+        .filter(
+            Q(owner_id=normalized_owner_id)
+            | Q(owner_id="", session__owner_id=normalized_owner_id)
+        )
+        .order_by("-updated_at")
+    )
+    if session_id:
+        queryset = queryset.filter(session__session_id=_text(session_id))
+    return [
+        {
+            "contract_version": "analysis_job_summary.v1",
+            "job_id": job.job_id,
+            "session_id": job.session.session_id,
+            "owner_id": job.owner_id or job.session.owner_id,
+            "routing_intent": job.routing_intent,
+            "status": job.status,
+            "active_node": job.active_node,
+            "progress_message": job.progress_message,
+            "analysis_plan_id": job.analysis_plan_id,
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+        }
+        for job in queryset
+    ]
 
 
 def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
@@ -2887,23 +3693,65 @@ def _uploaded_file_object_storage(uploaded_file: UploadedFile) -> dict[str, Any]
     )
 
 
-def _get_or_create_session(session_id: Any, *, owner_id: str) -> ChatSession | None:
+def _get_or_create_session(
+    session_id: Any,
+    *,
+    owner_id: str,
+    guest_id: str = "",
+) -> ChatSession | None:
     normalized_session_id = _text(session_id)
     if not normalized_session_id:
         return None
 
-    session, _created = ChatSession.objects.get_or_create(
-        session_id=normalized_session_id,
-        defaults={
-            "owner_id": owner_id,
-            "status": ChatSessionStatus.ACTIVE,
-            "metadata": {"created_by": "canonical_file_upload"},
-        },
+    normalized_owner_id = _text(owner_id)
+    normalized_guest_id = _normalize_guest_id(guest_id)
+    initial_auth_context = (
+        {"guest_id": normalized_guest_id, "subject_type": "guest"}
+        if normalized_guest_id
+        else {}
     )
-    if owner_id and not session.owner_id:
-        session.owner_id = owner_id
-        session.save(update_fields=["owner_id", "updated_at"])
-    return session
+    with transaction.atomic():
+        session, created = ChatSession.objects.select_for_update().get_or_create(
+            session_id=normalized_session_id,
+            defaults={
+                "owner_id": normalized_owner_id,
+                "status": ChatSessionStatus.ACTIVE,
+                "metadata": {
+                    "created_by": "canonical_session_binding",
+                    **(
+                        {"auth_context": initial_auth_context}
+                        if initial_auth_context
+                        else {}
+                    ),
+                },
+            },
+        )
+        if created:
+            return session
+
+        existing_guest_id = _chat_session_guest_id(session)
+        if session.owner_id:
+            if not normalized_owner_id or session.owner_id != normalized_owner_id:
+                raise PermissionError("session belongs to another identity")
+            return session
+
+        if normalized_owner_id:
+            if not existing_guest_id:
+                raise PermissionError("unbound session cannot be claimed")
+            if not normalized_guest_id or existing_guest_id != normalized_guest_id:
+                raise PermissionError("guest session binding does not match")
+            session.owner_id = normalized_owner_id
+            session.save(update_fields=["owner_id", "updated_at"])
+            return session
+
+        if existing_guest_id:
+            if not normalized_guest_id or existing_guest_id != normalized_guest_id:
+                raise PermissionError("guest session binding does not match")
+            return session
+
+        if normalized_guest_id:
+            raise PermissionError("unbound session cannot be claimed")
+        return session
 
 
 def _conversation_save_state_result(status: str, save_state: str, *, reason: str | None = None) -> dict[str, Any]:
@@ -3013,7 +3861,11 @@ def _bind_chat_session_auth_context(
     owner_id: str,
     auth_context: dict[str, Any],
 ) -> ChatSession | None:
-    session = _get_or_create_session(session_id, owner_id=owner_id)
+    session = _get_or_create_session(
+        session_id,
+        owner_id=owner_id,
+        guest_id=_normalize_guest_id(auth_context.get("guest_id")),
+    )
     if session is None:
         return None
 
@@ -3105,6 +3957,11 @@ def _owner_id(payload: dict[str, Any]) -> str:
     return _text(payload.get("owner_id") or payload.get("user_id"))
 
 
+def _payload_guest_id(payload: dict[str, Any]) -> str:
+    auth_context = _dict_or_empty(payload.get("auth_context"))
+    return _normalize_guest_id(payload.get("guest_id") or auth_context.get("guest_id"))
+
+
 def _message_content(payload: dict[str, Any]) -> str:
     return _text(payload.get("user_text") or payload.get("message") or payload.get("content"))
 
@@ -3137,6 +3994,21 @@ def _analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int
         status = _text(step.get("status")) or "unknown"
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _queued_analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int]:
+    from app.services.agent_node_service import executable_analysis_plan_steps
+
+    return {"queued": len(executable_analysis_plan_steps(analysis_plan))}
+
+
+def _analysis_plan_first_executable_node(analysis_plan: dict[str, Any]) -> str:
+    from app.services.agent_node_service import executable_analysis_plan_steps
+
+    steps = executable_analysis_plan_steps(analysis_plan)
+    if not steps:
+        return ""
+    return _text(steps[0].get("node_code"))
 
 
 def _analysis_plan_first_node(analysis_plan: dict[str, Any]) -> str:
@@ -3238,6 +4110,71 @@ def _agent_worker_retry_backoff(work_item: AgentWorkItem) -> timedelta:
 
 def _agent_worker_setting(name: str, default: int) -> int:
     return _positive_int_or_default(getattr(settings, name, default), default=default)
+
+
+def _worker_lease_is_current(
+    work_item: AgentWorkItem,
+    *,
+    expected_attempt_no: int,
+) -> bool:
+    return (
+        work_item.status == AgentWorkItemStatus.RUNNING.value
+        and work_item.attempt_no == expected_attempt_no
+    )
+
+
+def _refresh_agent_work_item_lease(
+    work_item_id: str,
+    *,
+    expected_attempt_no: int,
+) -> bool:
+    updated = AgentWorkItem.objects.filter(
+        work_item_id=_text(work_item_id),
+        status=AgentWorkItemStatus.RUNNING.value,
+        attempt_no=expected_attempt_no,
+    ).update(locked_at=timezone.now())
+    return updated == 1
+
+
+@contextmanager
+def _agent_work_item_lease_heartbeat(
+    work_item_id: str,
+    *,
+    expected_attempt_no: int,
+) -> Iterator[None]:
+    configured_interval = _agent_worker_setting("AGENT_WORKER_HEARTBEAT_SECONDS", 30)
+    stale_after = _agent_worker_setting("AGENT_WORKER_STALE_AFTER_SECONDS", 900)
+    interval_seconds = min(configured_interval, max(1, stale_after // 3))
+    stop_event = Event()
+
+    def refresh_until_stopped() -> None:
+        close_old_connections()
+        try:
+            while not stop_event.wait(interval_seconds):
+                try:
+                    refreshed = _refresh_agent_work_item_lease(
+                        work_item_id,
+                        expected_attempt_no=expected_attempt_no,
+                    )
+                except (DatabaseError, OSError):
+                    close_old_connections()
+                    continue
+                if not refreshed:
+                    break
+        finally:
+            close_old_connections()
+
+    heartbeat = Thread(
+        target=refresh_until_stopped,
+        name=f"agent-work-heartbeat-{work_item_id}",
+        daemon=True,
+    )
+    heartbeat.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        heartbeat.join(timeout=5)
 
 
 def _agent_work_item_skipped(
@@ -3461,7 +4398,9 @@ def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
         )
 
         job = work_item.job
-        active_node = _analysis_plan_first_node(_dict_or_empty(work_item.payload.get("analysis_plan")))
+        active_node = _analysis_plan_first_executable_node(
+            _dict_or_empty(work_item.payload.get("analysis_plan"))
+        )
         _update_job_worker_state(
             job,
             status=AnalysisJobStatus.RUNNING.value,
@@ -3502,6 +4441,17 @@ def _execute_agent_work_item_plan(work_item: AgentWorkItem) -> dict[str, Any]:
     execution_payload.setdefault("job_id", work_item.job.job_id)
     execution_payload.setdefault("session_id", work_item.job.session.session_id)
     execution_payload.setdefault("message_id", _text(job_payload.get("message_id")))
+    if "attachments" in execution_payload or "attachment_ids" in execution_payload:
+        from chatbot.file_scan_service import apply_attachment_scan_gate
+
+        execution_payload = apply_attachment_scan_gate(execution_payload)
+        if _list_or_empty(execution_payload.get("blocked_attachments")):
+            raise AttachmentScanGateError
+        from app.services.attachment_mock_service import (
+            resolve_attachment_references,
+        )
+
+        execution_payload = resolve_attachment_references(execution_payload)
     return execute_agent_plan(analysis_plan, execution_payload)
 
 
@@ -3536,6 +4486,7 @@ def _complete_agent_work_item(
     final_status: str,
     node_execution: dict[str, Any],
     persistence: dict[str, Any],
+    expected_attempt_no: int,
 ) -> dict[str, Any]:
     with transaction.atomic():
         work_item = (
@@ -3543,6 +4494,15 @@ def _complete_agent_work_item(
             .select_related("job", "job__session")
             .get(work_item_id=work_item_id)
         )
+        if not _worker_lease_is_current(
+            work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            return _agent_work_item_skipped(
+                "stale_worker_lease",
+                work_item_id=work_item_id,
+                current_status=work_item.status,
+            )
         job = work_item.job
         ai_session = AiSession.objects.filter(ai_session_id=persistence.get("ai_session_id")).first()
         work_item.ai_session = ai_session
@@ -3608,7 +4568,12 @@ def _complete_agent_work_item(
     }
 
 
-def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
+def _fail_agent_work_item(
+    work_item_id: str,
+    exc: Exception,
+    *,
+    expected_attempt_no: int,
+) -> dict[str, Any]:
     error_code = exc.__class__.__name__
     with transaction.atomic():
         work_item = (
@@ -3619,6 +4584,15 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
         )
         if work_item is None:
             return _agent_work_item_skipped("work_item_not_found", work_item_id=work_item_id)
+        if not _worker_lease_is_current(
+            work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            return _agent_work_item_skipped(
+                "stale_worker_lease",
+                work_item_id=work_item_id,
+                current_status=work_item.status,
+            )
 
         job = work_item.job
         can_retry = work_item.attempt_no < work_item.max_attempts
@@ -3634,7 +4608,7 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
         work_item.error_code = error_code
         work_item.result = {
             "error_code": error_code,
-            "message": _text(exc),
+            "message": "Agent worker execution failed.",
             "retryable": can_retry,
             "retry_after_seconds": int(retry_after.total_seconds()) if retry_after else 0,
         }

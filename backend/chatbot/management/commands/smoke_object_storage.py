@@ -9,6 +9,8 @@ from django.core.management.base import BaseCommand, CommandError
 from chatbot.object_storage import (
     build_report_storage_reference,
     build_upload_storage_reference,
+    copy_object,
+    delete_object,
     object_exists,
     object_storage_policy,
     write_object,
@@ -43,31 +45,44 @@ class Command(BaseCommand):
             session_id=options["session_id"],
             source_uri="mock://reports/rep_object_storage_smoke",
         )
-        upload_write = write_object(
-            upload_ref,
-            b"smoke upload",
-            metadata={"source": "smoke_object_storage", "resource_type": "uploaded_file"},
-        )
-        report_write = write_object(
-            report_ref,
+        upload_write = {
+            "status": "skipped",
+            "reason": "scanner_only_clean_upload",
+            "writes_binary": False,
+        }
+        report_staging_ref = _staging_reference(report_ref)
+        report_staging_write = write_object(
+            report_staging_ref,
             "smoke report\n",
             metadata={"source": "smoke_object_storage", "resource_type": "report"},
         )
+        if report_staging_write.get("writes_binary"):
+            report_write = copy_object(report_staging_ref, report_ref)
+            report_staging_cleanup = delete_object(report_staging_ref)
+        else:
+            report_write = {
+                "status": "skipped",
+                "reason": "report_staging_write_failed",
+                "writes_binary": False,
+            }
+            report_staging_cleanup = {"status": "not_required"}
         result = {
             "contract_version": "object_storage_smoke.v1",
             "status": "pass",
+            "scope": "api_report_write",
             "policy": policy,
             "upload_reference": _safe_reference(upload_ref),
             "report_reference": _safe_reference(report_ref),
             "upload_write": upload_write,
+            "report_staging_write": report_staging_write,
             "report_write": report_write,
+            "report_staging_cleanup": report_staging_cleanup,
         }
         binary_failure_reason = _binary_failure_reason(
             policy=policy,
-            upload_ref=upload_ref,
             report_ref=report_ref,
-            upload_write=upload_write,
             report_write=report_write,
+            report_staging_cleanup=report_staging_cleanup,
         )
         if options["require_binary"] and binary_failure_reason:
             result["status"] = "fail"
@@ -76,6 +91,7 @@ class Command(BaseCommand):
                 "message": "Object storage adapter did not write binary objects.",
                 "upload_reason": upload_write.get("reason"),
                 "report_reason": report_write.get("reason"),
+                "staging_cleanup_reason": report_staging_cleanup.get("reason"),
             }
 
         if options["format"] == "json":
@@ -102,24 +118,36 @@ def _safe_reference(reference: dict) -> dict:
     }
 
 
+def _staging_reference(reference: dict) -> dict:
+    staging = dict(reference)
+    key = str(reference.get("key") or "")
+    staging_key = f"staging/{key}"
+    bucket = str(reference.get("bucket") or "")
+    staging["key"] = staging_key
+    staging["storage_uri"] = f"s3://{bucket}/{staging_key}"
+    staging["resource_id"] = f"{reference.get('resource_id')}:staging"
+    return staging
+
+
 def _binary_failure_reason(
     *,
     policy: dict,
-    upload_ref: dict,
     report_ref: dict,
-    upload_write: dict,
     report_write: dict,
+    report_staging_cleanup: dict,
 ) -> str:
     if not policy.get("writes_binary"):
         return "binary_adapter_missing"
-    if not upload_write.get("writes_binary"):
-        return str(upload_write.get("reason") or "upload_write_failed")
     if not report_write.get("writes_binary"):
         return str(report_write.get("reason") or "report_write_failed")
-    if not object_exists(upload_ref):
-        return "upload_object_missing_after_write"
     if not object_exists(report_ref):
         return "report_object_missing_after_write"
+    if report_staging_cleanup.get("status") not in {"deleted", "not_found"}:
+        return "report_staging_cleanup_failed"
+    if policy.get("provider") == "s3" and not report_staging_cleanup.get(
+        "permanent"
+    ):
+        return "report_staging_cleanup_not_verified"
     return ""
 
 
@@ -132,7 +160,9 @@ def _text_result(result: dict) -> str:
         f"- persistence_state: {policy.get('persistence_state')}",
         f"- writes_binary: {policy.get('writes_binary')}",
         f"- upload_write: {result['upload_write'].get('status')}",
+        f"- report_staging_write: {result['report_staging_write'].get('status')}",
         f"- report_write: {result['report_write'].get('status')}",
+        f"- report_staging_cleanup: {result['report_staging_cleanup'].get('status')}",
         f"- upload_uri: {result['upload_reference'].get('storage_uri')}",
         f"- report_uri: {result['report_reference'].get('storage_uri')}",
     ]
@@ -142,4 +172,9 @@ def _text_result(result: dict) -> str:
             lines.append(f"- upload_reason: {result['error'].get('upload_reason')}")
         if result["error"].get("report_reason"):
             lines.append(f"- report_reason: {result['error'].get('report_reason')}")
+        if result["error"].get("staging_cleanup_reason"):
+            lines.append(
+                "- staging_cleanup_reason: "
+                f"{result['error'].get('staging_cleanup_reason')}"
+            )
     return "\n".join(lines)

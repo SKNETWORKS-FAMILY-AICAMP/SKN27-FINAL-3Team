@@ -173,13 +173,6 @@ resource "aws_s3_bucket_versioning" "frontend" {
   }
 }
 
-resource "aws_s3_bucket_versioning" "quarantine" {
-  bucket = aws_s3_bucket.quarantine.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
 resource "aws_s3_bucket_server_side_encryption_configuration" "objects" {
   bucket = aws_s3_bucket.objects.id
   rule {
@@ -191,14 +184,36 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "objects" {
   }
 }
 
-resource "aws_s3_bucket_lifecycle_configuration" "objects" {
-  bucket = aws_s3_bucket.objects.id
+resource "aws_s3_bucket_server_side_encryption_configuration" "quarantine" {
+  bucket = aws_s3_bucket.quarantine.id
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.data.arn
+      sse_algorithm     = "aws:kms"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "quarantine" {
+  bucket = aws_s3_bucket.quarantine.id
   rule {
     id     = "quarantine-retention"
     status = "Enabled"
-    filter { prefix = "quarantine/" }
+    filter {}
     expiration { days = 7 }
-    noncurrent_version_expiration { noncurrent_days = 7 }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "objects" {
+  bucket = aws_s3_bucket.objects.id
+  depends_on = [aws_s3_bucket_versioning.objects]
+  rule {
+    id     = "report-staging-retention"
+    status = "Enabled"
+    filter { prefix = "staging/" }
+    expiration { days = 1 }
+    noncurrent_version_expiration { noncurrent_days = 1 }
   }
 }
 
@@ -318,6 +333,14 @@ resource "aws_iam_role" "ecs_task" {
   })
 }
 
+resource "aws_iam_role" "ecs_scanner_task" {
+  name = "${local.name}-scanner-task"
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }]
+  })
+}
+
 resource "aws_iam_role" "ecs_execution" {
   name = "${local.name}-execution"
   assume_role_policy = jsonencode({
@@ -352,8 +375,33 @@ resource "aws_iam_role_policy" "app_data" {
     Statement = [
       {
         Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = ["${aws_s3_bucket.objects.arn}/canonical/uploads/*"]
+      },
+      {
+        Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-        Resource = ["${aws_s3_bucket.objects.arn}/*"]
+        Resource = ["${aws_s3_bucket.objects.arn}/canonical/reports/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion"]
+        Resource = ["${aws_s3_bucket.objects.arn}/staging/canonical/reports/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucketVersions"]
+        Resource = [aws_s3_bucket.objects.arn]
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["staging/canonical/reports/*"]
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = ["${aws_s3_bucket.quarantine.arn}/canonical/uploads/*"]
       },
       {
         Effect   = "Allow"
@@ -364,6 +412,41 @@ resource "aws_iam_role_policy" "app_data" {
         Effect   = "Allow"
         Action   = ["es:ESHttpGet", "es:ESHttpPost", "es:ESHttpPut"]
         Resource = ["${aws_opensearch_domain.main.arn}/*"]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "scanner_object_promotion" {
+  name = "scanner-object-promotion"
+  role = aws_iam_role.ecs_scanner_task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:DeleteObject"]
+        Resource = ["${aws_s3_bucket.quarantine.arn}/canonical/uploads/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:DeleteObjectVersion"]
+        Resource = ["${aws_s3_bucket.objects.arn}/canonical/uploads/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucketVersions"]
+        Resource = [aws_s3_bucket.objects.arn]
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["canonical/uploads/*"]
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"]
+        Resource = [aws_kms_key.data.arn]
       }
     ]
   })
@@ -456,7 +539,12 @@ locals {
     { name = "REDIS_URL", value = "rediss://:${random_password.redis.result}@${aws_elasticache_replication_group.main.primary_endpoint_address}:6379/0" },
     { name = "OBJECT_STORAGE_PROVIDER", value = "s3" },
     { name = "OBJECT_STORAGE_BUCKET", value = aws_s3_bucket.objects.id },
+    { name = "OBJECT_STORAGE_QUARANTINE_BUCKET", value = aws_s3_bucket.quarantine.id },
+    { name = "OBJECT_STORAGE_PREFIX", value = "canonical" },
     { name = "OBJECT_STORAGE_REGION", value = var.aws_region },
+    { name = "FILE_UPLOAD_MAX_BYTES", value = "20971520" },
+    { name = "FILE_MAX_ATTACHMENTS_PER_REQUEST", value = "20" },
+    { name = "REPORT_STAGING_CLEANUP_LIMIT", value = "100" },
     { name = "TEXT_ML_CASE_SEARCH_PROVIDER", value = "opensearch_aws" },
     { name = "TEXT_ML_CASE_SEARCH_OPENSEARCH_HOST", value = "https://${aws_opensearch_domain.main.endpoint}" },
     { name = "AWS_REGION", value = var.aws_region },
@@ -468,6 +556,32 @@ locals {
     { name = "GOOGLE_CLIENT_ID", valueFrom = "${var.app_secret_arn}:GOOGLE_CLIENT_ID::" },
     { name = "GOOGLE_CLIENT_SECRET", valueFrom = "${var.app_secret_arn}:GOOGLE_CLIENT_SECRET::" },
     { name = "SUPERVISOR_LLM_API_KEY", valueFrom = "${var.app_secret_arn}:SUPERVISOR_LLM_API_KEY::" },
+    { name = "POSTGRES_PASSWORD", valueFrom = "${aws_secretsmanager_secret.database.arn}:password::" },
+  ]
+  scanner_environment = [
+    { name = "DJANGO_DEBUG", value = "0" },
+    { name = "DJANGO_DATABASE_ENGINE", value = "postgres" },
+    { name = "POSTGRES_HOST", value = aws_db_instance.main.address },
+    { name = "POSTGRES_PORT", value = "5432" },
+    { name = "POSTGRES_DB", value = "law_db" },
+    { name = "POSTGRES_USER", value = "skn27_app" },
+    { name = "OBJECT_STORAGE_PROVIDER", value = "s3" },
+    { name = "OBJECT_STORAGE_BUCKET", value = aws_s3_bucket.objects.id },
+    { name = "OBJECT_STORAGE_QUARANTINE_BUCKET", value = aws_s3_bucket.quarantine.id },
+    { name = "OBJECT_STORAGE_PREFIX", value = "canonical" },
+    { name = "OBJECT_STORAGE_REGION", value = var.aws_region },
+    { name = "AWS_REGION", value = var.aws_region },
+    { name = "FILE_SCAN_PROVIDER", value = "clamav" },
+    { name = "FILE_SCAN_CLAMAV_HOST", value = "127.0.0.1" },
+    { name = "FILE_SCAN_CLAMAV_PORT", value = "3310" },
+    { name = "FILE_SCAN_MAX_BYTES", value = "52428800" },
+    { name = "FILE_SCAN_TIMEOUT_SECONDS", value = "10" },
+    { name = "FILE_SCAN_CLAIM_STALE_AFTER_SECONDS", value = "300" },
+    { name = "FILE_SCAN_RETRY_BACKOFF_SECONDS", value = "60" },
+    { name = "FILE_RETENTION_PURGE_LIMIT", value = "100" },
+  ]
+  scanner_secrets = [
+    { name = "DJANGO_SECRET_KEY", valueFrom = "${var.app_secret_arn}:DJANGO_SECRET_KEY::" },
     { name = "POSTGRES_PASSWORD", valueFrom = "${aws_secretsmanager_secret.database.arn}:password::" },
   ]
   log_configuration = {
@@ -519,13 +633,13 @@ resource "aws_ecs_task_definition" "scanner" {
   cpu                      = 2048
   memory                   = 4096
   execution_role_arn       = aws_iam_role.ecs_execution.arn
-  task_role_arn            = aws_iam_role.ecs_task.arn
+  task_role_arn            = aws_iam_role.ecs_scanner_task.arn
   container_definitions = jsonencode([
     {
       name        = "scanner", image = var.app_image, essential = true,
-      command     = ["python", "backend/manage.py", "process_uploaded_file_scans", "--loop", "--limit", "20"],
-      environment = concat(local.common_environment, [{ name = "FILE_SCAN_PROVIDER", value = "clamav" }, { name = "FILE_SCAN_CLAMAV_HOST", value = "127.0.0.1" }]),
-      secrets     = local.common_secrets, logConfiguration = local.log_configuration,
+      command     = ["python", "backend/manage.py", "process_uploaded_file_scans", "--loop", "--limit", "20", "--purge-limit", "100"],
+      environment = local.scanner_environment,
+      secrets     = local.scanner_secrets, logConfiguration = local.log_configuration,
       dependsOn   = [{ containerName = "clamav", condition = "HEALTHY" }]
     },
     {

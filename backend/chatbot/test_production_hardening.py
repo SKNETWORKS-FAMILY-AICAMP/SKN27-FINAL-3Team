@@ -11,7 +11,13 @@ from django.urls import Resolver404, resolve
 from chatbot.api_response import json_response
 from chatbot.models import ReportType
 from chatbot.runtime_health import build_runtime_health
-from chatbot.views import analysis_result, submit_chat_message
+from chatbot.views import (
+    _analysis_job_access_response,
+    agent_nodes,
+    analysis_jobs,
+    analysis_result,
+    submit_chat_message,
+)
 
 
 class ProductionApiContractTests(SimpleTestCase):
@@ -27,6 +33,29 @@ class ProductionApiContractTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "live")
+
+    @patch("chatbot.views.get_analysis_job_access_metadata")
+    @patch("chatbot.views._canonical_guest_identity_policy_response")
+    def test_analysis_result_access_gate_honors_canonical_guest_policy(
+        self,
+        guest_policy,
+        access_metadata,
+    ) -> None:
+        denied = json_response(
+            RequestFactory().get("/api/analysis/results/job_1/"),
+            {"error": {"code": "guest_identity_invalid"}},
+            status=401,
+        )
+        guest_policy.return_value = denied
+        access_metadata.return_value = None
+
+        response = _analysis_job_access_response(
+            RequestFactory().get("/api/analysis/results/job_1/"),
+            "job_1",
+        )
+
+        self.assertIs(response, denied)
+        access_metadata.assert_not_called()
 
     @patch("chatbot.views.build_runtime_health")
     def test_readiness_endpoint_returns_503_when_a_required_probe_fails(self, health) -> None:
@@ -54,6 +83,24 @@ class ProductionApiContractTests(SimpleTestCase):
                 "traffic_law_search",
                 "saved_report",
             ],
+        )
+        self.assertNotIn("vision_media_analysis", str(body))
+        self.assertNotIn("mock", str(body).lower())
+
+    def test_agent_catalog_exposes_only_typed_production_adapters(self) -> None:
+        response = agent_nodes(RequestFactory().get("/api/agents/nodes/"))
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body["contract_version"], "agent_capability_catalog.v1")
+        self.assertEqual(
+            {item["node_code"] for item in body["nodes"]},
+            {
+                "fine_notice_analysis",
+                "law_ground_search",
+                "objection_report_generation",
+                "text_ml_case_search",
+            },
         )
         self.assertNotIn("vision_media_analysis", str(body))
         self.assertNotIn("mock", str(body).lower())
@@ -111,7 +158,8 @@ class ProductionApiContractTests(SimpleTestCase):
             content_type="application/json",
         )
 
-        response = submit_chat_message(request)
+        with patch("chatbot.views.get_chat_session_access_metadata", return_value=None):
+            response = submit_chat_message(request)
 
         self.assertEqual(response.status_code, 202)
         body = json.loads(response.content)
@@ -125,8 +173,367 @@ class ProductionApiContractTests(SimpleTestCase):
             ["law_ground_search"],
         )
 
+    def test_scan_blocked_chat_message_does_not_consume_usage_quota(self) -> None:
+        request = RequestFactory().post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_chat_scan_blocked",
+                "attachments": [{"attachment_id": "att_waiting_scan"}],
+            },
+            content_type="application/json",
+        )
+        blocked_response = {
+            "session_id": "ses_chat_scan_blocked",
+            "message_id": "msg_chat_scan_blocked",
+            "status": "queued",
+            "analysis_plan": {"plan_id": "plan_chat_scan_blocked", "steps": []},
+            "attachments": [],
+            "blocked_attachments": [
+                {
+                    "attachment_id": "att_waiting_scan",
+                    "required_action": "wait_for_file_scan",
+                }
+            ],
+            "limitations": [],
+        }
+
+        with (
+            patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None),
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch(
+                "chatbot.views.apply_attachment_scan_gate",
+                side_effect=lambda payload: {
+                    **payload,
+                    "attachments": [],
+                    "blocked_attachments": blocked_response["blocked_attachments"],
+                },
+            ),
+            patch("chatbot.views.submit_message") as submit_message,
+            patch("chatbot.views.record_usage_event") as record_usage,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+        ):
+            response = submit_chat_message(request)
+
+        self.assertEqual(response.status_code, 409)
+        body = json.loads(response.content)
+        self.assertEqual(body["execution_mode"], "scan_blocked")
+        self.assertEqual(body["persistence"]["status"], "skipped")
+        self.assertFalse(body["usage"]["consumed"])
+        submit_message.assert_not_called()
+        record_usage.assert_not_called()
+        enqueue.assert_not_called()
+
+    def test_analysis_job_post_queues_plan_without_inline_agent_execution(self) -> None:
+        chat_response = {
+            "contract_version": "chat_message_accepted.v2",
+            "session_id": "ses_analysis_queue",
+            "message_id": "msg_analysis_queue",
+            "routing_intent": "traffic_law_search",
+            "status": "queued",
+            "progress": {
+                "status": "queued",
+                "active_node": "law_ground_search",
+                "message": "Analysis queued.",
+            },
+            "analysis_plan": {
+                "plan_id": "plan_analysis_queue",
+                "routing_intent": "traffic_law_search",
+                "steps": [
+                    {
+                        "order": 1,
+                        "node_code": "law_ground_search",
+                        "status": "queued",
+                    }
+                ],
+            },
+            "attachments": [],
+            "blocked_attachments": [],
+            "limitations": [],
+        }
+        queue_result = {
+            "backend": "postgresql",
+            "status": "queued",
+            "execution_mode": "async_worker",
+            "job_id": "job_analysis_queue",
+            "work_item_id": "work_job_analysis_queue",
+            "work_item_status": "queued",
+        }
+        request = RequestFactory().post(
+            "/api/analysis/jobs/",
+            data={
+                "session_id": "ses_analysis_queue",
+                "user_text": "도로교통법 근거를 찾아줘",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch(
+                "chatbot.views.record_usage_event",
+                return_value={"allowed": True},
+            ) as record_usage,
+            patch("chatbot.views.submit_message", return_value=chat_response),
+            patch("chatbot.views.enqueue_analysis_job_work", return_value=queue_result) as enqueue,
+            patch(
+                "chatbot.views.create_analysis_job",
+                side_effect=AssertionError("legacy synchronous job service must not run"),
+            ),
+            patch(
+                "chatbot.views.execute_mock_plan",
+                side_effect=AssertionError("agent plan must execute only in the worker"),
+            ),
+            patch("chatbot.views._record_history_safely"),
+            patch("chatbot.views._record_agent_events_safely") as record_agent_events,
+        ):
+            response = analysis_jobs(request)
+
+        self.assertEqual(response.status_code, 202)
+        body = json.loads(response.content)
+        job = body["job"]
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(job["execution_mode"], "async_worker")
+        self.assertEqual(job["node_execution"]["executions"], [])
+        self.assertEqual(job["work_item"]["work_item_id"], "work_job_analysis_queue")
+        self.assertEqual(enqueue.call_args.args[1]["status"], "queued")
+        self.assertNotIn("도로교통법 근거를 찾아줘", str(body))
+        record_agent_events.assert_not_called()
+        record_usage.assert_called_once()
+
+    def test_analysis_job_queue_failures_refund_precharged_usage(self) -> None:
+        chat_response = {
+            "session_id": "ses_analysis_queue_failure",
+            "message_id": "msg_analysis_queue_failure",
+            "routing_intent": "traffic_law_search",
+            "status": "queued",
+            "analysis_plan": {
+                "plan_id": "plan_analysis_queue_failure",
+                "steps": [
+                    {
+                        "order": 1,
+                        "node_code": "law_ground_search",
+                        "status": "queued",
+                    }
+                ],
+            },
+            "attachments": [],
+            "blocked_attachments": [],
+            "limitations": [],
+        }
+        cases = (
+            (PermissionError("owner mismatch"), 403, "analysis_queue_access_denied"),
+            (ValueError("job conflict"), 409, "analysis_queue_conflict"),
+            (RuntimeError("database unavailable"), 503, "analysis_queue_failed"),
+        )
+
+        for queue_error, expected_status, expected_reason in cases:
+            with self.subTest(queue_error=queue_error.__class__.__name__):
+                request = RequestFactory().post(
+                    "/api/analysis/jobs/",
+                    data={"session_id": "ses_analysis_queue_failure"},
+                    content_type="application/json",
+                )
+                with (
+                    patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+                    patch(
+                        "chatbot.views.record_usage_event",
+                        return_value={"allowed": True},
+                    ),
+                    patch("chatbot.views.submit_message", return_value=chat_response),
+                    patch(
+                        "chatbot.views.enqueue_analysis_job_work",
+                        side_effect=queue_error,
+                    ),
+                    patch("chatbot.views._refund_usage_safely") as refund_usage,
+                ):
+                    response = analysis_jobs(request)
+
+                self.assertEqual(response.status_code, expected_status)
+                refund_usage.assert_called_once_with(
+                    {"allowed": True},
+                    reason=expected_reason,
+                )
+
+    def test_analysis_job_post_rejects_non_executable_plan_without_queueing(self) -> None:
+        chat_response = {
+            "contract_version": "chat_message_accepted.v2",
+            "session_id": "ses_analysis_needs_input",
+            "message_id": "msg_analysis_needs_input",
+            "routing_intent": "fault_ratio_analysis",
+            "status": "needs_input",
+            "assistant_message": "추가 사실을 확인해야 분석을 시작할 수 있습니다.",
+            "consultation_state": {"required_action": "answer_questions"},
+            "case_status": "awaiting_fact_confirmation",
+            "progress": {
+                "status": "needs_input",
+                "active_node": "input_context_validation",
+                "message": "More input is required.",
+            },
+            "analysis_plan": {
+                "plan_id": "plan_analysis_needs_input",
+                "routing_intent": "fault_ratio_analysis",
+                "steps": [],
+            },
+            "pending_questions": [{"field": "accident_description"}],
+            "attachments": [],
+            "blocked_attachments": [],
+            "limitations": [],
+        }
+        request = RequestFactory().post(
+            "/api/analysis/jobs/",
+            data={
+                "session_id": "ses_analysis_needs_input",
+                "user_text": "과실비율 알려줘",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch(
+                "chatbot.views.record_usage_event",
+                return_value={"allowed": True},
+            ) as record_usage,
+            patch("chatbot.views.submit_message", return_value=chat_response),
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch("chatbot.views._refund_usage_safely") as refund_usage,
+            patch("chatbot.views._record_history_safely"),
+        ):
+            response = analysis_jobs(request)
+
+        self.assertEqual(response.status_code, 409)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "analysis_plan_not_executable")
+        self.assertEqual(body["analysis"]["status"], "needs_input")
+        self.assertEqual(
+            body["analysis"]["assistant_message"],
+            "추가 사실을 확인해야 분석을 시작할 수 있습니다.",
+        )
+        self.assertEqual(
+            body["analysis"]["consultation_state"],
+            {"required_action": "answer_questions"},
+        )
+        self.assertEqual(body["analysis"]["case_status"], "awaiting_fact_confirmation")
+        self.assertEqual(body["analysis"]["pending_questions"], [{"field": "accident_description"}])
+        enqueue.assert_not_called()
+        record_usage.assert_called_once()
+        refund_usage.assert_called_once_with(
+            {"allowed": True},
+            reason="analysis_plan_not_executable",
+        )
+
+    def test_analysis_job_post_does_not_queue_scan_blocked_attachments(self) -> None:
+        chat_response = {
+            **{
+                "contract_version": "chat_message_accepted.v2",
+                "session_id": "ses_analysis_scan_blocked",
+                "message_id": "msg_analysis_scan_blocked",
+                "routing_intent": "traffic_law_search",
+                "status": "queued",
+                "progress": {"status": "queued", "active_node": "law_ground_search"},
+                "analysis_plan": {
+                    "plan_id": "plan_analysis_scan_blocked",
+                    "steps": [{"order": 1, "node_code": "law_ground_search"}],
+                },
+                "attachments": [],
+                "limitations": [],
+            },
+            "blocked_attachments": [
+                {
+                    "attachment_id": "att_waiting_scan",
+                    "required_action": "wait_for_file_scan",
+                }
+            ],
+        }
+        request = RequestFactory().post(
+            "/api/analysis/jobs/",
+            data={"session_id": "ses_analysis_scan_blocked"},
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch(
+                "chatbot.views.apply_attachment_scan_gate",
+                side_effect=lambda payload: {
+                    **payload,
+                    "attachments": [],
+                    "blocked_attachments": chat_response["blocked_attachments"],
+                },
+            ),
+            patch("chatbot.views.record_usage_event") as record_usage,
+            patch("chatbot.views.submit_message") as submit_message,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch("chatbot.views._record_history_safely"),
+        ):
+            response = analysis_jobs(request)
+
+        self.assertEqual(response.status_code, 409)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "attachment_scan_blocked")
+        self.assertEqual(body["analysis"]["scan_gate"]["worker_action"], "not_queued")
+        submit_message.assert_not_called()
+        enqueue.assert_not_called()
+        record_usage.assert_not_called()
+
+    def test_analysis_job_post_rejects_plan_with_only_blocked_steps(self) -> None:
+        chat_response = {
+            "session_id": "ses_analysis_plan_blocked",
+            "message_id": "msg_analysis_plan_blocked",
+            "routing_intent": "traffic_law_search",
+            "status": "queued",
+            "progress": {"status": "queued", "active_node": "law_ground_search"},
+            "analysis_plan": {
+                "plan_id": "plan_analysis_plan_blocked",
+                "steps": [
+                    {
+                        "order": 1,
+                        "node_code": "law_ground_search",
+                        "status": "blocked",
+                    }
+                ],
+            },
+            "attachments": [],
+            "blocked_attachments": [],
+            "limitations": [],
+        }
+        request = RequestFactory().post(
+            "/api/analysis/jobs/",
+            data={"session_id": "ses_analysis_plan_blocked"},
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch(
+                "chatbot.views.record_usage_event",
+                return_value={"allowed": True},
+            ) as record_usage,
+            patch("chatbot.views.submit_message", return_value=chat_response),
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch("chatbot.views._refund_usage_safely") as refund_usage,
+        ):
+            response = analysis_jobs(request)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            json.loads(response.content)["error"]["code"],
+            "analysis_plan_not_executable",
+        )
+        enqueue.assert_not_called()
+        record_usage.assert_called_once()
+        refund_usage.assert_called_once_with(
+            {"allowed": True},
+            reason="analysis_plan_not_executable",
+        )
+
+    @patch("chatbot.views.get_analysis_job_access_metadata", return_value=None)
     @patch("chatbot.views.get_analysis_job_record")
-    def test_analysis_result_uses_persisted_agent_outputs(self, get_job) -> None:
+    def test_analysis_result_uses_persisted_agent_outputs(
+        self,
+        get_job,
+        _get_access_metadata,
+    ) -> None:
         get_job.return_value = {
             "job_id": "job_1",
             "status": "partial",
@@ -177,10 +584,12 @@ class ProductionApiContractTests(SimpleTestCase):
     @patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None)
     @patch("chatbot.views._get_current_auth_subject")
     @patch("chatbot.views.get_chat_session_access_metadata")
+    @patch("chatbot.views.get_analysis_job_access_metadata")
     @patch("chatbot.views.get_analysis_job_record")
     def test_guest_can_poll_its_own_queued_analysis_result(
         self,
         get_job,
+        get_access_metadata,
         get_session_access,
         get_auth_subject,
         _guest_policy,
@@ -189,6 +598,12 @@ class ProductionApiContractTests(SimpleTestCase):
             "job_id": "job_guest_owned",
             "session_id": "ses_guest_owned",
             "status": "queued",
+        }
+        get_access_metadata.return_value = {
+            "type": "analysis_job",
+            "job_id": "job_guest_owned",
+            "owner_id": "",
+            "session_id": "ses_guest_owned",
         }
         get_session_access.return_value = {
             "type": "chat_session",
@@ -218,10 +633,12 @@ class ProductionApiContractTests(SimpleTestCase):
     @patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None)
     @patch("chatbot.views._get_current_auth_subject")
     @patch("chatbot.views.get_chat_session_access_metadata")
+    @patch("chatbot.views.get_analysis_job_access_metadata")
     @patch("chatbot.views.get_analysis_job_record")
     def test_guest_cannot_poll_another_guests_analysis_result(
         self,
         get_job,
+        get_access_metadata,
         get_session_access,
         get_auth_subject,
         _guest_policy,
@@ -230,6 +647,12 @@ class ProductionApiContractTests(SimpleTestCase):
             "job_id": "job_guest_owned",
             "session_id": "ses_guest_owned",
             "status": "queued",
+        }
+        get_access_metadata.return_value = {
+            "type": "analysis_job",
+            "job_id": "job_guest_owned",
+            "owner_id": "",
+            "session_id": "ses_guest_owned",
         }
         get_session_access.return_value = {
             "type": "chat_session",
@@ -280,15 +703,29 @@ class RuntimeHealthTests(SimpleTestCase):
 
 
 class FileScanWorkerCommandTests(SimpleTestCase):
+    @patch("chatbot.management.commands.process_uploaded_file_scans.purge_expired_uploads")
     @patch("chatbot.management.commands.process_uploaded_file_scans.time.sleep")
     @patch("chatbot.management.commands.process_uploaded_file_scans.process_uploaded_file_scans")
-    def test_scan_worker_can_poll_until_max_loops(self, process_scans, sleep) -> None:
+    def test_scan_worker_can_poll_until_max_loops(
+        self,
+        process_scans,
+        sleep,
+        purge_expired,
+    ) -> None:
         process_scans.return_value = {
             "status": "success",
             "processed": 0,
             "clean": 0,
             "rejected": 0,
             "results": [],
+        }
+        purge_expired.return_value = {
+            "status": "pass",
+            "dry_run": False,
+            "selected": 0,
+            "purged": 0,
+            "retryable": 0,
+            "skipped": 0,
         }
         output = StringIO()
 
@@ -305,4 +742,5 @@ class FileScanWorkerCommandTests(SimpleTestCase):
         )
 
         self.assertEqual(process_scans.call_count, 2)
+        self.assertEqual(purge_expired.call_count, 2)
         sleep.assert_called_once_with(1)

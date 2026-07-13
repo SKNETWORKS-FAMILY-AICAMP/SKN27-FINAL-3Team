@@ -1,6 +1,10 @@
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class QueryUnderstandingResult:
@@ -75,6 +79,9 @@ def _boost_with_neo4j_stub(text: str, session: Any) -> list[str]:
     try:
         result = session.run(query, text=text)
         return [record["search_term"] for record in result]
-    except Exception as e:
-        print(f"[Warning] Neo4j Hint Graph 쿼리 실패: {e}")
+    except Exception as exc:
+        logger.warning(
+            "Neo4j hint graph query failed; error_class=%s",
+            exc.__class__.__name__,
+        )
         return []

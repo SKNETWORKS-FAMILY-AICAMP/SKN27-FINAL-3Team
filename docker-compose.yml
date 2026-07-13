@@ -22,6 +22,7 @@ services:
       PROGRESS_CACHE_TTL_SECONDS: "300"
       OBJECT_STORAGE_PROVIDER: "mock_s3"
       OBJECT_STORAGE_BUCKET: "skn27-demo-object-storage"
+      OBJECT_STORAGE_QUARANTINE_BUCKET: "skn27-demo-quarantine-storage"
       OBJECT_STORAGE_PREFIX: "canonical"
       OBJECT_STORAGE_LOCAL_ROOT: "backend/media/mock_object_storage"
       OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: "900"
@@ -31,6 +32,7 @@ services:
       OBJECT_STORAGE_SECRET_ACCESS_KEY: "${OBJECT_STORAGE_SECRET_ACCESS_KEY:-}"
       OBJECT_STORAGE_SESSION_TOKEN: ${OBJECT_STORAGE_SESSION_TOKEN:-}
       FILE_SCAN_PROVIDER: "${FILE_SCAN_PROVIDER:-local_policy}"
+      FILE_UPLOAD_MAX_BYTES: "${FILE_UPLOAD_MAX_BYTES:-20971520}"
       FILE_SCAN_CLAMAV_HOST: "${FILE_SCAN_CLAMAV_HOST:-}"
       FILE_SCAN_CLAMAV_PORT: "${FILE_SCAN_CLAMAV_PORT:-3310}"
       FILE_SCAN_EXTERNAL_URL: "${FILE_SCAN_EXTERNAL_URL:-}"
@@ -39,6 +41,11 @@ services:
       FILE_SCAN_REJECT_PII: "${FILE_SCAN_REJECT_PII:-0}"
       FILE_SCAN_TIMEOUT_SECONDS: "${FILE_SCAN_TIMEOUT_SECONDS:-10}"
       FILE_SCAN_EXTERNAL_INLINE_MAX_BYTES: "${FILE_SCAN_EXTERNAL_INLINE_MAX_BYTES:-5242880}"
+      FILE_SCAN_CLAIM_STALE_AFTER_SECONDS: "${FILE_SCAN_CLAIM_STALE_AFTER_SECONDS:-300}"
+      FILE_SCAN_RETRY_BACKOFF_SECONDS: "${FILE_SCAN_RETRY_BACKOFF_SECONDS:-60}"
+      FILE_RETENTION_PURGE_LIMIT: "${FILE_RETENTION_PURGE_LIMIT:-100}"
+      FILE_MAX_ATTACHMENTS_PER_REQUEST: "${FILE_MAX_ATTACHMENTS_PER_REQUEST:-20}"
+      REPORT_STAGING_CLEANUP_LIMIT: "${REPORT_STAGING_CLEANUP_LIMIT:-100}"
       GOOGLE_AUTH_ALLOW_MOCK: "${GOOGLE_AUTH_ALLOW_MOCK:-1}"
       GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -69,6 +76,8 @@ services:
       NEO4J_DATABASE: "${NEO4J_DATABASE:-neo4j}"
     ports:
       - "8000:8000"
+    volumes:
+      - object_storage_data:/app/backend/media/mock_object_storage
     depends_on:
       redis:
         condition: service_started
@@ -76,6 +85,72 @@ services:
         condition: service_healthy
       neo4j:
         condition: service_started
+
+  agent-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: skn27-demo-backend
+    container_name: skn27-agent-worker
+    command: sh -c "python backend/manage.py migrate --check && exec python backend/manage.py process_agent_work_items --loop --limit 10"
+    environment: *backend-environment
+    volumes:
+      - object_storage_data:/app/backend/media/mock_object_storage
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  file-scan-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: skn27-demo-backend
+    container_name: skn27-file-scan-worker
+    command: sh -c "python backend/manage.py migrate --check && exec python backend/manage.py process_uploaded_file_scans --loop"
+    environment:
+      PYTHONUTF8: "1"
+      DJANGO_DEBUG: "1"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
+      DJANGO_DATABASE_ENGINE: "postgres"
+      POSTGRES_HOST: "postgres"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-law_db}
+      OBJECT_STORAGE_PROVIDER: "mock_s3"
+      OBJECT_STORAGE_BUCKET: "skn27-demo-object-storage"
+      OBJECT_STORAGE_QUARANTINE_BUCKET: "skn27-demo-quarantine-storage"
+      OBJECT_STORAGE_PREFIX: "canonical"
+      OBJECT_STORAGE_LOCAL_ROOT: "backend/media/mock_object_storage"
+      OBJECT_STORAGE_ENDPOINT_URL: "${OBJECT_STORAGE_ENDPOINT_URL:-}"
+      OBJECT_STORAGE_REGION: "${OBJECT_STORAGE_REGION:-}"
+      OBJECT_STORAGE_ACCESS_KEY_ID: "${OBJECT_STORAGE_ACCESS_KEY_ID:-}"
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: "${OBJECT_STORAGE_SECRET_ACCESS_KEY:-}"
+      OBJECT_STORAGE_SESSION_TOKEN: ${OBJECT_STORAGE_SESSION_TOKEN:-}
+      FILE_SCAN_PROVIDER: "clamav"
+      FILE_SCAN_CLAMAV_HOST: "clamav"
+      FILE_SCAN_CLAMAV_PORT: "${FILE_SCAN_CLAMAV_PORT:-3310}"
+      FILE_SCAN_MAX_BYTES: "${FILE_SCAN_MAX_BYTES:-52428800}"
+      FILE_SCAN_REJECT_PII: "${FILE_SCAN_REJECT_PII:-0}"
+      FILE_SCAN_TIMEOUT_SECONDS: "${FILE_SCAN_TIMEOUT_SECONDS:-10}"
+      FILE_SCAN_CLAIM_STALE_AFTER_SECONDS: "${FILE_SCAN_CLAIM_STALE_AFTER_SECONDS:-300}"
+      FILE_SCAN_RETRY_BACKOFF_SECONDS: "${FILE_SCAN_RETRY_BACKOFF_SECONDS:-60}"
+      FILE_RETENTION_PURGE_LIMIT: "${FILE_RETENTION_PURGE_LIMIT:-100}"
+    volumes:
+      - object_storage_data:/app/backend/media/mock_object_storage
+    depends_on:
+      clamav:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
 
   frontend:
     image: node:22-alpine
@@ -91,25 +166,6 @@ services:
     volumes:
       - ./app/web:/app
       - frontend_node_modules:/app/node_modules
-
-  agent-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: skn27-demo-backend
-    container_name: skn27-agent-worker
-    command: sh -c "python backend/manage.py migrate --check && exec python backend/manage.py process_agent_work_items --loop --limit 10"
-    environment: *backend-environment
-    depends_on:
-      redis:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      neo4j:
-        condition: service_started
-    healthcheck:
-      disable: true
-    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -127,6 +183,12 @@ services:
       - "${CLAMAV_PORT:-3310}:3310"
     volumes:
       - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
 
   postgres:
     image: ${POSTGRES_IMAGE:-pgvector/pgvector:pg16}
@@ -268,6 +330,7 @@ volumes:
   frontend_node_modules:
   postgres_data:
   clamav_data:
+  object_storage_data:
   neo4j_data:
   neo4j_logs:
   redis_data:

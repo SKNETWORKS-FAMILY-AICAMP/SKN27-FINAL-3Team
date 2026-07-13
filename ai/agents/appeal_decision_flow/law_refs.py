@@ -9,7 +9,11 @@
 이 v2 재검증으로 폐기됨).
 """
 
+import logging
 import os
+
+
+logger = logging.getLogger(__name__)
 
 # ── 폴백 원문 (DB 조회 실패 시에만 사용) ──────────────────────────────
 
@@ -126,7 +130,10 @@ def _fetch_provision_text(source_name: str, article_no: str, fallback: str) -> s
 
         text = get_provision_text(source_name, article_no)
     except Exception as exc:
-        print(f"[Warning] law_refs DB 조회 실패, 폴백 원문 사용: {exc}")
+        logger.warning(
+            "Law reference lookup failed; using fallback; error_class=%s",
+            exc.__class__.__name__,
+        )
         return fallback
     if not text:
         return fallback
