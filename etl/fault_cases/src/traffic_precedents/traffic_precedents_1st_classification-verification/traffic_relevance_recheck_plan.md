@@ -35,8 +35,8 @@ python traffic_relevance_recheck.py --fresh
 
 ```bash
 python traffic_relevance_recheck.py \
-  --reclass-dir database/traffic_prec_reclass \
-  --out-dir database/traffic_prec_reclass_verified \
+  --reclass-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass \
+  --out-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified \
   --fresh
 ```
 
@@ -89,7 +89,7 @@ non_traffic
 기본 입력 폴더:
 
 ```text
-database/traffic_prec_reclass/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass/
 ```
 
 입력 파일:
@@ -115,7 +115,7 @@ database/traffic_prec_reclass/
 기본 출력 폴더:
 
 ```text
-database/traffic_prec_reclass_verified/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/
 ```
 
 출력 파일:
@@ -143,7 +143,7 @@ database/traffic_prec_reclass_verified/
 2차 과실비율 분류에 넣을 파일은 다음 하나입니다.
 
 ```text
-database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 ```
 
 `03_traffic_reclassified_verified_all.jsonl`은 전체 추적용이지 2차 분류 입력이 아닙니다.
@@ -176,6 +176,17 @@ non_traffic
 ## 7. 검증에 사용하는 기존 근거 필드
 
 이 단계는 1차 분류가 각 row에 붙인 근거 필드를 다시 사용합니다.
+
+또한 원본 판례 텍스트를 다시 확인할 때는 새 전처리 산출물의 한글 필드를 우선 사용하고, 기존 영문 필드를 fallback으로 사용합니다.
+
+```text
+사건명 / case_name
+판시사항 / holding
+판결요지 / summary
+주문
+이유
+판례내용 / main_text / full_text
+```
 
 | 필드 | 의미 |
 |---|---|
@@ -372,7 +383,7 @@ possible_traffic_review 입력: 3,355건
 검증 후 과실비율 2차 분류에 사용할 입력은 다음 파일입니다.
 
 ```text
-database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 ```
 
 그 다음 단계에서는 다음 질문을 봅니다.
