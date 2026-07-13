@@ -9,6 +9,14 @@ from django.apps import apps
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
+from app.contracts.consultation_case import (
+    CaseApiErrorResponse,
+    ConfirmCaseFactsResponse,
+    ConsultationCaseListResponse,
+    ConsultationCaseWorkspaceResponse,
+    CreateConsultationCaseResponse,
+    StartCaseAnalysisResponse,
+)
 from app.services.google_auth_service import issue_access_token
 from chatbot.case_repository import CaseOwnerMismatch, create_case
 from chatbot.models import (
@@ -203,6 +211,7 @@ class ConsultationCaseApiTests(TestCase):
         )
 
         self.assertEqual(create_response.status_code, 201)
+        CreateConsultationCaseResponse.model_validate(create_response.json())
         created = create_response.json()["case"]
         self.assertEqual(create_response.json()["contract_version"], "consultation_case.v2")
         self.assertEqual(created["owner_id"], self.owner_id)
@@ -210,10 +219,12 @@ class ConsultationCaseApiTests(TestCase):
 
         list_response = self.client.get("/api/cases/")
         self.assertEqual(list_response.status_code, 200)
+        ConsultationCaseListResponse.model_validate(list_response.json())
         self.assertEqual([item["case_id"] for item in list_response.json()["cases"]], [created["case_id"]])
 
         workspace_response = self.client.get(f"/api/cases/{created['case_id']}/workspace/")
         self.assertEqual(workspace_response.status_code, 200)
+        ConsultationCaseWorkspaceResponse.model_validate(workspace_response.json())
         workspace = workspace_response.json()["workspace"]
         self.assertEqual(workspace["contract_version"], "case_workspace.v2")
         self.assertEqual(workspace["case"]["case_id"], created["case_id"])
@@ -222,6 +233,7 @@ class ConsultationCaseApiTests(TestCase):
         other_client = authenticated_client("usr_other_case_owner")
         denied = other_client.get(f"/api/cases/{created['case_id']}/workspace/")
         self.assertEqual(denied.status_code, 403)
+        CaseApiErrorResponse.model_validate(denied.json())
         self.assertEqual(denied.json()["error"]["code"], "object_access_denied")
 
     def test_fact_confirmation_precedes_real_worker_queue(self) -> None:
@@ -244,6 +256,7 @@ class ConsultationCaseApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(premature.status_code, 409)
+        CaseApiErrorResponse.model_validate(premature.json())
         self.assertEqual(premature.json()["error"]["code"], "confirmed_facts_required")
 
         facts_response = self.client.post(
@@ -262,6 +275,7 @@ class ConsultationCaseApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(facts_response.status_code, 201)
+        ConfirmCaseFactsResponse.model_validate(facts_response.json())
         fact_version = facts_response.json()["fact_version"]
         self.assertEqual(fact_version["schema_version"], "confirmed_facts.v1")
         self.assertEqual(fact_version["version_no"], 1)
@@ -272,6 +286,7 @@ class ConsultationCaseApiTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(job_response.status_code, 202)
+        StartCaseAnalysisResponse.model_validate(job_response.json())
         body = job_response.json()
         self.assertEqual(body["contract_version"], "case_analysis_job.v2")
         self.assertEqual(body["job"]["status"], "queued")
@@ -318,6 +333,7 @@ class ConsultationCaseApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 409)
+        CaseApiErrorResponse.model_validate(response.json())
         error = response.json()["error"]
         self.assertEqual(error["code"], "fact_readiness_not_met")
         self.assertEqual(
@@ -334,6 +350,7 @@ class ConsultationCaseApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+        CaseApiErrorResponse.model_validate(response.json())
         self.assertEqual(response.json()["error"]["code"], "login_required")
 
     def test_case_creation_validates_typed_request_before_repository(self) -> None:
@@ -344,6 +361,7 @@ class ConsultationCaseApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 422)
+        CaseApiErrorResponse.model_validate(response.json())
         error = response.json()["error"]
         self.assertEqual(error["contract_version"], "request_validation_error.v1")
         self.assertEqual(error["code"], "validation_error")

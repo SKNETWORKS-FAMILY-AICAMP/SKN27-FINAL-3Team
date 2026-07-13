@@ -1,3 +1,5 @@
+import caseApiRoutes from "./caseApiRoutes.json";
+
 export function createFrontendApi({ apiBase = "/api" } = {}) {
   const authApiBase = toCanonicalApiBase(apiBase);
 
@@ -57,6 +59,29 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     updateConversationSaveState(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/save-state/"), payload, identity);
     },
+    listConsultationCases({ identity } = {}) {
+      return requestCaseApi(apiBase, "listConsultationCases", { identity });
+    },
+    createConsultationCase(payload = {}, identity = {}) {
+      return requestCaseApi(apiBase, "createConsultationCase", { payload, identity });
+    },
+    getConsultationCaseWorkspace({ caseId, identity } = {}) {
+      return requestCaseApi(apiBase, "getConsultationCaseWorkspace", { caseId, identity });
+    },
+    confirmConsultationCaseFacts({ caseId, payload = {}, identity } = {}) {
+      return requestCaseApi(apiBase, "confirmConsultationCaseFacts", {
+        caseId,
+        payload,
+        identity,
+      });
+    },
+    startConsultationCaseAnalysis({ caseId, payload = {}, identity } = {}) {
+      return requestCaseApi(apiBase, "startConsultationCaseAnalysis", {
+        caseId,
+        payload,
+        identity,
+      });
+    },
     runReportAction(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "reports/"), payload, identity);
     },
@@ -89,6 +114,27 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
       return getJson(url, identity);
     },
   };
+}
+
+function requestCaseApi(
+  apiBase,
+  operationId,
+  { caseId, payload = {}, identity = {} } = {}
+) {
+  const route = caseApiRoutes[operationId];
+  if (!route) {
+    throw new Error(`Unknown Case API operation: ${operationId}`);
+  }
+
+  const path = route.path.replace("{case_id}", encodeURIComponent(caseId || ""));
+  const url = joinApiPath(apiBase, path);
+  if (route.method === "GET") {
+    return getJson(url, identity);
+  }
+  if (route.method === "POST") {
+    return postJson(url, payload, identity);
+  }
+  throw new Error(`Unsupported Case API method: ${route.method}`);
 }
 
 export async function postJson(url, payload, identity = {}, options = {}) {

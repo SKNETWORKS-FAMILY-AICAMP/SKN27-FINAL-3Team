@@ -1,0 +1,22 @@
+{
+  "listConsultationCases": {
+    "method": "GET",
+    "path": "cases/"
+  },
+  "createConsultationCase": {
+    "method": "POST",
+    "path": "cases/"
+  },
+  "getConsultationCaseWorkspace": {
+    "method": "GET",
+    "path": "cases/{case_id}/workspace/"
+  },
+  "confirmConsultationCaseFacts": {
+    "method": "POST",
+    "path": "cases/{case_id}/facts/confirm/"
+  },
+  "startConsultationCaseAnalysis": {
+    "method": "POST",
+    "path": "cases/{case_id}/analysis/jobs/"
+  }
+}

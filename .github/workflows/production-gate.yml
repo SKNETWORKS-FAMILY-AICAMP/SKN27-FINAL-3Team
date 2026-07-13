@@ -25,6 +25,12 @@ jobs:
       - name: Offline pytest
         run: python -m pytest -q --timeout=30
 
+      - name: OpenAPI v1 contract drift
+        run: python scripts/generate_openapi_v1.py --check
+
+      - name: Frontend Case route contract drift
+        run: python scripts/generate_frontend_case_routes.py --check
+
       - name: Django tests
         run: python backend/manage.py test chatbot -v 1
 
