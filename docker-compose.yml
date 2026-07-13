@@ -10,7 +10,7 @@ services:
       DJANGO_DEBUG: "1"
       MOCK_REQUIRE_AUTH: "1"
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-secret}
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1]"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,[::1],backend"
       DJANGO_DATABASE_ENGINE: "postgres"
       POSTGRES_HOST: "postgres"
       POSTGRES_PORT: "5432"
