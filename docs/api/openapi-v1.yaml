@@ -128,9 +128,11 @@ paths:
       - name: case_id
         in: path
         required: true
+        description: Canonical consultation Case identifier
         schema:
           type: string
           minLength: 1
+          maxLength: 64
   /api/cases/{case_id}/facts/confirm/:
     post:
       tags:
@@ -187,9 +189,11 @@ paths:
       - name: case_id
         in: path
         required: true
+        description: Canonical consultation Case identifier
         schema:
           type: string
           minLength: 1
+          maxLength: 64
       requestBody:
         required: true
         content:
@@ -254,9 +258,11 @@ paths:
       - name: case_id
         in: path
         required: true
+        description: Canonical consultation Case identifier
         schema:
           type: string
           minLength: 1
+          maxLength: 64
       requestBody:
         required: true
         content:

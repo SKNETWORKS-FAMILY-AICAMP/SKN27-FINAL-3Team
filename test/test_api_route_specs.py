@@ -120,6 +120,45 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
     assert len(operation_ids) == len(set(operation_ids))
 
 
+def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    modeled = {(spec.method, spec.path) for spec in route_specs.API_ROUTE_SPECS}
+    deferred = {(spec.method, spec.path) for spec in route_specs.DEFERRED_ROUTE_SPECS}
+
+    assert modeled.isdisjoint(deferred)
+    assert deferred == {
+        ("GET", "/api/health/"),
+        ("GET", "/api/health/live/"),
+        ("GET", "/api/health/ready/"),
+        ("GET", "/api/capabilities/"),
+        ("POST", "/api/auth/guest-session/"),
+        ("POST", "/api/auth/google/code/"),
+        ("POST", "/api/auth/refresh/"),
+        ("POST", "/api/auth/logout/"),
+        ("GET", "/api/auth/me/"),
+        ("GET", "/api/mypage/summary/"),
+        ("GET", "/api/history/"),
+        ("POST", "/api/chat/sessions/"),
+        ("POST", "/api/chat/messages/"),
+        ("POST", "/api/chat/save-state/"),
+        ("GET", "/api/files/"),
+        ("POST", "/api/files/"),
+        ("GET", "/api/files/{attachment_id}/"),
+        ("GET", "/api/analysis/jobs/"),
+        ("POST", "/api/analysis/jobs/"),
+        ("GET", "/api/analysis/jobs/{job_id}/"),
+        ("GET", "/api/analysis/results/{job_id}/"),
+        ("GET", "/api/agents/nodes/"),
+        ("GET", "/api/reports/"),
+        ("POST", "/api/reports/"),
+        ("GET", "/api/reports/{report_id}/"),
+        ("GET", "/api/reports/{report_id}/download/"),
+    }
+    assert all(spec.reason.strip() for spec in route_specs.DEFERRED_ROUTE_SPECS)
+    assert all(spec.contract_status == "deferred" for spec in route_specs.DEFERRED_ROUTE_SPECS)
+
+
 def test_case_response_models_reject_contract_drift() -> None:
     contracts = importlib.import_module("app.contracts.consultation_case")
     case = {
