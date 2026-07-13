@@ -30,6 +30,15 @@ class AppealJudgmentState(TypedDict, total=False):
                                                 # user_appeal_reason과 동일하게 Supervisor가 물어
                                                 # 공급 (1차 고지서 기산일=수령일+60일 계산에 사용)
 
+    # ── reason_intake_node 출력 ────────────────────────────────────────
+    reason_quality_insufficient: Optional[bool]  # True면 user_appeal_reason은 있지만 길이가
+                                                # 짧아(reason_intake.py::_MIN_REASON_LENGTH
+                                                # 미만) 판단 근거가 빈약할 수 있다는 신호.
+                                                # 재질문으로 막지는 않고(RG·MG는 그대로
+                                                # 실행됨) guide_generation_node가 disclaimer에
+                                                # 보강 안내만 덧붙인다. reason 자체가 없으면
+                                                # (재질문 대상) 이 필드는 세팅되지 않고 None.
+
     # ── law_code_check_node (LDB_CHECK) 출력 ─────────────────────────
     law_code_verified:        Optional[bool]   # 실패해도 파이프라인은 계속 진행
 
@@ -72,6 +81,17 @@ class AppealJudgmentState(TypedDict, total=False):
                                                 # 있다"고 오해하지 않게 한다. 설계 근거는
                                                 # `docs/architecture/appeal-judgment/
                                                 # 면제·감경 사유 merit 구분 설계.md` 참고.
+    relief_type_judgment_failed: Optional[bool]  # True면 위 merit_relief_type=None이 2차 LLM
+                                                # 호출(면제/감경 구분) 실패·응답 파싱 실패로 인한
+                                                # 기본값이라는 뜻 — merit="강함"일 땐 참조 법조문이
+                                                # 항상 면제 또는 감경 중 하나로 확정되므로, 이
+                                                # 상태에서 relief_type이 None인 경우는 전부 판정
+                                                # 실패다(merit_judgment_failed·risk_judgment_failed와
+                                                # 대칭). merit != "강함"이면 relief_type 자체가
+                                                # 애초에 호출되지 않으므로 항상 None(적용 대상
+                                                # 아님). guide_generation_node가 이 값으로 "면제/
+                                                # 감경 구분이 기술 오류로 확정되지 못했다"는 별도
+                                                # 안내를 붙인다.
 
     # ── verdict_node (E) 출력 ──────────────────────────────────────────
     judgment_status:           Optional[JudgmentStatus]
