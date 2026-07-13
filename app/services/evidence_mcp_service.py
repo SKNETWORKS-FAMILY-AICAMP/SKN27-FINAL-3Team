@@ -44,6 +44,7 @@ def collect_external_evidence(
     evidence: list[dict[str, Any]] = []
     limitations: list[str] = []
     successful_gateways = 0
+    available_gateways = 0
 
     for provider in MCP_PROVIDERS:
         result = results.get(provider)
@@ -54,6 +55,12 @@ def collect_external_evidence(
         provider_status[provider] = status
         if status == "success":
             successful_gateways += 1
+            available_gateways += 1
+        elif status == "partial":
+            available_gateways += 1
+            limitations.append(
+                str(result.get("limitation") or f"{provider}: {status}")
+            )
         else:
             limitations.append(
                 str(result.get("limitation") or f"{provider}: {status}")
@@ -75,7 +82,7 @@ def collect_external_evidence(
         if isinstance(result, dict):
             provider_status[provider] = str(result.get("status") or "failed")
 
-    if successful_gateways == 0:
+    if available_gateways == 0:
         status = "dependency_unavailable"
     elif successful_gateways == len(MCP_PROVIDERS):
         if evidence:
