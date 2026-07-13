@@ -132,3 +132,27 @@ def test_docker_frontend_proxy_host_is_allowed_by_backend() -> None:
     assert match is not None
     allowed_hosts = {host.strip() for host in match.group(1).split(",")}
     assert "backend" in allowed_hosts
+
+
+def test_docker_backend_waits_for_tcp_postgres_and_migrates_before_serving() -> None:
+    compose = read("docker-compose.yml")
+    backend_service = compose.split("\n  backend:\n", 1)[1].split("\n  frontend:\n", 1)[0]
+    postgres_service = compose.split("\n  postgres:\n", 1)[1].split("\n  neo4j:\n", 1)[0]
+
+    command_match = re.search(r'^    command: sh -c "([^"]+)"$', backend_service, re.MULTILINE)
+    assert command_match is not None
+    assert command_match.group(1).startswith(
+        "python backend/manage.py migrate --noinput && exec gunicorn "
+    )
+    assert re.search(
+        r"^    depends_on:\n(?:.*\n)*?^      postgres:\n^        condition: service_healthy$",
+        backend_service,
+        re.MULTILINE,
+    )
+    for dependency in ("redis", "neo4j"):
+        assert re.search(
+            rf"^      {dependency}:\n^        condition: service_started$",
+            backend_service,
+            re.MULTILINE,
+        )
+    assert "pg_isready -h 127.0.0.1 " in postgres_service

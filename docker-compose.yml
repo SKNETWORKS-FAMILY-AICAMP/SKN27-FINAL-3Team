@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     image: skn27-demo-backend
     container_name: skn27-demo-backend
+    command: sh -c "python backend/manage.py migrate --noinput && exec gunicorn --chdir backend --bind 0.0.0.0:8000 --workers 3 --timeout 120 config.wsgi:application"
     environment:
       PYTHONUTF8: "1"
       DJANGO_DEBUG: "1"
@@ -69,9 +70,12 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - redis
-      - postgres
-      - neo4j
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_started
 
   frontend:
     image: node:22-alpine
@@ -119,7 +123,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./storage/schemas/law_db_schema.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-law_db}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-law_db}"]
       interval: 5s
       timeout: 5s
       retries: 5
