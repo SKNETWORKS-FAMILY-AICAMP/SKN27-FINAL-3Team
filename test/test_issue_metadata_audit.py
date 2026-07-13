@@ -1,3 +1,4 @@
+import io
 import json
 from pathlib import Path
 
@@ -330,6 +331,19 @@ def test_failure_report_links_each_issue_and_lists_violations() -> None:
     assert "[#3](https://github.com/acme/demo/issues/3) 메타데이터 누락" in report
     assert "`missing_assignee`" in report
     assert "`missing_field:Status`" in report
+
+
+def test_report_writer_escapes_characters_unsupported_by_console_encoding() -> None:
+    output = io.BytesIO()
+    stream = io.TextIOWrapper(output, encoding="cp949", errors="strict")
+
+    audit_module.write_report("메타데이터 ❌\n이슈 🚀", stream=stream)
+    stream.flush()
+
+    assert output.getvalue().decode("cp949").splitlines() == [
+        "메타데이터 \\u274c",
+        "이슈 \\U0001f680",
+    ]
 
 
 def test_cli_returns_failure_and_writes_actions_summary_for_missing_metadata(

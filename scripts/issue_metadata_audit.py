@@ -6,11 +6,13 @@ import argparse
 import json
 import os
 import re
+import sys
 import urllib.request
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Any
+from typing import TextIO
 
 import yaml
 
@@ -158,6 +160,15 @@ def render_report(failures: list[dict[str, Any]], *, repository: str) -> str:
     return "\n".join(lines)
 
 
+def write_report(report: str, *, stream: TextIO | None = None) -> None:
+    """Write a report without failing on characters unsupported by the console."""
+    target = sys.stdout if stream is None else stream
+    encoding = getattr(target, "encoding", None)
+    if encoding:
+        report = report.encode(encoding, errors="backslashreplace").decode(encoding)
+    print(report, file=target)
+
+
 def main(
     argv: list[str] | None = None,
     *,
@@ -205,7 +216,7 @@ def main(
         policy=policy,
     )
     report = render_report(failures, repository=repository)
-    print(report)
+    write_report(report)
 
     summary_path = environment.get("GITHUB_STEP_SUMMARY")
     if summary_path:
