@@ -1696,6 +1696,14 @@ def enqueue_analysis_job_work(
     if session is None:
         raise ValueError("job_payload must include session_id")
 
+    conversation_save_state = conversation_save_state_from_payload(payload)
+    session.metadata = _metadata_with_conversation_save_state(
+        session.metadata,
+        conversation_save_state,
+        raw_payload=payload,
+    )
+    session.save(update_fields=["metadata", "updated_at"])
+
     job_id = _text(job_payload.get("job_id"))
     if not job_id:
         raise ValueError("job_payload must include job_id")

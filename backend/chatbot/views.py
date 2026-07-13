@@ -621,6 +621,17 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
+    identity_payload = _request_access_payload(request)
+    policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
+    if policy_response is not None:
+        return policy_response
+    access = _authorize_session_query(
+        job.get("session_id"),
+        identity_payload,
+        resource_type="analysis_result",
+    )
+    if not access["allowed"]:
+        return _object_access_denied_response(request, access)
     if job.get("status") in {"queued", "running"}:
         return _json_response(
             request,
@@ -633,6 +644,8 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
                     "structured_results": {},
                     "evidence": [],
                     "limitations": [],
+                    "work_item": job.get("work_item"),
+                    "progress_state": job.get("progress_state") or {},
                 }
             },
             status=202,
@@ -648,6 +661,19 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
             "job_id": job_id,
             "status_counts": job.get("status_counts") or {},
             "executions": executions,
+        }
+    )
+    result.update(
+        {
+            "cards": job.get("cards") or [],
+            "pending_questions": job.get("pending_questions") or [],
+            "report_links": job.get("report_links") or [],
+            "attachments": job.get("attachments") or [],
+            "reporting_payload": job.get("reporting_payload") or None,
+            "supervisor_state": job.get("supervisor_state") or None,
+            "supervisor_execution": job.get("supervisor_execution") or None,
+            "work_item": job.get("work_item"),
+            "progress_state": job.get("progress_state") or {},
         }
     )
     return _json_response(request, {"result": result})

@@ -156,3 +156,38 @@ def test_docker_backend_waits_for_tcp_postgres_and_migrates_before_serving() -> 
             re.MULTILINE,
         )
     assert "pg_isready -h 127.0.0.1 " in postgres_service
+
+
+def test_docker_runs_the_agent_worker_continuously() -> None:
+    compose = read("docker-compose.yml")
+
+    assert "\n  agent-worker:\n" in compose
+    backend_service = compose.split("\n  backend:\n", 1)[1].split("\n  frontend:\n", 1)[0]
+    worker_service = compose.split("\n  agent-worker:\n", 1)[1].split("\n  redis:\n", 1)[0]
+
+    assert "environment: &backend-environment" in backend_service
+    assert "environment: *backend-environment" in worker_service
+    assert re.search(r"^    image: skn27-demo-backend$", worker_service, re.MULTILINE)
+    assert (
+        'command: sh -c "python backend/manage.py migrate --check && '
+        'exec python backend/manage.py process_agent_work_items --loop --limit 10"'
+        in worker_service
+    )
+    assert re.search(
+        r"^    depends_on:\n(?:.*\n)*?^      postgres:\n"
+        r"^        condition: service_healthy$",
+        worker_service,
+        re.MULTILINE,
+    )
+    for dependency in ("redis", "neo4j"):
+        assert re.search(
+            rf"^      {dependency}:\n^        condition: service_started$",
+            worker_service,
+            re.MULTILINE,
+        )
+    assert re.search(
+        r"^    healthcheck:\n^      disable: true$",
+        worker_service,
+        re.MULTILINE,
+    )
+    assert re.search(r"^    restart: unless-stopped$", worker_service, re.MULTILINE)
