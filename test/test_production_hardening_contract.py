@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,3 +122,37 @@ def test_docker_runtime_exposes_repo_and_backend_python_packages() -> None:
     dockerfile = read("Dockerfile")
 
     assert "PYTHONPATH=/app:/app/backend" in dockerfile
+
+
+def test_docker_frontend_proxy_host_is_allowed_by_backend() -> None:
+    compose = read("docker-compose.yml")
+
+    assert 'VITE_API_PROXY_TARGET: "http://backend:8000"' in compose
+    match = re.search(r'DJANGO_ALLOWED_HOSTS:\s*"([^"]+)"', compose)
+    assert match is not None
+    allowed_hosts = {host.strip() for host in match.group(1).split(",")}
+    assert "backend" in allowed_hosts
+
+
+def test_docker_backend_waits_for_tcp_postgres_and_migrates_before_serving() -> None:
+    compose = read("docker-compose.yml")
+    backend_service = compose.split("\n  backend:\n", 1)[1].split("\n  frontend:\n", 1)[0]
+    postgres_service = compose.split("\n  postgres:\n", 1)[1].split("\n  neo4j:\n", 1)[0]
+
+    command_match = re.search(r'^    command: sh -c "([^"]+)"$', backend_service, re.MULTILINE)
+    assert command_match is not None
+    assert command_match.group(1).startswith(
+        "python backend/manage.py migrate --noinput && exec gunicorn "
+    )
+    assert re.search(
+        r"^    depends_on:\n(?:.*\n)*?^      postgres:\n^        condition: service_healthy$",
+        backend_service,
+        re.MULTILINE,
+    )
+    for dependency in ("redis", "neo4j"):
+        assert re.search(
+            rf"^      {dependency}:\n^        condition: service_started$",
+            backend_service,
+            re.MULTILINE,
+        )
+    assert "pg_isready -h 127.0.0.1 " in postgres_service
