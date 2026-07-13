@@ -10,6 +10,14 @@ _NEXT_ACTIONS_1CHA = [
 # 단계별로 정확한 절차명을 써야 혼동을 안 준다.
 _NEXT_ACTIONS_SAJEON = ["Supervisor가 사용자에게 의견제출 사유 질문 후 재호출"]
 
+# "그냥요"류 한두 단어 사유는 재질문 트리거(존재 여부만 확인)를 통과해 그대로 RG·MG로
+# 직행한다 — 이건 의도된 설계다(README 참고). 다만 판단 자체는 진행하되 근거가 빈약하다는
+# 신호는 남겨야, guide_generation_node가 "판단이 이렇게 나왔지만 입력이 짧아 신뢰도가
+# 낮을 수 있다"고 사실대로 안내할 수 있다. 임의 값이라 실측으로 조정 가능하나, 판정을
+# 막지는 않는(v22의 "하드 블로커 없음" 원칙과 동일한) 최소 개입으로 둔다
+# (이의가능성_판단_에이전트_미비점_조사_2026-07-09.md 🔴2).
+_MIN_REASON_LENGTH = 10
+
 
 def reason_intake_node(state: AppealJudgmentState) -> dict:
     """user_appeal_reason 존재 확인.
@@ -25,8 +33,9 @@ def reason_intake_node(state: AppealJudgmentState) -> dict:
     partial_result에 항상 포함할 수 있다 (더 이상 notice_stage로 분기할 필요 없음).
     """
     notice_stage = state.get("notice_stage")
-    if (state.get("user_appeal_reason") or "").strip():
-        return {}
+    reason = (state.get("user_appeal_reason") or "").strip()
+    if reason:
+        return {"reason_quality_insufficient": len(reason) < _MIN_REASON_LENGTH}
 
     missing: list[str] = ["user_appeal_reason"]
     if notice_stage == "1차 고지서" and not state.get("notice_received_date"):

@@ -112,10 +112,13 @@ def merit_classification_node(state: AppealJudgmentState) -> dict:
         # "판단이 애매하다"가 아니라 "판단을 못 했다, 재시도하면 다를 수 있다"고
         # 사실대로 안내해야, 승산 있는 사유를 사용자가 오해로 포기하지 않는다.
         return {
-            "merit":                 "보류",
-            "merit_basis":           "LLM 판단 실패로 보류 처리",
-            "merit_judgment_failed": True,
-            "merit_relief_type":     None,
+            "merit":                      "보류",
+            "merit_basis":                "LLM 판단 실패로 보류 처리",
+            "merit_judgment_failed":      True,
+            "merit_relief_type":          None,
+            "relief_type_judgment_failed": None,  # merit 판정 자체가 실패해 relief_type
+                                                    # 호출까지 가지 못했다 — merit_judgment_failed로
+                                                    # 이미 원인이 드러나므로 여긴 "적용 대상 아님".
         }
 
     if merit not in _VALID_MERIT:
@@ -124,10 +127,12 @@ def merit_classification_node(state: AppealJudgmentState) -> dict:
         merit = "보류"
         merit_judgment_failed = True
         relief_type = None
+        relief_type_judgment_failed = None
     elif merit != "강함":
         # 보류/낮음은 relief_type이 애초에 의미 없다 — 추가 호출 없이 바로 None.
         merit_judgment_failed = False
         relief_type = None
+        relief_type_judgment_failed = None
     else:
         merit_judgment_failed = False
         # relief_type은 merit="강함"일 때만 의미가 있다(면제 사유 결과 = 처분 자체 불가) —
@@ -142,15 +147,23 @@ def merit_classification_node(state: AppealJudgmentState) -> dict:
             relief_type = None
 
         if relief_type not in _VALID_RELIEF_TYPES:
+            # merit="강함"이면 참조 법조문은 항상 면제 또는 감경 중 하나로 확정되므로
+            # (RELIEF_TYPE_CLASSIFICATION_PROMPT), 이 시점에 None인 경우는 전부 호출
+            # 실패·파싱 실패다 — "구분 불필요"인 정상 케이스가 아니다. RG·MG 1차 호출과
+            # 대칭으로 이 실패를 명시적으로 표시해, guide_generation_node가 "감경(확정)"과
+            # "구분 미확정(기술 오류)"을 다른 문구로 안내할 수 있게 한다.
             relief_type = None
+            relief_type_judgment_failed = True
         else:
             # 별도 호출로도 "미약"류 표현을 계속 면제로 오판할 가능성에 대비해,
             # 알려진 실패 패턴에 한해 키워드 안전장치를 마지막 방어선으로 유지한다.
             relief_type = _downgrade_relief_type_if_hedged(reason, relief_type)
+            relief_type_judgment_failed = False
 
     return {
-        "merit":                 merit,
-        "merit_basis":           merit_basis,
-        "merit_judgment_failed": merit_judgment_failed,
-        "merit_relief_type":     relief_type,
+        "merit":                      merit,
+        "merit_basis":                merit_basis,
+        "merit_judgment_failed":      merit_judgment_failed,
+        "merit_relief_type":          relief_type,
+        "relief_type_judgment_failed": relief_type_judgment_failed,
     }
