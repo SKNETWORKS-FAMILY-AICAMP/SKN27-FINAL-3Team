@@ -694,6 +694,25 @@ class ProductionReadinessTests(TestCase):
         )
 
     @override_settings(
+        OBJECT_STORAGE_PROVIDER="s3",
+        OBJECT_STORAGE_BUCKET="shared-bucket",
+        OBJECT_STORAGE_QUARANTINE_BUCKET="shared-bucket",
+    )
+    def test_readiness_rejects_shared_clean_and_quarantine_bucket(self):
+        report = build_production_readiness_report(include_database=False)
+
+        object_storage = {
+            check["name"]: check for check in report["checks"]
+        }["object_storage"]
+        self.assertEqual(object_storage["status"], "fail")
+        self.assertTrue(
+            any(
+                "must differ" in detail["message"]
+                for detail in object_storage["details"]
+            )
+        )
+
+    @override_settings(
         LEGAL_RAG_VECTOR_ENABLED=True,
         LEGAL_RAG_QUERY_EMBEDDING_PROVIDER="sentence-transformers",
         LEGAL_RAG_QUERY_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
@@ -911,13 +930,53 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(body["policy"]["provider"], "mock_s3")
         self.assertTrue(body["policy"]["writes_binary"])
         self.assertEqual(body["policy"]["persistence_state"], "binary_adapter")
-        self.assertEqual(body["upload_write"]["status"], "written")
-        self.assertEqual(body["report_write"]["status"], "written")
+        self.assertEqual(body["upload_write"]["status"], "skipped")
+        self.assertEqual(
+            body["upload_write"]["reason"],
+            "scanner_only_clean_upload",
+        )
+        self.assertEqual(body["report_staging_write"]["status"], "written")
+        self.assertEqual(body["report_write"]["status"], "copied")
+        self.assertEqual(body["report_staging_cleanup"]["status"], "deleted")
+
+    def test_object_storage_smoke_fails_when_staging_is_not_deleted(self):
+        output = StringIO()
+
+        with (
+            tempfile.TemporaryDirectory() as object_root,
+            override_settings(
+                OBJECT_STORAGE_PROVIDER="mock_s3",
+                OBJECT_STORAGE_BUCKET="bucket",
+                OBJECT_STORAGE_PREFIX="canonical",
+                OBJECT_STORAGE_LOCAL_ROOT=object_root,
+            ),
+            patch(
+                "chatbot.management.commands.smoke_object_storage.delete_object",
+                return_value={"status": "skipped", "reason": "delete_failed"},
+            ),
+            self.assertRaises(CommandError),
+        ):
+            call_command(
+                "smoke_object_storage",
+                "--require-binary",
+                "--format",
+                "json",
+                stdout=output,
+            )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["status"], "fail")
+        self.assertEqual(body["error"]["reason"], "report_staging_cleanup_failed")
 
     def test_file_scan_smoke_command_requires_clean_scan(self):
         output = StringIO()
 
-        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root):
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(
+            MOCK_UPLOAD_ROOT=upload_root,
+            OBJECT_STORAGE_LOCAL_ROOT=upload_root,
+            OBJECT_STORAGE_BUCKET="file-scan-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="file-scan-quarantine",
+        ):
             call_command(
                 "smoke_file_scan",
                 "--require-clean",
@@ -931,11 +990,60 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(body["status"], "pass")
         self.assertEqual(body["scan_status"], "clean")
 
+    def test_file_scan_smoke_supports_split_api_upload_and_scanner_phases(self):
+        upload_output = StringIO()
+        scan_output = StringIO()
+
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(
+            MOCK_UPLOAD_ROOT=upload_root,
+            OBJECT_STORAGE_LOCAL_ROOT=upload_root,
+            OBJECT_STORAGE_BUCKET="file-scan-split-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="file-scan-split-quarantine",
+        ):
+            call_command(
+                "smoke_file_scan",
+                "--phase",
+                "upload",
+                "--attachment-id",
+                "att_file_scan_split",
+                "--format",
+                "json",
+                stdout=upload_output,
+            )
+            uploaded_file = UploadedFile.objects.get(
+                attachment_id="att_file_scan_split"
+            )
+            self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+            self.assertEqual(uploaded_file.scan_status, "not_started")
+
+            call_command(
+                "smoke_file_scan",
+                "--phase",
+                "scan",
+                "--attachment-id",
+                "att_file_scan_split",
+                "--require-clean",
+                "--format",
+                "json",
+                stdout=scan_output,
+            )
+
+        self.assertEqual(json.loads(upload_output.getvalue())["phase"], "upload")
+        scan_body = json.loads(scan_output.getvalue())
+        self.assertEqual(scan_body["phase"], "scan")
+        self.assertEqual(scan_body["status"], "pass")
+        self.assertEqual(scan_body["scan_status"], "clean")
+
     @override_settings(FILE_SCAN_PROVIDER="clamav", FILE_SCAN_CLAMAV_HOST="clamav")
     def test_file_scan_smoke_supports_clamav_provider_clean_scan(self):
         output = StringIO()
 
-        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[]):
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(
+            MOCK_UPLOAD_ROOT=upload_root,
+            OBJECT_STORAGE_LOCAL_ROOT=upload_root,
+            OBJECT_STORAGE_BUCKET="file-scan-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="file-scan-quarantine",
+        ), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[]):
             call_command(
                 "smoke_file_scan",
                 "--attachment-id",
@@ -962,7 +1070,12 @@ class ProductionReadinessTests(TestCase):
             "reason": "connection_failed",
         }
 
-        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[finding]):
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(
+            MOCK_UPLOAD_ROOT=upload_root,
+            OBJECT_STORAGE_LOCAL_ROOT=upload_root,
+            OBJECT_STORAGE_BUCKET="file-scan-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="file-scan-quarantine",
+        ), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[finding]):
             with self.assertRaises(CommandError):
                 call_command(
                     "smoke_file_scan",
@@ -975,8 +1088,8 @@ class ProductionReadinessTests(TestCase):
                 )
 
         uploaded_file = UploadedFile.objects.get(attachment_id="att_file_scan_clamav_unavailable")
-        self.assertEqual(uploaded_file.status, UploadedFileStatus.REJECTED)
-        self.assertEqual(uploaded_file.scan_status, "rejected")
+        self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+        self.assertEqual(uploaded_file.scan_status, "error")
         self.assertEqual(uploaded_file.metadata["scan_result"]["findings"][0]["reason"], "connection_failed")
 
     def legacy_persona_catalog_smoke_command_covers_all_demo_personas(self):
@@ -2913,6 +3026,10 @@ class RemovedChatbotMockApiContract:
         body = json.loads(output.getvalue())
         self.assertEqual(body["loop_iteration"], 1)
         self.assertEqual(body["contract_version"], "agent_worker_queue.v1")
+        self.assertEqual(
+            body["report_staging_cleanup"]["contract_version"],
+            "report_staging_cleanup_batch.v1",
+        )
 
     def test_attachment_upload_endpoint_returns_metadata_and_handoff(self):
         upload = SimpleUploadedFile(

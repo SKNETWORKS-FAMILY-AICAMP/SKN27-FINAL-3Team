@@ -63,3 +63,57 @@ def test_production_plan_rejects_unregistered_agent_instead_of_generating_a_fixt
     assert output["structured_result"]["error_code"] == "sync_adapter_unregistered"
     assert "mock" not in str(result).lower()
 
+
+@patch("app.services.agent_node_service._run_sync_adapter")
+def test_production_plan_does_not_execute_waiting_or_approval_steps(run_adapter) -> None:
+    result = execute_agent_plan(
+        {
+            "plan_id": "plan_waiting",
+            "steps": [
+                {
+                    "order": 1,
+                    "node_code": "law_ground_search",
+                    "status": "waiting",
+                    "depends_on": [],
+                },
+                {
+                    "order": 2,
+                    "node_code": "agent_result_validation",
+                    "status": "approval_required",
+                    "depends_on": [],
+                },
+            ],
+        },
+        {"job_id": "job_waiting"},
+    )
+
+    assert result["executions"] == []
+    run_adapter.assert_not_called()
+
+
+@patch("app.services.agent_node_service._run_sync_adapter")
+def test_production_plan_does_not_execute_step_with_blocked_dependency(run_adapter) -> None:
+    result = execute_agent_plan(
+        {
+            "plan_id": "plan_blocked_dependency",
+            "steps": [
+                {
+                    "order": 1,
+                    "node_code": "input_context_validation",
+                    "status": "blocked",
+                    "depends_on": [],
+                },
+                {
+                    "order": 2,
+                    "node_code": "law_ground_search",
+                    "status": "ready",
+                    "depends_on": ["input_context_validation"],
+                },
+            ],
+        },
+        {"job_id": "job_blocked_dependency"},
+    )
+
+    assert result["executions"] == []
+    run_adapter.assert_not_called()
+

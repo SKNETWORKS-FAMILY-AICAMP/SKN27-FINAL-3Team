@@ -177,7 +177,7 @@ Canonical `GET /api/history/?session_id=...`는 PostgreSQL `history_events`의 `
 
 ## Analysis job 예시
 
-Canonical `POST /api/analysis/jobs/`는 `analysis_jobs`, 최초 `analysis_job_events`, Agent별 `agent_results`, 논리 실행 단위 `ai_sessions`, Agent 호출 attempt `agent_invocations`를 함께 저장한다. 명시적 `/api/mock/analysis/jobs/`는 회귀 테스트와 smoke check를 위해 sidecar-only로 유지한다.
+Canonical `POST /api/analysis/jobs/`는 실행 가능한 plan을 검증한 뒤 `analysis_jobs`, 최초 `analysis_job_events`, `agent_work_items`만 queued 상태로 저장하고 `202 Accepted`를 반환한다. Agent 실행과 `agent_results`, `ai_sessions`, `agent_invocations` 저장은 worker가 work item을 claim한 뒤 수행한다. caller-supplied `job_id`는 session과 요청 지문에 묶여 동일 요청은 재사용되고 다른 요청은 `409`로 거절된다. 명시적 `/api/mock/analysis/jobs/`는 회귀 테스트와 smoke check를 위해 sidecar-only로 유지한다.
 
 분석 job은 메시지 1개에서 시작된 `chat_response`, `analysis_plan`, `node_execution`을 `job_id`로 묶는다.
 

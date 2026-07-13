@@ -32,11 +32,20 @@ POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "change-me")
 POSTGRES_DB = os.environ.get("POSTGRES_DB", "law_db")
 PROGRESS_CACHE_TTL_SECONDS = _positive_int_env("PROGRESS_CACHE_TTL_SECONDS", 300)
 AGENT_WORKER_STALE_AFTER_SECONDS = _positive_int_env("AGENT_WORKER_STALE_AFTER_SECONDS", 900)
+AGENT_WORKER_HEARTBEAT_SECONDS = _positive_int_env("AGENT_WORKER_HEARTBEAT_SECONDS", 30)
 AGENT_WORKER_RETRY_BACKOFF_SECONDS = _positive_int_env("AGENT_WORKER_RETRY_BACKOFF_SECONDS", 60)
 AGENT_WORKER_RETRY_BACKOFF_MAX_SECONDS = _positive_int_env("AGENT_WORKER_RETRY_BACKOFF_MAX_SECONDS", 900)
 AGENT_WORKER_LOOP_SLEEP_SECONDS = _positive_int_env("AGENT_WORKER_LOOP_SLEEP_SECONDS", 5)
+ANALYSIS_JOB_RESERVATION_STALE_AFTER_SECONDS = _positive_int_env(
+    "ANALYSIS_JOB_RESERVATION_STALE_AFTER_SECONDS",
+    300,
+)
 OBJECT_STORAGE_PROVIDER = os.environ.get("OBJECT_STORAGE_PROVIDER", "mock_s3")
 OBJECT_STORAGE_BUCKET = os.environ.get("OBJECT_STORAGE_BUCKET", "skn27-demo-object-storage")
+OBJECT_STORAGE_QUARANTINE_BUCKET = os.environ.get(
+    "OBJECT_STORAGE_QUARANTINE_BUCKET",
+    f"{OBJECT_STORAGE_BUCKET}-quarantine",
+)
 OBJECT_STORAGE_PREFIX = os.environ.get("OBJECT_STORAGE_PREFIX", "canonical")
 OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS = _positive_int_env("OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS", 900)
 OBJECT_STORAGE_LOCAL_ROOT = os.environ.get("OBJECT_STORAGE_LOCAL_ROOT", "backend/media/mock_object_storage")
@@ -48,6 +57,7 @@ OBJECT_STORAGE_SECRET_ACCESS_KEY = os.environ.get(
     os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
 )
 OBJECT_STORAGE_SESSION_TOKEN = os.environ.get("OBJECT_STORAGE_SESSION_TOKEN", os.environ.get("AWS_SESSION_TOKEN", ""))
+FILE_UPLOAD_MAX_BYTES = _positive_int_env("FILE_UPLOAD_MAX_BYTES", 20 * 1024 * 1024)
 FILE_SCAN_MAX_BYTES = _positive_int_env("FILE_SCAN_MAX_BYTES", 50 * 1024 * 1024)
 FILE_SCAN_REJECT_PII = os.environ.get("FILE_SCAN_REJECT_PII", "0") == "1"
 FILE_SCAN_PROVIDER = os.environ.get("FILE_SCAN_PROVIDER", "local_policy")
@@ -57,6 +67,23 @@ FILE_SCAN_EXTERNAL_URL = os.environ.get("FILE_SCAN_EXTERNAL_URL", "")
 FILE_SCAN_EXTERNAL_API_KEY = os.environ.get("FILE_SCAN_EXTERNAL_API_KEY", "")
 FILE_SCAN_TIMEOUT_SECONDS = _positive_int_env("FILE_SCAN_TIMEOUT_SECONDS", 10)
 FILE_SCAN_EXTERNAL_INLINE_MAX_BYTES = _positive_int_env("FILE_SCAN_EXTERNAL_INLINE_MAX_BYTES", 5 * 1024 * 1024)
+FILE_SCAN_CLAIM_STALE_AFTER_SECONDS = _positive_int_env(
+    "FILE_SCAN_CLAIM_STALE_AFTER_SECONDS",
+    300,
+)
+FILE_SCAN_RETRY_BACKOFF_SECONDS = _positive_int_env(
+    "FILE_SCAN_RETRY_BACKOFF_SECONDS",
+    60,
+)
+FILE_RETENTION_PURGE_LIMIT = _positive_int_env("FILE_RETENTION_PURGE_LIMIT", 100)
+FILE_MAX_ATTACHMENTS_PER_REQUEST = _positive_int_env(
+    "FILE_MAX_ATTACHMENTS_PER_REQUEST",
+    20,
+)
+REPORT_STAGING_CLEANUP_LIMIT = _positive_int_env(
+    "REPORT_STAGING_CLEANUP_LIMIT",
+    100,
+)
 ANONYMOUS_RETENTION_DAYS = _positive_int_env("ANONYMOUS_RETENTION_DAYS", 1)
 GUEST_RETENTION_DAYS = _positive_int_env("GUEST_RETENTION_DAYS", 7)
 USER_RETENTION_DAYS = _positive_int_env("USER_RETENTION_DAYS", 365)
@@ -103,6 +130,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "config.middleware.SameOriginCorsMiddleware",
+    "config.middleware.FileUploadLimitMiddleware",
     "config.middleware.JwtAuthMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",

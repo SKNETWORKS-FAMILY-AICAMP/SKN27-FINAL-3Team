@@ -1,4 +1,8 @@
+import logging
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 LAW_GRAPH_EXPANSION_RELATION_TYPES = ["HAS_PENALTY", "HAS_APPENDIX", "HAS_EXCEPTION", "RELATED_TO"]
 
@@ -27,8 +31,11 @@ def search_law_provisions(
             temporal_basis=temporal_basis,
             scope=scope
         )
-    except Exception as e:
-        print(f"[Warning] Vector Search 실패: {e}")
+    except Exception as exc:
+        logger.warning(
+            "Vector search failed; error_class=%s",
+            exc.__class__.__name__,
+        )
         core_provisions = []
 
     if not core_provisions:
@@ -54,8 +61,11 @@ def _search_fallback_legal_rag(query_text: str, top_k: int) -> list[dict[str, An
             top_k=top_k,
             source_type="law",
         )
-    except Exception as e:
-        print(f"[Warning] Django RAG fallback 실패: {e}")
+    except Exception as exc:
+        logger.warning(
+            "Django RAG fallback failed; error_class=%s",
+            exc.__class__.__name__,
+        )
         return []
 
     if rag_response.get("status") != "ready":
@@ -137,8 +147,11 @@ def _expand_with_law_graph(core_provisions: list[dict], article_refs: list[str],
                     "retrieval_score": base_score * 0.9, # 원본 조문 대비 감가
                     "match_reason": f"graph_expansion:{relation_type}"
                 })
-        except Exception as e:
-            print(f"[Warning] Neo4j Law Graph 확장 실패: {e}")
+        except Exception as exc:
+            logger.warning(
+                "Neo4j law graph expansion failed; error_class=%s",
+                exc.__class__.__name__,
+            )
             
     # [2] 명시적 조문(article_refs) 주입 (강력한 정답 유도)
     if article_refs:
@@ -165,8 +178,11 @@ def _expand_with_law_graph(core_provisions: list[dict], article_refs: list[str],
                     "retrieval_score": 0.95, # 명시적 참조는 가장 높은 신뢰도
                     "match_reason": "article_ref_injection"
                 })
-        except Exception as e:
-            print(f"[Warning] Neo4j Article Ref 주입 실패: {e}")
+        except Exception as exc:
+            logger.warning(
+                "Neo4j article reference lookup failed; error_class=%s",
+                exc.__class__.__name__,
+            )
         
 
     # 핵심 조문과 확장 조문 병합

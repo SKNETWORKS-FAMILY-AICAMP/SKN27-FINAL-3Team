@@ -1,6 +1,10 @@
-import os
 import json
+import logging
+import os
 from typing import List
+
+
+logger = logging.getLogger(__name__)
 
 class OpenAILawKeywordExtractor:
     """
@@ -12,12 +16,12 @@ class OpenAILawKeywordExtractor:
             from openai import OpenAI
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
-                print("[Warning] OPENAI_API_KEY가 설정되지 않아 LLM Fallback이 비활성화됩니다.")
+                logger.warning("LLM fallback is disabled because OPENAI_API_KEY is missing.")
                 self.client = None
             else:
                 self.client = OpenAI(api_key=api_key)
         except ImportError:
-            print("[Warning] openai 패키지가 설치되지 않아 LLM Fallback이 비활성화됩니다.")
+            logger.warning("LLM fallback is disabled because the openai package is missing.")
             self.client = None
 
     def extract_legal_keywords(self, text: str) -> List[str]:
@@ -54,12 +58,16 @@ class OpenAILawKeywordExtractor:
                 return [str(k) for k in keywords]
             return []
             
-        except Exception as e:
-            print(f"[LLM Fallback Error] 키워드 추출 실패: {e}")
+        except Exception as exc:
+            logger.warning(
+                "LLM fallback keyword extraction failed; error_class=%s",
+                exc.__class__.__name__,
+            )
             return []
 
     def format_api_response(self, provisions: list, input_context: dict) -> dict:
-        if not self.client: return {}
+        if not self.client:
+            return {}
         system_prompt = (
             "당신은 법률 정보 요약 및 판단기입니다. 제공된 'Input Context'와 "
             "'Provisions(조문)'을 분석하여 다음 JSON 스키마에 맞게 결과를 출력하세요.\n"
@@ -90,7 +98,10 @@ class OpenAILawKeywordExtractor:
                 response_format={"type": "json_object"}
             )
             return json.loads(response.choices[0].message.content.strip())
-        except Exception as e:
-            print(f"[LLM Formatter Error] 포맷팅 실패: {e}")
+        except Exception as exc:
+            logger.warning(
+                "LLM response formatting failed; error_class=%s",
+                exc.__class__.__name__,
+            )
             return {}
 

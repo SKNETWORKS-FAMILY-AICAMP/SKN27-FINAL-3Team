@@ -68,14 +68,20 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
             },
         },
     }
-    if "{case_id}" in spec.path:
+    if spec.path_parameters:
         operation["parameters"] = [
             {
-                "name": "case_id",
+                "name": parameter.name,
                 "in": "path",
                 "required": True,
-                "schema": {"type": "string", "minLength": 1},
+                "description": parameter.description,
+                "schema": {
+                    "type": "string",
+                    "minLength": parameter.min_length,
+                    "maxLength": parameter.max_length,
+                },
             }
+            for parameter in spec.path_parameters
         ]
     if spec.request_model is not None:
         operation["requestBody"] = {

@@ -8,8 +8,10 @@ from typing import Optional
 import fitz        # pymupdf
 import openai
 
+from app.security.pii_masking import sanitize_pii
+
 from .evaluator import evaluate_ocr
-from .masking import mask_field, mask_personal_info
+from .masking import mask_field
 from .prompts import NOTICE_EXTRACTION_PROMPT
 from .state import FineNoticeState
 from .utils import make_envelope, update_agent_results
@@ -50,13 +52,20 @@ def _build_image_blocks(pages: list[tuple[str, str]]) -> list[dict]:
 def _classify_fine_type(title: str, authority: str, has_demerit: bool) -> Optional[str]:
     """우선순위 7단계 키워드 매칭. 미매칭 시 None."""
     t, a = title or "", authority or ""
-    if "즉결심판" in t and "과태료" not in t:  return "범칙금"  # P-0
-    if "검찰" in a:                             return "벌금"    # P-1
-    if "약식명령" in t or "벌과금" in t:        return "벌금"    # P-2
-    if "범칙금" in t:                           return "범칙금"  # P-3
-    if "과태료" in t:                           return "과태료"  # P-4
-    if has_demerit:                             return "범칙금"  # P-5
-    if any(kw in a for kw in ("구청", "시청")): return "과태료"  # P-6
+    if "즉결심판" in t and "과태료" not in t:  # P-0
+        return "범칙금"
+    if "검찰" in a:  # P-1
+        return "벌금"
+    if "약식명령" in t or "벌과금" in t:  # P-2
+        return "벌금"
+    if "범칙금" in t:  # P-3
+        return "범칙금"
+    if "과태료" in t:  # P-4
+        return "과태료"
+    if has_demerit:  # P-5
+        return "범칙금"
+    if any(kw in a for kw in ("구청", "시청")):  # P-6
+        return "과태료"
     return None
 
 
@@ -103,14 +112,17 @@ def _call_gpt(image_blocks: list[dict]) -> dict:
         }],
     )
     raw = response.choices[0].message.content.strip()
-    raw = mask_personal_info(raw)   # R-11: JSON 파싱 전 즉시 마스킹
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError:
         m = re.search(r"\{.*\}", raw, re.DOTALL)
         if m:
-            return json.loads(m.group())
-        raise
+            parsed = json.loads(m.group())
+        else:
+            raise
+    if not isinstance(parsed, dict):
+        raise ValueError("OCR response must be a JSON object.")
+    return sanitize_pii(parsed)
 
 
 # ── ocr_node ──────────────────────────────────────────────────────────────────
@@ -181,6 +193,7 @@ def ocr_node(state: FineNoticeState) -> dict:
         env = make_envelope("failed", {"ocr_status": "failed", "ocr_error": err}, [], ["이미지 재업로드 요청"])
         return {"ocr_status": "failed", "ocr_error": err, "notice_image": None,
                 "agent_results": update_agent_results(state, env)}
+    result = sanitize_pii(result)
 
     # ── fine_type 분류 ────────────────────────────────────────────────
     fine_type = _classify_fine_type(

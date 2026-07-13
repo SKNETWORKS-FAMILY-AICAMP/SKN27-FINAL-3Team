@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app.contracts.agent_registry import AgentCapabilityContract
 from app.services.agent_adapter_contract import (
     build_adapter_context,
     build_agent_adapter_input,
@@ -117,6 +118,13 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
     },
 }
 
+PRODUCTION_AGENT_TIMEOUT_SECONDS = {
+    "fine_notice_analysis": 120,
+    "law_ground_search": 30,
+    "objection_report_generation": 30,
+    "text_ml_case_search": 60,
+}
+
 
 def list_agent_nodes() -> list[dict[str, Any]]:
     """Return the current Agent/Node registry in execution-friendly order."""
@@ -125,6 +133,29 @@ def list_agent_nodes() -> list[dict[str, Any]]:
         _node_with_adapter_contract(NODE_REGISTRY[node_code])
         for node_code in sorted(NODE_REGISTRY, key=lambda code: NODE_REGISTRY[code]["order"])
     ]
+
+
+def list_public_agent_nodes() -> list[dict[str, Any]]:
+    """Return only production-callable Agents under a strict public contract."""
+
+    capabilities = []
+    for node_code in sorted(
+        _sync_adapter_node_codes(),
+        key=lambda code: NODE_REGISTRY[code]["order"],
+    ):
+        node = _production_node(node_code)
+        capability = AgentCapabilityContract(
+            node_code=node_code,
+            node_name=str(node["node_name"]),
+            owner=str(node["owner"]),
+            description=str(node["description"]),
+            timeout_seconds=PRODUCTION_AGENT_TIMEOUT_SECONDS[node_code],
+            required_inputs=list(node.get("required_inputs") or []),
+            produces=list(node.get("produces") or []),
+            handoff_to=list(node.get("handoff_to") or []),
+        )
+        capabilities.append(capability.model_dump(mode="json"))
+    return capabilities
 
 
 def get_agent_node(node_code: str) -> dict[str, Any]:
@@ -263,7 +294,11 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
 
     executions = []
     upstream_results = deepcopy(payload.get("upstream_results", {}))
-    for step in analysis_plan.get("steps", []):
+    executable_steps = executable_analysis_plan_steps(
+        analysis_plan,
+        completed_node_codes=set(upstream_results),
+    )
+    for step in executable_steps:
         step_payload = deepcopy(payload)
         step_payload.update(
             {
@@ -309,6 +344,45 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
         "limitations": limitations,
         "created_at": _now_iso(),
     }
+
+
+def executable_analysis_plan_steps(
+    analysis_plan: dict[str, Any],
+    *,
+    completed_node_codes: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return only explicitly runnable steps whose dependencies are satisfiable.
+
+    Plans are treated as ordered execution contracts. Unknown or waiting states fail
+    closed, and a runnable step is admitted only after every dependency has either
+    already completed or appeared earlier in the admitted sequence.
+    """
+
+    available = {
+        str(node_code).strip()
+        for node_code in (completed_node_codes or set())
+        if str(node_code).strip()
+    }
+    selected: list[dict[str, Any]] = []
+    for candidate in analysis_plan.get("steps", []):
+        if not isinstance(candidate, dict):
+            continue
+        status = str(candidate.get("status") or "").strip().lower()
+        if status not in {"ready", "queued"}:
+            continue
+        node_code = str(candidate.get("node_code") or "").strip()
+        if not node_code or node_code in available:
+            continue
+        dependencies = {
+            str(dependency).strip()
+            for dependency in candidate.get("depends_on", [])
+            if str(dependency).strip()
+        }
+        if not dependencies.issubset(available):
+            continue
+        selected.append(candidate)
+        available.add(node_code)
+    return selected
 
 
 def _sync_adapter_node_codes() -> set[str]:
@@ -466,7 +540,7 @@ def _execute_sync_node(
         )
         adapter_error = {
             "error_code": exc.__class__.__name__,
-            "message": str(exc),
+            "message": "Sync adapter execution failed.",
         }
 
     result = {
@@ -516,7 +590,7 @@ def _run_fine_notice_analysis_adapter(
             "summary": "fine_notice_analysis adapter failed before completing OCR processing.",
             "structured_result": {
                 "ocr_status": "failed",
-                "ocr_error": f"{exc.__class__.__name__}: {exc}",
+                "ocr_error": "Fine notice analysis failed.",
                 "missing_fields": ["notice_image"] if state.get("_input_source") == "missing" else [],
             },
             "evidence": [],
@@ -715,6 +789,20 @@ def _attachment_base64(attachment: dict[str, Any]) -> str | None:
 def _attachment_object_storage_bytes(attachment: dict[str, Any], storage_uri: str) -> bytes | None:
     if read_object_bytes is None:
         return None
+    attachment_id = str(attachment.get("attachment_id") or "")
+    if (
+        attachment_id
+        and storage_uri.startswith("s3://")
+        and attachment.get("metadata_source") == "canonical_scan_gate"
+    ):
+        try:
+            from chatbot.file_scan_service import read_scan_ready_attachment_bytes
+        except Exception:  # pragma: no cover - CLI-only imports have no Django app.
+            return None
+        return read_scan_ready_attachment_bytes(
+            attachment_id,
+            expected_storage_uri=storage_uri,
+        )
     object_storage = attachment.get("object_storage")
     if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
         return read_object_bytes(object_storage)
@@ -847,7 +935,7 @@ def _adapter_error_output(
     structured_result = _normalize_adapter_structured_result(
         {
             "error_code": exc.__class__.__name__,
-            "error_message": str(exc),
+            "error_message": "Sync adapter execution failed.",
         },
         node_code=node["node_code"],
         adapter_trace=adapter_trace,

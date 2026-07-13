@@ -128,9 +128,11 @@ paths:
       - name: case_id
         in: path
         required: true
+        description: Canonical consultation Case identifier
         schema:
           type: string
           minLength: 1
+          maxLength: 64
   /api/cases/{case_id}/facts/confirm/:
     post:
       tags:
@@ -187,9 +189,11 @@ paths:
       - name: case_id
         in: path
         required: true
+        description: Canonical consultation Case identifier
         schema:
           type: string
           minLength: 1
+          maxLength: 64
       requestBody:
         required: true
         content:
@@ -254,9 +258,11 @@ paths:
       - name: case_id
         in: path
         required: true
+        description: Canonical consultation Case identifier
         schema:
           type: string
           minLength: 1
+          maxLength: 64
       requestBody:
         required: true
         content:
@@ -537,6 +543,77 @@ components:
       - facts
       title: ConfirmCaseFactsRequest
       type: object
+    ConfirmedFactRecord:
+      additionalProperties: false
+      properties:
+        schema_version:
+          const: confirmed_facts.v1
+          title: Schema Version
+          type: string
+        fact_version_id:
+          maxLength: 64
+          minLength: 1
+          title: Fact Version Id
+          type: string
+        case_id:
+          maxLength: 64
+          minLength: 1
+          title: Case Id
+          type: string
+        version_no:
+          minimum: 1
+          title: Version No
+          type: integer
+        status:
+          const: confirmed
+          title: Status
+          type: string
+        facts:
+          additionalProperties: true
+          title: Facts
+          type: object
+        sources:
+          items:
+            additionalProperties: true
+            type: object
+          title: Sources
+          type: array
+        conflicts:
+          items:
+            additionalProperties: true
+            type: object
+          title: Conflicts
+          type: array
+        user_edit_history:
+          items:
+            additionalProperties: true
+            type: object
+          title: User Edit History
+          type: array
+        confirmed_by:
+          maxLength: 128
+          title: Confirmed By
+          type: string
+        confirmed_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Confirmed At
+      required:
+      - schema_version
+      - fact_version_id
+      - case_id
+      - version_no
+      - status
+      - facts
+      - sources
+      - conflicts
+      - user_edit_history
+      - confirmed_by
+      - confirmed_at
+      title: ConfirmedFactRecord
+      type: object
     ConfirmCaseFactsResponse:
       additionalProperties: false
       properties:
@@ -545,13 +622,85 @@ components:
           title: Contract Version
           type: string
         fact_version:
-          additionalProperties: true
-          title: Fact Version
-          type: object
+          $ref: '#/components/schemas/ConfirmedFactRecord'
       required:
       - contract_version
       - fact_version
       title: ConfirmCaseFactsResponse
+      type: object
+    ConsultationCaseRecord:
+      additionalProperties: false
+      properties:
+        case_id:
+          maxLength: 64
+          minLength: 1
+          title: Case Id
+          type: string
+        owner_id:
+          maxLength: 128
+          minLength: 1
+          title: Owner Id
+          type: string
+        title:
+          maxLength: 200
+          title: Title
+          type: string
+        case_type:
+          const: accident_fault
+          title: Case Type
+          type: string
+        status:
+          enum:
+          - intake
+          - awaiting_fact_confirmation
+          - queued
+          - analyzing
+          - needs_input
+          - ready
+          - high_risk_handoff
+          - closed
+          - deleted
+          title: Status
+          type: string
+        risk_level:
+          enum:
+          - standard
+          - high_risk
+          title: Risk Level
+          type: string
+        location:
+          additionalProperties: true
+          title: Location
+          type: object
+        current_fact_version:
+          minimum: 0
+          title: Current Fact Version
+          type: integer
+        current_report_version:
+          minimum: 0
+          title: Current Report Version
+          type: integer
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - case_id
+      - owner_id
+      - title
+      - case_type
+      - status
+      - risk_level
+      - location
+      - current_fact_version
+      - current_report_version
+      - created_at
+      - updated_at
+      title: ConsultationCaseRecord
       type: object
     ConsultationCaseListResponse:
       additionalProperties: false
@@ -562,8 +711,7 @@ components:
           type: string
         cases:
           items:
-            additionalProperties: true
-            type: object
+            $ref: '#/components/schemas/ConsultationCaseRecord'
           title: Cases
           type: array
       required:
@@ -571,13 +719,159 @@ components:
       - cases
       title: ConsultationCaseListResponse
       type: object
+    CaseWorkspace:
+      additionalProperties: false
+      properties:
+        contract_version:
+          const: case_workspace.v2
+          title: Contract Version
+          type: string
+        case:
+          $ref: '#/components/schemas/ConsultationCaseRecord'
+        consultation_state:
+          additionalProperties: true
+          title: Consultation State
+          type: object
+        confirmed_facts:
+          items:
+            $ref: '#/components/schemas/ConfirmedFactRecord'
+          title: Confirmed Facts
+          type: array
+        analysis_jobs:
+          items:
+            $ref: '#/components/schemas/CaseWorkspaceAnalysisJob'
+          title: Analysis Jobs
+          type: array
+        reports:
+          items:
+            $ref: '#/components/schemas/CaseWorkspaceReport'
+          title: Reports
+          type: array
+        attachments:
+          items:
+            $ref: '#/components/schemas/CaseWorkspaceAttachment'
+          title: Attachments
+          type: array
+      required:
+      - contract_version
+      - case
+      - consultation_state
+      - confirmed_facts
+      - analysis_jobs
+      - reports
+      - attachments
+      title: CaseWorkspace
+      type: object
+    CaseWorkspaceAnalysisJob:
+      additionalProperties: false
+      properties:
+        job_id:
+          maxLength: 64
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          enum:
+          - queued
+          - running
+          - success
+          - partial
+          - failed
+          title: Status
+          type: string
+        active_node:
+          maxLength: 120
+          title: Active Node
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - job_id
+      - status
+      - active_node
+      - updated_at
+      title: CaseWorkspaceAnalysisJob
+      type: object
+    CaseWorkspaceAttachment:
+      additionalProperties: false
+      properties:
+        attachment_id:
+          maxLength: 64
+          minLength: 1
+          title: Attachment Id
+          type: string
+        status:
+          enum:
+          - pending
+          - uploaded
+          - scanning
+          - ready
+          - rejected
+          - deleted
+          title: Status
+          type: string
+        purpose:
+          maxLength: 64
+          minLength: 1
+          title: Purpose
+          type: string
+        retention_expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          title: Retention Expires At
+      required:
+      - attachment_id
+      - status
+      - purpose
+      - retention_expires_at
+      title: CaseWorkspaceAttachment
+      type: object
+    CaseWorkspaceReport:
+      additionalProperties: false
+      properties:
+        report_id:
+          maxLength: 64
+          minLength: 1
+          title: Report Id
+          type: string
+        report_type:
+          enum:
+          - fine_notice_objection
+          - fault_ratio_analysis
+          - general
+          - initial_consultation
+          - expert_handoff
+          title: Report Type
+          type: string
+        version_no:
+          minimum: 1
+          title: Version No
+          type: integer
+        status:
+          enum:
+          - draft
+          - generating
+          - ready
+          - failed
+          - deleted
+          title: Status
+          type: string
+      required:
+      - report_id
+      - report_type
+      - version_no
+      - status
+      title: CaseWorkspaceReport
+      type: object
     ConsultationCaseWorkspaceResponse:
       additionalProperties: false
       properties:
         workspace:
-          additionalProperties: true
-          title: Workspace
-          type: object
+          $ref: '#/components/schemas/CaseWorkspace'
       required:
       - workspace
       title: ConsultationCaseWorkspaceResponse
@@ -620,9 +914,7 @@ components:
           title: Contract Version
           type: string
         case:
-          additionalProperties: true
-          title: Case
-          type: object
+          $ref: '#/components/schemas/ConsultationCaseRecord'
       required:
       - contract_version
       - case
@@ -638,6 +930,70 @@ components:
           type: string
       title: StartCaseAnalysisRequest
       type: object
+    CaseAnalysisJob:
+      additionalProperties: false
+      properties:
+        job_id:
+          maxLength: 64
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          enum:
+          - queued
+          - running
+          - success
+          - partial
+          - failed
+          title: Status
+          type: string
+      required:
+      - job_id
+      - status
+      title: CaseAnalysisJob
+      type: object
+    CaseAnalysisPlanSummary:
+      additionalProperties: false
+      properties:
+        plan_id:
+          maxLength: 64
+          minLength: 1
+          title: Plan Id
+          type: string
+        node_codes:
+          items:
+            type: string
+          minItems: 1
+          title: Node Codes
+          type: array
+      required:
+      - plan_id
+      - node_codes
+      title: CaseAnalysisPlanSummary
+      type: object
+    CaseAnalysisWorkItem:
+      additionalProperties: false
+      properties:
+        work_item_id:
+          maxLength: 64
+          minLength: 1
+          title: Work Item Id
+          type: string
+        status:
+          enum:
+          - queued
+          - running
+          - success
+          - failed
+          - retrying
+          - canceled
+          title: Status
+          type: string
+      required:
+      - work_item_id
+      - status
+      title: CaseAnalysisWorkItem
+      type: object
     StartCaseAnalysisResponse:
       additionalProperties: false
       properties:
@@ -646,17 +1002,11 @@ components:
           title: Contract Version
           type: string
         job:
-          additionalProperties: true
-          title: Job
-          type: object
+          $ref: '#/components/schemas/CaseAnalysisJob'
         work_item:
-          additionalProperties: true
-          title: Work Item
-          type: object
+          $ref: '#/components/schemas/CaseAnalysisWorkItem'
         analysis_plan:
-          additionalProperties: true
-          title: Analysis Plan
-          type: object
+          $ref: '#/components/schemas/CaseAnalysisPlanSummary'
       required:
       - contract_version
       - job

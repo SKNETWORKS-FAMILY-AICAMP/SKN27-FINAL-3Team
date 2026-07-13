@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from importlib import import_module, util
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,6 +22,8 @@ from app.services.google_auth_service import issue_access_token
 from chatbot.case_repository import CaseOwnerMismatch, create_case
 from chatbot.models import (
     AnalysisJob,
+    AuthSession,
+    AuthSessionStatus,
     Case,
     ChatSession,
     ChatSessionStatus,
@@ -28,11 +31,13 @@ from chatbot.models import (
     Report,
     ReportType,
     UploadedFile,
+    UserAccount,
 )
 from chatbot.repositories import (
     list_uploaded_files,
     persist_report_action,
     persist_uploaded_file_metadata,
+    purge_pending_report_staging,
 )
 
 
@@ -41,9 +46,27 @@ TEST_JWT_SIGNING_KEY = "consultation-v2-test-signing-key-is-long-enough"
 
 
 def authenticated_client(user_id: str) -> Client:
+    issued_at = timezone.now()
+    expires_at = issued_at + timedelta(hours=1)
+    auth_session_id = f"auth_{user_id}"
     token, _claims = issue_access_token(
         user_id=user_id,
-        auth_session_id=f"auth_{user_id}",
+        auth_session_id=auth_session_id,
+        issued_at=issued_at,
+        expires_at=expires_at,
+    )
+    user, _created = UserAccount.objects.get_or_create(user_id=user_id)
+    AuthSession.objects.update_or_create(
+        auth_session_id=auth_session_id,
+        defaults={
+            "user": user,
+            "subject_type": "user",
+            "subject_id": f"user:{user_id}",
+            "status": AuthSessionStatus.ACTIVE,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "revoked_at": None,
+        },
     )
     return Client(HTTP_AUTHORIZATION=f"Bearer {token}")
 
@@ -502,8 +525,8 @@ class ConsultationPersistenceSafetyTests(TestCase):
             "original_filename": f"{attachment_id}.{file_type}",
             "content_type": content_type,
             "size_bytes": 128,
-            "storage_uri": f"mock://uploads/{attachment_id}",
-            "status": "uploaded",
+            "storage_uri": f"mock://metadata/{attachment_id}",
+            "status": "metadata_registered",
             "agent_handoff": {},
         }
 
@@ -913,6 +936,155 @@ class ConsultationPersistenceSafetyTests(TestCase):
         report = Report.objects.get(report_id=report_payload["report_id"])
         self.assertEqual(storage_write.call_count, 2)
         promote_object.assert_called_once()
+        self.assertEqual(report.metadata["persistence_state"], "finalized")
+
+    def test_report_staging_cleanup_failure_is_pending_until_worker_retry(self) -> None:
+        payload = {
+            "owner_id": self.owner_id,
+            "session_id": self.session.session_id,
+            "case_id": self.case.case_id,
+            "source_fact_version": self.fact_version.fact_version_id,
+            "action": "save",
+        }
+        report_payload = {
+            "report_id": "rep_staging_cleanup_retry",
+            "status": "ready",
+        }
+        with (
+            patch(
+                "chatbot.repositories.write_object",
+                return_value={
+                    "status": "written",
+                    "writes_binary": True,
+                    "persistence_state": "binary_adapter",
+                },
+            ),
+            patch(
+                "chatbot.repositories.copy_object",
+                return_value={
+                    "status": "copied",
+                    "writes_binary": True,
+                    "persistence_state": "binary_adapter",
+                },
+            ),
+            patch(
+                "chatbot.repositories.delete_object",
+                side_effect=[
+                    {"status": "skipped", "reason": "storage_unavailable"},
+                    {"status": "deleted"},
+                ],
+            ) as cleanup,
+        ):
+            persist_report_action(dict(payload), dict(report_payload))
+            report = Report.objects.get(report_id=report_payload["report_id"])
+            self.assertEqual(
+                report.metadata["persistence_state"],
+                "staging_cleanup_pending",
+            )
+
+            batch = purge_pending_report_staging(limit=10)
+
+        self.assertEqual(cleanup.call_count, 2)
+        self.assertEqual(batch["cleaned"], 1)
+        self.assertEqual(batch["retryable"], 0)
+        report.refresh_from_db()
+        self.assertEqual(report.metadata["persistence_state"], "finalized")
+
+    def test_ambiguous_staging_write_is_cleaned_before_storage_failure(self) -> None:
+        payload = {
+            "owner_id": self.owner_id,
+            "session_id": self.session.session_id,
+            "case_id": self.case.case_id,
+            "source_fact_version": self.fact_version.fact_version_id,
+            "action": "save",
+        }
+        report_payload = {
+            "report_id": "rep_ambiguous_staging_write",
+            "status": "ready",
+        }
+        with (
+            patch(
+                "chatbot.repositories.write_object",
+                return_value={
+                    "status": "skipped",
+                    "reason": "response_lost",
+                    "writes_binary": False,
+                    "persistence_state": "metadata_only_adapter",
+                },
+            ),
+            patch("chatbot.repositories.copy_object") as promotion,
+            patch(
+                "chatbot.repositories.delete_object",
+                side_effect=[
+                    {"status": "skipped", "reason": "storage_unavailable"},
+                    {"status": "deleted"},
+                ],
+            ) as cleanup,
+        ):
+            persist_report_action(dict(payload), dict(report_payload))
+            report = Report.objects.get(report_id=report_payload["report_id"])
+            self.assertEqual(
+                report.metadata["persistence_state"],
+                "staging_cleanup_pending",
+            )
+            self.assertEqual(
+                report.metadata["staging_cleanup_target_state"],
+                "storage_failed",
+            )
+
+            batch = purge_pending_report_staging(limit=10)
+
+        promotion.assert_not_called()
+        self.assertEqual(cleanup.call_count, 2)
+        self.assertEqual(batch["cleaned"], 1)
+        report.refresh_from_db()
+        self.assertEqual(report.metadata["persistence_state"], "storage_failed")
+
+    def test_idempotent_report_retry_only_retries_pending_staging_delete(self) -> None:
+        payload = {
+            "owner_id": self.owner_id,
+            "session_id": self.session.session_id,
+            "case_id": self.case.case_id,
+            "source_fact_version": self.fact_version.fact_version_id,
+            "action": "save",
+        }
+        report_payload = {
+            "report_id": "rep_staging_cleanup_idempotent",
+            "status": "ready",
+        }
+        successful_write = {
+            "status": "written",
+            "writes_binary": True,
+            "persistence_state": "binary_adapter",
+        }
+        promoted = {
+            "status": "copied",
+            "writes_binary": True,
+            "persistence_state": "binary_adapter",
+        }
+        with (
+            patch(
+                "chatbot.repositories.write_object",
+                return_value=successful_write,
+            ) as staging_write,
+            patch(
+                "chatbot.repositories.copy_object",
+                return_value=promoted,
+            ) as promotion,
+            patch(
+                "chatbot.repositories.delete_object",
+                side_effect=[
+                    {"status": "skipped", "reason": "storage_unavailable"},
+                    {"status": "deleted"},
+                ],
+            ),
+        ):
+            persist_report_action(dict(payload), dict(report_payload))
+            persist_report_action(dict(payload), dict(report_payload))
+
+        staging_write.assert_called_once()
+        promotion.assert_called_once()
+        report = Report.objects.get(report_id=report_payload["report_id"])
         self.assertEqual(report.metadata["persistence_state"], "finalized")
 
     def test_report_storage_exception_marks_reservation_failed_and_cleans_staging(self) -> None:

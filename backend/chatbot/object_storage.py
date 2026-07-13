@@ -15,6 +15,7 @@ from django.conf import settings
 OBJECT_STORAGE_POLICY_VERSION = "object_storage_adapter.v1"
 DEFAULT_OBJECT_STORAGE_PROVIDER = "mock_s3"
 DEFAULT_OBJECT_STORAGE_BUCKET = "skn27-demo-object-storage"
+DEFAULT_OBJECT_STORAGE_QUARANTINE_BUCKET = "skn27-demo-object-storage-quarantine"
 DEFAULT_OBJECT_STORAGE_PREFIX = "canonical"
 DEFAULT_SIGNED_URL_TTL_SECONDS = 900
 DEFAULT_LOCAL_OBJECT_STORAGE_ROOT = "backend/media/mock_object_storage"
@@ -43,6 +44,14 @@ def object_storage_provider() -> str:
 
 def object_storage_bucket() -> str:
     return _settings_text("OBJECT_STORAGE_BUCKET", DEFAULT_OBJECT_STORAGE_BUCKET)
+
+
+def object_storage_quarantine_bucket() -> str:
+    default = f"{object_storage_bucket()}-quarantine"
+    return _settings_text(
+        "OBJECT_STORAGE_QUARANTINE_BUCKET",
+        default or DEFAULT_OBJECT_STORAGE_QUARANTINE_BUCKET,
+    )
 
 
 def object_storage_prefix() -> str:
@@ -74,6 +83,9 @@ def write_object(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    boundary_error = _quarantine_boundary_error(reference)
+    if boundary_error:
+        return _write_skipped(reference, reason=boundary_error)
     provider = _text(reference.get("provider")) or object_storage_provider()
     body = data.encode("utf-8") if isinstance(data, str) else bytes(data)
     if provider == "mock_s3":
@@ -88,12 +100,18 @@ def write_object_from_source_uri(
     *,
     fallback_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Write only real upload bytes; synthetic metadata is never a file object."""
+
+    del fallback_payload
+    boundary_error = _quarantine_boundary_error(reference)
+    if boundary_error:
+        return _write_skipped(reference, reason=boundary_error)
     source_uri = _text(reference.get("source_uri"))
     source_path = _mock_upload_path_from_uri(source_uri)
     if source_path and source_path.exists():
         data = source_path.read_bytes()
     else:
-        data = json.dumps(fallback_payload or reference, ensure_ascii=False, default=str).encode("utf-8")
+        return _write_skipped(reference, reason="source_file_unavailable")
     return write_object(
         reference,
         data,
@@ -105,7 +123,74 @@ def write_object_from_source_uri(
     )
 
 
+def delete_source_uri(
+    source_uri: str,
+    *,
+    attachment_id: str = "",
+) -> dict[str, Any]:
+    """Remove temporary upload bytes and their metadata sidecar."""
+
+    source_path = _mock_upload_path_from_uri(_text(source_uri))
+    attachment_dir = (
+        source_path.parent
+        if source_path is not None
+        else _mock_upload_directory(attachment_id or _metadata_attachment_id(source_uri))
+    )
+    if attachment_dir is None:
+        return {"status": "skipped", "reason": "unsupported_source_uri"}
+    metadata_path = attachment_dir / "metadata.json"
+    source_existed = bool(source_path and source_path.exists())
+    metadata_existed = metadata_path.exists()
+    if source_existed and source_path is not None:
+        source_path.unlink()
+    if metadata_existed:
+        metadata_path.unlink()
+    try:
+        attachment_dir.rmdir()
+        directory_status = "deleted"
+    except OSError:
+        directory_status = "retained"
+    return {
+        "status": "deleted" if source_existed or metadata_existed else "not_found",
+        "source_status": "deleted" if source_existed else "not_found",
+        "metadata_status": "deleted" if metadata_existed else "not_found",
+        "directory_status": directory_status,
+    }
+
+
+def _metadata_attachment_id(source_uri: str) -> str:
+    prefix = "mock://metadata/"
+    value = _text(source_uri)
+    return value.removeprefix(prefix).strip("/") if value.startswith(prefix) else ""
+
+
+def _mock_upload_directory(attachment_id: str) -> Path | None:
+    normalized = _text(attachment_id)
+    if not normalized or not re.fullmatch(r"[A-Za-z0-9._-]+", normalized):
+        return None
+    root = Path(
+        getattr(settings, "MOCK_UPLOAD_ROOT", "")
+        or os.environ.get("MOCK_UPLOAD_ROOT", "backend/media/mock_uploads")
+    ).resolve()
+    directory = (root / normalized).resolve()
+    if root != directory and root not in directory.parents:
+        return None
+    return directory
+
+
 def copy_object(source_reference: dict[str, Any], target_reference: dict[str, Any]) -> dict[str, Any]:
+    if (
+        _text(source_reference.get("resource_type"))
+        == "uploaded_file_quarantine"
+        and _text(target_reference.get("resource_type")) == "uploaded_file"
+        and _text(source_reference.get("bucket"))
+        and _text(source_reference.get("bucket"))
+        == _text(target_reference.get("bucket"))
+    ):
+        return _write_skipped(
+            target_reference,
+            reason="quarantine_bucket_not_isolated",
+        )
     provider = _text(target_reference.get("provider")) or object_storage_provider()
     if provider == "mock_s3":
         source_path = _local_object_path(source_reference)
@@ -127,6 +212,15 @@ def copy_object(source_reference: dict[str, Any], target_reference: dict[str, An
                     "Bucket": _text(source_reference.get("bucket")) or object_storage_bucket(),
                     "Key": _text(source_reference.get("key")),
                 },
+                MetadataDirective="REPLACE",
+                ContentType=(
+                    _text(target_reference.get("content_type"))
+                    or "application/octet-stream"
+                ),
+                Metadata={
+                    "resource_type": _text(target_reference.get("resource_type")),
+                    "resource_id": _text(target_reference.get("resource_id")),
+                },
             )
         except Exception as exc:
             return _write_skipped(target_reference, **_storage_error_kwargs(exc))
@@ -135,7 +229,7 @@ def copy_object(source_reference: dict[str, Any], target_reference: dict[str, An
 
 
 def delete_object(reference: dict[str, Any]) -> dict[str, Any]:
-    """Delete a staged object and its local metadata sidecar when present."""
+    """Delete an object, permanently clearing versioned upload/staging scopes."""
 
     provider = _text(reference.get("provider")) or object_storage_provider()
     if provider == "mock_s3":
@@ -162,10 +256,19 @@ def delete_object(reference: dict[str, Any]) -> dict[str, Any]:
                 "provider": provider,
                 "reason": "boto3_unavailable",
             }
+        bucket = _text(reference.get("bucket")) or object_storage_bucket()
+        key = _text(reference.get("key"))
+        if _requires_permanent_version_delete(reference):
+            return _delete_all_s3_object_versions(
+                client,
+                bucket=bucket,
+                key=key,
+                provider=provider,
+            )
         try:
             client.delete_object(
-                Bucket=_text(reference.get("bucket")) or object_storage_bucket(),
-                Key=_text(reference.get("key")),
+                Bucket=bucket,
+                Key=key,
             )
         except Exception as exc:
             return {
@@ -178,8 +281,8 @@ def delete_object(reference: dict[str, Any]) -> dict[str, Any]:
             "contract_version": "object_storage_delete.v1",
             "status": "deleted",
             "provider": provider,
-            "bucket": _text(reference.get("bucket")) or object_storage_bucket(),
-            "key": _text(reference.get("key")),
+            "bucket": bucket,
+            "key": key,
         }
     return {
         "contract_version": "object_storage_delete.v1",
@@ -187,6 +290,111 @@ def delete_object(reference: dict[str, Any]) -> dict[str, Any]:
         "provider": provider,
         "reason": "unsupported_provider",
     }
+
+
+def _requires_permanent_version_delete(reference: dict[str, Any]) -> bool:
+    key = _text(reference.get("key"))
+    prefix = object_storage_prefix().strip("/")
+    upload_prefix = f"{prefix}/uploads/" if prefix else "uploads/"
+    staging_report_prefix = (
+        f"staging/{prefix}/reports/" if prefix else "staging/reports/"
+    )
+    return (
+        _text(reference.get("resource_type")) == "uploaded_file"
+        and key.startswith(upload_prefix)
+    ) or key.startswith(staging_report_prefix)
+
+
+def _delete_all_s3_object_versions(
+    client: Any,
+    *,
+    bucket: str,
+    key: str,
+    provider: str,
+) -> dict[str, Any]:
+    try:
+        versions = _list_exact_s3_object_versions(
+            client,
+            bucket=bucket,
+            key=key,
+        )
+        for offset in range(0, len(versions), 1000):
+            batch = versions[offset : offset + 1000]
+            response = client.delete_objects(
+                Bucket=bucket,
+                Delete={"Objects": batch, "Quiet": True},
+            )
+            errors = response.get("Errors") if isinstance(response, dict) else None
+            if errors:
+                first_error = errors[0] if isinstance(errors[0], dict) else {}
+                return {
+                    "contract_version": "object_storage_delete.v1",
+                    "status": "skipped",
+                    "provider": provider,
+                    "reason": "versioned_delete_failed",
+                    "error_code": _text(first_error.get("Code")) or "delete_error",
+                }
+        remaining = _list_exact_s3_object_versions(
+            client,
+            bucket=bucket,
+            key=key,
+        )
+    except Exception as exc:
+        return {
+            "contract_version": "object_storage_delete.v1",
+            "status": "skipped",
+            "provider": provider,
+            "reason": "versioned_delete_failed",
+            "error_code": exc.__class__.__name__,
+        }
+    if remaining:
+        return {
+            "contract_version": "object_storage_delete.v1",
+            "status": "skipped",
+            "provider": provider,
+            "reason": "versioned_delete_verification_failed",
+        }
+    return {
+        "contract_version": "object_storage_delete.v1",
+        "status": "deleted" if versions else "not_found",
+        "provider": provider,
+        "bucket": bucket,
+        "key": key,
+        "permanent": True,
+        "versions_deleted": len(versions),
+    }
+
+
+def _list_exact_s3_object_versions(
+    client: Any,
+    *,
+    bucket: str,
+    key: str,
+) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    request: dict[str, Any] = {"Bucket": bucket, "Prefix": key}
+    seen_markers: set[tuple[str, str]] = set()
+    while True:
+        response = client.list_object_versions(**request)
+        for section in ("Versions", "DeleteMarkers"):
+            for item in response.get(section, []):
+                if _text(item.get("Key")) != key:
+                    continue
+                version_id = _text(item.get("VersionId"))
+                if version_id:
+                    entries.append({"Key": key, "VersionId": version_id})
+        if not response.get("IsTruncated"):
+            break
+        next_key_marker = _text(response.get("NextKeyMarker"))
+        next_version_marker = _text(response.get("NextVersionIdMarker"))
+        marker = (next_key_marker, next_version_marker)
+        if not next_key_marker or marker in seen_markers:
+            raise RuntimeError("invalid_version_pagination")
+        seen_markers.add(marker)
+        request["KeyMarker"] = next_key_marker
+        if next_version_marker:
+            request["VersionIdMarker"] = next_version_marker
+    return entries
 
 
 def object_exists(reference: dict[str, Any]) -> bool:
@@ -213,7 +421,10 @@ def read_object_bytes(reference: dict[str, Any]) -> bytes | None:
     if provider == "mock_s3":
         object_path = _local_object_path(reference)
         if object_path.exists() and object_path.is_file():
-            return object_path.read_bytes()
+            try:
+                return object_path.read_bytes()
+            except OSError:
+                return None
         return None
     if provider == "s3":
         client = _boto3_client()
@@ -229,7 +440,10 @@ def read_object_bytes(reference: dict[str, Any]) -> bytes | None:
         body = response.get("Body")
         if body is None:
             return None
-        return body.read()
+        try:
+            return body.read()
+        except Exception:
+            return None
     return None
 
 
@@ -288,7 +502,27 @@ def build_upload_storage_reference(
         filename=filename,
         content_type=_text(attachment.get("content_type")) or "application/octet-stream",
         size_bytes=_positive_int(attachment.get("size_bytes")),
+        source_uri="",
+    )
+
+
+def build_quarantine_upload_storage_reference(
+    attachment: dict[str, Any],
+    *,
+    owner_id: str = "",
+) -> dict[str, Any]:
+    """Build the private source reference used until a file passes scanning."""
+
+    clean_reference = build_upload_storage_reference(attachment, owner_id=owner_id)
+    return _reference(
+        resource_type="uploaded_file_quarantine",
+        resource_id=_text(clean_reference.get("resource_id")),
+        key=_text(clean_reference.get("key")),
+        filename=_text(clean_reference.get("filename")),
+        content_type=_text(clean_reference.get("content_type")),
+        size_bytes=_positive_int(clean_reference.get("size_bytes")),
         source_uri=_text(attachment.get("storage_uri")),
+        bucket=object_storage_quarantine_bucket(),
     )
 
 
@@ -367,14 +601,16 @@ def _reference(
     content_type: str,
     size_bytes: int,
     source_uri: str,
+    bucket: str = "",
 ) -> dict[str, Any]:
+    resolved_bucket = bucket or object_storage_bucket()
     return {
         "policy_version": OBJECT_STORAGE_POLICY_VERSION,
         "backend": "object_storage",
         "provider": object_storage_provider(),
-        "bucket": object_storage_bucket(),
+        "bucket": resolved_bucket,
         "key": key,
-        "storage_uri": f"s3://{object_storage_bucket()}/{key}",
+        "storage_uri": f"s3://{resolved_bucket}/{key}",
         "resource_type": resource_type,
         "resource_id": resource_id,
         "filename": filename,
@@ -463,7 +699,23 @@ def _write_s3(
         )
     except Exception as exc:
         return _write_skipped(reference, **_storage_error_kwargs(exc))
-    return _write_result(reference, status="written", size_bytes=len(body))
+    return _write_result(
+        reference,
+        status="written",
+        size_bytes=len(body),
+        exists=True,
+    )
+
+
+def _quarantine_boundary_error(reference: dict[str, Any]) -> str:
+    if _text(reference.get("resource_type")) != "uploaded_file_quarantine":
+        return ""
+    quarantine_bucket = _text(reference.get("bucket"))
+    if not quarantine_bucket:
+        return "quarantine_bucket_missing"
+    if quarantine_bucket == object_storage_bucket():
+        return "quarantine_bucket_not_isolated"
+    return ""
 
 
 def _write_result(
@@ -472,6 +724,7 @@ def _write_result(
     status: str,
     size_bytes: int,
     local_path: Path | None = None,
+    exists: bool | None = None,
 ) -> dict[str, Any]:
     result = {
         "contract_version": "object_storage_write.v1",
@@ -483,7 +736,7 @@ def _write_result(
         "writes_binary": True,
         "persistence_state": "binary_adapter",
         "size_bytes": size_bytes,
-        "exists": object_exists(reference),
+        "exists": object_exists(reference) if exists is None else exists,
     }
     if local_path is not None:
         result["local_path"] = str(local_path)
@@ -532,17 +785,8 @@ def _storage_error_kwargs(exc: Exception) -> dict[str, str]:
     return {
         "reason": reason_by_class.get(class_name, "s3_operation_failed"),
         "error_class": class_name,
-        "message": _truncate_error_message(exc),
+        "message": "Object storage provider operation failed.",
     }
-
-
-def _truncate_error_message(exc: Exception) -> str:
-    message = " ".join(str(exc).split())
-    if not message:
-        return ""
-    if len(message) > 180:
-        return f"{message[:177]}..."
-    return message
 
 
 def _local_object_path(reference: dict[str, Any]) -> Path:

@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import uuid
 
+from app.security.pii_masking import sanitize_pii
+
 from .constants import OUTPUT_STATUS_UNKNOWN
 from .state import TrafficAccidentConfirmationOCRState
 
@@ -95,7 +97,7 @@ def save_ocr_output(
     short_id = uuid.uuid4().hex[:8]
     file_path = output_path / f"{timestamp}_{source_stem}_{status}_{short_id}.json"
 
-    safe_result = _strip_sensitive_keys(result)
+    safe_result = sanitize_pii(_strip_sensitive_keys(result))
     file_path.write_text(
         json.dumps(safe_result, ensure_ascii=False, indent=2),
         encoding="utf-8",

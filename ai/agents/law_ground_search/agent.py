@@ -1,9 +1,12 @@
-import os
+import logging
+import os
 from datetime import datetime
 from typing import Any, Protocol
 from .query_understanding import process_query
 from .search import search_law_provisions, evaluate_confidence
 from .rule_guard import validate_input_envelope, validate_and_filter_provisions
+
+logger = logging.getLogger(__name__)
 
 class LLMExtractor(Protocol):
     def extract_legal_keywords(self, text: str) -> list[str]: ...
@@ -22,8 +25,11 @@ def _get_neo4j_session():
             password = os.environ.get("NEO4J_PASSWORD", "password")
             _neo4j_driver = GraphDatabase.driver(uri, auth=(user, password))
         return _neo4j_driver.session()
-    except Exception as e:
-        print(f"[Warning] Neo4j 연결 실패: {e}")
+    except Exception as exc:
+        logger.warning(
+            "Neo4j connection failed; error_class=%s",
+            exc.__class__.__name__,
+        )
         return None
 
 def run_law_ground_search(
@@ -59,14 +65,12 @@ def run_law_ground_search(
         neo4j_session=session
     )
     
-    print(f"\n[QU 디버그] 원본 질문: {qp_result.original_query}")
-    print(f"[QU 디버그] 부스팅된 질문(Hint Graph 반영): {qp_result.boosted_query}")
-
     if not qp_result.searchability:
         output["status"] = "failed"
         output["summary"] = "질의가 입력되지 않았습니다."
         output["missing_fields"] = qp_result.missing_fields
-        if session: session.close()
+        if session:
+            session.close()
         return output
 
     # 3. Vector Search & Neo4j Law Graph Expansion
@@ -158,7 +162,7 @@ def run_law_ground_search(
                 output["summary"] = f"조문 {len(valid_provisions)}건 검색됨. 다만 신뢰도가 낮아 추가 확인이 필요합니다."
                 output["limitations"].append(f"최종 검색 신뢰도 부족: {final_conf_res['reason']}")
 
-    if session and not neo4j_session: 
+    if session and not neo4j_session:
         session.close()
 
     return output

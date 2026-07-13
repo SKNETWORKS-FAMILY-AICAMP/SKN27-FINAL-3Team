@@ -626,6 +626,8 @@ def _int_setting(name: str, default: int) -> int:
 
 
 def _setting(name: str, default: Any = "") -> Any:
+    if name in os.environ:
+        return os.environ[name]
     try:
         from django.conf import settings
     except Exception:

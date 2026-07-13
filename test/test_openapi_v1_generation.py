@@ -99,6 +99,98 @@ def test_openapi_v1_yaml_rendering_is_deterministic_and_parseable() -> None:
     assert "openapi-v0" not in first
 
 
+def test_case_success_schemas_are_structural_in_openapi() -> None:
+    generator = importlib.import_module("app.contracts.openapi_v1")
+    schemas = generator.build_openapi_document()["components"]["schemas"]
+
+    expected_properties = {
+        "ConsultationCaseRecord": {
+            "case_id",
+            "owner_id",
+            "title",
+            "case_type",
+            "status",
+            "risk_level",
+            "location",
+            "current_fact_version",
+            "current_report_version",
+            "created_at",
+            "updated_at",
+        },
+        "ConfirmedFactRecord": {
+            "schema_version",
+            "fact_version_id",
+            "case_id",
+            "version_no",
+            "status",
+            "facts",
+            "sources",
+            "conflicts",
+            "user_edit_history",
+            "confirmed_by",
+            "confirmed_at",
+        },
+        "CaseWorkspace": {
+            "contract_version",
+            "case",
+            "consultation_state",
+            "confirmed_facts",
+            "analysis_jobs",
+            "reports",
+            "attachments",
+        },
+        "CaseAnalysisJob": {"job_id", "status"},
+        "CaseAnalysisWorkItem": {"work_item_id", "status"},
+        "CaseAnalysisPlanSummary": {"plan_id", "node_codes"},
+    }
+
+    for schema_name, properties in expected_properties.items():
+        schema = schemas[schema_name]
+        assert schema["additionalProperties"] is False
+        assert set(schema["properties"]) == properties
+
+
+def test_path_parameters_are_declared_by_route_specs_not_case_id_special_cases() -> None:
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+    contracts = importlib.import_module("app.contracts.consultation_case")
+    generator = importlib.import_module("app.contracts.openapi_v1")
+
+    spec = route_specs.RouteSpec(
+        operation_id="getAnalysisResultContractProbe",
+        method="GET",
+        path="/api/analysis/results/{job_id}/",
+        route_name="canonical-analysis-result",
+        view_name="analysis_result",
+        request_model=None,
+        response_model=contracts.StartCaseAnalysisResponse,
+        success_status=200,
+        errors=(),
+        auth_required=True,
+        contract_status="shadow",
+        tags=("Analysis",),
+        summary="Contract probe",
+        path_parameters=(
+            route_specs.PathParameterSpec(
+                name="job_id",
+                description="Canonical analysis job identifier",
+                max_length=64,
+            ),
+        ),
+    )
+
+    operation = generator.build_openapi_document((spec,))["paths"][spec.path]["get"]
+
+    assert operation["parameters"] == [
+        {
+            "name": "job_id",
+            "in": "path",
+            "required": True,
+            "description": "Canonical analysis job identifier",
+            "schema": {"type": "string", "minLength": 1, "maxLength": 64},
+        }
+    ]
+
+
 def test_openapi_v1_cli_detects_missing_and_stale_generated_file(tmp_path: Path) -> None:
     script = ROOT / "scripts" / "generate_openapi_v1.py"
     assert script.exists(), "OpenAPI v1 generation CLI must exist"

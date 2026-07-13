@@ -8,7 +8,10 @@ import time
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-from chatbot.repositories import process_agent_work_items
+from chatbot.repositories import (
+    process_agent_work_items,
+    purge_pending_report_staging,
+)
 
 
 class Command(BaseCommand):
@@ -44,6 +47,12 @@ class Command(BaseCommand):
             default=getattr(settings, "AGENT_WORKER_STALE_AFTER_SECONDS", 900),
             help="Requeue RUNNING work items locked longer than this value.",
         )
+        parser.add_argument(
+            "--report-staging-cleanup-limit",
+            type=int,
+            default=getattr(settings, "REPORT_STAGING_CLEANUP_LIMIT", 100),
+            help="Maximum pending report staging objects to clean per loop.",
+        )
 
     def handle(self, *args, **options):
         loop = bool(options["loop"])
@@ -56,6 +65,9 @@ class Command(BaseCommand):
             result = process_agent_work_items(
                 limit=options["limit"],
                 stale_after_seconds=options["stale_after_seconds"],
+            )
+            result["report_staging_cleanup"] = purge_pending_report_staging(
+                limit=options["report_staging_cleanup_limit"],
             )
             result["loop_iteration"] = iteration
             self.stdout.write(json.dumps(result, ensure_ascii=False, default=str))

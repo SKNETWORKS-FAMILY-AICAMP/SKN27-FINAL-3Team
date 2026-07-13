@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+from uuid import uuid4
 
 from django.db import DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -12,20 +15,28 @@ from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
 from app.contracts.consultation_case import (
+    ConfirmCaseFactsResponse,
     ConfirmCaseFactsRequest,
+    ConsultationCaseListResponse,
+    ConsultationCaseWorkspaceResponse,
     CreateConsultationCaseRequest,
+    CreateConsultationCaseResponse,
     StartCaseAnalysisRequest,
+    StartCaseAnalysisResponse,
 )
 from app.services.agent_node_service import (
+    executable_analysis_plan_steps,
     execute_mock_node,
     execute_mock_plan,
-    list_agent_nodes,
+    list_public_agent_nodes,
 )
-from app.services.analysis_job_mock_service import (
-    create_analysis_job,
-    list_analysis_jobs,
+from app.services.analysis_job_mock_service import create_analysis_job
+from app.services.analysis_job_query_service import (
+    load_analysis_job_detail,
+    load_analysis_result,
 )
 from app.services.attachment_mock_service import (
+    UploadTooLargeError,
     get_attachment as get_mock_attachment,
     list_attachments as list_mock_attachments,
     register_attachment as register_mock_attachment,
@@ -34,7 +45,7 @@ from app.services.auth_session_mock_service import (
     create_guest_session as _create_guest_session,
     get_current_auth_subject as _get_current_auth_subject,
 )
-from app.services.auth_error_contract import build_www_authenticate_header
+from app.services.auth_error_contract import build_auth_error, build_www_authenticate_header
 from app.services.capability_catalog import capability_catalog_payload
 from app.services.chat_orchestration_service import (
     compose_agent_response,
@@ -71,7 +82,7 @@ from chatbot.case_repository import (
     list_cases,
     start_case_analysis,
 )
-from chatbot.file_scan_service import apply_attachment_scan_gate, scan_uploaded_file
+from chatbot.file_scan_service import apply_attachment_scan_gate
 from chatbot.request_parsing import (
     first_upload_file as _first_upload_file,
     json_body as _json_body,
@@ -79,13 +90,17 @@ from chatbot.request_parsing import (
 )
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
+    AuthSessionStateError,
     ReportReferenceError,
+    UploadStorageUnavailableError,
+    UploadValidationError,
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
     build_report_download_pdf_body,
     build_history_after_service_summary,
     conversation_save_state_from_payload,
+    get_analysis_job_access_metadata,
     get_analysis_job_record,
     get_chat_session_access_metadata,
     get_mycase_summary,
@@ -94,6 +109,7 @@ from chatbot.repositories import (
     get_uploaded_file_access_metadata,
     get_uploaded_file,
     history_operating_policy,
+    list_analysis_job_records,
     list_history_event_records,
     list_report_records,
     list_uploaded_files,
@@ -104,15 +120,18 @@ from chatbot.repositories import (
     persist_auth_logout,
     persist_auth_token_refresh,
     persist_analysis_job_execution,
-    persist_chat_message_analysis_boundary,
     persist_guest_session_identity,
     record_agent_history_event_records,
     record_history_event_record,
     persist_report_action,
     record_usage_event,
+    refund_usage_event,
     register_uploaded_file,
+    release_analysis_job_reservation,
+    renew_analysis_job_reservation,
+    reserve_analysis_job_request,
 )
-from chatbot.models import GuestIdentity, GuestIdentityStatus, UploadedFile
+from chatbot.models import GuestIdentity, GuestIdentityStatus
 from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
 
 
@@ -249,10 +268,14 @@ def auth_refresh(request: HttpRequest) -> JsonResponse:
         payload=body,
     )
     if status < 400:
-        payload["persistence"] = persist_auth_token_refresh(
-            payload,
-            session_id=body.get("session_id"),
-        )
+        try:
+            payload["persistence"] = persist_auth_token_refresh(
+                payload,
+                session_id=body.get("session_id"),
+            )
+        except AuthSessionStateError as exc:
+            status = 401
+            payload = build_auth_error("token_invalid", reason=exc.reason)
     _record_history_safely(
         request,
         event_type="auth_token_refreshed",
@@ -324,10 +347,14 @@ def auth_me(request: HttpRequest) -> JsonResponse:
         session_id=request.GET.get("session_id"),
     )
     if status < 400:
-        payload["persistence"] = persist_current_auth_subject(
-            payload,
-            session_id=request.GET.get("session_id"),
-        )
+        try:
+            payload["persistence"] = persist_current_auth_subject(
+                payload,
+                session_id=request.GET.get("session_id"),
+            )
+        except AuthSessionStateError as exc:
+            status = 401
+            payload = build_auth_error("token_invalid", reason=exc.reason)
     _record_history_safely(
         request,
         event_type="auth_me_checked",
@@ -428,7 +455,13 @@ def mypage_summary(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def agent_nodes(request: HttpRequest) -> JsonResponse:
-    return _json_response(request, {"nodes": list_agent_nodes()})
+    return _json_response(
+        request,
+        {
+            "contract_version": "agent_capability_catalog.v1",
+            "nodes": list_public_agent_nodes(),
+        },
+    )
 
 
 @csrf_exempt
@@ -454,6 +487,15 @@ def attachments(request: HttpRequest) -> JsonResponse:
         return _json_response(request, {"attachments": attachments_payload})
 
     payload = _request_payload(request)
+    upload_limit_violation = getattr(request, "file_upload_limit_violation", None)
+    if isinstance(upload_limit_violation, dict):
+        return _file_upload_too_large_response(
+            request,
+            UploadTooLargeError(
+                size_bytes=int(upload_limit_violation.get("size_bytes") or 0),
+                limit_bytes=int(upload_limit_violation.get("limit_bytes") or 0),
+            ),
+        )
     upload_file = _first_upload_file(request)
     if _is_canonical_mock_request(request):
         identity_payload = _payload_with_request_identity(request, payload)
@@ -465,7 +507,17 @@ def attachments(request: HttpRequest) -> JsonResponse:
             return _rate_limit_response(request, usage)
         try:
             attachment = register_uploaded_file(identity_payload, upload_file=upload_file)
+        except UploadValidationError as exc:
+            _refund_usage_safely(usage, reason="file_upload_invalid")
+            return _file_upload_validation_response(request, reason=exc.reason)
+        except UploadTooLargeError as exc:
+            _refund_usage_safely(usage, reason="file_upload_too_large")
+            return _file_upload_too_large_response(request, exc)
+        except UploadStorageUnavailableError:
+            _refund_usage_safely(usage, reason="file_upload_storage_failed")
+            return _file_upload_storage_unavailable_response(request)
         except PermissionError:
+            _refund_usage_safely(usage, reason="file_upload_access_denied")
             return _persistence_access_denied_response(request)
         attachment["usage"] = usage
     else:
@@ -500,61 +552,324 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
-def process_file_scan(request: HttpRequest, attachment_id: str) -> JsonResponse:
-    body = _json_body(request)
-    identity_payload = _request_access_payload(request, session_id=body.get("session_id"))
-    access_metadata = get_uploaded_file_access_metadata(attachment_id)
-    if access_metadata is not None:
-        access = authorize_resource_access(access_metadata, identity_payload)
-        if not access["allowed"]:
-            return _object_access_denied_response(request, access)
-
-    uploaded_file = UploadedFile.objects.filter(attachment_id=attachment_id).first()
-    if uploaded_file is None:
-        return _json_response(
-            request,
-            {
-                "error": {
-                    "code": "attachment_not_found",
-                    "message": "??? attachment metadata? ?? ? ????.",
-                }
-            },
-            status=404,
-        )
-
-    scan_result = scan_uploaded_file(uploaded_file)
-    return _json_response(
-        request,
-        {
-            "contract_version": "file_scan_endpoint.v1",
-            "file_scan": scan_result,
-            "attachment": get_uploaded_file(attachment_id),
-        },
-    )
-
-
-@csrf_exempt
 @require_http_methods(["GET", "POST", "OPTIONS"])
 def analysis_jobs(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
-        return _json_response(request, {"jobs": list_analysis_jobs(session_id=request.GET.get("session_id"))})
+        session_id = request.GET.get("session_id")
+        identity_payload = _request_access_payload(request, session_id=session_id)
+        subject = access_subject_from_payload(identity_payload)["subject"]
+        if session_id:
+            session_access = get_chat_session_access_metadata(session_id)
+            if session_access is None:
+                return _object_access_denied_response(
+                    request,
+                    {
+                        "contract_version": "object_access.v1",
+                        "allowed": False,
+                        "reason": "not_found_or_forbidden",
+                        "resource": {"type": "chat_session"},
+                    },
+                )
+            access = authorize_resource_access(session_access, identity_payload)
+            if not access["allowed"]:
+                return _object_access_denied_response(request, access)
+        return _json_response(
+            request,
+            {
+                "jobs": list_analysis_job_records(
+                    owner_id=str(subject.get("user_id") or ""),
+                    session_id=session_id,
+                )
+            },
+        )
 
     body = _json_body(request)
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     usage = None
     if _is_canonical_mock_request(request):
+        requested_session_id = str(identity_body.get("session_id") or "")
+        if requested_session_id:
+            session_access = get_chat_session_access_metadata(requested_session_id)
+            if session_access is not None:
+                access = authorize_resource_access(session_access, identity_body)
+                if not access["allowed"]:
+                    return _object_access_denied_response(request, access)
+        requested_job_id = str(identity_body.get("job_id") or "")
+        request_fingerprint = ""
+        reservation_token = ""
+        reservation_generation: object = None
+        reservation_acquired = False
+        if requested_job_id:
+            if not requested_session_id:
+                return _analysis_job_request_error_response(
+                    request,
+                    code="analysis_job_session_required",
+                    message="session_id is required when a client supplies job_id.",
+                )
+            request_fingerprint = _analysis_job_request_fingerprint(identity_body)
+            try:
+                reservation = reserve_analysis_job_request(
+                    identity_body,
+                    job_id=requested_job_id,
+                    request_fingerprint=request_fingerprint,
+                )
+            except PermissionError:
+                return _object_access_denied_response(
+                    request,
+                    {
+                        "contract_version": "object_access.v1",
+                        "allowed": False,
+                        "reason": "not_found_or_forbidden",
+                        "resource": {"type": "analysis_job"},
+                    },
+                )
+            except ValueError:
+                return _analysis_job_conflict_response(request)
+            except Exception as exc:  # pragma: no cover - infrastructure failure boundary.
+                logger.warning(
+                    "analysis job reservation failed error_type=%s",
+                    exc.__class__.__name__,
+                )
+                return _analysis_job_unavailable_response(request)
+            reservation_acquired = bool(reservation.get("acquired"))
+            reservation_token = str(reservation.get("reservation_token") or "")
+            reservation_generation = reservation.get("reservation_generation")
+            if not reservation_acquired:
+                try:
+                    existing_job = get_analysis_job_record(requested_job_id)
+                except Exception as exc:  # pragma: no cover - infrastructure failure boundary.
+                    logger.warning(
+                        "analysis job replay lookup failed error_type=%s",
+                        exc.__class__.__name__,
+                    )
+                    return _analysis_job_unavailable_response(request)
+                if existing_job is None:
+                    return _analysis_job_unavailable_response(request)
+                existing_metadata = (
+                    existing_job.get("metadata")
+                    if isinstance(existing_job.get("metadata"), dict)
+                    else {}
+                )
+                if existing_metadata.get("source") == "canonical_analysis_job_reservation":
+                    return _analysis_job_reservation_pending_response(request)
+                replay_job = _analysis_job_replay_payload(existing_job)
+                replay_status = 202 if replay_job["status"] in {"queued", "running"} else 200
+                return _json_response(
+                    request,
+                    {"job": replay_job},
+                    status=replay_status,
+                )
+
+        identity_body = apply_attachment_scan_gate(identity_body)
+        if _has_blocked_attachments(identity_body):
+            blocked_response = _scan_blocked_chat_response_from_payload(identity_body)
+            _release_analysis_job_reservation_safely(
+                job_id=requested_job_id,
+                request_fingerprint=request_fingerprint,
+                reservation_token=reservation_token,
+                acquired=reservation_acquired,
+            )
+            return _analysis_scan_blocked_response(request, blocked_response)
+
+        if reservation_acquired:
+            try:
+                reservation_is_current = renew_analysis_job_reservation(
+                    job_id=requested_job_id,
+                    request_fingerprint=request_fingerprint,
+                    reservation_token=reservation_token,
+                )
+            except Exception as exc:  # pragma: no cover - infrastructure failure boundary.
+                logger.warning(
+                    "analysis job reservation renewal failed error_type=%s",
+                    exc.__class__.__name__,
+                )
+                return _analysis_job_unavailable_response(request)
+            if not reservation_is_current:
+                return _analysis_job_conflict_response(request)
+
         usage = record_usage_event(identity_body, scope="agent_run")
         if not usage["allowed"]:
+            _release_analysis_job_reservation_safely(
+                job_id=requested_job_id,
+                request_fingerprint=request_fingerprint,
+                reservation_token=reservation_token,
+                acquired=reservation_acquired,
+            )
             return _rate_limit_response(request, usage)
-        identity_body = apply_attachment_scan_gate(identity_body)
-    job = create_analysis_job(identity_body)
-    if _is_canonical_mock_request(request):
-        job["persistence"] = persist_analysis_job_execution(
+
+        try:
+            chat_response = submit_message(identity_body)
+        except Exception as exc:  # pragma: no cover - provider failures are integration-tested.
+            _refund_usage_safely(usage, reason="analysis_planning_failed")
+            _release_analysis_job_reservation_safely(
+                job_id=requested_job_id,
+                request_fingerprint=request_fingerprint,
+                reservation_token=reservation_token,
+                acquired=reservation_acquired,
+            )
+            logger.warning(
+                "analysis job planning failed error_type=%s",
+                exc.__class__.__name__,
+            )
+            return _analysis_job_unavailable_response(request)
+        if _has_blocked_attachments(chat_response):
+            blocked_response = _scan_blocked_chat_response(chat_response)
+            _refund_usage_safely(usage, reason="attachment_scan_blocked")
+            _release_analysis_job_reservation_safely(
+                job_id=requested_job_id,
+                request_fingerprint=request_fingerprint,
+                reservation_token=reservation_token,
+                acquired=reservation_acquired,
+            )
+            return _analysis_scan_blocked_response(request, blocked_response)
+        analysis_plan = chat_response.get("analysis_plan") or {}
+        active_node = _analysis_plan_active_node(analysis_plan)
+        if not active_node:
+            _refund_usage_safely(usage, reason="analysis_plan_not_executable")
+            _release_analysis_job_reservation_safely(
+                job_id=requested_job_id,
+                request_fingerprint=request_fingerprint,
+                reservation_token=reservation_token,
+                acquired=reservation_acquired,
+            )
+            return _json_response(
+                request,
+                {
+                    "error": {
+                        "contract_version": "analysis_job_error.v1",
+                        "type": "conflict",
+                        "code": "analysis_plan_not_executable",
+                        "status": 409,
+                        "message": "The analysis plan requires more input before it can be queued.",
+                    },
+                    "analysis": {
+                        "status": chat_response.get("status") or "needs_input",
+                        "assistant_message": chat_response.get("assistant_message"),
+                        "consultation_state": chat_response.get("consultation_state"),
+                        "case_status": chat_response.get("case_status"),
+                        "pending_questions": chat_response.get("pending_questions") or [],
+                    },
+                },
+                status=409,
+            )
+        node_execution = _queued_node_execution_placeholder(
             identity_body,
-            job,
+            analysis_plan=analysis_plan,
+            chat_response=chat_response,
         )
-        job["usage"] = usage
+        job_payload = _agent_plan_job_payload(
+            identity_body,
+            {
+                "analysis_plan": analysis_plan,
+                "chat_response": chat_response,
+                "node_execution": node_execution,
+            },
+        )
+        job_payload["status"] = "queued"
+        job_payload["active_node"] = active_node
+        job_payload["progress_message"] = "Analysis job queued for agent worker."
+        job_payload["node_execution"] = node_execution
+        if request_fingerprint:
+            job_payload["idempotency"] = {
+                "contract_version": "analysis_job_idempotency.v1",
+                "request_fingerprint": request_fingerprint,
+                "reservation_token": reservation_token,
+                "reservation_generation": reservation_generation,
+                "state": "queued",
+            }
+        if reservation_acquired:
+            try:
+                reservation_is_current = renew_analysis_job_reservation(
+                    job_id=requested_job_id,
+                    request_fingerprint=request_fingerprint,
+                    reservation_token=reservation_token,
+                )
+            except Exception as exc:  # pragma: no cover - infrastructure failure boundary.
+                _refund_usage_safely(usage, reason="analysis_reservation_renewal_failed")
+                _release_analysis_job_reservation_safely(
+                    job_id=requested_job_id,
+                    request_fingerprint=request_fingerprint,
+                    reservation_token=reservation_token,
+                    acquired=reservation_acquired,
+                )
+                logger.warning(
+                    "analysis job reservation renewal failed error_type=%s",
+                    exc.__class__.__name__,
+                )
+                return _analysis_job_unavailable_response(request)
+            if not reservation_is_current:
+                _refund_usage_safely(usage, reason="analysis_reservation_lost")
+                return _analysis_job_conflict_response(request)
+        try:
+            persistence = enqueue_analysis_job_work(identity_body, job_payload)
+        except PermissionError:
+            _refund_usage_safely(usage, reason="analysis_queue_access_denied")
+            _release_analysis_job_reservation_safely(
+                job_id=requested_job_id,
+                request_fingerprint=request_fingerprint,
+                reservation_token=reservation_token,
+                acquired=reservation_acquired,
+            )
+            return _object_access_denied_response(
+                request,
+                {
+                    "contract_version": "object_access.v1",
+                    "allowed": False,
+                    "reason": "not_found_or_forbidden",
+                    "resource": {"type": "analysis_job"},
+                },
+            )
+        except ValueError:
+            _refund_usage_safely(usage, reason="analysis_queue_conflict")
+            _release_analysis_job_reservation_safely(
+                job_id=requested_job_id,
+                request_fingerprint=request_fingerprint,
+                reservation_token=reservation_token,
+                acquired=reservation_acquired,
+            )
+            return _analysis_job_conflict_response(request)
+        except Exception as exc:  # pragma: no cover - infrastructure failure boundary.
+            _refund_usage_safely(usage, reason="analysis_queue_failed")
+            _release_analysis_job_reservation_safely(
+                job_id=requested_job_id,
+                request_fingerprint=request_fingerprint,
+                reservation_token=reservation_token,
+                acquired=reservation_acquired,
+            )
+            logger.warning(
+                "analysis job queue persistence failed error_type=%s",
+                exc.__class__.__name__,
+            )
+            return _analysis_job_unavailable_response(request)
+        work_item = {
+            "contract_version": "agent_worker_queue.v1",
+            "work_item_id": persistence["work_item_id"],
+            "status": persistence["work_item_status"],
+            "job_id": persistence["job_id"],
+        }
+        job = {
+            "contract_version": "analysis_job_accepted.v1",
+            "job_id": job_payload.get("job_id"),
+            "session_id": job_payload.get("session_id"),
+            "message_id": job_payload.get("message_id"),
+            "routing_intent": job_payload.get("routing_intent"),
+            "status": "queued",
+            "active_node": active_node,
+            "progress_message": job_payload["progress_message"],
+            "analysis_plan_id": job_payload.get("analysis_plan_id"),
+            "analysis_plan": {
+                "plan_id": analysis_plan.get("plan_id") if isinstance(analysis_plan, dict) else None,
+                "node_codes": _analysis_plan_executable_node_codes(analysis_plan),
+            },
+            "node_execution": node_execution,
+            "status_counts": node_execution.get("status_counts") or {"queued": 1},
+            "execution_mode": "async_worker",
+            "persistence": persistence,
+            "work_item": work_item,
+            "usage": usage,
+        }
+    else:
+        job = create_analysis_job(identity_body)
     actor = _history_actor(request, body)
     source = _history_source(request)
     subject = subject_from_payload(
@@ -579,20 +894,30 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
             "status_counts": job.get("status_counts", {}),
         },
     )
-    _record_agent_events_safely(
-        request,
-        job.get("node_execution", {}).get("executions", []),
-        actor=actor,
-        source=source,
-        subject=subject,
-    )
-    return _json_response(request, {"job": job})
+    executions = job.get("node_execution", {}).get("executions", [])
+    if executions:
+        _record_agent_events_safely(
+            request,
+            executions,
+            actor=actor,
+            source=source,
+            subject=subject,
+        )
+    response_status = 202 if job.get("execution_mode") == "async_worker" else 200
+    return _json_response(request, {"job": job}, status=response_status)
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
-    job = get_analysis_job_record(job_id)
-    if not job:
+    access_response = _analysis_job_access_response(request, job_id)
+    if access_response is not None:
+        return access_response
+    outcome = load_analysis_job_detail(
+        job_id,
+        load_job=get_analysis_job_record,
+        load_progress=read_analysis_job_progress,
+    )
+    if outcome.kind == "not_found":
         return _json_response(
             request,
             {
@@ -603,14 +928,20 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    job["progress_cache"] = read_analysis_job_progress(job_id)
-    return _json_response(request, {"job": job})
+    return _json_response(request, {"job": outcome.payload})
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
-    job = get_analysis_job_record(job_id)
-    if not job:
+    access_response = _analysis_job_access_response(request, job_id)
+    if access_response is not None:
+        return access_response
+    outcome = load_analysis_result(
+        job_id,
+        load_job=get_analysis_job_record,
+        compose_response=compose_agent_response,
+    )
+    if outcome.kind == "not_found":
         return _json_response(
             request,
             {
@@ -621,62 +952,8 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    identity_payload = _request_access_payload(request)
-    policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
-    if policy_response is not None:
-        return policy_response
-    access = _authorize_session_query(
-        job.get("session_id"),
-        identity_payload,
-        resource_type="analysis_result",
-    )
-    if not access["allowed"]:
-        return _object_access_denied_response(request, access)
-    if job.get("status") in {"queued", "running"}:
-        return _json_response(
-            request,
-            {
-                "result": {
-                    "contract_version": "analysis_result.v2",
-                    "job_id": job_id,
-                    "status": job.get("status"),
-                    "assistant_message": None,
-                    "structured_results": {},
-                    "evidence": [],
-                    "limitations": [],
-                    "work_item": job.get("work_item"),
-                    "progress_state": job.get("progress_state") or {},
-                }
-            },
-            status=202,
-        )
-
-    executions = [
-        {"node_code": item.get("node_code"), "agent_output": item}
-        for item in job.get("agent_results", [])
-        if isinstance(item, dict)
-    ]
-    result = compose_agent_response(
-        {
-            "job_id": job_id,
-            "status_counts": job.get("status_counts") or {},
-            "executions": executions,
-        }
-    )
-    result.update(
-        {
-            "cards": job.get("cards") or [],
-            "pending_questions": job.get("pending_questions") or [],
-            "report_links": job.get("report_links") or [],
-            "attachments": job.get("attachments") or [],
-            "reporting_payload": job.get("reporting_payload") or None,
-            "supervisor_state": job.get("supervisor_state") or None,
-            "supervisor_execution": job.get("supervisor_execution") or None,
-            "work_item": job.get("work_item"),
-            "progress_state": job.get("progress_state") or {},
-        }
-    )
-    return _json_response(request, {"result": result})
+    status = 202 if outcome.kind == "pending" else 200
+    return _json_response(request, {"result": outcome.payload}, status=status)
 
 
 @csrf_exempt
@@ -705,12 +982,36 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     policy_response = _canonical_guest_identity_policy_response(request, identity_body)
     if policy_response is not None:
         return policy_response
+    requested_session_id = str(identity_body.get("session_id") or "")
+    if requested_session_id:
+        session_access = get_chat_session_access_metadata(requested_session_id)
+        if session_access is not None:
+            access = authorize_resource_access(session_access, identity_body)
+            if not access["allowed"]:
+                return _object_access_denied_response(request, access)
+    identity_body = apply_attachment_scan_gate(identity_body)
+    if _has_blocked_attachments(identity_body):
+        return _chat_scan_blocked_response(
+            request,
+            chat_response=_scan_blocked_chat_response_from_payload(identity_body),
+        )
+
     usage = record_usage_event(identity_body, scope="chat_message")
     if not usage["allowed"]:
         return _rate_limit_response(request, usage)
-    identity_body = apply_attachment_scan_gate(identity_body)
-    chat_response = submit_message(identity_body)
+    try:
+        chat_response = submit_message(identity_body)
+    except Exception:
+        _refund_usage_safely(usage, reason="chat_planning_failed")
+        raise
     conversation_save_state = conversation_save_state_from_payload(identity_body)
+
+    if _has_blocked_attachments(chat_response):
+        _refund_usage_safely(usage, reason="attachment_scan_blocked")
+        return _chat_scan_blocked_response(
+            request,
+            chat_response=chat_response,
+        )
 
     if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
         chat_response["usage"] = usage
@@ -738,14 +1039,6 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         },
     }
 
-    if _has_blocked_attachments(chat_response):
-        chat_response = _scan_blocked_chat_response(chat_response)
-        persistence = persist_chat_message_analysis_boundary(identity_body, chat_response)
-        chat_response["persistence"] = persistence
-        chat_response["usage"] = usage
-        chat_response["execution_mode"] = "scan_blocked"
-        return _json_response(request, chat_response, status=409)
-
     node_execution = _queued_node_execution_placeholder(
         execution_payload,
         analysis_plan=chat_response.get("analysis_plan") or {},
@@ -763,7 +1056,11 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     job_payload["active_node"] = _analysis_plan_active_node(chat_response.get("analysis_plan") or {})
     job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
     job_payload["node_execution"] = {}
-    persistence = enqueue_analysis_job_work(execution_payload, job_payload)
+    try:
+        persistence = enqueue_analysis_job_work(execution_payload, job_payload)
+    except Exception:
+        _refund_usage_safely(usage, reason="chat_queue_failed")
+        raise
     chat_response["persistence"] = persistence
     chat_response["node_execution"] = node_execution
     chat_response["work_item"] = {
@@ -871,12 +1168,16 @@ def consultation_cases(request: HttpRequest) -> JsonResponse:
     owner_id = str(subject.get("user_id") or "")
 
     if request.method == "GET":
-        return _json_response(
-            request,
+        response_payload = _serialize_response_dto(
+            ConsultationCaseListResponse,
             {
                 "contract_version": "consultation_case_list.v2",
                 "cases": list_cases(owner_id=owner_id),
             },
+        )
+        return _json_response(
+            request,
+            response_payload,
         )
 
     validated, validation_response = _validate_request_dto(
@@ -894,11 +1195,11 @@ def consultation_cases(request: HttpRequest) -> JsonResponse:
         )
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    return _json_response(
-        request,
+    response_payload = _serialize_response_dto(
+        CreateConsultationCaseResponse,
         {"contract_version": "consultation_case.v2", "case": case},
-        status=201,
     )
+    return _json_response(request, response_payload, status=201)
 
 
 @csrf_exempt
@@ -919,7 +1220,11 @@ def consultation_case_workspace(request: HttpRequest, case_id: str) -> JsonRespo
         workspace = get_case_workspace(case_id)
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    return _json_response(request, {"workspace": workspace})
+    response_payload = _serialize_response_dto(
+        ConsultationCaseWorkspaceResponse,
+        {"workspace": workspace},
+    )
+    return _json_response(request, response_payload)
 
 
 @csrf_exempt
@@ -952,11 +1257,11 @@ def consultation_case_fact_confirmation(request: HttpRequest, case_id: str) -> J
         )
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    return _json_response(
-        request,
+    response_payload = _serialize_response_dto(
+        ConfirmCaseFactsResponse,
         {"contract_version": "confirmed_facts.v1", "fact_version": fact_version},
-        status=201,
     )
+    return _json_response(request, response_payload, status=201)
 
 
 @csrf_exempt
@@ -989,7 +1294,8 @@ def consultation_case_analysis_jobs(request: HttpRequest, case_id: str) -> JsonR
         )
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    return _json_response(request, result, status=202)
+    response_payload = _serialize_response_dto(StartCaseAnalysisResponse, result)
+    return _json_response(request, response_payload, status=202)
 
 
 @csrf_exempt
@@ -1307,31 +1613,61 @@ def _payload_with_request_identity(
     payload: dict[str, object],
 ) -> dict[str, object]:
     enriched = dict(payload)
-    auth_context = (
+    untrusted_auth_context = (
         dict(payload.get("auth_context"))
         if isinstance(payload.get("auth_context"), dict)
         else {}
     )
+    identity_keys = {
+        "auth_session_id",
+        "guest_id",
+        "owner_id",
+        "subject_id",
+        "subject_type",
+        "user_id",
+    }
+    for key in identity_keys:
+        enriched.pop(key, None)
+    auth_context = {
+        key: value
+        for key, value in untrusted_auth_context.items()
+        if key not in identity_keys
+    }
     status, auth_payload = _get_current_auth_subject(
         authorization_header=request.headers.get("Authorization"),
-        guest_id=request.headers.get("X-Guest-Id") or auth_context.get("guest_id"),
-        session_id=enriched.get("session_id") or auth_context.get("session_id"),
+        guest_id=(
+            request.headers.get("X-Guest-Id")
+            or untrusted_auth_context.get("guest_id")
+            or payload.get("guest_id")
+        ),
+        session_id=(
+            enriched.get("session_id")
+            or untrusted_auth_context.get("session_id")
+        ),
     )
     if status < 400:
         subject = auth_payload.get("subject") if isinstance(auth_payload.get("subject"), dict) else {}
         for key in ("subject_id", "subject_type", "user_id", "guest_id", "auth_session_id"):
             value = subject.get(key)
             if value:
-                auth_context.setdefault(key, value)
-        if subject.get("user_id") and not enriched.get("owner_id") and not enriched.get("user_id"):
-            enriched["user_id"] = subject["user_id"]
+                auth_context[key] = value
+        if subject.get("user_id"):
+            authenticated_user_id = str(subject["user_id"])
+            auth_context["subject_id"] = f"user:{authenticated_user_id}"
+            auth_context["subject_type"] = "user"
+            auth_context["user_id"] = authenticated_user_id
+            if subject.get("auth_session_id"):
+                auth_context["auth_session_id"] = subject["auth_session_id"]
+            enriched["owner_id"] = authenticated_user_id
+            enriched["user_id"] = authenticated_user_id
     elif request.headers.get("X-Guest-Id"):
-        auth_context.setdefault("guest_id", request.headers["X-Guest-Id"])
-
-    if request.headers.get("X-Auth-Session-Id"):
-        auth_context.setdefault("auth_session_id", request.headers["X-Auth-Session-Id"])
+        auth_context["subject_id"] = f"guest:{request.headers['X-Guest-Id']}"
+        auth_context["subject_type"] = "guest"
+        auth_context["guest_id"] = request.headers["X-Guest-Id"]
     if auth_context:
         enriched["auth_context"] = auth_context
+    else:
+        enriched.pop("auth_context", None)
     return enriched
 
 
@@ -1513,6 +1849,15 @@ def _validate_request_dto(
     return dto.model_dump(mode="python"), None
 
 
+def _serialize_response_dto(
+    dto_type: type[BaseModel],
+    payload: dict[str, object],
+) -> dict[str, object]:
+    """Validate internal output before it crosses the public API boundary."""
+
+    return dto_type.model_validate(payload).model_dump(mode="json")
+
+
 def _case_repository_error_response(
     request: HttpRequest,
     error: CaseRepositoryError,
@@ -1616,6 +1961,32 @@ def _object_access_denied_response(request: HttpRequest, access: dict[str, objec
     )
 
 
+def _analysis_job_access_response(
+    request: HttpRequest,
+    job_id: str,
+) -> JsonResponse | None:
+    identity_payload = _request_access_payload(request)
+    policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
+    if policy_response is not None:
+        return policy_response
+    metadata = get_analysis_job_access_metadata(job_id)
+    if metadata is None:
+        return None
+    session_id = str(metadata.get("session_id") or "").strip()
+    access = (
+        _authorize_session_query(
+            session_id,
+            identity_payload,
+            resource_type="analysis_result",
+        )
+        if session_id
+        else authorize_resource_access(metadata, identity_payload)
+    )
+    if access["allowed"]:
+        return None
+    return _object_access_denied_response(request, access)
+
+
 def _persistence_access_denied_response(request: HttpRequest) -> JsonResponse:
     return _object_access_denied_response(
         request,
@@ -1625,6 +1996,69 @@ def _persistence_access_denied_response(request: HttpRequest) -> JsonResponse:
             "policy_version": "case_persistence.v1",
         },
     )
+
+
+def _file_upload_too_large_response(
+    request: HttpRequest,
+    error: UploadTooLargeError,
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "file_upload_error.v1",
+                "type": "validation",
+                "code": "file_too_large",
+                "status": 413,
+                "message": "The uploaded file exceeds the configured size limit.",
+                "size_bytes": error.size_bytes,
+                "limit_bytes": error.limit_bytes,
+                "required_action": "select_smaller_file",
+            }
+        },
+        status=413,
+    )
+
+
+def _file_upload_validation_response(
+    request: HttpRequest,
+    *,
+    reason: str,
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "file_upload_error.v1",
+                "type": "validation",
+                "code": reason,
+                "status": 400,
+                "message": "A bound chat session is required for file uploads.",
+                "required_action": "create_or_select_session",
+            }
+        },
+        status=400,
+    )
+
+
+def _file_upload_storage_unavailable_response(request: HttpRequest) -> JsonResponse:
+    response = _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "file_upload_error.v1",
+                "type": "service_unavailable",
+                "code": "upload_storage_unavailable",
+                "status": 503,
+                "message": "The upload could not be stored safely. Retry the upload.",
+                "required_action": "retry_upload",
+                "retryable": True,
+            }
+        },
+        status=503,
+    )
+    response["Retry-After"] = "5"
+    return response
 
 
 def _report_reference_conflict_response(request: HttpRequest, reason: str) -> JsonResponse:
@@ -1715,6 +2149,77 @@ def _scan_blocked_chat_response(chat_response: dict[str, object]) -> dict[str, o
     return response
 
 
+def _scan_blocked_chat_response_from_payload(payload: dict[str, object]) -> dict[str, object]:
+    return _scan_blocked_chat_response(
+        {
+            "contract_version": "chat_message_accepted.v2",
+            "session_id": str(payload.get("session_id") or f"ses_{uuid4().hex[:12]}"),
+            "message_id": f"msg_{uuid4().hex[:12]}",
+            "routing_intent": payload.get("routing_intent"),
+            "status": "partial",
+            "progress": {},
+            "analysis_plan": {
+                "contract_version": "analysis_plan.v2",
+                "plan_id": f"plan_{uuid4().hex[:12]}",
+                "steps": [],
+            },
+            "attachments": payload.get("attachments") or [],
+            "blocked_attachments": payload.get("blocked_attachments") or [],
+            "attachment_scan_policy": payload.get("attachment_scan_policy") or {},
+            "limitations": [],
+        }
+    )
+
+
+def _chat_scan_blocked_response(
+    request: HttpRequest,
+    *,
+    chat_response: dict[str, object],
+) -> JsonResponse:
+    blocked_response = _scan_blocked_chat_response(chat_response)
+    blocked_response["persistence"] = {
+        "backend": "none",
+        "status": "skipped",
+        "reason": "attachment_scan_blocked",
+    }
+    blocked_response["usage"] = {
+        "allowed": True,
+        "consumed": False,
+        "scope": "chat_message",
+        "reason": "attachment_scan_blocked",
+    }
+    blocked_response["execution_mode"] = "scan_blocked"
+    return _json_response(request, blocked_response, status=409)
+
+
+def _analysis_scan_blocked_response(
+    request: HttpRequest,
+    blocked_response: dict[str, object],
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "analysis_job_error.v1",
+                "type": "conflict",
+                "code": "attachment_scan_blocked",
+                "status": 409,
+                "message": "Attachments must pass file scanning before analysis can be queued.",
+            },
+            "analysis": {
+                "status": blocked_response["status"],
+                "assistant_message": blocked_response.get("assistant_message"),
+                "consultation_state": blocked_response.get("consultation_state"),
+                "case_status": blocked_response.get("case_status"),
+                "pending_questions": blocked_response.get("pending_questions") or [],
+                "scan_gate": blocked_response["scan_gate"],
+                "limitations": blocked_response["limitations"],
+            },
+        },
+        status=409,
+    )
+
+
 def _scan_blocked_node_execution(
     body: dict[str, object],
     chat_response: dict[str, object],
@@ -1735,6 +2240,194 @@ def _scan_blocked_node_execution(
         "executions": [],
         "status_counts": {"blocked": 1},
         "completed_node_codes": [],
+    }
+
+
+def _analysis_job_request_fingerprint(payload: dict[str, object]) -> str:
+    excluded_identity_fields = {
+        "job_id",
+        "owner_id",
+        "user_id",
+        "auth_context",
+    }
+    request_contract = {
+        "contract_version": "analysis_job_request_fingerprint.v1",
+        "planner_input": {
+            key: value
+            for key, value in payload.items()
+            if key not in excluded_identity_fields
+        },
+    }
+    serialized = json.dumps(
+        request_contract,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _release_analysis_job_reservation_safely(
+    *,
+    job_id: str,
+    request_fingerprint: str,
+    reservation_token: str,
+    acquired: bool,
+) -> None:
+    if not acquired or not job_id or not request_fingerprint or not reservation_token:
+        return
+    try:
+        release_analysis_job_reservation(
+            job_id=job_id,
+            request_fingerprint=request_fingerprint,
+            reservation_token=reservation_token,
+        )
+    except (DatabaseError, OSError):
+        logger.warning("analysis job reservation release failed")
+
+
+def _refund_usage_safely(usage: dict[str, object] | None, *, reason: str) -> None:
+    if not usage or not usage.get("allowed"):
+        return
+    try:
+        refund_usage_event(usage, reason=reason)
+    except (DatabaseError, OSError):
+        logger.warning("usage refund failed reason=%s", reason)
+
+
+def _analysis_job_request_error_response(
+    request: HttpRequest,
+    *,
+    code: str,
+    message: str,
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "analysis_job_error.v1",
+                "type": "validation",
+                "code": code,
+                "status": 400,
+                "message": message,
+            }
+        },
+        status=400,
+    )
+
+
+def _analysis_job_conflict_response(request: HttpRequest) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "analysis_job_error.v1",
+                "type": "conflict",
+                "code": "analysis_job_id_conflict",
+                "status": 409,
+                "message": "The analysis job id is already bound to another request.",
+            }
+        },
+        status=409,
+    )
+
+
+def _analysis_job_reservation_pending_response(request: HttpRequest) -> JsonResponse:
+    response = _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "analysis_job_error.v1",
+                "type": "conflict",
+                "code": "analysis_job_reservation_pending",
+                "status": 409,
+                "message": "The same analysis request is still being prepared. Please retry.",
+                "retryable": True,
+            }
+        },
+        status=409,
+    )
+    response["Retry-After"] = "1"
+    return response
+
+
+def _analysis_job_unavailable_response(request: HttpRequest) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "analysis_job_error.v1",
+                "type": "service_unavailable",
+                "code": "analysis_job_unavailable",
+                "status": 503,
+                "message": "The analysis job could not be queued. Please retry.",
+            }
+        },
+        status=503,
+    )
+
+
+def _analysis_job_replay_payload(job_record: dict[str, object]) -> dict[str, object]:
+    analysis_plan = (
+        job_record.get("analysis_plan")
+        if isinstance(job_record.get("analysis_plan"), dict)
+        else {}
+    )
+    source_work_item = (
+        job_record.get("work_item")
+        if isinstance(job_record.get("work_item"), dict)
+        else {}
+    )
+    work_item = {
+        "contract_version": "agent_worker_queue.v1",
+        "work_item_id": source_work_item.get("work_item_id"),
+        "status": source_work_item.get("status"),
+        "job_id": job_record.get("job_id"),
+    }
+    status = str(job_record.get("status") or "queued")
+    status_counts = (
+        job_record.get("status_counts")
+        if isinstance(job_record.get("status_counts"), dict)
+        else {}
+    )
+    return {
+        "contract_version": "analysis_job_accepted.v1",
+        "job_id": job_record.get("job_id"),
+        "session_id": job_record.get("session_id"),
+        "message_id": job_record.get("message_id"),
+        "routing_intent": job_record.get("routing_intent"),
+        "status": status,
+        "active_node": job_record.get("active_node"),
+        "progress_message": job_record.get("progress_message"),
+        "analysis_plan_id": job_record.get("analysis_plan_id"),
+        "analysis_plan": {
+            "plan_id": analysis_plan.get("plan_id"),
+            "node_codes": _analysis_plan_executable_node_codes(analysis_plan),
+        },
+        "node_execution": {
+            "execution_mode": "async_worker",
+            "status": status,
+            "job_id": job_record.get("job_id"),
+            "plan_id": job_record.get("analysis_plan_id"),
+            "session_id": job_record.get("session_id"),
+            "message_id": job_record.get("message_id"),
+            "executions": [],
+            "status_counts": status_counts,
+            "completed_node_codes": [],
+        },
+        "status_counts": status_counts,
+        "execution_mode": "async_worker",
+        "persistence": {
+            "backend": "postgresql",
+            "status": "existing",
+            "job_id": job_record.get("job_id"),
+            "work_item_id": source_work_item.get("work_item_id"),
+            "work_item_status": source_work_item.get("status"),
+        },
+        "work_item": work_item,
+        "usage": {"allowed": True, "replayed": True},
+        "idempotent_replay": True,
     }
 
 
@@ -1783,13 +2476,18 @@ def _uses_async_worker(body: dict[str, object]) -> bool:
 
 
 def _analysis_plan_active_node(analysis_plan: object) -> str:
+    node_codes = _analysis_plan_executable_node_codes(analysis_plan)
+    return node_codes[0] if node_codes else ""
+
+
+def _analysis_plan_executable_node_codes(analysis_plan: object) -> list[str]:
     if not isinstance(analysis_plan, dict):
-        return ""
-    steps = analysis_plan.get("steps") if isinstance(analysis_plan.get("steps"), list) else []
-    for step in steps:
-        if isinstance(step, dict) and step.get("node_code"):
-            return str(step["node_code"])
-    return ""
+        return []
+    return [
+        str(step["node_code"])
+        for step in executable_analysis_plan_steps(analysis_plan)
+        if step.get("node_code")
+    ]
 
 
 def _queued_node_execution_placeholder(
@@ -1808,6 +2506,7 @@ def _queued_node_execution_placeholder(
         job_id = f"job_{plan_id.removeprefix('plan_')}"
     if not job_id:
         job_id = "job_agent_plan"
+    queued_node_codes = _analysis_plan_executable_node_codes(analysis_plan)
     return {
         "execution_mode": "async_worker",
         "status": "queued",
@@ -1816,7 +2515,7 @@ def _queued_node_execution_placeholder(
         "session_id": chat_response.get("session_id") or body.get("session_id"),
         "message_id": message_id,
         "executions": [],
-        "status_counts": {"queued": 1},
+        "status_counts": {"queued": len(queued_node_codes)},
         "completed_node_codes": [],
     }
 
