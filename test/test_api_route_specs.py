@@ -122,20 +122,143 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
 
 def test_case_response_models_reject_contract_drift() -> None:
     contracts = importlib.import_module("app.contracts.consultation_case")
+    case = {
+        "case_id": "case_123",
+        "owner_id": "usr_123",
+        "title": "Intersection collision",
+        "case_type": "accident_fault",
+        "status": "awaiting_fact_confirmation",
+        "risk_level": "standard",
+        "location": {},
+        "current_fact_version": 0,
+        "current_report_version": 0,
+        "created_at": "2026-07-13T00:00:00+00:00",
+        "updated_at": "2026-07-13T00:00:00+00:00",
+    }
 
     response = contracts.CreateConsultationCaseResponse.model_validate(
         {
             "contract_version": "consultation_case.v2",
-            "case": {"case_id": "case_123"},
+            "case": case,
         }
     )
-    assert response.case["case_id"] == "case_123"
+    assert response.case.case_id == "case_123"
 
     with pytest.raises(ValidationError):
         contracts.CreateConsultationCaseResponse.model_validate(
             {
                 "contract_version": "wrong-version",
-                "case": {"case_id": "case_123"},
+                "case": case,
+            }
+        )
+
+
+def test_case_success_models_reject_nested_contract_drift() -> None:
+    contracts = importlib.import_module("app.contracts.consultation_case")
+    case = {
+        "case_id": "case_123",
+        "owner_id": "usr_123",
+        "title": "Intersection collision",
+        "case_type": "accident_fault",
+        "status": "awaiting_fact_confirmation",
+        "risk_level": "standard",
+        "location": {"city": "Seoul"},
+        "current_fact_version": 0,
+        "current_report_version": 0,
+        "created_at": "2026-07-13T00:00:00+00:00",
+        "updated_at": "2026-07-13T00:00:00+00:00",
+    }
+    fact_version = {
+        "schema_version": "confirmed_facts.v1",
+        "fact_version_id": "fact_123",
+        "case_id": "case_123",
+        "version_no": 1,
+        "status": "confirmed",
+        "facts": {"road_layout": "intersection"},
+        "sources": [],
+        "conflicts": [],
+        "user_edit_history": [],
+        "confirmed_by": "usr_123",
+        "confirmed_at": "2026-07-13T00:01:00+00:00",
+    }
+
+    contracts.CreateConsultationCaseResponse.model_validate(
+        {"contract_version": "consultation_case.v2", "case": case}
+    )
+    contracts.ConsultationCaseWorkspaceResponse.model_validate(
+        {
+            "workspace": {
+                "contract_version": "case_workspace.v2",
+                "case": case,
+                "consultation_state": {},
+                "confirmed_facts": [fact_version],
+                "analysis_jobs": [
+                    {
+                        "job_id": "job_123",
+                        "status": "queued",
+                        "active_node": "text_ml_case_search",
+                        "updated_at": "2026-07-13T00:02:00+00:00",
+                    }
+                ],
+                "reports": [
+                    {
+                        "report_id": "rep_123",
+                        "report_type": "fault_ratio_analysis",
+                        "version_no": 1,
+                        "status": "ready",
+                    }
+                ],
+                "attachments": [
+                    {
+                        "attachment_id": "att_123",
+                        "status": "ready",
+                        "purpose": "supporting_evidence",
+                        "retention_expires_at": "2027-07-13T00:00:00+00:00",
+                    }
+                ],
+            }
+        }
+    )
+    contracts.StartCaseAnalysisResponse.model_validate(
+        {
+            "contract_version": "case_analysis_job.v2",
+            "job": {"job_id": "job_123", "status": "queued"},
+            "work_item": {"work_item_id": "work_123", "status": "queued"},
+            "analysis_plan": {
+                "plan_id": "plan_123",
+                "node_codes": ["text_ml_case_search", "law_ground_search"],
+            },
+        }
+    )
+
+    with pytest.raises(ValidationError):
+        contracts.CreateConsultationCaseResponse.model_validate(
+            {
+                "contract_version": "consultation_case.v2",
+                "case": {**case, "unexpected_internal_field": "leak"},
+            }
+        )
+    with pytest.raises(ValidationError):
+        contracts.CreateConsultationCaseResponse.model_validate(
+            {
+                "contract_version": "consultation_case.v2",
+                "case": {**case, "status": "made_up_status"},
+            }
+        )
+    with pytest.raises(ValidationError):
+        contracts.ConfirmCaseFactsResponse.model_validate(
+            {
+                "contract_version": "confirmed_facts.v1",
+                "fact_version": {**fact_version, "fact_version_id": ""},
+            }
+        )
+    with pytest.raises(ValidationError):
+        contracts.StartCaseAnalysisResponse.model_validate(
+            {
+                "contract_version": "case_analysis_job.v2",
+                "job": {"job_id": "job_123", "status": "unknown"},
+                "work_item": {"work_item_id": "work_123", "status": "queued"},
+                "analysis_plan": {"plan_id": "plan_123", "node_codes": []},
             }
         )
 

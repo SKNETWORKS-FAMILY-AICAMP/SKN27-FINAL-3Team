@@ -12,9 +12,14 @@ from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
 from app.contracts.consultation_case import (
+    ConfirmCaseFactsResponse,
     ConfirmCaseFactsRequest,
+    ConsultationCaseListResponse,
+    ConsultationCaseWorkspaceResponse,
     CreateConsultationCaseRequest,
+    CreateConsultationCaseResponse,
     StartCaseAnalysisRequest,
+    StartCaseAnalysisResponse,
 )
 from app.services.agent_node_service import (
     execute_mock_node,
@@ -834,12 +839,16 @@ def consultation_cases(request: HttpRequest) -> JsonResponse:
     owner_id = str(subject.get("user_id") or "")
 
     if request.method == "GET":
-        return _json_response(
-            request,
+        response_payload = _serialize_response_dto(
+            ConsultationCaseListResponse,
             {
                 "contract_version": "consultation_case_list.v2",
                 "cases": list_cases(owner_id=owner_id),
             },
+        )
+        return _json_response(
+            request,
+            response_payload,
         )
 
     validated, validation_response = _validate_request_dto(
@@ -857,11 +866,11 @@ def consultation_cases(request: HttpRequest) -> JsonResponse:
         )
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    return _json_response(
-        request,
+    response_payload = _serialize_response_dto(
+        CreateConsultationCaseResponse,
         {"contract_version": "consultation_case.v2", "case": case},
-        status=201,
     )
+    return _json_response(request, response_payload, status=201)
 
 
 @csrf_exempt
@@ -882,7 +891,11 @@ def consultation_case_workspace(request: HttpRequest, case_id: str) -> JsonRespo
         workspace = get_case_workspace(case_id)
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    return _json_response(request, {"workspace": workspace})
+    response_payload = _serialize_response_dto(
+        ConsultationCaseWorkspaceResponse,
+        {"workspace": workspace},
+    )
+    return _json_response(request, response_payload)
 
 
 @csrf_exempt
@@ -915,11 +928,11 @@ def consultation_case_fact_confirmation(request: HttpRequest, case_id: str) -> J
         )
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    return _json_response(
-        request,
+    response_payload = _serialize_response_dto(
+        ConfirmCaseFactsResponse,
         {"contract_version": "confirmed_facts.v1", "fact_version": fact_version},
-        status=201,
     )
+    return _json_response(request, response_payload, status=201)
 
 
 @csrf_exempt
@@ -952,7 +965,8 @@ def consultation_case_analysis_jobs(request: HttpRequest, case_id: str) -> JsonR
         )
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    return _json_response(request, result, status=202)
+    response_payload = _serialize_response_dto(StartCaseAnalysisResponse, result)
+    return _json_response(request, response_payload, status=202)
 
 
 @csrf_exempt
@@ -1474,6 +1488,15 @@ def _validate_request_dto(
             status=422,
         )
     return dto.model_dump(mode="python"), None
+
+
+def _serialize_response_dto(
+    dto_type: type[BaseModel],
+    payload: dict[str, object],
+) -> dict[str, object]:
+    """Validate internal output before it crosses the public API boundary."""
+
+    return dto_type.model_validate(payload).model_dump(mode="json")
 
 
 def _case_repository_error_response(
