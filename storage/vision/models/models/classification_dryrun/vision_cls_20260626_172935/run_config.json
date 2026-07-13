@@ -1,0 +1,19 @@
+{
+  "run_id": "vision_cls_20260626_172935",
+  "manifest": "storage/vision/datasets/classification/manifests/frame_manifest_dryrun.csv",
+  "label_column": "coarse_label",
+  "model_name": "resnet18",
+  "pretrained": false,
+  "freeze_backbone": true,
+  "image_size": 128,
+  "epochs": 1,
+  "batch_size": 4,
+  "learning_rate": 0.001,
+  "seed": 42,
+  "device": "cpu",
+  "num_classes": 4,
+  "train_rows": 15,
+  "val_rows": 5,
+  "test_rows": 0,
+  "model_path": "storage/vision/models/classification_dryrun/vision_cls_20260626_172935/model.pt"
+}

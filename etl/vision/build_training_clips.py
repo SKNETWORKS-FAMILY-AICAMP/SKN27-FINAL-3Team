@@ -18,6 +18,21 @@ DEFAULT_INPUT = Path("storage/vision/datasets/classification/manifests/train_700
 DEFAULT_OUTPUT = Path("storage/vision/datasets/classification/manifests/train_700_clip_manifest_5s.csv")
 DEFAULT_CLIP_DIR = Path("storage/vision/datasets/classification/clips_5s")
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+ACCIDENT_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle", "person"}
+PAIR_WEIGHTS = {
+    frozenset(("car", "person")): 1.0,
+    frozenset(("truck", "person")): 1.0,
+    frozenset(("bus", "person")): 1.0,
+    frozenset(("car", "motorcycle")): 0.9,
+    frozenset(("truck", "motorcycle")): 0.9,
+    frozenset(("bus", "motorcycle")): 0.9,
+    frozenset(("car", "bicycle")): 0.9,
+    frozenset(("truck", "bicycle")): 0.9,
+    frozenset(("bus", "bicycle")): 0.9,
+    frozenset(("car", "car")): 0.7,
+    frozenset(("car", "truck")): 0.7,
+    frozenset(("car", "bus")): 0.7,
+}
 
 
 def video_info(path: Path) -> tuple[int, float, float]:
@@ -40,6 +55,50 @@ def centered_window(duration: float, center_sec: float, clip_sec: float) -> tupl
     return start, end
 
 
+def bbox_area(box: list[float]) -> float:
+    return max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
+
+
+def bbox_iou(a: list[float], b: list[float]) -> float:
+    x1 = max(a[0], b[0])
+    y1 = max(a[1], b[1])
+    x2 = min(a[2], b[2])
+    y2 = min(a[3], b[3])
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    union = bbox_area(a) + bbox_area(b) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def center_distance(a: list[float], b: list[float]) -> float:
+    ax = (a[0] + a[2]) / 2
+    ay = (a[1] + a[3]) / 2
+    bx = (b[0] + b[2]) / 2
+    by = (b[1] + b[3]) / 2
+    return math.hypot(ax - bx, ay - by)
+
+
+def normalize_distance(distance_px: float, width: float, height: float) -> float:
+    diag = math.hypot(width, height)
+    return distance_px / diag if diag > 0 else 1.0
+
+
+def pair_score(a: dict, b: dict, width: float, height: float) -> dict:
+    pair = frozenset((a["class_name"], b["class_name"]))
+    weight = PAIR_WEIGHTS.get(pair, 0.2)
+    iou = bbox_iou(a["bbox"], b["bbox"])
+    distance_px = center_distance(a["bbox"], b["bbox"])
+    distance_norm = normalize_distance(distance_px, width, height)
+    distance_score = max(0.0, 1.0 - min(distance_norm / 0.35, 1.0))
+    score = weight * (0.7 * iou + 0.3 * distance_score)
+    return {
+        "score": score,
+        "iou": iou,
+        "center_distance_px": distance_px,
+        "object_pair": f"{a['class_name']}-{b['class_name']}",
+        "track_pair": f"{a.get('track_id', '')}-{b.get('track_id', '')}",
+    }
+
+
 @lru_cache(maxsize=4)
 def load_yolo_model(model_name: str):
     from ultralytics import YOLO
@@ -47,35 +106,66 @@ def load_yolo_model(model_name: str):
     return YOLO(model_name)
 
 
-def estimate_accident_sec(video_path: Path, duration: float, source: str, model_name: str) -> tuple[float, str]:
+def estimate_accident(video_path: Path, duration: float, source: str, model_name: str) -> dict:
+    base = {
+        "time_sec": duration / 2,
+        "basis": "center",
+        "score": 0.0,
+        "max_iou": 0.0,
+        "min_center_distance_px": "",
+        "object_pair": "",
+        "track_pair": "",
+    }
     if source == "center":
-        return duration / 2, "center"
+        return base
 
-    # ponytail: ByteTrack is optional here; fall back to center if ultralytics/tracker fails.
+    # ponytail: This is a cheap heuristic, not accident truth; replace with labeled event data if available.
     try:
         model = load_yolo_model(model_name)
-        previous = None
-        best_score = -1.0
-        best_frame = 0
+        previous_count = None
+        best = dict(base, basis="yolo_bytetrack_bbox_overlap")
         for frame_idx, result in enumerate(model.track(source=video_path.as_posix(), tracker="bytetrack.yaml", stream=True, verbose=False, persist=True)):
             boxes = result.boxes
-            if boxes is None or boxes.xyxy is None or len(boxes.xyxy) == 0:
-                current = []
-            else:
-                current = boxes.xyxy.detach().cpu().numpy().tolist()
-            if previous is not None:
-                score = abs(len(current) - len(previous))
-                score += sum(abs((b[2] - b[0]) * (b[3] - b[1])) for b in current) / 1_000_000
-                if score > best_score:
-                    best_score = score
-                    best_frame = frame_idx
-            previous = current
-        frames, fps, _ = video_info(video_path)
-        if fps > 0 and frames > 0:
-            return min(duration, best_frame / fps), "yolo_bytetrack_bbox_change"
+            names = result.names
+            width = float(result.orig_shape[1]) if result.orig_shape else 0.0
+            height = float(result.orig_shape[0]) if result.orig_shape else 0.0
+            detections = []
+            if boxes is not None and boxes.xyxy is not None and len(boxes.xyxy) > 0:
+                xyxy = boxes.xyxy.detach().cpu().numpy().tolist()
+                cls = boxes.cls.detach().cpu().numpy().astype(int).tolist() if boxes.cls is not None else [None] * len(xyxy)
+                ids = boxes.id.detach().cpu().numpy().astype(int).tolist() if boxes.id is not None else [""] * len(xyxy)
+                for bbox, class_id, track_id in zip(xyxy, cls, ids):
+                    class_name = names.get(class_id, str(class_id)) if class_id is not None else ""
+                    if class_name in ACCIDENT_CLASSES:
+                        detections.append({"bbox": bbox, "class_name": class_name, "track_id": track_id})
+
+            best_frame_score = None
+            for i, first in enumerate(detections):
+                for second in detections[i + 1:]:
+                    candidate = pair_score(first, second, width, height)
+                    if best_frame_score is None or candidate["score"] > best_frame_score["score"]:
+                        best_frame_score = candidate
+
+            count_change = abs(len(detections) - previous_count) if previous_count is not None else 0
+            if best_frame_score:
+                combined = best_frame_score["score"] + min(count_change, 3) * 0.03
+                if combined > best["score"]:
+                    frames, fps, _ = video_info(video_path)
+                    best.update(
+                        {
+                            "time_sec": min(duration, frame_idx / fps) if fps > 0 and frames > 0 else duration / 2,
+                            "score": combined,
+                            "max_iou": best_frame_score["iou"],
+                            "min_center_distance_px": best_frame_score["center_distance_px"],
+                            "object_pair": best_frame_score["object_pair"],
+                            "track_pair": best_frame_score["track_pair"],
+                        }
+                    )
+            previous_count = len(detections)
+        return best
     except Exception as exc:
         print(f"track_fallback_center: {video_path} reason={exc}")
-    return duration / 2, "center_fallback"
+    return dict(base, basis="center_fallback")
 
 
 def write_clip(video_path: Path, output_path: Path, start_sec: float, end_sec: float) -> bool:
@@ -133,7 +223,9 @@ def build_training_clips(args: argparse.Namespace) -> None:
             output_rows.append(copied)
             continue
 
-        accident_sec, basis = estimate_accident_sec(src, duration, args.accident_source, args.model_name)
+        accident = estimate_accident(src, duration, args.accident_source, args.model_name)
+        accident_sec = accident["time_sec"]
+        basis = accident["basis"]
         start_sec, end_sec = centered_window(duration, accident_sec, args.clip_sec)
         label = row.get(args.label_column) or row.get("label") or "unknown"
         asset_id = row.get("asset_id") or src.stem
@@ -158,6 +250,11 @@ def build_training_clips(args: argparse.Namespace) -> None:
                 "clip_end_sec": f"{end_sec:.3f}",
                 "clip_duration_sec": f"{end_sec - start_sec:.3f}",
                 "accident_candidate_sec": f"{accident_sec:.3f}",
+                "accident_candidate_score": f"{accident['score']:.6f}",
+                "accident_candidate_iou": f"{accident['max_iou']:.6f}",
+                "accident_candidate_center_distance_px": f"{accident['min_center_distance_px']:.3f}" if accident["min_center_distance_px"] != "" else "",
+                "accident_candidate_object_pair": accident["object_pair"],
+                "accident_candidate_track_pair": accident["track_pair"],
                 "clip_basis": basis,
                 "clip_status": "ok" if ok else "failed",
                 "file_exists": str(clip_path.exists()),
@@ -165,7 +262,7 @@ def build_training_clips(args: argparse.Namespace) -> None:
             }
         )
         output_rows.append(copied)
-        print(f"{copied['clip_status']}: {asset_id} {start_sec:.2f}~{end_sec:.2f}s basis={basis}")
+        print(f"{copied['clip_status']}: {asset_id} {start_sec:.2f}~{end_sec:.2f}s score={copied['accident_candidate_score']} basis={basis}")
 
     fields = list(dict.fromkeys([key for row in output_rows for key in row.keys()]))
     write_csv(output_rows, args.output, fields)

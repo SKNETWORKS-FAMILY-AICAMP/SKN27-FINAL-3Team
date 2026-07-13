@@ -1,0 +1,42 @@
+{
+  "architectures": [
+    "VideoMAEForVideoClassification"
+  ],
+  "attention_probs_dropout_prob": 0.0,
+  "decoder_hidden_size": 384,
+  "decoder_intermediate_size": 1536,
+  "decoder_num_attention_heads": 6,
+  "decoder_num_hidden_layers": 4,
+  "dtype": "float32",
+  "hidden_act": "gelu",
+  "hidden_dropout_prob": 0.0,
+  "hidden_size": 768,
+  "id2label": {
+    "0": "\ucc28\ub300\ubcf4\ud589\uc790",
+    "1": "\ucc28\ub300\uc774\ub95c\ucc28",
+    "2": "\ucc28\ub300\uc790\uc804\uac70",
+    "3": "\ucc28\ub300\ucc28"
+  },
+  "image_size": 224,
+  "initializer_range": 0.02,
+  "intermediate_size": 3072,
+  "label2id": {
+    "\ucc28\ub300\ubcf4\ud589\uc790": 0,
+    "\ucc28\ub300\uc774\ub95c\ucc28": 1,
+    "\ucc28\ub300\uc790\uc804\uac70": 2,
+    "\ucc28\ub300\ucc28": 3
+  },
+  "layer_norm_eps": 1e-12,
+  "model_type": "videomae",
+  "norm_pix_loss": false,
+  "num_attention_heads": 12,
+  "num_channels": 3,
+  "num_frames": 16,
+  "num_hidden_layers": 12,
+  "patch_size": 16,
+  "problem_type": "single_label_classification",
+  "qkv_bias": true,
+  "transformers_version": "5.12.1",
+  "tubelet_size": 2,
+  "use_mean_pooling": true
+}

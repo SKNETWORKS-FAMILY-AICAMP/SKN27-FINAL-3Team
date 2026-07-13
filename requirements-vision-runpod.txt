@@ -1,0 +1,9 @@
+﻿numpy
+opencv-python-headless
+Pillow
+transformers
+tqdm
+ultralytics
+lap
+accelerate
+qwen-vl-utils[decord]

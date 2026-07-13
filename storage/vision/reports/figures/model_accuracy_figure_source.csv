@@ -1,0 +1,14 @@
+run_id,best_val_accuracy,best_test_accuracy,model_name
+vision_cls_20260626_172935,0.200000,,resnet18
+videomae_cls_20260702_124642,0.538095,0.551887,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260702_153544,0.380952,0.367925,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260702_183519,0.552381,0.603774,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260712_172709,0.000000,0.000000,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260713_010613,0.000000,0.000000,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260713_022139,0.550000,0.450000,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260713_033130,0.537500,0.500000,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260713_045649,0.562500,0.550000,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260712_172921,0.000000,0.000000,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260713_092150,0.000000,0.000000,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260713_112125,0.400000,0.450000,MCG-NJU/videomae-base-finetuned-kinetics
+videomae_cls_20260713_140919,0.400000,0.450000,MCG-NJU/videomae-base-finetuned-kinetics

@@ -35,7 +35,6 @@ yolov8*.pt
 storage/vision/raw/
 storage/vision/processed/
 storage/vision/outputs/
-storage/vision/models/
 storage/vision/datasets/classification/raw_videos/
 storage/vision/datasets/classification/frames/
 storage/vision/datasets/classification/clips_5s/
@@ -43,6 +42,20 @@ storage/vision/datasets/classification/clip_strategy_test/
 storage/vision/datasets/classification/manifests/*.csv
 storage/vision/datasets/classification/manifests/*.json
 storage/vision/manifests/*.json
+
+# Vision model weights stay out of Git; lightweight metadata stays trackable.
+storage/vision/models/**/*.pt
+storage/vision/models/**/*.pth
+storage/vision/models/**/*.safetensors
+!storage/vision/models/**/run_config.json
+!storage/vision/models/**/training_history.csv
+!storage/vision/models/**/class_mapping.json
+!storage/vision/models/**/config.json
+!storage/vision/models/**/preprocessor_config.json
+
+# Vision report artifacts are meant for tables, figures, and appendix reuse.
+!storage/vision/reports/
+!storage/vision/reports/**
 
 # Generated PDF/export scratch artifacts not already tracked
 output/pdf/SKN27_*.pdf
@@ -59,4 +72,4 @@ output/pptx/*.inspect.ndjson
 설계/
 # Local archive exports
 *.tar.gz
-models/
+/models/
