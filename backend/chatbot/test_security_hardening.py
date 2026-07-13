@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
@@ -10,8 +11,10 @@ from chatbot.models import (
     AnalysisJob,
     AuthSession,
     AuthSessionStatus,
+    ChatMessage,
     ChatSession,
     ChatSessionStatus,
+    UsageEvent,
     UserAccount,
 )
 
@@ -113,6 +116,131 @@ class AnalysisJobOwnershipSecurityTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+
+    def test_job_creation_rejects_another_users_session_before_orchestration(self) -> None:
+        with patch("chatbot.views.submit_message") as submit_message:
+            response = self.other_client.post(
+                "/api/analysis/jobs/",
+                data={
+                    "session_id": self.owner_session.session_id,
+                    "user_text": "attempt cross-owner analysis",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+        submit_message.assert_not_called()
+
+    def test_scan_blocked_chat_rejects_cross_owner_session_before_scan_or_write(self) -> None:
+        with (
+            patch("chatbot.views.apply_attachment_scan_gate") as scan_gate,
+            patch("chatbot.views.submit_message") as submit_message,
+            patch("chatbot.views.record_usage_event") as record_usage,
+        ):
+            response = self.other_client.post(
+                "/api/chat/messages/",
+                data={
+                    "session_id": self.owner_session.session_id,
+                    "message_id": "msg_attacker_controlled",
+                    "job_id": self.owner_job.job_id,
+                    "attachments": [{"attachment_id": "att_attacker_unscanned"}],
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+        scan_gate.assert_not_called()
+        submit_message.assert_not_called()
+        record_usage.assert_not_called()
+        self.owner_job.refresh_from_db()
+        self.assertEqual(self.owner_job.owner_id, self.owner_id)
+        self.assertEqual(self.owner_job.session_id, self.owner_session.pk)
+        self.assertFalse(ChatMessage.objects.filter(message_id="msg_attacker_controlled").exists())
+
+    def test_scan_blocked_chat_does_not_persist_client_controlled_message_or_job_ids(self) -> None:
+        original_metadata = dict(self.owner_job.metadata)
+
+        with (
+            patch(
+                "chatbot.views.apply_attachment_scan_gate",
+                side_effect=lambda payload: {
+                    **payload,
+                    "attachments": [],
+                    "blocked_attachments": [
+                        {
+                            "attachment_id": "att_owner_unscanned",
+                            "required_action": "wait_for_file_scan",
+                        }
+                    ],
+                },
+            ),
+            patch("chatbot.views.submit_message") as submit_message,
+            patch("chatbot.views.record_usage_event") as record_usage,
+        ):
+            response = self.owner_client.post(
+                "/api/chat/messages/",
+                data={
+                    "session_id": self.owner_session.session_id,
+                    "message_id": "msg_client_controlled",
+                    "job_id": self.owner_job.job_id,
+                    "attachments": [{"attachment_id": "att_owner_unscanned"}],
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 409)
+        body = response.json()
+        self.assertEqual(body["persistence"]["status"], "skipped")
+        self.assertNotEqual(body["message_id"], "msg_client_controlled")
+        submit_message.assert_not_called()
+        record_usage.assert_not_called()
+        self.owner_job.refresh_from_db()
+        self.assertEqual(self.owner_job.metadata, original_metadata)
+        self.assertFalse(ChatMessage.objects.filter(message_id="msg_client_controlled").exists())
+
+    def test_job_creation_uses_authenticated_owner_not_forged_body_owner(self) -> None:
+        session_id = "ses_analysis_new_owned"
+        chat_response = {
+            "session_id": session_id,
+            "message_id": "msg_analysis_new_owned",
+            "routing_intent": "traffic_law_search",
+            "status": "queued",
+            "progress": {"status": "queued", "active_node": "law_ground_search"},
+            "analysis_plan": {
+                "plan_id": "plan_analysis_new_owned",
+                "steps": [
+                    {
+                        "order": 1,
+                        "node_code": "law_ground_search",
+                        "status": "queued",
+                    }
+                ],
+            },
+            "attachments": [],
+            "blocked_attachments": [],
+            "limitations": [],
+        }
+
+        with patch("chatbot.views.submit_message", return_value=chat_response):
+            response = self.owner_client.post(
+                "/api/analysis/jobs/",
+                data={
+                    "session_id": session_id,
+                    "owner_id": self.other_id,
+                    "user_id": self.other_id,
+                    "user_text": "create under forged owner",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 202)
+        job = AnalysisJob.objects.get(job_id=response.json()["job"]["job_id"])
+        self.assertEqual(job.owner_id, self.owner_id)
+        self.assertEqual(job.session.owner_id, self.owner_id)
+        usage_event = UsageEvent.objects.get(scope="agent_run")
+        self.assertEqual(usage_event.subject_id, f"user:{self.owner_id}")
 
     def test_owner_can_read_detail_and_pending_result(self) -> None:
         detail = self.owner_client.get(

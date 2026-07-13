@@ -362,7 +362,7 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         path="/api/analysis/jobs/",
         route_name="canonical-analysis-jobs",
         view_name="analysis_jobs",
-        reason="Legacy synchronous job creation must move to the worker boundary.",
+        reason="Queued analysis job request/response DTO promotion remains pending.",
     ),
     DeferredRouteSpec(
         method="GET",

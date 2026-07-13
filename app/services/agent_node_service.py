@@ -294,7 +294,11 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
 
     executions = []
     upstream_results = deepcopy(payload.get("upstream_results", {}))
-    for step in analysis_plan.get("steps", []):
+    executable_steps = executable_analysis_plan_steps(
+        analysis_plan,
+        completed_node_codes=set(upstream_results),
+    )
+    for step in executable_steps:
         step_payload = deepcopy(payload)
         step_payload.update(
             {
@@ -340,6 +344,45 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
         "limitations": limitations,
         "created_at": _now_iso(),
     }
+
+
+def executable_analysis_plan_steps(
+    analysis_plan: dict[str, Any],
+    *,
+    completed_node_codes: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return only explicitly runnable steps whose dependencies are satisfiable.
+
+    Plans are treated as ordered execution contracts. Unknown or waiting states fail
+    closed, and a runnable step is admitted only after every dependency has either
+    already completed or appeared earlier in the admitted sequence.
+    """
+
+    available = {
+        str(node_code).strip()
+        for node_code in (completed_node_codes or set())
+        if str(node_code).strip()
+    }
+    selected: list[dict[str, Any]] = []
+    for candidate in analysis_plan.get("steps", []):
+        if not isinstance(candidate, dict):
+            continue
+        status = str(candidate.get("status") or "").strip().lower()
+        if status not in {"ready", "queued"}:
+            continue
+        node_code = str(candidate.get("node_code") or "").strip()
+        if not node_code or node_code in available:
+            continue
+        dependencies = {
+            str(dependency).strip()
+            for dependency in candidate.get("depends_on", [])
+            if str(dependency).strip()
+        }
+        if not dependencies.issubset(available):
+            continue
+        selected.append(candidate)
+        available.add(node_code)
+    return selected
 
 
 def _sync_adapter_node_codes() -> set[str]:

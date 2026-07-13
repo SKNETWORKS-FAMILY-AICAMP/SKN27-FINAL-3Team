@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta, timezone as datetime_timezone
 from io import BytesIO
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
 
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, close_old_connections, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -1392,7 +1396,7 @@ def record_usage_event(
     now = timezone.now()
 
     with transaction.atomic():
-        quota, _created = UsageQuota.objects.get_or_create(
+        quota, _created = UsageQuota.objects.select_for_update().get_or_create(
             quota_id=_usage_quota_id(subject_id, scope),
             defaults={
                 "subject_id": subject_id,
@@ -1411,6 +1415,8 @@ def record_usage_event(
                 },
             },
         )
+        if not _created:
+            quota = UsageQuota.objects.select_for_update().get(pk=quota.pk)
         if not _created and quota.metadata.get("policy_managed"):
             quota.metadata = {
                 **quota.metadata,
@@ -1474,6 +1480,52 @@ def record_usage_event(
         else None,
         "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
         "status": "allowed" if allowed else "blocked",
+    }
+
+
+def refund_usage_event(usage: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    """Refund one allowed usage reservation exactly once after a rejected request."""
+
+    usage_event_id = _text(usage.get("usage_event_id"))
+    quota_id = _text(usage.get("quota_id"))
+    if not usage_event_id or not quota_id:
+        return {"status": "skipped", "reason": "missing_usage_reference"}
+
+    with transaction.atomic():
+        usage_event = (
+            UsageEvent.objects.select_for_update()
+            .filter(usage_event_id=usage_event_id)
+            .first()
+        )
+        if usage_event is None:
+            return {"status": "skipped", "reason": "usage_event_not_found"}
+        metadata = _dict_or_empty(usage_event.metadata)
+        if usage_event.amount <= 0 or metadata.get("status") != "allowed":
+            return {"status": "skipped", "reason": "usage_not_refundable"}
+        quota = UsageQuota.objects.select_for_update().filter(quota_id=quota_id).first()
+        if quota is None:
+            return {"status": "skipped", "reason": "usage_quota_not_found"}
+
+        refunded_amount = usage_event.amount
+        quota.used_count = max(0, quota.used_count - refunded_amount)
+        quota.save(update_fields=["used_count", "updated_at"])
+        usage_event.amount = 0
+        usage_event.metadata = {
+            **metadata,
+            "status": "refunded",
+            "refund_reason": _text(reason) or "request_rejected",
+            "refunded_amount": refunded_amount,
+            "refunded_at": timezone.now().isoformat(),
+            "used_count": quota.used_count,
+        }
+        usage_event.save(update_fields=["amount", "metadata"])
+
+    return {
+        "status": "refunded",
+        "usage_event_id": usage_event.usage_event_id,
+        "quota_id": quota.quota_id,
+        "refunded_amount": refunded_amount,
+        "used_count": quota.used_count,
     }
 
 
@@ -1653,6 +1705,18 @@ def persist_analysis_job_execution(
     }
 
     with transaction.atomic():
+        existing_job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=job_id)
+            .only("metadata")
+            .first()
+        )
+        existing_metadata = _dict_or_empty(existing_job.metadata if existing_job else None)
+        preserved_metadata = {
+            key: existing_metadata[key]
+            for key in ("idempotency", "work_queue")
+            if isinstance(existing_metadata.get(key), dict)
+        }
         message = None
         if message_id:
             message, _message_created = ChatMessage.objects.update_or_create(
@@ -1691,6 +1755,7 @@ def persist_analysis_job_execution(
                 "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
                 "status_counts": job_payload.get("status_counts") or {},
                 "metadata": {
+                    **preserved_metadata,
                     "source": "canonical_analysis_job",
                     "analysis_plan": analysis_plan,
                     "assistant_message": chat_response.get("assistant_message"),
@@ -1756,6 +1821,168 @@ def persist_analysis_job_execution(
     }
 
 
+def reserve_analysis_job_request(
+    payload: dict[str, Any],
+    *,
+    job_id: str,
+    request_fingerprint: str,
+) -> dict[str, Any]:
+    """Reserve a caller-supplied job id before quota use or plan generation."""
+
+    normalized_job_id = _text(job_id)
+    normalized_fingerprint = _text(request_fingerprint)
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
+    if not normalized_job_id or not normalized_fingerprint or session is None:
+        raise ValueError("job_id, request_fingerprint, and session_id are required")
+    if owner_id and session.owner_id and session.owner_id != owner_id:
+        raise PermissionError("analysis job session belongs to another owner")
+
+    now = timezone.now()
+    reservation_token = secrets.token_urlsafe(32)
+    reservation_metadata = {
+        "source": "canonical_analysis_job_reservation",
+        "idempotency": {
+            "contract_version": "analysis_job_idempotency.v1",
+            "request_fingerprint": normalized_fingerprint,
+            "state": "reserved",
+            "reserved_at": now.isoformat(),
+            "reservation_token": reservation_token,
+            "reservation_generation": 1,
+        },
+    }
+    with transaction.atomic():
+        job, created = AnalysisJob.objects.select_for_update().get_or_create(
+            job_id=normalized_job_id,
+            defaults={
+                "session": session,
+                "owner_id": owner_id or session.owner_id,
+                "status": AnalysisJobStatus.QUEUED.value,
+                "progress_message": "Analysis request reserved.",
+                "metadata": reservation_metadata,
+            },
+        )
+        if not created:
+            job = AnalysisJob.objects.select_for_update().select_related("session").get(pk=job.pk)
+            effective_owner = job.owner_id or job.session.owner_id
+            if owner_id and effective_owner and effective_owner != owner_id:
+                raise PermissionError("analysis job belongs to another owner")
+            if job.session_id != session.pk:
+                raise ValueError("analysis job id is already bound to another session")
+            metadata = _dict_or_empty(job.metadata)
+            idempotency = _dict_or_empty(metadata.get("idempotency"))
+            if _text(idempotency.get("request_fingerprint")) != normalized_fingerprint:
+                raise ValueError("analysis job id is already bound to another request")
+            stale_after = _agent_worker_setting(
+                "ANALYSIS_JOB_RESERVATION_STALE_AFTER_SECONDS",
+                300,
+            )
+            stale_cutoff = now - timedelta(seconds=stale_after)
+            is_recoverable_stale_reservation = (
+                metadata.get("source") == "canonical_analysis_job_reservation"
+                and not job.work_items.exists()
+                and job.updated_at <= stale_cutoff
+            )
+            if is_recoverable_stale_reservation:
+                recovered_token = secrets.token_urlsafe(32)
+                recovered_generation = max(
+                    1,
+                    _positive_int_or_default(
+                        idempotency.get("reservation_generation"),
+                        default=1,
+                    )
+                    + 1,
+                )
+                job.progress_message = "Analysis request reservation recovered."
+                job.metadata = {
+                    **reservation_metadata,
+                    "idempotency": {
+                        **reservation_metadata["idempotency"],
+                        "reservation_token": recovered_token,
+                        "reservation_generation": recovered_generation,
+                    },
+                }
+                job.save(update_fields=["progress_message", "metadata", "updated_at"])
+                return {
+                    "status": "reserved",
+                    "created": False,
+                    "acquired": True,
+                    "recovered": True,
+                    "job_id": job.job_id,
+                    "reservation_token": recovered_token,
+                    "reservation_generation": recovered_generation,
+                }
+            return {
+                "status": "existing",
+                "created": False,
+                "acquired": False,
+                "recovered": False,
+                "job_id": job.job_id,
+                "reservation_token": "",
+                "reservation_generation": idempotency.get("reservation_generation"),
+            }
+    return {
+        "status": "reserved",
+        "created": True,
+        "acquired": True,
+        "recovered": False,
+        "job_id": normalized_job_id,
+        "reservation_token": reservation_token,
+        "reservation_generation": 1,
+    }
+
+
+def release_analysis_job_reservation(
+    *,
+    job_id: str,
+    request_fingerprint: str,
+    reservation_token: str,
+) -> bool:
+    """Delete an unqueued reservation so a rejected or failed plan can be retried."""
+
+    with transaction.atomic():
+        job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=_text(job_id), metadata__source="canonical_analysis_job_reservation")
+            .first()
+        )
+        if job is None or job.work_items.exists():
+            return False
+        idempotency = _dict_or_empty(_dict_or_empty(job.metadata).get("idempotency"))
+        if _text(idempotency.get("request_fingerprint")) != _text(request_fingerprint):
+            return False
+        if _text(idempotency.get("reservation_token")) != _text(reservation_token):
+            return False
+        job.delete()
+        return True
+
+
+def renew_analysis_job_reservation(
+    *,
+    job_id: str,
+    request_fingerprint: str,
+    reservation_token: str,
+) -> bool:
+    """Refresh only the current reservation holder's lease before quota use."""
+
+    with transaction.atomic():
+        job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=_text(job_id), metadata__source="canonical_analysis_job_reservation")
+            .first()
+        )
+        if job is None or job.work_items.exists():
+            return False
+        idempotency = _dict_or_empty(_dict_or_empty(job.metadata).get("idempotency"))
+        if _text(idempotency.get("request_fingerprint")) != _text(request_fingerprint):
+            return False
+        if _text(idempotency.get("reservation_token")) != _text(reservation_token):
+            return False
+        job.progress_message = "Analysis request reservation active."
+        job.save(update_fields=["progress_message", "updated_at"])
+        return True
+
+
 def enqueue_analysis_job_work(
     payload: dict[str, Any],
     job_payload: dict[str, Any],
@@ -1768,6 +1995,8 @@ def enqueue_analysis_job_work(
     session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
     if session is None:
         raise ValueError("job_payload must include session_id")
+    if owner_id and session.owner_id and session.owner_id != owner_id:
+        raise PermissionError("analysis job session belongs to another owner")
 
     job_id = _text(job_payload.get("job_id"))
     if not job_id:
@@ -1776,9 +2005,14 @@ def enqueue_analysis_job_work(
     message_id = _text(job_payload.get("message_id"))
     chat_response = _dict_or_empty(job_payload.get("chat_response"))
     analysis_plan = _dict_or_empty(job_payload.get("analysis_plan") or chat_response.get("analysis_plan"))
-    active_node = _text(job_payload.get("active_node")) or _analysis_plan_first_node(analysis_plan)
+    active_node = _text(job_payload.get("active_node")) or _analysis_plan_first_executable_node(
+        analysis_plan
+    )
     progress_message = _text(job_payload.get("progress_message")) or "Agent worker item queued."
     work_item_id = _agent_work_item_id(job_id)
+    requested_idempotency = _dict_or_empty(job_payload.get("idempotency"))
+    requested_fingerprint = _text(requested_idempotency.get("request_fingerprint"))
+    requested_reservation_token = _text(requested_idempotency.get("reservation_token"))
 
     with transaction.atomic():
         message = None
@@ -1805,52 +2039,108 @@ def enqueue_analysis_job_work(
                 },
             )
 
-        job, _job_created = AnalysisJob.objects.update_or_create(
-            job_id=job_id,
-            defaults={
-                "session": session,
-                "message": message,
-                "owner_id": owner_id or session.owner_id,
-                "routing_intent": _text(job_payload.get("routing_intent")),
-                "mock_scenario": _text(job_payload.get("mock_scenario")),
-                "status": AnalysisJobStatus.QUEUED.value,
-                "active_node": active_node,
-                "progress_message": progress_message,
-                "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
-                "status_counts": _analysis_plan_status_counts(analysis_plan),
-                "metadata": {
-                    "source": "canonical_analysis_job_queue",
-                    "analysis_plan": analysis_plan,
-                    "assistant_message": chat_response.get("assistant_message"),
-                    "case_status": chat_response.get("case_status"),
-                    "cards": chat_response.get("cards", []),
-                    "pending_questions": chat_response.get("pending_questions", []),
-                    "report_links": chat_response.get("report_links", []),
-                    "supervisor_state": chat_response.get("supervisor_state", {}),
-                    "reporting_payload": chat_response.get("reporting_payload", {}),
-                    "attachments": job_payload.get("attachments", []),
-                    "blocked_attachments": job_payload.get("blocked_attachments", []),
-                    "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
-                    "attachment_resolution": job_payload.get("attachment_resolution", {}),
-                    "scan_gate": job_payload.get("scan_gate", {}),
-                    "limitations": job_payload.get("limitations", []),
-                    "work_queue": {
-                        "contract_version": "agent_worker_queue.v1",
-                        "work_item_id": work_item_id,
-                        "status": AgentWorkItemStatus.QUEUED.value,
-                    },
-                },
+        queue_metadata = {
+            "source": "canonical_analysis_job_queue",
+            "analysis_plan": analysis_plan,
+            "assistant_message": chat_response.get("assistant_message"),
+            "case_status": chat_response.get("case_status"),
+            "cards": chat_response.get("cards", []),
+            "pending_questions": chat_response.get("pending_questions", []),
+            "report_links": chat_response.get("report_links", []),
+            "supervisor_state": chat_response.get("supervisor_state", {}),
+            "reporting_payload": chat_response.get("reporting_payload", {}),
+            "attachments": job_payload.get("attachments", []),
+            "blocked_attachments": job_payload.get("blocked_attachments", []),
+            "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
+            "attachment_resolution": job_payload.get("attachment_resolution", {}),
+            "scan_gate": job_payload.get("scan_gate", {}),
+            "limitations": job_payload.get("limitations", []),
+            "work_queue": {
+                "contract_version": "agent_worker_queue.v1",
+                "work_item_id": work_item_id,
+                "status": AgentWorkItemStatus.QUEUED.value,
             },
+        }
+        if requested_idempotency:
+            queue_metadata["idempotency"] = {
+                **requested_idempotency,
+                "contract_version": "analysis_job_idempotency.v1",
+                "state": "queued",
+            }
+        job_defaults = {
+            "session": session,
+            "message": message,
+            "owner_id": owner_id or session.owner_id,
+            "routing_intent": _text(job_payload.get("routing_intent")),
+            "mock_scenario": _text(job_payload.get("mock_scenario")),
+            "status": AnalysisJobStatus.QUEUED.value,
+            "active_node": active_node,
+            "progress_message": progress_message,
+            "analysis_plan_id": _text(
+                job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")
+            ),
+            "status_counts": _queued_analysis_plan_status_counts(analysis_plan),
+            "metadata": queue_metadata,
+        }
+        job, job_created = AnalysisJob.objects.select_for_update().get_or_create(
+            job_id=job_id,
+            defaults=job_defaults,
         )
-        _append_analysis_job_event(
-            job,
-            status=AnalysisJobStatus.QUEUED.value,
-            active_node=active_node,
-            message=progress_message,
-            source="agent_worker_queue",
-            metadata={"work_item_id": work_item_id},
-        )
-        work_item, _work_item_created = AgentWorkItem.objects.update_or_create(
+        requested_owner_id = owner_id or session.owner_id
+        reservation_promoted = False
+        if not job_created:
+            effective_owner_id = job.owner_id or job.session.owner_id
+            if requested_owner_id and effective_owner_id and effective_owner_id != requested_owner_id:
+                raise PermissionError("analysis job belongs to another owner")
+            if job.session_id != session.pk:
+                raise ValueError("analysis job id is already bound to another session")
+            existing_metadata = _dict_or_empty(job.metadata)
+            existing_idempotency = _dict_or_empty(existing_metadata.get("idempotency"))
+            existing_fingerprint = _text(existing_idempotency.get("request_fingerprint"))
+            existing_reservation_token = _text(
+                existing_idempotency.get("reservation_token")
+            )
+            if requested_fingerprint or existing_fingerprint:
+                if not requested_fingerprint or requested_fingerprint != existing_fingerprint:
+                    raise ValueError("analysis job id is already bound to another request")
+            if existing_reservation_token or requested_reservation_token:
+                if (
+                    not requested_reservation_token
+                    or requested_reservation_token != existing_reservation_token
+                ):
+                    raise ValueError("analysis job reservation holder is stale")
+
+            if existing_metadata.get("source") == "canonical_analysis_job_reservation":
+                if not requested_fingerprint or not requested_reservation_token:
+                    raise ValueError("analysis job reservation requires a request fingerprint")
+                if job.work_items.exists():
+                    raise ValueError("analysis job reservation has an invalid work item binding")
+                for field_name, field_value in job_defaults.items():
+                    setattr(job, field_name, field_value)
+                job.save(update_fields=[*job_defaults, "updated_at"])
+                reservation_promoted = True
+
+            requested_plan_id = _text(
+                job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")
+            )
+            if (
+                not requested_fingerprint
+                and job.analysis_plan_id
+                and requested_plan_id != job.analysis_plan_id
+            ):
+                raise ValueError("analysis job id is already bound to another plan")
+            if (
+                job.status
+                in {
+                    AnalysisJobStatus.SUCCESS.value,
+                    AnalysisJobStatus.PARTIAL.value,
+                    AnalysisJobStatus.FAILED.value,
+                }
+                and not job.work_items.exists()
+            ):
+                raise ValueError("terminal analysis job cannot create a new work item")
+
+        work_item, work_item_created = AgentWorkItem.objects.get_or_create(
             work_item_id=work_item_id,
             defaults={
                 "job": job,
@@ -1895,12 +2185,23 @@ def enqueue_analysis_job_work(
                 },
             },
         )
+        if work_item.job_id != job.pk:
+            raise ValueError("agent work item is already bound to another analysis job")
+        if job_created or work_item_created or reservation_promoted:
+            _append_analysis_job_event(
+                job,
+                status=AnalysisJobStatus.QUEUED.value,
+                active_node=active_node,
+                message=progress_message,
+                source="agent_worker_queue",
+                metadata={"work_item_id": work_item_id},
+            )
 
     progress_cache = write_analysis_job_progress(job)
     session_cache = write_chat_session_state(session, latest_job=job)
     return {
         "backend": "postgresql",
-        "status": AgentWorkItemStatus.QUEUED.value,
+        "status": work_item.status,
         "execution_mode": "async_worker",
         "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "tables": [AnalysisJob._meta.db_table, AgentWorkItem._meta.db_table],
@@ -1955,30 +2256,55 @@ def process_agent_work_item(work_item_id: str) -> dict[str, Any]:
     claimed = _claim_agent_work_item(normalized_work_item_id)
     if not claimed["claimed"]:
         return claimed
+    claimed_attempt_no = int(claimed.get("attempt_no") or 0)
 
     try:
         work_item = AgentWorkItem.objects.select_related("job", "job__session").get(
             work_item_id=normalized_work_item_id
         )
-        node_execution = _execute_agent_work_item_plan(work_item)
+        with _agent_work_item_lease_heartbeat(
+            normalized_work_item_id,
+            expected_attempt_no=claimed_attempt_no,
+        ):
+            node_execution = _execute_agent_work_item_plan(work_item)
         final_status = _analysis_job_status_from_node_execution(node_execution)
         completed_job_payload = _completed_job_payload_for_work_item(
             work_item,
             node_execution=node_execution,
             final_status=final_status,
         )
-        persistence = persist_analysis_job_execution(
-            _dict_or_empty(work_item.payload.get("request_payload")),
-            completed_job_payload,
-        )
-        return _complete_agent_work_item(
-            normalized_work_item_id,
-            final_status=final_status,
-            node_execution=node_execution,
-            persistence=persistence,
-        )
+        with transaction.atomic():
+            leased_work_item = (
+                AgentWorkItem.objects.select_for_update()
+                .select_related("job", "job__session")
+                .get(work_item_id=normalized_work_item_id)
+            )
+            if not _worker_lease_is_current(
+                leased_work_item,
+                expected_attempt_no=claimed_attempt_no,
+            ):
+                return _agent_work_item_skipped(
+                    "stale_worker_lease",
+                    work_item_id=normalized_work_item_id,
+                    current_status=leased_work_item.status,
+                )
+            persistence = persist_analysis_job_execution(
+                _dict_or_empty(work_item.payload.get("request_payload")),
+                completed_job_payload,
+            )
+            return _complete_agent_work_item(
+                normalized_work_item_id,
+                final_status=final_status,
+                node_execution=node_execution,
+                persistence=persistence,
+                expected_attempt_no=claimed_attempt_no,
+            )
     except Exception as exc:  # pragma: no cover - exercised through retry smoke tests.
-        return _fail_agent_work_item(normalized_work_item_id, exc)
+        return _fail_agent_work_item(
+            normalized_work_item_id,
+            exc,
+            expected_attempt_no=claimed_attempt_no,
+        )
 
 
 def persist_analysis_display_result(result_payload: dict[str, Any]) -> dict[str, Any]:
@@ -3262,6 +3588,21 @@ def _analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int
     return counts
 
 
+def _queued_analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int]:
+    from app.services.agent_node_service import executable_analysis_plan_steps
+
+    return {"queued": len(executable_analysis_plan_steps(analysis_plan))}
+
+
+def _analysis_plan_first_executable_node(analysis_plan: dict[str, Any]) -> str:
+    from app.services.agent_node_service import executable_analysis_plan_steps
+
+    steps = executable_analysis_plan_steps(analysis_plan)
+    if not steps:
+        return ""
+    return _text(steps[0].get("node_code"))
+
+
 def _analysis_plan_first_node(analysis_plan: dict[str, Any]) -> str:
     steps = analysis_plan.get("steps") or []
     for step in steps:
@@ -3361,6 +3702,71 @@ def _agent_worker_retry_backoff(work_item: AgentWorkItem) -> timedelta:
 
 def _agent_worker_setting(name: str, default: int) -> int:
     return _positive_int_or_default(getattr(settings, name, default), default=default)
+
+
+def _worker_lease_is_current(
+    work_item: AgentWorkItem,
+    *,
+    expected_attempt_no: int,
+) -> bool:
+    return (
+        work_item.status == AgentWorkItemStatus.RUNNING.value
+        and work_item.attempt_no == expected_attempt_no
+    )
+
+
+def _refresh_agent_work_item_lease(
+    work_item_id: str,
+    *,
+    expected_attempt_no: int,
+) -> bool:
+    updated = AgentWorkItem.objects.filter(
+        work_item_id=_text(work_item_id),
+        status=AgentWorkItemStatus.RUNNING.value,
+        attempt_no=expected_attempt_no,
+    ).update(locked_at=timezone.now())
+    return updated == 1
+
+
+@contextmanager
+def _agent_work_item_lease_heartbeat(
+    work_item_id: str,
+    *,
+    expected_attempt_no: int,
+) -> Iterator[None]:
+    configured_interval = _agent_worker_setting("AGENT_WORKER_HEARTBEAT_SECONDS", 30)
+    stale_after = _agent_worker_setting("AGENT_WORKER_STALE_AFTER_SECONDS", 900)
+    interval_seconds = min(configured_interval, max(1, stale_after // 3))
+    stop_event = Event()
+
+    def refresh_until_stopped() -> None:
+        close_old_connections()
+        try:
+            while not stop_event.wait(interval_seconds):
+                try:
+                    refreshed = _refresh_agent_work_item_lease(
+                        work_item_id,
+                        expected_attempt_no=expected_attempt_no,
+                    )
+                except (DatabaseError, OSError):
+                    close_old_connections()
+                    continue
+                if not refreshed:
+                    break
+        finally:
+            close_old_connections()
+
+    heartbeat = Thread(
+        target=refresh_until_stopped,
+        name=f"agent-work-heartbeat-{work_item_id}",
+        daemon=True,
+    )
+    heartbeat.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        heartbeat.join(timeout=5)
 
 
 def _agent_work_item_skipped(
@@ -3584,7 +3990,9 @@ def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
         )
 
         job = work_item.job
-        active_node = _analysis_plan_first_node(_dict_or_empty(work_item.payload.get("analysis_plan")))
+        active_node = _analysis_plan_first_executable_node(
+            _dict_or_empty(work_item.payload.get("analysis_plan"))
+        )
         _update_job_worker_state(
             job,
             status=AnalysisJobStatus.RUNNING.value,
@@ -3659,6 +4067,7 @@ def _complete_agent_work_item(
     final_status: str,
     node_execution: dict[str, Any],
     persistence: dict[str, Any],
+    expected_attempt_no: int,
 ) -> dict[str, Any]:
     with transaction.atomic():
         work_item = (
@@ -3666,6 +4075,15 @@ def _complete_agent_work_item(
             .select_related("job", "job__session")
             .get(work_item_id=work_item_id)
         )
+        if not _worker_lease_is_current(
+            work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            return _agent_work_item_skipped(
+                "stale_worker_lease",
+                work_item_id=work_item_id,
+                current_status=work_item.status,
+            )
         job = work_item.job
         ai_session = AiSession.objects.filter(ai_session_id=persistence.get("ai_session_id")).first()
         work_item.ai_session = ai_session
@@ -3731,7 +4149,12 @@ def _complete_agent_work_item(
     }
 
 
-def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
+def _fail_agent_work_item(
+    work_item_id: str,
+    exc: Exception,
+    *,
+    expected_attempt_no: int,
+) -> dict[str, Any]:
     error_code = exc.__class__.__name__
     with transaction.atomic():
         work_item = (
@@ -3742,6 +4165,15 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
         )
         if work_item is None:
             return _agent_work_item_skipped("work_item_not_found", work_item_id=work_item_id)
+        if not _worker_lease_is_current(
+            work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            return _agent_work_item_skipped(
+                "stale_worker_lease",
+                work_item_id=work_item_id,
+                current_status=work_item.status,
+            )
 
         job = work_item.job
         can_retry = work_item.attempt_no < work_item.max_attempts
@@ -3757,7 +4189,7 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
         work_item.error_code = error_code
         work_item.result = {
             "error_code": error_code,
-            "message": _text(exc),
+            "message": "Agent worker execution failed.",
             "retryable": can_retry,
             "retry_after_seconds": int(retry_after.total_seconds()) if retry_after else 0,
         }
