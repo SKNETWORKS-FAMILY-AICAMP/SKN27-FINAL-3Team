@@ -44,7 +44,12 @@ def test_pending_result_uses_the_v2_contract_without_calling_composer() -> None:
 
     outcome = load_analysis_result(
         "job_queued",
-        load_job=lambda _job_id: {"job_id": "job_queued", "status": "queued"},
+        load_job=lambda _job_id: {
+            "job_id": "job_queued",
+            "status": "queued",
+            "work_item": {"id": "work_1", "state": "queued"},
+            "progress_state": {"current": 1, "total": 3},
+        },
         compose_response=lambda payload: composer_calls.append(payload),
     )
 
@@ -57,6 +62,8 @@ def test_pending_result_uses_the_v2_contract_without_calling_composer() -> None:
         "structured_results": {},
         "evidence": [],
         "limitations": [],
+        "work_item": {"id": "work_1", "state": "queued"},
+        "progress_state": {"current": 1, "total": 3},
     }
     assert composer_calls == []
 
@@ -103,6 +110,43 @@ def test_completed_result_normalizes_only_dict_agent_outputs_for_composer() -> N
             ],
         }
     ]
+
+
+def test_completed_result_preserves_persisted_presentation_fields() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    composed = {"contract_version": "analysis_result.v2", "status": "completed"}
+    outcome = load_analysis_result(
+        "job_done",
+        load_job=lambda _job_id: {
+            "job_id": "job_done",
+            "status": "completed",
+            "cards": [{"title": "next step"}],
+            "pending_questions": [{"question": "confirm facts"}],
+            "report_links": [{"url": "/reports/report_1"}],
+            "attachments": [{"attachment_id": "attachment_1"}],
+            "reporting_payload": {"report_id": "report_1"},
+            "supervisor_state": {"stage": "finalize"},
+            "supervisor_execution": {"status": "success"},
+            "work_item": {"id": "work_1", "state": "done"},
+            "progress_state": {"current": 3, "total": 3},
+        },
+        compose_response=lambda _payload: composed,
+    )
+
+    assert outcome.kind == "completed"
+    assert outcome.payload == {
+        **composed,
+        "cards": [{"title": "next step"}],
+        "pending_questions": [{"question": "confirm facts"}],
+        "report_links": [{"url": "/reports/report_1"}],
+        "attachments": [{"attachment_id": "attachment_1"}],
+        "reporting_payload": {"report_id": "report_1"},
+        "supervisor_state": {"stage": "finalize"},
+        "supervisor_execution": {"status": "success"},
+        "work_item": {"id": "work_1", "state": "done"},
+        "progress_state": {"current": 3, "total": 3},
+    }
 
 
 def test_result_reports_missing_job_without_calling_composer() -> None:

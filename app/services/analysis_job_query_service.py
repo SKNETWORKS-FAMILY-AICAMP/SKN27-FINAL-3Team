@@ -60,6 +60,8 @@ def load_analysis_result(
                 "structured_results": {},
                 "evidence": [],
                 "limitations": [],
+                "work_item": deepcopy(job.get("work_item")),
+                "progress_state": deepcopy(job.get("progress_state") or {}),
             },
         )
 
@@ -76,6 +78,19 @@ def load_analysis_result(
             "job_id": job_id,
             "status_counts": deepcopy(job.get("status_counts") or {}),
             "executions": executions,
+        }
+    )
+    result.update(
+        {
+            "cards": deepcopy(job.get("cards") or []),
+            "pending_questions": deepcopy(job.get("pending_questions") or []),
+            "report_links": deepcopy(job.get("report_links") or []),
+            "attachments": deepcopy(job.get("attachments") or []),
+            "reporting_payload": deepcopy(job.get("reporting_payload") or None),
+            "supervisor_state": deepcopy(job.get("supervisor_state") or None),
+            "supervisor_execution": deepcopy(job.get("supervisor_execution") or None),
+            "work_item": deepcopy(job.get("work_item")),
+            "progress_state": deepcopy(job.get("progress_state") or {}),
         }
     )
     return AnalysisJobQueryOutcome(kind="completed", payload=result)

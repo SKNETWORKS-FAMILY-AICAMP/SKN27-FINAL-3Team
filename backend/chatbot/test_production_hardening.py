@@ -11,7 +11,13 @@ from django.urls import Resolver404, resolve
 from chatbot.api_response import json_response
 from chatbot.models import ReportType
 from chatbot.runtime_health import build_runtime_health
-from chatbot.views import agent_nodes, analysis_jobs, analysis_result, submit_chat_message
+from chatbot.views import (
+    _analysis_job_access_response,
+    agent_nodes,
+    analysis_jobs,
+    analysis_result,
+    submit_chat_message,
+)
 
 
 class ProductionApiContractTests(SimpleTestCase):
@@ -27,6 +33,29 @@ class ProductionApiContractTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "live")
+
+    @patch("chatbot.views.get_analysis_job_access_metadata")
+    @patch("chatbot.views._canonical_guest_identity_policy_response")
+    def test_analysis_result_access_gate_honors_canonical_guest_policy(
+        self,
+        guest_policy,
+        access_metadata,
+    ) -> None:
+        denied = json_response(
+            RequestFactory().get("/api/analysis/results/job_1/"),
+            {"error": {"code": "guest_identity_invalid"}},
+            status=401,
+        )
+        guest_policy.return_value = denied
+        access_metadata.return_value = None
+
+        response = _analysis_job_access_response(
+            RequestFactory().get("/api/analysis/results/job_1/"),
+            "job_1",
+        )
+
+        self.assertIs(response, denied)
+        access_metadata.assert_not_called()
 
     @patch("chatbot.views.build_runtime_health")
     def test_readiness_endpoint_returns_503_when_a_required_probe_fails(self, health) -> None:

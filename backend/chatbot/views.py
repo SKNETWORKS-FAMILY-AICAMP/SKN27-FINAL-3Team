@@ -1965,10 +1965,14 @@ def _analysis_job_access_response(
     request: HttpRequest,
     job_id: str,
 ) -> JsonResponse | None:
+    identity_payload = _request_access_payload(request)
+    policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
+    if policy_response is not None:
+        return policy_response
     metadata = get_analysis_job_access_metadata(job_id)
     if metadata is None:
         return None
-    access = authorize_resource_access(metadata, _request_access_payload(request))
+    access = authorize_resource_access(metadata, identity_payload)
     if access["allowed"]:
         return None
     return _object_access_denied_response(request, access)
