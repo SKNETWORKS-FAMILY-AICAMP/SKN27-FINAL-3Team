@@ -1,7 +1,7 @@
 """Configurable retention deadlines shared by Case and file persistence.
 
-This module only calculates ``retention_expires_at``. Physical DB and S3 purge
-is deliberately deferred to the next retention-enforcement PR.
+``chatbot.file_retention_service`` enforces these deadlines by deleting clean
+and quarantine objects and scrubbing expired upload rows to tombstones.
 """
 
 from __future__ import annotations

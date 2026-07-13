@@ -160,6 +160,10 @@ def test_object_storage_error_does_not_expose_exception_message() -> None:
 def test_external_file_scan_metadata_is_recursively_sanitized() -> None:
     metadata = {
         "safe": "retained",
+        "source_storage_uri": "mock://uploads/private/raw.bin",
+        "upload_storage_lifecycle": {
+            "quarantine": {"bucket": "private-quarantine-bucket"}
+        },
         "nested": {
             "apiKey": "secret-api-key-value",
             "providerApiKeyBackup": "backup-provider-secret",
@@ -198,6 +202,28 @@ def test_file_scan_unexpected_provider_responses_use_stable_messages() -> None:
     assert clamav[0]["message"] == "ClamAV returned an unexpected response."
     assert external[0]["message"] == "External scan provider returned an unexpected response."
     assert rejected[0]["code"] == "external_scan_rejected"
+
+
+def test_file_scan_empty_provider_responses_fail_closed() -> None:
+    clamav = file_scan_service._clamav_findings_from_response("")
+    external = file_scan_service._external_findings_from_response({})
+
+    assert clamav[0]["code"] == "scanner_unavailable"
+    assert clamav[0]["reason"] == "empty_response"
+    assert external[0]["code"] == "scanner_unavailable"
+    assert external[0]["reason"] == "missing_verdict"
+
+    missing_verdict_with_findings = file_scan_service._external_findings_from_response(
+        {"findings": [{"category": "provider", "severity": "low"}]}
+    )
+    malicious_with_low_finding = file_scan_service._external_findings_from_response(
+        {
+            "status": "malicious",
+            "findings": [{"category": "provider", "severity": "low"}],
+        }
+    )
+    assert missing_verdict_with_findings[0]["code"] == "scanner_unavailable"
+    assert malicious_with_low_finding[-1]["code"] == "external_scan_rejected"
 
 
 def test_external_provider_findings_drop_untrusted_diagnostic_fields() -> None:

@@ -72,11 +72,15 @@ from chatbot.models import (
     UploadedFileStatus,
 )
 from chatbot.object_storage import (
+    build_quarantine_upload_storage_reference,
     build_report_storage_reference,
     build_upload_storage_reference,
     copy_object,
     delete_object,
+    delete_source_uri,
+    object_storage_bucket,
     object_storage_policy,
+    object_storage_prefix,
     storage_reference_from_uri,
     write_object,
     write_object_from_source_uri,
@@ -95,6 +99,11 @@ REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
 ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
 REPORT_PDF_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_report_renderer.py"
+UPLOAD_STORAGE_LIFECYCLE_VERSION = "upload_storage_lifecycle.v1"
+REPORT_STAGING_CLEANUP_BATCH_VERSION = "report_staging_cleanup_batch.v1"
+REPORT_STAGING_CLEANUP_PENDING = "staging_cleanup_pending"
+SUCCESSFUL_STORAGE_DELETE_STATUSES = {"deleted", "not_found"}
+DEFAULT_REPORT_STAGING_CLEANUP_LIMIT = 100
 
 
 class ReportReferenceError(ValueError):
@@ -107,6 +116,30 @@ class ReportReferenceError(ValueError):
 
 class AuthSessionStateError(ValueError):
     """Fail-closed auth-session persistence error safe to expose as a reason code."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class UploadStorageUnavailableError(RuntimeError):
+    """Retryable upload error raised when quarantine persistence did not finish."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__("quarantine object storage is unavailable")
+        self.reason = reason or "quarantine_write_failed"
+
+
+class AttachmentScanGateError(RuntimeError):
+    """Queued work item no longer has access to every requested attachment."""
+
+    def __init__(self) -> None:
+        super().__init__("queued attachment is no longer available")
+        self.reason = "attachment_scan_gate_blocked"
+
+
+class UploadValidationError(ValueError):
+    """Stable validation error for canonical upload boundary requirements."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
@@ -449,11 +482,28 @@ def register_uploaded_file(
     metadata exposes the object-storage adapter URI and fallback envelope.
     """
 
+    if not _text(payload.get("session_id")):
+        raise UploadValidationError("session_id_required")
+    owner_id = _owner_id(payload)
+    guest_id = _payload_guest_id(payload)
+    _get_or_create_session(
+        payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=guest_id,
+    )
     registration_payload = dict(payload)
     registration_payload.pop("attachment_id", None)
-    attachment = register_mock_attachment(registration_payload, upload_file=upload_file)
-    owner_id = _owner_id(payload)
-    return persist_uploaded_file_metadata(attachment, owner_id=owner_id, raw_payload=payload)
+    attachment = register_mock_attachment(
+        registration_payload,
+        upload_file=upload_file,
+        max_upload_bytes=int(getattr(settings, "FILE_UPLOAD_MAX_BYTES", 20 * 1024 * 1024)),
+    )
+    return persist_uploaded_file_metadata(
+        attachment,
+        owner_id=owner_id,
+        raw_payload=payload,
+        binary_upload=upload_file is not None,
+    )
 
 
 def persist_uploaded_file_metadata(
@@ -461,8 +511,16 @@ def persist_uploaded_file_metadata(
     *,
     owner_id: str = "",
     raw_payload: dict[str, Any] | None = None,
+    binary_upload: bool | None = None,
 ) -> dict[str, Any]:
-    session = _get_or_create_session(attachment.get("session_id"), owner_id=owner_id)
+    if not _text(attachment.get("session_id")):
+        raise UploadValidationError("session_id_required")
+    guest_id = _payload_guest_id(raw_payload or {})
+    session = _get_or_create_session(
+        attachment.get("session_id"),
+        owner_id=owner_id,
+        guest_id=guest_id,
+    )
     if session is not None and session.owner_id and session.owner_id != owner_id:
         raise PermissionError("session does not belong to authenticated owner")
     case = None
@@ -499,7 +557,7 @@ def persist_uploaded_file_metadata(
         )
     retention_expires_at = upload_retention_expires_at(
         owner_id=effective_owner_id,
-        guest_id=_text((raw_payload or {}).get("guest_id")),
+        guest_id=guest_id,
         file_type=_text(attachment.get("type")),
         content_type=_text(attachment.get("content_type")),
     )
@@ -508,20 +566,77 @@ def persist_uploaded_file_metadata(
         attachment,
         owner_id=effective_owner_id,
     )
-    object_storage_write = write_object_from_source_uri(
-        object_storage,
+    quarantine_storage = build_quarantine_upload_storage_reference(
+        attachment,
+        owner_id=effective_owner_id,
+    )
+    quarantine_write = write_object_from_source_uri(
+        quarantine_storage,
         fallback_payload=attachment,
     )
-    object_storage["write_result"] = object_storage_write
-    object_storage["status"] = object_storage_write["status"]
-    object_storage["writes_binary"] = object_storage_write["writes_binary"]
-    object_storage["persistence_state"] = object_storage_write["persistence_state"]
-    metadata["source_storage_uri"] = _text(attachment.get("storage_uri"))
+    quarantine_ready = (
+        quarantine_write.get("status") == "written"
+        and bool(quarantine_write.get("exists"))
+    )
+    source_storage_uri = _text(attachment.get("storage_uri"))
+    has_binary_upload = (
+        binary_upload
+        if binary_upload is not None
+        else source_storage_uri.startswith("mock://uploads/")
+    )
+    if not quarantine_ready and has_binary_upload:
+        delete_source_uri(source_storage_uri, attachment_id=attachment_id)
+        raise UploadStorageUnavailableError(
+            _text(quarantine_write.get("reason")) or "quarantine_write_failed"
+        )
+    source_cleanup = (
+        delete_source_uri(source_storage_uri, attachment_id=attachment_id)
+        if quarantine_ready or not has_binary_upload
+        else {"status": "retained", "reason": "quarantine_write_incomplete"}
+    )
+    upload_scan_status = (
+        "not_started"
+        if quarantine_ready
+        else (
+            "awaiting_upload"
+            if quarantine_write.get("reason") == "source_file_unavailable"
+            else "upload_error"
+        )
+    )
+    upload_status = (
+        UploadedFileStatus.UPLOADED
+        if quarantine_ready
+        else UploadedFileStatus.PENDING
+    )
+    object_storage.update(
+        {
+            "status": "pending_scan" if quarantine_ready else "awaiting_upload",
+            "writes_binary": False,
+            "persistence_state": "quarantine_pending",
+        }
+    )
+    quarantine_storage.update(
+        {
+            "status": quarantine_write.get("status"),
+            "writes_binary": bool(quarantine_write.get("writes_binary")),
+            "persistence_state": quarantine_write.get("persistence_state"),
+        }
+    )
+    metadata["source_storage_uri"] = source_storage_uri
     metadata["object_storage"] = object_storage
-    metadata["object_storage_write"] = object_storage_write
+    metadata["object_storage_write"] = quarantine_write
+    metadata["upload_storage_lifecycle"] = {
+        "contract_version": UPLOAD_STORAGE_LIFECYCLE_VERSION,
+        "state": "quarantined" if quarantine_ready else upload_scan_status,
+        "quarantine": quarantine_storage,
+        "clean": object_storage,
+        "quarantine_write": quarantine_write,
+        "source_cleanup": source_cleanup,
+    }
     agent_handoff = dict(attachment.get("agent_handoff") or {})
     agent_handoff["storage_uri"] = object_storage["storage_uri"]
     agent_handoff["object_storage"] = object_storage
+    agent_handoff["scan_status"] = upload_scan_status
 
     with transaction.atomic():
         existing_file = (
@@ -548,8 +663,8 @@ def persist_uploaded_file_metadata(
                 "size_bytes": _positive_int_or_none(attachment.get("size_bytes")),
                 "storage_uri": object_storage["storage_uri"],
                 "privacy_risk": True,
-                "status": _model_status(attachment.get("status")),
-                "scan_status": "not_started",
+                "status": upload_status,
+                "scan_status": upload_scan_status,
                 "agent_handoff": agent_handoff,
                 "metadata": metadata,
                 "retention_expires_at": retention_expires_at,
@@ -725,7 +840,11 @@ def persist_chat_message_analysis_boundary(
     """Persist the canonical chat message and its analysis-job boundary."""
 
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(chat_response.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        chat_response.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("chat_response must include session_id")
 
@@ -1688,7 +1807,11 @@ def persist_analysis_job_execution(
     """Persist a canonical analysis job and its agent execution outputs."""
 
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        job_payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("job_payload must include session_id")
 
@@ -1832,7 +1955,11 @@ def reserve_analysis_job_request(
     normalized_job_id = _text(job_id)
     normalized_fingerprint = _text(request_fingerprint)
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if not normalized_job_id or not normalized_fingerprint or session is None:
         raise ValueError("job_id, request_fingerprint, and session_id are required")
     if owner_id and session.owner_id and session.owner_id != owner_id:
@@ -1992,7 +2119,11 @@ def enqueue_analysis_job_work(
     """Persist a queued worker item without executing the agent plan inline."""
 
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        job_payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("job_payload must include session_id")
     if owner_id and session.owner_id and session.owner_id != owner_id:
@@ -2352,7 +2483,15 @@ def persist_report_action(
 
     owner_id = _owner_id(payload)
     job = AnalysisJob.objects.filter(job_id=_text(payload.get("job_id"))).first()
-    session = job.session if job else _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
+    session = (
+        job.session
+        if job
+        else _get_or_create_session(
+            payload.get("session_id"),
+            owner_id=owner_id,
+            guest_id=_payload_guest_id(payload),
+        )
+    )
     display_result = _display_result_for_job(job)
     report_quality = _report_quality_snapshot(job, display_result, report_payload)
     report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
@@ -2384,6 +2523,7 @@ def persist_report_action(
         source_uri=source_storage_uri,
     )
 
+    cleanup_pending_report_pk: int | None = None
     with transaction.atomic():
         locked_case = (
             Case.objects.select_for_update().get(pk=case.pk)
@@ -2416,6 +2556,15 @@ def persist_report_action(
                     existing_report,
                     report_quality=report_quality,
                 )
+            if (
+                _text(
+                    _dict_or_empty(existing_report.metadata).get(
+                        "persistence_state"
+                    )
+                )
+                == REPORT_STAGING_CLEANUP_PENDING
+            ):
+                cleanup_pending_report_pk = existing_report.pk
             report = existing_report
         else:
             version_no = locked_case.current_report_version + 1 if locked_case is not None else 1
@@ -2471,6 +2620,11 @@ def persist_report_action(
                 locked_case.current_report_version = version_no
                 locked_case.save(update_fields=["current_report_version", "updated_at"])
 
+    if cleanup_pending_report_pk is not None:
+        _purge_pending_report_staging_object(cleanup_pending_report_pk)
+        report = Report.objects.get(pk=cleanup_pending_report_pk)
+        return _report_persistence_result(report, report_quality=report_quality)
+
     staging_storage = _staging_report_storage_reference(object_storage)
     try:
         staging_write = write_object(
@@ -2486,14 +2640,22 @@ def persist_report_action(
         )
     except Exception:
         cleanup = _safe_delete_staged_object(staging_storage)
-        _mark_report_storage_failure(report.pk, cleanup=cleanup)
+        _mark_report_storage_failure(
+            report.pk,
+            cleanup=cleanup,
+            staging_storage=staging_storage,
+        )
         raise
     if staging_write.get("writes_binary"):
         try:
             promotion = copy_object(staging_storage, object_storage)
         except Exception:
             cleanup = _safe_delete_staged_object(staging_storage)
-            _mark_report_storage_failure(report.pk, cleanup=cleanup)
+            _mark_report_storage_failure(
+                report.pk,
+                cleanup=cleanup,
+                staging_storage=staging_storage,
+            )
             raise
     else:
         promotion = {
@@ -2502,10 +2664,18 @@ def persist_report_action(
             "persistence_state": "staging_write_failed",
             "reason": "staging_write_failed",
         }
-    cleanup = (
-        _safe_delete_staged_object(staging_storage)
-        if staging_write.get("writes_binary")
-        else {"status": "not_required"}
+    cleanup = _safe_delete_staged_object(staging_storage)
+    cleanup_completed = _report_staging_cleanup_completed(
+        cleanup,
+        reference=staging_storage,
+    )
+    cleanup_target_state = (
+        "finalized" if promotion.get("writes_binary") else "storage_failed"
+    )
+    persistence_state = (
+        cleanup_target_state
+        if cleanup_completed
+        else REPORT_STAGING_CLEANUP_PENDING
     )
     finalized_storage = {
         **object_storage,
@@ -2527,11 +2697,15 @@ def persist_report_action(
                 "object_storage_write": promotion,
                 "object_storage_staging_write": staging_write,
                 "object_storage_staging_cleanup": cleanup,
-                "persistence_state": (
-                    "finalized" if promotion.get("writes_binary") else "storage_failed"
+                "object_storage_staging": _minimal_report_storage_reference(
+                    staging_storage
                 ),
+                "staging_cleanup_target_state": cleanup_target_state,
+                "persistence_state": persistence_state,
             }
         )
+        if persistence_state != REPORT_STAGING_CLEANUP_PENDING:
+            metadata.pop("staging_cleanup_target_state", None)
         report.content = content
         report.metadata = metadata
         report.save(update_fields=["content", "metadata", "updated_at"])
@@ -2571,17 +2745,33 @@ def _mark_report_storage_failure(
     report_pk: int,
     *,
     cleanup: dict[str, Any],
+    staging_storage: dict[str, Any],
 ) -> None:
     with transaction.atomic():
         failed_report = Report.objects.select_for_update().get(pk=report_pk)
         metadata = dict(failed_report.metadata or {})
+        cleanup_completed = _report_staging_cleanup_completed(
+            cleanup,
+            reference=staging_storage,
+        )
         metadata.update(
             {
                 "object_storage_status": "failed",
                 "object_storage_staging_cleanup": cleanup,
-                "persistence_state": "storage_failed",
+                "object_storage_staging": _minimal_report_storage_reference(
+                    staging_storage
+                ),
+                "persistence_state": (
+                    "storage_failed"
+                    if cleanup_completed
+                    else REPORT_STAGING_CLEANUP_PENDING
+                ),
             }
         )
+        if cleanup_completed:
+            metadata.pop("staging_cleanup_target_state", None)
+        else:
+            metadata["staging_cleanup_target_state"] = "storage_failed"
         failed_report.metadata = metadata
         failed_report.save(update_fields=["metadata", "updated_at"])
 
@@ -2595,6 +2785,145 @@ def _staging_report_storage_reference(reference: dict[str, Any]) -> dict[str, An
     staging["storage_uri"] = f"s3://{bucket}/{staging_key}" if bucket else staging_key
     staging["resource_id"] = f"{_text(reference.get('resource_id'))}:staging"
     return staging
+
+
+def purge_pending_report_staging(*, limit: int | None = None) -> dict[str, Any]:
+    """Retry deletion of staged report objects before finalizing their state."""
+
+    resolved_limit = _positive_report_staging_cleanup_limit(limit)
+    queryset = (
+        Report.objects.filter(
+            metadata__persistence_state=REPORT_STAGING_CLEANUP_PENDING
+        )
+        .order_by("updated_at", "pk")
+        .values_list("pk", flat=True)
+    )
+    selected_pks = list(queryset[:resolved_limit])
+    batch = {
+        "contract_version": REPORT_STAGING_CLEANUP_BATCH_VERSION,
+        "status": "pass",
+        "selected": len(selected_pks),
+        "cleaned": 0,
+        "retryable": 0,
+        "skipped": 0,
+    }
+    for report_pk in selected_pks:
+        outcome = _purge_pending_report_staging_object(report_pk)
+        batch[outcome] += 1
+    if batch["retryable"]:
+        batch["status"] = "warn"
+    return batch
+
+
+def _purge_pending_report_staging_object(report_pk: int) -> str:
+    report = Report.objects.filter(pk=report_pk).first()
+    if report is None:
+        return "skipped"
+    metadata = _dict_or_empty(report.metadata)
+    if _text(metadata.get("persistence_state")) != REPORT_STAGING_CLEANUP_PENDING:
+        return "skipped"
+    staging_reference = _validated_report_staging_reference(report)
+    if not staging_reference:
+        cleanup = {"status": "skipped", "reason": "staging_reference_invalid"}
+    else:
+        cleanup = _safe_delete_staged_object(staging_reference)
+    cleanup_completed = bool(staging_reference) and _report_staging_cleanup_completed(
+        cleanup,
+        reference=staging_reference,
+    )
+
+    with transaction.atomic():
+        locked_report = Report.objects.select_for_update().filter(pk=report_pk).first()
+        if locked_report is None:
+            return "skipped"
+        locked_metadata = _dict_or_empty(locked_report.metadata)
+        if (
+            _text(locked_metadata.get("persistence_state"))
+            != REPORT_STAGING_CLEANUP_PENDING
+        ):
+            return "skipped"
+        locked_metadata["object_storage_staging_cleanup"] = cleanup
+        if cleanup_completed:
+            locked_metadata["persistence_state"] = (
+                _text(locked_metadata.get("staging_cleanup_target_state"))
+                or "finalized"
+            )
+            locked_metadata.pop("staging_cleanup_target_state", None)
+        locked_report.metadata = locked_metadata
+        locked_report.save(update_fields=["metadata", "updated_at"])
+    return "cleaned" if cleanup_completed else "retryable"
+
+
+def _validated_report_staging_reference(report: Report) -> dict[str, Any]:
+    metadata = _dict_or_empty(report.metadata)
+    final_reference = _dict_or_empty(metadata.get("object_storage"))
+    if (
+        _text(final_reference.get("resource_type")) != "report"
+        or _text(final_reference.get("resource_id")) != report.report_id
+        or _text(final_reference.get("bucket")) != object_storage_bucket()
+    ):
+        return {}
+    final_key = _text(final_reference.get("key"))
+    prefix = object_storage_prefix().strip("/")
+    expected_prefix = f"{prefix}/reports/" if prefix else "reports/"
+    if (
+        not final_key.startswith(expected_prefix)
+        or ".." in final_key.split("/")
+        or "\\" in final_key
+    ):
+        return {}
+    expected = _staging_report_storage_reference(final_reference)
+    stored = _dict_or_empty(metadata.get("object_storage_staging"))
+    for field in ("provider", "bucket", "key", "resource_type", "resource_id"):
+        if stored and _text(stored.get(field)) != _text(expected.get(field)):
+            return {}
+    return expected
+
+
+def _report_staging_cleanup_completed(
+    cleanup: dict[str, Any],
+    *,
+    reference: dict[str, Any],
+) -> bool:
+    if cleanup.get("status") not in SUCCESSFUL_STORAGE_DELETE_STATUSES:
+        return False
+    provider = _text(reference.get("provider")) or _text(
+        object_storage_policy().get("provider")
+    )
+    return provider != "s3" or bool(cleanup.get("permanent"))
+
+
+def _minimal_report_storage_reference(reference: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: reference[key]
+        for key in (
+            "policy_version",
+            "backend",
+            "provider",
+            "bucket",
+            "key",
+            "resource_type",
+            "resource_id",
+        )
+        if reference.get(key) not in (None, "")
+    }
+
+
+def _positive_report_staging_cleanup_limit(value: int | None) -> int:
+    raw_value = (
+        value
+        if value is not None
+        else getattr(
+            settings,
+            "REPORT_STAGING_CLEANUP_LIMIT",
+            DEFAULT_REPORT_STAGING_CLEANUP_LIMIT,
+        )
+    )
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return DEFAULT_REPORT_STAGING_CLEANUP_LIMIT
+    return parsed if parsed > 0 else DEFAULT_REPORT_STAGING_CLEANUP_LIMIT
 
 
 def _report_request_fingerprint(
@@ -2852,10 +3181,25 @@ def authorize_report_download_metadata(
 
 def access_subject_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     auth_context = _dict_or_empty(payload.get("auth_context"))
-    user_id = _owner_id(payload) or _text(auth_context.get("user_id"))
-    guest_id = _normalize_guest_id(payload.get("guest_id") or auth_context.get("guest_id"))
+    context_has_identity = any(
+        key in auth_context
+        for key in (
+            "subject_id",
+            "subject_type",
+            "user_id",
+            "guest_id",
+            "auth_session_id",
+        )
+    )
+    if context_has_identity:
+        user_id = _text(auth_context.get("user_id"))
+        guest_id = _normalize_guest_id(auth_context.get("guest_id"))
+        auth_session_id = _text(auth_context.get("auth_session_id"))
+    else:
+        user_id = _owner_id(payload)
+        guest_id = _normalize_guest_id(payload.get("guest_id"))
+        auth_session_id = _text(payload.get("auth_session_id"))
     session_id = _text(payload.get("session_id") or auth_context.get("session_id"))
-    auth_session_id = _text(payload.get("auth_session_id") or auth_context.get("auth_session_id"))
 
     if user_id:
         subject_type = "user"
@@ -2905,8 +3249,13 @@ def authorize_resource_access(
         allowed = bool(session_id and session_id == resource_session_id)
         reason = "session_match" if allowed else "session_mismatch"
     else:
-        allowed = True
-        reason = "legacy_unowned_resource"
+        object_identifiers = (
+            resource.get("attachment_id"),
+            resource.get("job_id"),
+            resource.get("report_id"),
+        )
+        allowed = not any(_text(value) for value in object_identifiers)
+        reason = "unscoped_collection" if allowed else "unbound_resource"
 
     return {
         "contract_version": "object_access.v1",
@@ -3336,23 +3685,65 @@ def _uploaded_file_object_storage(uploaded_file: UploadedFile) -> dict[str, Any]
     )
 
 
-def _get_or_create_session(session_id: Any, *, owner_id: str) -> ChatSession | None:
+def _get_or_create_session(
+    session_id: Any,
+    *,
+    owner_id: str,
+    guest_id: str = "",
+) -> ChatSession | None:
     normalized_session_id = _text(session_id)
     if not normalized_session_id:
         return None
 
-    session, _created = ChatSession.objects.get_or_create(
-        session_id=normalized_session_id,
-        defaults={
-            "owner_id": owner_id,
-            "status": ChatSessionStatus.ACTIVE,
-            "metadata": {"created_by": "canonical_file_upload"},
-        },
+    normalized_owner_id = _text(owner_id)
+    normalized_guest_id = _normalize_guest_id(guest_id)
+    initial_auth_context = (
+        {"guest_id": normalized_guest_id, "subject_type": "guest"}
+        if normalized_guest_id
+        else {}
     )
-    if owner_id and not session.owner_id:
-        session.owner_id = owner_id
-        session.save(update_fields=["owner_id", "updated_at"])
-    return session
+    with transaction.atomic():
+        session, created = ChatSession.objects.select_for_update().get_or_create(
+            session_id=normalized_session_id,
+            defaults={
+                "owner_id": normalized_owner_id,
+                "status": ChatSessionStatus.ACTIVE,
+                "metadata": {
+                    "created_by": "canonical_session_binding",
+                    **(
+                        {"auth_context": initial_auth_context}
+                        if initial_auth_context
+                        else {}
+                    ),
+                },
+            },
+        )
+        if created:
+            return session
+
+        existing_guest_id = _chat_session_guest_id(session)
+        if session.owner_id:
+            if not normalized_owner_id or session.owner_id != normalized_owner_id:
+                raise PermissionError("session belongs to another identity")
+            return session
+
+        if normalized_owner_id:
+            if not existing_guest_id:
+                raise PermissionError("unbound session cannot be claimed")
+            if not normalized_guest_id or existing_guest_id != normalized_guest_id:
+                raise PermissionError("guest session binding does not match")
+            session.owner_id = normalized_owner_id
+            session.save(update_fields=["owner_id", "updated_at"])
+            return session
+
+        if existing_guest_id:
+            if not normalized_guest_id or existing_guest_id != normalized_guest_id:
+                raise PermissionError("guest session binding does not match")
+            return session
+
+        if normalized_guest_id:
+            raise PermissionError("unbound session cannot be claimed")
+        return session
 
 
 def _conversation_save_state_result(status: str, save_state: str, *, reason: str | None = None) -> dict[str, Any]:
@@ -3462,7 +3853,11 @@ def _bind_chat_session_auth_context(
     owner_id: str,
     auth_context: dict[str, Any],
 ) -> ChatSession | None:
-    session = _get_or_create_session(session_id, owner_id=owner_id)
+    session = _get_or_create_session(
+        session_id,
+        owner_id=owner_id,
+        guest_id=_normalize_guest_id(auth_context.get("guest_id")),
+    )
     if session is None:
         return None
 
@@ -3552,6 +3947,11 @@ def _json_compatible(value: Any) -> Any:
 
 def _owner_id(payload: dict[str, Any]) -> str:
     return _text(payload.get("owner_id") or payload.get("user_id"))
+
+
+def _payload_guest_id(payload: dict[str, Any]) -> str:
+    auth_context = _dict_or_empty(payload.get("auth_context"))
+    return _normalize_guest_id(payload.get("guest_id") or auth_context.get("guest_id"))
 
 
 def _message_content(payload: dict[str, Any]) -> str:
@@ -4033,6 +4433,17 @@ def _execute_agent_work_item_plan(work_item: AgentWorkItem) -> dict[str, Any]:
     execution_payload.setdefault("job_id", work_item.job.job_id)
     execution_payload.setdefault("session_id", work_item.job.session.session_id)
     execution_payload.setdefault("message_id", _text(job_payload.get("message_id")))
+    if "attachments" in execution_payload or "attachment_ids" in execution_payload:
+        from chatbot.file_scan_service import apply_attachment_scan_gate
+
+        execution_payload = apply_attachment_scan_gate(execution_payload)
+        if _list_or_empty(execution_payload.get("blocked_attachments")):
+            raise AttachmentScanGateError
+        from app.services.attachment_mock_service import (
+            resolve_attachment_references,
+        )
+
+        execution_payload = resolve_attachment_references(execution_payload)
     return execute_agent_plan(analysis_plan, execution_payload)
 
 

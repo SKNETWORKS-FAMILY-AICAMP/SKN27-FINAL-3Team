@@ -25,10 +25,47 @@ SUPPORTED_PURPOSES = {
 MAX_MOCK_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
+class _CanonicalScanGateMarker(str):
+    """JSON-safe in-process provenance marker that still requires identity."""
+
+    __slots__ = ()
+
+    def __new__(cls) -> "_CanonicalScanGateMarker":
+        return str.__new__(cls, "canonical-scan-gate")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "_CanonicalScanGateMarker":
+        del memo
+        return self
+
+
+CANONICAL_SCAN_GATE_MARKER = _CanonicalScanGateMarker()
+
+
+class UploadTooLargeError(ValueError):
+    """Raised before an oversized upload can become a durable local object."""
+
+    def __init__(self, *, size_bytes: int, limit_bytes: int) -> None:
+        super().__init__("uploaded file exceeds the configured size limit")
+        self.size_bytes = size_bytes
+        self.limit_bytes = limit_bytes
+
+
 def register_attachment(
     payload: dict[str, Any],
     upload_file: Any | None = None,
+    *,
+    max_upload_bytes: int | None = None,
 ) -> dict[str, Any]:
+    upload_limit = _positive_upload_limit(max_upload_bytes)
+    declared_size = getattr(upload_file, "size", None)
+    if upload_file is not None and declared_size is not None:
+        normalized_size = int(declared_size)
+        if normalized_size > upload_limit:
+            raise UploadTooLargeError(
+                size_bytes=normalized_size,
+                limit_bytes=upload_limit,
+            )
+
     attachment_id = payload.get("attachment_id") or f"att_{uuid4().hex[:12]}"
     original_filename = _original_filename(payload, upload_file)
     safe_filename = _safe_filename(original_filename)
@@ -43,7 +80,19 @@ def register_attachment(
     size_bytes = int(payload.get("size_bytes") or 0)
     if upload_file is not None:
         stored_path = upload_dir / safe_filename
-        size_bytes = _write_upload(stored_path, upload_file)
+        try:
+            size_bytes = _write_upload(
+                stored_path,
+                upload_file,
+                max_bytes=upload_limit,
+            )
+        except UploadTooLargeError:
+            stored_path.unlink(missing_ok=True)
+            try:
+                upload_dir.rmdir()
+            except OSError:
+                pass
+            raise
 
     storage_uri = (
         f"mock://uploads/{attachment_id}/{safe_filename}"
@@ -67,8 +116,8 @@ def register_attachment(
         "status": status,
         "created_at": now,
         "checks": {
-            "accepted": size_bytes <= MAX_MOCK_UPLOAD_BYTES,
-            "size_limit_bytes": MAX_MOCK_UPLOAD_BYTES,
+            "accepted": size_bytes <= upload_limit,
+            "size_limit_bytes": upload_limit,
             "extension": Path(safe_filename).suffix.lower(),
             "metadata_sidecar": f"mock://uploads/{attachment_id}/metadata.json",
         },
@@ -129,6 +178,13 @@ def resolve_attachment_references(payload: dict[str, Any]) -> dict[str, Any]:
 
     for attachment in attachments:
         attachment_id = attachment.get("attachment_id")
+
+        if _is_canonical_scan_ready_reference(attachment):
+            resolved_attachments.append(_merge_attachment_metadata(attachment, {}))
+            if attachment_id:
+                resolution["resolved_attachment_ids"].append(str(attachment_id))
+            continue
+
         metadata = get_attachment(str(attachment_id)) if attachment_id else None
 
         if metadata:
@@ -138,6 +194,7 @@ def resolve_attachment_references(payload: dict[str, Any]) -> dict[str, Any]:
 
         if _has_inline_metadata(attachment):
             inline_attachment = dict(attachment)
+            inline_attachment.pop("_canonical_scan_gate", None)
             inline_attachment["resolution_status"] = "inline_metadata"
             resolved_attachments.append(inline_attachment)
             if attachment_id:
@@ -146,6 +203,7 @@ def resolve_attachment_references(payload: dict[str, Any]) -> dict[str, Any]:
             continue
 
         unresolved_attachment = dict(attachment)
+        unresolved_attachment.pop("_canonical_scan_gate", None)
         unresolved_attachment["resolution_status"] = "unresolved"
         resolved_attachments.append(unresolved_attachment)
         if attachment_id:
@@ -210,14 +268,36 @@ def _normalize_purpose(purpose: str) -> str:
     return purpose if purpose in SUPPORTED_PURPOSES else "unknown"
 
 
-def _write_upload(stored_path: Path, upload_file: Any) -> int:
+def _write_upload(
+    stored_path: Path,
+    upload_file: Any,
+    *,
+    max_bytes: int,
+) -> int:
     size_bytes = 0
-    with stored_path.open("wb") as file_handle:
-        chunks = upload_file.chunks() if hasattr(upload_file, "chunks") else [upload_file.read()]
-        for chunk in chunks:
-            file_handle.write(chunk)
-            size_bytes += len(chunk)
+    try:
+        with stored_path.open("wb") as file_handle:
+            chunks = upload_file.chunks() if hasattr(upload_file, "chunks") else [upload_file.read()]
+            for chunk in chunks:
+                next_size = size_bytes + len(chunk)
+                if next_size > max_bytes:
+                    raise UploadTooLargeError(
+                        size_bytes=next_size,
+                        limit_bytes=max_bytes,
+                    )
+                file_handle.write(chunk)
+                size_bytes = next_size
+    except Exception:
+        stored_path.unlink(missing_ok=True)
+        raise
     return size_bytes
+
+
+def _positive_upload_limit(value: int | None) -> int:
+    if value is None:
+        return MAX_MOCK_UPLOAD_BYTES
+    normalized = int(value)
+    return normalized if normalized > 0 else MAX_MOCK_UPLOAD_BYTES
 
 
 def _write_metadata(metadata_path: Path, attachment: dict[str, Any]) -> None:
@@ -262,6 +342,18 @@ def _merge_attachment_metadata(
     attachment_ref: dict[str, Any],
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
+    if _is_canonical_scan_ready_reference(attachment_ref):
+        attachment = {
+            **attachment_ref,
+            "resolution_status": "scan_ready",
+            "metadata_source": "canonical_scan_gate",
+        }
+        return {
+            key: value
+            for key, value in attachment.items()
+            if key != "_canonical_scan_gate" and value is not None
+        }
+
     handoff = metadata.get("agent_handoff", {})
     attachment = {
         **attachment_ref,
@@ -274,6 +366,24 @@ def _merge_attachment_metadata(
         "metadata_source": "mock_upload_registry",
     }
     return {key: value for key, value in attachment.items() if value is not None}
+
+
+def _is_canonical_scan_ready_reference(attachment_ref: dict[str, Any]) -> bool:
+    object_storage = attachment_ref.get("object_storage")
+    if not isinstance(object_storage, dict):
+        return False
+    storage_uri = str(attachment_ref.get("storage_uri") or "")
+    return (
+        attachment_ref.get("_canonical_scan_gate")
+        is CANONICAL_SCAN_GATE_MARKER
+        and attachment_ref.get("resolution_status") == "scan_ready"
+        and attachment_ref.get("status") == "ready"
+        and attachment_ref.get("scan_status") == "clean"
+        and storage_uri.startswith("s3://")
+        and object_storage.get("resource_type") == "uploaded_file"
+        and object_storage.get("status") == "ready"
+        and object_storage.get("storage_uri") == storage_uri
+    )
 
 
 def _normalize_inline_attachment(attachment: dict[str, Any]) -> dict[str, Any]:

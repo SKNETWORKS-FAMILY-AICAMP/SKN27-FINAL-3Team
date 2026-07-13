@@ -99,7 +99,7 @@ def test_design_doc_and_feature_flags_are_versioned() -> None:
     assert "AWS_OPS_MCP_ENABLED" not in env_example
 
 
-def test_retention_policy_explicitly_defers_physical_db_and_s3_purge_worker() -> None:
+def test_retention_policy_documents_physical_db_and_s3_purge_worker() -> None:
     retention_doc = read_text(ROOT / "docs" / "ops" / "retention-enforcement-follow-up.md")
 
     for token in (
@@ -109,7 +109,11 @@ def test_retention_policy_explicitly_defers_physical_db_and_s3_purge_worker() ->
         "원본 이미지·영상 30일",
         "retention_expires_at",
         "DB·S3 실제 삭제 worker",
-        "다음 PR",
+        "purge_expired_uploads",
+        "retryable",
+        "tombstone",
         "사용자 명시 삭제",
     ):
         assert token in retention_doc
+
+    assert "다음 PR에서 구현" not in retention_doc

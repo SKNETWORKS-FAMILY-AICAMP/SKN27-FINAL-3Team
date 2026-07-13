@@ -7,6 +7,7 @@ import time
 
 from django.core.management.base import BaseCommand
 
+from chatbot.file_retention_service import purge_expired_uploads
 from chatbot.file_scan_service import process_uploaded_file_scans
 
 
@@ -19,6 +20,12 @@ class Command(BaseCommand):
         parser.add_argument("--loop", action="store_true", help="Keep polling until interrupted.")
         parser.add_argument("--sleep-seconds", type=int, default=5, help="Polling delay when --loop is set.")
         parser.add_argument("--max-loops", type=int, default=0, help="Stop after N loops; zero has no limit.")
+        parser.add_argument(
+            "--purge-limit",
+            type=int,
+            default=None,
+            help="Maximum expired upload rows to purge per loop.",
+        )
 
     def handle(self, *args, **options):
         loop = bool(options["loop"])
@@ -28,7 +35,9 @@ class Command(BaseCommand):
 
         while True:
             iteration += 1
+            retention_purge = purge_expired_uploads(limit=options["purge_limit"])
             result = process_uploaded_file_scans(limit=options["limit"])
+            result["retention_purge"] = retention_purge
             result["loop_iteration"] = iteration
             self._write_result(result, output_format=options["format"])
 
@@ -44,7 +53,15 @@ class Command(BaseCommand):
         self.stdout.write(
             "File scan batch: "
             f"{result['status']} processed={result['processed']} "
-            f"clean={result['clean']} rejected={result['rejected']}"
+            f"clean={result['clean']} rejected={result['rejected']} "
+            f"error={result['error']} skipped={result['skipped']}"
+        )
+        purge = result["retention_purge"]
+        self.stdout.write(
+            "Expired upload purge: "
+            f"{purge['status']} selected={purge['selected']} "
+            f"purged={purge['purged']} retryable={purge['retryable']} "
+            f"skipped={purge['skipped']}"
         )
         for item in result["results"]:
             self.stdout.write(

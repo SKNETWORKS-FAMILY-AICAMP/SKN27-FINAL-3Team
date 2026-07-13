@@ -36,6 +36,7 @@ from app.services.analysis_job_query_service import (
     load_analysis_result,
 )
 from app.services.attachment_mock_service import (
+    UploadTooLargeError,
     get_attachment as get_mock_attachment,
     list_attachments as list_mock_attachments,
     register_attachment as register_mock_attachment,
@@ -81,7 +82,7 @@ from chatbot.case_repository import (
     list_cases,
     start_case_analysis,
 )
-from chatbot.file_scan_service import apply_attachment_scan_gate, scan_uploaded_file
+from chatbot.file_scan_service import apply_attachment_scan_gate
 from chatbot.request_parsing import (
     first_upload_file as _first_upload_file,
     json_body as _json_body,
@@ -91,6 +92,8 @@ from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
     AuthSessionStateError,
     ReportReferenceError,
+    UploadStorageUnavailableError,
+    UploadValidationError,
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
@@ -128,7 +131,7 @@ from chatbot.repositories import (
     renew_analysis_job_reservation,
     reserve_analysis_job_request,
 )
-from chatbot.models import GuestIdentity, GuestIdentityStatus, UploadedFile
+from chatbot.models import GuestIdentity, GuestIdentityStatus
 from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
 
 
@@ -484,6 +487,15 @@ def attachments(request: HttpRequest) -> JsonResponse:
         return _json_response(request, {"attachments": attachments_payload})
 
     payload = _request_payload(request)
+    upload_limit_violation = getattr(request, "file_upload_limit_violation", None)
+    if isinstance(upload_limit_violation, dict):
+        return _file_upload_too_large_response(
+            request,
+            UploadTooLargeError(
+                size_bytes=int(upload_limit_violation.get("size_bytes") or 0),
+                limit_bytes=int(upload_limit_violation.get("limit_bytes") or 0),
+            ),
+        )
     upload_file = _first_upload_file(request)
     if _is_canonical_mock_request(request):
         identity_payload = _payload_with_request_identity(request, payload)
@@ -495,7 +507,17 @@ def attachments(request: HttpRequest) -> JsonResponse:
             return _rate_limit_response(request, usage)
         try:
             attachment = register_uploaded_file(identity_payload, upload_file=upload_file)
+        except UploadValidationError as exc:
+            _refund_usage_safely(usage, reason="file_upload_invalid")
+            return _file_upload_validation_response(request, reason=exc.reason)
+        except UploadTooLargeError as exc:
+            _refund_usage_safely(usage, reason="file_upload_too_large")
+            return _file_upload_too_large_response(request, exc)
+        except UploadStorageUnavailableError:
+            _refund_usage_safely(usage, reason="file_upload_storage_failed")
+            return _file_upload_storage_unavailable_response(request)
         except PermissionError:
+            _refund_usage_safely(usage, reason="file_upload_access_denied")
             return _persistence_access_denied_response(request)
         attachment["usage"] = usage
     else:
@@ -527,41 +549,6 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
             status=404,
         )
     return _json_response(request, {"attachment": attachment})
-
-
-@csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
-def process_file_scan(request: HttpRequest, attachment_id: str) -> JsonResponse:
-    body = _json_body(request)
-    identity_payload = _request_access_payload(request, session_id=body.get("session_id"))
-    access_metadata = get_uploaded_file_access_metadata(attachment_id)
-    if access_metadata is not None:
-        access = authorize_resource_access(access_metadata, identity_payload)
-        if not access["allowed"]:
-            return _object_access_denied_response(request, access)
-
-    uploaded_file = UploadedFile.objects.filter(attachment_id=attachment_id).first()
-    if uploaded_file is None:
-        return _json_response(
-            request,
-            {
-                "error": {
-                    "code": "attachment_not_found",
-                    "message": "??? attachment metadata? ?? ? ????.",
-                }
-            },
-            status=404,
-        )
-
-    scan_result = scan_uploaded_file(uploaded_file)
-    return _json_response(
-        request,
-        {
-            "contract_version": "file_scan_endpoint.v1",
-            "file_scan": scan_result,
-            "attachment": get_uploaded_file(attachment_id),
-        },
-    )
 
 
 @csrf_exempt
@@ -1626,22 +1613,44 @@ def _payload_with_request_identity(
     payload: dict[str, object],
 ) -> dict[str, object]:
     enriched = dict(payload)
-    auth_context = (
+    untrusted_auth_context = (
         dict(payload.get("auth_context"))
         if isinstance(payload.get("auth_context"), dict)
         else {}
     )
+    identity_keys = {
+        "auth_session_id",
+        "guest_id",
+        "owner_id",
+        "subject_id",
+        "subject_type",
+        "user_id",
+    }
+    for key in identity_keys:
+        enriched.pop(key, None)
+    auth_context = {
+        key: value
+        for key, value in untrusted_auth_context.items()
+        if key not in identity_keys
+    }
     status, auth_payload = _get_current_auth_subject(
         authorization_header=request.headers.get("Authorization"),
-        guest_id=request.headers.get("X-Guest-Id") or auth_context.get("guest_id"),
-        session_id=enriched.get("session_id") or auth_context.get("session_id"),
+        guest_id=(
+            request.headers.get("X-Guest-Id")
+            or untrusted_auth_context.get("guest_id")
+            or payload.get("guest_id")
+        ),
+        session_id=(
+            enriched.get("session_id")
+            or untrusted_auth_context.get("session_id")
+        ),
     )
     if status < 400:
         subject = auth_payload.get("subject") if isinstance(auth_payload.get("subject"), dict) else {}
         for key in ("subject_id", "subject_type", "user_id", "guest_id", "auth_session_id"):
             value = subject.get(key)
             if value:
-                auth_context.setdefault(key, value)
+                auth_context[key] = value
         if subject.get("user_id"):
             authenticated_user_id = str(subject["user_id"])
             auth_context["subject_id"] = f"user:{authenticated_user_id}"
@@ -1652,12 +1661,13 @@ def _payload_with_request_identity(
             enriched["owner_id"] = authenticated_user_id
             enriched["user_id"] = authenticated_user_id
     elif request.headers.get("X-Guest-Id"):
-        auth_context.setdefault("guest_id", request.headers["X-Guest-Id"])
-
-    if request.headers.get("X-Auth-Session-Id"):
-        auth_context.setdefault("auth_session_id", request.headers["X-Auth-Session-Id"])
+        auth_context["subject_id"] = f"guest:{request.headers['X-Guest-Id']}"
+        auth_context["subject_type"] = "guest"
+        auth_context["guest_id"] = request.headers["X-Guest-Id"]
     if auth_context:
         enriched["auth_context"] = auth_context
+    else:
+        enriched.pop("auth_context", None)
     return enriched
 
 
@@ -1973,6 +1983,69 @@ def _persistence_access_denied_response(request: HttpRequest) -> JsonResponse:
             "policy_version": "case_persistence.v1",
         },
     )
+
+
+def _file_upload_too_large_response(
+    request: HttpRequest,
+    error: UploadTooLargeError,
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "file_upload_error.v1",
+                "type": "validation",
+                "code": "file_too_large",
+                "status": 413,
+                "message": "The uploaded file exceeds the configured size limit.",
+                "size_bytes": error.size_bytes,
+                "limit_bytes": error.limit_bytes,
+                "required_action": "select_smaller_file",
+            }
+        },
+        status=413,
+    )
+
+
+def _file_upload_validation_response(
+    request: HttpRequest,
+    *,
+    reason: str,
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "file_upload_error.v1",
+                "type": "validation",
+                "code": reason,
+                "status": 400,
+                "message": "A bound chat session is required for file uploads.",
+                "required_action": "create_or_select_session",
+            }
+        },
+        status=400,
+    )
+
+
+def _file_upload_storage_unavailable_response(request: HttpRequest) -> JsonResponse:
+    response = _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "file_upload_error.v1",
+                "type": "service_unavailable",
+                "code": "upload_storage_unavailable",
+                "status": 503,
+                "message": "The upload could not be stored safely. Retry the upload.",
+                "required_action": "retry_upload",
+                "retryable": True,
+            }
+        },
+        status=503,
+    )
+    response["Retry-After"] = "5"
+    return response
 
 
 def _report_reference_conflict_response(request: HttpRequest, reason: str) -> JsonResponse:

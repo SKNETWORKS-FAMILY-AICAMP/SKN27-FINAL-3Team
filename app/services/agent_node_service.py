@@ -789,6 +789,20 @@ def _attachment_base64(attachment: dict[str, Any]) -> str | None:
 def _attachment_object_storage_bytes(attachment: dict[str, Any], storage_uri: str) -> bytes | None:
     if read_object_bytes is None:
         return None
+    attachment_id = str(attachment.get("attachment_id") or "")
+    if (
+        attachment_id
+        and storage_uri.startswith("s3://")
+        and attachment.get("metadata_source") == "canonical_scan_gate"
+    ):
+        try:
+            from chatbot.file_scan_service import read_scan_ready_attachment_bytes
+        except Exception:  # pragma: no cover - CLI-only imports have no Django app.
+            return None
+        return read_scan_ready_attachment_bytes(
+            attachment_id,
+            expected_storage_uri=storage_uri,
+        )
     object_storage = attachment.get("object_storage")
     if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
         return read_object_bytes(object_storage)

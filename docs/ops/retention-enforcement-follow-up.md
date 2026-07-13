@@ -1,6 +1,6 @@
-# 데이터 보관기간과 실제 삭제 후속 작업
+# 데이터 보관기간과 실제 삭제 집행
 
-## 이번 PR에서 확정한 정책
+## 확정한 정책
 
 - anonymous 1일
 - guest 7일
@@ -11,10 +11,32 @@
 - OCR 텍스트, 확정 사실, 리포트처럼 원본에서 파생된 문서는 인증 사용자 문서 정책을 적용한다.
 - 사용자 명시 삭제는 위 보관기간보다 우선한다.
 
-## 이번 PR의 구현 경계
+## DB·S3 실제 삭제 worker
 
-이번 PR은 각 객체의 `retention_expires_at`을 계산하고 저장하는 단계까지만 담당한다. 이 값은 삭제 예정일이지 실제 삭제가 완료됐다는 증거가 아니다.
+`retention_expires_at`이 지난 업로드는 scanner worker가 다음 polling 전에
+`purge_expired_uploads`로 집행한다. quarantine 객체와 clean 객체를 모두
+`deleted` 또는 `not_found`로 확인한 뒤, `UploadedFile`은 민감 필드를 제거한
+감사용 tombstone으로 남긴다. 파일명, 소유자, 세션·Case 연결, MIME type,
+크기, URI, Agent handoff, 기존 metadata는 tombstone에 남지 않는다.
 
-DB·S3 실제 삭제 worker는 다음 PR에서 구현한다. 다음 PR은 만료 레코드 조회, S3 객체 삭제, DB soft/hard delete, 실패 재시도, 감사 로그, 사용자 명시 삭제 우선 처리, staging 실제 삭제 smoke를 함께 포함해야 한다.
+한 객체라도 삭제하지 못하면 레코드는 즉시 `deleted` 상태로 fencing하고
+필요한 canonical storage reference만 내부 retry metadata에 유지한다. 다음
+poll에서 retryable 정리를 다시 수행하며, 그동안 스캔 승격과 Agent handoff는
+모두 차단된다. 두 객체 삭제가 확인되면 retry metadata도 제거한다.
 
-실제 삭제 worker와 staging 검증이 완료되기 전에는 자동 보관기간 집행 또는 개인정보 삭제 구현이 완료됐다고 표시하지 않는다.
+운영 명령은 aggregate count와 안정적인 상태만 출력하며 attachment ID,
+파일명, bucket, key, URI를 로그에 기록하지 않는다.
+
+```powershell
+python backend\manage.py purge_expired_uploads --dry-run --format json
+python backend\manage.py purge_expired_uploads --limit 100 --fail-on-error --format text
+```
+
+scanner task role에만 두 bucket의 `canonical/uploads/*` Delete 권한을 준다.
+API task role에는 clean upload 삭제 권한을 추가하지 않는다.
+
+clean bucket은 versioning이 켜져 있으므로 `DeleteObject`의 delete marker만
+확인해서는 삭제 완료로 처리하지 않는다. worker는 exact key의 모든 Versions와
+DeleteMarkers를 `DeleteObjectVersion`으로 지운 다음 `ListBucketVersions`를
+재실행한다. 결과가 비어 있을 때만 tombstone을 완료한다. version 목록 권한은
+bucket 전체가 아니라 IAM `s3:prefix=canonical/uploads/*` 조건으로 제한한다.

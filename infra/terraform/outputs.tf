@@ -10,6 +10,10 @@ output "app_bucket" {
   value = aws_s3_bucket.objects.id
 }
 
+output "quarantine_bucket" {
+  value = aws_s3_bucket.quarantine.id
+}
+
 output "database_endpoint" {
   value     = aws_db_instance.main.address
   sensitive = true

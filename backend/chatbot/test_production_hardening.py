@@ -564,15 +564,29 @@ class RuntimeHealthTests(SimpleTestCase):
 
 
 class FileScanWorkerCommandTests(SimpleTestCase):
+    @patch("chatbot.management.commands.process_uploaded_file_scans.purge_expired_uploads")
     @patch("chatbot.management.commands.process_uploaded_file_scans.time.sleep")
     @patch("chatbot.management.commands.process_uploaded_file_scans.process_uploaded_file_scans")
-    def test_scan_worker_can_poll_until_max_loops(self, process_scans, sleep) -> None:
+    def test_scan_worker_can_poll_until_max_loops(
+        self,
+        process_scans,
+        sleep,
+        purge_expired,
+    ) -> None:
         process_scans.return_value = {
             "status": "success",
             "processed": 0,
             "clean": 0,
             "rejected": 0,
             "results": [],
+        }
+        purge_expired.return_value = {
+            "status": "pass",
+            "dry_run": False,
+            "selected": 0,
+            "purged": 0,
+            "retryable": 0,
+            "skipped": 0,
         }
         output = StringIO()
 
@@ -589,4 +603,5 @@ class FileScanWorkerCommandTests(SimpleTestCase):
         )
 
         self.assertEqual(process_scans.call_count, 2)
+        self.assertEqual(purge_expired.call_count, 2)
         sleep.assert_called_once_with(1)
