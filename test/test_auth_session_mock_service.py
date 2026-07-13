@@ -2,6 +2,7 @@ from app.services.auth_session_mock_service import (
     create_guest_session,
     get_current_auth_subject,
 )
+from app.services import google_auth_service
 from app.services.google_auth_service import create_google_login
 
 
@@ -75,3 +76,26 @@ def test_google_login_rejects_mock_profile_when_mock_google_auth_disabled(monkey
     assert status == 401
     assert payload["error"]["code"] == "token_invalid"
     assert payload["error"]["auth"]["reason"] == "google_identity_missing"
+
+
+def test_google_login_issues_a_new_auth_session_for_each_login(monkeypatch):
+    google_profile = {
+        "sub": "google-user-123",
+        "email": "driver@example.com",
+        "display_name": "Driver",
+        "picture": "",
+        "aud": "test-client",
+        "verification": "google_id_token_verified",
+    }
+    monkeypatch.setattr(
+        google_auth_service,
+        "_google_profile_from_payload",
+        lambda _payload: google_profile,
+    )
+
+    first_status, first = create_google_login({"id_token": "first"})
+    second_status, second = create_google_login({"id_token": "second"})
+
+    assert first_status == 200
+    assert second_status == 200
+    assert first["subject"]["auth_session_id"] != second["subject"]["auth_session_id"]

@@ -10,6 +10,7 @@ from app.services.auth_error_contract import (
     build_www_authenticate_header,
 )
 from app.services.google_auth_service import decode_access_token
+from chatbot.auth_session_policy import validate_persisted_auth_session
 
 
 PUBLIC_PATHS = (
@@ -18,6 +19,7 @@ PUBLIC_PATHS = (
     "/api/health/ready/",
     "/api/capabilities/",
     "/api/auth/guest-session/",
+    "/api/auth/login/",
     "/api/auth/google/code/",
     "/api/auth/refresh/",
 )
@@ -28,9 +30,11 @@ GUEST_ALLOWED_PATHS = (
     "/api/chat/save-state/",
     "/api/files/",
     "/api/reports/",
+    "/api/auth/me/",
 )
 
 PROTECTED_PREFIXES = (
+    "/api/auth/",
     "/api/agents/",
     "/api/analysis/",
     "/api/chat/",
@@ -102,7 +106,10 @@ def _is_valid_api_auth(request: HttpRequest) -> tuple[bool, dict | None]:
     if token:
         app_jwt_valid, app_jwt_claims = decode_access_token(token)
         if app_jwt_valid:
-            return True, None
+            session_valid, reason = validate_persisted_auth_session(app_jwt_claims)
+            if session_valid:
+                return True, None
+            return False, build_auth_error("token_invalid", reason=reason)
         reason = str(app_jwt_claims.get("reason") or "invalid_app_jwt")
         if reason == "expired_token":
             return False, build_auth_error("token_expired")

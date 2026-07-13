@@ -40,7 +40,7 @@ from app.services.auth_session_mock_service import (
     create_guest_session as _create_guest_session,
     get_current_auth_subject as _get_current_auth_subject,
 )
-from app.services.auth_error_contract import build_www_authenticate_header
+from app.services.auth_error_contract import build_auth_error, build_www_authenticate_header
 from app.services.capability_catalog import capability_catalog_payload
 from app.services.chat_orchestration_service import (
     compose_agent_response,
@@ -85,6 +85,7 @@ from chatbot.request_parsing import (
 )
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
+    AuthSessionStateError,
     ReportReferenceError,
     access_subject_from_payload,
     authorize_resource_access,
@@ -257,10 +258,14 @@ def auth_refresh(request: HttpRequest) -> JsonResponse:
         payload=body,
     )
     if status < 400:
-        payload["persistence"] = persist_auth_token_refresh(
-            payload,
-            session_id=body.get("session_id"),
-        )
+        try:
+            payload["persistence"] = persist_auth_token_refresh(
+                payload,
+                session_id=body.get("session_id"),
+            )
+        except AuthSessionStateError as exc:
+            status = 401
+            payload = build_auth_error("token_invalid", reason=exc.reason)
     _record_history_safely(
         request,
         event_type="auth_token_refreshed",
@@ -332,10 +337,14 @@ def auth_me(request: HttpRequest) -> JsonResponse:
         session_id=request.GET.get("session_id"),
     )
     if status < 400:
-        payload["persistence"] = persist_current_auth_subject(
-            payload,
-            session_id=request.GET.get("session_id"),
-        )
+        try:
+            payload["persistence"] = persist_current_auth_subject(
+                payload,
+                session_id=request.GET.get("session_id"),
+            )
+        except AuthSessionStateError as exc:
+            status = 401
+            payload = build_auth_error("token_invalid", reason=exc.reason)
     _record_history_safely(
         request,
         event_type="auth_me_checked",

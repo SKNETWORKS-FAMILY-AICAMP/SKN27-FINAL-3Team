@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from importlib import import_module, util
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -21,6 +22,8 @@ from app.services.google_auth_service import issue_access_token
 from chatbot.case_repository import CaseOwnerMismatch, create_case
 from chatbot.models import (
     AnalysisJob,
+    AuthSession,
+    AuthSessionStatus,
     Case,
     ChatSession,
     ChatSessionStatus,
@@ -28,6 +31,7 @@ from chatbot.models import (
     Report,
     ReportType,
     UploadedFile,
+    UserAccount,
 )
 from chatbot.repositories import (
     list_uploaded_files,
@@ -41,9 +45,27 @@ TEST_JWT_SIGNING_KEY = "consultation-v2-test-signing-key-is-long-enough"
 
 
 def authenticated_client(user_id: str) -> Client:
+    issued_at = timezone.now()
+    expires_at = issued_at + timedelta(hours=1)
+    auth_session_id = f"auth_{user_id}"
     token, _claims = issue_access_token(
         user_id=user_id,
-        auth_session_id=f"auth_{user_id}",
+        auth_session_id=auth_session_id,
+        issued_at=issued_at,
+        expires_at=expires_at,
+    )
+    user, _created = UserAccount.objects.get_or_create(user_id=user_id)
+    AuthSession.objects.update_or_create(
+        auth_session_id=auth_session_id,
+        defaults={
+            "user": user,
+            "subject_type": "user",
+            "subject_id": f"user:{user_id}",
+            "status": AuthSessionStatus.ACTIVE,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "revoked_at": None,
+        },
     )
     return Client(HTTP_AUTHORIZATION=f"Bearer {token}")
 

@@ -101,6 +101,14 @@ class ReportReferenceError(ValueError):
         self.reason = reason
 
 
+class AuthSessionStateError(ValueError):
+    """Fail-closed auth-session persistence error safe to expose as a reason code."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 def build_report_download_pdf_body(
     *,
     report_id: str,
@@ -916,6 +924,31 @@ def persist_guest_session_identity(
     }
 
 
+def _locked_active_auth_session(
+    *,
+    auth_session_id: str,
+    user_id: str,
+) -> AuthSession:
+    auth_session = (
+        AuthSession.objects.select_for_update()
+        .select_related("user")
+        .filter(auth_session_id=auth_session_id)
+        .first()
+    )
+    if auth_session is None:
+        raise AuthSessionStateError("auth_session_not_persisted")
+    if auth_session.status != AuthSessionStatus.ACTIVE or auth_session.revoked_at is not None:
+        raise AuthSessionStateError("auth_session_revoked")
+    if auth_session.expires_at and auth_session.expires_at <= timezone.now():
+        raise AuthSessionStateError("auth_session_expired")
+    expected_subject_id = f"user:{user_id}"
+    if auth_session.subject_type != "user" or auth_session.subject_id != expected_subject_id:
+        raise AuthSessionStateError("auth_session_subject_mismatch")
+    if auth_session.user is not None and auth_session.user.user_id != user_id:
+        raise AuthSessionStateError("auth_session_subject_mismatch")
+    return auth_session
+
+
 def persist_current_auth_subject(
     auth_payload: dict[str, Any],
     *,
@@ -929,8 +962,15 @@ def persist_current_auth_subject(
     user_id = _text(subject.get("user_id"))
     guest_id = _normalize_guest_id(subject.get("guest_id"))
     auth_session_id = _text(subject.get("auth_session_id"))
-    auth_source = "auth_google_code" if auth_payload.get("contract_version") == "google_auth_code.v1" else "auth_me"
-    auth_event_type = "auth_google_code_completed" if auth_source == "auth_google_code" else "auth_me_checked"
+    contract_version = _text(auth_payload.get("contract_version"))
+    login_sources = {
+        "google_auth.v1": ("auth_google_login", "auth_google_login_completed"),
+        "google_auth_code.v1": ("auth_google_code", "auth_google_code_completed"),
+    }
+    auth_source, auth_event_type = login_sources.get(
+        contract_version,
+        ("auth_me", "auth_me_checked"),
+    )
 
     with transaction.atomic():
         user = _get_or_create_user_account(user_id)
@@ -939,29 +979,40 @@ def persist_current_auth_subject(
         guest = _get_or_create_guest_identity(guest_id)
         auth_session = None
         if auth_session_id:
-            auth_session, _created = AuthSession.objects.update_or_create(
-                auth_session_id=auth_session_id,
-                defaults={
-                    "user": user,
-                    "guest": guest,
-                    "subject_type": subject_type,
-                    "subject_id": subject_id,
-                    "status": AuthSessionStatus.ACTIVE,
-                    "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
-                    "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
-                    "revoked_at": None,
-                    "metadata": {
-                        "source": auth_source,
-                        "auth_state": auth_payload.get("auth_state"),
-                        "verification": _dict_or_empty(auth_payload.get("auth_session")).get(
-                            "verification"
-                        ),
-                        "google": _safe_google_connection_metadata(auth_payload),
-                        "rate_limit": auth_payload.get("rate_limit") or {},
-                        "merge_policy": auth_payload.get("merge_policy") or {},
-                    },
-                },
-            )
+            session_metadata = {
+                "source": auth_source,
+                "auth_state": auth_payload.get("auth_state"),
+                "verification": _dict_or_empty(auth_payload.get("auth_session")).get(
+                    "verification"
+                ),
+                "google": _safe_google_connection_metadata(auth_payload),
+                "rate_limit": auth_payload.get("rate_limit") or {},
+                "merge_policy": auth_payload.get("merge_policy") or {},
+            }
+            if contract_version in login_sources:
+                auth_session = AuthSession.objects.create(
+                    auth_session_id=auth_session_id,
+                    user=user,
+                    guest=guest,
+                    subject_type=subject_type,
+                    subject_id=subject_id,
+                    status=AuthSessionStatus.ACTIVE,
+                    issued_at=_datetime_or_none(auth_payload.get("issued_at")),
+                    expires_at=_datetime_or_none(auth_payload.get("expires_at")),
+                    revoked_at=None,
+                    metadata=session_metadata,
+                )
+            else:
+                auth_session = _locked_active_auth_session(
+                    auth_session_id=auth_session_id,
+                    user_id=user_id,
+                )
+                auth_session.user = user
+                auth_session.guest = guest
+                existing_metadata = dict(auth_session.metadata or {})
+                existing_metadata.update(session_metadata)
+                auth_session.metadata = existing_metadata
+                auth_session.save(update_fields=["user", "guest", "metadata", "updated_at"])
         google_persistence = _upsert_google_oauth_subject(user, auth_payload)
         chat_session = _bind_chat_session_auth_context(
             session_id=session_id,
@@ -1030,32 +1081,52 @@ def persist_auth_token_refresh(
     user_id = _text(subject.get("user_id"))
     guest_id = _normalize_guest_id(subject.get("guest_id"))
     auth_session_id = _text(subject.get("auth_session_id"))
-    if not user_id or not auth_session_id:
-        return _auth_persistence_skipped("missing_refresh_subject")
+    auth_session_payload = _dict_or_empty(auth_payload.get("auth_session"))
+    rotation = _dict_or_empty(auth_session_payload.get("rotation"))
+    previous_auth_session_id = _text(rotation.get("previous_auth_session_id"))
+    if not user_id or not auth_session_id or not previous_auth_session_id:
+        raise AuthSessionStateError("missing_refresh_subject")
+    if auth_session_id == previous_auth_session_id:
+        raise AuthSessionStateError("auth_session_rotation_required")
 
     with transaction.atomic():
-        user = _get_or_create_user_account(user_id)
+        previous_auth_session = _locked_active_auth_session(
+            auth_session_id=previous_auth_session_id,
+            user_id=user_id,
+        )
+        user = previous_auth_session.user or _get_or_create_user_account(user_id)
         if user is not None:
             _update_user_account_from_auth_payload(user, auth_payload)
         guest = _get_or_create_guest_identity(guest_id)
-        auth_session, _created = AuthSession.objects.update_or_create(
+        revoked_at = timezone.now()
+        previous_metadata = dict(previous_auth_session.metadata or {})
+        previous_metadata["rotation"] = {
+            "rotated_to": auth_session_id,
+            "rotated_at": revoked_at.isoformat(),
+        }
+        previous_auth_session.status = AuthSessionStatus.REVOKED
+        previous_auth_session.revoked_at = revoked_at
+        previous_auth_session.metadata = previous_metadata
+        previous_auth_session.save(
+            update_fields=["status", "revoked_at", "metadata", "updated_at"]
+        )
+        auth_session = AuthSession.objects.create(
             auth_session_id=auth_session_id,
-            defaults={
-                "user": user,
-                "guest": guest,
-                "subject_type": "user",
-                "subject_id": f"user:{user_id}",
-                "status": AuthSessionStatus.ACTIVE,
-                "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
-                "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
-                "revoked_at": None,
-                "metadata": {
-                    "source": "auth_refresh",
-                    "auth_state": auth_payload.get("auth_state"),
-                    "verification": _dict_or_empty(auth_payload.get("auth_session")).get("verification"),
-                    "refresh_policy": _dict_or_empty(auth_payload.get("auth_session")).get("refresh_policy"),
-                    "rate_limit": auth_payload.get("rate_limit") or {},
-                },
+            user=user,
+            guest=guest,
+            subject_type="user",
+            subject_id=f"user:{user_id}",
+            status=AuthSessionStatus.ACTIVE,
+            issued_at=_datetime_or_none(auth_payload.get("issued_at")),
+            expires_at=_datetime_or_none(auth_payload.get("expires_at")),
+            revoked_at=None,
+            metadata={
+                "source": "auth_refresh",
+                "auth_state": auth_payload.get("auth_state"),
+                "verification": auth_session_payload.get("verification"),
+                "refresh_policy": auth_session_payload.get("refresh_policy"),
+                "rotated_from": previous_auth_session_id,
+                "rate_limit": auth_payload.get("rate_limit") or {},
             },
         )
         chat_session = _bind_chat_session_auth_context(
@@ -1081,6 +1152,7 @@ def persist_auth_token_refresh(
                 "auth_state": auth_payload.get("auth_state"),
                 "chat_session_id": chat_session.session_id if chat_session else None,
                 "expires_at": auth_payload.get("expires_at"),
+                "previous_auth_session_id": previous_auth_session_id,
             },
         )
 
@@ -1099,6 +1171,7 @@ def persist_auth_token_refresh(
         "user_id": user.user_id if user else None,
         "guest_id": guest.guest_id if guest else None,
         "auth_session_id": auth_session.auth_session_id,
+        "previous_auth_session_id": previous_auth_session_id,
         "auth_session_status": auth_session.status,
         "event_id": event.event_id,
         "session_id": chat_session.session_id if chat_session else None,
