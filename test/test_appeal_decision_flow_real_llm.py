@@ -26,6 +26,7 @@ _requires_api = pytest.mark.skipif(
     not os.getenv("OPENAI_API_KEY"),
     reason="OPENAI_API_KEY not set — 통합 테스트 건너뜀",
 )
+pytestmark = pytest.mark.live
 
 TODAY = datetime.date.today()
 

@@ -42,6 +42,8 @@ from chatbot.models import (
     AuthEvent,
     AuthSession,
     AuthSessionStatus,
+    Case,
+    ConfirmedFactVersion,
     ChatMessage,
     ChatSession,
     ChatSessionStatus,
@@ -68,6 +70,8 @@ from chatbot.models import (
 from chatbot.object_storage import (
     build_report_storage_reference,
     build_upload_storage_reference,
+    copy_object,
+    delete_object,
     object_storage_policy,
     storage_reference_from_uri,
     write_object,
@@ -78,6 +82,7 @@ from chatbot.progress_cache import (
     write_analysis_job_progress,
     write_chat_session_state,
 )
+from chatbot.retention_policy import upload_retention_expires_at
 
 USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
 REPORT_PDF_CONTENT_TYPE = "application/pdf"
@@ -86,6 +91,14 @@ REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
 ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
 REPORT_PDF_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_report_renderer.py"
+
+
+class ReportReferenceError(ValueError):
+    """Stable report-reference error whose internal detail is log-only."""
+
+    def __init__(self, reason: str, internal_message: str) -> None:
+        super().__init__(internal_message)
+        self.reason = reason
 
 
 def build_report_download_pdf_body(
@@ -364,10 +377,10 @@ HISTORY_POLICY_VERSION = "history_operating_policy.v1"
 CONVERSATION_SAVE_POLICY_VERSION = "conversation_save_policy.v1"
 CONVERSATION_SAVE_STATES = {"pending", "saved", "session_only"}
 HISTORY_RETENTION_DAYS = {
-    "anonymous": 1,
-    "guest": 7,
-    "user": 365,
-    "authenticated": 365,
+    "anonymous": settings.ANONYMOUS_RETENTION_DAYS,
+    "guest": settings.GUEST_RETENTION_DAYS,
+    "user": settings.USER_RETENTION_DAYS,
+    "authenticated": settings.USER_RETENTION_DAYS,
 }
 HISTORY_METADATA_ALLOWED_KEYS = {
     "action",
@@ -424,7 +437,9 @@ def register_uploaded_file(
     metadata exposes the object-storage adapter URI and fallback envelope.
     """
 
-    attachment = register_mock_attachment(payload, upload_file=upload_file)
+    registration_payload = dict(payload)
+    registration_payload.pop("attachment_id", None)
+    attachment = register_mock_attachment(registration_payload, upload_file=upload_file)
     owner_id = _owner_id(payload)
     return persist_uploaded_file_metadata(attachment, owner_id=owner_id, raw_payload=payload)
 
@@ -436,10 +451,50 @@ def persist_uploaded_file_metadata(
     raw_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     session = _get_or_create_session(attachment.get("session_id"), owner_id=owner_id)
+    if session is not None and session.owner_id and session.owner_id != owner_id:
+        raise PermissionError("session does not belong to authenticated owner")
+    case = None
+    case_id = _text((raw_payload or {}).get("case_id"))
+    if case_id:
+        if not owner_id:
+            raise PermissionError("case upload requires an authenticated owner")
+        case = Case.objects.filter(
+            case_id=case_id,
+            owner_id=owner_id,
+            deleted_at__isnull=True,
+        ).first()
+        if case is None:
+            raise PermissionError("case does not exist or belongs to another owner")
+    elif session is not None and session.case_id:
+        if not owner_id or session.case.owner_id != owner_id:
+            raise PermissionError("session case does not belong to authenticated owner")
+        case = session.case
+    effective_owner_id = owner_id or (session.owner_id if session else "")
+    attachment_id = _text(attachment.get("attachment_id"))
+    if not attachment_id:
+        raise ValueError("attachment_id is required")
+    with transaction.atomic():
+        existing_file = (
+            UploadedFile.objects.select_for_update()
+            .filter(attachment_id=attachment_id)
+            .first()
+        )
+        _validate_uploaded_file_retry(
+            existing_file,
+            owner_id=effective_owner_id,
+            session=session,
+            case=case,
+        )
+    retention_expires_at = upload_retention_expires_at(
+        owner_id=effective_owner_id,
+        guest_id=_text((raw_payload or {}).get("guest_id")),
+        file_type=_text(attachment.get("type")),
+        content_type=_text(attachment.get("content_type")),
+    )
     metadata = _metadata_snapshot(attachment, raw_payload=raw_payload)
     object_storage = build_upload_storage_reference(
         attachment,
-        owner_id=owner_id or (session.owner_id if session else ""),
+        owner_id=effective_owner_id,
     )
     object_storage_write = write_object_from_source_uri(
         object_storage,
@@ -457,10 +512,22 @@ def persist_uploaded_file_metadata(
     agent_handoff["object_storage"] = object_storage
 
     with transaction.atomic():
+        existing_file = (
+            UploadedFile.objects.select_for_update()
+            .filter(attachment_id=attachment_id)
+            .first()
+        )
+        _validate_uploaded_file_retry(
+            existing_file,
+            owner_id=effective_owner_id,
+            session=session,
+            case=case,
+        )
         uploaded_file, _created = UploadedFile.objects.update_or_create(
-            attachment_id=_text(attachment.get("attachment_id")),
+            attachment_id=attachment_id,
             defaults={
-                "owner_id": owner_id or (session.owner_id if session else ""),
+                "owner_id": effective_owner_id,
+                "case": case or (session.case if session else None),
                 "session": session,
                 "purpose": _text(attachment.get("purpose")) or "unknown",
                 "file_type": _text(attachment.get("type")),
@@ -473,10 +540,30 @@ def persist_uploaded_file_metadata(
                 "scan_status": "not_started",
                 "agent_handoff": agent_handoff,
                 "metadata": metadata,
+                "retention_expires_at": retention_expires_at,
+                "deleted_at": None,
             },
         )
 
     return uploaded_file_to_api(uploaded_file)
+
+
+def _validate_uploaded_file_retry(
+    uploaded_file: UploadedFile | None,
+    *,
+    owner_id: str,
+    session: ChatSession | None,
+    case: Case | None,
+) -> None:
+    if uploaded_file is None:
+        return
+    if uploaded_file.owner_id != owner_id:
+        raise PermissionError("attachment_id belongs to another owner")
+    if uploaded_file.session_id != (session.id if session is not None else None):
+        raise PermissionError("attachment_id belongs to another session")
+    expected_case_id = case.id if case is not None else (session.case_id if session is not None else None)
+    if uploaded_file.case_id != expected_case_id:
+        raise PermissionError("attachment_id belongs to another case")
 
 
 def list_uploaded_files(
@@ -484,7 +571,7 @@ def list_uploaded_files(
     *,
     owner_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    queryset = UploadedFile.objects.select_related("session").order_by("-created_at")
+    queryset = UploadedFile.objects.select_related("session", "case").filter(deleted_at__isnull=True).order_by("-created_at")
     if session_id:
         queryset = queryset.filter(session__session_id=session_id)
     if owner_id is not None:
@@ -494,8 +581,8 @@ def list_uploaded_files(
 
 def get_uploaded_file(attachment_id: str) -> dict[str, Any] | None:
     uploaded_file = (
-        UploadedFile.objects.select_related("session")
-        .filter(attachment_id=attachment_id)
+        UploadedFile.objects.select_related("session", "case")
+        .filter(attachment_id=attachment_id, deleted_at__isnull=True)
         .first()
     )
     if uploaded_file is None:
@@ -1858,7 +1945,7 @@ def persist_report_action(
     payload: dict[str, Any],
     report_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Persist a canonical report action as report metadata."""
+    """Reserve, stage, and finalize an immutable canonical report version."""
 
     report_id = _text(report_payload.get("report_id"))
     if not report_id:
@@ -1870,6 +1957,25 @@ def persist_report_action(
     display_result = _display_result_for_job(job)
     report_quality = _report_quality_snapshot(job, display_result, report_payload)
     report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
+    case = _owned_case_for_report_persistence(
+        requested_case_id=_text(payload.get("case_id")),
+        owner_id=report_owner_id,
+        job=job,
+        session=session,
+    )
+    source_fact_version = _source_fact_version_for_report(
+        case=case,
+        fact_version_id=_text(payload.get("source_fact_version")),
+    )
+    request_fingerprint = _report_request_fingerprint(
+        payload=payload,
+        report_payload=report_payload,
+        owner_id=report_owner_id,
+        case=case,
+        session=session,
+        job=job,
+        source_fact_version=source_fact_version,
+    )
     source_storage_uri = _text(payload.get("storage_uri")) or f"mock://reports/{report_id}"
     object_storage = build_report_storage_reference(
         report_id=report_id,
@@ -1878,57 +1984,169 @@ def persist_report_action(
         job_id=job.job_id if job else "",
         source_uri=source_storage_uri,
     )
-    object_storage_write = write_object(
-        object_storage,
-        _report_object_body_for_write(payload, report_payload),
-        metadata={
-            "report_id": report_id,
-            "action": _text(payload.get("action")) or "save",
-            "session_id": session.session_id if session else "",
-            "job_id": job.job_id if job else "",
-        },
-    )
-    object_storage["write_result"] = object_storage_write
-    object_storage["status"] = object_storage_write["status"]
-    object_storage["writes_binary"] = object_storage_write["writes_binary"]
-    object_storage["persistence_state"] = object_storage_write["persistence_state"]
 
-    report, _created = Report.objects.update_or_create(
-        report_id=report_id,
-        defaults={
-            "owner_id": report_owner_id,
-            "session": session,
-            "job": job,
-            "display_result": display_result,
-            "report_type": _report_type(payload.get("report_type")),
-            "status": _report_status(report_payload.get("status")),
-            "title": _report_title(payload, report_payload),
-            "storage_uri": object_storage["storage_uri"],
-            "content_summary": _report_content_summary(display_result, report_payload, payload=payload),
-            "content": {
-                "format": _text(payload.get("format")) or "mock_text",
-                "action": _text(payload.get("action")) or "save",
-                "case_id": report_payload.get("case_id"),
-                "download_url": report_payload.get("download_url"),
-                "reporting_payload": _dict_or_empty(payload.get("reporting_payload")),
-                "object_storage": object_storage,
-                "report_quality": report_quality,
-            },
-            "metadata": {
-                "source": "canonical_report_action",
-                "action": _text(payload.get("action")) or "save",
-                "mock_status": report_payload.get("status"),
-                "report_quality": report_quality,
-                "limitations": report_payload.get("limitations", []),
-                "object_storage_status": object_storage["status"],
-                "object_storage": object_storage,
-                "object_storage_write": object_storage_write,
-                "source_storage_uri": source_storage_uri,
-                "raw_payload": _safe_payload(payload),
-            },
-        },
-    )
+    with transaction.atomic():
+        locked_case = (
+            Case.objects.select_for_update().get(pk=case.pk)
+            if case is not None
+            else None
+        )
+        existing_report = Report.objects.select_for_update().filter(report_id=report_id).first()
+        if existing_report is not None and existing_report.owner_id not in {"", report_owner_id}:
+            raise PermissionError("report belongs to another owner")
+        if (
+            existing_report is not None
+            and locked_case is not None
+            and existing_report.case_id not in {None, locked_case.id}
+        ):
+            raise ReportReferenceError(
+                "report_case_mismatch",
+                "report belongs to another case",
+            )
+        if existing_report is not None:
+            existing_fingerprint = _text(
+                _dict_or_empty(existing_report.metadata).get("request_fingerprint")
+            )
+            if not existing_fingerprint or existing_fingerprint != request_fingerprint:
+                raise ReportReferenceError(
+                    "report_id_payload_mismatch",
+                    "report_id was reused with a different canonical request",
+                )
+            if _text(_dict_or_empty(existing_report.metadata).get("persistence_state")) == "finalized":
+                return _report_persistence_result(
+                    existing_report,
+                    report_quality=report_quality,
+                )
+            report = existing_report
+        else:
+            version_no = locked_case.current_report_version + 1 if locked_case is not None else 1
+            pending_storage = {
+                **object_storage,
+                "status": "pending",
+                "writes_binary": False,
+                "persistence_state": "database_reserved",
+            }
+            report = Report.objects.create(
+                report_id=report_id,
+                owner_id=report_owner_id,
+                case=locked_case,
+                session=session,
+                job=job,
+                display_result=display_result,
+                source_fact_version=source_fact_version,
+                version_no=version_no,
+                report_type=_report_type(payload.get("report_type")),
+                status=_report_status(report_payload.get("status")),
+                title=_report_title(payload, report_payload),
+                storage_uri=object_storage["storage_uri"],
+                content_summary=_report_content_summary(
+                    display_result,
+                    report_payload,
+                    payload=payload,
+                ),
+                content={
+                    "format": _text(payload.get("format")) or "mock_text",
+                    "action": _text(payload.get("action")) or "save",
+                    "case_id": locked_case.case_id if locked_case is not None else None,
+                    "download_url": report_payload.get("download_url"),
+                    "reporting_payload": _dict_or_empty(payload.get("reporting_payload")),
+                    "object_storage": pending_storage,
+                    "report_quality": report_quality,
+                },
+                metadata={
+                    "source": "canonical_report_action",
+                    "action": _text(payload.get("action")) or "save",
+                    "mock_status": report_payload.get("status"),
+                    "report_quality": report_quality,
+                    "limitations": report_payload.get("limitations", []),
+                    "object_storage_status": "pending",
+                    "object_storage": pending_storage,
+                    "source_storage_uri": source_storage_uri,
+                    "raw_payload": _safe_payload(payload),
+                    "request_fingerprint": request_fingerprint,
+                    "persistence_state": "database_reserved",
+                },
+            )
 
+            if locked_case is not None and version_no > locked_case.current_report_version:
+                locked_case.current_report_version = version_no
+                locked_case.save(update_fields=["current_report_version", "updated_at"])
+
+    staging_storage = _staging_report_storage_reference(object_storage)
+    try:
+        staging_write = write_object(
+            staging_storage,
+            _report_object_body_for_write(payload, report_payload),
+            metadata={
+                "report_id": report_id,
+                "action": _text(payload.get("action")) or "save",
+                "session_id": session.session_id if session else "",
+                "job_id": job.job_id if job else "",
+                "request_fingerprint": request_fingerprint,
+            },
+        )
+    except Exception:
+        cleanup = _safe_delete_staged_object(staging_storage)
+        _mark_report_storage_failure(report.pk, cleanup=cleanup)
+        raise
+    if staging_write.get("writes_binary"):
+        try:
+            promotion = copy_object(staging_storage, object_storage)
+        except Exception:
+            cleanup = _safe_delete_staged_object(staging_storage)
+            _mark_report_storage_failure(report.pk, cleanup=cleanup)
+            raise
+    else:
+        promotion = {
+            "status": "skipped",
+            "writes_binary": False,
+            "persistence_state": "staging_write_failed",
+            "reason": "staging_write_failed",
+        }
+    cleanup = (
+        _safe_delete_staged_object(staging_storage)
+        if staging_write.get("writes_binary")
+        else {"status": "not_required"}
+    )
+    finalized_storage = {
+        **object_storage,
+        "write_result": promotion,
+        "status": promotion.get("status") or "skipped",
+        "writes_binary": bool(promotion.get("writes_binary")),
+        "persistence_state": promotion.get("persistence_state") or "metadata_only_adapter",
+    }
+
+    with transaction.atomic():
+        report = Report.objects.select_for_update().get(pk=report.pk)
+        content = dict(report.content or {})
+        content["object_storage"] = finalized_storage
+        metadata = dict(report.metadata or {})
+        metadata.update(
+            {
+                "object_storage_status": finalized_storage["status"],
+                "object_storage": finalized_storage,
+                "object_storage_write": promotion,
+                "object_storage_staging_write": staging_write,
+                "object_storage_staging_cleanup": cleanup,
+                "persistence_state": (
+                    "finalized" if promotion.get("writes_binary") else "storage_failed"
+                ),
+            }
+        )
+        report.content = content
+        report.metadata = metadata
+        report.save(update_fields=["content", "metadata", "updated_at"])
+
+    return _report_persistence_result(report, report_quality=report_quality)
+
+
+def _report_persistence_result(
+    report: Report,
+    *,
+    report_quality: dict[str, Any],
+) -> dict[str, Any]:
+    metadata = _dict_or_empty(report.metadata)
+    object_storage = _dict_or_empty(metadata.get("object_storage"))
     return {
         "backend": "postgresql",
         "table": Report._meta.db_table,
@@ -1936,8 +2154,162 @@ def persist_report_action(
         "status": "metadata_saved",
         "storage_uri": report.storage_uri,
         "object_storage": object_storage,
-        "report_quality": report_quality,
+        "report_quality": _dict_or_empty(metadata.get("report_quality")) or report_quality,
     }
+
+
+def _safe_delete_staged_object(reference: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return delete_object(reference)
+    except Exception as cleanup_error:
+        return {
+            "status": "failed",
+            "error_class": cleanup_error.__class__.__name__,
+        }
+
+
+def _mark_report_storage_failure(
+    report_pk: int,
+    *,
+    cleanup: dict[str, Any],
+) -> None:
+    with transaction.atomic():
+        failed_report = Report.objects.select_for_update().get(pk=report_pk)
+        metadata = dict(failed_report.metadata or {})
+        metadata.update(
+            {
+                "object_storage_status": "failed",
+                "object_storage_staging_cleanup": cleanup,
+                "persistence_state": "storage_failed",
+            }
+        )
+        failed_report.metadata = metadata
+        failed_report.save(update_fields=["metadata", "updated_at"])
+
+
+def _staging_report_storage_reference(reference: dict[str, Any]) -> dict[str, Any]:
+    staging = dict(reference)
+    key = _text(reference.get("key"))
+    staging_key = f"staging/{key}"
+    staging["key"] = staging_key
+    bucket = _text(reference.get("bucket"))
+    staging["storage_uri"] = f"s3://{bucket}/{staging_key}" if bucket else staging_key
+    staging["resource_id"] = f"{_text(reference.get('resource_id'))}:staging"
+    return staging
+
+
+def _report_request_fingerprint(
+    *,
+    payload: dict[str, Any],
+    report_payload: dict[str, Any],
+    owner_id: str,
+    case: Case | None,
+    session: ChatSession | None,
+    job: AnalysisJob | None,
+    source_fact_version: ConfirmedFactVersion | None,
+) -> str:
+    canonical_request = {
+        "action": _text(payload.get("action")) or "save",
+        "owner_id": owner_id,
+        "case_id": case.case_id if case is not None else "",
+        "session_id": session.session_id if session is not None else "",
+        "job_id": job.job_id if job is not None else "",
+        "source_fact_version": (
+            source_fact_version.fact_version_id if source_fact_version is not None else ""
+        ),
+        "report_type": _report_type(payload.get("report_type")),
+        "format": _text(payload.get("format")) or "mock_text",
+        "title": _report_title(payload, report_payload),
+        "status": _report_status(report_payload.get("status")),
+        "reporting_payload": _dict_or_empty(payload.get("reporting_payload")),
+        "limitations": _list_or_empty(report_payload.get("limitations")),
+    }
+    encoded = json.dumps(
+        canonical_request,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _owned_case_for_report_persistence(
+    *,
+    requested_case_id: str,
+    owner_id: str,
+    job: AnalysisJob | None,
+    session: ChatSession | None,
+) -> Case | None:
+    if job is not None and job.owner_id and job.owner_id != owner_id:
+        raise PermissionError("analysis job belongs to another owner")
+    if session is not None and session.owner_id and session.owner_id != owner_id:
+        raise PermissionError("chat session belongs to another owner")
+
+    if requested_case_id:
+        if not owner_id:
+            raise PermissionError("case report requires an authenticated owner")
+        case = Case.objects.filter(
+            case_id=requested_case_id,
+            owner_id=owner_id,
+            deleted_at__isnull=True,
+        ).first()
+        if case is None:
+            raise PermissionError("case does not exist or belongs to another owner")
+    else:
+        case = job.case if job is not None and job.case_id else None
+        if case is None and session is not None and session.case_id:
+            case = session.case
+
+    if case is not None and (not owner_id or case.owner_id != owner_id):
+        raise PermissionError("case does not belong to authenticated owner")
+    related_cases = {
+        related_case_id
+        for related_case_id in (
+            job.case_id if job is not None else None,
+            session.case_id if session is not None else None,
+        )
+        if related_case_id is not None
+    }
+    if case is not None:
+        related_cases.add(case.id)
+    if len(related_cases) > 1:
+        raise ReportReferenceError(
+            "provenance_mismatch",
+            "job, session, and requested case do not share the same provenance",
+        )
+    return case
+
+
+def _source_fact_version_for_report(
+    *,
+    case: Case | None,
+    fact_version_id: str,
+) -> ConfirmedFactVersion | None:
+    if not fact_version_id:
+        return None
+    if case is None:
+        raise ReportReferenceError(
+            "case_required_for_fact_version",
+            "source_fact_version requires a case",
+        )
+    fact_version = ConfirmedFactVersion.objects.filter(fact_version_id=fact_version_id).first()
+    if fact_version is None:
+        raise ReportReferenceError(
+            "fact_version_not_found",
+            f"source_fact_version was not found: {fact_version_id}",
+        )
+    if fact_version.case_id != case.id:
+        raise ReportReferenceError(
+            "fact_case_mismatch",
+            "source_fact_version does not belong to the requested case",
+        )
+    if fact_version.status != "confirmed":
+        raise ReportReferenceError(
+            "fact_version_not_confirmed",
+            "source_fact_version is not confirmed",
+        )
+    return fact_version
 
 
 def get_report_download_metadata(report_id: str, *, document_type: str | None = None) -> dict[str, Any] | None:
@@ -2457,6 +2829,7 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
 
     attachment = {
         "attachment_id": uploaded_file.attachment_id,
+        "case_id": uploaded_file.case.case_id if uploaded_file.case_id else None,
         "session_id": session_id,
         "message_id": metadata.get("message_id"),
         "purpose": uploaded_file.purpose,
@@ -2469,6 +2842,12 @@ def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
         "object_storage": object_storage,
         "status": uploaded_file.status,
         "scan_status": uploaded_file.scan_status,
+        "retention_expires_at": (
+            uploaded_file.retention_expires_at.isoformat()
+            if uploaded_file.retention_expires_at
+            else None
+        ),
+        "deleted_at": uploaded_file.deleted_at.isoformat() if uploaded_file.deleted_at else None,
         "privacy_risk": uploaded_file.privacy_risk,
         "scan_result": metadata.get("scan_result"),
         "created_at": uploaded_file.created_at.isoformat(),

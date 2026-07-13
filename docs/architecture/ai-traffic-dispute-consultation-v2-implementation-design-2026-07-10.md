@@ -36,7 +36,10 @@ AI 교통분쟁 사건 워크스페이스를 지향한다.
 - `ConfirmedFactVersion`: 사용자가 확정한 사실, 출처, 상충정보, 수정 이력을 불변 버전으로 보관한다.
 - `MediaArtifact`: 선별 프레임, 마스킹 결과, 객체탐지 결과를 원본 자료와 분리한다.
 - `Report`: `initial_consultation`, `expert_handoff`, 기존 제품 리포트를 버전별로 보관한다.
-- 원본과 추출 프레임은 기본 30일 보관 후 삭제하고 구조화 사실과 요약서는 Case 삭제 전까지 보관한다.
+- 원본 이미지·영상은 인증 여부와 관계없이 30일, anonymous 문서는 1일, guest 문서는 7일,
+  인증 사용자 문서·구조화 사실·리포트는 365일 보관한다. 사용자 명시 삭제는 이 기한보다 우선한다.
+- 이번 저장 안전성 PR은 `retention_expires_at` 계산까지만 담당한다. DB·S3 실제 삭제 worker와
+  staging 삭제 smoke는 `docs/ops/retention-enforcement-follow-up.md`에 정의한 다음 PR에서 구현한다.
 
 Case 상태는 다음 값으로 고정한다.
 
@@ -149,6 +152,10 @@ Risk Gate
 - `NEO4J_EVIDENCE_ENABLED`
 - `SQS_WORKER_ENABLED`
 - `EMAIL_NOTIFICATION_ENABLED`
+- `ANONYMOUS_RETENTION_DAYS=1`
+- `GUEST_RETENTION_DAYS=7`
+- `USER_RETENTION_DAYS=365`
+- `RAW_MEDIA_RETENTION_DAYS=30`
 
 플래그는 목표를 축소하기 위한 장치가 아니라 실연동 전 거짓 성공을 막기 위한 release gate다.
 Vision과 Neo4j는 v2 제품의 필수 목표이며 staging 실연동과 대표 사건 검증 후 활성화한다.

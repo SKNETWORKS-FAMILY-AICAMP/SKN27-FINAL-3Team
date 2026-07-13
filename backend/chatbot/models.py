@@ -496,6 +496,12 @@ class Report(TimestampedModel):
                 name="reports_type_status_idx",
             ),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["case", "version_no"],
+                name="report_case_version_uniq",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.report_id

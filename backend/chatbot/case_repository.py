@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -17,6 +16,7 @@ from chatbot.models import (
     ChatSession,
     ConfirmedFactVersion,
 )
+from chatbot.retention_policy import upload_retention_expires_at
 from chatbot.repositories import enqueue_analysis_job_work
 
 
@@ -52,7 +52,14 @@ class FactReadinessNotMet(CaseConflict):
     code = "fact_readiness_not_met"
 
 
-def create_case(*, owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def create_case(
+    *,
+    owner_id: str,
+    payload: dict[str, Any],
+    guest_id: str = "",
+) -> dict[str, Any]:
+    if not _text(owner_id):
+        raise CaseOwnerMismatch("authenticated owner_id is required")
     session_id = _text(payload.get("session_id"))
     if not session_id:
         raise CaseConflict("session_id is required")
@@ -63,6 +70,12 @@ def create_case(*, owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             raise CaseNotFound("chat session was not found")
         if session.owner_id and session.owner_id != owner_id:
             raise CaseOwnerMismatch("chat session belongs to another user")
+        if not session.owner_id:
+            session_guest_id = _session_guest_id(session)
+            if not session_guest_id:
+                raise CaseOwnerMismatch("guest session binding is required")
+            if session_guest_id != _text(guest_id):
+                raise CaseOwnerMismatch("guest session belongs to another guest identity")
         if session.case_id:
             if session.case.owner_id != owner_id:
                 raise CaseOwnerMismatch("case belongs to another user")
@@ -89,15 +102,53 @@ def create_case(*, owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "consultation_state": consultation_state,
             },
         )
+        _validate_promotable_session_records(session, owner_id=owner_id)
         session.owner_id = owner_id
         session.case = case
         session.save(update_fields=["owner_id", "case", "updated_at"])
-        session.analysis_jobs.update(case=case)
-        session.reports.update(case=case)
-        session.uploaded_files.filter(retention_expires_at__isnull=True).update(
-            case=case,
-            retention_expires_at=timezone.now() + timedelta(days=30),
-        )
+        session.analysis_jobs.update(case=case, owner_id=owner_id)
+        reports = list(session.reports.select_for_update().order_by("created_at", "id"))
+        for version_no, report in enumerate(reports, start=1):
+            old_version = report.version_no
+            metadata = dict(report.metadata or {})
+            metadata["guest_promotion"] = {
+                "guest_id": _text(guest_id),
+                "owner_id": owner_id,
+                "old_version": old_version,
+                "new_version": version_no,
+            }
+            report.owner_id = owner_id
+            report.case = case
+            report.version_no = version_no
+            report.metadata = metadata
+            report.save(
+                update_fields=[
+                    "owner_id",
+                    "case",
+                    "version_no",
+                    "metadata",
+                    "updated_at",
+                ]
+            )
+        case.current_report_version = len(reports)
+        if reports:
+            case.save(update_fields=["current_report_version", "updated_at"])
+        for uploaded_file in session.uploaded_files.filter(deleted_at__isnull=True):
+            uploaded_file.owner_id = owner_id
+            uploaded_file.case = case
+            uploaded_file.retention_expires_at = upload_retention_expires_at(
+                owner_id=owner_id,
+                file_type=uploaded_file.file_type,
+                content_type=uploaded_file.content_type,
+            )
+            uploaded_file.save(
+                update_fields=[
+                    "owner_id",
+                    "case",
+                    "retention_expires_at",
+                    "updated_at",
+                ]
+            )
     return case_to_api(case)
 
 
@@ -345,3 +396,26 @@ def _dict_list(value: Any) -> list[dict[str, Any]]:
 
 def _text(value: Any) -> str:
     return str(value).strip() if value is not None else ""
+
+
+def _session_guest_id(session: ChatSession) -> str:
+    metadata = session.metadata if isinstance(session.metadata, dict) else {}
+    auth_context = (
+        metadata.get("auth_context")
+        if isinstance(metadata.get("auth_context"), dict)
+        else {}
+    )
+    return _text(auth_context.get("guest_id"))
+
+
+def _validate_promotable_session_records(session: ChatSession, *, owner_id: str) -> None:
+    related_querysets = (
+        session.analysis_jobs.all(),
+        session.reports.all(),
+        session.uploaded_files.filter(deleted_at__isnull=True),
+    )
+    for queryset in related_querysets:
+        if queryset.exclude(owner_id__in=["", owner_id]).exists():
+            raise CaseOwnerMismatch("session contains data owned by another user")
+        if queryset.exclude(case_id__isnull=True).exists():
+            raise CaseOwnerMismatch("session contains data linked to another case")

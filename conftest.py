@@ -8,6 +8,7 @@ import pytest
 collect_ignore = [
     "backend/chatbot/test_consultation_v2.py",
     "backend/chatbot/test_production_hardening.py",
+    "backend/chatbot/test_report_version_migration.py",
 ]
 
 
@@ -31,6 +32,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="run tests against provisioned AWS resources",
     )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    for marker, description in {
+        "unit": "isolated unit test",
+        "integration": "local integration test",
+        "live": "real external service test; requires --run-live",
+        "aws": "AWS-backed test; requires --run-aws",
+    }.items():
+        config.addinivalue_line("markers", f"{marker}: {description}")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
