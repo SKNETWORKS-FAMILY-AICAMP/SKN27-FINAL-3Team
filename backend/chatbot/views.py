@@ -26,10 +26,7 @@ from app.services.agent_node_service import (
     execute_mock_plan,
     list_public_agent_nodes,
 )
-from app.services.analysis_job_mock_service import (
-    create_analysis_job,
-    list_analysis_jobs,
-)
+from app.services.analysis_job_mock_service import create_analysis_job
 from app.services.analysis_job_query_service import (
     load_analysis_job_detail,
     load_analysis_result,
@@ -95,6 +92,7 @@ from chatbot.repositories import (
     build_report_download_pdf_body,
     build_history_after_service_summary,
     conversation_save_state_from_payload,
+    get_analysis_job_access_metadata,
     get_analysis_job_record,
     get_chat_session_access_metadata,
     get_mycase_summary,
@@ -103,6 +101,7 @@ from chatbot.repositories import (
     get_uploaded_file_access_metadata,
     get_uploaded_file,
     history_operating_policy,
+    list_analysis_job_records,
     list_history_event_records,
     list_report_records,
     list_uploaded_files,
@@ -553,7 +552,33 @@ def process_file_scan(request: HttpRequest, attachment_id: str) -> JsonResponse:
 @require_http_methods(["GET", "POST", "OPTIONS"])
 def analysis_jobs(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
-        return _json_response(request, {"jobs": list_analysis_jobs(session_id=request.GET.get("session_id"))})
+        session_id = request.GET.get("session_id")
+        identity_payload = _request_access_payload(request, session_id=session_id)
+        subject = access_subject_from_payload(identity_payload)["subject"]
+        if session_id:
+            session_access = get_chat_session_access_metadata(session_id)
+            if session_access is None:
+                return _object_access_denied_response(
+                    request,
+                    {
+                        "contract_version": "object_access.v1",
+                        "allowed": False,
+                        "reason": "not_found_or_forbidden",
+                        "resource": {"type": "chat_session"},
+                    },
+                )
+            access = authorize_resource_access(session_access, identity_payload)
+            if not access["allowed"]:
+                return _object_access_denied_response(request, access)
+        return _json_response(
+            request,
+            {
+                "jobs": list_analysis_job_records(
+                    owner_id=str(subject.get("user_id") or ""),
+                    session_id=session_id,
+                )
+            },
+        )
 
     body = _json_body(request)
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
@@ -606,6 +631,9 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
+    access_response = _analysis_job_access_response(request, job_id)
+    if access_response is not None:
+        return access_response
     outcome = load_analysis_job_detail(
         job_id,
         load_job=get_analysis_job_record,
@@ -627,6 +655,9 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
+    access_response = _analysis_job_access_response(request, job_id)
+    if access_response is not None:
+        return access_response
     outcome = load_analysis_result(
         job_id,
         load_job=get_analysis_job_record,
@@ -1600,6 +1631,19 @@ def _object_access_denied_response(request: HttpRequest, access: dict[str, objec
         },
         status=403,
     )
+
+
+def _analysis_job_access_response(
+    request: HttpRequest,
+    job_id: str,
+) -> JsonResponse | None:
+    metadata = get_analysis_job_access_metadata(job_id)
+    if metadata is None:
+        return None
+    access = authorize_resource_access(metadata, _request_access_payload(request))
+    if access["allowed"]:
+        return None
+    return _object_access_denied_response(request, access)
 
 
 def _persistence_access_denied_response(request: HttpRequest) -> JsonResponse:

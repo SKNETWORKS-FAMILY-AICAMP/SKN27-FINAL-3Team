@@ -143,8 +143,13 @@ class ProductionApiContractTests(SimpleTestCase):
             ["law_ground_search"],
         )
 
+    @patch("chatbot.views.get_analysis_job_access_metadata", return_value=None)
     @patch("chatbot.views.get_analysis_job_record")
-    def test_analysis_result_uses_persisted_agent_outputs(self, get_job) -> None:
+    def test_analysis_result_uses_persisted_agent_outputs(
+        self,
+        get_job,
+        _get_access_metadata,
+    ) -> None:
         get_job.return_value = {
             "job_id": "job_1",
             "status": "partial",

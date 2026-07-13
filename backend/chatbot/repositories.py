@@ -2520,6 +2520,7 @@ def authorize_resource_access(
                 "type": resource.get("type"),
                 "report_id": resource.get("report_id"),
                 "attachment_id": resource.get("attachment_id"),
+                "job_id": resource.get("job_id"),
                 "session_id": resource_session_id or None,
                 "owner_id": resource_owner_id or None,
                 "guest_id": resource_guest_id or None,
@@ -2599,6 +2600,63 @@ def get_mycase_summary(
             "authorization is still mock bearer/guest-shape based.",
         ],
     }
+
+
+def get_analysis_job_access_metadata(job_id: str) -> dict[str, Any] | None:
+    """Return the minimum ownership record needed before exposing a job."""
+
+    job = (
+        AnalysisJob.objects.select_related("session")
+        .filter(job_id=_text(job_id))
+        .only("job_id", "owner_id", "session__session_id", "session__owner_id")
+        .first()
+    )
+    if job is None:
+        return None
+    return {
+        "type": "analysis_job",
+        "job_id": job.job_id,
+        "owner_id": job.owner_id or job.session.owner_id,
+        "session_id": job.session.session_id,
+    }
+
+
+def list_analysis_job_records(
+    *,
+    owner_id: str,
+    session_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List only jobs owned by the authenticated principal."""
+
+    normalized_owner_id = _text(owner_id)
+    if not normalized_owner_id:
+        return []
+    queryset = (
+        AnalysisJob.objects.select_related("session")
+        .filter(
+            Q(owner_id=normalized_owner_id)
+            | Q(owner_id="", session__owner_id=normalized_owner_id)
+        )
+        .order_by("-updated_at")
+    )
+    if session_id:
+        queryset = queryset.filter(session__session_id=_text(session_id))
+    return [
+        {
+            "contract_version": "analysis_job_summary.v1",
+            "job_id": job.job_id,
+            "session_id": job.session.session_id,
+            "owner_id": job.owner_id or job.session.owner_id,
+            "routing_intent": job.routing_intent,
+            "status": job.status,
+            "active_node": job.active_node,
+            "progress_message": job.progress_message,
+            "analysis_plan_id": job.analysis_plan_id,
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+        }
+        for job in queryset
+    ]
 
 
 def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
