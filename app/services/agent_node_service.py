@@ -1,4 +1,4 @@
-"""Mock Agent/Node registry and execution envelopes for integration tests."""
+"""Agent/Node registry and runtime execution envelopes."""
 
 from __future__ import annotations
 
@@ -26,6 +26,9 @@ except Exception:  # pragma: no cover - keeps CLI-only mock service imports deco
     storage_reference_from_uri = None
 
 
+DL_MOCK_NODE_CODES = {"vision_media_analysis"}
+
+
 NODE_REGISTRY: dict[str, dict[str, Any]] = {
     "input_context_validation": {
         "order": 10,
@@ -50,7 +53,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "produces": ["fine_notice_analysis", "notice_fields", "required_documents"],
         "handoff_to": ["law_ground_search", "objection_report_generation"],
         "status": "sync_adapter_ready",
-        "adapter_modes": ["mock", "sync"],
+        "adapter_modes": ["sync"],
     },
     "law_ground_search": {
         "order": 30,
@@ -63,7 +66,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "produces": ["matched_laws", "source_ref", "applicability_limit"],
         "handoff_to": ["agent_result_validation", "objection_report_generation"],
         "status": "sync_adapter_ready",
-        "adapter_modes": ["mock", "sync"],
+        "adapter_modes": ["sync"],
     },
     "text_ml_case_search": {
         "order": 40,
@@ -76,7 +79,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "produces": ["accident_type_candidates", "similar_cases", "reliability_score"],
         "handoff_to": ["law_ground_search", "agent_result_validation"],
         "status": "sync_adapter_ready",
-        "adapter_modes": ["mock", "sync"],
+        "adapter_modes": ["sync"],
     },
     "vision_media_analysis": {
         "order": 50,
@@ -91,6 +94,19 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "status": "mock_contract_only",
         "adapter_modes": ["mock"],
     },
+    "appeal_decision_flow": {
+        "order": 55,
+        "node_name": "이의신청 가능성 판단 노드",
+        "node_code": "appeal_decision_flow",
+        "node_type": "agent",
+        "owner": "hi20260204-maker",
+        "description": "고지서 분석 결과와 사용자 이의 사유를 실제 LangGraph 판단 흐름으로 검토합니다.",
+        "required_inputs": ["notice_analysis_result", "user_appeal_reason"],
+        "produces": ["appeal_decision", "judgment_status", "guide"],
+        "handoff_to": ["objection_report_generation"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["sync"],
+    },
     "objection_report_generation": {
         "order": 60,
         "node_name": "이의신청서 생성/리포트 노드",
@@ -102,7 +118,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "produces": ["objection_draft", "attachment_list", "report_actions"],
         "handoff_to": ["agent_result_validation", "final_response_merge"],
         "status": "sync_adapter_ready",
-        "adapter_modes": ["mock", "sync"],
+        "adapter_modes": ["sync"],
     },
     "agent_result_validation": {
         "order": 70,
@@ -119,6 +135,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 PRODUCTION_AGENT_TIMEOUT_SECONDS = {
+    "appeal_decision_flow": 120,
     "fine_notice_analysis": 120,
     "law_ground_search": 30,
     "objection_report_generation": 30,
@@ -163,8 +180,13 @@ def get_agent_node(node_code: str) -> dict[str, Any]:
 
 
 def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
+    """Compatibility entrypoint; only the DL node may still return mock output."""
+
     payload = resolve_attachment_references(payload)
     node_code = _payload_node_code(payload)
+    if node_code not in DL_MOCK_NODE_CODES:
+        return execute_agent_node(payload)
+
     execution_status = str(payload.get("execution_status") or payload.get("mock_status") or "success")
     result_status = _normalize_result_status(execution_status)
     node = get_agent_node(node_code)
@@ -387,6 +409,7 @@ def executable_analysis_plan_steps(
 
 def _sync_adapter_node_codes() -> set[str]:
     return {
+        "appeal_decision_flow",
         "fine_notice_analysis",
         "law_ground_search",
         "objection_report_generation",
@@ -399,7 +422,7 @@ def _production_node(node_code: str) -> dict[str, Any]:
     supported = node_code in _sync_adapter_node_codes()
     node["status"] = "sync_adapter_ready" if supported else "unavailable"
     node["adapter_modes"] = ["sync"] if supported else []
-    return node
+    return _node_with_adapter_contract(node)
 
 
 def _unregistered_adapter_output(
@@ -513,12 +536,7 @@ def _requested_execution_mode(payload: dict[str, Any]) -> str:
 
 
 def _should_use_sync_adapter(node_code: str, execution_mode: str) -> bool:
-    return execution_mode == "sync" and node_code in {
-        "fine_notice_analysis",
-        "law_ground_search",
-        "objection_report_generation",
-        "text_ml_case_search",
-    }
+    return execution_mode == "sync" and node_code in _sync_adapter_node_codes()
 
 
 def _execute_sync_node(
@@ -568,11 +586,80 @@ def _run_sync_adapter(
         return _run_fine_notice_analysis_adapter(agent_input, adapter_context)
     if node_code == "law_ground_search":
         return _run_law_ground_search_adapter(agent_input, adapter_context)
+    if node_code == "appeal_decision_flow":
+        return _run_appeal_decision_flow_adapter(agent_input, adapter_context)
     if node_code == "objection_report_generation":
         return _run_objection_report_generation_adapter(agent_input, adapter_context)
     if node_code == "text_ml_case_search":
         return _run_text_ml_case_search_adapter(agent_input, adapter_context)
     raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
+
+
+def _run_appeal_decision_flow_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    from ai.agents.appeal_decision_flow import graph
+
+    state = _appeal_decision_state(agent_input)
+    result = graph.invoke(state)
+    raw_output = (
+        result.get("agent_results", {}).get("appeal_judgment")
+        if isinstance(result, dict)
+        else None
+    )
+    if not isinstance(raw_output, dict):
+        raw_output = {
+            "status": "partial",
+            "summary": "appeal_decision_flow returned without an appeal judgment envelope.",
+            "structured_result": {
+                "judgment_status": "input_required",
+                "overall_possibility": None,
+                "guide": {},
+            },
+            "evidence": [],
+            "next_actions": ["check_appeal_decision_agent_output"],
+            "limitations": ["The appeal decision graph did not return a complete envelope."],
+        }
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "ai.agents.appeal_decision_flow.graph",
+            "execution_mode": "sync",
+            "source_status": raw_output.get("status"),
+            "input_source": "agent_input.context+upstream_results",
+        },
+    )
+
+
+def _appeal_decision_state(agent_input: dict[str, Any]) -> dict[str, Any]:
+    from ai.agents.appeal_decision_flow.state import AppealJudgmentState
+
+    allowed_fields = set(AppealJudgmentState.__annotations__)
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    state = {
+        key: deepcopy(value)
+        for key, value in context.items()
+        if key in allowed_fields and value is not None
+    }
+    upstream_results = (
+        agent_input.get("upstream_results")
+        if isinstance(agent_input.get("upstream_results"), dict)
+        else {}
+    )
+    fine_notice = upstream_results.get("fine_notice_analysis")
+    if isinstance(fine_notice, dict):
+        structured_result = fine_notice.get("structured_result")
+        if isinstance(structured_result, dict):
+            for key, value in structured_result.items():
+                if key in allowed_fields and value is not None and key not in state:
+                    state[key] = deepcopy(value)
+    if not state.get("user_appeal_reason") and agent_input.get("user_text"):
+        state["user_appeal_reason"] = str(agent_input["user_text"])
+    state["agent_results"] = {}
+    return state
 
 
 def _run_fine_notice_analysis_adapter(
@@ -660,6 +747,21 @@ def _run_law_ground_search_adapter(
             "next_actions": ["check_law_ground_search_agent_output"],
             "limitations": ["The law_ground_search adapter did not return a dictionary."],
         }
+    structured_result = raw_output.get("structured_result")
+    if isinstance(structured_result, dict) and "matched_laws" not in structured_result:
+        structured_result["matched_laws"] = [
+            {
+                **deepcopy(provision),
+                "source_reference": provision.get("source_reference")
+                or provision.get("source_ref")
+                or provision.get("chunk_id"),
+                "law_name": provision.get("law_name") or provision.get("source_name"),
+                "article": provision.get("article") or provision.get("article_no"),
+                "summary": provision.get("summary") or provision.get("provision_text"),
+            }
+            for provision in structured_result.get("law_provisions") or []
+            if isinstance(provision, dict)
+        ]
     return _complete_adapter_output(
         raw_output,
         node=adapter_context["node"],

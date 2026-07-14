@@ -77,6 +77,24 @@ def test_runtime_auth_and_frontend_do_not_expose_development_bypass_paths() -> N
     assert "AUTH_TOKEN_STORAGE_KEY" not in auth_session
 
 
+def test_canonical_agent_endpoint_never_calls_the_mock_entrypoint() -> None:
+    views = read("backend/chatbot/views.py")
+
+    run_node = views.split("def run_agent_node", 1)[1].split("def run_agent_plan", 1)[0]
+    assert "execute_agent_node(body)" in run_node
+    assert "execute_mock_node(body)" not in run_node
+
+
+def test_agent_plan_endpoint_never_calls_the_mock_plan_entrypoint() -> None:
+    views = read("backend/chatbot/views.py")
+
+    run_plan = views.split("def run_agent_plan", 1)[1].split(
+        "def process_agent_work_items_once", 1
+    )[0]
+    assert "execute_agent_plan(analysis_plan, execution_payload)" in run_plan
+    assert "execute_mock_plan(analysis_plan, execution_payload)" not in run_plan
+
+
 def test_terraform_defines_the_approved_aws_managed_topology() -> None:
     terraform = "\n".join(
         path.read_text(encoding="utf-8")

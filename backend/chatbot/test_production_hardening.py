@@ -96,6 +96,7 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertEqual(
             {item["node_code"] for item in body["nodes"]},
             {
+                "appeal_decision_flow",
                 "fine_notice_analysis",
                 "law_ground_search",
                 "objection_report_generation",
@@ -280,7 +281,7 @@ class ProductionApiContractTests(SimpleTestCase):
                 side_effect=AssertionError("legacy synchronous job service must not run"),
             ),
             patch(
-                "chatbot.views.execute_mock_plan",
+                "chatbot.views.execute_agent_plan",
                 side_effect=AssertionError("agent plan must execute only in the worker"),
             ),
             patch("chatbot.views._record_history_safely"),

@@ -26,8 +26,8 @@ from app.contracts.consultation_case import (
 )
 from app.services.agent_node_service import (
     executable_analysis_plan_steps,
-    execute_mock_node,
-    execute_mock_plan,
+    execute_agent_plan,
+    execute_agent_node,
     list_public_agent_nodes,
 )
 from app.services.analysis_job_mock_service import create_analysis_job
@@ -1302,7 +1302,7 @@ def consultation_case_analysis_jobs(request: HttpRequest, case_id: str) -> JsonR
 @require_http_methods(["POST", "OPTIONS"])
 def run_agent_node(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    node_execution = execute_mock_node(body)
+    node_execution = execute_agent_node(body)
     agent_output = node_execution.get("agent_output") or {}
     _record_agent_events_safely(
         request,
@@ -1364,7 +1364,7 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
                 }
             return _json_response(request, response)
 
-        response["node_execution"] = execute_mock_plan(analysis_plan, execution_payload)
+        response["node_execution"] = execute_agent_plan(analysis_plan, execution_payload)
         job_payload = _agent_plan_job_payload(execution_payload, response)
         if job_payload.get("session_id"):
             response["persistence"] = persist_analysis_job_execution(execution_payload, job_payload)
@@ -1375,7 +1375,7 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
                 "reason": "missing_session_id",
             }
     else:
-        response["node_execution"] = execute_mock_plan(analysis_plan, execution_payload)
+        response["node_execution"] = execute_agent_plan(analysis_plan, execution_payload)
     _record_agent_events_safely(
         request,
         response["node_execution"].get("executions", []),

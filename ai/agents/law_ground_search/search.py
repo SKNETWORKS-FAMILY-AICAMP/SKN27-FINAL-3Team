@@ -73,6 +73,11 @@ def _search_fallback_legal_rag(query_text: str, top_k: int) -> list[dict[str, An
 
     provisions = []
     backend = rag_response.get("backend") or "django_rag_tables"
+    retrieval_metadata = {
+        key: value
+        for key, value in rag_response.items()
+        if key != "results"
+    }
     for item in rag_response.get("results") or []:
         source_reference = item.get("source_reference") or item.get("chunk_id") or ""
         provisions.append(
@@ -89,6 +94,7 @@ def _search_fallback_legal_rag(query_text: str, top_k: int) -> list[dict[str, An
                 "retrieval_score": item.get("score", 0.0),
                 "score": item.get("score", 0.0),
                 "match_reason": f"legal_rag_fallback:{backend}",
+                "_retrieval": retrieval_metadata,
             }
         )
     return provisions
