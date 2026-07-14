@@ -345,6 +345,18 @@ def normalize_space(text: Any) -> str:
     return " ".join(str(text).split())
 
 
+def first_value(row: Dict[str, Any], *keys: str) -> str:
+    """
+    새 한글 전처리 필드와 기존 영문 필드를 함께 지원합니다.
+    """
+
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, "", []):
+            return str(value)
+    return ""
+
+
 def trim_reclass_body_text(text: Any) -> str:
     """
     재분류용 긴 본문을 적당한 길이로 줄입니다.
@@ -386,25 +398,29 @@ def build_fault_ratio_text(row: Dict[str, Any]) -> Tuple[str, str, str]:
 
     # 사건명/사건번호/법원명/사건종류 등 짧은 메타 정보를 모읍니다.
     title_parts = [
-        row.get("case_name", ""),
-        row.get("case_number", ""),
-        row.get("court_name", ""),
-        row.get("case_category", ""),
-        row.get("judgment_type", ""),
+        first_value(row, "사건명", "case_name"),
+        first_value(row, "사건번호", "case_number"),
+        first_value(row, "법원명", "court_name"),
+        first_value(row, "사건종류명", "case_category"),
+        first_value(row, "judgment_type"),
     ]
 
     # main_text를 우선 사용하고, 없으면 full_text를 사용합니다.
-    raw_main_body = row.get("main_text", "") or row.get("full_text", "")
+    raw_main_body = first_value(row, "판례내용", "main_text", "full_text")
 
     # 너무 긴 본문은 앞부분과 끝부분만 남깁니다.
     main_body = trim_reclass_body_text(raw_main_body)
 
     # 본문 판단에 사용할 필드를 모읍니다.
     body_parts = [
-        row.get("holding", ""),
-        row.get("summary", ""),
+        first_value(row, "판시사항", "holding"),
+        first_value(row, "판결요지", "summary"),
+        first_value(row, "주문"),
+        first_value(row, "이유"),
+        first_value(row, "과실비율"),
         main_body,
-        row.get("referenced_laws", ""),
+        first_value(row, "참조조문", "referenced_laws"),
+        first_value(row, "참조판례", "referenced_cases"),
     ]
 
     # 제목/메타 텍스트를 만듭니다.
@@ -531,6 +547,9 @@ def classify_fault_ratio_relevance(row: Dict[str, Any]) -> Dict[str, Any]:
     # 과실/책임 단어 주변에 숫자 비율 표현이 있는지 찾습니다.
     ratio_number_examples = find_fault_ratio_number_examples(all_text)
 
+    # 전처리 단계에서 high confidence로 추출한 과실비율 필드입니다.
+    preprocessed_fault_ratio = first_value(row, "과실비율", "fault_ratio")
+
     # 점수 초기값입니다.
     score = 0
 
@@ -553,6 +572,13 @@ def classify_fault_ratio_relevance(row: Dict[str, Any]) -> Dict[str, Any]:
         reasons.append("explicit_fault_ratio_terms")
         evidence_terms.extend(explicit_fault_terms)
         signal_groups.append("explicit_fault_ratio_expression")
+
+    # 전처리에서 이미 확인한 과실비율은 강한 보조 신호로 사용합니다.
+    if preprocessed_fault_ratio:
+        score += 6
+        reasons.append("preprocessed_fault_ratio_field")
+        evidence_terms.append(preprocessed_fault_ratio)
+        signal_groups.append("preprocessed_fault_ratio")
 
     # ------------------------------------------------------------
     # 2. 숫자 비율 + 과실/책임 근접 문맥
@@ -620,6 +646,7 @@ def classify_fault_ratio_relevance(row: Dict[str, Any]) -> Dict[str, Any]:
     # 과실비율 핵심 문맥이 있는지 확인합니다.
     has_core_fault_ratio_context = bool(
         explicit_fault_terms
+        or preprocessed_fault_ratio
         or ratio_number_examples
         or (party_fault_terms and damage_terms)
     )
@@ -681,6 +708,7 @@ def classify_fault_ratio_relevance(row: Dict[str, Any]) -> Dict[str, Any]:
         "fault_ratio_duty_terms": duty_terms,
         "fault_ratio_no_fault_terms": no_fault_terms,
         "fault_ratio_number_examples": ratio_number_examples,
+        "preprocessed_fault_ratio": preprocessed_fault_ratio,
         "min_confirmed_signal_groups": MIN_CONFIRMED_SIGNAL_GROUPS,
     }
 

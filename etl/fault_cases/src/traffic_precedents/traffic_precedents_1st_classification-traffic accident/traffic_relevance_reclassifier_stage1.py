@@ -4,7 +4,7 @@
 """
 traffic_relevance_reclassifier_stage1_final_commented.py
 
-전처리 최종 파일인 06_all_cases_quality_checked.jsonl을 입력으로 받아
+전처리 최종 파일인 traffic_prec_pre/03_cases_preprocessed.jsonl을 입력으로 받아
 판례가 "교통사고 관련 판례인지 아닌지"를 1차로 재분류하는 코드입니다.
 
 이번 수정의 핵심은 precision-first 최종 기준입니다.
@@ -20,7 +20,7 @@ confirmed_traffic 조건:
 6. 세무/특허/가사처럼 비교통 성격이 강한 사건종류가 아님
 
 기본 입력:
-etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_preprocessed/06_all_cases_quality_checked.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_pre/03_cases_preprocessed.jsonl
 
 기본 출력:
 etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass/
@@ -69,7 +69,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 # 전처리 최종 결과 파일입니다.
 # invalid 분리, 중복 제거, 품질 플래그 생성이 끝난 파일을 입력으로 받습니다.
-DEFAULT_INPUT_PATH = "etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_preprocessed/06_all_cases_quality_checked.jsonl"
+DEFAULT_INPUT_PATH = "etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_pre/03_cases_preprocessed.jsonl"
 
 # 교통사고 관련성 1차 재분류 결과를 저장할 기본 폴더입니다.
 DEFAULT_OUTPUT_DIR = "etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass"
@@ -536,6 +536,18 @@ def normalize_space(text: Any) -> str:
     return " ".join(str(text).split())
 
 
+def first_value(row: Dict[str, Any], *keys: str) -> str:
+    """
+    새 한글 전처리 필드와 기존 영문 필드를 함께 지원합니다.
+    """
+
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, "", []):
+            return str(value)
+    return ""
+
+
 def trim_reclass_body_text(text: Any) -> str:
     """
     재분류용 긴 본문을 적당한 길이로 줄입니다.
@@ -583,26 +595,29 @@ def build_reclass_text(row: Dict[str, Any]) -> Tuple[str, str, str]:
 
     # 사건명, 사건번호, 법원명 등 짧은 메타 정보를 모읍니다.
     title_parts = [
-        row.get("case_name", ""),
-        row.get("case_number", ""),
-        row.get("court_name", ""),
-        row.get("case_category", ""),
-        row.get("judgment_type", ""),
+        first_value(row, "사건명", "case_name"),
+        first_value(row, "사건번호", "case_number"),
+        first_value(row, "법원명", "court_name"),
+        first_value(row, "사건종류명", "case_category"),
+        first_value(row, "judgment_type"),
     ]
 
     # 본문 판단에 사용할 긴 텍스트 필드를 모읍니다.
     # full_text는 case_name, holding, summary, main_text가 합쳐져 있어 중복이 생길 수 있습니다.
     # 그래서 가능하면 main_text를 우선 사용하고, main_text가 없을 때만 full_text를 사용합니다.
-    raw_main_body_text = row.get("main_text", "") or row.get("full_text", "")
+    raw_main_body_text = first_value(row, "판례내용", "main_text", "full_text")
 
     # 너무 긴 본문은 앞부분과 끝부분만 남겨 처리 속도를 높입니다.
     main_body_text = trim_reclass_body_text(raw_main_body_text)
 
     body_parts = [
-        row.get("holding", ""),
-        row.get("summary", ""),
+        first_value(row, "판시사항", "holding"),
+        first_value(row, "판결요지", "summary"),
+        first_value(row, "주문"),
+        first_value(row, "이유"),
         main_body_text,
-        row.get("referenced_laws", ""),
+        first_value(row, "참조조문", "referenced_laws"),
+        first_value(row, "참조판례", "referenced_cases"),
     ]
 
     # title_parts 중 비어 있지 않은 값만 이어 붙입니다.
@@ -925,7 +940,7 @@ def classify_traffic_relevance(row: Dict[str, Any]) -> Dict[str, Any]:
 
     # 사건종류가 confirmed로 바로 보내기 위험한 도메인인지 확인합니다.
     case_category_disallowed_for_confirmed = is_case_category_disallowed_for_confirmed(
-        row.get("case_category", "")
+        first_value(row, "사건종류명", "case_category")
     )
 
     # 분류 점수 초기값입니다.
