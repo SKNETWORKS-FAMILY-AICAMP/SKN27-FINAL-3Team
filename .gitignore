@@ -44,3 +44,4 @@ output/pptx/*.inspect.ndjson
 서식문서/
 설계/
 models/
+etl/fault_cases/artifacts/
