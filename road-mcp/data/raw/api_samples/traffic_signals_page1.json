@@ -1,0 +1,52 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL_SERVICE",
+      "type": "json"
+    },
+    "body": {
+      "items": [
+        {
+          "ctprvnNm": "충청남도",
+          "signguNm": "아산시",
+          "roadKnd": "기타",
+          "roadRouteNo": "",
+          "roadRouteNm": "북수서로",
+          "roadRouteDrc": "03",
+          "rdnmadr": "",
+          "lnmadr": "충청남도 아산시 배방읍 북수리 1520",
+          "latitude": "36.7728495358",
+          "longitude": "127.0695694",
+          "sgngnrInstlMthd": "02",
+          "roadType": "02",
+          "priorRoadYn": "Y",
+          "tfclghtManageNo": "1548",
+          "tfclghtSe": "02",
+          "tfclghtColorKnd": "02",
+          "sgnaspMthd": "02",
+          "sgnaspOrdr": "녹색+적색",
+          "sgnaspTime": "30+30",
+          "sotKnd": "02",
+          "signlCtrlMthd": "99",
+          "signlTimeMthdType": "99",
+          "opratnYn": "N",
+          "flashingLightOpenHhmm": "00:00",
+          "flashingLightCloseHhmm": "00:00",
+          "fnctngSgngnrYn": "N",
+          "remndrIdctYn": "Y",
+          "sondSgngnrYn": "N",
+          "drcbrdSn": "",
+          "institutionNm": "충청남도 아산시",
+          "phoneNumber": "041-540-2566",
+          "referenceDate": "2024-05-21",
+          "insttCode": "4520000",
+          "insttNm": "충청남도 아산시"
+        }
+      ],
+      "totalCount": "99820",
+      "numOfRows": "1",
+      "pageNo": "1"
+    }
+  }
+}

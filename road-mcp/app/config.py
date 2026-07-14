@@ -39,6 +39,29 @@ class Settings(BaseSettings):
         alias="OSM_PBF_URL",
     )
     public_data_api_key: str = Field(default="", alias="PUBLIC_DATA_API_KEY")
+    public_data_default_num_of_rows: int = Field(
+        default=100,
+        alias="PUBLIC_DATA_DEFAULT_NUM_OF_ROWS",
+    )
+    public_data_request_timeout_seconds: int = Field(
+        default=30,
+        alias="PUBLIC_DATA_REQUEST_TIMEOUT_SECONDS",
+    )
+    road_signs_api_url: str = Field(default="", alias="ROAD_SIGNS_API_URL")
+    traffic_signals_api_url: str = Field(default="", alias="TRAFFIC_SIGNALS_API_URL")
+    crosswalks_api_url: str = Field(default="", alias="CROSSWALKS_API_URL")
+    protection_zones_api_url: str = Field(default="", alias="PROTECTION_ZONES_API_URL")
+    protection_zone_sgg_codes: str = Field(default="", alias="PROTECTION_ZONE_SGG_CODES")
+    protection_zone_sgg_codes_csv: Path = Field(
+        default=Path("./data/raw/reference/sgg_codes.csv"),
+        alias="PROTECTION_ZONE_SGG_CODES_CSV",
+    )
+    protection_zone_assign_type: str = Field(default="", alias="PROTECTION_ZONE_ASSIGN_TYPE")
+    protection_zone_call_date: str = Field(default="", alias="PROTECTION_ZONE_CALL_DATE")
+
+    @property
+    def protection_zone_sgg_code_list(self) -> list[str]:
+        return [code.strip() for code in self.protection_zone_sgg_codes.split(",") if code.strip()]
 
     @property
     def database_url(self) -> str:

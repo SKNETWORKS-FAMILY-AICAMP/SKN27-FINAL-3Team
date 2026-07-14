@@ -1,0 +1,36 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "성공"
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "ptznMngNo": 111101011430,
+            "trgtFcltNm": "재동초등학교병설유치원",
+            "fcltTypeCd": "1",
+            "fcltDtlTypeCd": "103",
+            "rprsPtznMngNo": 111101011431,
+            "useYn": "Y",
+            "sggCd": "11110",
+            "emdongCd": "146",
+            "stdgCd": "11110146  ",
+            "assignType": "2",
+            "roadNmAddr": "서울특별시 종로구 북촌로4길 7 (가회동)",
+            "roadNmDaddr": "재동초등학교병설유치원",
+            "lotnoAddr": "서울특별시 종로구 가회동 210 서울재동초등학교",
+            "lotnoDaddr": "재동초등학교병설유치원",
+            "fturGeomVl": "MULTIPOINT((198745.93379999977 453404.9304030519))",
+            "frstRegDt": "20100101"
+          }
+        ]
+      },
+      "numOfRows": 1,
+      "pageNo": 1,
+      "totalCount": 51,
+      "totalPages": 51
+    }
+  }
+}
