@@ -15,7 +15,6 @@ from app.services.legal_rag_service import search_legal_rag
 
 
 CASE_SOURCE_TYPE = "review_case"
-FALLBACK_CASE_ID = "case_text_ml_heuristic_001"
 
 
 def run_text_ml_case_search(
@@ -53,15 +52,12 @@ def run_text_ml_case_search(
     retrieval = search_legal_rag(query_text, top_k=3, source_type=CASE_SOURCE_TYPE)
     cases = _cases_from_retrieval(retrieval)
     fallback_used = False
-    status = "success"
+    status = "success" if cases else "partial"
     limitations: list[str] = []
 
     if not cases:
-        fallback_used = True
-        status = "partial"
-        cases = [_heuristic_case(query_text)]
         limitations.append(
-            "No review_case RAG chunks were available; returned a heuristic case candidate."
+            "No review_case RAG chunks were available; no similar-case evidence was produced."
         )
 
     structured_result = _structured_result(
@@ -77,7 +73,7 @@ def run_text_ml_case_search(
         agent_input=agent_input,
         node=node,
         status=status,
-        summary=_summary(cases, fallback_used),
+        summary=_summary(cases),
         structured_result=structured_result,
         evidence=evidence,
         limitations=limitations
@@ -541,20 +537,6 @@ def _cases_from_retrieval(retrieval: dict[str, Any]) -> list[dict[str, Any]]:
     return cases
 
 
-def _heuristic_case(query_text: str) -> dict[str, Any]:
-    return {
-        "case_id": FALLBACK_CASE_ID,
-        "title": "Heuristic intersection/contact accident candidate",
-        "summary": (
-            "Use this as a placeholder candidate until review_case RAG data or the "
-            "dedicated text ML agent is available."
-        ),
-        "reliability_score": 0.42 if query_text else 0.0,
-        "source_type": CASE_SOURCE_TYPE,
-        "source_ref": FALLBACK_CASE_ID,
-    }
-
-
 def _case_score(raw_score: Any) -> float:
     try:
         score = float(raw_score)
@@ -727,7 +709,7 @@ def _empty_retrieval(status: str) -> dict[str, Any]:
     }
 
 
-def _summary(cases: list[dict[str, Any]], fallback_used: bool) -> str:
-    if fallback_used:
-        return "Prepared a heuristic similar-case candidate while RAG case data is unavailable."
+def _summary(cases: list[dict[str, Any]]) -> str:
+    if not cases:
+        return "No verified similar-case evidence was available from the configured RAG source."
     return f"Retrieved {len(cases)} similar case candidate(s) for the accident context."
