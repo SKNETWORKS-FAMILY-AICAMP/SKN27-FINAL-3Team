@@ -1,9 +1,0 @@
-{
-  "extractor": "pymupdf",
-  "expected_page_count": 472,
-  "read_page_count": 472,
-  "fallback_errors": {},
-  "metadata": {
-    "pdf_path": "C:\\dev\\project\\SKN27-FINAL-3Team\\etl\\fault_cases\\artifacts\\review_case_output\\crawled\\(최종)과실비율심의사례_(54MB).pdf"
-  }
-}

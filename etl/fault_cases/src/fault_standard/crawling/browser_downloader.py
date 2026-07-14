@@ -65,7 +65,11 @@ async def download_attachment_with_browser(config: PipelineConfig, attachment: A
         # 첨부 URL이 상대경로일 수도 있으므로 절대 URL로 바꾼다.
         absolute_attachment_url = urljoin(attachment.source_page_url, attachment.attachment_url)
         # 다운로드 링크 후보 locator를 만든다.
-        link_locator = page.locator(f'a[href="{absolute_attachment_url}"], a[href*="{attachment.attachment_url}"]').first
+        selector_url = absolute_attachment_url.replace("\\", "\\\\").replace('"', '\\"')
+        selector_attachment_url = attachment.attachment_url.replace("\\", "\\\\").replace('"', '\\"')
+        link_locator = page.locator(f'a[href="{selector_url}"], a[href*="{selector_attachment_url}"]').first
+        selector_filename = attachment.original_filename.replace("\\", "\\\\").replace('"', '\\"')
+        onclick_locator = page.locator(f'[onclick*="{selector_filename}"]').first
         # 링크가 정확히 안 잡히는 경우를 대비해 파일명 텍스트로도 locator를 만든다.
         filename_locator = page.get_by_text(attachment.original_filename, exact=False).first
         # 다운로드 시도 중 생기는 오류 메시지를 담기 위한 변수다.
@@ -79,6 +83,8 @@ async def download_attachment_with_browser(config: PipelineConfig, attachment: A
                     # 정확한 링크를 클릭한다.
                     await link_locator.click()
                 # href locator가 없으면 파일명 텍스트를 클릭한다.
+                elif await onclick_locator.count() > 0:
+                    await onclick_locator.click()
                 else:
                     # 파일명 텍스트 링크를 클릭한다.
                     await filename_locator.click()

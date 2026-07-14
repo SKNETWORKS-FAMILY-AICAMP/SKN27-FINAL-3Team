@@ -7,10 +7,10 @@
 입력 데이터는 이미 다음 처리가 끝난 파일입니다.
 
 ```text
-database/traffic_prec_work/06_all_cases_quality_checked.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_pre/03_cases_preprocessed.jsonl
 ```
 
-이 파일은 invalid 분리, 표준 필드 생성, 본문 정리, 중복 제거, 품질 플래그 생성이 끝난 판례 후보입니다.  
+이 파일은 invalid 분리, 18개 한글 표준 필드 생성, 본문 정리, 중복 제거, 과실비율 후보 추출이 끝난 판례 후보입니다.  
 하지만 이 파일은 교통사고 판례만 모아 둔 정답 데이터가 아니라, 수집 키워드에 걸린 전체 후보입니다.
 
 따라서 1차 분류는 다음 질문에 답합니다.
@@ -42,8 +42,8 @@ python "판례 데이터 1차 분류-교통사고 관련/traffic_relevance_recla
 
 ```bash
 python "판례 데이터 1차 분류-교통사고 관련/traffic_relevance_reclassifier_stage1.py" \
-  --input database/traffic_prec_work/06_all_cases_quality_checked.jsonl \
-  --out-dir database/traffic_prec_reclass \
+  --input etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_pre/03_cases_preprocessed.jsonl \
+  --out-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass \
   --fresh
 ```
 
@@ -54,7 +54,7 @@ python "판례 데이터 1차 분류-교통사고 관련/traffic_relevance_recla
 ### 3.1 입력 파일
 
 ```text
-database/traffic_prec_work/06_all_cases_quality_checked.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_pre/03_cases_preprocessed.jsonl
 ```
 
 이 파일은 전처리 최종 산출물입니다.
@@ -62,13 +62,13 @@ database/traffic_prec_work/06_all_cases_quality_checked.jsonl
 ### 3.2 출력 폴더
 
 ```text
-database/traffic_prec_reclass/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass/
 ```
 
 ### 3.3 출력 파일
 
 ```text
-database/
+etl/fault_cases/artifacts/traffic_precedents_output/
   traffic_prec_reclass/
     00_traffic_reclass_report.json
     01_confirmed_traffic_cases.jsonl
@@ -185,14 +185,20 @@ non_traffic
 각 row에서 다음 텍스트를 모아 분류합니다.
 
 ```text
-case_name
-holding
-summary
-main_text
-referenced_laws
-referenced_cases
-full_text
+사건명 / case_name
+사건번호 / case_number
+법원명 / court_name
+사건종류명 / case_category
+판시사항 / holding
+판결요지 / summary
+주문
+이유
+판례내용 / main_text / full_text
+참조조문 / referenced_laws
+참조판례 / referenced_cases
 ```
+
+현재 코드는 새 전처리 산출물의 18개 한글 필드를 우선 읽고, 기존 영문 필드가 남아 있는 과거 산출물도 읽을 수 있도록 fallback을 둡니다.
 
 본문이 너무 길면 전체를 다 검색하지 않고 앞부분과 끝부분을 중심으로 봅니다.  
 교통사고 관련성 단서는 보통 사건명, 판시사항, 판결요지, 본문 앞부분에 많이 나오기 때문입니다.
@@ -489,7 +495,8 @@ possible로 보내는 이유는 recall을 보강하기 위해서입니다.
 
 ## 16. 현재 실행 결과
 
-현재 `database/traffic_prec_reclass/00_traffic_reclass_report.json` 기준 결과는 다음과 같습니다.
+아래 수치는 과거 `database/traffic_prec_reclass/00_traffic_reclass_report.json` 기준 예시입니다.  
+현재 기본 입력이 `traffic_prec_pre/03_cases_preprocessed.jsonl`로 바뀌었으므로 재실행 후 새 report 기준으로 다시 확인해야 합니다.
 
 ```text
 입력 row: 15,520건
@@ -540,7 +547,7 @@ possible_traffic_review 중 confirmed로 올릴 만큼 강하지 않으면 non_t
 검증/정리 후 과실비율 2차 분류에 사용할 파일은 다음입니다.
 
 ```text
-database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 ```
 
 ---
@@ -549,21 +556,21 @@ database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 
 ```text
 전처리 최종 파일
-database/traffic_prec_work/06_all_cases_quality_checked.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_pre/03_cases_preprocessed.jsonl
 ↓
 교통사고 관련성 1차 분류
-database/traffic_prec_reclass/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass/
   01_confirmed_traffic_cases.jsonl
   02_possible_traffic_review.jsonl
   03_non_traffic_cases.jsonl
 ↓
 reclass 검증/정리
-database/traffic_prec_reclass_verified/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/
   01_confirmed_traffic_cases.jsonl
   02_non_traffic_cases.jsonl
 ↓
 과실비율 2차 분류
-database/traffic_prec_fault_ratio/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio/
 ```
 
 ---

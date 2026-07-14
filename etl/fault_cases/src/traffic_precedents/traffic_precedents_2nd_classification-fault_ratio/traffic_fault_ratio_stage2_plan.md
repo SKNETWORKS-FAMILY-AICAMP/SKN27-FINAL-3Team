@@ -266,7 +266,7 @@ traffic_situation_context
 이렇게 정리하면 2차 과실비율 분류는 다음 파일만 입력으로 사용하면 됩니다.
 
 ```text
-database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 ```
 
 `03_traffic_reclassified_verified_all.jsonl`은 2차 분류 입력이 아니라 전체 추적/감사용 파일입니다.
@@ -276,7 +276,7 @@ database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 검증 결과는 새 폴더에 저장합니다.
 
 ```text
-database/traffic_prec_reclass_verified/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/
 ```
 
 출력 파일은 다음과 같습니다.
@@ -309,7 +309,7 @@ possible_traffic_review 입력: 3,355건
 검증/정리 후 만들어진 다음 파일입니다.
 
 ```text
-database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 ```
 
 ---
@@ -321,7 +321,7 @@ database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 2차 분류의 입력은 1차 reclass 결과를 검증/정리한 뒤 만들어진 최종 confirmed 파일입니다.
 
 ```text
-database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 ```
 
 이 파일은 다음 두 묶음을 합친 것입니다.
@@ -341,7 +341,7 @@ database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl
 2차 분류 결과는 새 폴더에 저장합니다.
 
 ```text
-database/traffic_prec_fault_ratio/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio/
 ```
 
 ---
@@ -349,7 +349,7 @@ database/traffic_prec_fault_ratio/
 ### 2.3 출력 파일
 
 ```text
-database/
+etl/fault_cases/artifacts/traffic_precedents_output/
   traffic_prec_fault_ratio/
     00_fault_ratio_classification_report.json
     01_fault_ratio_confirmed_cases.jsonl
@@ -584,10 +584,39 @@ python traffic_fault_ratio_stage2_classifier_commented.py --fresh
 
 ```bash
 python traffic_fault_ratio_stage2_classifier_commented.py \
-  --input database/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl \
-  --out-dir database/traffic_prec_fault_ratio \
+  --input etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass_verified/01_confirmed_traffic_cases.jsonl \
+  --out-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio \
   --fresh
 ```
+
+---
+
+## 10.5 입력 필드 호환 정책
+
+2차 분류 코드는 새 전처리 산출물의 18개 한글 필드를 우선 사용하고, 기존 영문 필드가 남아 있는 과거 산출물도 읽을 수 있도록 fallback을 둡니다.
+
+분류 텍스트를 만들 때 사용하는 주요 필드는 다음과 같습니다.
+
+```text
+사건명 / case_name
+사건번호 / case_number
+법원명 / court_name
+사건종류명 / case_category
+판시사항 / holding
+판결요지 / summary
+주문
+이유
+과실비율 / fault_ratio
+판례내용 / main_text / full_text
+참조조문 / referenced_laws
+참조판례 / referenced_cases
+```
+
+여기서 `과실비율`은 전처리 단계에서 high confidence 규칙으로 추출한 값입니다.  
+2차 분류에서는 이 값을 `preprocessed_fault_ratio`로 보존하고, `preprocessed_fault_ratio_field`라는 강한 보조 신호로 사용합니다.
+
+다만 `과실비율` 값이 있다고 해서 바로 `fault_ratio_confirmed`로 확정하지는 않습니다.  
+최종 confirmed에는 기존과 같이 손해배상/보험 문맥, 과실비율 핵심 문맥, 근거 묶음 수 조건이 함께 필요합니다.
 
 ---
 
@@ -614,7 +643,8 @@ python traffic_fault_ratio_stage2_classifier_commented.py \
   ],
   "fault_ratio_signal_group_count": 2,
   "has_core_fault_ratio_context": true,
-  "has_damage_or_insurance_context": true
+  "has_damage_or_insurance_context": true,
+  "preprocessed_fault_ratio": "피해자 과실 30%"
 }
 ```
 

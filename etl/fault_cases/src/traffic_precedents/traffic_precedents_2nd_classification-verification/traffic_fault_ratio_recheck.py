@@ -236,6 +236,14 @@ def check_spurious_signals(row: Dict[str, Any]) -> Tuple[bool, str]:
     return False, ""
 
 
+def first_value(row: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, "", []):
+            return str(value)
+    return ""
+
+
 def check_case_type(row: Dict[str, Any]) -> Tuple[bool, str]:
     """
     사건분류, 사건번호, 사건명을 복합 분석하여 형사책임, 행정처분, 산재보험 등
@@ -246,11 +254,11 @@ def check_case_type(row: Dict[str, Any]) -> Tuple[bool, str]:
     - (False, ''): 정상 민사/구상금 사건 영역임
     """
     # 사건 종류 메타데이터를 문자열로 가져옵니다.
-    case_category = str(row.get("case_category", ""))
+    case_category = first_value(row, "사건종류명", "case_category")
     # 사건 번호를 문자열로 가져옵니다. (예: "2020다12345")
-    case_number = str(row.get("case_number", ""))
+    case_number = first_value(row, "사건번호", "case_number")
     # 사건명을 문자열로 가져옵니다. (예: "손해배상(자)")
-    case_name = str(row.get("case_name", ""))
+    case_name = first_value(row, "사건명", "case_name")
     
     # 1) 형사사건 여부 판단 (사건번호에 고단, 고합, 노, 도 등 형사 기호가 들어갔는지 확인)
     is_criminal_no = any(x in case_number for x in ["고단", "고합", "노", "도", "초"])

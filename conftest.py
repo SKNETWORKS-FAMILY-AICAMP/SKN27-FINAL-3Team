@@ -5,11 +5,7 @@ from pathlib import Path
 import pytest
 
 
-collect_ignore = [
-    "backend/chatbot/test_consultation_v2.py",
-    "backend/chatbot/test_production_hardening.py",
-    "backend/chatbot/test_report_version_migration.py",
-]
+collect_ignore_glob = ["backend/chatbot/test*.py"]
 
 
 LIVE_TEST_FILES = {

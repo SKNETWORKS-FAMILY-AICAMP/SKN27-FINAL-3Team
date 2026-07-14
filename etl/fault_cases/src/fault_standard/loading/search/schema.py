@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 SEARCH_SCHEMA = "search"
-EMBEDDING_DIMENSION = 3072
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small-1024"
+DEFAULT_EMBEDDING_API_MODEL = "text-embedding-3-small"
+EMBEDDING_DIMENSION = 1024
 
 
 def table_ref(table_name: str) -> str:
@@ -104,4 +106,3 @@ def create_search_schema(conn) -> None:
         )
 
     conn.commit()
-
