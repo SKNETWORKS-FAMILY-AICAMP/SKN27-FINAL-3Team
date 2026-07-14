@@ -1,0 +1,39 @@
+services:
+  road-postgis:
+    image: postgis/postgis:16-3.5
+    container_name: road-postgis
+    environment:
+      POSTGRES_DB: ${ROAD_DB_NAME:-road_environment}
+      POSTGRES_USER: ${ROAD_DB_USER:-road_user}
+      POSTGRES_PASSWORD: ${ROAD_DB_PASSWORD:-change-me}
+    ports:
+      - "${ROAD_DB_PORT:-5433}:5432"
+    volumes:
+      - road_postgis_data:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${ROAD_DB_USER:-road_user} -d ${ROAD_DB_NAME:-road_environment}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  road-mcp:
+    build:
+      context: .
+    container_name: road-mcp
+    env_file:
+      - .env
+    environment:
+      ROAD_DB_HOST: road-postgis
+      ROAD_DB_PORT: 5432
+      ROAD_MCP_TRANSPORT: streamable-http
+    ports:
+      - "${ROAD_MCP_PORT:-8001}:8001"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      road-postgis:
+        condition: service_healthy
+
+volumes:
+  road_postgis_data:
