@@ -206,7 +206,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "quarantine" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "objects" {
-  bucket = aws_s3_bucket.objects.id
+  bucket     = aws_s3_bucket.objects.id
   depends_on = [aws_s3_bucket_versioning.objects]
   rule {
     id     = "report-staging-retention"
