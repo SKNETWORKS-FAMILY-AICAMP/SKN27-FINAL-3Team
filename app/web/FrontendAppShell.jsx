@@ -355,10 +355,11 @@ export default function FrontendAppShell({
   }
 
   async function runCurrentReportAction(action = "download_report") {
-    const jobId = analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || "";
+    const jobId = currentReport?.job_id || analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || "";
     const documentType = action === "download_objection" ? "objection_form" : "report";
     const reportAction = action === "save" ? "save" : "download";
     const activeReportingPayload = currentReport?.content?.reporting_payload || visibleReportingPayload;
+    const persistedReportId = persistedAnalysisReportId(analysisResponse, currentReport);
     if (action === "download_report") {
       if (!currentReport && !activeReportingPayload) {
         setReportActionStatus("PDF로 저장할 리포트 화면이 아직 없습니다.");
@@ -413,6 +414,10 @@ export default function FrontendAppShell({
       setActiveRoute("chatbot");
       return;
     }
+    if (!persistedReportId) {
+      setReportActionStatus("분석 워커가 리포트를 저장할 때까지 기다린 뒤 다시 시도해 주세요.");
+      return;
+    }
     setReportActionStatus(
       reportAction === "download"
         ? documentType === "objection_form"
@@ -421,7 +426,7 @@ export default function FrontendAppShell({
         : "리포트를 저장하고 있습니다."
     );
     try {
-      let activeSessionId = analysisResponse?.session_id || sessionId;
+      let activeSessionId = currentReport?.session_id || analysisResponse?.session_id || sessionId;
       let nextIdentity = identity;
       if (!authSessionId) {
         setPendingAuthAction({ type: `report_${action}`, jobId });
@@ -434,40 +439,49 @@ export default function FrontendAppShell({
         nextIdentity = loginState.identity;
         setPendingAuthAction(null);
       }
-      const report = await api.runReportAction(
-        {
-          action: reportAction,
-          document_type: documentType,
-          report_id: currentReport?.report_id || `rep_${jobId}`,
-          job_id: jobId,
-          session_id: activeSessionId,
-          report_type: activeReportingPayload?.report_type || currentReport?.report_type || "general",
-          title: activeReportingPayload?.title || currentReport?.title || "상담 분석 리포트",
-          reporting_payload: activeReportingPayload,
-        },
-        nextIdentity
-      );
-      setCurrentReport(report);
-      let downloadedFilename = "";
-      if (reportAction === "download" && report?.report_id) {
-        downloadedFilename = await triggerReportDownload({
-          reportId: report.report_id,
+      if (persistedReportId) {
+        const detailResult = await api.getReportDetail({
+          reportId: persistedReportId,
           sessionId: activeSessionId,
-          requestIdentity: nextIdentity,
-          documentType,
+          identity: nextIdentity,
         });
+        const persistedReport = detailResult?.report || currentReport || {
+          report_id: persistedReportId,
+          session_id: activeSessionId,
+          content: { reporting_payload: activeReportingPayload },
+        };
+        setCurrentReport(persistedReport);
+        let downloadedFilename = "";
+        if (reportAction === "download") {
+          downloadedFilename = await triggerReportDownload({
+            reportId: persistedReportId,
+            sessionId: activeSessionId,
+            requestIdentity: nextIdentity,
+            documentType,
+          });
+        } else {
+          await api.updateConversationSaveState(
+            {
+              session_id: activeSessionId,
+              conversation_save_state: "saved",
+              conversation_save_source: "worker_report_save_action",
+            },
+            nextIdentity
+          );
+        }
+        setReportActionStatus(
+          reportAction === "download"
+            ? `다운로드 완료: ${downloadedFilename || persistedReportId}`
+            : `리포트 저장 완료: ${persistedReportId}`
+        );
+        if (nextIdentity.authSessionId) {
+          await loadMyPageSummary({ identity: nextIdentity, sessionId: activeSessionId });
+          await loadHistoryEvents({ identity: nextIdentity, sessionId: activeSessionId });
+          await loadReports({ identity: nextIdentity, sessionId: activeSessionId });
+        }
+        setActiveRoute("reporting");
+        return;
       }
-      setReportActionStatus(
-        reportAction === "download"
-          ? `다운로드 완료: ${downloadedFilename || report.download_url || report.report_id}`
-          : `리포트 저장 완료: ${report.report_id}`
-      );
-      if (nextIdentity.authSessionId) {
-        await loadMyPageSummary({ identity: nextIdentity, sessionId: activeSessionId });
-        await loadHistoryEvents({ identity: nextIdentity, sessionId: activeSessionId });
-        await loadReports({ identity: nextIdentity, sessionId: activeSessionId });
-      }
-      setActiveRoute("reporting");
     } catch (_error) {
       setPendingAuthAction(null);
       setReportActionStatus(`리포트 action 실행에 실패했습니다. ${_error?.message || ""}`.trim());
@@ -618,6 +632,8 @@ export default function FrontendAppShell({
       userId: followupLoginState?.userId || null,
     });
     setChatMessages(conversationHistory);
+    setCurrentReport(null);
+    setReportActionStatus("");
 
     try {
       const submitIdentity = {
@@ -1094,6 +1110,12 @@ export default function FrontendAppShell({
       </div>
     </div>
   );
+}
+
+function persistedAnalysisReportId(analysisResponse, currentReport) {
+  const reportLinks = Array.isArray(analysisResponse?.report_links) ? analysisResponse.report_links : [];
+  const analysisReportId = reportLinks.find((link) => link?.report_id)?.report_id || "";
+  return currentReport?.report_id || analysisReportId || "";
 }
 
 function EntryScreen({ onGuestStart, onOpenChat }) {
