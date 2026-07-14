@@ -9,6 +9,10 @@ from typing import Any
 from django.conf import settings
 from django.db import connection
 
+from app.services.rag_seed_bundle import (
+    RagSeedValidationError,
+    validate_elasticsearch_index_targets,
+)
 from chatbot.file_scan_service import DEFAULT_MAX_SCAN_BYTES
 from chatbot.object_storage import object_storage_policy
 
@@ -167,14 +171,29 @@ def _supervisor_llm_check() -> dict[str, Any]:
 def _legal_rag_check(*, include_database: bool, database_state: dict[str, Any]) -> dict[str, Any]:
     details = []
     enabled = bool(_setting("LEGAL_RAG_VECTOR_ENABLED", False))
-    provider = str(_setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "") or "")
-    model = str(_setting("LEGAL_RAG_QUERY_EMBEDDING_MODEL", "") or "")
+    provider = str(_setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "") or "").strip().lower()
+    model = str(_setting("LEGAL_RAG_QUERY_EMBEDDING_MODEL", "") or "").strip()
+    query_dimensions_raw = _setting("LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS", "")
+    seed_provider = str(_setting("LEGAL_RAG_SEED_EMBEDDING_PROVIDER", "") or "").strip().lower()
+    seed_model = str(_setting("LEGAL_RAG_SEED_EMBEDDING_MODEL", "") or "").strip()
+    seed_dimensions_raw = _setting("LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS", "")
     introspection_error = str(database_state.get("error") or "")
+    try:
+        query_dimensions = int(query_dimensions_raw)
+        seed_dimensions = int(seed_dimensions_raw)
+    except (TypeError, ValueError):
+        query_dimensions = 0
+        seed_dimensions = 0
 
     if not enabled:
-        details.append(_detail(WARN, "Legal RAG vector search is disabled; Django lexical fallback remains active."))
+        details.append(
+            _detail(
+                WARN,
+                "Legal RAG vector search is disabled; PostgreSQL lexical retrieval remains active.",
+            )
+        )
     else:
-        if provider not in {"sentence-transformers", "openai", "hash"}:
+        if provider not in {"sentence-transformers", "openai"}:
             details.append(_detail(FAIL, f"Unsupported LEGAL_RAG_QUERY_EMBEDDING_PROVIDER: {provider}."))
         if provider in {"sentence-transformers", "openai"} and not model:
             details.append(_detail(FAIL, "LEGAL_RAG_QUERY_EMBEDDING_MODEL is required for vector search."))
@@ -183,25 +202,151 @@ def _legal_rag_check(*, include_database: bool, database_state: dict[str, Any]) 
         legal_rag_openai_key = str(_setting("LEGAL_RAG_OPENAI_API_KEY", "") or "")
         if provider == "openai" and (not legal_rag_openai_key.strip() or _looks_placeholder(legal_rag_openai_key)):
             details.append(_detail(FAIL, "LEGAL_RAG_OPENAI_API_KEY or OPENAI_API_KEY is required for OpenAI embeddings."))
-        if include_database:
-            if introspection_error:
-                details.append(
-                    _detail(
-                        FAIL,
-                        f"Cannot verify pgvector RAG tables because database introspection failed: {introspection_error}",
-                    )
+        if not seed_provider or not seed_model or seed_dimensions <= 0:
+            details.append(
+                _detail(
+                    FAIL,
+                    "LEGAL_RAG_SEED_EMBEDDING_PROVIDER/MODEL/DIMENSIONS must match the verified seed manifest.",
                 )
+            )
+        elif seed_dimensions != 1024:
+            details.append(_detail(FAIL, "Production legal RAG seed embeddings must have 1024 dimensions."))
+        if (
+            provider != seed_provider
+            or model != seed_model
+            or query_dimensions != seed_dimensions
+        ):
+            details.append(
+                _detail(
+                    FAIL,
+                    "Legal RAG query embedding space does not match the configured seed embedding space.",
+                )
+            )
+
+    if include_database:
+        if introspection_error:
+            details.append(
+                _detail(
+                    FAIL,
+                    f"Cannot verify legal RAG tables because database introspection failed: {introspection_error}",
+                )
+            )
+        else:
+            table_names = set(database_state.get("table_names") or set())
+            if "law_chunks" not in table_names:
+                details.append(_detail(FAIL, "Missing legal RAG table: law_chunks."))
             else:
-                table_names = set(database_state.get("table_names") or set())
-                missing = [table for table in ("law_chunks", "law_embeddings") if table not in table_names]
-                if missing:
-                    details.append(_detail(FAIL, f"Missing pgvector RAG tables: {', '.join(missing)}."))
+                try:
+                    if not _current_legal_chunk_exists():
+                        details.append(
+                            _detail(
+                                FAIL,
+                                "No current searchable legal row exists for PostgreSQL lexical retrieval.",
+                            )
+                        )
+                except Exception as exc:
+                    details.append(
+                        _detail(
+                            FAIL,
+                            "Cannot verify current searchable legal rows: "
+                            f"{_format_exception(exc)}",
+                        )
+                    )
+
+            if enabled:
+                if "law_embeddings" not in table_names:
+                    details.append(_detail(FAIL, "Missing legal RAG table: law_embeddings."))
+                elif (
+                    seed_provider
+                    and seed_model
+                    and seed_dimensions == 1024
+                    and provider == seed_provider
+                    and model == seed_model
+                    and query_dimensions == seed_dimensions
+                    and "law_chunks" in table_names
+                ):
+                    try:
+                        if not _configured_legal_embedding_exists(
+                            provider=seed_provider,
+                            model=seed_model,
+                            dimensions=seed_dimensions,
+                        ):
+                            details.append(
+                                _detail(
+                                    FAIL,
+                                    "No current searchable legal embedding exists in the configured seed space.",
+                                )
+                            )
+                    except Exception as exc:
+                        details.append(
+                            _detail(
+                                FAIL,
+                                "Cannot verify configured legal embedding rows: "
+                                f"{_format_exception(exc)}",
+                            )
+                        )
 
     return _check(
         "legal_rag",
         details,
         ok_message="Legal RAG vector search is configured.",
-        metadata={"vector_enabled": enabled, "embedding_provider": provider or None, "embedding_model": model or None},
+        metadata={
+            "vector_enabled": enabled,
+            "embedding_provider": provider or None,
+            "embedding_model": model or None,
+            "embedding_dimensions": query_dimensions_raw or None,
+            "seed_embedding_provider": seed_provider or None,
+            "seed_embedding_model": seed_model or None,
+            "seed_embedding_dimensions": seed_dimensions_raw or None,
+        },
+    )
+
+
+def _current_legal_chunk_exists() -> bool:
+    from app.services.legal_rag_service import (
+        LEGAL_SOURCE_TYPES,
+        USABLE_LEGAL_EVIDENCE_SQL,
+        current_legal_date,
+    )
+
+    effective_at = current_legal_date()
+    sql = f"""
+        SELECT 1
+        FROM law_chunks c
+        WHERE c.is_searchable = TRUE
+          AND c.source_type = ANY(%s)
+          AND c.enforce_date IS NOT NULL
+          AND c.enforce_date <= %s
+          AND (c.expire_date IS NULL OR c.expire_date >= %s)
+          AND {USABLE_LEGAL_EVIDENCE_SQL}
+        LIMIT 1
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [list(LEGAL_SOURCE_TYPES), effective_at, effective_at])
+        return cursor.fetchone() is not None
+
+
+def _configured_legal_embedding_exists(
+    *,
+    provider: str,
+    model: str,
+    dimensions: int,
+) -> bool:
+    from app.services.legal_rag_service import (
+        LEGAL_SOURCE_TYPES,
+        _pgvector_seed_space_has_eligible_row,
+        current_legal_date,
+    )
+
+    return _pgvector_seed_space_has_eligible_row(
+        connection,
+        allowed_source_types=LEGAL_SOURCE_TYPES,
+        effective_at=current_legal_date(),
+        embedding_space={
+            "provider": provider,
+            "model": model,
+            "dimensions": dimensions,
+        },
     )
 
 
@@ -285,16 +430,13 @@ def _text_ml_case_search_rag_check() -> dict[str, Any]:
             details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD is required when an Elasticsearch user is set."))
         if password and _looks_placeholder(password):
             details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD must not contain a placeholder."))
-        missing_indexes = [
-            name
-            for name, value in {
-                "REVIEW_CASE_ES_BM25_INDEX": review_case_index,
-                "FAULT_RATIO_PRECEDENT_ES_BM25_INDEX": fault_ratio_index,
-            }.items()
-            if not value.strip()
-        ]
-        if missing_indexes:
-            details.append(_detail(FAIL, f"Missing text ML Elasticsearch index settings: {', '.join(missing_indexes)}."))
+        try:
+            validate_elasticsearch_index_targets(
+                review_case_index,
+                fault_ratio_index,
+            )
+        except RagSeedValidationError as exc:
+            details.append(_detail(FAIL, str(exc)))
         if importlib.util.find_spec("elasticsearch") is None:
             details.append(_detail(FAIL, "elasticsearch package is required when text_ml_case_search ES RAG is enabled."))
 

@@ -7,12 +7,30 @@ import math
 import os
 import re
 import time
+from datetime import date, datetime, timezone
+from functools import lru_cache
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 PGVECTOR_BACKEND = "postgres_pgvector"
+POSTGRES_LEXICAL_BACKEND = "postgres_lexical"
 DJANGO_RAG_BACKEND = "django_rag_tables"
 DEFAULT_SENTENCE_TRANSFORMER_MODEL = "intfloat/multilingual-e5-large"
+LEGAL_SOURCE_TYPES = (
+    "law",
+    "enforcement_decree",
+    "enforcement_rule",
+    "administrative_rule",
+    "notice",
+)
+DJANGO_ONLY_SOURCE_TYPES = {"review_case"}
+USABLE_LEGAL_EVIDENCE_SQL = (
+    "c.source_url IS NOT NULL AND btrim(c.source_url) <> '' "
+    "AND c.provision_text IS NOT NULL AND btrim(c.provision_text) <> ''"
+)
+_STRICT_ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_LEGAL_TIME_ZONE = ZoneInfo("Asia/Seoul")
 
 
 def search_legal_rag(
@@ -20,6 +38,8 @@ def search_legal_rag(
     *,
     top_k: int = 3,
     source_type: str = "law",
+    temporal_basis: dict[str, Any] | None = None,
+    scope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     started_at = time.perf_counter()
     normalized_query = _text(query)
@@ -33,28 +53,165 @@ def search_legal_rag(
             started_at=started_at,
         )
 
-    vector_response = _search_pgvector(normalized_query, top_k=top_k, source_type=source_type)
+    allowed_source_types, effective_at, filter_error = resolve_legal_search_filters(
+        source_type=source_type,
+        temporal_basis=temporal_basis,
+        scope=scope,
+    )
+    if filter_error:
+        return _search_response(
+            status="invalid_filter",
+            backend=DJANGO_RAG_BACKEND,
+            query=normalized_query,
+            top_k=top_k,
+            results=[],
+            started_at=started_at,
+            error_code=filter_error,
+        )
+
+    vector_response = _search_pgvector(
+        normalized_query,
+        top_k=top_k,
+        source_type=source_type,
+        allowed_source_types=allowed_source_types,
+        effective_at=effective_at,
+    )
     vector_attempt = _attempt_summary(vector_response)
     if vector_response["status"] == "ready" and vector_response["results"]:
         vector_response["attempted_backends"] = [vector_attempt]
         return vector_response
 
-    lexical_response = _search_django_rag_tables(
+    lexical_response = _search_law_chunks_lexical(
         normalized_query,
         top_k=top_k,
         source_type=source_type,
+        allowed_source_types=allowed_source_types,
+        effective_at=effective_at,
     )
-    lexical_response["attempted_backends"] = [vector_attempt, _attempt_summary(lexical_response)]
+    lexical_attempt = _attempt_summary(lexical_response)
+    if lexical_response["status"] == "ready" and lexical_response["results"]:
+        lexical_response["attempted_backends"] = [vector_attempt, lexical_attempt]
+        if vector_response["status"] not in {"disabled", "empty_query"}:
+            lexical_response["fallback_from"] = {
+                "backend": vector_response["backend"],
+                "status": vector_response["status"],
+                "error_code": vector_response.get("error_code", ""),
+            }
+        return lexical_response
+
+    django_response = _search_django_rag_tables(
+        normalized_query,
+        top_k=top_k,
+        source_type=source_type,
+        allowed_source_types=allowed_source_types,
+        effective_at=effective_at,
+    )
+    django_response["attempted_backends"] = [
+        vector_attempt,
+        lexical_attempt,
+        _attempt_summary(django_response),
+    ]
     if vector_response["status"] not in {"disabled", "empty_query"}:
-        lexical_response["fallback_from"] = {
+        django_response["fallback_from"] = {
             "backend": vector_response["backend"],
             "status": vector_response["status"],
             "error_code": vector_response.get("error_code", ""),
         }
-    return lexical_response
+    return django_response
 
 
-def _search_pgvector(query: str, *, top_k: int, source_type: str) -> dict[str, Any]:
+def resolve_legal_search_filters(
+    *,
+    source_type: str,
+    temporal_basis: dict[str, Any] | None,
+    scope: dict[str, Any] | None,
+) -> tuple[tuple[str, ...], date | None, str]:
+    normalized_source_type = _text(source_type)
+    if normalized_source_type in DJANGO_ONLY_SOURCE_TYPES:
+        return (), None, ""
+    if normalized_source_type not in LEGAL_SOURCE_TYPES:
+        return (), None, "unsupported_source_type"
+    if scope is not None and not isinstance(scope, dict):
+        return (), None, "invalid_scope"
+
+    normalized_scope = scope or {}
+    jurisdiction = _text(normalized_scope.get("jurisdiction", "KR")).upper()
+    if jurisdiction != "KR":
+        return (), None, "unsupported_jurisdiction"
+
+    requested_types = (
+        LEGAL_SOURCE_TYPES
+        if normalized_source_type == "law"
+        else (normalized_source_type,)
+    )
+    scoped_types = normalized_scope.get("allowed_source_types")
+    if scoped_types is not None:
+        if not isinstance(scoped_types, (list, tuple)) or not scoped_types:
+            return (), None, "invalid_allowed_source_types"
+        if any(not isinstance(item, str) or item not in LEGAL_SOURCE_TYPES for item in scoped_types):
+            return (), None, "invalid_allowed_source_types"
+        requested_set = set(requested_types) & set(scoped_types)
+        requested_types = tuple(item for item in LEGAL_SOURCE_TYPES if item in requested_set)
+        if not requested_types:
+            return (), None, "empty_allowed_source_types"
+
+    effective_at, temporal_error = _resolve_effective_at(temporal_basis)
+    if temporal_error:
+        return (), None, temporal_error
+    return tuple(requested_types), effective_at, ""
+
+
+def _resolve_search_filters(
+    *,
+    source_type: str,
+    temporal_basis: dict[str, Any] | None,
+    scope: dict[str, Any] | None,
+) -> tuple[tuple[str, ...], date | None, str]:
+    """Backward-compatible alias for callers that imported the private helper."""
+
+    return resolve_legal_search_filters(
+        source_type=source_type,
+        temporal_basis=temporal_basis,
+        scope=scope,
+    )
+
+
+def _resolve_effective_at(temporal_basis: dict[str, Any] | None) -> tuple[date | None, str]:
+    if temporal_basis is None or temporal_basis == {}:
+        return current_legal_date(), ""
+    if not isinstance(temporal_basis, dict):
+        return None, "invalid_temporal_basis"
+    mode = _text(temporal_basis.get("mode"))
+    if mode == "current":
+        return current_legal_date(), ""
+    if mode != "as_of":
+        return None, "unsupported_temporal_mode"
+    effective_at = _text(temporal_basis.get("effective_at"))
+    if not _STRICT_ISO_DATE_PATTERN.fullmatch(effective_at):
+        return None, "invalid_effective_at"
+    try:
+        return date.fromisoformat(effective_at), ""
+    except ValueError:
+        return None, "invalid_effective_at"
+
+
+def current_legal_date(now: datetime | None = None) -> date:
+    """Return the legal effective date in the service's Korean jurisdiction."""
+
+    instant = now or datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(_LEGAL_TIME_ZONE).date()
+
+
+def _search_pgvector(
+    query: str,
+    *,
+    top_k: int,
+    source_type: str,
+    allowed_source_types: tuple[str, ...],
+    effective_at: date | None,
+) -> dict[str, Any]:
     started_at = time.perf_counter()
     if not _truthy(_setting("LEGAL_RAG_VECTOR_ENABLED", "0")):
         return _search_response(
@@ -66,7 +223,7 @@ def _search_pgvector(query: str, *, top_k: int, source_type: str) -> dict[str, A
             started_at=started_at,
             error_code="vector_disabled",
         )
-    if source_type and source_type != "law":
+    if not allowed_source_types or effective_at is None:
         return _search_response(
             status="disabled",
             backend=PGVECTOR_BACKEND,
@@ -78,6 +235,7 @@ def _search_pgvector(query: str, *, top_k: int, source_type: str) -> dict[str, A
         )
 
     try:
+        configured_space = _validate_configured_embedding_space()
         connection = _django_connection()
         if getattr(connection, "vendor", "") != "postgresql":
             raise RuntimeError("postgresql_connection_required")
@@ -89,14 +247,24 @@ def _search_pgvector(query: str, *, top_k: int, source_type: str) -> dict[str, A
         ]
         if missing_tables:
             raise RuntimeError(f"missing_tables:{','.join(missing_tables)}")
+        if not _pgvector_seed_space_has_eligible_row(
+            connection,
+            allowed_source_types=allowed_source_types,
+            effective_at=effective_at,
+            embedding_space=configured_space,
+        ):
+            raise RuntimeError("no_eligible_seed_embeddings")
 
         query_vector, embedding_metadata = _build_query_embedding(query)
+        _validate_query_embedding_space(embedding_metadata)
         rows = _query_pgvector_rows(
             connection,
             query_vector=query_vector,
             top_k=top_k,
             source_type=source_type,
-            provider_filter=_text(_setting("LEGAL_RAG_EMBEDDING_PROVIDER_FILTER", "")),
+            allowed_source_types=allowed_source_types,
+            effective_at=effective_at,
+            embedding_space=embedding_metadata,
         )
         results = [_pgvector_row_result(row) for row in rows]
         return _search_response(
@@ -121,7 +289,14 @@ def _search_pgvector(query: str, *, top_k: int, source_type: str) -> dict[str, A
         )
 
 
-def _search_django_rag_tables(query: str, *, top_k: int, source_type: str) -> dict[str, Any]:
+def _search_django_rag_tables(
+    query: str,
+    *,
+    top_k: int,
+    source_type: str,
+    allowed_source_types: tuple[str, ...],
+    effective_at: date | None,
+) -> dict[str, Any]:
     started_at = time.perf_counter()
     try:
         connection = _django_connection()
@@ -132,7 +307,23 @@ def _search_django_rag_tables(query: str, *, top_k: int, source_type: str) -> di
             raise RuntimeError("rag_chunks_table_missing")
 
         queryset = RagChunk.objects.filter(is_searchable=True)
-        if source_type:
+        if allowed_source_types:
+            from django.db.models import Q
+
+            queryset = queryset.filter(source_type__in=allowed_source_types)
+            queryset = queryset.filter(source_document__isnull=False)
+            queryset = queryset.filter(source_document__status="active")
+            queryset = queryset.filter(source_document__source_type__in=allowed_source_types)
+            queryset = queryset.filter(source_document__jurisdiction="KR")
+            queryset = queryset.filter(content__regex=r"\S")
+            queryset = queryset.filter(source_document__source_url__regex=r"\S")
+            queryset = queryset.filter(source_document__effective_date__isnull=False)
+            queryset = queryset.filter(source_document__effective_date__lte=effective_at)
+            queryset = queryset.filter(
+                Q(source_document__expire_date__isnull=True)
+                | Q(source_document__expire_date__gte=effective_at)
+            )
+        elif source_type:
             queryset = queryset.filter(source_type=source_type)
 
         candidates = list(queryset.select_related("source_document").order_by("-updated_at")[:1000])
@@ -145,6 +336,8 @@ def _search_django_rag_tables(query: str, *, top_k: int, source_type: str) -> di
             results=results,
             started_at=started_at,
             sql_tables=["rag_chunks", "source_documents"],
+            score_kind="token_coverage",
+            query_token_count=len(_unique_tokens(_tokens(query))),
         )
     except Exception as exc:  # pragma: no cover - depends on configured Django runtime.
         return _search_response(
@@ -164,14 +357,20 @@ def _query_pgvector_rows(
     query_vector: list[float],
     top_k: int,
     source_type: str,
-    provider_filter: str,
+    allowed_source_types: tuple[str, ...],
+    effective_at: date,
+    embedding_space: dict[str, Any],
 ) -> list[dict[str, Any]]:
     vector_literal = _pgvector_literal(query_vector)
-    provider_clause = ""
-    params: list[Any] = [vector_literal, source_type, source_type]
-    if provider_filter:
-        provider_clause = " AND e.embedding_provider = %s"
-        params.append(provider_filter)
+    params: list[Any] = [
+        vector_literal,
+        list(allowed_source_types),
+        effective_at,
+        effective_at,
+        embedding_space["provider"],
+        embedding_space["model"],
+        embedding_space["dimensions"],
+    ]
     params.extend([vector_literal, top_k])
 
     sql = f"""
@@ -191,12 +390,21 @@ def _query_pgvector_rows(
             c.expire_date,
             c.domain_tags,
             e.embedding_provider,
+            e.embedding_model,
+            e.embedding_dimensions,
             1 - (e.embedding_vector <=> %s::vector) AS score
         FROM law_embeddings e
         JOIN law_chunks c ON c.chunk_id = e.chunk_id
         WHERE c.is_searchable = TRUE
-          AND (%s = '' OR c.source_type = %s)
-          {provider_clause}
+          AND c.source_type = ANY(%s)
+          AND c.enforce_date IS NOT NULL
+          AND c.enforce_date <= %s
+          AND (c.expire_date IS NULL OR c.expire_date >= %s)
+          AND {USABLE_LEGAL_EVIDENCE_SQL}
+          AND e.embedding_vector IS NOT NULL
+          AND e.embedding_provider = %s
+          AND e.embedding_model = %s
+          AND e.embedding_dimensions = %s
         ORDER BY e.embedding_vector <=> %s::vector
         LIMIT %s
     """
@@ -204,6 +412,149 @@ def _query_pgvector_rows(
         cursor.execute(sql, params)
         columns = [column[0] for column in cursor.description]
         return [dict(zip(columns, row, strict=False)) for row in cursor.fetchall()]
+
+
+def _pgvector_seed_space_has_eligible_row(
+    connection: Any,
+    *,
+    allowed_source_types: tuple[str, ...],
+    effective_at: date,
+    embedding_space: dict[str, Any],
+) -> bool:
+    sql = f"""
+        SELECT 1
+        FROM law_embeddings e
+        JOIN law_chunks c ON c.chunk_id = e.chunk_id
+        WHERE c.is_searchable = TRUE
+          AND c.source_type = ANY(%s)
+          AND c.enforce_date IS NOT NULL
+          AND c.enforce_date <= %s
+          AND (c.expire_date IS NULL OR c.expire_date >= %s)
+          AND {USABLE_LEGAL_EVIDENCE_SQL}
+          AND e.embedding_vector IS NOT NULL
+          AND e.embedding_provider = %s
+          AND e.embedding_model = %s
+          AND e.embedding_dimensions = %s
+        LIMIT 1
+    """
+    params = [
+        list(allowed_source_types),
+        effective_at,
+        effective_at,
+        embedding_space["provider"],
+        embedding_space["model"],
+        embedding_space["dimensions"],
+    ]
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        return cursor.fetchone() is not None
+
+
+def _search_law_chunks_lexical(
+    query: str,
+    *,
+    top_k: int,
+    source_type: str,
+    allowed_source_types: tuple[str, ...],
+    effective_at: date | None,
+) -> dict[str, Any]:
+    """Search the production-seeded law_chunks table without a query embedding call."""
+
+    started_at = time.perf_counter()
+    if not allowed_source_types or effective_at is None:
+        return _search_response(
+            status="disabled",
+            backend=POSTGRES_LEXICAL_BACKEND,
+            query=query,
+            top_k=top_k,
+            results=[],
+            started_at=started_at,
+            error_code="source_type_not_supported",
+        )
+    try:
+        connection = _django_connection()
+        if getattr(connection, "vendor", "") != "postgresql":
+            raise RuntimeError("postgresql_connection_required")
+        if "law_chunks" not in set(connection.introspection.table_names()):
+            raise RuntimeError("missing_tables:law_chunks")
+
+        tokens = _unique_tokens(_tokens(query))[:8]
+        if not tokens:
+            raise RuntimeError("no_search_tokens")
+        search_document = (
+            "lower(concat_ws(' ', c.source_name, coalesce(c.article_no, ''), "
+            "coalesce(c.appendix_no, ''), coalesce(c.form_no, ''), "
+            "c.normalized_text, c.provision_text))"
+        )
+        score_fragments = [f"CASE WHEN {search_document} LIKE %s THEN 1 ELSE 0 END" for _ in tokens]
+        score_expression = " + ".join(score_fragments)
+        match_fragments = [f"{search_document} LIKE %s" for _ in tokens]
+        patterns = [f"%{token.lower()}%" for token in tokens]
+        sql = f"""
+            SELECT
+                c.chunk_id,
+                c.source_id,
+                c.source_name,
+                c.source_type,
+                c.chunk_type,
+                c.article_no,
+                c.appendix_no,
+                c.form_no,
+                c.provision_text,
+                c.normalized_text,
+                c.source_url,
+                c.enforce_date,
+                c.expire_date,
+                c.domain_tags,
+                ({score_expression})::int AS matched_token_count,
+                {len(tokens)}::int AS query_token_count,
+                (({score_expression})::float / {len(tokens)}.0) AS score
+            FROM law_chunks c
+            WHERE c.is_searchable = TRUE
+              AND c.source_type = ANY(%s)
+              AND c.enforce_date IS NOT NULL
+              AND c.enforce_date <= %s
+              AND (c.expire_date IS NULL OR c.expire_date >= %s)
+              AND {USABLE_LEGAL_EVIDENCE_SQL}
+              AND ({' OR '.join(match_fragments)})
+            ORDER BY score DESC, c.chunk_id
+            LIMIT %s
+        """
+        params: list[Any] = [
+            *patterns,
+            *patterns,
+            list(allowed_source_types),
+            effective_at,
+            effective_at,
+            *patterns,
+            top_k,
+        ]
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            columns = [column[0] for column in cursor.description]
+            rows = [dict(zip(columns, row, strict=False)) for row in cursor.fetchall()]
+        results = [_law_chunk_row_result(row) for row in rows]
+        return _search_response(
+            status="ready" if results else "empty",
+            backend=POSTGRES_LEXICAL_BACKEND,
+            query=query,
+            top_k=top_k,
+            results=results,
+            started_at=started_at,
+            sql_tables=["law_chunks"],
+            score_kind="token_coverage",
+            query_token_count=len(tokens),
+        )
+    except Exception as exc:  # pragma: no cover - depends on configured PostgreSQL runtime.
+        return _search_response(
+            status="unavailable",
+            backend=POSTGRES_LEXICAL_BACKEND,
+            query=query,
+            top_k=top_k,
+            results=[],
+            started_at=started_at,
+            error_code=str(exc)[:120],
+        )
 
 
 def _build_query_embedding(query: str) -> tuple[list[float], dict[str, Any]]:
@@ -239,15 +590,60 @@ def _build_query_embedding(query: str) -> tuple[list[float], dict[str, Any]]:
     raise RuntimeError(f"unsupported_embedding_provider:{provider}")
 
 
-def _sentence_transformer_embedding(query: str, *, model_id: str) -> list[float]:
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        raise RuntimeError("sentence_transformers_unavailable") from exc
+def _validate_query_embedding_space(metadata: dict[str, Any]) -> None:
+    """Fail closed unless query and verified seed embeddings share one space."""
 
+    seed_space = _validate_configured_embedding_space()
+    query_provider = _text(metadata.get("provider")).lower()
+    query_model = _text(metadata.get("model"))
+    try:
+        query_dimensions = int(metadata.get("dimensions"))
+    except (TypeError, ValueError):
+        raise RuntimeError("embedding_space_mismatch") from None
+
+    if (
+        query_provider != seed_space["provider"]
+        or query_model != seed_space["model"]
+        or query_dimensions != seed_space["dimensions"]
+    ):
+        raise RuntimeError("embedding_space_mismatch")
+
+
+def _validate_configured_embedding_space() -> dict[str, Any]:
+    """Validate query/seed configuration before any model or paid API call."""
+
+    seed_provider = _text(_setting("LEGAL_RAG_SEED_EMBEDDING_PROVIDER", "")).lower()
+    seed_model = _text(_setting("LEGAL_RAG_SEED_EMBEDDING_MODEL", ""))
+    seed_dimensions = _int_setting("LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS", 0)
+    if not seed_provider or not seed_model or seed_dimensions <= 0:
+        raise RuntimeError("query_embedding_space_not_configured")
+
+    query_provider = _text(
+        _setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "sentence-transformers")
+    ).lower()
+    query_model = _text(
+        _setting("LEGAL_RAG_QUERY_EMBEDDING_MODEL", DEFAULT_SENTENCE_TRANSFORMER_MODEL)
+    )
+    query_dimensions = _int_setting("LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS", 0)
+
+    if (
+        seed_dimensions != 1024
+        or query_dimensions != seed_dimensions
+        or query_provider != seed_provider
+        or query_model != seed_model
+    ):
+        raise RuntimeError("embedding_space_mismatch")
+    return {
+        "provider": seed_provider,
+        "model": seed_model,
+        "dimensions": seed_dimensions,
+    }
+
+
+def _sentence_transformer_embedding(query: str, *, model_id: str) -> list[float]:
     device = _text(_setting("LEGAL_RAG_QUERY_EMBEDDING_DEVICE", "cpu")) or "cpu"
+    model = _sentence_transformer_model(model_id, device)
     prefix = "query: " if "e5" in model_id.lower() else ""
-    model = SentenceTransformer(model_id, device=device)
     vector = model.encode(
         [prefix + query],
         convert_to_numpy=True,
@@ -255,6 +651,15 @@ def _sentence_transformer_embedding(query: str, *, model_id: str) -> list[float]
         show_progress_bar=False,
     )[0]
     return [float(item) for item in vector.tolist()]
+
+
+@lru_cache(maxsize=1)
+def _sentence_transformer_model(model_id: str, device: str) -> Any:
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise RuntimeError("sentence_transformers_unavailable") from exc
+    return SentenceTransformer(model_id, device=device)
 
 
 def _openai_embedding(query: str, *, model_id: str, dimensions: int) -> list[float]:
@@ -302,7 +707,9 @@ def _pgvector_literal(vector: list[float]) -> str:
 
 
 def _rank_chunks(query: str, chunks: list[Any], *, top_k: int) -> list[dict[str, Any]]:
-    query_tokens = _tokens(query)
+    query_tokens = _unique_tokens(_tokens(query))
+    if not query_tokens:
+        return []
     ranked = []
     for chunk in chunks:
         haystack = " ".join(
@@ -316,25 +723,31 @@ def _rank_chunks(query: str, chunks: list[Any], *, top_k: int) -> list[dict[str,
         ).lower()
         if not haystack:
             continue
-        score = 0.0
-        if query.lower() in haystack:
-            score += 5.0
-        for token in query_tokens:
-            if token in haystack:
-                score += 1.0
-                if token in _text(getattr(chunk, "title", "")).lower():
-                    score += 1.5
-                if token in _text(getattr(chunk, "article_no", "")).lower():
-                    score += 1.5
-        if score <= 0:
+        matched_token_count = sum(1 for token in query_tokens if token in haystack)
+        if matched_token_count == 0:
             continue
-        ranked.append((score, chunk))
+        score = matched_token_count / len(query_tokens)
+        ranked.append((score, matched_token_count, chunk))
 
     ranked.sort(key=lambda item: item[0], reverse=True)
-    return [_chunk_result(chunk, score) for score, chunk in ranked[:top_k]]
+    return [
+        _chunk_result(
+            chunk,
+            score,
+            matched_token_count=matched_token_count,
+            query_token_count=len(query_tokens),
+        )
+        for score, matched_token_count, chunk in ranked[:top_k]
+    ]
 
 
-def _chunk_result(chunk: Any, score: float) -> dict[str, Any]:
+def _chunk_result(
+    chunk: Any,
+    score: float,
+    *,
+    matched_token_count: int,
+    query_token_count: int,
+) -> dict[str, Any]:
     source_document = getattr(chunk, "source_document", None)
     source_name = _text(getattr(source_document, "source_name", "")) or _text(getattr(chunk, "source_id", ""))
     source_url = _text(getattr(source_document, "source_url", ""))
@@ -346,17 +759,22 @@ def _chunk_result(chunk: Any, score: float) -> dict[str, Any]:
     return {
         "source_reference": _text(getattr(chunk, "chunk_id", "")),
         "source_document_id": _text(getattr(source_document, "source_document_id", "")),
+        "source_id": _text(getattr(chunk, "source_id", ""))
+        or _text(getattr(source_document, "source_document_id", "")),
         "source_type": _text(getattr(chunk, "source_type", "")),
         "source_name": source_name,
         "title": title,
         "article": article_no,
         "section_ref": _text(getattr(chunk, "section_ref", "")),
         "summary": content[:240],
+        "provision_text": content,
         "source_url": source_url,
         "effective_date": effective_date.isoformat() if effective_date else None,
         "expire_date": expire_date.isoformat() if expire_date else None,
         "domain_tags": _list(getattr(chunk, "domain_tags", [])),
         "score": round(score, 4),
+        "matched_token_count": matched_token_count,
+        "query_token_count": query_token_count,
     }
 
 
@@ -367,19 +785,33 @@ def _pgvector_row_result(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "source_reference": _text(row.get("chunk_id")),
         "source_document_id": "",
+        "source_id": _text(row.get("source_id")),
         "source_type": _text(row.get("source_type")),
         "source_name": source_name,
         "title": f"{source_name} {article}".strip() or "Legal source chunk",
         "article": article,
         "section_ref": article,
         "summary": provision_text[:240],
+        "provision_text": provision_text,
         "source_url": _text(row.get("source_url")),
         "effective_date": _date_iso(row.get("enforce_date")),
         "expire_date": _date_iso(row.get("expire_date")),
         "domain_tags": _list(row.get("domain_tags")),
         "embedding_provider": _text(row.get("embedding_provider")),
+        "embedding_model": _text(row.get("embedding_model")),
+        "embedding_dimensions": int(row.get("embedding_dimensions") or 0),
         "score": round(float(row.get("score") or 0.0), 6),
     }
+
+
+def _law_chunk_row_result(row: dict[str, Any]) -> dict[str, Any]:
+    result = _pgvector_row_result(row)
+    result.pop("embedding_provider", None)
+    result.pop("embedding_model", None)
+    result.pop("embedding_dimensions", None)
+    result["matched_token_count"] = int(row.get("matched_token_count") or 0)
+    result["query_token_count"] = int(row.get("query_token_count") or 0)
+    return result
 
 
 def _search_response(
@@ -428,7 +860,15 @@ def _django_connection() -> Any:
 
 
 def _tokens(value: str) -> list[str]:
-    return [token.lower() for token in re.findall(r"[\w\uac00-\ud7a3]+", value) if len(token) >= 2]
+    return [
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9\uac00-\ud7a3]+", value)
+        if len(token) >= 2
+    ]
+
+
+def _unique_tokens(tokens: list[str]) -> list[str]:
+    return list(dict.fromkeys(tokens))
 
 
 def _list(value: Any) -> list[Any]:
