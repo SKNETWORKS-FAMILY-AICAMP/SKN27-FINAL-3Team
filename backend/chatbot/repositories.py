@@ -122,6 +122,14 @@ class AuthSessionStateError(ValueError):
         self.reason = reason
 
 
+class SessionBindingError(PermissionError):
+    """Stable chat-session ownership error safe to expose as a reason code."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__("chat session cannot be bound to this identity")
+        self.reason = reason
+
+
 class UploadStorageUnavailableError(RuntimeError):
     """Retryable upload error raised when quarantine persistence did not finish."""
 
@@ -403,6 +411,7 @@ USAGE_POLICY_LIMITS = {
         "file_upload": 3,
         "agent_run": 3,
         "report_action": 2,
+        "google_oauth_code_exchange": settings.GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT,
     },
     "free": {
         "chat_message": 100,
@@ -1067,8 +1076,12 @@ def _locked_active_auth_session(
     expected_subject_id = f"user:{user_id}"
     if auth_session.subject_type != "user" or auth_session.subject_id != expected_subject_id:
         raise AuthSessionStateError("auth_session_subject_mismatch")
-    if auth_session.user is not None and auth_session.user.user_id != user_id:
+    if auth_session.user is None:
+        raise AuthSessionStateError("auth_session_user_missing")
+    if auth_session.user.user_id != user_id:
         raise AuthSessionStateError("auth_session_subject_mismatch")
+    if auth_session.user.status != UserAccountStatus.ACTIVE:
+        raise AuthSessionStateError("user_account_inactive")
     return auth_session
 
 
@@ -1095,8 +1108,19 @@ def persist_current_auth_subject(
         ("auth_me", "auth_me_checked"),
     )
 
+    if subject_type == "user" and not user_id:
+        raise AuthSessionStateError("auth_session_user_missing")
+    if user_id and (
+        subject_type != "user" or subject_id != f"user:{user_id}"
+    ):
+        raise AuthSessionStateError("auth_session_subject_mismatch")
+
     with transaction.atomic():
         user = _get_or_create_user_account(user_id)
+        if user_id and user is None:
+            raise AuthSessionStateError("auth_session_user_missing")
+        if user is not None and user.status != UserAccountStatus.ACTIVE:
+            raise AuthSessionStateError("user_account_inactive")
         if user is not None:
             _update_user_account_from_auth_payload(user, auth_payload)
         guest = _get_or_create_guest_identity(guest_id)
@@ -1503,6 +1527,7 @@ def record_usage_event(
     *,
     scope: str,
     amount: int = 1,
+    record_blocked_event: bool = True,
 ) -> dict[str, Any]:
     """Record and enforce a lightweight subject-scoped usage quota."""
 
@@ -1556,33 +1581,38 @@ def record_usage_event(
             quota.used_count = projected_count
         quota.save(update_fields=["limit_count", "used_count", "reset_at", "metadata", "updated_at"])
 
-        usage_event = UsageEvent.objects.create(
-            usage_event_id=_usage_event_id(subject_id, scope),
-            subject_id=subject_id,
-            scope=scope,
-            amount=normalized_amount if allowed else 0,
-            quota_key=quota_key,
-            metadata={
-                "source": "canonical_usage_enforcement",
-                "status": "allowed" if allowed else "blocked",
-                "subject_type": subject_type,
-                "plan_code": policy["plan_code"],
-                "subscription_id": policy["subscription_id"],
-                "policy_code_item": policy["policy_code_item"],
-                "limit_count": quota.limit_count,
-                "used_count": quota.used_count,
-                "requested_amount": normalized_amount,
-                "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
-            },
-        )
+        usage_event = None
+        if allowed or record_blocked_event:
+            usage_event = UsageEvent.objects.create(
+                usage_event_id=_usage_event_id(subject_id, scope),
+                subject_id=subject_id,
+                scope=scope,
+                amount=normalized_amount if allowed else 0,
+                quota_key=quota_key,
+                metadata={
+                    "source": "canonical_usage_enforcement",
+                    "status": "allowed" if allowed else "blocked",
+                    "subject_type": subject_type,
+                    "plan_code": policy["plan_code"],
+                    "subscription_id": policy["subscription_id"],
+                    "policy_code_item": policy["policy_code_item"],
+                    "limit_count": quota.limit_count,
+                    "used_count": quota.used_count,
+                    "requested_amount": normalized_amount,
+                    "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
+                },
+            )
 
     return {
         "backend": "postgresql",
-        "tables": [UsageQuota._meta.db_table, UsageEvent._meta.db_table],
+        "tables": [
+            UsageQuota._meta.db_table,
+            *([UsageEvent._meta.db_table] if usage_event is not None else []),
+        ],
         "quota_table": UsageQuota._meta.db_table,
         "usage_event_table": UsageEvent._meta.db_table,
         "quota_id": quota.quota_id,
-        "usage_event_id": usage_event.usage_event_id,
+        "usage_event_id": usage_event.usage_event_id if usage_event is not None else None,
         "subject_id": subject_id,
         "subject_type": subject_type,
         "scope": scope,
@@ -3732,25 +3762,25 @@ def _get_or_create_session(
         existing_guest_id = _chat_session_guest_id(session)
         if session.owner_id:
             if not normalized_owner_id or session.owner_id != normalized_owner_id:
-                raise PermissionError("session belongs to another identity")
+                raise SessionBindingError("session_owned_by_another_identity")
             return session
 
         if normalized_owner_id:
             if not existing_guest_id:
-                raise PermissionError("unbound session cannot be claimed")
+                raise SessionBindingError("session_unbound")
             if not normalized_guest_id or existing_guest_id != normalized_guest_id:
-                raise PermissionError("guest session binding does not match")
+                raise SessionBindingError("guest_session_binding_mismatch")
             session.owner_id = normalized_owner_id
             session.save(update_fields=["owner_id", "updated_at"])
             return session
 
         if existing_guest_id:
             if not normalized_guest_id or existing_guest_id != normalized_guest_id:
-                raise PermissionError("guest session binding does not match")
+                raise SessionBindingError("guest_session_binding_mismatch")
             return session
 
         if normalized_guest_id:
-            raise PermissionError("unbound session cannot be claimed")
+            raise SessionBindingError("session_unbound")
         return session
 
 
@@ -4939,9 +4969,12 @@ def _usage_policy_for_subject(subject: dict[str, str], *, scope: str) -> dict[st
     plan_code = _usage_plan_code(subject)
     code_item = _ensure_usage_policy_code_item(plan_code)
     limits = _dict_or_empty(code_item.metadata.get("limits"))
-    limit_count = _positive_int_or_none(limits.get(scope))
-    if limit_count is None:
-        limit_count = _default_usage_limit(plan_code, scope)
+    if scope == "google_oauth_code_exchange":
+        limit_count = settings.GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT
+    else:
+        limit_count = _positive_int_or_none(limits.get(scope))
+        if limit_count is None:
+            limit_count = _default_usage_limit(plan_code, scope)
     subscription = _active_subscription_for_subject(subject)
     return {
         "plan_code": plan_code,

@@ -7,6 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 OPENAPI_FILE = ROOT / "docs" / "api" / "openapi-v0.yaml"
 GUIDE_FILE = ROOT / "docs" / "api" / "openapi-v0-distribution-guide.md"
 NOTES_FILE = ROOT / "docs" / "api" / "openapi-v0-notes.md"
+COMPOSE_FILE = ROOT / "docker-compose.yml"
+PRODUCTION_ENV_EXAMPLE = ROOT / ".env.production.example"
+PRODUCTION_ENV_GUIDE = ROOT / "docs" / "ops" / "production-env.md"
+BACKEND_README = ROOT / "backend" / "README.md"
 
 
 def read_text(path: Path) -> str:
@@ -40,7 +44,7 @@ def test_openapi_v0_exposes_auth_history_and_agent_contracts():
 
     for path in [
         "/api/auth/guest-session/",
-        "/api/auth/login/",
+        "/api/auth/google/code/",
         "/api/auth/refresh/",
         "/api/auth/logout/",
         "/api/auth/me/",
@@ -57,6 +61,66 @@ def test_openapi_v0_exposes_auth_history_and_agent_contracts():
     assert schemas["HistoryEvent"]["x-contract-status"] == "confirmed"
     assert "auth_context" in schemas["ChatMessageRequest"]["properties"]
     assert "auth_context" in schemas["ReportActionRequest"]["properties"]
+
+
+def test_openapi_v0_exposes_only_real_google_authorization_code_login():
+    document = load_openapi()
+    paths = document["paths"]
+    schemas = document["components"]["schemas"]
+
+    assert "/api/auth/login/" not in paths
+
+    operation = paths["/api/auth/google/code/"]["post"]
+    assert operation["operationId"] == "exchangeGoogleAuthorizationCode"
+    assert operation["security"] == []
+    assert {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "header"
+    } == {"Origin", "X-Requested-With"}
+
+    request_schema = schemas["GoogleAuthorizationCodeRequest"]
+    assert set(request_schema["required"]) >= {
+        "client_id",
+        "code",
+        "redirect_uri",
+    }
+    assert "provider" not in request_schema["required"]
+    assert request_schema["properties"]["auth_flow"]["enum"] == [
+        "google_authorization_code_popup"
+    ]
+    assert "google_sub" not in request_schema["properties"]
+    assert "id_token" not in request_schema["properties"]
+    assert "credential" not in request_schema["properties"]
+
+    response_schema = schemas["GoogleAuthorizationCodeResponse"]
+    assert "google_auth_code.v1" in response_schema["properties"]["contract_version"]["enum"]
+    assert response_schema["properties"]["auth_mode"]["enum"] == ["authorization_code"]
+
+
+def test_google_code_distribution_includes_required_runtime_settings_only():
+    compose = read_text(COMPOSE_FILE)
+    production_env = read_text(PRODUCTION_ENV_EXAMPLE)
+    production_guide = read_text(PRODUCTION_ENV_GUIDE)
+    backend_readme = read_text(BACKEND_README)
+
+    for name in [
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_POPUP_REDIRECT_URI",
+        "GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT",
+        "GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS",
+    ]:
+        assert name in compose
+        assert name in production_env
+        assert name in production_guide
+
+    assert "VITE_GOOGLE_CLIENT_ID" in compose
+    assert "VITE_GOOGLE_CLIENT_ID" in production_env
+    assert "VITE_GOOGLE_CLIENT_ID" in production_guide
+    assert "MOCK_REQUIRE_AUTH" not in compose
+    assert "/api/auth/login/" not in backend_readme
+    assert "POST /api/auth/google/code/" in backend_readme
 
 
 def test_openapi_v0_reflects_latest_agent_output_schema_updates():

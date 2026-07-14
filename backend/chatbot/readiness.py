@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import importlib.util
+import ipaddress
 import os
 from typing import Any
 
 from django.conf import settings
 from django.db import connection
 
+from app.services.google_auth_service import (
+    is_official_google_token_endpoint,
+    is_official_google_userinfo_endpoint,
+    is_google_web_client_id,
+    normalize_google_web_origin,
+)
 from chatbot.file_scan_service import DEFAULT_MAX_SCAN_BYTES
 from chatbot.object_storage import object_storage_policy
 
@@ -124,12 +131,74 @@ def _google_oauth_check() -> dict[str, Any]:
     if placeholder:
         details.append(_detail(FAIL, f"Google OAuth settings still contain placeholders: {', '.join(placeholder)}."))
 
+    client_id = str(required["GOOGLE_CLIENT_ID"] or "").strip()
+    if client_id and not is_google_web_client_id(client_id):
+        details.append(
+            _detail(
+                FAIL,
+                "GOOGLE_CLIENT_ID must be a Google OAuth Web client ID ending in .apps.googleusercontent.com.",
+            )
+        )
+
+    redirect_uri = str(required["GOOGLE_POPUP_REDIRECT_URI"] or "").strip()
+    normalized_redirect_uri = normalize_google_web_origin(redirect_uri)
+    if redirect_uri and not normalized_redirect_uri:
+        details.append(
+            _detail(
+                FAIL,
+                "GOOGLE_POPUP_REDIRECT_URI must be a secure web origin without a path, query, or fragment; HTTP is allowed only for loopback local development.",
+            )
+        )
+    elif (
+        redirect_uri
+        and not bool(_setting("DEBUG", True))
+        and not normalized_redirect_uri.startswith("https://")
+    ):
+        details.append(
+            _detail(
+                FAIL,
+                "GOOGLE_POPUP_REDIRECT_URI must use HTTPS when DEBUG is false.",
+            )
+        )
+
+    token_endpoint = str(_setting("GOOGLE_TOKEN_ENDPOINT", "") or "").strip()
+    userinfo_endpoint = str(_setting("GOOGLE_USERINFO_ENDPOINT", "") or "").strip()
+    if not is_official_google_token_endpoint(token_endpoint) or not is_official_google_userinfo_endpoint(
+        userinfo_endpoint
+    ):
+        details.append(
+            _detail(
+                FAIL,
+                "GOOGLE_TOKEN_ENDPOINT and GOOGLE_USERINFO_ENDPOINT must use the official Google HTTPS endpoints.",
+            )
+        )
+
     app_jwt_secret = str(_setting("APP_JWT_SECRET", ""))
     oauth_secret = str(_setting("OAUTH_TOKEN_SECRET", ""))
     if not app_jwt_secret or app_jwt_secret == DEV_SECRET_KEY or len(app_jwt_secret) < 32 or _looks_placeholder(app_jwt_secret):
         details.append(_detail(FAIL, "APP_JWT_SECRET must be a non-default secret with at least 32 characters."))
     if not oauth_secret or oauth_secret == DEV_SECRET_KEY or len(oauth_secret) < 32 or _looks_placeholder(oauth_secret):
         details.append(_detail(FAIL, "OAUTH_TOKEN_SECRET must be a non-default secret with at least 32 characters."))
+
+    configured_proxy_cidrs = _setting("GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS", [])
+    proxy_cidrs = (
+        configured_proxy_cidrs.split(",")
+        if isinstance(configured_proxy_cidrs, str)
+        else configured_proxy_cidrs
+    )
+    invalid_proxy_cidrs = []
+    for value in proxy_cidrs:
+        try:
+            ipaddress.ip_network(str(value).strip(), strict=False)
+        except ValueError:
+            invalid_proxy_cidrs.append(str(value))
+    if invalid_proxy_cidrs:
+        details.append(
+            _detail(
+                FAIL,
+                "GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS contains an invalid trusted proxy CIDR.",
+            )
+        )
 
     return _check(
         "google_oauth",
