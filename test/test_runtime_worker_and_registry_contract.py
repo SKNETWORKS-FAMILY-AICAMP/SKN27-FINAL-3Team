@@ -32,6 +32,7 @@ def test_public_agent_registry_is_typed_and_never_exposes_mock_execution() -> No
 
     nodes = agent_node_service.list_public_agent_nodes()
     assert {node["node_code"] for node in nodes} == {
+        "appeal_decision_flow",
         "fine_notice_analysis",
         "law_ground_search",
         "objection_report_generation",

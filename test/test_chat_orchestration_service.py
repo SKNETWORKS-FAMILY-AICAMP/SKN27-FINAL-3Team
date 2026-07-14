@@ -26,6 +26,7 @@ def test_fine_notice_message_queues_only_supported_real_agents() -> None:
     assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
         "fine_notice_analysis",
         "law_ground_search",
+        "appeal_decision_flow",
         "objection_report_generation",
     ]
     assert response["assistant_message"] is None

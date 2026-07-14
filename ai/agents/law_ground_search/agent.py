@@ -119,6 +119,16 @@ def run_law_ground_search(
     valid_provisions, limitations = validate_and_filter_provisions(raw_provisions, scope)
     output["limitations"].extend(limitations)
     final_conf_res = evaluate_confidence(valid_provisions)
+    retrieval_metadata = next(
+        (
+            provision.get("_retrieval")
+            for provision in valid_provisions
+            if isinstance(provision.get("_retrieval"), dict)
+        ),
+        None,
+    )
+    for provision in valid_provisions:
+        provision.pop("_retrieval", None)
 
     # 6. 결과 구성
     if not valid_provisions:
@@ -134,6 +144,11 @@ def run_law_ground_search(
                 output["structured_result"].update(api_result)
         
         output["structured_result"]["law_provisions"] = valid_provisions
+        if retrieval_metadata:
+            output["structured_result"]["retrieval_quality"] = (
+                retrieval_metadata.get("backend") or "django_rag_tables"
+            )
+            output["structured_result"]["retrieval"] = retrieval_metadata
         
         
         # Evidence 배열 추출
