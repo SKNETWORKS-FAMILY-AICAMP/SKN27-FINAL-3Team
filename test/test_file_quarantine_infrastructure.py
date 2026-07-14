@@ -109,7 +109,10 @@ def test_terraform_quarantine_bucket_is_private_kms_encrypted_and_short_lived() 
         "resource",
         "aws_s3_bucket_lifecycle_configuration.objects",
     )
-    assert "bucket = aws_s3_bucket.objects.id" in staging_lifecycle
+    assert re.search(
+        r"bucket\s*=\s*aws_s3_bucket\.objects\.id",
+        staging_lifecycle,
+    )
     assert "depends_on = [aws_s3_bucket_versioning.objects]" in staging_lifecycle
     assert 'filter { prefix = "staging/" }' in staging_lifecycle
     assert "expiration { days = 1 }" in staging_lifecycle
