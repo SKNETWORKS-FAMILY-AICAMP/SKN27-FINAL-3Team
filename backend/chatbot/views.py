@@ -93,7 +93,6 @@ from chatbot.request_parsing import (
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
     AuthSessionStateError,
-    ReportReferenceError,
     SessionBindingError,
     UploadStorageUnavailableError,
     UploadValidationError,
