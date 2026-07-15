@@ -5,10 +5,10 @@ from unittest.mock import patch
 from etl.legal.reference_drift_check import check_reference_drift, main
 
 
-def _fake_pinned_references():
+def _fake_required_rag_references():
     return [
-        ("도로교통법 시행규칙", "제142조", "폴백 원문 A"),
-        ("질서위반행위규제법", "제7조", "폴백 원문 B"),
+        ("도로교통법 시행규칙", "폴백 원문 A"),
+        ("질서위반행위규제법", "폴백 원문 B"),
     ]
 
 
@@ -17,7 +17,7 @@ def _embed_stub(text: str, **_kwargs) -> list[float]:
     구성한 벡터 값에 따라 낮게 나오도록 결정론적으로 매핑한다."""
     vectors = {
         "폴백 원문 A": [1.0, 0.0],
-        "도로교통법 시행규칙 폴백 원문 A": [1.0, 0.0],       # DB 원문 == 폴백과 동일(정상)
+        "도로교통법 시행규칙 폴백 원문 A": [1.0, 0.0],       # RAG 매칭 원문 == 폴백과 동일(정상)
         "도로교통법 시행규칙 살짝 다른 표현": [0.99, 0.14107],  # 소폭 개정(정상, 여전히 유사)
         "도로교통법 시행규칙 완전히 다른 조문 내용": [0.0, 1.0],  # 재편 의심(드리프트)
         "폴백 원문 B": [1.0, 0.0],
@@ -29,13 +29,13 @@ def _embed_stub(text: str, **_kwargs) -> list[float]:
 
 
 class TestCheckReferenceDrift:
-    def test_DB원문이_폴백과_동일하면_ok(self):
+    def test_RAG매칭원문이_검증기준과_동일하면_ok(self):
         with patch(
-            "etl.legal.reference_drift_check.PINNED_REFERENCES",
-            [("도로교통법 시행규칙", "제142조", "폴백 원문 A")],
+            "etl.legal.reference_drift_check.REQUIRED_RAG_REFERENCES",
+            [("도로교통법 시행규칙", "폴백 원문 A")],
         ), patch(
-            "etl.legal.reference_drift_check.get_provision_text",
-            return_value="폴백 원문 A",
+            "etl.legal.reference_drift_check._resolve_provision_match",
+            return_value={"provision_text": "폴백 원문 A"},
         ), patch(
             "etl.legal.reference_drift_check.embed_query_with_openai", side_effect=_embed_stub,
         ):
@@ -49,11 +49,11 @@ class TestCheckReferenceDrift:
         """조문 문구가 살짝만 바뀐 정상적인 법 개정은 유사도가 임계값 이상으로
         유지돼야 한다 — 드리프트 경고는 "완전히 다른 내용"일 때만 나와야 한다."""
         with patch(
-            "etl.legal.reference_drift_check.PINNED_REFERENCES",
-            [("도로교통법 시행규칙", "제142조", "폴백 원문 A")],
+            "etl.legal.reference_drift_check.REQUIRED_RAG_REFERENCES",
+            [("도로교통법 시행규칙", "폴백 원문 A")],
         ), patch(
-            "etl.legal.reference_drift_check.get_provision_text",
-            return_value="살짝 다른 표현",
+            "etl.legal.reference_drift_check._resolve_provision_match",
+            return_value={"provision_text": "살짝 다른 표현"},
         ), patch(
             "etl.legal.reference_drift_check.embed_query_with_openai", side_effect=_embed_stub,
         ):
@@ -63,11 +63,11 @@ class TestCheckReferenceDrift:
 
     def test_완전히_다른_내용이면_drifted(self):
         with patch(
-            "etl.legal.reference_drift_check.PINNED_REFERENCES",
-            [("도로교통법 시행규칙", "제142조", "폴백 원문 A")],
+            "etl.legal.reference_drift_check.REQUIRED_RAG_REFERENCES",
+            [("도로교통법 시행규칙", "폴백 원문 A")],
         ), patch(
-            "etl.legal.reference_drift_check.get_provision_text",
-            return_value="완전히 다른 조문 내용",
+            "etl.legal.reference_drift_check._resolve_provision_match",
+            return_value={"provision_text": "완전히 다른 조문 내용"},
         ), patch(
             "etl.legal.reference_drift_check.embed_query_with_openai", side_effect=_embed_stub,
         ):
@@ -75,28 +75,29 @@ class TestCheckReferenceDrift:
 
         assert results[0].status == "drifted"
         assert results[0].similarity < 0.75
-        assert "재편" in results[0].detail
+        assert "재검토" in results[0].detail
 
-    def test_DB에_조문없으면_missing(self):
+    def test_신뢰도_미달로_매칭없으면_unavailable(self):
         with patch(
-            "etl.legal.reference_drift_check.PINNED_REFERENCES",
-            [("도로교통법 시행규칙", "제142조", "폴백 원문 A")],
+            "etl.legal.reference_drift_check.REQUIRED_RAG_REFERENCES",
+            [("도로교통법 시행규칙", "폴백 원문 A")],
         ), patch(
-            "etl.legal.reference_drift_check.get_provision_text", return_value=None,
+            "etl.legal.reference_drift_check._resolve_provision_match", return_value=None,
         ), patch(
             "etl.legal.reference_drift_check.embed_query_with_openai",
         ) as mock_embed:
             results = check_reference_drift()
 
-        assert results[0].status == "missing"
-        mock_embed.assert_not_called()  # 조회 자체가 없으면 임베딩 비용을 쓸 필요 없다
+        assert results[0].status == "unavailable"
+        assert "런타임 판정은 필수 법령 근거 미확보로 중단됨" in results[0].detail
+        mock_embed.assert_not_called()  # 매칭 자체가 없으면 임베딩 비용을 쓸 필요 없다
 
-    def test_DB조회_예외시_error(self):
+    def test_RAG조회_예외시_error(self):
         with patch(
-            "etl.legal.reference_drift_check.PINNED_REFERENCES",
-            [("도로교통법 시행규칙", "제142조", "폴백 원문 A")],
+            "etl.legal.reference_drift_check.REQUIRED_RAG_REFERENCES",
+            [("도로교통법 시행규칙", "폴백 원문 A")],
         ), patch(
-            "etl.legal.reference_drift_check.get_provision_text",
+            "etl.legal.reference_drift_check._resolve_provision_match",
             side_effect=ConnectionError("DB 연결 실패"),
         ):
             results = check_reference_drift()
@@ -105,10 +106,14 @@ class TestCheckReferenceDrift:
 
     def test_여러_조문_섞여있으면_전부_개별_판정(self):
         with patch(
-            "etl.legal.reference_drift_check.PINNED_REFERENCES", _fake_pinned_references(),
+            "etl.legal.reference_drift_check.REQUIRED_RAG_REFERENCES",
+            _fake_required_rag_references(),
         ), patch(
-            "etl.legal.reference_drift_check.get_provision_text",
-            side_effect=["폴백 원문 A", "폴백 원문 B"],
+            "etl.legal.reference_drift_check._resolve_provision_match",
+            side_effect=[
+                {"provision_text": "폴백 원문 A"},
+                {"provision_text": "폴백 원문 B"},
+            ],
         ), patch(
             "etl.legal.reference_drift_check.embed_query_with_openai", side_effect=_embed_stub,
         ):
@@ -135,6 +140,18 @@ class TestMain:
         with patch(
             "etl.legal.reference_drift_check.check_reference_drift",
             return_value=[DriftResult("법", "제1조", "drifted", 0.3, "재편 의심")],
+        ):
+            exit_code = main()
+        assert exit_code == 1
+        assert "재검토 필요" in capsys.readouterr().out
+
+    def test_unavailable상태도_재검토_필요로_집계(self, capsys):
+        """unavailable은 런타임 판정을 중단시키므로 사람이 RAG 상태를 확인해야 한다."""
+        from etl.legal.reference_drift_check import DriftResult
+
+        with patch(
+            "etl.legal.reference_drift_check.check_reference_drift",
+            return_value=[DriftResult("법", "제1조", "unavailable", None, "매칭 없음")],
         ):
             exit_code = main()
         assert exit_code == 1

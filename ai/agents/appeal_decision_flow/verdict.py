@@ -19,6 +19,7 @@ def verdict_node(state: AppealJudgmentState) -> dict:
             "judgment_status": "failed",
             "overall_possibility": None,
         }
+
     return {
         "judgment_status":     "success",
         "overall_possibility": _OVERALL_POSSIBILITY_BY_STAGE.get(state.get("notice_stage")),

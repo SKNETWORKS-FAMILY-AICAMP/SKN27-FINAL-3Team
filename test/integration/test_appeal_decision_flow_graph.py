@@ -42,15 +42,18 @@ def _mock_law_code_db_lookup():
 
 
 @pytest.fixture(autouse=True)
-def _mock_required_legal_provisions():
-    def verified_provision(source_name, article_no):
-        if article_no == "제160조":
-            return "도로교통법 제160조제4항제1호 도난 또는 그 밖의 부득이한 사유"
-        return f"{source_name} {article_no} DB 검증 조문"
+def _mock_verified_merit_law_context():
+    """그래프 분기 테스트에는 필수 법령 근거가 검증된 상태를 제공한다."""
+    def verified_match(source_name, golden_text):
+        return {
+            "source_name": source_name,
+            "provision_text": golden_text,
+            "score": 0.9,
+        }
 
     with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
-        "etl.legal.search.get_provision_text",
-        side_effect=verified_provision,
+        "ai.agents.appeal_decision_flow.law_refs._resolve_provision_match",
+        side_effect=verified_match,
     ):
         yield
 
@@ -327,7 +330,8 @@ class TestSuccessBranch:
         """(law160-budeuk-hansayu-scope-analysis2.md 확정) 142조는 위반유형 무관 공통
         조문이라, 비주정차 law_code에서도 제7조뿐 아니라 142조까지 함께 주입돼야 한다.
 
-        테스트용 DB 포트가 반환한 조문과 provenance 라벨이 프롬프트에 함께 들어가는지 검증한다.
+        autouse fixture가 검증된 RAG 매칭을 결정론적으로 제공하며, 제160조만 검증된 고정
+        스냅샷으로 주입되는 provenance 계약까지 함께 확인한다.
         """
         captured_context = {}
 
@@ -347,14 +351,39 @@ class TestSuccessBranch:
                 "user_appeal_reason": "그냥 급해서 그랬습니다",
             })
 
-        assert (
-            "source=질서위반행위규제법; article=제7조; provenance=legal_provision_db"
-            in captured_context["prompt"]
-        )
-        assert (
-            "source=도로교통법 시행규칙; article=제142조; provenance=legal_provision_db"
-            in captured_context["prompt"]
-        )
+        assert "source=도로교통법 시행규칙; provenance=legal_rag" in captured_context["prompt"]
+        assert "source=질서위반행위규제법; provenance=legal_rag" in captured_context["prompt"]
+        assert "provenance=pinned_verified_snapshot" in captured_context["prompt"]
+
+    def test_필수_법령DB_비활성화면_MG호출없이_partial_failed(self, monkeypatch):
+        calls = {"risk": 0, "merit": 0}
+
+        def fake_create(*args, **kwargs):
+            prompt = kwargs["messages"][0]["content"]
+            if "신원노출" in prompt:
+                calls["risk"] += 1
+                return _fake_response('{"category": null, "confidence": "low", "rationale": "무관"}')
+            calls["merit"] += 1
+            return _fake_response('{"merit": "강함", "merit_basis": "should-not-run"}')
+
+        monkeypatch.delenv("LEGAL_PROVISION_DB_ENABLED", raising=False)
+        with patch("openai.OpenAI") as mock_cls:
+            mock_cls.return_value.chat.completions.create.side_effect = fake_create
+            result = graph.invoke({
+                "fine_type": "과태료",
+                "notice_stage": "사전통지",
+                "opinion_deadline": _iso(8),
+                "law_code": "도로교통법 제17조 제1항",
+                "user_appeal_reason": "그냥 급해서 그랬습니다",
+            })
+
+        envelope = _envelope(result)
+        structured = envelope["structured_result"]
+        assert envelope["status"] == "partial"
+        assert structured["judgment_status"] == "failed"
+        assert structured["legal_evidence_status"] == "unavailable"
+        assert structured["legal_evidence_reason"] == "legal_provision_db_disabled"
+        assert calls == {"risk": 1, "merit": 0}
 
     def test_MG_LLM_호출실패해도_success로_완료되되_merit_judgment_failed_표시(self):
         """MG의 LLM 호출이 실패해도 그래프는 여전히 judgment_status=success로
@@ -383,40 +412,6 @@ class TestSuccessBranch:
 
         next_actions = _envelope(result)["next_actions"]
         assert any("재호출" in action for action in next_actions)
-
-    def test_필수_법령DB_비활성화면_MG호출없이_partial_failed(self, monkeypatch):
-        calls = {"risk": 0, "merit": 0}
-
-        def fake_create(*args, **kwargs):
-            prompt = kwargs["messages"][0]["content"]
-            if "신원노출" in prompt:
-                calls["risk"] += 1
-                return _fake_response(
-                    '{"category": null, "confidence": "low", "rationale": "무관"}'
-                )
-            calls["merit"] += 1
-            return _fake_response('{"merit": "강함", "merit_basis": "should-not-run"}')
-
-        monkeypatch.delenv("LEGAL_PROVISION_DB_ENABLED", raising=False)
-        with patch("openai.OpenAI") as mock_cls:
-            mock_cls.return_value.chat.completions.create.side_effect = fake_create
-            result = graph.invoke(
-                {
-                    "fine_type": "과태료",
-                    "notice_stage": "사전통지",
-                    "opinion_deadline": _iso(8),
-                    "law_code": "도로교통법 제17조 제1항",
-                    "user_appeal_reason": "그냥 급해서 그랬습니다",
-                }
-            )
-
-        envelope = _envelope(result)
-        structured = envelope["structured_result"]
-        assert envelope["status"] == "partial"
-        assert structured["judgment_status"] == "failed"
-        assert structured["legal_evidence_status"] == "unavailable"
-        assert structured["legal_evidence_reason"] == "legal_provision_db_disabled"
-        assert calls == {"risk": 1, "merit": 0}
 
 
 # ── RG ∥ MG 병렬 분기의 실행 순서·독립성 확인 ────────────────────────────────
