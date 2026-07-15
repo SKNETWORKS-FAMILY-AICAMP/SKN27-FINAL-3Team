@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterator, Mapping
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from app.services.legal_rag_service import LEGAL_SOURCE_TYPES
 
@@ -45,6 +45,22 @@ LEGAL_VARCHAR_LIMITS = {
 _ELASTICSEARCH_FORBIDDEN_INDEX_CHARACTERS = frozenset('\\/*?"<>|,#:')
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_CREDENTIAL_QUERY_KEYS = frozenset(
+    {
+        "accesstoken",
+        "credential",
+        "googleaccessid",
+        "sig",
+        "signature",
+        "token",
+        "xamzcredential",
+        "xamzsecuritytoken",
+        "xamzsignature",
+        "xgoogcredential",
+        "xgoogsecuritytoken",
+        "xgoogsignature",
+    }
+)
 
 
 class RagSeedValidationError(ValueError):
@@ -593,9 +609,19 @@ def _validate_legal_source_url(value: str, *, role: str, line_number: int) -> No
     try:
         parsed = urlsplit(value)
         hostname = (parsed.hostname or "").lower()
+        query_keys = {
+            "".join(character for character in key.lower() if character.isalnum())
+            for key, _item in parse_qsl(parsed.query, keep_blank_values=True)
+        }
     except ValueError:
         raise RagSeedValidationError(error) from None
     if parsed.scheme.lower() != "https" or not parsed.netloc or not hostname:
+        raise RagSeedValidationError(error)
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or bool(query_keys & _CREDENTIAL_QUERY_KEYS)
+    ):
         raise RagSeedValidationError(error)
 
     placeholder_host = (

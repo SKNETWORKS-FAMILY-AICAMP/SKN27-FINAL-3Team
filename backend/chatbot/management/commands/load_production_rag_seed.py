@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+from contextlib import contextmanager
 from io import StringIO
-from typing import Any, Callable, Iterable
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Callable, Iterable, Iterator
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
@@ -121,21 +125,48 @@ def execute_rag_seed_load(
     if dry_run:
         return result
 
-    loads = {
-        "legal": _load_legal_pgvector(bundle, replace=replace_legal, batch_size=batch_size),
-        "review_case": _load_review_case_elasticsearch(
-            bundle,
-            recreate=recreate_es,
-            batch_size=batch_size,
-        ),
-        "precedent_fault_ratio": _load_fault_ratio_elasticsearch(
-            bundle,
-            recreate=recreate_es,
-            batch_size=batch_size,
-        ),
-    }
+    with _verified_bundle_snapshot(bundle) as load_bundle:
+        loads = {
+            "legal": _load_legal_pgvector(
+                load_bundle,
+                replace=replace_legal,
+                batch_size=batch_size,
+            ),
+            "review_case": _load_review_case_elasticsearch(
+                load_bundle,
+                recreate=recreate_es,
+                batch_size=batch_size,
+            ),
+            "precedent_fault_ratio": _load_fault_ratio_elasticsearch(
+                load_bundle,
+                recreate=recreate_es,
+                batch_size=batch_size,
+            ),
+        }
     result["loads"] = loads
     return result
+
+
+@contextmanager
+def _verified_bundle_snapshot(bundle: RagSeedBundle) -> Iterator[RagSeedBundle]:
+    """Freeze verified artifact bytes for the complete multi-target load."""
+
+    with TemporaryDirectory(prefix="skn27-rag-seed-") as temporary_directory:
+        snapshot_root = Path(temporary_directory)
+        try:
+            for artifact in bundle.artifacts.values():
+                target = snapshot_root / Path(*artifact.relative_path.split("/"))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(artifact.path, target)
+            snapshot_manifest = snapshot_root / bundle.manifest_path.name
+            shutil.copyfile(bundle.manifest_path, snapshot_manifest)
+            snapshot_bundle = load_and_validate_rag_seed_manifest(snapshot_manifest)
+        except (OSError, RagSeedValidationError):
+            raise SeedLoadError("RAG seed snapshot verification failed") from None
+
+        if _bundle_identity(snapshot_bundle) != _bundle_identity(bundle):
+            raise SeedLoadError("RAG seed snapshot changed after approval")
+        yield snapshot_bundle
 
 
 def _load_legal_pgvector(bundle: RagSeedBundle, *, replace: bool, batch_size: int) -> dict[str, Any]:
@@ -306,7 +337,6 @@ def _bundle_identity(bundle: RagSeedBundle) -> tuple[Any, ...]:
         (
             role,
             artifact.relative_path,
-            str(artifact.path),
             artifact.sha256,
             artifact.byte_count,
             artifact.row_count,

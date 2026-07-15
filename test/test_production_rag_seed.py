@@ -12,6 +12,7 @@ from app.services.rag_seed_bundle import (
     REQUIRED_RAG_SEED_ROLES,
     RagSeedValidationError,
     build_rag_seed_manifest,
+    iter_rag_seed_jsonl,
     load_and_validate_rag_seed_manifest,
 )
 from backend.chatbot.management.commands import load_production_rag_seed
@@ -396,6 +397,8 @@ def test_production_manifest_rejects_synthetic_or_unsupported_embedding_provider
         "https://example.org/law",
         "https://www.example.com/law",
         "https://offline/law",
+        "https://user:secret@www.law.go.kr/law",
+        "https://www.law.go.kr/law?X-Amz-Credential=AKIA_TEST&X-Amz-Signature=secret",
         "/relative/law",
     ],
 )
@@ -807,8 +810,20 @@ def test_live_load_calls_all_existing_load_paths_once(
     )
 
     assert [call[0] for call in calls] == ["legal", "review", "precedent"]
-    assert all(call[1].manifest_path == bundle.manifest_path for call in calls)
+    assert all(call[1] is calls[0][1] for call in calls)
+    assert calls[0][1].manifest_path != bundle.manifest_path
     assert all(call[1].embedding_space == bundle.embedding_space for call in calls)
+    assert all(
+        {
+            role: artifact.sha256
+            for role, artifact in call[1].artifacts.items()
+        }
+        == {
+            role: artifact.sha256
+            for role, artifact in bundle.artifacts.items()
+        }
+        for call in calls
+    )
     assert all(call[2] is True and call[3] == 25 for call in calls)
     assert result["status"] == "loaded"
     assert result["external_writes"] is True
@@ -826,6 +841,56 @@ def test_live_load_revalidates_bundle_before_external_writes(tmp_path: Path) -> 
             recreate_es=False,
             batch_size=10,
         )
+
+
+def test_live_load_uses_verified_snapshot_across_all_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
+    source_review_path = bundle.artifacts["review_case_chunks"].path
+    consumed_review_rows: list[dict[str, object]] = []
+
+    def load_legal(current_bundle, *, replace: bool, batch_size: int):
+        assert replace is False
+        assert batch_size == 10
+        mutated_row = dict(_valid_rows()["review_case_chunks"][0])
+        mutated_row["review_case_id"] = "changed-after-verification"
+        mutated_row["chunk_id"] = "changed-after-verification"
+        _write_jsonl(source_review_path, [mutated_row])
+        return {"loaded": 1}
+
+    def load_review(current_bundle, *, recreate: bool, batch_size: int):
+        assert recreate is False
+        assert batch_size == 10
+        consumed_review_rows.extend(
+            iter_rag_seed_jsonl(current_bundle.artifacts["review_case_chunks"])
+        )
+        return {"indexed": 1}
+
+    monkeypatch.setattr(load_production_rag_seed, "_load_legal_pgvector", load_legal)
+    monkeypatch.setattr(
+        load_production_rag_seed,
+        "_load_review_case_elasticsearch",
+        load_review,
+    )
+    monkeypatch.setattr(
+        load_production_rag_seed,
+        "_load_fault_ratio_elasticsearch",
+        lambda _bundle, *, recreate, batch_size: {"indexed": 1},
+    )
+
+    result = load_production_rag_seed.execute_rag_seed_load(
+        bundle,
+        dry_run=False,
+        replace_legal=False,
+        recreate_es=False,
+        batch_size=10,
+    )
+
+    assert result["status"] == "loaded"
+    assert consumed_review_rows[0]["review_case_id"] == "review-1"
+    assert consumed_review_rows[0]["chunk_id"] == "review-1-summary"
 
 
 def test_live_load_rejects_self_consistent_bundle_replacement(tmp_path: Path) -> None:

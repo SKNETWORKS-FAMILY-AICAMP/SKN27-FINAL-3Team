@@ -12,12 +12,35 @@ def run_objection_report_generation(
     context: dict[str, Any],
 ) -> dict[str, Any]:
     node = context.get("node") if isinstance(context.get("node"), dict) else {}
+    handoff_error = _strict_handoff_error(agent_input)
+    if handoff_error:
+        return _output(
+            agent_input=agent_input,
+            node=node,
+            status="failed",
+            summary="Persisted Supervisor reporting handoff validation failed.",
+            structured_result={
+                "document_type": "objection_form",
+                "form_sections": [],
+                "report_actions": [],
+                "error_code": handoff_error,
+                "readiness": {
+                    "ready_for_download": False,
+                    "requires_user_review": True,
+                },
+            },
+            evidence=[],
+            next_actions=["rebuild_supervisor_reporting_handoff"],
+            limitations=["Reporting did not run without a valid persisted Supervisor handoff."],
+        )
     notice_output = _upstream_output(agent_input, "fine_notice_analysis")
     text_ml_output = _upstream_output(agent_input, "text_ml_case_search")
     law_output = _upstream_output(agent_input, "law_ground_search")
+    appeal_output = _upstream_output(agent_input, "appeal_decision_flow")
     notice_result = _structured_result(notice_output)
     text_ml_result = _structured_result(text_ml_output)
     law_result = _structured_result(law_output)
+    appeal_result = _structured_result(appeal_output)
     user_facts = _user_facts(agent_input)
     document_variant = _document_variant(notice_result, text_ml_result)
 
@@ -72,6 +95,8 @@ def run_objection_report_generation(
             document_variant=document_variant,
         ),
         "report_actions": _report_actions(),
+        "appeal_decision": _appeal_decision(appeal_result),
+        "supervisor_handoff": _handoff_trace(agent_input),
         "missing_fields": missing_fields,
         "readiness": {
             "ready_for_download": not missing_fields,
@@ -80,14 +105,27 @@ def run_objection_report_generation(
         },
     }
 
-    status = "success" if not missing_fields else "partial"
+    handoff = _supervisor_handoff(agent_input)
+    handoff_gate = handoff.get("gate") if isinstance(handoff.get("gate"), dict) else {}
+    status = (
+        "success"
+        if not missing_fields and handoff_gate.get("status") != "draft"
+        else "partial"
+    )
     return _output(
         agent_input=agent_input,
         node=node,
         status=status,
         summary=_summary(status, recipient_agency, missing_fields, document_variant),
         structured_result=structured_result,
-        evidence=_evidence(agent_input, notice_output, text_ml_output, law_output, user_facts),
+        evidence=_evidence(
+            agent_input,
+            notice_output,
+            text_ml_output,
+            law_output,
+            appeal_output,
+            user_facts,
+        ),
         next_actions=_next_actions(missing_fields),
         limitations=_limitations(missing_fields),
     )
@@ -123,6 +161,13 @@ def _output(
 
 
 def _upstream_output(agent_input: dict[str, Any], node_code: str) -> dict[str, Any]:
+    handoff = _supervisor_handoff(agent_input)
+    handoff_results = handoff.get("results") if isinstance(handoff.get("results"), dict) else {}
+    persisted_output = handoff_results.get(node_code)
+    if isinstance(persisted_output, dict):
+        return deepcopy(persisted_output)
+    if _handoff_required(agent_input):
+        return {}
     upstream = agent_input.get("upstream_results")
     if not isinstance(upstream, dict):
         return {}
@@ -142,8 +187,13 @@ def _structured_result(output: dict[str, Any]) -> dict[str, Any]:
 
 def _user_facts(agent_input: dict[str, Any]) -> str:
     context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    handoff = _supervisor_handoff(agent_input)
+    case_context = handoff.get("case_context") if isinstance(handoff.get("case_context"), dict) else {}
+    if _handoff_required(agent_input):
+        return _text(case_context.get("user_facts"))
     slot_state = agent_input.get("slot_state") if isinstance(agent_input.get("slot_state"), dict) else {}
     candidates = [
+        case_context.get("user_facts"),
         context.get("user_facts"),
         context.get("fact_summary"),
         context.get("raw_user_text"),
@@ -246,7 +296,7 @@ def _recipient_agency(
     context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
     notice_fields = _notice_fields(notice_result)
     recipient = (
-        _text(context.get("recipient_agency"))
+        ("" if _handoff_required(agent_input) else _text(context.get("recipient_agency")))
         or _text(notice_fields.get("agency"))
         or _text(notice_fields.get("issuing_authority"))
         or _text(notice_result.get("issuing_authority"))
@@ -418,10 +468,23 @@ def _required_attachments(
         required_documents = notice_result.get("required_documents")
         if isinstance(required_documents, list):
             attachments.extend(_text(item) for item in required_documents)
-    for attachment in agent_input.get("attachments") or []:
+    attachment_candidates = agent_input.get("attachments") or []
+    if _handoff_required(agent_input):
+        handoff = _supervisor_handoff(agent_input)
+        case_context = (
+            handoff.get("case_context")
+            if isinstance(handoff.get("case_context"), dict)
+            else {}
+        )
+        attachment_candidates = case_context.get("attachment_refs") or []
+    for attachment in attachment_candidates:
         if not isinstance(attachment, dict):
             continue
-        label = _text(attachment.get("filename")) or _text(attachment.get("original_filename"))
+        label = (
+            _text(attachment.get("filename"))
+            or _text(attachment.get("purpose"))
+            or _text(attachment.get("original_filename"))
+        )
         if label:
             attachments.append(label)
     return _unique(attachments)
@@ -497,12 +560,14 @@ def _evidence(
     notice_output: dict[str, Any],
     text_ml_output: dict[str, Any],
     law_output: dict[str, Any],
+    appeal_output: dict[str, Any],
     user_facts: str,
 ) -> list[dict[str, Any]]:
     evidence = []
     evidence.extend(_output_evidence(notice_output))
     evidence.extend(_output_evidence(text_ml_output))
     evidence.extend(_output_evidence(law_output))
+    evidence.extend(_output_evidence(appeal_output))
     if user_facts:
         evidence.append(
             {
@@ -514,6 +579,70 @@ def _evidence(
             }
         )
     return evidence[:10]
+
+
+def _supervisor_handoff(agent_input: dict[str, Any]) -> dict[str, Any]:
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    handoff = context.get("supervisor_reporting_handoff")
+    return handoff if isinstance(handoff, dict) else {}
+
+
+def _handoff_required(agent_input: dict[str, Any]) -> bool:
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    return context.get("handoff_required") is True
+
+
+def _strict_handoff_error(agent_input: dict[str, Any]) -> str:
+    if not _handoff_required(agent_input):
+        return ""
+    handoff = _supervisor_handoff(agent_input)
+    if not handoff:
+        return "supervisor_reporting_handoff_required"
+    if handoff.get("contract_version") != "supervisor_reporting_handoff.v1":
+        return "supervisor_reporting_handoff_version_invalid"
+    target = handoff.get("target") if isinstance(handoff.get("target"), dict) else {}
+    if target.get("node_code") != "objection_report_generation":
+        return "supervisor_reporting_handoff_target_invalid"
+    source = handoff.get("source") if isinstance(handoff.get("source"), dict) else {}
+    if source.get("persistence") != "agent_results" or source.get("persisted") is not True:
+        return "supervisor_reporting_handoff_source_invalid"
+    gate = handoff.get("gate") if isinstance(handoff.get("gate"), dict) else {}
+    if gate.get("status") not in {"ready", "draft"}:
+        return "supervisor_reporting_handoff_gate_blocked"
+    if not isinstance(handoff.get("results"), dict):
+        return "supervisor_reporting_handoff_results_invalid"
+    return ""
+
+
+def _handoff_trace(agent_input: dict[str, Any]) -> dict[str, Any]:
+    handoff = _supervisor_handoff(agent_input)
+    source = handoff.get("source") if isinstance(handoff.get("source"), dict) else {}
+    gate = handoff.get("gate") if isinstance(handoff.get("gate"), dict) else {}
+    return {
+        "contract_version": handoff.get("contract_version"),
+        "handoff_id": handoff.get("handoff_id"),
+        "gate_status": gate.get("status"),
+        "source_fingerprint": source.get("fingerprint"),
+        "source_result_ids": deepcopy(source.get("result_ids") or []),
+    }
+
+
+def _appeal_decision(appeal_result: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = (
+        "judgment_status",
+        "overall_possibility",
+        "merit",
+        "merit_basis",
+        "merit_relief_type",
+        "risk_flag",
+        "risk_basis",
+        "guide",
+    )
+    return {
+        field: deepcopy(appeal_result.get(field))
+        for field in allowed_fields
+        if field in appeal_result
+    }
 
 
 def _output_evidence(output: dict[str, Any]) -> list[dict[str, Any]]:

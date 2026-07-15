@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 
@@ -6,6 +7,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def run_auth_session_node_contract(source: str) -> None:
+    module_url = (ROOT / "app" / "web" / "authSession.js").as_uri()
+    completed = subprocess.run(
+        [
+            "node",
+            "--input-type=module",
+            "--eval",
+            f'const authSession = await import("{module_url}");\n{source}',
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_frontend_uses_only_the_canonical_auth_and_job_contracts() -> None:
@@ -80,3 +98,101 @@ def test_production_auth_document_requires_real_google_code_flow() -> None:
     assert "GOOGLE_POPUP_REDIRECT_URI" in content
     assert "GOOGLE_AUTH_ALLOW_MOCK" not in content
     assert "APP_AUTH_ALLOW_MOCK_BEARER" not in content
+
+
+def test_memory_only_app_jwt_does_not_restore_stale_authenticated_ui() -> None:
+    auth_session = read_text(ROOT / "app" / "web" / "authSession.js")
+    persistence = auth_session.split("export function persistAuthSession", 1)[1].split(
+        "export function clearStoredAuthSession", 1
+    )[0]
+
+    assert "auth_session_id: authSessionId || null" not in persistence
+    assert "user_id: userId || null" not in persistence
+    assert "writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null)" not in persistence
+    assert "removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY)" in auth_session
+
+
+def test_app_jwt_refresh_scheduler_uses_exp_for_timing_and_cleans_up() -> None:
+    run_auth_session_node_contract(
+        r"""
+        const assert = (await import("node:assert/strict")).default;
+        const payload = Buffer.from(JSON.stringify({ exp: 1000 })).toString("base64url");
+        const token = `header.${payload}.signature`;
+
+        assert.equal(
+          authSession.millisecondsUntilAppJwtRefresh(token, { nowMs: 100000 }),
+          600000,
+        );
+        assert.equal(
+          authSession.millisecondsUntilAppJwtRefresh(token, { nowMs: 800000 }),
+          0,
+        );
+        assert.equal(authSession.millisecondsUntilAppJwtRefresh("not-a-jwt"), null);
+
+        let scheduled = null;
+        let clearedTimerId = null;
+        let refreshCalls = 0;
+        let finishRefresh;
+        const cleanup = authSession.scheduleAppJwtRefresh({
+          token,
+          nowMs: 100000,
+          setTimer(callback, delayMs) {
+            scheduled = { callback, delayMs };
+            return 17;
+          },
+          clearTimer(timerId) {
+            clearedTimerId = timerId;
+          },
+          refresh() {
+            refreshCalls += 1;
+            return new Promise((resolve) => {
+              finishRefresh = resolve;
+            });
+          },
+        });
+
+        assert.equal(scheduled.delayMs, 600000);
+        const firstRun = scheduled.callback();
+        const duplicateRun = scheduled.callback();
+        await Promise.resolve();
+        assert.equal(refreshCalls, 1);
+        finishRefresh();
+        await Promise.all([firstRun, duplicateRun]);
+        cleanup();
+        assert.equal(clearedTimerId, 17);
+
+        let cancelledRefreshCalls = 0;
+        let cancelledCallback = null;
+        const cancelBeforeRun = authSession.scheduleAppJwtRefresh({
+          token,
+          nowMs: 100000,
+          setTimer(callback) {
+            cancelledCallback = callback;
+            return 18;
+          },
+          clearTimer() {},
+          refresh() {
+            cancelledRefreshCalls += 1;
+          },
+        });
+        cancelBeforeRun();
+        await cancelledCallback();
+        assert.equal(cancelledRefreshCalls, 0);
+        """
+    )
+
+
+def test_frontend_refreshes_app_jwt_and_clears_stale_auth_ui_on_failure() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    for required in (
+        "scheduleAppJwtRefresh",
+        "api.refreshAuthToken(",
+        "setActiveAuthToken(nextToken)",
+        "setAuthSessionId(nextAuthSessionId)",
+        "clearStoredAuthSession()",
+        'setActiveAuthToken("")',
+        'setAuthSessionId("")',
+        "다시 로그인",
+    ):
+        assert required in shell

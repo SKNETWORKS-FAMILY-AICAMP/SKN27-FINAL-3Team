@@ -235,15 +235,15 @@ class TestReasonIntakeNode:
 
 class TestLawRefs:
     @pytest.fixture(autouse=True)
-    def _force_db_lookup_fallback(self):
-        """법령DB 조회가 실패한 상황을 강제해, 하드코딩 폴백 원문으로 결정론적으로 검증한다.
+    def _provide_verified_db_provisions(self):
+        def verified_provision(source_name, article_no):
+            if article_no == "제160조":
+                return "도로교통법 제160조제4항제1호 도난 또는 그 밖의 부득이한 사유"
+            return f"{source_name} {article_no} (DB) 검증 조문"
 
-        DB가 실제로 응답할 때의 동작(원문 그대로 사용)은 별도 테스트
-        (test_DB_조회_성공하면_DB_원문_사용)에서 확인한다.
-        """
-        with patch(
+        with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
             "etl.legal.search.get_provision_text",
-            side_effect=RuntimeError("테스트 환경 — DB 조회 불가"),
+            side_effect=verified_provision,
         ):
             yield
 
@@ -268,9 +268,14 @@ class TestLawRefs:
         assert "질서위반행위규제법 제14조" in ctx
 
     def test_DB_조회_성공하면_DB_원문_사용(self):
+        def db_provision(_source_name, article_no):
+            if article_no == "제160조":
+                return "(DB) 실제 법령DB 제160조 도난 및 부득이한 사유 원문"
+            return "(DB) 실제 법령DB에서 조회된 조문 원문"
+
         with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
             "etl.legal.search.get_provision_text",
-            return_value="(DB) 실제 법령DB에서 조회된 조문 원문",
+            side_effect=db_provision,
         ):
             ctx = get_merit_context("사전통지")
         assert "(DB) 실제 법령DB에서 조회된 조문 원문" in ctx
@@ -391,6 +396,17 @@ class TestRiskClassificationNode:
 # ── merit_classification_node (DATA-003 §5) ─────────────────────────────────
 
 class TestMeritClassificationNode:
+    @pytest.fixture(autouse=True)
+    def _provide_verified_law_context(self):
+        with patch(
+            "ai.agents.appeal_decision_flow.merit_gate.get_merit_context",
+            return_value=(
+                "[source=도로교통법 시행규칙; article=제142조; "
+                "provenance=legal_provision_db] 시행규칙 제142조"
+            ),
+        ):
+            yield
+
     def test_사전통지면_142조_컨텍스트_위반유형무관_포함(self):
         """142조는 law_code(주정차 여부)로 더 이상 라우팅되지 않고 항상 포함된다
         (law160-budeuk-hansayu-scope-analysis2.md) — 비주정차 law_code로 검증.
@@ -674,6 +690,15 @@ class TestMeritClassificationNode:
 # ── verdict_node (DATA-003 §4) ───────────────────────────────────────────────
 
 class TestVerdictNode:
+    def test_필수_법령근거_없으면_판정실패(self):
+        result = verdict_node(
+            {
+                "notice_stage": "사전통지",
+                "legal_evidence_status": "unavailable",
+            }
+        )
+        assert result == {"judgment_status": "failed", "overall_possibility": None}
+
     def test_사전통지_라벨(self):
         result = verdict_node({"notice_stage": "사전통지"})
         assert result["overall_possibility"] == "의견_제출시_인정가능"
