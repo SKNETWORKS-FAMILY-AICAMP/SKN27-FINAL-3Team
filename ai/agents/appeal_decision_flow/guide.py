@@ -290,8 +290,6 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "deadline_passed":       state.get("deadline_passed"),
         "law_code_verified":     state.get("law_code_verified"),
         "reason_quality_insufficient": state.get("reason_quality_insufficient"),
-        "legal_evidence_status": state.get("legal_evidence_status"),
-        "legal_evidence_reason": state.get("legal_evidence_reason"),
         "schema_fields_unrecognized": _unrecognized_schema_fields(state),
         "guide":                 guide,
     }
@@ -328,8 +326,6 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
         # merit="강함"까지는 정상 판단됐지만 면제/감경 2차 구분만 기술적으로 실패한
         # 상태 — merit_judgment_failed와 별개 원인이므로 별도 재호출 안내를 남긴다.
         next_actions.append("MG(relief_type) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
-    if state.get("legal_evidence_status") == "unavailable":
-        next_actions.append("필수 법령 근거를 확인한 뒤 MG(merit) 판정을 재시도")
     if _unrecognized_schema_fields(state):
         # fine_type·notice_stage가 알려진 값 밖이면 판정은 그대로(기본 분기로) 진행했지만,
         # Supervisor가 OCR 결과를 재확인하도록 명시적으로 알려준다.
@@ -346,11 +342,6 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
         missing_fields.append("notice_received_date")
 
     env = make_envelope(judgment_status, structured, missing_fields, next_actions, summary)
-    if state.get("legal_evidence_status") == "unavailable":
-        env["status"] = "partial"
-        env["limitations"] = [
-            str(state.get("legal_evidence_reason") or "legal_provision_unavailable")
-        ]
 
     return {
         "guide":         guide,
