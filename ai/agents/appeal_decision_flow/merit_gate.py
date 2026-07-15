@@ -3,7 +3,7 @@ import re
 
 import openai
 
-from .law_refs import get_merit_context
+from .law_refs import LegalProvisionEvidenceUnavailable, get_merit_context
 from .prompts import MERIT_CLASSIFICATION_PROMPT, RELIEF_TYPE_CLASSIFICATION_PROMPT
 from .state import AppealJudgmentState
 
@@ -97,7 +97,18 @@ def merit_classification_node(state: AppealJudgmentState) -> dict:
     reason = state.get("user_appeal_reason") or ""
     notice_stage = state.get("notice_stage")
 
-    law_context = get_merit_context(notice_stage)
+    try:
+        law_context = get_merit_context(notice_stage)
+    except LegalProvisionEvidenceUnavailable as exc:
+        return {
+            "merit": "보류",
+            "merit_basis": "Required legal provision evidence is unavailable.",
+            "merit_judgment_failed": True,
+            "merit_relief_type": None,
+            "relief_type_judgment_failed": None,
+            "legal_evidence_status": "unavailable",
+            "legal_evidence_reason": exc.reason_code,
+        }
 
     try:
         result = _call_llm_merit(reason, law_context)
@@ -119,6 +130,8 @@ def merit_classification_node(state: AppealJudgmentState) -> dict:
             "relief_type_judgment_failed": None,  # merit 판정 자체가 실패해 relief_type
                                                     # 호출까지 가지 못했다 — merit_judgment_failed로
                                                     # 이미 원인이 드러나므로 여긴 "적용 대상 아님".
+            "legal_evidence_status":       "available",
+            "legal_evidence_reason":       None,
         }
 
     if merit not in _VALID_MERIT:
@@ -166,4 +179,6 @@ def merit_classification_node(state: AppealJudgmentState) -> dict:
         "merit_judgment_failed":      merit_judgment_failed,
         "merit_relief_type":          relief_type,
         "relief_type_judgment_failed": relief_type_judgment_failed,
+        "legal_evidence_status":       "available",
+        "legal_evidence_reason":       None,
     }
