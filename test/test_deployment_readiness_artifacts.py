@@ -94,6 +94,16 @@ def test_production_env_template_contains_readiness_keys():
     assert missing == []
 
 
+def test_low_cost_seed_and_production_defaults_avoid_paid_vector_calls():
+    compose = read_text(ROOT / "docker-compose.yml")
+    production_env = read_text(ROOT / ".env.production.example")
+
+    assert "--provider sentence-transformers" in compose
+    assert "--provider openai" not in compose
+    assert 'profiles: ["seed"]' in compose
+    assert "LEGAL_RAG_VECTOR_ENABLED=0" in production_env
+
+
 def test_production_env_doc_references_readiness_command_and_secret_rules():
     content = read_text(ROOT / "docs" / "ops" / "production-env.md")
     assert "check_production_readiness" in content

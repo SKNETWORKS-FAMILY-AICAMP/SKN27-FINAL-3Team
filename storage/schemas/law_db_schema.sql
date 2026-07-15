@@ -22,13 +22,20 @@ CREATE TABLE IF NOT EXISTS law_chunks (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create law embeddings table (E5-multilingual uses 1024 dimensions, hash uses 32)
+-- Create law embeddings table. Production seed/query space is explicit and 1024-dimensional.
 CREATE TABLE IF NOT EXISTS law_embeddings (
     chunk_id VARCHAR(255) REFERENCES law_chunks(chunk_id) ON DELETE CASCADE,
-    embedding_vector vector(1024),
+    embedding_vector vector(1024) NOT NULL,
     embedding_provider VARCHAR(50) NOT NULL,
+    embedding_model VARCHAR(255) NOT NULL,
+    embedding_dimensions INTEGER NOT NULL CHECK (embedding_dimensions = 1024),
     PRIMARY KEY (chunk_id)
 );
+
+-- Upgrade older pilot tables without guessing metadata for existing vectors.
+-- Seed upserts populate these columns; runtime retrieval ignores NULL/mismatched rows.
+ALTER TABLE law_embeddings ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(255);
+ALTER TABLE law_embeddings ADD COLUMN IF NOT EXISTS embedding_dimensions INTEGER;
 
 -- Create GIN index for domain_tags array
 CREATE INDEX IF NOT EXISTS idx_law_chunks_domain_tags ON law_chunks USING GIN (domain_tags);
