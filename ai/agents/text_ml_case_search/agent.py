@@ -6,6 +6,7 @@ AgentAdapterInput -> AgentAdapterOutput contract stable.
 
 from __future__ import annotations
 
+import math
 import os
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -517,34 +518,43 @@ def _truthy(value: Any) -> bool:
 
 def _cases_from_retrieval(retrieval: dict[str, Any]) -> list[dict[str, Any]]:
     cases = []
-    for index, item in enumerate(retrieval.get("results") or [], start=1):
+    for item in retrieval.get("results") or []:
         if not isinstance(item, dict):
             continue
-        source_ref = _text(item.get("source_reference")) or f"review_case_{index:03d}"
+        source_ref = _text(item.get("source_reference"))
+        source_type = _text(item.get("source_type"))
+        title = _text(item.get("title"))
+        summary = _text(item.get("summary"))
+        score = _case_score(item.get("score"))
+        if not all((source_ref, source_type, title, summary)) or score is None:
+            continue
         cases.append(
             {
                 "case_id": source_ref,
-                "title": _text(item.get("title"))
-                or _text(item.get("source_name"))
-                or f"Similar accident case {index}",
-                "summary": _text(item.get("summary"))
-                or "Retrieved case chunk requires source review.",
-                "reliability_score": _case_score(item.get("score")),
-                "source_type": _text(item.get("source_type")) or CASE_SOURCE_TYPE,
+                "title": title,
+                "summary": summary,
+                "reliability_score": score,
+                "source_type": source_type,
                 "source_ref": source_ref,
             }
         )
     return cases
 
 
-def _case_score(raw_score: Any) -> float:
+def _case_score(raw_score: Any) -> float | None:
+    if raw_score is None or isinstance(raw_score, bool):
+        return None
     try:
         score = float(raw_score)
     except (TypeError, ValueError):
-        return 0.5
+        return None
+    if not math.isfinite(score) or score < 0:
+        return None
     if score > 1:
         score = score / 10
-    return round(min(0.95, max(0.1, score)), 4)
+    if score > 1:
+        return None
+    return round(score, 4)
 
 
 def _reliability_score(cases: list[dict[str, Any]]) -> float:
@@ -657,15 +667,15 @@ def _evidence_from_cases(
 ) -> list[dict[str, Any]]:
     return [
         {
-            "source_type": case.get("source_type") or CASE_SOURCE_TYPE,
-            "title": case.get("title") or "Similar case candidate",
-            "source_reference": case.get("source_ref") or case.get("case_id"),
+            "source_type": case["source_type"],
+            "title": case["title"],
+            "source_reference": case["source_ref"],
             "metadata": {
                 "case_id": case.get("case_id"),
                 "retrieval_backend": retrieval.get("backend"),
                 "retrieval_status": retrieval.get("status"),
             },
-            "confidence": case.get("reliability_score"),
+            "confidence": case["reliability_score"],
         }
         for case in cases
     ]

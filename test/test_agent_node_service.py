@@ -765,6 +765,106 @@ def test_execute_sync_text_ml_case_search_does_not_fabricate_evidence_when_rag_i
     assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
 
 
+def test_execute_sync_text_ml_case_search_drops_malformed_rag_hits(monkeypatch):
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    monkeypatch.setattr(
+        text_ml_agent,
+        "_run_fault_ratio_knowledge_agent",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        text_ml_agent,
+        "search_legal_rag",
+        lambda query, *, top_k, source_type: {
+            "contract_version": "legal_rag_search.v1",
+            "status": "ready",
+            "backend": "django_rag_tables",
+            "query": query,
+            "top_k": top_k,
+            "result_count": 4,
+            "results": [
+                {},
+                {
+                    "source_reference": " ",
+                    "source_type": "review_case",
+                    "title": "blank provenance",
+                    "summary": "must be dropped",
+                    "score": 0.9,
+                },
+                {
+                    "source_reference": "review_case:blank-content",
+                    "source_type": "review_case",
+                    "title": " ",
+                    "summary": " ",
+                    "score": 0.8,
+                },
+                {
+                    "source_reference": "review_case:bad-score",
+                    "source_type": "review_case",
+                    "title": "Bad score",
+                    "summary": "must be dropped",
+                    "score": "not-a-number",
+                },
+            ],
+        },
+    )
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "text_ml_case_search",
+            "analysis_plan_id": "plan_sync_text_ml_malformed",
+            "job_id": "job_sync_text_ml_malformed",
+            "session_id": "ses_sync_text_ml_malformed",
+            "message_id": "msg_sync_text_ml_malformed",
+            "user_text": "교차로 접촉 사고 유사 사례를 찾아줘",
+        }
+    )
+
+    output = execution["agent_output"]
+    assert output["status"] == "partial"
+    assert output["structured_result"]["similar_cases"] == []
+    assert output["structured_result"]["top_cases"] == []
+    assert output["structured_result"]["reliability_score"] == 0.0
+    assert output["evidence"] == []
+
+
+def test_text_ml_case_search_preserves_only_valid_rag_provenance_and_score():
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    cases = text_ml_agent._cases_from_retrieval(
+        {
+            "results": [
+                {
+                    "source_reference": "review_case:missing-score",
+                    "source_type": "review_case",
+                    "title": "Missing score",
+                    "summary": "must be dropped",
+                },
+                {
+                    "source_reference": "review_case:valid-001",
+                    "source_type": "review_case",
+                    "title": "Verified intersection case",
+                    "summary": "A source-backed summary.",
+                    "score": 0.73,
+                },
+            ]
+        }
+    )
+
+    assert cases == [
+        {
+            "case_id": "review_case:valid-001",
+            "title": "Verified intersection case",
+            "summary": "A source-backed summary.",
+            "reliability_score": 0.73,
+            "source_type": "review_case",
+            "source_ref": "review_case:valid-001",
+        }
+    ]
+
+
 def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch):
     from ai.agents.law_ground_search import agent as law_agent
 
