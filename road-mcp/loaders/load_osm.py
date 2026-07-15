@@ -17,16 +17,19 @@ async def download_osm_pbf(force: bool = False) -> Path:
     settings = get_settings()
     ensure_data_dirs(settings)
     url = require_value(settings.osm_pbf_url, "OSM_PBF_URL")
-    output_path = data_path("raw", "osm", "south-korea-latest.osm.pbf", settings=settings)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_dir = data_path("raw", "osm", settings=settings)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    if output_path.exists() and not force:
-        print(f"OSM PBF already exists: {output_path}")
-        return output_path
-
-    async with httpx.AsyncClient(timeout=None) as client:
+    async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
         async with client.stream("GET", url) as response:
             response.raise_for_status()
+            if str(response.url) != url:
+                print(f"Redirected OSM PBF URL: {response.url}")
+            output_filename = Path(response.url.path).name or "south-korea-latest.osm.pbf"
+            output_path = output_dir / output_filename
+            if output_path.exists() and not force:
+                print(f"OSM PBF already exists: {output_path}")
+                return output_path
             with output_path.open("wb") as file:
                 async for chunk in response.aiter_bytes():
                     file.write(chunk)

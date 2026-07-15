@@ -229,15 +229,26 @@ database/
 ```text
 data/
 ├─ raw/
+│  ├─ osm/
+│  ├─ api_samples/
+│  └─ reference/
 ├─ snapshots/
+│  ├─ road_signs_YYMMDD/
+│  ├─ traffic_signals_YYMMDD/
+│  ├─ crosswalks_YYMMDD/
+│  └─ protection_zones_YYMMDD/
+│     └─ {sggCd}/
 └─ rejected/
+   └─ protection_zones/
 ```
 
 | 폴더 | 역할 |
 |---|---|
-| `raw` | 현재 작업 중인 원본 파일 |
-| `snapshots` | 날짜별 원본 백업 |
-| `rejected` | 검증 실패 또는 좌표 오류 데이터 |
+| `raw/osm` | Geofabrik OSM PBF 파일 보관. 파일명은 redirect 최종 파일명 사용 |
+| `raw/api_samples` | API 1건 미리보기 응답 |
+| `raw/reference` | 시군구 코드 등 참조 CSV |
+| `snapshots` | 공공데이터 원본 JSON 수집본. 폴더명은 `source_YYMMDD` |
+| `rejected/protection_zones` | 보호구역 실패 sggCd 재시도 큐 |
 
 주의:
 
@@ -248,6 +259,17 @@ data/rejected
 ```
 
 이 폴더에는 큰 파일이 들어갈 수 있으므로 `.gitignore`에 넣는 것이 좋다. 문서와 샘플만 Git에 올린다.
+
+현재 예시:
+
+```text
+data/raw/osm/south-korea-260713.osm.pbf
+data/snapshots/road_signs_260714/page_00001.json
+data/snapshots/traffic_signals_260714/page_00001.json
+data/snapshots/crosswalks_260714/page_00001.json
+data/snapshots/protection_zones_260714/11110/page_00001.json
+data/rejected/protection_zones/29110_error.json
+```
 
 ---
 

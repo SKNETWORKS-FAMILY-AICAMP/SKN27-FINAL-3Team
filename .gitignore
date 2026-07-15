@@ -45,3 +45,5 @@ output/pptx/*.inspect.ndjson
 설계/
 models/
 etl/fault_cases/artifacts/
+road-mcp/
+kakaomap/

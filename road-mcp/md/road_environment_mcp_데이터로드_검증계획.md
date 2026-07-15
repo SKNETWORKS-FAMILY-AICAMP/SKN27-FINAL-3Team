@@ -79,9 +79,20 @@ download.geofabrik.de/asia/south-korea-latest.osm.pbf
 저장 위치:
 
 ```text
-road-mcp/data/raw/osm/south-korea-latest.osm.pbf
-road-mcp/data/snapshots/osm/YYYYMMDD/south-korea-latest.osm.pbf
+road-mcp/data/raw/osm/south-korea-YYMMDD.osm.pbf
 ```
+
+`OSM_PBF_URL`은 `south-korea-latest.osm.pbf`를 사용하되, Geofabrik이 반환하는 redirect 최종 URL의 실제 파일명을 저장 파일명으로 사용한다.
+
+예시:
+
+```text
+요청 URL: https://download.geofabrik.de/asia/south-korea-latest.osm.pbf
+redirect 최종 URL: https://download.geofabrik.de/asia/south-korea-260713.osm.pbf
+저장 파일: road-mcp/data/raw/osm/south-korea-260713.osm.pbf
+```
+
+폴더명은 `osm`으로 유지한다. PBF 파일명 자체에 데이터 기준일이 들어가므로 `osm_YYMMDD` 폴더를 별도로 만들지 않는다.
 
 ## 4.2 변환
 
@@ -329,6 +340,73 @@ enabled
 
 단, 보호구역은 `sggCd`별로 위 흐름을 반복한다.
 
+## 5.7 원본 snapshot 저장 규칙
+
+공공데이터 원본 응답은 날짜를 하위 폴더로 두지 않고, 소스 폴더명에 수집일자를 붙인다.
+
+```text
+data/snapshots/
+├─ road_signs_260714/
+│  ├─ page_00001.json
+│  └─ page_00002.json
+├─ traffic_signals_260714/
+│  ├─ page_00001.json
+│  └─ page_00002.json
+├─ crosswalks_260714/
+│  ├─ page_00001.json
+│  └─ page_00002.json
+└─ protection_zones_260714/
+   ├─ 11110/
+   │  └─ page_00001.json
+   └─ 11140/
+      └─ page_00001.json
+```
+
+이 규칙을 선택한 이유:
+
+```text
+1. 날짜 하위 폴더보다 한눈에 원천과 수집일을 확인하기 쉽다.
+2. 같은 날짜의 전체 수집본을 폴더 단위로 관리할 수 있다.
+3. 보호구역은 지역코드별 반복 수집이므로 소스_날짜/sggCd/page 구조가 가장 읽기 쉽다.
+4. 향후 여러 날짜 수집본을 병렬 보관할 때도 source_YYMMDD 단위로 비교할 수 있다.
+```
+
+OSM은 공공데이터 snapshot과 다르게 `data/raw/osm` 아래에 저장한다.
+
+```text
+data/raw/osm/
+└─ south-korea-260713.osm.pbf
+```
+
+## 5.8 실패 기록과 재시도 큐
+
+보호구역 API는 시군구 코드별로 호출하므로, 일부 시군구에서만 실패할 수 있다. 실패한 코드는 `data/rejected/protection_zones`에 기록한다.
+
+```text
+data/rejected/protection_zones/
+├─ 29110_error.json
+├─ 29140_error.json
+└─ ...
+```
+
+이 폴더는 단순 로그가 아니라 재시도 큐 역할을 한다.
+
+```text
+python -m loaders.load_protection_zones --retry-rejected
+```
+
+동작 방식:
+
+```text
+1. rejected/protection_zones/*_error.json 파일명을 읽는다.
+2. 파일명에서 sggCd를 추출한다.
+3. 실패한 sggCd만 다시 호출한다.
+4. 성공하면 해당 *_error.json 파일을 삭제한다.
+5. 다시 실패하면 같은 파일을 최신 오류 내용으로 갱신한다.
+```
+
+검증 스크립트에는 향후 `--clean-resolved-rejected` 같은 옵션을 추가해, snapshot에는 존재하지만 rejected에 남아 있는 오래된 오류 파일을 정리할 수 있게 한다.
+
 ```text
 보호구역:
 시군구 코드 반복
@@ -338,7 +416,7 @@ enabled
 → 시군구별 누락 검증
 ```
 
-## 5.7 공통 컬럼
+## 5.9 공통 컬럼
 
 ```text
 id
@@ -365,7 +443,7 @@ raw_json
 재처리 가능성 확보
 ```
 
-## 5.8 원천별 운영 테이블
+## 5.10 원천별 운영 테이블
 
 ```text
 road_prod.road_guide_signs
@@ -390,7 +468,7 @@ protection_zones
 → zone_type, facility_name, zone_radius, polygon_source
 ```
 
-## 5.9 원천별 응답 구조 확인 체크리스트
+## 5.11 원천별 응답 구조 확인 체크리스트
 
 로더를 구현하기 전에 각 API를 `numOfRows=1`, `pageNo=1`로 호출해 응답 구조를 저장한다.
 
@@ -829,34 +907,61 @@ road_prod, road_staging, road_meta 스키마 생성
 ## 4단계: OSM 적재
 
 ```text
-대한민국 PBF 다운로드
-osm2pgsql Flex 작성
-staging 적재
-OSM 품질검증
-production 교체
-대표 좌표 주변 도로 조회 테스트
+대한민국 PBF 다운로드 로더 구현
+→ Geofabrik latest URL redirect 처리
+→ redirect 최종 URL의 실제 파일명으로 저장
+→ south-korea-260713.osm.pbf 다운로드 확인
+→ osm2pgsql Flex 작성
+→ road-postgis 컨테이너 기준 PostGIS 적재
+→ OSM 도로 테이블 품질검증
+→ production 교체
+→ 대표 좌표 주변 도로 조회 테스트
 ```
 
 ## 5단계: 공공데이터 4종 적재
 
 ```text
 API 키와 활용신청 상태 확인
-페이지네이션 수집기 구현
-raw_json snapshot 저장
-정규화 및 geometry 생성
-staging 적재
-품질검증
-production 교체
+→ 공공데이터 4종 API URL 환경변수 구성
+→ 도로안내표지, 신호등, 횡단보도 로더 구현
+→ 보호구역 시군구 코드 CSV 기반 반복 로더 구현
+→ 공공데이터 오류 시 서비스키 비노출 예외 처리
+→ 네트워크 일시 오류 재시도 처리
+→ 일반 3종 로더 --resume, --start-page 지원
+→ 보호구역 --retry-rejected 지원
+→ snapshot 폴더명 source_YYMMDD 규칙 적용
+→ raw_json snapshot 저장
+→ 원본 JSON 구조 분석
+→ 정규화 매핑표 확정
+→ 좌표와 geometry 생성
+→ staging 적재
+→ 품질검증
+→ production 교체
 ```
 
-보호구역은 추가로 다음을 수행한다.
+보호구역은 다음 순서로 별도 반복한다.
 
 ```text
 시군구 코드 목록 준비
-sggCd별 페이지네이션 반복
-sggCd별 성공·실패 로그 저장
-실패 sggCd가 있으면 전국 production 교체 중단
+→ sggCd별 페이지네이션 반복
+→ sggCd별 성공 snapshot 저장
+→ 실패 sggCd는 rejected/protection_zones에 기록
+→ rejected 폴더를 재시도 큐로 사용
+→ 성공한 sggCd의 error json 삭제
+→ 실패 sggCd가 남아 있으면 전국 production 교체 중단
 ```
+
+2026-07-14 기준 확인된 원본 수집 결과:
+
+```text
+road_signs_260714: 41 page
+traffic_signals_260714: 999 page
+crosswalks_260714: 598 page
+protection_zones_260714: 61 sggCd folder
+protection_zones rejected queue: 169 error json
+```
+
+보호구역 rejected 대부분은 `429 API token quota exceeded` 또는 `429 API token rate limit exceeded`이다. 이는 코드 오류가 아니라 공공데이터 API 호출 한도 또는 속도 제한으로 판단한다.
 
 ## 6단계: MCP 조회 검증
 
@@ -888,3 +993,262 @@ OSM PBF: V1에서는 주 1회 또는 월 1회 전체 교체
 - 검증 실패 시 production을 교체하지 않는다.
 - MCP는 위치 모호 사례를 임의 확정하지 않는다.
 - 최종 출력은 항상 `road_environment_output_v1` 구조를 유지한다.
+- 공공데이터 snapshot은 `source_YYMMDD` 폴더명으로 저장한다.
+- 보호구역 snapshot은 `protection_zones_YYMMDD/{sggCd}/page_00001.json` 구조로 저장한다.
+- 보호구역 rejected 폴더는 재시도 큐로 사용한다.
+- OSM PBF는 `data/raw/osm` 폴더에 redirect 최종 파일명 그대로 저장한다.
+
+---
+
+# 14. 2026-07-14 구축 절차 상세
+
+## 14.1 보호구역 API URL 확정
+
+### 보호구역 API 500 오류
+
+초기에는 보호구역 API URL을 다음처럼 잘못 설정했다.
+
+```text
+https://apis.data.go.kr/1320000/safetyzoneInfo/getDtlList
+```
+
+Swagger 실행 결과와 비교하면서 실제 성공 URL이 다음과 같음을 확인했다.
+
+```text
+https://apis.data.go.kr/1320000/safetyzonedtlinfo/getdtllist
+```
+
+문제 원인:
+
+```text
+1. safetyzoneInfo가 아니라 safetyzonedtlinfo였다.
+2. 해당 API 서버는 경로 대소문자에도 민감했다.
+3. Swagger 화면의 Request URL을 기준으로 맞춘 뒤 정상 응답을 받았다.
+```
+
+조치 결과:
+
+```text
+PROTECTION_ZONES_API_URL=https://apis.data.go.kr/1320000/safetyzonedtlinfo/getdtllist
+```
+
+보호구역 샘플 호출 결과:
+
+```text
+source: protection_zones_11110
+total_count: 51
+record_count: 1
+top_level_keys: response
+```
+
+### 도로안내표지 ReadTimeout
+
+초기에는 다음 설정을 사용했다.
+
+```text
+PUBLIC_DATA_DEFAULT_NUM_OF_ROWS=1000
+```
+
+도로안내표지 API는 `numOfRows=1000`에서 `ReadTimeout`이 발생했다. `numOfRows=1`, `numOfRows=100`은 정상 응답을 반환했다.
+
+조치:
+
+```text
+PUBLIC_DATA_DEFAULT_NUM_OF_ROWS=100
+```
+
+결과:
+
+```text
+python -m loaders.load_road_signs --collect
+→ road_signs_260714/page_00001.json ... page_00041.json 저장
+```
+
+### 신호등 수집 중 ConnectError
+
+신호등은 약 999페이지 규모이며, 수집 중 756페이지 이후 네트워크 연결 오류가 발생했다.
+
+오류:
+
+```text
+error_type=ConnectError
+error='All connection attempts failed'
+```
+
+조치:
+
+```text
+1. 공공데이터 공통 호출부에 재시도 추가
+2. PUBLIC_DATA_MAX_RETRIES 추가
+3. PUBLIC_DATA_RETRY_BACKOFF_SECONDS 추가
+4. 일반 3종 로더에 --resume, --start-page 추가
+```
+
+재개 방식:
+
+```text
+python -m loaders.load_traffic_signals --collect --resume
+```
+
+결과:
+
+```text
+traffic_signals_260714/page_00001.json ... page_00999.json 저장
+```
+
+### 보호구역 429 한도 초과
+
+보호구역 전국 수집 중 일부 시군구에서 다음 오류가 발생했다.
+
+```text
+status_code=429
+body_preview='API token quota exceeded'
+body_preview='API token rate limit exceeded'
+```
+
+원인 판단:
+
+```text
+공공데이터포털 API 호출량 또는 호출 속도 제한
+```
+
+조치:
+
+```text
+1. 실패한 sggCd별 오류 파일을 data/rejected/protection_zones에 저장
+2. rejected 폴더를 재시도 큐로 사용
+3. --retry-rejected 옵션 추가
+4. 성공한 sggCd는 해당 error json 자동 삭제
+```
+
+재시도 방식:
+
+```text
+python -m loaders.load_protection_zones --retry-rejected
+```
+
+### OSM PBF 302 Redirect
+
+Geofabrik latest URL 호출 시 다음 redirect가 발생했다.
+
+```text
+요청: https://download.geofabrik.de/asia/south-korea-latest.osm.pbf
+응답: 302 Found
+Location: https://download.geofabrik.de/asia/south-korea-260713.osm.pbf
+```
+
+초기 로더는 redirect를 따라가지 않아 `HTTPStatusError`가 발생했다.
+
+조치:
+
+```text
+httpx.AsyncClient(..., follow_redirects=True)
+```
+
+추가 결정:
+
+```text
+폴더명: data/raw/osm
+파일명: redirect 최종 URL의 실제 파일명
+```
+
+결과:
+
+```text
+data/raw/osm/south-korea-260713.osm.pbf
+```
+
+## 14.2 로더 실행 명령
+
+공공데이터 4종 전체 수집:
+
+```powershell
+python -m loaders.load_road_signs --collect
+python -m loaders.load_crosswalks --collect
+python -m loaders.load_traffic_signals --collect
+python -m loaders.load_protection_zones --collect
+```
+
+일반 3종 이어받기:
+
+```powershell
+python -m loaders.load_road_signs --collect --resume
+python -m loaders.load_crosswalks --collect --resume
+python -m loaders.load_traffic_signals --collect --resume
+```
+
+일반 3종 특정 페이지부터 재개:
+
+```powershell
+python -m loaders.load_traffic_signals --collect --start-page 757
+```
+
+보호구역 실패분 재시도:
+
+```powershell
+python -m loaders.load_protection_zones --retry-rejected
+python -m loaders.load_protection_zones --retry-rejected --max-pages 1
+```
+
+OSM PBF 다운로드:
+
+```powershell
+python -m loaders.load_osm --download
+```
+
+로더 설정 검증:
+
+```powershell
+python -m loaders.validate_loaded_data
+```
+
+## 14.3 파일 구조
+
+```text
+data/
+├─ raw/
+│  ├─ api_samples/
+│  ├─ osm/
+│  │  └─ south-korea-260713.osm.pbf
+│  └─ reference/
+│     └─ sgg_codes.csv
+├─ snapshots/
+│  ├─ road_signs_260714/
+│  ├─ traffic_signals_260714/
+│  ├─ crosswalks_260714/
+│  └─ protection_zones_260714/
+│     ├─ 11110/
+│     ├─ 11140/
+│     └─ ...
+└─ rejected/
+   └─ protection_zones/
+      ├─ 29110_error.json
+      ├─ 29140_error.json
+      └─ ...
+```
+
+## 14.4 전체 구축 순서
+
+데이터 수집부터 MCP 조회 연결까지 다음 순서로 정리한다.
+
+```text
+1. validate_loaded_data에 --clean-resolved-rejected 옵션 추가
+2. 보호구역 rejected 169개는 429 호출 한도 회복 후 --retry-rejected로 반복 처리
+3. 원본 JSON 구조 분석
+4. 정규화 매핑표 확정
+5. road_staging 테이블 적재 로더 구현
+6. 좌표·geometry 생성 로직 구현
+7. OSM osm2pgsql Flex 작성
+8. PostGIS 컨테이너에서 실제 적재 테스트
+9. staging 품질검증
+10. production 교체 흐름 구현
+11. MCP 조회 로직이 production 테이블을 사용하도록 연결
+```
+
+주의:
+
+```text
+rejected 파일이 남아 있으면 전국 보호구역 수집이 완결된 상태가 아니다.
+429가 남아 있는 동안에는 production 교체를 하지 않는다.
+원본 JSON만으로는 운영 데이터가 아니며, DB 적재와 공간 검증을 거쳐야 MCP 조회에 사용할 수 있다.
+```

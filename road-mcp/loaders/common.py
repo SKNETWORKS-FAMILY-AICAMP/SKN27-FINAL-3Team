@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -70,24 +71,34 @@ async def fetch_public_data_page(
     params = build_public_data_params(selected, page_no, num_of_rows, extra_params)
 
     async with httpx.AsyncClient(timeout=selected.public_data_request_timeout_seconds) as client:
-        try:
-            response = await client.get(api_url, params=params, headers={"accept": "application/json"})
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            content_type = exc.response.headers.get("content-type", "")
-            body_preview = mask_secret(exc.response.text[:500], selected.public_data_api_key)
-            raise PublicDataApiError(
-                "공공데이터 API가 오류 상태를 반환했습니다. "
-                f"status_code={exc.response.status_code}, api_url={api_url!r}, "
-                f"content-type={content_type!r}, body_preview={body_preview!r}"
-            ) from None
-        except httpx.HTTPError as exc:
-            error_detail = str(exc) or repr(exc)
-            raise PublicDataApiError(
-                "공공데이터 API 요청 중 네트워크 오류가 발생했습니다. "
-                f"api_url={api_url!r}, error_type={type(exc).__name__}, "
-                f"error={mask_secret(error_detail, selected.public_data_api_key)!r}"
-            ) from None
+        for attempt in range(1, selected.public_data_max_retries + 2):
+            try:
+                response = await client.get(api_url, params=params, headers={"accept": "application/json"})
+                response.raise_for_status()
+                break
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code < 500 or attempt > selected.public_data_max_retries:
+                    content_type = exc.response.headers.get("content-type", "")
+                    body_preview = mask_secret(exc.response.text[:500], selected.public_data_api_key)
+                    raise PublicDataApiError(
+                        "공공데이터 API가 오류 상태를 반환했습니다. "
+                        f"status_code={exc.response.status_code}, api_url={api_url!r}, "
+                        f"content-type={content_type!r}, body_preview={body_preview!r}"
+                    ) from None
+                wait_seconds = selected.public_data_retry_backoff_seconds * attempt
+                print(f"[retry] page={page_no} status={exc.response.status_code} retry_after={wait_seconds}s")
+                await asyncio.sleep(wait_seconds)
+            except httpx.HTTPError as exc:
+                if attempt > selected.public_data_max_retries:
+                    error_detail = str(exc) or repr(exc)
+                    raise PublicDataApiError(
+                        "공공데이터 API 요청 중 네트워크 오류가 발생했습니다. "
+                        f"api_url={api_url!r}, error_type={type(exc).__name__}, "
+                        f"error={mask_secret(error_detail, selected.public_data_api_key)!r}"
+                    ) from None
+                wait_seconds = selected.public_data_retry_backoff_seconds * attempt
+                print(f"[retry] page={page_no} error_type={type(exc).__name__} retry_after={wait_seconds}s")
+                await asyncio.sleep(wait_seconds)
         try:
             return response.json()
         except JSONDecodeError as exc:
@@ -111,12 +122,13 @@ async def iter_public_data_pages(
     num_of_rows: int | None = None,
     extra_params: dict[str, Any] | None = None,
     max_pages: int | None = None,
+    start_page: int = 1,
     settings: Settings | None = None,
 ) -> AsyncIterator[tuple[int, dict[str, Any]]]:
     """공공데이터포털 API를 pageNo=1부터 순서대로 호출하는 비동기 반복자다."""
     selected = settings or get_settings()
     rows_per_page = num_of_rows or selected.public_data_default_num_of_rows
-    page_no = 1
+    page_no = max(start_page, 1)
 
     while True:
         payload = await fetch_public_data_page(
@@ -132,9 +144,10 @@ async def iter_public_data_pages(
         total_count = find_total_count(payload)
         reached_total = total_count is not None and page_no * rows_per_page >= total_count
         no_more_records = records is not None and len(records) == 0
-        reached_limit = max_pages is not None and page_no >= max_pages
+        no_data_response = is_no_data_response(payload)
+        reached_limit = max_pages is not None and (page_no - start_page + 1) >= max_pages
 
-        if reached_total or no_more_records or reached_limit:
+        if reached_total or no_more_records or no_data_response or reached_limit:
             break
         page_no += 1
 
@@ -154,10 +167,29 @@ def save_api_sample(source_name: str, payload: dict[str, Any], suffix: str = "pa
 
 
 def snapshot_path(source_name: str, page_no: int, suffix: str = "json") -> Path:
-    """원본 응답 스냅샷을 날짜별 폴더 아래에 저장하기 위한 경로를 만든다."""
-    today = datetime.now().strftime("%Y%m%d")
+    """원본 응답 스냅샷을 날짜가 붙은 소스 폴더 아래에 저장하기 위한 경로를 만든다."""
+    today = datetime.now().strftime("%y%m%d")
     safe_source_name = source_name.replace(" ", "_")
-    return data_path("snapshots", safe_source_name, today, f"page_{page_no:05d}.{suffix}")
+    dated_source_name = f"{safe_source_name}_{today}"
+    return data_path("snapshots", dated_source_name, f"page_{page_no:05d}.{suffix}")
+
+
+def latest_snapshot_page(source_name: str, settings: Settings | None = None) -> int | None:
+    """오늘 날짜가 붙은 소스 폴더에서 가장 마지막 페이지 번호를 찾는다."""
+    today = datetime.now().strftime("%y%m%d")
+    safe_source_name = source_name.replace(" ", "_")
+    snapshot_dir = data_path("snapshots", f"{safe_source_name}_{today}", settings=settings)
+    if not snapshot_dir.exists():
+        return None
+
+    page_numbers: list[int] = []
+    for path in snapshot_dir.glob("page_*.json"):
+        page_text = path.stem.removeprefix("page_")
+        try:
+            page_numbers.append(int(page_text))
+        except ValueError:
+            continue
+    return max(page_numbers) if page_numbers else None
 
 
 def find_first_key(payload: Any, candidate_keys: tuple[str, ...]) -> Any:
@@ -185,6 +217,19 @@ def find_total_count(payload: dict[str, Any]) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def find_result_code(payload: dict[str, Any]) -> str | None:
+    """공공데이터 응답 JSON에서 resultCode 값을 찾는다."""
+    value = find_first_key(payload, ("resultCode", "result_code", "code"))
+    return str(value) if value is not None else None
+
+
+def is_no_data_response(payload: dict[str, Any]) -> bool:
+    """공공데이터 응답이 조회 결과 0건을 뜻하는지 확인한다."""
+    result_code = find_result_code(payload)
+    total_count = find_total_count(payload)
+    return result_code == "ERR_03" or total_count == 0
 
 
 def find_record_list(payload: dict[str, Any]) -> list[Any] | None:

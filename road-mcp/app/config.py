@@ -47,6 +47,11 @@ class Settings(BaseSettings):
         default=30,
         alias="PUBLIC_DATA_REQUEST_TIMEOUT_SECONDS",
     )
+    public_data_max_retries: int = Field(default=3, alias="PUBLIC_DATA_MAX_RETRIES")
+    public_data_retry_backoff_seconds: float = Field(
+        default=2.0,
+        alias="PUBLIC_DATA_RETRY_BACKOFF_SECONDS",
+    )
     road_signs_api_url: str = Field(default="", alias="ROAD_SIGNS_API_URL")
     traffic_signals_api_url: str = Field(default="", alias="TRAFFIC_SIGNALS_API_URL")
     crosswalks_api_url: str = Field(default="", alias="CROSSWALKS_API_URL")

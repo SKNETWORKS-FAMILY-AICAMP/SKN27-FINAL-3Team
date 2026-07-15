@@ -16,10 +16,41 @@ from loaders.common import (
     preview_public_data_api,
     require_value,
     save_json,
-    snapshot_path,
 )
 
 SOURCE_NAME = "protection_zones"
+
+
+def protection_zone_snapshot_path(sgg_cd: str, page_no: int) -> Path:
+    """보호구역 원본 응답을 날짜가 붙은 소스 폴더와 지역코드 폴더 아래에 저장할 경로를 만든다."""
+    dated_source_name = f"{SOURCE_NAME}_{datetime.now().strftime('%y%m%d')}"
+    return data_path("snapshots", dated_source_name, sgg_cd, f"page_{page_no:05d}.json")
+
+
+def protection_zone_error_path(sgg_cd: str) -> Path:
+    """보호구역 수집 실패 정보를 날짜 없이 지역코드 기준 파일로 저장할 경로를 만든다."""
+    return data_path("rejected", SOURCE_NAME, f"{sgg_cd}_error.json")
+
+
+def load_rejected_sgg_codes() -> list[str]:
+    """실패 기록 폴더의 *_error.json 파일명에서 재시도할 시군구 코드를 읽는다."""
+    rejected_dir = data_path("rejected", SOURCE_NAME)
+    if not rejected_dir.exists():
+        return []
+
+    codes = []
+    for path in sorted(rejected_dir.glob("*_error.json")):
+        code = path.stem.removesuffix("_error")
+        if code:
+            codes.append(code)
+    return codes
+
+
+def clear_rejected_sgg_code(sgg_cd: str) -> None:
+    """시군구 코드 재수집이 성공하면 기존 실패 기록을 삭제한다."""
+    error_path = protection_zone_error_path(sgg_cd)
+    if error_path.exists():
+        error_path.unlink()
 
 
 def load_sgg_codes(settings: Settings) -> list[str]:
@@ -70,12 +101,13 @@ async def preview() -> dict:
     )
 
 
-async def collect_raw_pages(max_pages_per_sgg: int | None = None) -> None:
-    """활성화된 모든 시군구 코드에 대해 보호구역 원본 응답을 수집한다."""
+async def collect_raw_pages(max_pages_per_sgg: int | None = None, sgg_codes: list[str] | None = None) -> None:
+    """지정된 시군구 코드 또는 활성화된 모든 시군구 코드의 보호구역 원본 응답을 수집한다."""
     settings = get_settings()
-    sgg_codes = load_sgg_codes(settings)
-    for sgg_cd in sgg_codes:
+    target_sgg_codes = sgg_codes or load_sgg_codes(settings)
+    for sgg_cd in target_sgg_codes:
         source_key = f"{SOURCE_NAME}_{sgg_cd}"
+        saved_any_page = False
         try:
             async for page_no, payload in iter_public_data_pages(
                 api_url=settings.protection_zones_api_url,
@@ -83,11 +115,13 @@ async def collect_raw_pages(max_pages_per_sgg: int | None = None) -> None:
                 max_pages=max_pages_per_sgg,
                 settings=settings,
             ):
-                path = save_json(payload, snapshot_path(source_key, page_no))
+                path = save_json(payload, protection_zone_snapshot_path(sgg_cd, page_no))
+                saved_any_page = True
                 print(f"[{source_key}] saved page {page_no}: {path}")
+            if saved_any_page:
+                clear_rejected_sgg_code(sgg_cd)
         except PublicDataApiError as exc:
-            today = datetime.now().strftime("%Y%m%d")
-            error_path = data_path("rejected", SOURCE_NAME, today, f"{sgg_cd}_error.json", settings=settings)
+            error_path = protection_zone_error_path(sgg_cd)
             save_json(
                 {
                     "source": SOURCE_NAME,
@@ -104,6 +138,7 @@ def parse_args() -> argparse.Namespace:
     """명령행 옵션을 해석한다."""
     parser = argparse.ArgumentParser(description="경찰청 전국 보호구역 현황 데이터 로더")
     parser.add_argument("--collect", action="store_true", help="전체 시군구 원본을 수집합니다.")
+    parser.add_argument("--retry-rejected", action="store_true", help="실패 기록에 남은 시군구 코드만 다시 수집합니다.")
     parser.add_argument("--max-pages", type=int, default=None, help="시군구별 테스트용 최대 페이지 수")
     return parser.parse_args()
 
@@ -112,8 +147,11 @@ def main() -> None:
     """스크립트 진입점으로 preview 또는 collect 모드를 실행한다."""
     args = parse_args()
     try:
-        if args.collect:
-            asyncio.run(collect_raw_pages(max_pages_per_sgg=args.max_pages))
+        if args.collect or args.retry_rejected:
+            retry_codes = load_rejected_sgg_codes() if args.retry_rejected else None
+            if args.retry_rejected:
+                print(f"[{SOURCE_NAME}] retry rejected sgg codes: {len(retry_codes)}")
+            asyncio.run(collect_raw_pages(max_pages_per_sgg=args.max_pages, sgg_codes=retry_codes))
         else:
             asyncio.run(preview())
     except PublicDataApiError as exc:

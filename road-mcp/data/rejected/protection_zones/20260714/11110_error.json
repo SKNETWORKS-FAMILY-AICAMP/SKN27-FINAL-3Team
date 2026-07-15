@@ -1,6 +1,0 @@
-{
-  "source": "protection_zones",
-  "sggCd": "11110",
-  "error": "공공데이터 API가 오류 상태를 반환했습니다. status_code=500, api_url='https://apis.data.go.kr/1320000/safetyzoneInfo/getDtlList', content-type='text/plain; charset=utf-8', body_preview='Unexpected errors\\n'",
-  "message": "보호구역 API가 해당 시군구 코드에서 오류를 반환해 다음 코드로 넘어갑니다."
-}
