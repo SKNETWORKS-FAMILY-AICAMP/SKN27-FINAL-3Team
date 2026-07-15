@@ -3,7 +3,7 @@
 `smoke_non_dl_analysis_reporting_pipeline` verifies one real, uniquely identified
 canonical worker run across this boundary:
 
-`law_ground_search -> text_ml_case_search -> persisted Supervisor handoff -> objection_report_generation -> Report/AnalysisDisplayResult`
+`fine_notice_analysis -> law_ground_search -> text_ml_case_search -> appeal_decision_flow -> persisted Supervisor handoff -> objection_report_generation -> Report/AnalysisDisplayResult`
 
 The plan intentionally excludes `vision_media_analysis`. The command does not
 create fixture `AgentResult`, handoff, report, or display rows. It enqueues through
@@ -18,6 +18,13 @@ one new smoke job whose configured analysis adapters may call paid providers.
 Every run uses a new session, job, plan, and message identifier; successful rows
 remain in the database as audit evidence.
 
+The fine-notice adapter also requires a sanitized, operator-reviewed acceptance
+file already promoted to the clean S3 namespace. Upload it through the normal
+quarantine/scan/promotion path, review that it contains no real personal data,
+then place it under `canonical/acceptance/`. The command rejects quarantine
+objects, path traversal, URL query/fragment selectors, and unsupported file
+types before it creates or enqueues any job.
+
 Run the strict production check with:
 
 ```powershell
@@ -26,6 +33,7 @@ python backend/manage.py smoke_non_dl_analysis_reporting_pipeline `
   --require-real-agent-results `
   --require-persisted-handoff `
   --require-report `
+  --fine-notice-fixture-s3-uri "s3://<clean-bucket>/canonical/acceptance/<reviewed-file>.png" `
   --timeout-seconds 180 `
   --format json
 ```
@@ -36,7 +44,7 @@ environment before running it.
 
 ## What strict mode proves
 
-- only the two declared non-DL analysis nodes and Reporting produced result rows;
+- all four declared non-DL analysis nodes and Reporting produced result rows;
 - the canonical job and every analysis/Reporting `AgentResult` finished with
   `success`; a terminal `partial` job is not an operational pass;
 - each analysis row has the registered production sync-adapter trace, no adapter

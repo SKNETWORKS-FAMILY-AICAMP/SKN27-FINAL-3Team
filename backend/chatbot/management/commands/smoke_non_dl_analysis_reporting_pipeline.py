@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from typing import Any
+from urllib.parse import unquote, urlsplit
 from uuid import uuid4
 
 from django.core.management.base import BaseCommand, CommandError
@@ -24,7 +25,12 @@ from chatbot.models import (
 )
 
 
-ANALYSIS_NODE_CODES = ("law_ground_search", "text_ml_case_search")
+ANALYSIS_NODE_CODES = (
+    "fine_notice_analysis",
+    "law_ground_search",
+    "text_ml_case_search",
+    "appeal_decision_flow",
+)
 REPORTING_NODE_CODE = "objection_report_generation"
 PAID_GUARD_NODE_CODES = ("__paid_analysis_phase__", "__paid_reporting_phase__")
 TERMINAL_WORK_ITEM_STATUSES = {
@@ -38,8 +44,18 @@ TERMINAL_JOB_STATUSES = {
     AnalysisJobStatus.FAILED.value,
 }
 EXPECTED_ADAPTERS = {
+    "fine_notice_analysis": "ai.agents.fine_notice_analysis.graph",
     "law_ground_search": "ai.agents.law_ground_search.run_law_ground_search",
     "text_ml_case_search": "ai.agents.text_ml_case_search.run_text_ml_case_search",
+    "appeal_decision_flow": "ai.agents.appeal_decision_flow.graph",
+}
+
+FINE_NOTICE_CONTENT_TYPES = {
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".webp": "image/webp",
 }
 
 
@@ -75,6 +91,14 @@ class Command(BaseCommand):
             help="Fail unless one Report and one AnalysisDisplayResult are persisted.",
         )
         parser.add_argument(
+            "--fine-notice-fixture-s3-uri",
+            default="",
+            help=(
+                "S3 URI of an operator-reviewed, sanitized fine-notice acceptance "
+                "fixture under canonical/acceptance/. Required before any paid work."
+            ),
+        )
+        parser.add_argument(
             "--timeout-seconds",
             type=int,
             default=180,
@@ -99,10 +123,17 @@ class Command(BaseCommand):
                 "Refusing provider-capable smoke run without --allow-paid-provider-call."
             )
 
+        fine_notice_fixture = _fine_notice_fixture(
+            str(options.get("fine_notice_fixture_s3_uri") or "")
+        )
+
         timeout_seconds = max(1, min(int(options["timeout_seconds"] or 1), 900))
         poll_interval_seconds = max(0.0, float(options["poll_interval_seconds"] or 0.0))
         identifiers = _unique_identifiers()
-        payload, job_payload = _smoke_payloads(identifiers)
+        payload, job_payload = _smoke_payloads(
+            identifiers,
+            fine_notice_fixture=fine_notice_fixture,
+        )
         queued = repositories.enqueue_analysis_job_work(payload, job_payload, max_attempts=1)
 
         worker_result = repositories.process_agent_work_item(queued["work_item_id"])
@@ -161,7 +192,53 @@ def _unique_identifiers() -> dict[str, str]:
     }
 
 
-def _smoke_payloads(identifiers: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _fine_notice_fixture(storage_uri: str) -> dict[str, Any]:
+    storage_uri = storage_uri.strip()
+    parsed = urlsplit(storage_uri)
+    key = unquote(parsed.path.lstrip("/"))
+    suffix = "." + key.rsplit(".", 1)[-1].lower() if "." in key else ""
+    if (
+        parsed.scheme != "s3"
+        or not parsed.netloc
+        or not key.startswith("canonical/acceptance/")
+        or not key.removeprefix("canonical/acceptance/")
+        or any(part in {"", ".", ".."} for part in key.split("/"))
+        or parsed.query
+        or parsed.fragment
+        or suffix not in FINE_NOTICE_CONTENT_TYPES
+    ):
+        raise CommandError(
+            "--fine-notice-fixture-s3-uri must be an operator-reviewed s3:// URI "
+            "under canonical/acceptance/ with a supported image or PDF extension."
+        )
+    attachment_id = f"att_non_dl_smoke_{uuid4().hex[:12]}"
+    content_type = FINE_NOTICE_CONTENT_TYPES[suffix]
+    return {
+        "attachment_id": attachment_id,
+        "purpose": "fine_notice",
+        "status": "ready",
+        "filename": key.rsplit("/", 1)[-1],
+        "content_type": content_type,
+        "storage_uri": storage_uri,
+        "metadata_source": "operator_reviewed_acceptance_fixture",
+        "object_storage": {
+            "provider": "s3",
+            "bucket": parsed.netloc,
+            "key": key,
+            "storage_uri": storage_uri,
+            "resource_type": "acceptance_fixture",
+            "resource_id": attachment_id,
+            "filename": key.rsplit("/", 1)[-1],
+            "content_type": content_type,
+        },
+    }
+
+
+def _smoke_payloads(
+    identifiers: dict[str, str],
+    *,
+    fine_notice_fixture: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     user_facts = (
         "At a signalized four-way intersection the smoke vehicle proceeded straight "
         "on green while the other vehicle turned left; review signal priority, "
@@ -170,20 +247,34 @@ def _smoke_payloads(identifiers: dict[str, str]) -> tuple[dict[str, Any], dict[s
     steps = [
         {
             "order": 1,
-            "node_code": "law_ground_search",
+            "node_code": "fine_notice_analysis",
             "status": "ready",
             "execution_mode": "sync",
             "depends_on": [],
         },
         {
             "order": 2,
+            "node_code": "law_ground_search",
+            "status": "ready",
+            "execution_mode": "sync",
+            "depends_on": ["fine_notice_analysis"],
+        },
+        {
+            "order": 3,
             "node_code": "text_ml_case_search",
             "status": "ready",
             "execution_mode": "sync",
             "depends_on": ["law_ground_search"],
         },
         {
-            "order": 3,
+            "order": 4,
+            "node_code": "appeal_decision_flow",
+            "status": "ready",
+            "execution_mode": "sync",
+            "depends_on": ["fine_notice_analysis", "law_ground_search"],
+        },
+        {
+            "order": 5,
             "node_code": REPORTING_NODE_CODE,
             "status": "ready",
             "execution_mode": "sync",
@@ -204,11 +295,13 @@ def _smoke_payloads(identifiers: dict[str, str]) -> tuple[dict[str, Any], dict[s
         "session_id": identifiers["session_id"],
         "message_id": identifiers["message_id"],
         "user_text": user_facts,
+        "attachments": [fine_notice_fixture],
         "context": {
             "user_facts": user_facts,
             "raw_user_text": user_facts,
             "query_text": user_facts,
             "accident_context": user_facts,
+            "user_appeal_reason": user_facts,
             "query": {
                 "raw_text": user_facts,
                 "search_query": user_facts,
