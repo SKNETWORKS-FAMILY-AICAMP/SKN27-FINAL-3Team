@@ -959,6 +959,8 @@ def _complete_adapter_output(
 ) -> dict[str, Any]:
     source_status = str(raw_output.get("status") or "partial")
     structured_result = deepcopy(raw_output.get("structured_result") or {})
+    if "missing_fields" in raw_output and "missing_fields" not in structured_result:
+        structured_result["missing_fields"] = deepcopy(raw_output.get("missing_fields") or [])
     structured_result = _normalize_adapter_structured_result(
         structured_result,
         node_code=node["node_code"],
