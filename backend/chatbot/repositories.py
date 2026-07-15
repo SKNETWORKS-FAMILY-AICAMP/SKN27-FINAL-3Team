@@ -2018,7 +2018,10 @@ def persist_analysis_job_execution(
                     "assistant_message": chat_response.get("assistant_message"),
                     "case_status": chat_response.get("case_status"),
                     "cards": chat_response.get("cards", []),
-                    "pending_questions": chat_response.get("pending_questions", []),
+                    "pending_questions": (
+                        job_payload.get("pending_questions")
+                        or chat_response.get("pending_questions", [])
+                    ),
                     "report_links": chat_response.get("report_links", []),
                     "supervisor_state": chat_response.get("supervisor_state", {}),
                     "reporting_payload": chat_response.get("reporting_payload", {}),
@@ -6810,6 +6813,32 @@ def _node_execution_envelope(
     }
 
 
+def _pending_questions_from_node_execution(
+    job_payload: dict[str, Any],
+    node_execution: dict[str, Any],
+) -> list[Any]:
+    pending_questions = deepcopy(_list_or_empty(job_payload.get("pending_questions")))
+    known_fields = {
+        _text(question.get("field")).strip()
+        for question in pending_questions
+        if isinstance(question, dict) and _text(question.get("field")).strip()
+    }
+    for execution in _list_or_empty(node_execution.get("executions")):
+        agent_output = _dict_or_empty(_dict_or_empty(execution).get("agent_output"))
+        structured_result = _dict_or_empty(agent_output.get("structured_result"))
+        if (
+            _text(agent_output.get("execution_status")) != "input_required"
+            and _text(structured_result.get("judgment_status")) != "input_required"
+        ):
+            continue
+        for field in _list_or_empty(structured_result.get("missing_fields")):
+            normalized_field = _text(field).strip()
+            if normalized_field and normalized_field not in known_fields:
+                pending_questions.append({"field": normalized_field})
+                known_fields.add(normalized_field)
+    return pending_questions
+
+
 def _completed_job_payload_for_work_item(
     work_item: AgentWorkItem,
     *,
@@ -6831,6 +6860,7 @@ def _completed_job_payload_for_work_item(
         "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
         "node_execution": node_execution,
         "status_counts": _dict_or_empty(node_execution.get("status_counts")),
+        "pending_questions": _pending_questions_from_node_execution(job_payload, node_execution),
         "work_item_id": work_item.work_item_id,
     }
 
