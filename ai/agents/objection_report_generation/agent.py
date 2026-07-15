@@ -7,6 +7,57 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+TRAFFIC_ACCIDENT_DOCX_TYPE = "traffic_accident_objection_docx"
+
+TRAFFIC_ACCIDENT_REQUIRED_FIELDS: tuple[dict[str, str], ...] = (
+    {
+        "field": "applicant_name",
+        "label": "신청인 성명",
+        "question": "이의신청서에 기재할 신청인 성명을 알려주세요.",
+    },
+    {
+        "field": "recipient",
+        "label": "수신 기관",
+        "question": "이의신청서를 제출할 경찰서 또는 담당 기관을 알려주세요.",
+    },
+    {
+        "field": "case_number",
+        "label": "사건번호 / 접수번호",
+        "question": "경찰 조사결과 통지서에 적힌 사건번호 또는 접수번호를 알려주세요.",
+    },
+    {
+        "field": "incident_at",
+        "label": "사고 일시",
+        "question": "사고가 발생한 날짜와 시간을 알려주세요.",
+    },
+    {
+        "field": "location",
+        "label": "사고 장소",
+        "question": "사고 장소를 도로명, 교차로명 등으로 구체적으로 알려주세요.",
+    },
+    {
+        "field": "police_station",
+        "label": "담당 경찰서",
+        "question": "최초 조사를 담당한 경찰서를 알려주세요.",
+    },
+    {
+        "field": "investigation_result_summary",
+        "label": "기존 조사결과",
+        "question": "경찰 조사결과에서 어떤 판단을 받았는지 핵심 내용을 알려주세요.",
+    },
+    {
+        "field": "objection_points",
+        "label": "이의신청 쟁점",
+        "question": "기존 조사결과 중 어떤 판단이 잘못되었다고 보는지 알려주세요.",
+    },
+    {
+        "field": "specific_request",
+        "label": "구체적 요청사항",
+        "question": "재검토, 현장 재조사, 블랙박스 확인 등 원하는 조치를 알려주세요.",
+    },
+)
+
+
 def run_objection_report_generation(
     agent_input: dict[str, Any],
     context: dict[str, Any],
@@ -63,6 +114,7 @@ def run_objection_report_generation(
         notice_result=notice_result,
         text_ml_result=text_ml_result,
         legal_grounds=legal_grounds,
+        appeal_result=appeal_result,
         user_facts=user_facts,
         missing_fields=missing_fields,
         document_variant=document_variant,
@@ -74,6 +126,26 @@ def run_objection_report_generation(
         text_ml_result=text_ml_result,
         document_variant=document_variant,
     )
+    form_data = _objection_form_data(
+        agent_input=agent_input,
+        text_ml_result=text_ml_result,
+        recipient_agency=recipient_agency,
+        case_summary=case_summary,
+        requested_action=requested_action,
+        objection_reasons=objection_reasons,
+        required_attachments=required_attachments,
+        document_variant=document_variant,
+    )
+    document_readiness = _document_readiness(
+        form_data=form_data,
+        document_variant=document_variant,
+        require_docx_fields=_requires_docx_fields(agent_input),
+    )
+    document_missing_fields = [
+        item["field"]
+        for item in document_readiness["missing_field_details"]
+    ]
+    combined_missing_fields = _unique([*missing_fields, *document_missing_fields])
 
     structured_result = {
         "document_type": "objection_form",
@@ -84,7 +156,10 @@ def run_objection_report_generation(
         "requested_action": requested_action,
         "objection_reasons": objection_reasons,
         "legal_grounds": legal_grounds,
+        "appeal_decision": appeal_result,
         "required_attachments": required_attachments,
+        "form_data": form_data,
+        "document_readiness": document_readiness,
         "form_sections": _form_sections(
             recipient_agency=recipient_agency,
             case_summary=case_summary,
@@ -94,12 +169,15 @@ def run_objection_report_generation(
             required_attachments=required_attachments,
             document_variant=document_variant,
         ),
-        "report_actions": _report_actions(),
+        "report_actions": _report_actions(
+            document_variant=document_variant,
+            ready_for_docx=document_readiness["ready_for_docx"],
+        ),
         "appeal_decision": _appeal_decision(appeal_result),
         "supervisor_handoff": _handoff_trace(agent_input),
-        "missing_fields": missing_fields,
+        "missing_fields": combined_missing_fields,
         "readiness": {
-            "ready_for_download": not missing_fields,
+            "ready_for_download": not combined_missing_fields,
             "requires_user_review": True,
             "review_reason": "제출 전 사실관계, 관할 기관, 기한, 증빙자료를 사용자가 최종 확인해야 합니다.",
         },
@@ -109,14 +187,20 @@ def run_objection_report_generation(
     handoff_gate = handoff.get("gate") if isinstance(handoff.get("gate"), dict) else {}
     status = (
         "success"
-        if not missing_fields and handoff_gate.get("status") != "draft"
+        if not combined_missing_fields and handoff_gate.get("status") != "draft"
         else "partial"
     )
     return _output(
         agent_input=agent_input,
         node=node,
         status=status,
-        summary=_summary(status, recipient_agency, missing_fields, document_variant),
+        summary=_summary(
+            status,
+            recipient_agency,
+            combined_missing_fields,
+            document_variant,
+            next_questions=document_readiness["next_questions"],
+        ),
         structured_result=structured_result,
         evidence=_evidence(
             agent_input,
@@ -126,8 +210,8 @@ def run_objection_report_generation(
             appeal_output,
             user_facts,
         ),
-        next_actions=_next_actions(missing_fields),
-        limitations=_limitations(missing_fields),
+        next_actions=_next_actions(combined_missing_fields),
+        limitations=_limitations(combined_missing_fields),
     )
 
 
@@ -368,6 +452,7 @@ def _objection_reasons(
     notice_result: dict[str, Any],
     text_ml_result: dict[str, Any],
     legal_grounds: list[dict[str, Any]],
+    appeal_result: dict[str, Any],
     user_facts: str,
     missing_fields: list[str],
     document_variant: str,
@@ -393,6 +478,14 @@ def _objection_reasons(
         return reasons
 
     reasons = []
+    judgment_status = _text(appeal_result.get("judgment_status"))
+    overall_possibility = _text(appeal_result.get("overall_possibility"))
+    merit_basis = _text(appeal_result.get("merit_basis"))
+    if judgment_status or overall_possibility:
+        judgment_label = overall_possibility or judgment_status
+        reasons.append(f"이의 가능성 판단 결과({judgment_label})를 초안 작성에 반영했습니다.")
+    if merit_basis:
+        reasons.append(f"이의 사유 타당성 판단 근거: {_shorten(merit_basis, 240)}")
     if user_facts:
         reasons.append("사용자 진술에 비추어 고지서 기재 사실관계와 실제 상황 사이에 다툼의 여지가 있습니다.")
     if legal_grounds:
@@ -490,6 +583,142 @@ def _required_attachments(
     return _unique(attachments)
 
 
+def _objection_form_data(
+    *,
+    agent_input: dict[str, Any],
+    text_ml_result: dict[str, Any],
+    recipient_agency: str,
+    case_summary: str,
+    requested_action: str,
+    objection_reasons: list[str],
+    required_attachments: list[str],
+    document_variant: str,
+) -> dict[str, Any]:
+    if document_variant != "traffic_accident":
+        return {}
+
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    supplied = context.get("objection_form") if isinstance(context.get("objection_form"), dict) else {}
+    allowed_fields = {
+        "recipient",
+        "applicant_name",
+        "birth_date",
+        "address",
+        "contact",
+        "email",
+        "relationship",
+        "representative_name",
+        "representative_birth_date",
+        "representative_address",
+        "representative_contact",
+        "representative_relationship",
+        "has_power_of_attorney",
+        "case_number",
+        "incident_at",
+        "location",
+        "police_station",
+        "investigator",
+        "notice_date",
+        "vehicle_parties",
+        "insurance_number",
+        "investigation_result_summary",
+        "objection_points",
+        "timeline",
+        "omitted_evidence",
+        "specific_request",
+        "write_date",
+        "evidence_rows",
+        "issue_rows",
+    }
+    form_data = {
+        key: deepcopy(value)
+        for key, value in supplied.items()
+        if key in allowed_fields and value not in (None, "", [], {})
+    }
+
+    for field in allowed_fields:
+        if field in form_data:
+            continue
+        value = context.get(field)
+        if value not in (None, "", [], {}):
+            form_data[field] = deepcopy(value)
+
+    generic_recipients = {"관할 경찰서 또는 분쟁조정 기관", "관할 행정청"}
+    if "recipient" not in form_data and recipient_agency not in generic_recipients:
+        form_data["recipient"] = recipient_agency
+
+    if "objection_points" not in form_data:
+        issue_tags = _text_list(text_ml_result.get("issue_tags"))
+        if issue_tags:
+            form_data["objection_points"] = issue_tags[:4]
+
+    form_data.setdefault("relationship", "운전자")
+    form_data.setdefault("purpose", requested_action)
+    form_data.setdefault("summary", case_summary)
+    form_data.setdefault("rebuttal_summary", "\n".join(objection_reasons))
+    form_data.setdefault("evidence_summary", " / ".join(required_attachments))
+    form_data.setdefault("write_date", datetime.now(timezone.utc).strftime("%Y년 %m월 %d일"))
+    form_data["evidence_rows"] = _form_evidence_rows(
+        form_data.get("evidence_rows"),
+        required_attachments,
+    )
+    return form_data
+
+
+def _form_evidence_rows(raw_rows: Any, attachments: list[str]) -> list[dict[str, str]]:
+    if isinstance(raw_rows, list):
+        rows = [deepcopy(item) for item in raw_rows if isinstance(item, dict)]
+        if rows:
+            return rows[:10]
+    return [
+        {
+            "no": str(index),
+            "name": attachment,
+            "fact": "기존 조사결과와 신청인 주장의 차이를 확인",
+            "format": "원본 또는 사본",
+            "note": "",
+        }
+        for index, attachment in enumerate(attachments[:10], start=1)
+    ]
+
+
+def _document_readiness(
+    *,
+    form_data: dict[str, Any],
+    document_variant: str,
+    require_docx_fields: bool = True,
+) -> dict[str, Any]:
+    if document_variant != "traffic_accident" or not require_docx_fields:
+        return {
+            "ready_for_docx": True,
+            "missing_field_details": [],
+            "next_questions": [],
+        }
+
+    missing_details = [
+        deepcopy(spec)
+        for spec in TRAFFIC_ACCIDENT_REQUIRED_FIELDS
+        if not _form_value_present(form_data.get(spec["field"]))
+    ]
+    return {
+        "ready_for_docx": not missing_details,
+        "missing_field_details": missing_details,
+        "next_questions": missing_details[:3],
+    }
+
+
+def _requires_docx_fields(agent_input: dict[str, Any]) -> bool:
+    handoff = _supervisor_handoff(agent_input)
+    target = handoff.get("target") if isinstance(handoff.get("target"), dict) else {}
+    return target.get("report_type") != "fault_ratio_analysis"
+
+
+def _form_value_present(value: Any) -> bool:
+    if isinstance(value, list):
+        return any(_text(item) for item in value)
+    return bool(_text(value))
+
+
 def _form_sections(
     *,
     recipient_agency: str,
@@ -535,7 +764,33 @@ def _form_sections(
     ]
 
 
-def _report_actions() -> list[dict[str, str]]:
+def _report_actions(
+    *,
+    document_variant: str,
+    ready_for_docx: bool,
+) -> list[dict[str, str]]:
+    if document_variant == "traffic_accident":
+        primary_action = (
+            {
+                "type": "download_objection",
+                "label": "교통사고 이의신청서 DOCX 다운로드",
+                "document_type": TRAFFIC_ACCIDENT_DOCX_TYPE,
+            }
+            if ready_for_docx
+            else {
+                "type": "complete_objection_form",
+                "label": "추가 정보 작성하기",
+                "document_type": TRAFFIC_ACCIDENT_DOCX_TYPE,
+            }
+        )
+        return [
+            primary_action,
+            {
+                "type": "download_report",
+                "label": "분석 리포트 PDF 다운로드",
+                "document_type": "report",
+            },
+        ]
     return [
         {
             "type": "download_objection",
@@ -681,12 +936,20 @@ def _summary(
     recipient_agency: str,
     missing_fields: list[str],
     document_variant: str,
+    *,
+    next_questions: list[dict[str, str]] | None = None,
 ) -> str:
     if status == "success":
         if document_variant == "traffic_accident":
             return f"{recipient_agency} 제출용 교통사고 이의신청서 초안과 리포트 다운로드 action을 생성했습니다."
         return f"{recipient_agency} 제출용 이의신청서 초안과 리포트 다운로드 action을 생성했습니다."
-    return f"이의신청서 초안 구조를 만들었지만 추가 확인 입력이 필요합니다: {', '.join(missing_fields)}"
+    question_text = " ".join(
+        str(item.get("question") or "").strip()
+        for item in next_questions or []
+        if str(item.get("question") or "").strip()
+    )
+    summary = f"이의신청서 초안 구조를 만들었지만 추가 확인 입력이 필요합니다: {', '.join(missing_fields)}"
+    return f"{summary} {question_text}".strip()
 
 
 def _notice_fields(notice_result: dict[str, Any]) -> dict[str, Any]:

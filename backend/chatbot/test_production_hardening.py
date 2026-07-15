@@ -172,7 +172,12 @@ class ProductionApiContractTests(SimpleTestCase):
         queued_payload = enqueue.call_args.args[1]
         self.assertEqual(
             [step["node_code"] for step in queued_payload["analysis_plan"]["steps"]],
-            ["law_ground_search"],
+            [
+                "input_context_validation",
+                "law_ground_search",
+                "agent_result_validation",
+                "final_response_merge",
+            ],
         )
 
     def test_supervisor_unavailable_chat_response_is_not_enqueued(self) -> None:

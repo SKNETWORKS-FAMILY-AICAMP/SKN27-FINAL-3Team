@@ -469,7 +469,7 @@ class ConsultationCaseApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["routing_intent"], "fault_ratio_text")
+        self.assertEqual(body["routing_intent"], "accident_initial_consultation")
         self.assertEqual(body["status"], "needs_input")
         self.assertEqual(body["execution_mode"], "input_collection")
         state = body["consultation_state"]["v2"]
@@ -492,7 +492,7 @@ class ConsultationCaseApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["routing_intent"], "fault_ratio_text")
+        self.assertEqual(body["routing_intent"], "accident_initial_consultation")
         self.assertEqual(body["status"], "high_risk_handoff")
         self.assertEqual(body["execution_mode"], "expert_handoff")
         self.assertEqual(body["consultation_state"]["v2"]["next_action"], "expert_handoff")

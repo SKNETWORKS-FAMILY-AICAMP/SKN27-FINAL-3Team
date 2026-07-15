@@ -15,9 +15,20 @@ from app.services.agent_adapter_contract import (
     build_adapter_context,
     build_agent_adapter_input,
     build_agent_adapter_contract,
+    validate_adapter_context_envelope,
+    validate_agent_input_envelope,
+    validate_agent_output_envelope,
 )
 from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.legal_rag_service import search_legal_rag
+from app.services.supervisor_control_service import (
+    SUPERVISOR_INTERNAL_NODE_CODES,
+    run_supervisor_control_node,
+)
+
+
+DL_MOCK_NODE_CODES = {"vision_media_analysis"}
+REPORTING_NODE_CODE = "objection_report_generation"
 
 try:
     from chatbot.object_storage import read_object_bytes, storage_reference_from_uri
@@ -40,7 +51,31 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["user_text|attachments"],
         "produces": ["input_summary", "routing_hints", "missing_fields"],
         "handoff_to": ["fine_notice_analysis", "text_ml_case_search", "vision_media_analysis"],
-        "status": "mock_ready",
+        "status": "internal_ready",
+    },
+    "consultation_fact_state_reducer": {
+        "order": 12,
+        "node_name": "상담 사실 상태 병합 노드",
+        "node_code": "consultation_fact_state_reducer",
+        "node_type": "supervisor_internal",
+        "owner": "hi20260204-maker",
+        "description": "이전 사실과 현재 답변을 출처 단위로 병합하고 충돌 및 누락 필드를 계산한다.",
+        "required_inputs": ["conversation_history|facts"],
+        "produces": ["facts", "conflicts", "missing_fields"],
+        "handoff_to": ["case_promotion_gate"],
+        "status": "internal_ready",
+    },
+    "case_promotion_gate": {
+        "order": 14,
+        "node_name": "상담 사건 전환 판단 노드",
+        "node_code": "case_promotion_gate",
+        "node_type": "supervisor_internal",
+        "owner": "hi20260204-maker",
+        "description": "위험도, 사실 준비도, 인증 및 동의 조건으로 상담의 사건 전환 가능성을 판단한다.",
+        "required_inputs": ["consultation_state"],
+        "produces": ["decision", "requirements", "automatic_case_creation"],
+        "handoff_to": ["final_response_merge"],
+        "status": "internal_ready",
     },
     "fine_notice_analysis": {
         "order": 20,
@@ -51,7 +86,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "고지서 이미지나 설명에서 위반 내용, 관할 기관, 의견제출 기한 후보를 추출한다.",
         "required_inputs": ["attachments[purpose=fine_notice]|user_text"],
         "produces": ["fine_notice_analysis", "notice_fields", "required_documents"],
-        "handoff_to": ["law_ground_search", "objection_report_generation"],
+        "handoff_to": ["law_ground_search", "appeal_decision_flow"],
         "status": "sync_adapter_ready",
         "adapter_modes": ["sync"],
     },
@@ -64,7 +99,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "법령, 시행령, 규칙, 판례 근거 후보를 검색해 Supervisor 병합용 근거를 만든다.",
         "required_inputs": ["law_code|violation_text|search_query"],
         "produces": ["matched_laws", "source_ref", "applicability_limit"],
-        "handoff_to": ["agent_result_validation", "objection_report_generation"],
+        "handoff_to": ["appeal_decision_flow", "agent_result_validation", "objection_report_generation"],
         "status": "sync_adapter_ready",
         "adapter_modes": ["sync"],
     },
@@ -130,7 +165,19 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["agent_results"],
         "produces": ["validation_summary", "rejected_results", "merge_ready"],
         "handoff_to": ["final_response_merge", "missing_input_question"],
-        "status": "mock_ready",
+        "status": "internal_ready",
+    },
+    "final_response_merge": {
+        "order": 80,
+        "node_name": "최종 사용자 응답 병합 노드",
+        "node_code": "final_response_merge",
+        "node_type": "supervisor_internal",
+        "owner": "hi20260204-maker",
+        "description": "검증이 승인한 결과만 사용자 응답, 카드, 근거, 한계 및 다음 행동으로 병합한다.",
+        "required_inputs": ["agent_result_validation"],
+        "produces": ["assistant_message", "cards", "evidence", "limitations"],
+        "handoff_to": [],
+        "status": "internal_ready",
     },
 }
 
@@ -192,22 +239,12 @@ def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
     node = get_agent_node(node_code)
     agent_input = _agent_input(payload, node)
     execution_id = f"exec_{uuid4().hex[:12]}"
-    execution_mode = _requested_execution_mode(payload)
     adapter_context = build_adapter_context(
         execution_id=execution_id,
-        execution_mode=execution_mode if _should_use_sync_adapter(node_code, execution_mode) else "mock",
+        execution_mode="mock",
         node=node,
         plan_step=payload.get("plan_step"),
     )
-
-    if _should_use_sync_adapter(node_code, execution_mode):
-        return _execute_sync_node(
-            payload=payload,
-            node=node,
-            agent_input=agent_input,
-            adapter_context=adapter_context,
-            execution_id=execution_id,
-        )
 
     return {
         "execution_id": execution_id,
@@ -281,7 +318,7 @@ def execute_agent_node(payload: dict[str, Any]) -> dict[str, Any]:
     """Execute one production Agent through a registered synchronous adapter."""
 
     node_code = _payload_node_code(payload)
-    node = _production_node(node_code)
+    node = _node_with_adapter_contract(_production_node(node_code))
     execution_id = f"exec_{uuid4().hex[:12]}"
     agent_input = _agent_input(payload, node)
     adapter_context = build_adapter_context(
@@ -290,6 +327,35 @@ def execute_agent_node(payload: dict[str, Any]) -> dict[str, Any]:
         node=node,
         plan_step=payload.get("plan_step"),
     )
+    input_validation = validate_agent_input_envelope(
+        agent_input,
+        expected_node_code=node_code,
+    )
+    context_validation = validate_adapter_context_envelope(
+        adapter_context,
+        expected_execution_mode="sync",
+    )
+    if not input_validation["valid"] or not context_validation["valid"]:
+        return _contract_rejected_execution(
+            payload=payload,
+            node=node,
+            agent_input=agent_input,
+            adapter_context=adapter_context,
+            execution_id=execution_id,
+            error_code="agent_input_contract_invalid",
+            validation={
+                "agent_input": input_validation,
+                "adapter_context": context_validation,
+            },
+        )
+    if node_code in SUPERVISOR_INTERNAL_NODE_CODES:
+        return _execute_supervisor_internal_node(
+            payload=payload,
+            node=node,
+            agent_input=agent_input,
+            adapter_context=adapter_context,
+            execution_id=execution_id,
+        )
     if node_code not in _sync_adapter_node_codes():
         return {
             "execution_id": execution_id,
@@ -316,6 +382,7 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
 
     executions = []
     upstream_results = deepcopy(payload.get("upstream_results", {}))
+    supervisor_handoff: dict[str, Any] = {}
     executable_steps = executable_analysis_plan_steps(
         analysis_plan,
         completed_node_codes=set(upstream_results),
@@ -339,7 +406,31 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
             context = deepcopy(payload.get("context") if isinstance(payload.get("context"), dict) else {})
             context.update(deepcopy(step["context"]))
             step_payload["context"] = context
-        execution = execute_agent_node(step_payload)
+        if (
+            step.get("node_code") == REPORTING_NODE_CODE
+            and not _reporting_execution_authorized(
+                upstream_results,
+                payload=step_payload,
+            )
+        ):
+            continue
+        if step.get("node_code") == REPORTING_NODE_CODE:
+            supervisor_handoff = _build_supervisor_reporting_handoff(
+                upstream_results,
+                analysis_plan=analysis_plan,
+            )
+            context = deepcopy(
+                step_payload.get("context")
+                if isinstance(step_payload.get("context"), dict)
+                else {}
+            )
+            context["supervisor_handoff"] = deepcopy(supervisor_handoff)
+            step_payload["context"] = context
+        execution = (
+            execute_mock_node(step_payload)
+            if step.get("node_code") in DL_MOCK_NODE_CODES
+            else execute_agent_node(step_payload)
+        )
         execution["plan_step"] = deepcopy(step)
         executions.append(execution)
         upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
@@ -350,8 +441,19 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
             text = str(limitation).strip()
             if text and text not in limitations:
                 limitations.append(text)
+    if not supervisor_handoff:
+        supervisor_handoff = _build_supervisor_reporting_handoff(
+            upstream_results,
+            analysis_plan=analysis_plan,
+        )
+    reporting_payload = _build_reporting_payload(
+        payload.get("reporting_payload"),
+        upstream_results=upstream_results,
+        supervisor_handoff=supervisor_handoff,
+    )
+    execution_mode = _production_plan_execution_mode(executions)
     return {
-        "execution_mode": "sync",
+        "execution_mode": execution_mode,
         "job_id": payload.get("job_id"),
         "plan_id": analysis_plan.get("plan_id"),
         "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
@@ -363,6 +465,8 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
             for execution in executions
             if execution["agent_output"]["status"] == "success"
         ],
+        "supervisor_handoff": supervisor_handoff,
+        "reporting_payload": reporting_payload,
         "limitations": limitations,
         "created_at": _now_iso(),
     }
@@ -417,8 +521,96 @@ def _sync_adapter_node_codes() -> set[str]:
     }
 
 
+def _production_plan_execution_mode(executions: list[dict[str, Any]]) -> str:
+    modes = {str(item.get("execution_mode") or "") for item in executions}
+    if modes == {"mock"}:
+        return "dl_mock"
+    if "mock" in modes:
+        return "hybrid"
+    return "sync"
+
+
+def _build_supervisor_reporting_handoff(
+    upstream_results: dict[str, Any],
+    *,
+    analysis_plan: dict[str, Any],
+) -> dict[str, Any]:
+    analysis_results: dict[str, dict[str, Any]] = {}
+    source_node_codes: list[str] = []
+    status_counts = {"success": 0, "partial": 0, "failed": 0}
+    for node_code, raw_output in upstream_results.items():
+        if (
+            node_code == REPORTING_NODE_CODE
+            or node_code in SUPERVISOR_INTERNAL_NODE_CODES
+            or not isinstance(raw_output, dict)
+        ):
+            continue
+        output = raw_output.get("agent_output") if isinstance(raw_output.get("agent_output"), dict) else raw_output
+        status = str(output.get("status") or "failed")
+        normalized_status = status if status in status_counts else "failed"
+        status_counts[normalized_status] += 1
+        source_node_codes.append(node_code)
+        analysis_results[node_code] = {
+            "status": normalized_status,
+            "summary": str(output.get("summary") or ""),
+            "structured_result": deepcopy(output.get("structured_result") or {}),
+            "evidence": deepcopy(output.get("evidence") or []),
+            "limitations": deepcopy(output.get("limitations") or []),
+        }
+    ready_for_reporting = bool(analysis_results) and status_counts["failed"] == 0
+    return {
+        "contract_version": "supervisor_reporting_handoff.v1",
+        "analysis_plan_id": analysis_plan.get("plan_id"),
+        "ready_for_reporting": ready_for_reporting,
+        "source_node_codes": source_node_codes,
+        "status_counts": status_counts,
+        "agent_results": analysis_results,
+    }
+
+
+def _build_reporting_payload(
+    base_payload: Any,
+    *,
+    upstream_results: dict[str, Any],
+    supervisor_handoff: dict[str, Any],
+) -> dict[str, Any]:
+    report_output = upstream_results.get(REPORTING_NODE_CODE)
+    if not isinstance(report_output, dict):
+        return {}
+    nested = report_output.get("agent_output")
+    if isinstance(nested, dict):
+        report_output = nested
+    structured = report_output.get("structured_result")
+    structured = deepcopy(structured) if isinstance(structured, dict) else {}
+    base = deepcopy(base_payload) if isinstance(base_payload, dict) else {}
+    source_node_codes = list(supervisor_handoff.get("source_node_codes") or [])
+    return {
+        **base,
+        "contract_version": "reporting_payload.v2",
+        "source": "supervisor_agent_result_aggregation",
+        "stage": "final" if report_output.get("status") == "success" else "partial",
+        "report_type": base.get("report_type") or structured.get("document_variant") or "general",
+        "title": structured.get("document_title") or base.get("title") or "Analysis report",
+        "summary": report_output.get("summary") or base.get("summary") or "",
+        "generated_from_node_codes": source_node_codes,
+        "sections": deepcopy(structured.get("form_sections") or []),
+        "report_actions": deepcopy(structured.get("report_actions") or []),
+        "missing_fields": deepcopy(structured.get("missing_fields") or []),
+        "form_data": deepcopy(structured.get("form_data") or {}),
+        "document_readiness": deepcopy(structured.get("document_readiness") or {}),
+        "quality": {
+            "ready_for_reporting": bool(supervisor_handoff.get("ready_for_reporting")),
+            "agent_status_counts": deepcopy(supervisor_handoff.get("status_counts") or {}),
+        },
+    }
+
+
 def _production_node(node_code: str) -> dict[str, Any]:
     node = deepcopy(NODE_REGISTRY.get(node_code, _unknown_node(node_code)))
+    if node_code in SUPERVISOR_INTERNAL_NODE_CODES and node_code in NODE_REGISTRY:
+        node["status"] = "internal_ready"
+        node["adapter_modes"] = ["sync"]
+        return node
     supported = node_code in _sync_adapter_node_codes()
     node["status"] = "sync_adapter_ready" if supported else "unavailable"
     node["adapter_modes"] = ["sync"] if supported else []
@@ -549,7 +741,28 @@ def _execute_sync_node(
 ) -> dict[str, Any]:
     try:
         agent_output = _run_sync_adapter(agent_input, adapter_context)
-        adapter_error = None
+        agent_output = _normalize_execution_agent_output(
+            agent_output,
+            node=node,
+            agent_input=agent_input,
+        )
+        output_validation = validate_agent_output_envelope(
+            agent_output,
+            expected_node_code=node["node_code"],
+        )
+        if not output_validation["valid"]:
+            agent_output = _contract_error_output(
+                node=node,
+                agent_input=agent_input,
+                error_code="agent_output_contract_invalid",
+                validation=output_validation,
+            )
+            adapter_error = {
+                "error_code": "agent_output_contract_invalid",
+                "message": "Agent output contract validation failed.",
+            }
+        else:
+            adapter_error = None
     except Exception as exc:  # pragma: no cover - defensive production boundary.
         agent_output = _adapter_error_output(
             node=node,
@@ -577,11 +790,213 @@ def _execute_sync_node(
     return result
 
 
+def _execute_supervisor_internal_node(
+    *,
+    payload: dict[str, Any],
+    node: dict[str, Any],
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+    execution_id: str,
+) -> dict[str, Any]:
+    try:
+        agent_output = run_supervisor_control_node(node["node_code"], agent_input)
+        agent_output = _normalize_execution_agent_output(
+            agent_output,
+            node=node,
+            agent_input=agent_input,
+        )
+        output_validation = validate_agent_output_envelope(
+            agent_output,
+            expected_node_code=node["node_code"],
+        )
+        if not output_validation["valid"]:
+            agent_output = _contract_error_output(
+                node=node,
+                agent_input=agent_input,
+                error_code="supervisor_output_contract_invalid",
+                validation=output_validation,
+            )
+            adapter_error = {
+                "error_code": "supervisor_output_contract_invalid",
+                "message": "Supervisor control output contract validation failed.",
+            }
+        else:
+            adapter_error = None
+    except Exception as exc:  # pragma: no cover - defensive Supervisor boundary.
+        agent_output = _adapter_error_output(
+            node=node,
+            agent_input=agent_input,
+            exc=exc,
+        )
+        adapter_error = {
+            "error_code": exc.__class__.__name__,
+            "message": "Supervisor control execution failed.",
+        }
+
+    result = {
+        "execution_id": execution_id,
+        "execution_mode": "sync",
+        "job_id": payload.get("job_id"),
+        "node_code": node["node_code"],
+        "node": node,
+        "adapter_context": adapter_context,
+        "agent_input": agent_input,
+        "agent_output": agent_output,
+        "created_at": _now_iso(),
+    }
+    if adapter_error:
+        result["adapter_error"] = adapter_error
+    return result
+
+
+def _validation_report_ready(upstream_results: dict[str, Any]) -> bool:
+    validation = upstream_results.get("agent_result_validation")
+    if not isinstance(validation, dict):
+        return False
+    nested = validation.get("agent_output")
+    output = nested if isinstance(nested, dict) else validation
+    structured = output.get("structured_result")
+    return bool(structured.get("report_ready")) if isinstance(structured, dict) else False
+
+
+def _reporting_execution_authorized(
+    upstream_results: dict[str, Any],
+    *,
+    payload: dict[str, Any],
+) -> bool:
+    if _validation_report_ready(upstream_results):
+        return True
+
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    if context.get("handoff_required") is not True:
+        return False
+    handoff = (
+        context.get("supervisor_reporting_handoff")
+        if isinstance(context.get("supervisor_reporting_handoff"), dict)
+        else {}
+    )
+    target = handoff.get("target") if isinstance(handoff.get("target"), dict) else {}
+    source = handoff.get("source") if isinstance(handoff.get("source"), dict) else {}
+    gate = handoff.get("gate") if isinstance(handoff.get("gate"), dict) else {}
+    return bool(
+        handoff.get("contract_version") == "supervisor_reporting_handoff.v1"
+        and handoff.get("ready_for_reporting") is True
+        and target.get("node_code") == REPORTING_NODE_CODE
+        and source.get("persistence") == "agent_results"
+        and source.get("persisted") is True
+        and gate.get("status") == "ready"
+        and gate.get("ready_for_reporting") is True
+        and isinstance(handoff.get("results"), dict)
+    )
+
+
+def _contract_rejected_execution(
+    *,
+    payload: dict[str, Any],
+    node: dict[str, Any],
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+    execution_id: str,
+    error_code: str,
+    validation: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "execution_id": execution_id,
+        "execution_mode": "sync",
+        "job_id": payload.get("job_id"),
+        "node_code": node["node_code"],
+        "node": node,
+        "adapter_context": adapter_context,
+        "agent_input": agent_input,
+        "agent_output": _contract_error_output(
+            node=node,
+            agent_input=agent_input,
+            error_code=error_code,
+            validation=validation,
+        ),
+        "adapter_error": {
+            "error_code": error_code,
+            "message": "Agent input contract validation failed.",
+        },
+        "created_at": _now_iso(),
+    }
+
+
+def _normalize_execution_agent_output(
+    output: Any,
+    *,
+    node: dict[str, Any],
+    agent_input: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = deepcopy(output) if isinstance(output, dict) else {}
+    defaults = {
+        "session_id": agent_input.get("session_id"),
+        "message_id": agent_input.get("message_id"),
+        "job_id": agent_input.get("job_id"),
+        "node_name": node["node_name"],
+        "node_code": node["node_code"],
+        "node_type": node["node_type"],
+        "owner": node["owner"],
+        "status": "failed",
+        "summary": "",
+        "structured_result": {},
+        "evidence": [],
+        "next_actions": [],
+        "limitations": [],
+        "created_at": _now_iso(),
+    }
+    for key, value in defaults.items():
+        normalized.setdefault(key, value)
+    return normalized
+
+
+def _contract_error_output(
+    *,
+    node: dict[str, Any],
+    agent_input: dict[str, Any],
+    error_code: str,
+    validation: dict[str, Any],
+) -> dict[str, Any]:
+    invalid_fields = sorted(
+        {
+            str(field)
+            for key in ("missing_fields", "invalid_collection_fields")
+            for field in (
+                validation.get(key, [])
+                if isinstance(validation.get(key), list)
+                else []
+            )
+        }
+    )
+    return {
+        "session_id": agent_input.get("session_id"),
+        "message_id": agent_input.get("message_id"),
+        "job_id": agent_input.get("job_id"),
+        "node_name": node["node_name"],
+        "node_code": node["node_code"],
+        "node_type": node["node_type"],
+        "owner": node["owner"],
+        "status": "failed",
+        "execution_status": "failed",
+        "summary": "Agent 계약 검증을 통과하지 못해 실행 결과를 전달하지 않았습니다.",
+        "structured_result": {
+            "error_code": error_code,
+            "invalid_fields": invalid_fields,
+        },
+        "evidence": [],
+        "next_actions": ["fix_agent_contract_before_retry"],
+        "limitations": ["Invalid Agent input or output was rejected at the execution boundary."],
+        "created_at": _now_iso(),
+    }
+
+
 def _run_sync_adapter(
     agent_input: dict[str, Any],
     adapter_context: dict[str, Any],
 ) -> dict[str, Any]:
     node_code = str(agent_input.get("node_code") or "")
+    if node_code == "appeal_decision_flow":
+        return _run_appeal_decision_flow_adapter(agent_input, adapter_context)
     if node_code == "fine_notice_analysis":
         return _run_fine_notice_analysis_adapter(agent_input, adapter_context)
     if node_code == "law_ground_search":
@@ -683,7 +1098,7 @@ def _run_fine_notice_analysis_adapter(
             "evidence": [],
             "next_actions": [
                 "check_fine_notice_agent_dependencies",
-                "fallback_to_mock_or_retry_adapter",
+                "retry_sync_adapter",
             ],
             "limitations": [
                 f"fine_notice_analysis adapter dependency error:{exc.__class__.__name__}",
@@ -999,7 +1414,9 @@ def _adapter_result_status(status: str) -> str:
 def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, Any]) -> list[str]:
     limitations = [str(item) for item in raw_output.get("limitations") or [] if str(item)]
     adapter = str(adapter_trace.get("adapter") or "")
-    if "fine_notice_analysis" in adapter:
+    if "appeal_decision_flow" in adapter:
+        marker = "appeal_decision_flow real graph is connected through Supervisor sync execution mode."
+    elif "fine_notice_analysis" in adapter:
         marker = "fine_notice_analysis real adapter is connected through Supervisor sync execution mode."
     elif "text_ml_case_search" in adapter:
         marker = "text_ml_case_search sync adapter is connected through the RAG-backed case-search port."
@@ -1035,7 +1452,57 @@ def _normalize_adapter_structured_result(
         structured.setdefault("top_cases", deepcopy(structured.get("similar_cases") or []))
         structured.setdefault("ratio_range_label", "Fault ratio is not fixed; review issues and evidence first.")
         structured.setdefault("recommended_evidence", [])
+    elif node_code == "law_ground_search":
+        provisions = [
+            item
+            for item in structured.get("law_provisions") or []
+            if isinstance(item, dict)
+        ]
+        retrieval = (
+            deepcopy(structured.get("retrieval"))
+            if isinstance(structured.get("retrieval"), dict)
+            else next(
+                (
+                    deepcopy(item.get("_retrieval"))
+                    for item in provisions
+                    if isinstance(item.get("_retrieval"), dict)
+                ),
+                {},
+            )
+        )
+        matched_laws = []
+        for provision in provisions:
+            matched_laws.append(
+                {
+                    "law_name": provision.get("source_name"),
+                    "article": provision.get("article_no"),
+                    "title": provision.get("article_title"),
+                    "summary": provision.get("provision_text"),
+                    "source_url": provision.get("source_url"),
+                    "source_reference": (
+                        provision.get("source_ref") or provision.get("chunk_id")
+                    ),
+                    "score": provision.get("retrieval_score") or provision.get("score"),
+                }
+            )
+        backend = retrieval.get("backend") or _law_retrieval_backend(provisions)
+        if backend:
+            retrieval.setdefault("backend", backend)
+        retrieval.setdefault("status", "ready" if provisions else "empty")
+        retrieval.setdefault("attempted_backends", [])
+        structured["matched_laws"] = matched_laws
+        structured["retrieval"] = retrieval
+        structured["retrieval_quality"] = backend or "unavailable"
     return structured
+
+
+def _law_retrieval_backend(provisions: list[dict[str, Any]]) -> str:
+    for provision in provisions:
+        reason = str(provision.get("match_reason") or "")
+        marker = "legal_rag_fallback:"
+        if reason.startswith(marker):
+            return reason.removeprefix(marker)
+    return ""
 
 
 def _adapter_error_output(
@@ -1066,7 +1533,7 @@ def _adapter_error_output(
         "summary": f"{node['node_code']} sync adapter failed before returning a usable envelope.",
         "structured_result": structured_result,
         "evidence": [],
-        "next_actions": ["fallback_to_mock_or_retry_adapter"],
+        "next_actions": ["retry_sync_adapter"],
         "limitations": ["Sync adapter exception was normalized for Supervisor result validation."],
         "created_at": _now_iso(),
     }
@@ -1074,6 +1541,7 @@ def _adapter_error_output(
 
 def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Exception) -> dict[str, Any]:
     adapter_by_node = {
+        "appeal_decision_flow": "ai.agents.appeal_decision_flow.graph",
         "fine_notice_analysis": "ai.agents.fine_notice_analysis.graph",
         "law_ground_search": "ai.agents.law_ground_search.run_law_ground_search",
         "text_ml_case_search": "ai.agents.text_ml_case_search.run_text_ml_case_search",
