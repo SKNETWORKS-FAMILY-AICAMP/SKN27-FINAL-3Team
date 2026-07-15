@@ -41,6 +41,23 @@ def _mock_law_code_db_lookup():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _mock_verified_merit_law_context():
+    """그래프 분기 테스트에는 필수 법령 근거가 검증된 상태를 제공한다."""
+    def verified_match(source_name, golden_text):
+        return {
+            "source_name": source_name,
+            "provision_text": golden_text,
+            "score": 0.9,
+        }
+
+    with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
+        "ai.agents.appeal_decision_flow.law_refs._resolve_provision_match",
+        side_effect=verified_match,
+    ):
+        yield
+
+
 def _iso(days_from_today: int) -> str:
     return (TODAY + datetime.timedelta(days=days_from_today)).isoformat()
 

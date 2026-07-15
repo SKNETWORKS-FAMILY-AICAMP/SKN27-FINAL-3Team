@@ -4,6 +4,7 @@ import tempfile
 from datetime import timedelta
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -209,6 +210,7 @@ class ChatbotPersistenceModelTests(TestCase):
             source_type="law",
             source_name="Road Traffic Act",
             source_url="https://example.test/school-zone",
+            effective_date=(timezone.now() - timedelta(days=3650)).date(),
         )
         RagChunk.objects.create(
             chunk_id="rag_school_zone_emergency_stop",
@@ -727,6 +729,111 @@ class ProductionReadinessTests(TestCase):
         )
 
     @override_settings(
+        LEGAL_RAG_VECTOR_ENABLED=True,
+        LEGAL_RAG_QUERY_EMBEDDING_PROVIDER="sentence-transformers",
+        LEGAL_RAG_QUERY_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
+        LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS="1024",
+        LEGAL_RAG_SEED_EMBEDDING_PROVIDER="openai",
+        LEGAL_RAG_SEED_EMBEDDING_MODEL="text-embedding-3-large",
+        LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS="1024",
+    )
+    def test_readiness_rejects_query_and_seed_embedding_space_mismatch(self):
+        with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
+            report = build_production_readiness_report(include_database=False)
+
+        legal_rag = {check["name"]: check for check in report["checks"]}["legal_rag"]
+        self.assertEqual(legal_rag["status"], "fail")
+        self.assertTrue(
+            any(
+                "does not match the configured seed embedding space" in detail["message"]
+                for detail in legal_rag["details"]
+            )
+        )
+
+    @override_settings(
+        DJANGO_DATABASE_ENGINE="postgres",
+        LEGAL_RAG_VECTOR_ENABLED=False,
+    )
+    def test_readiness_requires_current_lexical_legal_rows_when_vector_is_off(self):
+        class EmptyCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+            def execute(self, _sql, _params):
+                return None
+
+            def fetchone(self):
+                return None
+
+        fake_connection = SimpleNamespace(
+            vendor="postgresql",
+            introspection=SimpleNamespace(table_names=lambda: ["law_chunks"]),
+            cursor=lambda: EmptyCursor(),
+        )
+
+        with patch("chatbot.readiness.connection", fake_connection):
+            report = build_production_readiness_report(include_database=True)
+
+        legal_rag = {check["name"]: check for check in report["checks"]}["legal_rag"]
+        self.assertEqual(legal_rag["status"], "fail")
+        self.assertTrue(
+            any(
+                "No current searchable legal row" in detail["message"]
+                for detail in legal_rag["details"]
+            )
+        )
+
+    @override_settings(
+        DJANGO_DATABASE_ENGINE="postgres",
+        LEGAL_RAG_VECTOR_ENABLED=True,
+        LEGAL_RAG_QUERY_EMBEDDING_PROVIDER="sentence-transformers",
+        LEGAL_RAG_QUERY_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
+        LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS="1024",
+        LEGAL_RAG_SEED_EMBEDDING_PROVIDER="sentence-transformers",
+        LEGAL_RAG_SEED_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
+        LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS="1024",
+    )
+    def test_readiness_requires_an_eligible_row_in_the_configured_vector_space(self):
+        fetch_results = iter([(1,), None])
+
+        class SequencedCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+            def execute(self, _sql, _params):
+                return None
+
+            def fetchone(self):
+                return next(fetch_results)
+
+        fake_connection = SimpleNamespace(
+            vendor="postgresql",
+            introspection=SimpleNamespace(
+                table_names=lambda: ["law_chunks", "law_embeddings"]
+            ),
+            cursor=lambda: SequencedCursor(),
+        )
+
+        with patch("chatbot.readiness.connection", fake_connection):
+            with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
+                report = build_production_readiness_report(include_database=True)
+
+        legal_rag = {check["name"]: check for check in report["checks"]}["legal_rag"]
+        self.assertEqual(legal_rag["status"], "fail")
+        self.assertTrue(
+            any(
+                "No current searchable legal embedding" in detail["message"]
+                for detail in legal_rag["details"]
+            )
+        )
+
+    @override_settings(
         TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
         TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
         TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
@@ -748,6 +855,76 @@ class ProductionReadinessTests(TestCase):
         self.assertTrue(
             any("elasticsearch package is required" in detail["message"] for detail in checks["text_ml_case_search_rag"]["details"])
         )
+
+    @override_settings(
+        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
+        REVIEW_CASE_ES_BM25_INDEX="shared_chunks_v1",
+        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="shared_chunks_v1",
+    )
+    def test_readiness_rejects_shared_text_ml_elasticsearch_indexes(self):
+        with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
+            report = build_production_readiness_report(include_database=False)
+
+        check = {item["name"]: item for item in report["checks"]}[
+            "text_ml_case_search_rag"
+        ]
+        self.assertEqual(check["status"], "fail")
+        self.assertTrue(
+            any(
+                "non-empty and distinct" in detail["message"]
+                for detail in check["details"]
+            )
+        )
+
+    @override_settings(
+        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
+        REVIEW_CASE_ES_BM25_INDEX="Invalid Index",
+        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="fault-ratio-index",
+    )
+    def test_readiness_rejects_invalid_text_ml_elasticsearch_index_name(self):
+        with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
+            report = build_production_readiness_report(include_database=False)
+
+        check = {item["name"]: item for item in report["checks"]}[
+            "text_ml_case_search_rag"
+        ]
+        self.assertEqual(check["status"], "fail")
+        self.assertTrue(
+            any("Elasticsearch index" in detail["message"] for detail in check["details"])
+        )
+
+    def test_readiness_legal_row_query_requires_usable_evidence(self):
+        from chatbot import readiness
+
+        class RecordingCursor:
+            sql = ""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+            def execute(self, sql, _params):
+                self.sql = sql
+
+            def fetchone(self):
+                return (1,)
+
+        cursor = RecordingCursor()
+        fake_connection = SimpleNamespace(cursor=lambda: cursor)
+
+        with patch("chatbot.readiness.connection", fake_connection):
+            self.assertTrue(readiness._current_legal_chunk_exists())
+
+        self.assertIn("btrim(c.source_url) <> ''", cursor.sql)
+        self.assertIn("btrim(c.provision_text) <> ''", cursor.sql)
 
     def test_readiness_management_command_outputs_json(self):
         output = StringIO()

@@ -146,6 +146,14 @@ APPEAL_DEADLINE_BASIS = (
 )
 
 
+class LegalProvisionEvidenceUnavailable(RuntimeError):
+    """필수 법령 근거를 신뢰할 수 있는 RAG 결과로 확보하지 못한 상태."""
+
+    def __init__(self, reason_code: str):
+        self.reason_code = reason_code
+        super().__init__(reason_code)
+
+
 def _resolve_provision_match(source_name: str, golden_text: str) -> dict | None:
     """golden_text와 내용이 가장 유사한 (source_name) 조문을 RAG로 찾아 매칭 결과를 반환한다.
 
@@ -171,32 +179,41 @@ def _resolve_provision_match(source_name: str, golden_text: str) -> dict | None:
 
 def _fetch_provision_text(source_name: str, golden_text: str) -> str:
     """golden_text와 내용이 가장 유사한 조문을 법령DB에서 의미 기반(RAG) 검색으로 조회하고,
-    신뢰도 미달이거나 실패하면 golden_text를 그대로 쓴다.
+    신뢰할 수 있는 결과를 확보하지 못하면 명시적으로 실패한다.
 
-    조문번호가 아니라 golden_text(검증된 폴백 원문) 자체를 검색 질의로 써서, 법 개정으로
+    조문번호가 아니라 golden_text(검증된 기준 원문) 자체를 검색 질의로 써서, 법 개정으로
     조문번호가 재편돼도(예: 142조→143조) 내용 기반으로 계속 올바른 조문을 찾는다. 검색
     결과의 source_name이 기대값과 다르면(엉뚱한 법의 비슷한 문구에 매칭) 신뢰하지 않고
-    폴백한다.
+    판정을 중단한다. 검증 스냅샷을 직접 쓰는 예외는 제160조제4항제1호뿐이다.
     """
     if os.environ.get("LEGAL_PROVISION_DB_ENABLED", "0").strip().lower() not in {"1", "true", "yes"}:
-        return golden_text
+        raise LegalProvisionEvidenceUnavailable("legal_provision_db_disabled")
 
     try:
         match = _resolve_provision_match(source_name, golden_text)
     except Exception as exc:
         logger.warning(
-            "Law reference RAG lookup failed; using fallback; error_class=%s",
+            "Required law reference RAG lookup failed; error_class=%s",
             exc.__class__.__name__,
         )
-        return golden_text
+        raise LegalProvisionEvidenceUnavailable("legal_provision_lookup_failed") from None
 
     if match is None:
-        return golden_text
+        raise LegalProvisionEvidenceUnavailable("legal_provision_low_confidence_or_not_found")
 
     text = match.get("provision_text")
     if not text:
-        return golden_text
-    return f"{source_name} {text}"
+        raise LegalProvisionEvidenceUnavailable("legal_provision_not_found")
+    return f"[source={source_name}; provenance=legal_rag]\n{text}"
+
+
+def _pinned_article_160_context() -> str:
+    """청크 혼합이 확인된 제160조제4항제1호만 검증 스냅샷으로 제공한다."""
+    return (
+        "[source=도로교통법; article=제160조제4항제1호; "
+        "provenance=pinned_verified_snapshot; verified_at=2026-07-15]\n"
+        f"{_FALLBACK_ARTICLE_160_4_1_TEXT}"
+    )
 
 
 def get_merit_context(notice_stage: str) -> str:
@@ -218,7 +235,7 @@ def get_merit_context(notice_stage: str) -> str:
     """
     parts = [
         # RAG 대상에서 제외 — _FALLBACK_ARTICLE_160_4_1_TEXT 주석 참고.
-        _FALLBACK_ARTICLE_160_4_1_TEXT,
+        _pinned_article_160_context(),
         _fetch_provision_text("도로교통법 시행규칙", _FALLBACK_RULE_142_TEXT),
         _fetch_provision_text("질서위반행위규제법", _FALLBACK_ARTICLE_7_TEXT),
         _fetch_provision_text("질서위반행위규제법", _FALLBACK_ARTICLE_8_TEXT),

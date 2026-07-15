@@ -996,7 +996,7 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
     monkeypatch.setattr(
         legal_rag_service,
         "search_legal_rag",
-        lambda query, *, top_k, source_type: {
+        lambda query, *, top_k, source_type, temporal_basis, scope: {
             "status": "ready",
             "backend": "django_rag_tables",
             "query": query,
@@ -1009,6 +1009,7 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
                     "title": "School zone emergency stopping",
                     "article": "Article 32",
                     "summary": "어린이보호구역 정차 과태료는 긴급 정차 증빙을 확인합니다.",
+                    "provision_text": "어린이보호구역 정차 과태료는 긴급 정차 증빙을 확인합니다.",
                     "source_url": "https://example.test/road-traffic-act",
                     "score": 4.0,
                 }

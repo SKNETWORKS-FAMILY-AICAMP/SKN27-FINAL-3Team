@@ -2,7 +2,7 @@ from typing import Optional
 from typing_extensions import TypedDict, Literal
 
 JudgmentStatus = Literal[
-    "success", "denied", "input_required", "not_applicable",
+    "success", "denied", "input_required", "not_applicable", "failed",
 ]
 MeritLevel          = Literal["강함", "보류", "낮음"]
 MeritReliefType     = Literal["면제", "감경"]
@@ -91,7 +91,12 @@ class AppealJudgmentState(TypedDict, total=False):
                                                 # 애초에 호출되지 않으므로 항상 None(적용 대상
                                                 # 아님). guide_generation_node가 이 값으로 "면제/
                                                 # 감경 구분이 기술 오류로 확정되지 못했다"는 별도
-                                                # 안내를 붙인다.
+                                                 # 안내를 붙인다.
+
+    # 필수 법령 근거가 RAG에서 검증됐는지 표시한다. 제160조제4항제1호만 검증된
+    # 고정 스냅샷을 쓰며, 나머지 필수 조문 조회가 실패하면 unavailable로 종료한다.
+    legal_evidence_status:       Optional[Literal["available", "unavailable"]]
+    legal_evidence_reason:       Optional[str]
 
     # ── verdict_node (E) 출력 ──────────────────────────────────────────
     judgment_status:           Optional[JudgmentStatus]

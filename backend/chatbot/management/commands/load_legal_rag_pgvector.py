@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from itertools import islice
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Iterator
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -96,10 +97,6 @@ def _execute_schema(schema_path: Path) -> None:
 
 
 def _load_jsonl_artifacts(*, chunks_path: Path, embeddings_path: Path, batch_size: int) -> dict[str, int]:
-    chunks = list(_chunk_rows(chunks_path))
-    chunk_ids = {row[0] for row in chunks}
-    embeddings = [row for row in _embedding_rows(embeddings_path) if row[0] in chunk_ids]
-
     chunk_sql = """
         INSERT INTO law_chunks (
             chunk_id, source_id, source_name, source_type, chunk_type,
@@ -124,23 +121,41 @@ def _load_jsonl_artifacts(*, chunks_path: Path, embeddings_path: Path, batch_siz
             domain_tags = EXCLUDED.domain_tags
     """
     embedding_sql = """
-        INSERT INTO law_embeddings (chunk_id, embedding_vector, embedding_provider)
-        VALUES (%s, %s::vector, %s)
+        INSERT INTO law_embeddings (
+            chunk_id, embedding_vector, embedding_provider,
+            embedding_model, embedding_dimensions
+        )
+        VALUES (%s, %s::vector, %s, %s, %s)
         ON CONFLICT (chunk_id) DO UPDATE SET
             embedding_vector = EXCLUDED.embedding_vector,
-            embedding_provider = EXCLUDED.embedding_provider
+            embedding_provider = EXCLUDED.embedding_provider,
+            embedding_model = EXCLUDED.embedding_model,
+            embedding_dimensions = EXCLUDED.embedding_dimensions
     """
 
+    loaded_chunks = 0
+    loaded_embeddings = 0
     with connection.cursor() as cursor:
-        for batch in _batches(chunks, batch_size):
+        for batch in _batches(_chunk_rows(chunks_path), batch_size):
             cursor.executemany(chunk_sql, batch)
-        for batch in _batches(embeddings, batch_size):
+            loaded_chunks += len(batch)
+        for batch in _batches(_embedding_rows(embeddings_path), batch_size):
             cursor.executemany(embedding_sql, batch)
-    return {"chunks": len(chunks), "embeddings": len(embeddings)}
+            loaded_embeddings += len(batch)
+    return {"chunks": loaded_chunks, "embeddings": loaded_embeddings}
 
 
 def _chunk_rows(path: Path):
     for row in _read_jsonl(path):
+        is_searchable = row.get("is_searchable", True)
+        if is_searchable is not True:
+            raise CommandError("Legal RAG is_searchable must be true")
+        domain_tags = row.get("domain_tags", [])
+        if not isinstance(domain_tags, list) or any(
+            not isinstance(tag, str) or not tag.strip() or tag != tag.strip()
+            for tag in domain_tags
+        ):
+            raise CommandError("Legal RAG domain_tags must be a list of non-empty strings")
         yield (
             _required(row, "chunk_id"),
             _required(row, "source_id"),
@@ -155,20 +170,25 @@ def _chunk_rows(path: Path):
             row.get("source_url") or None,
             row.get("enforce_date") or None,
             row.get("expire_date") or None,
-            bool(row.get("is_searchable", True)),
-            list(row.get("domain_tags") or []),
+            is_searchable,
+            domain_tags,
         )
 
 
 def _embedding_rows(path: Path):
     for row in _read_jsonl(path):
         vector = row.get("embedding_vector") or []
-        if not vector:
-            continue
+        dimensions = _required(row, "embedding_dimensions")
+        if isinstance(dimensions, bool) or not isinstance(dimensions, int):
+            raise CommandError("Invalid legal RAG embedding_dimensions")
+        if dimensions != 1024 or len(vector) != dimensions:
+            raise CommandError("Legal RAG embeddings must contain exactly 1024 dimensions")
         yield (
             _required(row, "chunk_id"),
             f"[{','.join(str(float(item)) for item in vector)}]",
-            str(row.get("embedding_provider") or row.get("embedding_version") or "sentence-transformers"),
+            _required(row, "embedding_provider"),
+            _required(row, "embedding_model"),
+            dimensions,
         )
 
 
@@ -190,9 +210,10 @@ def _required(row: dict[str, Any], key: str) -> Any:
     return value
 
 
-def _batches(rows: list[tuple[Any, ...]], size: int):
-    for index in range(0, len(rows), size):
-        yield rows[index : index + size]
+def _batches(rows: Iterable[tuple[Any, ...]], size: int) -> Iterator[list[tuple[Any, ...]]]:
+    iterator = iter(rows)
+    while batch := list(islice(iterator, max(1, size))):
+        yield batch
 
 
 def _table_counts() -> dict[str, int]:

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import re
-from heapq import heappop, heappush
 from pathlib import Path
-from etl.common.utils import load_env_file, normalize_l2, read_jsonl, read_jsonl_iter
+from etl.common.utils import load_env_file, normalize_l2, read_jsonl_iter
 
 _ARTICLE_NO_PATTERN = re.compile(r"제(\d+)조(?:의(\d+))?")
+_DEFAULT_SENTENCE_TRANSFORMER_MODEL = "intfloat/multilingual-e5-large"
+_DEFAULT_OPENAI_MODEL = "text-embedding-3-large"
 
 
 def parse_law_code(law_code: str) -> tuple[str, str] | None:
@@ -123,20 +124,27 @@ def search_laws(
     if top_k <= 0:
         return []
 
-    # PostgreSQL schema enforces vector(1024)
-    embedding_metadata = {"embedding_provider": provider, "embedding_dimensions": 1024}
+    # PostgreSQL production schema enforces one explicit 1024-dimensional space.
+    resolved_model_id = model_id or (
+        _DEFAULT_OPENAI_MODEL if provider == "openai" else _DEFAULT_SENTENCE_TRANSFORMER_MODEL
+    )
+    embedding_metadata = {
+        "embedding_provider": provider,
+        "embedding_model": resolved_model_id,
+        "embedding_dimensions": 1024,
+    }
 
     # Generate query vector
     if provider == "sentence-transformers":
         query_vector = embed_query_with_sentence_transformers(
             query,
-            model_id=model_id or infer_embedding_model(embedding_metadata),
+            model_id=resolved_model_id,
             device=device,
         )
     elif provider == "openai":
         query_vector = embed_query_with_openai(
             query,
-            model_id=model_id or infer_embedding_model(embedding_metadata),
+            model_id=resolved_model_id,
             dimensions=infer_embedding_dimensions(embedding_metadata),
         )
     else:
@@ -185,9 +193,16 @@ def search_laws(
             FROM law_embeddings e
             JOIN law_chunks c ON e.chunk_id = c.chunk_id
             WHERE e.embedding_provider = %s
+              AND e.embedding_model = %s
+              AND e.embedding_dimensions = %s
         """
         vector_str = "[" + ",".join(map(str, query_vector)) + "]"
-        params = [vector_str, provider]
+        params = [
+            vector_str,
+            provider,
+            resolved_model_id,
+            infer_embedding_dimensions(embedding_metadata),
+        ]
         
         if effective_at:
             query_sql += " AND (c.enforce_date <= %s OR c.enforce_date IS NULL)"
