@@ -4,6 +4,15 @@
 !.env.production.example
 .venv/
 .terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+infra/terraform-pilot/terraform.tfvars
+infra/terraform-pilot/backend.hcl
+deploy/aws-pilot/.runtime.env
+deploy/aws-pilot/.compose.env
+deploy/aws-pilot/.edge.env
+deploy/aws-pilot/.elasticsearch.env
 __pycache__/
 *.py[cod]
 .pytest_cache/
