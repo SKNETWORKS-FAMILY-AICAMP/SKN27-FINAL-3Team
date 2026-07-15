@@ -83,7 +83,9 @@ def check_export_to_sql_outputs_valid_schema():
     emb_data = {
         "chunk_id": "road_traffic_act:2026:article:1",
         "embedding_vector": [0.1] * 1024,
-        "embedding_provider": "sentence-transformers"
+        "embedding_provider": "sentence-transformers",
+        "embedding_model": "intfloat/multilingual-e5-large",
+        "embedding_dimensions": 1024,
     }
     embeddings_path.write_text(json.dumps(emb_data) + "\n", encoding="utf-8")
 

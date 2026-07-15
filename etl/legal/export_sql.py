@@ -69,10 +69,12 @@ def export_to_sql(
         "CREATE INDEX IF NOT EXISTS idx_law_chunks_temporal ON law_chunks (enforce_date, expire_date);",
         "",
         "DROP TABLE IF EXISTS law_embeddings CASCADE;",
-        f"CREATE TABLE law_embeddings (",
+        "CREATE TABLE law_embeddings (",
         "    chunk_id VARCHAR(255) REFERENCES law_chunks(chunk_id) ON DELETE CASCADE,",
-        f"    embedding_vector vector({vector_dim}),",
+        f"    embedding_vector vector({vector_dim}) NOT NULL,",
         "    embedding_provider VARCHAR(50) NOT NULL,",
+        "    embedding_model VARCHAR(255) NOT NULL,",
+        f"    embedding_dimensions INTEGER NOT NULL CHECK (embedding_dimensions = {vector_dim}),",
         "    PRIMARY KEY (chunk_id)",
         ");",
         "",
@@ -129,10 +131,13 @@ def export_to_sql(
             vector = emb["embedding_vector"]
             if not vector:
                 continue
-            provider = emb.get("embedding_provider") or emb.get("embedding_version") or "sentence-transformers"
+            provider, model, dimensions = _embedding_metadata(emb, vector_dim=vector_dim)
             vector_str = f"'[{','.join(map(str, vector))}]'"
             handle.write(
-                f"INSERT INTO law_embeddings (chunk_id, embedding_vector, embedding_provider) VALUES ({escape_sql_string(chunk_id)}, {vector_str}, {escape_sql_string(provider)});\n"
+                "INSERT INTO law_embeddings "
+                "(chunk_id, embedding_vector, embedding_provider, embedding_model, embedding_dimensions) "
+                f"VALUES ({escape_sql_string(chunk_id)}, {vector_str}, "
+                f"{escape_sql_string(provider)}, {escape_sql_string(model)}, {dimensions});\n"
             )
             embedding_count += 1
         handle.write("\nCOMMIT;\n")
@@ -150,6 +155,22 @@ def infer_vector_dimensions(embeddings_file: Path) -> int:
             if vector:
                 return len(vector)
     raise ValueError(f"No embedding vectors found in {embeddings_file}")
+
+
+def _embedding_metadata(embedding: dict, *, vector_dim: int) -> tuple[str, str, int]:
+    provider = str(embedding.get("embedding_provider") or "").strip()
+    model = str(embedding.get("embedding_model") or "").strip()
+    dimensions = embedding.get("embedding_dimensions")
+    vector = embedding.get("embedding_vector")
+    if not provider:
+        raise ValueError("embedding_provider is required")
+    if not model:
+        raise ValueError("embedding_model is required")
+    if isinstance(dimensions, bool) or not isinstance(dimensions, int):
+        raise ValueError("embedding_dimensions must be an integer")
+    if not isinstance(vector, list) or dimensions != vector_dim or len(vector) != dimensions:
+        raise ValueError("embedding vector does not match embedding_dimensions")
+    return provider, model, dimensions
 
 
 if __name__ == "__main__":

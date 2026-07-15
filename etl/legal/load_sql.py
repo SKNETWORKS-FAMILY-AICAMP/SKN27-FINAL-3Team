@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import argparse
@@ -24,7 +23,7 @@ def load_to_postgres(
     try:
         import psycopg2
         from psycopg2.extras import execute_values
-    except ImportError as exc:
+    except ImportError:
         print("psycopg2-binary is required. Install dependencies from requirements.txt.", file=sys.stderr)
         return 1
 
@@ -118,8 +117,10 @@ def load_to_postgres(
             cur.execute(f"""
                 CREATE TABLE law_embeddings (
                     chunk_id VARCHAR(255) REFERENCES law_chunks(chunk_id) ON DELETE CASCADE,
-                    embedding_vector vector({vector_dim}),
+                    embedding_vector vector({vector_dim}) NOT NULL,
                     embedding_provider VARCHAR(50) NOT NULL,
+                    embedding_model VARCHAR(255) NOT NULL,
+                    embedding_dimensions INTEGER NOT NULL CHECK (embedding_dimensions = {vector_dim}),
                     PRIMARY KEY (chunk_id)
                 );
             """)
@@ -161,11 +162,14 @@ def load_to_postgres(
             print("Upserting embeddings to law_embeddings...")
             emb_upsert_query = """
                 INSERT INTO law_embeddings (
-                    chunk_id, embedding_vector, embedding_provider
+                    chunk_id, embedding_vector, embedding_provider,
+                    embedding_model, embedding_dimensions
                 ) VALUES %s
                 ON CONFLICT (chunk_id) DO UPDATE SET
                     embedding_vector = EXCLUDED.embedding_vector,
-                    embedding_provider = EXCLUDED.embedding_provider
+                    embedding_provider = EXCLUDED.embedding_provider,
+                    embedding_model = EXCLUDED.embedding_model,
+                    embedding_dimensions = EXCLUDED.embedding_dimensions
             """
             batch = []
             for row in read_jsonl(embeddings_file):
@@ -175,9 +179,7 @@ def load_to_postgres(
                 vector = row["embedding_vector"]
                 if not vector:
                     continue
-                provider = row.get("embedding_provider") or row.get("embedding_version") or "sentence-transformers"
-                vector_str = f"[{','.join(map(str, vector))}]"
-                batch.append((chunk_id, vector_str, provider))
+                batch.append(_embedding_db_row(row, vector_dim=vector_dim))
                 if len(batch) >= batch_size:
                     execute_values(cur, emb_upsert_query, batch, page_size=batch_size)
                     embedding_count += len(batch)
@@ -206,6 +208,23 @@ def infer_vector_dimensions(embeddings_file: Path) -> int:
             continue
         return len(vector)
     raise ValueError(f"No embedding vectors found in {embeddings_file}")
+
+
+def _embedding_db_row(row: dict, *, vector_dim: int) -> tuple[str, str, str, str, int]:
+    vector = row.get("embedding_vector")
+    provider = str(row.get("embedding_provider") or "").strip()
+    model = str(row.get("embedding_model") or "").strip()
+    dimensions = row.get("embedding_dimensions")
+    if not provider:
+        raise ValueError("embedding_provider is required")
+    if not model:
+        raise ValueError("embedding_model is required")
+    if isinstance(dimensions, bool) or not isinstance(dimensions, int):
+        raise ValueError("embedding_dimensions must be an integer")
+    if not isinstance(vector, list) or dimensions != vector_dim or len(vector) != dimensions:
+        raise ValueError("embedding vector does not match embedding_dimensions")
+    vector_str = f"[{','.join(map(str, vector))}]"
+    return str(row["chunk_id"]), vector_str, provider, model, dimensions
 
 
 def main(argv: list[str] | None = None) -> int:
