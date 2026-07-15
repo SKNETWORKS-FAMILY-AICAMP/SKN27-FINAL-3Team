@@ -702,6 +702,59 @@ class AnalysisJobQueueTests(TestCase):
         self.assertEqual(work_item.attempt_no, 2)
         persist.assert_not_called()
 
+    def test_completed_job_surfaces_pending_questions_from_input_required_agent_output(self) -> None:
+        """A node that finishes with status=input_required (e.g. appeal_decision_flow
+        asking for the missing user_appeal_reason) must reach the user as a pending
+        question on the completed job. Today nothing recomputes pending_questions from
+        the finished node_execution -- _completed_job_payload_for_work_item only carries
+        forward the pre-execution chat_response, which is always empty at queue time.
+        """
+        payload, job_payload = _queue_payload(
+            owner_id="usr_worker_input_required",
+            session_id="ses_worker_input_required",
+            job_id="job_worker_input_required",
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        node_execution = {
+            "job_id": queued["job_id"],
+            "executions": [
+                {
+                    "node_code": "appeal_decision_flow",
+                    "agent_output": {
+                        "node_code": "appeal_decision_flow",
+                        "status": "partial",
+                        "execution_status": "input_required",
+                        "summary": "이의신청 사유 정보 필요",
+                        "structured_result": {
+                            "judgment_status": "input_required",
+                            "missing_fields": ["user_appeal_reason"],
+                        },
+                        "evidence": [],
+                        "next_actions": [
+                            "Supervisor가 사용자에게 이의신청 사유 질문 후 재호출"
+                        ],
+                        "limitations": [],
+                    },
+                }
+            ],
+            "status_counts": {"partial": 1},
+            "completed_node_codes": ["appeal_decision_flow"],
+        }
+
+        with patch(
+            "chatbot.repositories._execute_agent_work_item_plan",
+            return_value=node_execution,
+        ):
+            result = process_agent_work_item(queued["work_item_id"])
+
+        self.assertEqual(result["status"], AgentWorkItemStatus.SUCCESS)
+        job = AnalysisJob.objects.get(job_id=queued["job_id"])
+        pending_questions = job.metadata.get("pending_questions") or []
+        self.assertTrue(
+            any(q.get("field") == "user_appeal_reason" for q in pending_questions),
+            f"expected a pending question for user_appeal_reason, got {pending_questions!r}",
+        )
+
     def test_worker_failure_persists_only_stable_error_metadata(self) -> None:
         payload, job_payload = _queue_payload(
             owner_id="usr_worker_private_error",

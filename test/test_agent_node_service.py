@@ -175,6 +175,49 @@ def test_appeal_decision_runtime_invokes_real_graph_with_upstream_results(monkey
     ]
 
 
+def test_appeal_decision_runtime_propagates_input_required_missing_fields(monkeypatch):
+    """When reason_intake_node reports input_required, the adapter must surface
+    missing_fields so downstream consumers (e.g. history_event_mock_service,
+    which reads structured_result["missing_fields"]) can re-ask the user.
+    """
+    from ai.agents.appeal_decision_flow import graph as appeal_graph
+
+    def fake_invoke(state):
+        return {
+            "agent_results": {
+                "appeal_judgment": {
+                    "status": "input_required",
+                    "summary": "이의신청 사유 정보 필요",
+                    "structured_result": {
+                        "judgment_status": "input_required",
+                        "fine_type": "administrative_fine",
+                        "notice_stage": "first_notice",
+                    },
+                    "evidence": [],
+                    "missing_fields": ["user_appeal_reason"],
+                    "next_actions": [
+                        "Supervisor가 사용자에게 이의신청 사유 질문 후 재호출"
+                    ],
+                    "limitations": [],
+                }
+            }
+        }
+
+    monkeypatch.setattr(appeal_graph, "invoke", fake_invoke)
+
+    execution = execute_agent_node(
+        {
+            "node_code": "appeal_decision_flow",
+            "user_text": "",
+            "context": {"fine_type": "administrative_fine", "notice_stage": "first_notice"},
+        }
+    )
+
+    output = execution["agent_output"]
+    assert output["execution_status"] == "input_required"
+    assert output["structured_result"]["missing_fields"] == ["user_appeal_reason"]
+
+
 def test_agent_node_registry_exposes_real_adapter_contract():
     nodes = list_agent_nodes()
     law_node = next(node for node in nodes if node["node_code"] == "law_ground_search")

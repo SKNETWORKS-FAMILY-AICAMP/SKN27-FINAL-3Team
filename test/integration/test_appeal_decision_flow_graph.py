@@ -327,7 +327,7 @@ class TestSuccessBranch:
             return _fake_response('{"merit": "낮음", "merit_basis": "무관"}')
 
         with patch(
-            "etl.legal.search.get_provision_text",
+            "ai.agents.appeal_decision_flow.law_refs.search_law_provisions",
             side_effect=RuntimeError("테스트 환경 — DB 조회 불가"),
         ), patch("openai.OpenAI") as mock_cls:
             mock_cls.return_value.chat.completions.create.side_effect = fake_create

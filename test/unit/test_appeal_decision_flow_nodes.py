@@ -236,13 +236,13 @@ class TestReasonIntakeNode:
 class TestLawRefs:
     @pytest.fixture(autouse=True)
     def _force_db_lookup_fallback(self):
-        """법령DB 조회가 실패한 상황을 강제해, 하드코딩 폴백 원문으로 결정론적으로 검증한다.
+        """법령DB(RAG) 조회가 실패한 상황을 강제해, 하드코딩 폴백 원문으로 결정론적으로 검증한다.
 
-        DB가 실제로 응답할 때의 동작(원문 그대로 사용)은 별도 테스트
+        DB가 실제로 응답할 때의 동작(RAG 매칭 원문 사용)은 별도 테스트
         (test_DB_조회_성공하면_DB_원문_사용)에서 확인한다.
         """
         with patch(
-            "etl.legal.search.get_provision_text",
+            "ai.agents.appeal_decision_flow.law_refs.search_law_provisions",
             side_effect=RuntimeError("테스트 환경 — DB 조회 불가"),
         ):
             yield
@@ -267,14 +267,38 @@ class TestLawRefs:
         assert "질서위반행위규제법 제10조" in ctx
         assert "질서위반행위규제법 제14조" in ctx
 
-    def test_DB_조회_성공하면_DB_원문_사용(self):
+    def test_DB_조회_성공하면_RAG_매칭_원문_사용(self):
+        """RAG 검색이 신뢰도 기준(evaluate_confidence)을 넘는 매칭을 반환하면, 조문번호가
+        아니라 source_name 일치 여부로 폴백 대신 그 매칭 원문을 쓴다."""
+        confident_match = [{
+            "source_name": "질서위반행위규제법",
+            "provision_text": "(DB) 실제 법령DB에서 조회된 조문 원문",
+            "score": 0.9,
+        }]
         with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
-            "etl.legal.search.get_provision_text",
-            return_value="(DB) 실제 법령DB에서 조회된 조문 원문",
+            "ai.agents.appeal_decision_flow.law_refs.search_law_provisions",
+            return_value=confident_match,
         ):
             ctx = get_merit_context("사전통지")
         assert "(DB) 실제 법령DB에서 조회된 조문 원문" in ctx
         assert "질서위반행위규제법 제7조(고의 또는 과실)" not in ctx
+
+    def test_source_name_불일치하면_폴백_유지(self):
+        """검색 결과가 신뢰도는 높아도 엉뚱한 법(source_name 불일치)에 매칭됐다면
+        신뢰하지 않고 폴백 원문을 유지한다 — 조문번호 대신 내용 검색으로 바꾸면서
+        생긴 "엉뚱한 조문에 매칭" 위험에 대한 안전장치."""
+        wrong_source_match = [{
+            "source_name": "형법",  # PINNED_REFERENCES 어디에도 없는 source_name이어야 진짜 불일치를 검증한다
+            "provision_text": "전혀 다른 법의 조문 원문",
+            "score": 0.9,
+        }]
+        with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
+            "ai.agents.appeal_decision_flow.law_refs.search_law_provisions",
+            return_value=wrong_source_match,
+        ):
+            ctx = get_merit_context("사전통지")
+        assert "질서위반행위규제법 제7조(고의 또는 과실)" in ctx
+        assert "전혀 다른 법의 조문 원문" not in ctx
 
 
 # ── risk_classification_node (DATA-003 §8) ──────────────────────────────────
