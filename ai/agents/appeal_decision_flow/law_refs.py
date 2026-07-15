@@ -1,8 +1,8 @@
 """MG(merit_classification_node)·RG(risk_classification_node)가 참조하는 법조문 원문.
 
-법령DB(law_chunks)에서 조회하는 게 우선이고, 조회 실패(DB 연결 오류 등)나 해당 조문이
-아직 적재되지 않은 경우에만 아래 하드코딩 상수로 폴백한다 — 법령DB가 항상 최신본을
-반영하지만, 일시적으로 접근이 안 될 때 MG가 컨텍스트 없이 판단하는 사태는 막는다.
+운영 MG 컨텍스트는 법령DB(law_chunks)에서 확인된 조문만 사용한다. DB 비활성화·조회
+오류·미적재 시에는 하드코딩 원문을 주입하지 않고 evidence-unavailable로 실패 폐쇄한다.
+아래 하드코딩 상수는 드리프트 검사와 테스트의 golden snapshot으로만 유지한다.
 원문 출처·적용범위 검증 근거는
 `docs/architecture/appeal-judgment/law160-budeuk-hansayu-scope-analysis2.md` 참고
 (구 버전 `법조문_참고자료_142조_14조.md`·`...analysis.md`의 "142조=주정차 전용" 전제는
@@ -15,7 +15,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# ── 폴백 원문 (DB 조회 실패 시에만 사용) ──────────────────────────────
+# ── 검증용 golden snapshot (운영 LLM 컨텍스트에 사용 금지) ────────────
 
 # 도로교통법 시행규칙 제142조(부득이한 사유)
 # 위임 근거: 도로교통법 제160조제4항제1호 "그 밖의 부득이한 사유"
@@ -86,14 +86,14 @@ _FALLBACK_ARTICLE_14_TEXT = """\
 
 # ── DB 조회 대상 고정 조문 목록 (etl/legal/reference_drift_check.py가 참조) ──
 # get_merit_context()가 실제로 _fetch_provision_text로 조회하는 (법령명, 조문번호,
-# 검증된 폴백 원문) 조합을 한곳에 모아둔다 — 법 개정으로 조문번호가 재편되면(예: 142조가
-# 143조로 밀림) law_chunks의 해당 article_no 값이 더 이상 이 폴백 원문과 같은 내용을
-# 가리키지 않게 될 수 있다. 여기 나열된 폴백 원문은 마지막으로 사람이 직접 검증한
+# 검증된 golden snapshot) 조합을 한곳에 모아둔다 — 법 개정으로 조문번호가 재편되면(예: 142조가
+# 143조로 밀림) law_chunks의 해당 article_no 값이 더 이상 이 원문과 같은 내용을
+# 가리키지 않게 될 수 있다. 여기 나열된 원문은 마지막으로 사람이 직접 검증한
 # "정답" 스냅샷이라, 드리프트 점검 스크립트가 DB 현재 원문과의 임베딩 유사도를 비교하는
-# 기준으로 재사용한다. 160조4항1호는 목록에서 제외한다 — get_merit_context()가 항
-# 단위 주소 미지원 문제로 이 조문만은 애초에 DB 조회 없이 폴백만 쓰기 때문에(위 주석
-# 참고), 비교할 "현재 DB 원문" 자체가 없다.
+# 기준으로 재사용한다. 제160조는 조 단위 조회 결과에 필요한 제4항제1호 문구가 포함됐는지
+# 런타임에서도 별도로 검증한다.
 PINNED_REFERENCES: list[tuple[str, str, str]] = [
+    ("도로교통법", "제160조", _FALLBACK_ARTICLE_160_4_1_TEXT),
     ("도로교통법 시행규칙", "제142조", _FALLBACK_RULE_142_TEXT),
     ("질서위반행위규제법", "제7조", _FALLBACK_ARTICLE_7_TEXT),
     ("질서위반행위규제법", "제8조", _FALLBACK_ARTICLE_8_TEXT),
@@ -114,16 +114,22 @@ APPEAL_DEADLINE_BASIS = (
 )
 
 
-def _fetch_provision_text(source_name: str, article_no: str, fallback: str) -> str:
-    """법령DB에서 (source_name, article_no) 원문을 조회하고, 실패하면 fallback을 쓴다.
+class LegalProvisionEvidenceUnavailable(RuntimeError):
+    """Sanitized fail-closed signal for required legal provision evidence."""
 
-    DB 원문은 조문 본문만 담고 법령명을 포함하지 않는다(법령명은 별도 컬럼으로 관리) —
-    여러 조문을 이어붙여 LLM 프롬프트로 주입할 때 어느 법인지 구분되도록 앞에 source_name을
-    라벨로 붙인다. 폴백 원문(_FALLBACK_* 상수)은 이미 법령명을 포함해 직접 쓴 텍스트라
-    그대로 반환한다.
-    """
-    if os.environ.get("LEGAL_PROVISION_DB_ENABLED", "0").strip().lower() not in {"1", "true", "yes"}:
-        return fallback
+    def __init__(self, reason_code: str):
+        self.reason_code = reason_code
+        super().__init__(reason_code)
+
+
+def _fetch_provision_text(source_name: str, article_no: str) -> str:
+    """Load a required provision from the legal DB with explicit provenance."""
+    if os.environ.get("LEGAL_PROVISION_DB_ENABLED", "0").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        raise LegalProvisionEvidenceUnavailable("legal_provision_db_disabled")
 
     try:
         from etl.legal.search import get_provision_text
@@ -131,13 +137,23 @@ def _fetch_provision_text(source_name: str, article_no: str, fallback: str) -> s
         text = get_provision_text(source_name, article_no)
     except Exception as exc:
         logger.warning(
-            "Law reference lookup failed; using fallback; error_class=%s",
+            "Required law reference lookup failed error_class=%s",
             exc.__class__.__name__,
         )
-        return fallback
+        raise LegalProvisionEvidenceUnavailable(
+            "legal_provision_lookup_failed"
+        ) from None
+    text = str(text or "").strip()
     if not text:
-        return fallback
-    return f"{source_name} {text}"
+        raise LegalProvisionEvidenceUnavailable("legal_provision_not_found")
+    if article_no == "\uc81c160\uc870" and not all(
+        marker in text for marker in ("\ub3c4\ub09c", "\ubd80\ub4dd\uc774\ud55c \uc0ac\uc720")
+    ):
+        raise LegalProvisionEvidenceUnavailable("legal_provision_incomplete")
+    return (
+        f"[source={source_name}; article={article_no}; "
+        f"provenance=legal_provision_db]\n{text}"
+    )
 
 
 def get_merit_context(notice_stage: str) -> str:
@@ -158,21 +174,15 @@ def get_merit_context(notice_stage: str) -> str:
         1차 고지서 → 160조4항1호 + 142조 + 제7~10조 + 제14조
     """
     parts = [
-        # 제160조는 DB 조회 없이 항상 폴백을 쓴다 — 법령DB가 조(article) 단위까지만 저장하고
-        # 항(paragraph) 단위 주소를 안 갖고 있어(ingestion 파서가 paragraph_no를 채우지 않음),
-        # get_provision_text("도로교통법", "제160조")가 우리가 필요한 제4항제1호(부득이한 사유)가
-        # 아니라 제1항(과태료 대상 열거) 같은 다른 항을 반환할 수 있다 — 실측 확인됨: 반환된
-        # 원문에 "도난"·"부득이한 사유"가 없었음. 항 단위 저장·조회가 갖춰지기 전까지는 검증된
-        # 폴백 원문만 신뢰한다.
-        _FALLBACK_ARTICLE_160_4_1_TEXT,
-        _fetch_provision_text("도로교통법 시행규칙", "제142조", _FALLBACK_RULE_142_TEXT),
-        _fetch_provision_text("질서위반행위규제법", "제7조", _FALLBACK_ARTICLE_7_TEXT),
-        _fetch_provision_text("질서위반행위규제법", "제8조", _FALLBACK_ARTICLE_8_TEXT),
-        _fetch_provision_text("질서위반행위규제법", "제9조", _FALLBACK_ARTICLE_9_TEXT),
-        _fetch_provision_text("질서위반행위규제법", "제10조", _FALLBACK_ARTICLE_10_TEXT),
+        _fetch_provision_text("도로교통법", "제160조"),
+        _fetch_provision_text("도로교통법 시행규칙", "제142조"),
+        _fetch_provision_text("질서위반행위규제법", "제7조"),
+        _fetch_provision_text("질서위반행위규제법", "제8조"),
+        _fetch_provision_text("질서위반행위규제법", "제9조"),
+        _fetch_provision_text("질서위반행위규제법", "제10조"),
     ]
 
     if notice_stage == "1차 고지서":
-        parts.append(_fetch_provision_text("질서위반행위규제법", "제14조", _FALLBACK_ARTICLE_14_TEXT))
+        parts.append(_fetch_provision_text("질서위반행위규제법", "제14조"))
 
     return "\n\n".join(parts)

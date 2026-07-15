@@ -22,6 +22,14 @@ NODE_PLANS: dict[str, tuple[str, ...]] = {
     "traffic_law_search": ("law_ground_search",),
 }
 
+NODE_OWNERS: dict[str, str] = {
+    "fine_notice_analysis": "workzion2",
+    "law_ground_search": "techshin31",
+    "text_ml_case_search": "leejaegang27",
+    "appeal_decision_flow": "hi20260204-maker",
+    "objection_report_generation": "hi20260204-maker",
+}
+
 ROUTING_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("fine_notice_objection", ("과태료", "고지서", "범칙금", "의견제출", "이의신청")),
     (
@@ -109,6 +117,42 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
         scenario=routing_intent,
         fallback_builder=_fallback_supervisor_state,
     )
+    if (supervisor_state.get("llm") or {}).get("status") == "failed":
+        return _supervisor_unavailable_response(
+            session_id=session_id,
+            message_id=message_id,
+            routing_intent=routing_intent,
+            attachments=attachments,
+            supervisor_state=supervisor_state,
+        )
+    if supervisor_state.get("stage") == "need_more_input":
+        return _supervisor_needs_input_response(
+            session_id=session_id,
+            message_id=message_id,
+            routing_intent=routing_intent,
+            attachments=attachments,
+            supervisor_state=supervisor_state,
+        )
+    if supervisor_state.get("stage") != "agent_execution_ready":
+        blocked_state = dict(supervisor_state)
+        blocked_state["llm"] = {
+            **(
+                supervisor_state.get("llm")
+                if isinstance(supervisor_state.get("llm"), dict)
+                else {}
+            ),
+            "status": "failed",
+            "reason": "invalid_contract",
+        }
+        blocked_state["agent_input_packages"] = []
+        blocked_state["reporting_payload"] = None
+        return _supervisor_unavailable_response(
+            session_id=session_id,
+            message_id=message_id,
+            routing_intent=routing_intent,
+            attachments=attachments,
+            supervisor_state=blocked_state,
+        )
     analysis_plan = _analysis_plan(
         session_id=session_id,
         message_id=message_id,
@@ -211,6 +255,91 @@ def _needs_input_response(*, session_id: str, message_id: str) -> dict[str, Any]
     }
 
 
+def _supervisor_unavailable_response(
+    *,
+    session_id: str,
+    message_id: str,
+    routing_intent: str,
+    attachments: list[dict[str, Any]],
+    supervisor_state: dict[str, Any],
+) -> dict[str, Any]:
+    message = "Supervisor planning is temporarily unavailable. Please retry shortly."
+    return {
+        "contract_version": "chat_message_accepted.v2",
+        "message_id": message_id,
+        "session_id": session_id,
+        "routing_intent": routing_intent,
+        "status": "supervisor_unavailable",
+        "created_at": _now_iso(),
+        "assistant_message": {"answer": message, "summary": message},
+        "progress": {"status": "blocked", "active_node": "", "message": message},
+        "pending_questions": [],
+        "cards": [],
+        "report_links": [],
+        "attachments": attachments,
+        "blocked_attachments": [],
+        "supervisor_state": supervisor_state,
+        "reporting_payload": None,
+        "analysis_plan": {
+            "contract_version": "analysis_plan.v2",
+            "plan_id": f"plan_{uuid4().hex[:12]}",
+            "session_id": session_id,
+            "message_id": message_id,
+            "routing_intent": routing_intent,
+            "status": "blocked",
+            "steps": [],
+            "blocked_reason": (supervisor_state.get("llm") or {}).get("reason")
+            or "provider_unavailable",
+        },
+        "limitations": ["Supervisor planning is temporarily unavailable."],
+    }
+
+
+def _supervisor_needs_input_response(
+    *,
+    session_id: str,
+    message_id: str,
+    routing_intent: str,
+    attachments: list[dict[str, Any]],
+    supervisor_state: dict[str, Any],
+) -> dict[str, Any]:
+    response = _needs_input_response(session_id=session_id, message_id=message_id)
+    pending_questions = [
+        dict(item)
+        for item in supervisor_state.get("next_questions") or []
+        if isinstance(item, dict)
+    ]
+    question = str(
+        (pending_questions[0].get("question") if pending_questions else "")
+        or response["assistant_message"]["answer"]
+    )
+    sanitized_state = dict(supervisor_state)
+    sanitized_state["reporting_payload"] = None
+    response.update(
+        {
+            "routing_intent": routing_intent,
+            "assistant_message": {"answer": question, "summary": question},
+            "progress": {
+                "status": "needs_input",
+                "active_node": "",
+                "message": question,
+            },
+            "pending_questions": pending_questions,
+            "attachments": attachments,
+            "supervisor_state": sanitized_state,
+            "reporting_payload": None,
+        }
+    )
+    response["analysis_plan"].update(
+        {
+            "routing_intent": routing_intent,
+            "status": "needs_input",
+            "steps": [],
+        }
+    )
+    return response
+
+
 def _consultation_hold_response(
     *,
     session_id: str,
@@ -272,7 +401,7 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
     return {
         "contract_version": "supervisor_conversation_state.v2",
         "scenario": routing_intent,
-        "stage": "analysis_ready",
+        "stage": "agent_execution_ready",
         "conversation_turn_count": len(payload.get("conversation_history") or []) + 1,
         "conversation_summary": user_text,
         "collected_facts": [{"field": "user_text", "value": user_text}] if user_text else [],
@@ -280,7 +409,11 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
         "next_questions": [],
         "agent_input_packages": [
             {
+                "schema_version": "agent_input_schema.v1",
                 "node_code": node_code,
+                "owner": NODE_OWNERS[node_code],
+                "status": "ready",
+                "missing_fields": [],
                 "required_inputs": ["user_text|attachments"],
                 "payload": {"user_text": user_text, "attachments": payload.get("attachments", [])},
             }

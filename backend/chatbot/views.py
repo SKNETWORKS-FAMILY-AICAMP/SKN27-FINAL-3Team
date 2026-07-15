@@ -1214,6 +1214,12 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             chat_response=chat_response,
         )
 
+    if chat_response["status"] == "supervisor_unavailable":
+        _refund_usage_safely(usage, reason="supervisor_unavailable")
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "planning_blocked"
+        return _json_response(request, chat_response, status=503)
+
     if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
         chat_response["usage"] = usage
         execution_modes = {
