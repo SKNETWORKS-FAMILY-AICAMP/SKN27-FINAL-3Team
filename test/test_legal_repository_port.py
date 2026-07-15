@@ -5,7 +5,11 @@ import pytest
 from unittest.mock import Mock
 
 from ai.agents.appeal_decision_flow.guide import guide_generation_node
-from ai.agents.appeal_decision_flow.law_refs import get_merit_context
+from ai.agents.appeal_decision_flow.law_refs import (
+    LegalProvisionEvidenceUnavailable,
+    _fetch_provision_text,
+    get_merit_context,
+)
 from ai.agents.appeal_decision_flow.merit_gate import merit_classification_node
 from etl.legal.search import _connect_law_db
 
@@ -55,6 +59,19 @@ def test_article_160_uses_only_verified_pinned_snapshot(monkeypatch) -> None:
         "질서위반행위규제법",
         "질서위반행위규제법",
     ]
+
+
+def test_required_rag_rejects_whitespace_only_provision_text(monkeypatch) -> None:
+    monkeypatch.setenv("LEGAL_PROVISION_DB_ENABLED", "1")
+    monkeypatch.setattr(
+        "ai.agents.appeal_decision_flow.law_refs._resolve_provision_match",
+        lambda _source_name, _golden_text: {"provision_text": " \t\n "},
+    )
+
+    with pytest.raises(LegalProvisionEvidenceUnavailable) as exc_info:
+        _fetch_provision_text("도로교통법 시행규칙", "검증 기준 원문")
+
+    assert exc_info.value.reason_code == "legal_provision_not_found"
 
 
 def test_merit_node_does_not_call_llm_when_required_rag_lookup_fails(monkeypatch) -> None:

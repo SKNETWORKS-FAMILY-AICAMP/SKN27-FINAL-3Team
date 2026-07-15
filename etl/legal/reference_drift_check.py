@@ -1,19 +1,20 @@
-"""appeal_decision_flow가 참조하는 고정 법조문의 RAG 검색 드리프트 점검 배치 스크립트.
+"""appeal_decision_flow가 참조하는 필수 RAG 법조문의 검색 드리프트 점검 배치 스크립트.
 
 `ai/agents/appeal_decision_flow/law_refs.py`의 MG(merit_classification_node) 참조 조문
-(142조, 질서위반행위규제법 7~10조·14조, 160조4항1호)은 조문번호가 아니라 검증된 폴백
-원문 자체를 질의로 쓰는 의미 기반(RAG) 검색으로 조회한다(2026-07-15 전환). 이 방식은
+(142조, 질서위반행위규제법 7~10조·14조)은 조문번호가 아니라 검증 기준 원문 자체를
+질의로 쓰는 의미 기반(RAG) 검색으로 조회한다(2026-07-15 전환). 제160조4항1호는 청크
+분할 문제 때문에 RAG 대상에서 제외하고 검증된 고정 스냅샷을 사용한다. 이 방식은
 법 개정으로 조문번호가 재편돼도(예: 142조가 143조로 밀림) 내용 기반으로 계속 같은
 조문을 찾아내므로, exact match 방식이 가졌던 "조회는 성공하지만 조용히 엉뚱한 조문을
 주입" 위험은 구조적으로 줄어든다. 다만 다음 두 실패 모드는 여전히 남는다:
 
-- 신뢰도 미달로 검색이 매번 폴백만 쓰는 상태로 굳어짐 (DB 미적재·임베딩 인프라 문제 등)
-- 신뢰도는 통과했지만 매칭된 조문 내용이 검증된 폴백 원문과 실질적으로 달라짐
+- 신뢰도 미달로 런타임 판정이 중단됨 (DB 미적재·임베딩 인프라 문제 등)
+- 신뢰도는 통과했지만 매칭된 조문 내용이 검증 기준 원문과 실질적으로 달라짐
   (법 개정으로 조문 실체가 바뀌었거나, 우연히 비슷한 다른 조문에 매칭)
 
 이 스크립트는 law_refs.py의 RAG 매칭 함수(_resolve_provision_match)를 그대로 호출해 —
 런타임(_fetch_provision_text)과 같은 매칭 로직을 검증하되, LEGAL_PROVISION_DB_ENABLED
-게이트는 우회해 게이트 설정과 무관하게 DB 상태 자체를 확인한다 — 반환된 원문과 폴백
+게이트는 우회해 게이트 설정과 무관하게 DB 상태 자체를 확인한다 — 반환된 원문과 기준
 원문의 임베딩 코사인 유사도를 비교한다. 문구만 소폭 개정된 정상적인 경우는 유사도가
 여전히 높게 유지되므로, "완전히 다른 내용으로 바뀐" 경우만 선별적으로 잡아낸다.
 
@@ -28,7 +29,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from ai.agents.appeal_decision_flow.law_refs import PINNED_REFERENCES, _resolve_provision_match
+from ai.agents.appeal_decision_flow.law_refs import REQUIRED_RAG_REFERENCES, _resolve_provision_match
 from etl.legal.search import (
     embed_query_with_openai,
     infer_embedding_dimensions,
@@ -48,8 +49,8 @@ _EMBEDDING_METADATA = {"embedding_provider": "openai", "embedding_dimensions": 1
 @dataclass
 class DriftResult:
     source_name: str
-    golden_preview: str  # 폴백 원문 앞부분(로그 식별용) — article_no 같은 안정적 키가 더 이상 없다
-    status: str  # "ok" | "fallback" | "drifted" | "error"
+    golden_preview: str  # 검증 기준 원문 앞부분(로그 식별용) — article_no 같은 안정적 키가 더 이상 없다
+    status: str  # "ok" | "unavailable" | "drifted" | "error"
     similarity: float | None
     detail: str = ""
 
@@ -70,7 +71,7 @@ def _embed(text: str) -> list[float]:
 def check_reference_drift() -> list[DriftResult]:
     results: list[DriftResult] = []
 
-    for source_name, golden_text in PINNED_REFERENCES:
+    for source_name, golden_text in REQUIRED_RAG_REFERENCES:
         preview = golden_text.splitlines()[0][:40]
 
         try:
@@ -81,9 +82,9 @@ def check_reference_drift() -> list[DriftResult]:
 
         if match is None:
             results.append(DriftResult(
-                source_name, preview, "fallback", None,
+                source_name, preview, "unavailable", None,
                 "RAG 검색이 신뢰도 기준을 못 넘겼거나 source_name이 일치하는 매칭이 없음 — "
-                "지금 이 조문은 폴백 원문만으로 운영 중",
+                "런타임 판정은 필수 법령 근거 미확보로 중단됨",
             ))
             continue
 
@@ -100,7 +101,7 @@ def check_reference_drift() -> list[DriftResult]:
         if similarity < _DRIFT_THRESHOLD:
             results.append(DriftResult(
                 source_name, preview, "drifted", similarity,
-                "RAG 매칭 원문이 검증된 폴백 원문과 크게 다름 — 법 개정으로 조문 실체가 "
+                "RAG 매칭 원문이 검증 기준 원문과 크게 다름 — 법 개정으로 조문 실체가 "
                 "바뀌었거나 엉뚱한 조문에 매칭됐을 가능성이 있으니 law_refs.py를 재검토하세요",
             ))
         else:

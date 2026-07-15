@@ -305,7 +305,7 @@ class TestLawRefs:
         """검색 결과가 신뢰도는 높아도 엉뚱한 법(source_name 불일치)에 매칭됐다면
         하드코딩 원문으로 대체하지 않고 법령 근거 미확보로 판정을 중단한다."""
         wrong_source_match = [{
-            "source_name": "형법",  # PINNED_REFERENCES 어디에도 없는 source_name이어야 진짜 불일치를 검증한다
+            "source_name": "형법",  # REQUIRED_RAG_REFERENCES에 없는 source_name이어야 진짜 불일치를 검증한다
             "provision_text": "전혀 다른 법의 조문 원문",
             "score": 0.9,
         }]
