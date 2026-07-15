@@ -66,6 +66,43 @@ def test_chat_report_ready_notice_uses_a_locally_declared_gated_payload() -> Non
     assert "{visibleReportingPayload && (" in chat_screen
 
 
+def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_it() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    action_start = shell.index('async function runCurrentReportAction')
+    action_end = shell.index('async function triggerReportDownload', action_start)
+    report_action = shell[action_start:action_end]
+
+    assert "const persistedReportId = persistedAnalysisReportId(analysisResponse, currentReport);" in report_action
+    assert "if (persistedReportId) {" in report_action
+    assert "api.getReportDetail" in report_action
+    assert "reportId: persistedReportId" in report_action
+    persisted_branch = report_action[report_action.index("if (persistedReportId) {"):]
+    save_state_call = persisted_branch.index("api.updateConversationSaveState")
+    save_success = persisted_branch.index("setReportActionStatus")
+    assert save_state_call < save_success
+    assert 'conversation_save_state: "saved"' in persisted_branch
+    assert 'conversation_save_source: "worker_report_save_action"' in persisted_branch
+    assert "api.runReportAction" not in report_action
+    assert "function persistedAnalysisReportId(analysisResponse, currentReport)" in shell
+    helper_start = shell.index("function persistedAnalysisReportId(analysisResponse, currentReport)")
+    helper_end = shell.index("function EntryScreen", helper_start)
+    helper = shell[helper_start:helper_end]
+    helper_return = next(line for line in helper.splitlines() if line.strip().startswith("return "))
+    assert helper_return.index("currentReport?.report_id") < helper_return.index("analysisReportId")
+    assert (
+        "const activeReportingPayload = currentReport?.content?.reporting_payload || "
+        "visibleReportingPayload;"
+    ) in report_action
+    assert (
+        "let activeSessionId = currentReport?.session_id || "
+        "analysisResponse?.session_id || sessionId;"
+    ) in report_action
+
+    submit_start = shell.index("async function submitServiceMessage")
+    submit_end = shell.index("async function saveConversationWithGoogle", submit_start)
+    assert "setCurrentReport(null);" in shell[submit_start:submit_end]
+
+
 def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 

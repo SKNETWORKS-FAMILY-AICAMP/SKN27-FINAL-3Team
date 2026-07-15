@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import ipaddress
 import json
 import logging
 from uuid import uuid4
 
+from django.conf import settings
+from django.core.cache import cache
 from django.db import DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
@@ -41,7 +45,7 @@ from app.services.attachment_mock_service import (
     list_attachments as list_mock_attachments,
     register_attachment as register_mock_attachment,
 )
-from app.services.auth_session_mock_service import (
+from app.services.auth_session_service import (
     create_guest_session as _create_guest_session,
     get_current_auth_subject as _get_current_auth_subject,
 )
@@ -54,11 +58,10 @@ from app.services.chat_orchestration_service import (
 )
 from app.services.google_auth_service import (
     create_google_code_login as _create_google_code_login,
-    create_google_login as _create_google_login,
     create_logout as _create_logout,
     create_token_refresh as _create_token_refresh,
+    validate_google_code_request_boundary as _validate_google_code_request_boundary,
 )
-from app.services.chatbot_mock_service import perform_report_action
 from app.services.history_event_mock_service import (
     HISTORY_EVENT_VERSION,
     actor_from_payload,
@@ -69,7 +72,6 @@ from app.services.history_event_mock_service import (
     subject_from_payload,
 )
 from chatbot.api_response import (
-    canonicalize_mock_paths as _canonicalize_mock_paths,
     is_canonical_mock_request as _is_canonical_mock_request,
     json_response as _json_response,
 )
@@ -91,7 +93,7 @@ from chatbot.request_parsing import (
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
     AuthSessionStateError,
-    ReportReferenceError,
+    SessionBindingError,
     UploadStorageUnavailableError,
     UploadValidationError,
     access_subject_from_payload,
@@ -104,6 +106,7 @@ from chatbot.repositories import (
     get_analysis_job_record,
     get_chat_session_access_metadata,
     get_mycase_summary,
+    get_report_access_metadata,
     get_report_download_metadata,
     get_report_record_detail,
     get_uploaded_file_access_metadata,
@@ -123,7 +126,6 @@ from chatbot.repositories import (
     persist_guest_session_identity,
     record_agent_history_event_records,
     record_history_event_record,
-    persist_report_action,
     record_usage_event,
     refund_usage_event,
     register_uploaded_file,
@@ -188,53 +190,73 @@ def guest_session(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(["POST", "OPTIONS"])
-def auth_login(request: HttpRequest) -> JsonResponse:
-    body = _json_body(request)
-    status, payload = _create_google_login(body)
-    if status < 400:
-        payload["persistence"] = persist_current_auth_subject(
-            payload,
-            session_id=body.get("session_id"),
-        )
-    _record_history_safely(
-        request,
-        event_type="auth_login_completed",
-        status="success" if status < 400 else "failed",
-        summary="Google login boundary was processed.",
-        actor=_actor_from_auth_me_payload(request, payload),
-        subject=subject_from_payload({"session_id": body.get("session_id")}),
-        source=_history_source(request),
-        metadata={
-            "http_status": status,
-            "provider": payload.get("provider"),
-            "subject_type": (payload.get("subject") or {}).get("subject_type")
-            if isinstance(payload.get("subject"), dict)
-            else None,
-            "error_code": (payload.get("error") or {}).get("code")
-            if isinstance(payload.get("error"), dict)
-            else None,
-        },
-    )
-    response = _json_response(request, payload, status=status)
-    if status in {401, 403} and isinstance(payload.get("error"), dict):
-        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
-    return response
-
-
-@csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
 def auth_google_code(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
+    request_error = _validate_google_code_request_boundary(
+        body,
+        request_headers=dict(request.headers.items()),
+    )
+    if request_error is not None:
+        status, payload = request_error
+        response = _json_response(request, payload, status=status)
+        if status in {401, 403} and isinstance(payload.get("error"), dict):
+            response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+        return response
+    try:
+        binding_error = _google_code_session_binding_error(body)
+    except DatabaseError:
+        payload = build_auth_error(
+            "provider_unavailable",
+            reason="google_login_session_store_unavailable",
+        )
+        return _json_response(request, payload, status=503)
+    if binding_error:
+        payload = build_auth_error("forbidden", reason=binding_error)
+        response = _json_response(request, payload, status=403)
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+        return response
+    rate_subject = _google_oauth_rate_limit_subject(request)
+    cached_block = _get_cached_google_oauth_block(rate_subject)
+    if cached_block is not None:
+        return _google_oauth_rate_limit_response(request, cached_block)
+    try:
+        usage = record_usage_event(
+            rate_subject,
+            scope="google_oauth_code_exchange",
+            record_blocked_event=False,
+        )
+    except DatabaseError:
+        payload = build_auth_error(
+            "provider_unavailable",
+            reason="google_oauth_rate_limit_store_unavailable",
+        )
+        return _json_response(request, payload, status=503)
+    if not usage["allowed"]:
+        _cache_google_oauth_block(rate_subject, usage)
+        return _google_oauth_rate_limit_response(request, usage)
     status, payload = _create_google_code_login(
         body,
         request_headers=dict(request.headers.items()),
     )
-    if status < 400:
-        payload["persistence"] = persist_current_auth_subject(
-            payload,
-            session_id=body.get("session_id"),
-        )
     _strip_private_oauth_payload(payload)
+    if status < 400:
+        try:
+            payload["persistence"] = persist_current_auth_subject(
+                payload,
+                session_id=body.get("session_id"),
+            )
+        except AuthSessionStateError as exc:
+            status = 401
+            payload = build_auth_error("token_invalid", reason=exc.reason)
+        except SessionBindingError as exc:
+            status = 403
+            payload = build_auth_error("forbidden", reason=exc.reason)
+        except DatabaseError:
+            status = 503
+            payload = build_auth_error(
+                "provider_unavailable",
+                reason="google_login_persistence_unavailable",
+            )
     _record_history_safely(
         request,
         event_type="auth_google_code_completed",
@@ -257,6 +279,182 @@ def auth_google_code(request: HttpRequest) -> JsonResponse:
     if status in {401, 403} and isinstance(payload.get("error"), dict):
         response["WWW-Authenticate"] = build_www_authenticate_header(payload)
     return response
+
+
+def _google_code_session_binding_error(body: dict) -> str:
+    session_id = str(body.get("session_id") or "").strip()
+    if not session_id:
+        return ""
+    session_access = get_chat_session_access_metadata(session_id)
+    if session_access is None:
+        return ""
+    if str(session_access.get("owner_id") or "").strip():
+        return "google_session_already_owned"
+
+    expected_guest_id = _normalized_guest_id_for_binding(session_access.get("guest_id"))
+    request_guest_id = _normalized_guest_id_for_binding(body.get("guest_id"))
+    if not expected_guest_id:
+        return "google_session_unbound"
+    if request_guest_id != expected_guest_id:
+        return "google_guest_session_mismatch"
+    return ""
+
+
+def _normalized_guest_id_for_binding(value: object) -> str:
+    guest_id = str(value or "").strip()
+    if not guest_id:
+        return ""
+    return guest_id if guest_id.startswith("gst_") else f"gst_{guest_id}"
+
+
+def _google_oauth_rate_limit_subject(request: HttpRequest) -> dict[str, str]:
+    client_ip = _google_oauth_client_ip(request)
+    secret = str(settings.APP_JWT_SECRET or settings.SECRET_KEY).encode("utf-8")
+    digest = hmac.new(
+        secret,
+        f"google_oauth_code_exchange.v1:{client_ip}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+    return {"guest_id": f"oauth_{digest}"}
+
+
+def _google_oauth_block_cache_key(subject: dict[str, str]) -> str:
+    return f"google_oauth_code_exchange:block:{subject['guest_id']}"
+
+
+def _get_cached_google_oauth_block(
+    subject: dict[str, str],
+) -> dict[str, object] | None:
+    try:
+        cached = cache.get(_google_oauth_block_cache_key(subject))
+    except Exception as exc:  # pragma: no cover - cache backend failure boundary.
+        logger.warning(
+            "Google OAuth block cache read failed error_type=%s",
+            exc.__class__.__name__,
+        )
+        return None
+    return dict(cached) if isinstance(cached, dict) else None
+
+
+def _cache_google_oauth_block(
+    subject: dict[str, str],
+    usage: dict[str, object],
+) -> None:
+    public_usage = {
+        key: usage.get(key)
+        for key in (
+            "scope",
+            "limit_count",
+            "used_count",
+            "remaining_count",
+            "reset_at",
+        )
+        if key in usage
+    }
+    try:
+        cache.set(
+            _google_oauth_block_cache_key(subject),
+            public_usage,
+            timeout=300,
+        )
+    except Exception as exc:  # pragma: no cover - cache backend failure boundary.
+        logger.warning(
+            "Google OAuth block cache write failed error_type=%s",
+            exc.__class__.__name__,
+        )
+
+
+def _google_oauth_client_ip(request: HttpRequest) -> str:
+    remote_ip = _normalized_ip_address(request.META.get("REMOTE_ADDR"))
+    if not remote_ip:
+        return "unknown"
+
+    trusted_networks = _google_oauth_trusted_proxy_networks()
+    if not _ip_is_in_networks(remote_ip, trusted_networks):
+        return remote_ip
+
+    forwarded_values = [
+        _normalized_ip_address(value)
+        for value in str(request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")
+        if value.strip()
+    ]
+    if not forwarded_values or any(not value for value in forwarded_values):
+        return remote_ip
+
+    current_ip = remote_ip
+    for forwarded_ip in reversed(forwarded_values):
+        if not _ip_is_in_networks(current_ip, trusted_networks):
+            break
+        current_ip = forwarded_ip
+    return current_ip
+
+
+def _google_oauth_trusted_proxy_networks() -> tuple[
+    ipaddress.IPv4Network | ipaddress.IPv6Network,
+    ...,
+]:
+    configured = settings.GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS
+    values = configured.split(",") if isinstance(configured, str) else configured
+    networks = []
+    for value in values:
+        try:
+            networks.append(ipaddress.ip_network(str(value).strip(), strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
+def _normalized_ip_address(value: object) -> str:
+    try:
+        return ipaddress.ip_address(str(value or "").strip()).compressed
+    except ValueError:
+        return ""
+
+
+def _ip_is_in_networks(
+    value: str,
+    networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...],
+) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return any(
+        address.version == network.version and address in network
+        for network in networks
+    )
+
+
+def _google_oauth_rate_limit_response(
+    request: HttpRequest,
+    usage: dict[str, object],
+) -> JsonResponse:
+    public_usage = {
+        key: usage.get(key)
+        for key in (
+            "scope",
+            "limit_count",
+            "used_count",
+            "remaining_count",
+            "reset_at",
+        )
+        if key in usage
+    }
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "rate_limit.v1",
+                "type": "rate_limit",
+                "code": "rate_limit_exceeded",
+                "status": 429,
+                "message": "Google 로그인 요청 한도를 초과했습니다.",
+                "required_action": "wait_then_restart_google_login",
+                "usage": public_usage,
+            }
+        },
+        status=429,
+    )
 
 
 @csrf_exempt
@@ -1013,6 +1211,12 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             chat_response=chat_response,
         )
 
+    if chat_response["status"] == "supervisor_unavailable":
+        _refund_usage_safely(usage, reason="supervisor_unavailable")
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "planning_blocked"
+        return _json_response(request, chat_response, status=503)
+
     if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
         chat_response["usage"] = usage
         execution_modes = {
@@ -1336,7 +1540,9 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
     if chat_response:
         response["chat_response"] = chat_response
     if _is_canonical_mock_request(request):
-        if _uses_async_worker(execution_payload):
+        if _uses_async_worker(execution_payload) or _analysis_plan_requires_persisted_reporting(
+            analysis_plan
+        ):
             response["node_execution"] = _queued_node_execution_placeholder(
                 execution_payload,
                 analysis_plan=analysis_plan,
@@ -1422,10 +1628,20 @@ def report_action(request: HttpRequest) -> JsonResponse:
             session_id=request.GET.get("session_id"),
             owner_id=str(subject.get("user_id") or "") if _is_canonical_mock_request(request) else request.GET.get("owner_id"),
         )
+        has_worker_reports = any(
+            report.get("source") == "analysis_worker_reporting"
+            for report in reports
+        )
         return _json_response(
             request,
             {
-                "api_surface": "canonical_mock" if _is_canonical_mock_request(request) else "mock",
+                "api_surface": (
+                    "canonical"
+                    if _is_canonical_mock_request(request) and has_worker_reports
+                    else "canonical_mock"
+                    if _is_canonical_mock_request(request)
+                    else "mock"
+                ),
                 "reports": reports,
             },
         )
@@ -1434,7 +1650,6 @@ def report_action(request: HttpRequest) -> JsonResponse:
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     subject = access_subject_from_payload(identity_body)["subject"]
     action = str(body.get("action") or identity_body.get("action") or "save").lower()
-    usage = None
     if _is_canonical_mock_request(request):
         guest_violation = _guest_identity_policy_violation(subject)
         if guest_violation:
@@ -1448,60 +1663,19 @@ def report_action(request: HttpRequest) -> JsonResponse:
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
-        usage = record_usage_event(identity_body, scope="report_action")
-        if not usage["allowed"]:
-            return _rate_limit_response(request, usage)
-    report = perform_report_action(identity_body)
-    if _is_canonical_mock_request(request):
-        report = _canonicalize_mock_paths(report)
-        if action in {"preview", "prepare"}:
-            report["persistence"] = {
-                "backend": "postgresql",
-                "table": "reports",
-                "status": "skipped",
-                "reason": "preview_not_persisted",
-                "policy_version": "report_action_policy.v1",
-            }
-            report["object_storage"] = None
-        else:
-            try:
-                report["persistence"] = persist_report_action(identity_body, report)
-            except PermissionError:
-                return _persistence_access_denied_response(request)
-            except ReportReferenceError as exc:
-                logger.warning(
-                    "Rejected report reference: reason=%s detail=%s",
-                    exc.reason,
-                    str(exc),
-                )
-                return _report_reference_conflict_response(request, exc.reason)
-            report["object_storage"] = report["persistence"].get("object_storage")
-        report["usage"] = usage
-    _record_history_safely(
-        request,
-        event_type=_report_history_event_type(action),
-        status=report.get("status") or "success",
-        summary="??? action? mock ??????.",
-        actor=_history_actor(request, body),
-        subject=subject_from_payload(
-            body,
-            session_id=body.get("session_id"),
-            job_id=body.get("job_id"),
-            report_id=report.get("report_id"),
-        ),
-        source=_history_source(request),
-        metadata={
-            "action": body.get("action") or "save",
-            "report_status": report.get("status"),
-            "has_download_url": bool(report.get("download_url")),
-        },
-        privacy={"risk_level": "medium"},
-    )
-    return _json_response(request, report)
+        access_response = _canonical_report_action_access_response(
+            request,
+            identity_body,
+        )
+        if access_response is not None:
+            return access_response
+        return _worker_report_action_required_response(request)
+    return _worker_report_action_required_response(request)
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
+    access_metadata = None
     if _is_canonical_mock_request(request):
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
         subject = access_subject_from_payload(identity_payload)["subject"]
@@ -1517,10 +1691,9 @@ def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
-        document_type = request.GET.get("document_type")
-        download = get_report_download_metadata(report_id, document_type=document_type)
-        if download is not None:
-            access = authorize_report_download_metadata(download, identity_payload)
+        access_metadata = get_report_access_metadata(report_id)
+        if access_metadata is not None:
+            access = authorize_report_download_metadata(access_metadata, identity_payload)
             if not access["allowed"]:
                 return _object_access_denied_response(request, access)
 
@@ -1539,7 +1712,19 @@ def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
     return _json_response(
         request,
         {
-            "api_surface": "canonical_mock" if _is_canonical_mock_request(request) else "mock",
+            "api_surface": (
+                "canonical"
+                if _is_canonical_mock_request(request)
+                and report.get("source") == "analysis_worker_reporting"
+                else "canonical_mock"
+                if _is_canonical_mock_request(request)
+                else "mock"
+            ),
+            "execution_mode": (
+                "async_worker"
+                if report.get("source") == "analysis_worker_reporting"
+                else "mock"
+            ),
             "report": report,
         },
     )
@@ -1562,19 +1747,49 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
+        access_metadata = get_report_access_metadata(report_id)
+        if access_metadata is None:
+            return _json_response(
+                request,
+                {
+                    "error": {
+                        "code": "report_not_found",
+                        "message": "Requested report was not found.",
+                    }
+                },
+                status=404,
+            )
+        access = authorize_report_download_metadata(access_metadata, identity_payload)
+        if not access["allowed"]:
+            return _object_access_denied_response(request, access)
+        if (
+            access_metadata.get("source") == "analysis_worker_reporting"
+            and access_metadata.get("status") != "ready"
+        ):
+            return _json_response(
+                request,
+                {
+                    "error": {
+                        "contract_version": "report_download.v1",
+                        "code": "report_not_ready",
+                        "message": "Draft analysis reports are preview-only until the Reporting gate is ready.",
+                        "report_id": report_id,
+                        "status": access_metadata.get("status"),
+                    }
+                },
+                status=409,
+            )
         document_type = request.GET.get("document_type")
         download = get_report_download_metadata(report_id, document_type=document_type)
         if download is not None:
-            access = authorize_report_download_metadata(download, identity_payload)
-            if not access["allowed"]:
-                return _object_access_denied_response(request, access)
+            is_worker_report = access_metadata.get("source") == "analysis_worker_reporting"
             response = HttpResponse(
                 download["body"],
                 content_type=download["content_type"],
             )
             response["Content-Disposition"] = f'attachment; filename="{download["filename"]}"'
-            response["X-API-Surface"] = "canonical_mock"
-            response["X-Execution-Mode"] = "mock"
+            response["X-API-Surface"] = "canonical" if is_worker_report else "canonical_mock"
+            response["X-Execution-Mode"] = "async_worker" if is_worker_report else "mock"
             response["X-Report-Persistence"] = "postgresql"
             response["X-Report-Storage-Backend"] = download["storage_backend"]
             response["X-Report-Storage-URI"] = download["storage_uri"]
@@ -2473,6 +2688,54 @@ def _agent_plan_job_payload(body: dict[str, object], response: dict[str, object]
 
 def _uses_async_worker(body: dict[str, object]) -> bool:
     return body.get("execution_mode") == "async_worker" or body.get("async_worker") is True
+
+
+def _analysis_plan_requires_persisted_reporting(analysis_plan: object) -> bool:
+    return "objection_report_generation" in _analysis_plan_executable_node_codes(
+        analysis_plan
+    )
+
+
+def _worker_report_action_required_response(request: HttpRequest) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "consultation_report_error.v2",
+                "type": "report",
+                "code": "worker_report_action_required",
+                "status": 409,
+                "message": "분석 워커가 생성한 리포트의 조회 또는 다운로드 API를 사용해 주세요.",
+                "required_action": "use_persisted_worker_report",
+            }
+        },
+        status=409,
+    )
+
+
+def _canonical_report_action_access_response(
+    request: HttpRequest,
+    payload: dict[str, object],
+) -> JsonResponse | None:
+    """Preserve object-level authorization even though POST generation is disabled."""
+
+    resource_checks = (
+        (get_report_access_metadata(str(payload.get("report_id") or "")), True),
+        (get_analysis_job_access_metadata(str(payload.get("job_id") or "")), False),
+        (get_case_access_metadata(str(payload.get("case_id") or "")), False),
+        (get_chat_session_access_metadata(str(payload.get("session_id") or "")), False),
+    )
+    for resource, is_report in resource_checks:
+        if resource is None:
+            continue
+        access = (
+            authorize_report_download_metadata(resource, payload)
+            if is_report
+            else authorize_resource_access(resource, payload)
+        )
+        if not access["allowed"]:
+            return _object_access_denied_response(request, access)
+    return None
 
 
 def _analysis_plan_active_node(analysis_plan: object) -> str:

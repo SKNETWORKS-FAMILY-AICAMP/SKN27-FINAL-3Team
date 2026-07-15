@@ -149,6 +149,30 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
     }
 
 
+def test_completed_result_uses_canonical_persisted_terminal_status() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_blocked",
+        load_job=lambda _job_id: {
+            "job_id": "job_blocked",
+            "status": "failed",
+            "status_counts": {"success": 2, "failed": 1},
+            "agent_results": [
+                {"node_code": "fine_notice_analysis", "status": "success"},
+                {"node_code": "law_ground_search", "status": "failed"},
+            ],
+        },
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "status": "partial",
+        },
+    )
+
+    assert outcome.kind == "completed"
+    assert outcome.payload["status"] == "failed"
+
+
 def test_result_reports_missing_job_without_calling_composer() -> None:
     from app.services.analysis_job_query_service import load_analysis_result
 

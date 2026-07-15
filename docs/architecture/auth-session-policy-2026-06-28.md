@@ -1,5 +1,11 @@
 # 로그인, 비회원, 채팅 세션 분리 정책
 
+> [!IMPORTANT]
+> 이 문서는 초기 설계 스냅샷입니다. `/api/auth/login/`과 mock 인증 경계에
+> 관한 내용은 현재 운영 계약이 아니며,
+> [`../ops/google-oauth-live-e2e.md`](../ops/google-oauth-live-e2e.md)와
+> [`../api/openapi-v0.yaml`](../api/openapi-v0.yaml)이 이를 대체합니다.
+
 | 항목 | 내용 |
 |---|---|
 | 작성일 | 2026-06-28 |

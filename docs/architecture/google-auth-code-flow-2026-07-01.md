@@ -145,7 +145,7 @@ Drive/Photos/Sheets/Calendar는 기능별 scope를 따로 요청하고, 승인�
 
 - `python backend/manage.py test chatbot`
   - Result: 62 passed
-- `python -m pytest test/test_auth_session_mock_service.py test/test_agent_node_service.py`
+- `python -m pytest test/test_auth_session_service.py test/test_agent_node_service.py`
   - Result: 15 passed
 - `python -m pytest --ignore=test/test_fine_notice_ocr.py`
   - Result: 56 passed

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from io import StringIO
 from unittest.mock import patch
 
@@ -173,6 +174,115 @@ class ProductionApiContractTests(SimpleTestCase):
             [step["node_code"] for step in queued_payload["analysis_plan"]["steps"]],
             ["law_ground_search"],
         )
+
+    def test_supervisor_unavailable_chat_response_is_not_enqueued(self) -> None:
+        blocked_response = {
+            "contract_version": "chat_message_accepted.v2",
+            "session_id": "ses_supervisor_blocked",
+            "message_id": "msg_supervisor_blocked",
+            "routing_intent": "traffic_law_search",
+            "status": "supervisor_unavailable",
+            "progress": {"status": "blocked", "active_node": "", "message": "Planning unavailable."},
+            "assistant_message": {"answer": "Planning unavailable.", "summary": "Planning unavailable."},
+            "analysis_plan": {"plan_id": "plan_supervisor_blocked", "steps": []},
+            "supervisor_state": {"llm": {"status": "failed", "reason": "provider_unavailable"}},
+            "reporting_payload": None,
+            "attachments": [],
+            "blocked_attachments": [],
+            "limitations": ["Supervisor planning is temporarily unavailable."],
+        }
+        request = RequestFactory().post(
+            "/api/chat/messages/",
+            data={"session_id": "ses_supervisor_blocked", "user_text": "법령을 찾아줘"},
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None),
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch("chatbot.views.record_usage_event", return_value={"allowed": True}) as usage,
+            patch("chatbot.views.submit_message", return_value=blocked_response),
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch("chatbot.views._refund_usage_safely") as refund_usage,
+        ):
+            response = submit_chat_message(request)
+
+        self.assertEqual(response.status_code, 503)
+        body = json.loads(response.content)
+        self.assertEqual(body["status"], "supervisor_unavailable")
+        self.assertEqual(body["execution_mode"], "planning_blocked")
+        enqueue.assert_not_called()
+        usage.assert_called_once()
+        refund_usage.assert_called_once_with(
+            {"allowed": True},
+            reason="supervisor_unavailable",
+        )
+
+    def test_supervisor_need_more_input_chat_response_is_not_enqueued(self) -> None:
+        candidate = {
+            "contract_version": "supervisor_conversation.v1",
+            "stage": "need_more_input",
+            "conversation_turn_count": 1,
+            "conversation_summary": "A law reference is still required.",
+            "collected_facts": [],
+            "missing_fields": [{"field": "law_question"}],
+            "next_questions": [
+                {"field": "law_question", "question": "Which law should be reviewed?"}
+            ],
+            "agent_input_packages": [
+                {
+                    "schema_version": "agent_input_schema.v1",
+                    "node_code": "law_ground_search",
+                    "owner": "techshin31",
+                    "status": "waiting_for_fields",
+                    "missing_fields": ["law_question"],
+                    "payload": {"user_text": "help", "attachments": []},
+                }
+            ],
+            "reporting_payload": {
+                "contract_version": "reporting_payload.v1",
+                "scenario": "traffic_law_search",
+                "stage": "need_more_input",
+                "title": "Pending analysis",
+                "summary": "More input is required.",
+                "sections": [],
+            },
+        }
+        request = RequestFactory().post(
+            "/api/chat/messages/",
+            data={"session_id": "ses_need_more_input", "user_text": "help"},
+            content_type="application/json",
+        )
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "SUPERVISOR_LLM_ENABLED": "1",
+                    "SUPERVISOR_LLM_API_KEY": "sk-test",
+                },
+            ),
+            patch(
+                "app.services.supervisor_llm_service._request_supervisor_json",
+                return_value=candidate,
+            ),
+            patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None),
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch("chatbot.views.record_usage_event", return_value={"allowed": True}),
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+        ):
+            response = submit_chat_message(request)
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body["status"], "needs_input")
+        self.assertEqual(body["execution_mode"], "input_collection")
+        self.assertEqual(body["analysis_plan"]["steps"], [])
+        self.assertIsNone(body["reporting_payload"])
+        self.assertEqual(body["report_links"], [])
+        enqueue.assert_not_called()
 
     def test_scan_blocked_chat_message_does_not_consume_usage_quota(self) -> None:
         request = RequestFactory().post(
