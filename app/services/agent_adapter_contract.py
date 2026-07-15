@@ -123,7 +123,9 @@ def build_agent_adapter_contract(node: dict[str, Any]) -> dict[str, Any]:
         "required_output_fields": list(REQUIRED_AGENT_OUTPUT_FIELDS),
         "allowed_statuses": list(AGENT_RESULT_STATUSES),
         "call_style": ADAPTER_CALL_STYLE,
-        "execution_modes": list(node.get("adapter_modes") or ADAPTER_EXECUTION_MODES),
+        "execution_modes": list(
+            node["adapter_modes"] if "adapter_modes" in node else ADAPTER_EXECUTION_MODES
+        ),
         "idempotency_scope": "job_id:node_code:analysis_plan_id",
         "timeout_seconds": 30,
         "retry_policy": {

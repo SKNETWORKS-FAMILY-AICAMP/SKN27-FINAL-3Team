@@ -15,6 +15,7 @@ NODE_PLANS: dict[str, tuple[str, ...]] = {
     "fine_notice_objection": (
         "fine_notice_analysis",
         "law_ground_search",
+        "appeal_decision_flow",
         "objection_report_generation",
     ),
     "fault_ratio_text": ("text_ml_case_search", "law_ground_search"),
