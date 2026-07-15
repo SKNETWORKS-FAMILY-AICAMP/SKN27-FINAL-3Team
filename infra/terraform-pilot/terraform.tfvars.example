@@ -1,0 +1,9 @@
+budget_alert_email = "owner@example.org"
+budget_limit_usd   = 50
+
+# Keep database_deletion_protection enabled except during an approved teardown.
+database_deletion_protection = true
+
+# Narrow these CIDRs for an internal pilot. A public customer pilot normally
+# keeps 80/443 open and relies on TLS plus the HAProxy/app rate gates.
+http_ingress_cidrs = ["0.0.0.0/0"]

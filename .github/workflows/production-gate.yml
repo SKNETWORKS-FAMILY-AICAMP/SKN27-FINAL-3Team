@@ -61,6 +61,9 @@ jobs:
           terraform -chdir=infra/terraform fmt -check
           terraform -chdir=infra/terraform init -backend=false -input=false
           terraform -chdir=infra/terraform validate
+          terraform -chdir=infra/terraform-pilot fmt -check
+          terraform -chdir=infra/terraform-pilot init -backend=false -input=false
+          terraform -chdir=infra/terraform-pilot validate
 
       - name: Docker build and import smoke
         run: |
