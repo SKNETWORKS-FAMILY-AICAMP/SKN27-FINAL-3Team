@@ -74,7 +74,7 @@ def render_official_objection_docx(agent_output: dict[str, Any], output_path: Pa
     _fill_value(table, 1, 2, f"{applicant['address']}   (☎ {applicant['contact']})", merge_right=2)
     _fill_value(table, 2, 2, applicant["vehicle_number"])
     _fill_value(table, 2, 4, sr["recipient_agency"])
-    _fill_value(table, 3, 2, disposition.get("violation_datetime") or "확인 필요")
+    _fill_value(table, 3, 2, disposition.get("notice_received_date") or disposition.get("violation_datetime") or "확인 필요")
     _fill_value(table, 3, 4, disposition.get("fine_amount") or "확인 필요")
     _fill_value(table, 4, 2, disposition.get("violation_text") or "확인 필요")
     _fill_value(table, 4, 4, disposition.get("case_number") or "확인 필요")

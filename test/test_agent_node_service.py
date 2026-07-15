@@ -1134,6 +1134,123 @@ def test_execute_sync_objection_report_generation_adapter_falls_back_when_llm_dr
     assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
 
 
+def _objection_payload_with_appeal_decision(appeal_structured_result, *, job_id):
+    return {
+        "execution_mode": "sync",
+        "node_code": "objection_report_generation",
+        "job_id": job_id,
+        "session_id": f"ses_{job_id}",
+        "message_id": f"msg_{job_id}",
+        "context": {"user_facts": "어린이보호구역에서 정차했습니다."},
+        "upstream_results": {
+            "fine_notice_analysis": {
+                "status": "success",
+                "structured_result": {
+                    "notice_fields": {"agency": "강남구청 교통과", "violation_text": "어린이보호구역 정차 위반"},
+                },
+            },
+            "law_ground_search": {"status": "success", "structured_result": {"matched_laws": []}},
+            "appeal_decision_flow": {"status": "success", "structured_result": appeal_structured_result},
+        },
+    }
+
+
+def test_objection_report_generation_blocks_readiness_when_appeal_decision_denied(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    execution = execute_mock_node(
+        _objection_payload_with_appeal_decision(
+            {"judgment_status": "denied", "deadline_passed": True},
+            job_id="job_objection_denied",
+        )
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+    assert output["status"] == "partial"
+    assert structured_result["readiness"]["ready_for_download"] is False
+    assert "기한" in structured_result["readiness"]["review_reason"]
+    assert any("기한" in item for item in output["limitations"])
+
+
+def test_objection_report_generation_blocks_readiness_when_appeal_decision_not_applicable(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    execution = execute_mock_node(
+        _objection_payload_with_appeal_decision(
+            {"judgment_status": "not_applicable"},
+            job_id="job_objection_not_applicable",
+        )
+    )
+
+    structured_result = execution["agent_output"]["structured_result"]
+    assert structured_result["readiness"]["ready_for_download"] is False
+    assert "대상이 아닌" in structured_result["readiness"]["review_reason"]
+
+
+def test_objection_report_generation_stays_ready_for_normal_appeal_decision(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    execution = execute_mock_node(
+        _objection_payload_with_appeal_decision(
+            {"judgment_status": "success", "merit": "강함", "deadline_passed": False},
+            job_id="job_objection_normal_appeal",
+        )
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+    assert output["status"] == "success"
+    assert structured_result["readiness"]["ready_for_download"] is True
+    assert structured_result["appeal_decision"]["merit"] == "강함"
+
+
+def test_objection_report_generation_surfaces_judgment_failed_limitations(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    execution = execute_mock_node(
+        _objection_payload_with_appeal_decision(
+            {"judgment_status": "success", "risk_judgment_failed": True, "merit_judgment_failed": True},
+            job_id="job_objection_judgment_failed",
+        )
+    )
+
+    limitations = execution["agent_output"]["limitations"]
+    assert any("위험도 판정이 기술 오류" in item for item in limitations)
+    assert any("이의제기 실익 판정이 기술 오류" in item for item in limitations)
+
+
+def test_objection_report_generation_fallback_petition_purpose_follows_merit_relief_type(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    denied_purposes = {}
+    for relief_type in ("감경", "면제", None):
+        appeal_result = {"judgment_status": "success", "merit": "강함"}
+        if relief_type:
+            appeal_result["merit_relief_type"] = relief_type
+        execution = execute_mock_node(
+            _objection_payload_with_appeal_decision(
+                appeal_result, job_id=f"job_objection_relief_{relief_type or 'none'}"
+            )
+        )
+        denied_purposes[relief_type] = execution["agent_output"]["structured_result"]["petition_purpose"]
+
+    assert "감경을 요청합니다" in denied_purposes["감경"]
+    assert "취소를 요청합니다" in denied_purposes["면제"]
+    assert "취소 또는 감경을 요청합니다" in denied_purposes[None]
+
+
+def test_objection_report_generation_uses_supervisor_supplied_notice_received_date(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    payload = _objection_payload_with_appeal_decision(
+        {"judgment_status": "success"}, job_id="job_objection_notice_date"
+    )
+    payload["context"]["notice_received_date"] = "2026.06.05"
+
+    execution = execute_mock_node(payload)
+    disposition_details = execution["agent_output"]["structured_result"]["disposition_details"]
+    assert disposition_details["notice_received_date"] == "2026.06.05"
+    assert any(
+        section["title"] == "대상처분 내역" and "고지받은일자: 2026.06.05" in section["body"]
+        for section in execution["agent_output"]["structured_result"]["form_sections"]
+    )
+
+
 def test_law_ground_sync_adapter_can_feed_sync_objection_when_sync_requested(monkeypatch):
     from ai.agents.law_ground_search import agent as law_agent
 

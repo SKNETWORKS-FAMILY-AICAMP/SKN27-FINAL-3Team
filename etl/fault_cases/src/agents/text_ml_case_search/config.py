@@ -8,6 +8,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[5]
 
 
 def load_dotenv_if_available() -> None:
+    """Load the repo-root .env into os.environ (non-destructive; existing values win).
+
+    Only call this from a standalone script's `if __name__ == "__main__":` guard.
+    This module is also imported as a library dependency (by
+    ai/agents/text_ml_case_search/agent.py, which is production code, not an ETL
+    script), so it must never run this as an import-time side effect — doing so
+    would leak repo secrets (OPENAI_API_KEY, DB credentials, ...) into the env of
+    whatever process happens to import this module, bypassing the opt-in dotenv
+    gate that backend/config/env_loader.py deliberately enforces for the Django app.
+    """
     env_path = PROJECT_ROOT / ".env"
     if not env_path.exists():
         return
@@ -18,9 +28,6 @@ def load_dotenv_if_available() -> None:
             continue
         key, value = line.split("=", 1)
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-load_dotenv_if_available()
 
 
 NODE_CODE = "text_ml_case_search"

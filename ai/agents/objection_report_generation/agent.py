@@ -18,6 +18,8 @@ _PETITION_SYSTEM_PROMPT = (
     "아래 'disposition_details', 'legal_grounds', 'user_facts'에 제공된 사실관계와 법령 근거만 사용해 "
     "신청취지와 신청이유 문장을 작성하세요. 제공되지 않은 사실을 새로 만들어내거나 추측하지 마세요. "
     "'missing_fields'에 있는 항목은 문장 안에서 사용자가 직접 확인해야 한다고 표현하세요. "
+    "'appeal_decision'에 merit_relief_type 값이 있으면 신청취지를 그 값에 맞춰 정확히 좁히세요: "
+    "'감경'이면 감경만 요청하고, '면제'이면 취소만 요청하세요. 값이 없으면 취소 또는 감경을 함께 요청하세요. "
     "결과는 반드시 다음 JSON 스키마로만 출력하세요: "
     '{"petition_purpose": "신청취지 문장", "petition_reason": "신청이유 문장"}'
 )
@@ -64,7 +66,7 @@ def run_objection_report_generation(
     )
     legal_grounds = _legal_grounds(law_result)
     recipient_agency = _recipient_agency(agent_input, notice_result)
-    disposition_details = _disposition_details(notice_result)
+    disposition_details = _disposition_details(agent_input, notice_result)
     applicant_info = _applicant_info(agent_input, notice_result)
     required_attachments = _required_attachments(agent_input=agent_input, notice_result=notice_result)
 
@@ -90,6 +92,7 @@ def run_objection_report_generation(
             legal_grounds=legal_grounds,
             user_facts=user_facts,
             missing_fields=missing_fields,
+            appeal_decision=appeal_decision,
         )
         if not petition:
             limitations_extra.append("LLM 초안 생성에 실패하여 규칙 기반 문장으로 대체했습니다.")
@@ -100,7 +103,7 @@ def run_objection_report_generation(
         petition_reason = petition["petition_reason"]
     else:
         drafting_source = "rule_based_fallback"
-        petition_purpose = _fallback_petition_purpose(disposition_details, recipient_agency)
+        petition_purpose = _fallback_petition_purpose(disposition_details, recipient_agency, appeal_decision)
         petition_reason = _fallback_petition_reason(
             disposition_details=disposition_details,
             legal_grounds=legal_grounds,
@@ -301,7 +304,8 @@ def _recipient_agency(agent_input: dict[str, Any], notice_result: dict[str, Any]
     return recipient or "관할 행정청"
 
 
-def _disposition_details(notice_result: dict[str, Any]) -> dict[str, str]:
+def _disposition_details(agent_input: dict[str, Any], notice_result: dict[str, Any]) -> dict[str, str]:
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
     notice_fields = _notice_fields(notice_result)
     return {
         "violation_text": _first_present(notice_fields.get("violation_text"), notice_result.get("violation_text")),
@@ -322,6 +326,9 @@ def _disposition_details(notice_result: dict[str, Any]) -> dict[str, str]:
             notice_result.get("charge_number"),
             notice_result.get("case_number"),
         ),
+        # OCR extracts no notice-received-date field (see appeal_decision_flow/state.py's
+        # notice_received_date comment) — Supervisor supplies it the same way, when known.
+        "notice_received_date": _text(context.get("notice_received_date")),
     }
 
 
@@ -441,11 +448,13 @@ def _draft_petition_text(
     legal_grounds: list[dict[str, Any]],
     user_facts: str,
     missing_fields: list[str],
+    appeal_decision: dict[str, Any] | None = None,
 ) -> dict[str, str] | None:
     client = _openai_client()
     if client is None:
         return None
 
+    appeal_decision = appeal_decision or {}
     user_prompt = json.dumps(
         {
             "disposition_details": disposition_details,
@@ -459,6 +468,12 @@ def _draft_petition_text(
             ],
             "user_facts": user_facts,
             "missing_fields": missing_fields,
+            "appeal_decision": {
+                "merit": appeal_decision.get("merit"),
+                "merit_basis": appeal_decision.get("merit_basis"),
+                "merit_relief_type": appeal_decision.get("merit_relief_type"),
+                "overall_possibility": appeal_decision.get("overall_possibility"),
+            },
         },
         ensure_ascii=False,
     )
@@ -489,9 +504,20 @@ def _draft_petition_text(
     return {"petition_purpose": purpose, "petition_reason": reason}
 
 
-def _fallback_petition_purpose(disposition_details: dict[str, str], recipient_agency: str) -> str:
+def _fallback_petition_purpose(
+    disposition_details: dict[str, str],
+    recipient_agency: str,
+    appeal_decision: dict[str, Any] | None = None,
+) -> str:
     violation = disposition_details.get("violation_text") or "고지서 기재 위반 사실"
-    return f"{recipient_agency}에 대하여 {violation}에 관한 처분의 취소 또는 감경을 요청합니다."
+    relief_type = (appeal_decision or {}).get("merit_relief_type")
+    if relief_type == "감경":
+        action = "감경을"
+    elif relief_type == "면제":
+        action = "취소를"
+    else:
+        action = "취소 또는 감경을"
+    return f"{recipient_agency}에 대하여 {violation}에 관한 처분의 {action} 요청합니다."
 
 
 def _fallback_petition_reason(
@@ -548,6 +574,7 @@ def _form_sections(
             ("위반 일시", disposition_details.get("violation_datetime")),
             ("위반 장소", disposition_details.get("violation_location")),
             ("고지 금액", disposition_details.get("fine_amount")),
+            ("고지받은일자", disposition_details.get("notice_received_date")),
             ("납부/의견제출 기한", disposition_details.get("payment_deadline")),
             ("사건/고지 번호", disposition_details.get("case_number")),
         )

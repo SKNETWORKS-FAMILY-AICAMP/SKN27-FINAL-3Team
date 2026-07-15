@@ -126,4 +126,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from etl.fault_cases.src.agents.text_ml_case_search.config import load_dotenv_if_available
+
+    load_dotenv_if_available()
     main()
