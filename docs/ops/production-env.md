@@ -331,6 +331,15 @@ After enabling Supervisor LLM, run a real planner smoke:
 python backend\manage.py smoke_supervisor_llm --require-used --require-slot-state --format text
 ```
 
+For the persisted non-DL analysis-to-Reporting boundary, run the separate strict
+paid-call-gated smoke described in
+[`non-dl-analysis-reporting-smoke.md`](non-dl-analysis-reporting-smoke.md). It
+excludes Vision/DL and verifies the real fine-notice, law-ground, text/case-search,
+and appeal-decision adapters, persisted analysis rows, Supervisor handoff
+provenance, Reporting consumption, final report/display rows, and safe terminal
+retry behavior. The command requires an operator-reviewed clean S3 acceptance
+fixture under `canonical/acceptance/`; see the runbook for the exact invocation.
+
 Without `--require-used`, the command reports whether the LLM path was
 `used`, `fallback`, or `disabled` without printing secrets. `--require-slot-state`
 also verifies that `slot_filling_state.v1` is present in ready Agent input

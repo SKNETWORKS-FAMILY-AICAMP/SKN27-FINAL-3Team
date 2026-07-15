@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from app.services import agent_node_service
 from app.services.google_auth_service import issue_access_token
+from chatbot import repositories as repository_module
 from chatbot.models import (
     AgentInvocation,
     AgentResult,
@@ -17,6 +18,7 @@ from chatbot.models import (
     AnalysisJobStatus,
     AuthSession,
     AuthSessionStatus,
+    Case,
     ChatSession,
     ChatSessionStatus,
     UsageEvent,
@@ -535,6 +537,294 @@ class AnalysisJobQueueTests(TestCase):
             invocation_count,
         )
 
+    def test_enqueue_uses_the_sessions_authoritative_case_binding(self) -> None:
+        owner_id = "usr_enqueue_existing_case"
+        case = Case.objects.create(
+            case_id="case_enqueue_existing_case",
+            owner_id=owner_id,
+            title="Authoritative enqueue case",
+        )
+        ChatSession.objects.create(
+            session_id="ses_enqueue_existing_case",
+            owner_id=owner_id,
+            case=case,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        payload, job_payload = _queue_payload(
+            owner_id=owner_id,
+            session_id="ses_enqueue_existing_case",
+            job_id="job_enqueue_existing_case",
+        )
+
+        queued = enqueue_analysis_job_work(payload, job_payload)
+
+        job = AnalysisJob.objects.get(job_id=queued["job_id"])
+        self.assertEqual(job.case, case)
+
+    def test_non_reporting_plan_never_repeats_paid_call_after_final_store_failure(
+        self,
+    ) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_no_report_cost_guard",
+            session_id="ses_no_report_cost_guard",
+            job_id="job_no_report_cost_guard",
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        node_execution = {
+            "execution_mode": "sync",
+            "job_id": queued["job_id"],
+            "plan_id": job_payload["analysis_plan_id"],
+            "executions": [
+                {
+                    "node_code": "law_ground_search",
+                    "agent_output": {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                    },
+                }
+            ],
+            "status_counts": {"success": 1},
+            "completed_node_codes": ["law_ground_search"],
+            "limitations": [],
+        }
+
+        with (
+            patch(
+                "app.services.agent_node_service.execute_agent_plan",
+                return_value=node_execution,
+            ) as execute_plan,
+            patch(
+                "chatbot.repositories.persist_analysis_job_execution",
+                side_effect=RuntimeError("final store unavailable"),
+            ),
+        ):
+            first = process_agent_work_item(queued["work_item_id"])
+
+        work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
+        guard = AgentInvocation.objects.get(
+            job__job_id=queued["job_id"],
+            node_code="__paid_analysis_phase__",
+        )
+        self.assertEqual(first["status"], AgentWorkItemStatus.FAILED)
+        self.assertEqual(work_item.error_code, "PaidAgentCallRetryBlockedError")
+        self.assertEqual(guard.metadata["state"], "provider_response_received")
+        self.assertEqual(execute_plan.call_count, 1)
+
+        second = process_agent_work_item(queued["work_item_id"])
+        self.assertEqual(second["status"], "skipped")
+        self.assertEqual(second["reason"], "work_item_not_queued")
+        self.assertEqual(execute_plan.call_count, 1)
+
+    def test_non_reporting_checkpoint_allows_store_retry_without_paid_recall(
+        self,
+    ) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_no_report_checkpoint_resume",
+            session_id="ses_no_report_checkpoint_resume",
+            job_id="job_no_report_checkpoint_resume",
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        node_execution = {
+            "execution_mode": "sync",
+            "job_id": queued["job_id"],
+            "plan_id": job_payload["analysis_plan_id"],
+            "executions": [
+                {
+                    "node_code": "law_ground_search",
+                    "agent_output": {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                    },
+                }
+            ],
+            "status_counts": {"success": 1},
+            "completed_node_codes": ["law_ground_search"],
+            "limitations": [],
+        }
+        original_persist = repository_module.persist_analysis_job_execution
+        persist_calls = 0
+
+        def fail_final_store_once(*args, **kwargs):
+            nonlocal persist_calls
+            persist_calls += 1
+            if persist_calls == 2:
+                raise RuntimeError("final store unavailable")
+            return original_persist(*args, **kwargs)
+
+        with (
+            patch(
+                "app.services.agent_node_service.execute_agent_plan",
+                return_value=node_execution,
+            ) as execute_plan,
+            patch(
+                "chatbot.repositories.persist_analysis_job_execution",
+                side_effect=fail_final_store_once,
+            ),
+        ):
+            first = process_agent_work_item(queued["work_item_id"])
+            work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
+            work_item.next_run_at = timezone.now()
+            work_item.save(update_fields=["next_run_at", "updated_at"])
+            second = process_agent_work_item(queued["work_item_id"])
+
+        self.assertEqual(first["status"], AgentWorkItemStatus.RETRYING)
+        self.assertEqual(second["status"], AgentWorkItemStatus.SUCCESS)
+        self.assertEqual(execute_plan.call_count, 1)
+        self.assertEqual(
+            AgentResult.objects.filter(job__job_id=queued["job_id"]).count(),
+            1,
+        )
+
+    def test_mixed_plan_reuses_only_the_dispatched_node_checkpoint(self) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_mixed_checkpoint_resume",
+            session_id="ses_mixed_checkpoint_resume",
+            job_id="job_mixed_checkpoint_resume",
+        )
+        job_payload["analysis_plan"]["steps"].append(
+            {
+                "order": 2,
+                "node_code": "appeal_decision_flow",
+                "status": "blocked",
+                "depends_on": ["law_ground_search"],
+            }
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        node_execution = {
+            "execution_mode": "sync",
+            "job_id": queued["job_id"],
+            "plan_id": job_payload["analysis_plan_id"],
+            "executions": [
+                {
+                    "node_code": "law_ground_search",
+                    "agent_output": {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                    },
+                }
+            ],
+            "status_counts": {"success": 1},
+            "completed_node_codes": ["law_ground_search"],
+            "limitations": [],
+        }
+        original_persist = repository_module.persist_analysis_job_execution
+        persist_calls = 0
+
+        def fail_final_store_once(*args, **kwargs):
+            nonlocal persist_calls
+            persist_calls += 1
+            if persist_calls == 2:
+                raise RuntimeError("final store unavailable")
+            return original_persist(*args, **kwargs)
+
+        with (
+            patch(
+                "app.services.agent_node_service.execute_agent_plan",
+                return_value=node_execution,
+            ) as execute_plan,
+            patch(
+                "chatbot.repositories.persist_analysis_job_execution",
+                side_effect=fail_final_store_once,
+            ),
+        ):
+            first = process_agent_work_item(queued["work_item_id"])
+            work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
+            work_item.next_run_at = timezone.now()
+            work_item.save(update_fields=["next_run_at", "updated_at"])
+            second = process_agent_work_item(queued["work_item_id"])
+
+        self.assertEqual(first["status"], AgentWorkItemStatus.RETRYING)
+        self.assertEqual(second["status"], AgentWorkItemStatus.SUCCESS)
+        self.assertEqual(execute_plan.call_count, 1)
+        guard = AgentInvocation.objects.get(
+            job__job_id=queued["job_id"],
+            node_code="__paid_analysis_phase__",
+        )
+        self.assertEqual(guard.metadata["expected_node_codes"], ["law_ground_search"])
+
+    def test_stale_lease_cannot_reserve_or_dispatch_a_paid_call(self) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_stale_paid_dispatch",
+            session_id="ses_stale_paid_dispatch",
+            job_id="job_stale_paid_dispatch",
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        original_reserve = repository_module._reserve_paid_agent_phase_call
+
+        def steal_lease_before_reserve(*args, **kwargs):
+            AgentWorkItem.objects.filter(
+                work_item_id=queued["work_item_id"]
+            ).update(attempt_no=99)
+            return original_reserve(*args, **kwargs)
+
+        with (
+            patch(
+                "chatbot.repositories._reserve_paid_agent_phase_call",
+                side_effect=steal_lease_before_reserve,
+            ),
+            patch("app.services.agent_node_service.execute_agent_plan") as execute_plan,
+        ):
+            result = process_agent_work_item(queued["work_item_id"])
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "stale_worker_lease")
+        execute_plan.assert_not_called()
+        self.assertFalse(
+            AgentInvocation.objects.filter(
+                job__job_id=queued["job_id"],
+                node_code="__paid_analysis_phase__",
+            ).exists()
+        )
+
+    def test_stale_dispatch_guard_without_checkpoint_requires_manual_recovery(
+        self,
+    ) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_stale_guard_recovery",
+            session_id="ses_stale_guard_recovery",
+            job_id="job_stale_guard_recovery",
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        job = AnalysisJob.objects.get(job_id=queued["job_id"])
+        work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
+        job.status = AnalysisJobStatus.RUNNING
+        job.save(update_fields=["status", "updated_at"])
+        work_item.status = AgentWorkItemStatus.RUNNING
+        work_item.attempt_no = 1
+        work_item.locked_at = timezone.now() - timedelta(hours=1)
+        work_item.save(
+            update_fields=["status", "attempt_no", "locked_at", "updated_at"]
+        )
+        AgentInvocation.objects.create(
+            invocation_id="ainv_job_stale_guard_recovery_paid_analysis",
+            job=job,
+            node_code="__paid_analysis_phase__",
+            status="running",
+            attempt_no=1,
+            execution_mode="async_worker",
+            started_at=timezone.now() - timedelta(hours=1),
+            retryable=False,
+            metadata={
+                "contract_version": "paid_agent_call_guard.v1",
+                "phase": "analysis",
+                "state": "dispatch_reserved",
+                "automatic_retry_allowed": False,
+            },
+        )
+
+        with patch("app.services.agent_node_service.execute_agent_plan") as execute_plan:
+            result = repository_module.process_agent_work_items(
+                limit=1,
+                stale_after_seconds=1,
+            )
+
+        work_item.refresh_from_db()
+        self.assertEqual(result["stale_requeued"], 1)
+        self.assertEqual(result["processed"], 0)
+        self.assertEqual(work_item.status, AgentWorkItemStatus.FAILED)
+        self.assertEqual(work_item.error_code, "paid_agent_call_retry_blocked")
+        execute_plan.assert_not_called()
+
     def test_http_retry_with_same_job_id_replays_without_new_usage_or_work(self) -> None:
         owner_id = "usr_http_retry"
         session_id = "ses_http_retry"
@@ -722,5 +1012,5 @@ class AnalysisJobQueueTests(TestCase):
 
         work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
         self.assertNotIn(private_error, repr({"result": result, "work_item": work_item.result}))
-        self.assertEqual(work_item.error_code, "RuntimeError")
+        self.assertEqual(work_item.error_code, "PaidAgentCallRetryBlockedError")
         self.assertEqual(work_item.result["message"], "Agent worker execution failed.")
