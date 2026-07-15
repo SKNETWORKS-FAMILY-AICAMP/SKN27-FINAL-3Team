@@ -117,40 +117,70 @@ paths:
                   - $ref: "#/components/schemas/CanonicalMockMeta"
                   - $ref: "#/components/schemas/GuestSessionResponse"
 
-  /api/auth/login/:
+  /api/auth/google/code/:
     post:
       tags: [Auth]
-      summary: Exchange a Google login subject for an app Bearer token
-      operationId: createGoogleLogin
+      summary: Exchange a one-time Google authorization code for an app Bearer token
+      operationId: exchangeGoogleAuthorizationCode
       security: []
       x-contract-status: confirmed
-      x-review-note: Local/dev accepts mock Google profile fields while GOOGLE_AUTH_ALLOW_MOCK=1. Production must set GOOGLE_AUTH_ALLOW_MOCK=0 and configure GOOGLE_CLIENT_ID.
+      x-review-note: This is the only public Google login boundary. The backend exchanges the code with Google once, verifies the returned identity, persists the app session/social account, and discards provider login tokens.
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          description: Exact frontend origin configured by GOOGLE_POPUP_REDIRECT_URI.
+          schema:
+            type: string
+            format: uri
+        - name: X-Requested-With
+          in: header
+          required: true
+          description: Browser request marker required before any provider exchange.
+          schema:
+            type: string
+            enum: [XmlHttpRequest]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/GoogleLoginRequest"
+              $ref: "#/components/schemas/GoogleAuthorizationCodeRequest"
             examples:
-              mockGoogleLogin:
+              googleAuthorizationCode:
                 value:
+                  auth_flow: google_authorization_code_popup
                   provider: google
-                  google_sub: google-sub-123
-                  email: driver@example.com
-                  display_name: Driver User
+                  client_id: web-client.apps.googleusercontent.com
+                  code: one-time-authorization-code
+                  purpose: LOGIN
+                  scope: openid email profile
                   guest_id: gst_before_google
                   session_id: ses_google_login
+                  redirect_uri: https://app.example.com
       responses:
         "200":
-          description: App Bearer token and persisted auth subject.
+          description: Signed app Bearer token, persisted auth subject, and provider-token discard policy.
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/CanonicalMockMeta"
-                  - $ref: "#/components/schemas/GoogleLoginResponse"
+                $ref: "#/components/schemas/GoogleAuthorizationCodeResponse"
         "401":
           $ref: "#/components/responses/AuthRequired"
+        "403":
+          description: Browser origin/header validation or chat-session binding failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorEnvelope"
+        "429":
+          $ref: "#/components/responses/RateLimitExceeded"
+        "503":
+          description: Google or the OAuth rate-limit store is unavailable. Start a new Google login; never replay the same one-time code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthErrorEnvelope"
 
   /api/auth/refresh/:
     post:
@@ -1220,7 +1250,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Current mock only validates Bearer header shape. Production JWT verification is review-required.
+      description: Backend-issued app JWT validated by signature, issuer, audience, expiry, and an active persisted auth session.
 
   parameters:
     OptionalSessionId:
@@ -1438,50 +1468,62 @@ components:
           items:
             type: string
 
-    GoogleLoginRequest:
+    GoogleAuthorizationCodeRequest:
       type: object
-      required: [provider]
+      required: [client_id, code, redirect_uri]
+      additionalProperties: false
       properties:
+        auth_flow:
+          type: string
+          enum: [google_authorization_code_popup]
+          default: google_authorization_code_popup
         provider:
           type: string
           enum: [google]
           default: google
-        id_token:
+        client_id:
           type: string
-          description: Google ID token or dev mock token. Required in production verification mode.
-        credential:
+          description: Public Google OAuth web client ID; must equal the backend GOOGLE_CLIENT_ID.
+        code:
           type: string
-          description: Alias for Google Identity Services credential.
-        google_sub:
+          writeOnly: true
+          description: One-time authorization code returned by Google Identity Services.
+        purpose:
           type: string
-          description: Dev/mock Google subject when GOOGLE_AUTH_ALLOW_MOCK=1.
-        email:
+          enum: [LOGIN]
+          default: LOGIN
+        scope:
           type: string
-          format: email
-        display_name:
-          type: string
-        picture:
-          type: string
+          description: Scopes requested by the browser. Granted scopes are taken only from Google's token response.
         guest_id:
           type: string
         session_id:
           type: string
+          description: Existing guest chat session to bind after ownership checks.
+        redirect_uri:
+          type: string
+          format: uri
+          description: Exact frontend origin configured by GOOGLE_POPUP_REDIRECT_URI; paths, query strings, and fragments are rejected.
 
-    GoogleLoginResponse:
+    GoogleAuthorizationCodeResponse:
       type: object
-      required: [contract_version, auth_state, provider, access_token, token_type, expires_in, user, subject, auth_session, session_binding, rate_limit, merge_policy, limitations]
+      required: [contract_version, auth_state, provider, auth_mode, access_token, token_type, expires_in, user, google, subject, auth_session, session_binding, rate_limit, merge_policy, limitations, persistence]
       properties:
         contract_version:
           type: string
-          enum: [google_auth.v1]
+          enum: [google_auth_code.v1]
         auth_state:
           type: string
           enum: [authenticated]
         provider:
           type: string
           enum: [google]
+        auth_mode:
+          type: string
+          enum: [authorization_code]
         access_token:
           type: string
+          description: Backend-issued app JWT. Google access/refresh/ID tokens are never returned.
         token_type:
           type: string
           enum: [Bearer]
@@ -1495,6 +1537,52 @@ components:
           format: date-time
         user:
           $ref: "#/components/schemas/AuthUser"
+        google:
+          type: object
+          required: [connected, purpose, granted_scopes, has_refresh_token, connection_policy, social_account, oauth_connection]
+          properties:
+            connected:
+              type: boolean
+              enum: [true]
+            purpose:
+              type: string
+              enum: [LOGIN]
+            granted_scopes:
+              type: array
+              items:
+                type: string
+            has_refresh_token:
+              type: boolean
+              enum: [false]
+            token_expires_at:
+              type: [string, "null"]
+              format: date-time
+            connection_policy:
+              type: string
+              enum: [login_tokens_discarded_after_identity_verification]
+            social_account:
+              type: object
+              additionalProperties: true
+            oauth_connection:
+              type: object
+              required: [provider, granted_scopes, token_storage]
+              properties:
+                provider:
+                  type: string
+                  enum: [google]
+                granted_scopes:
+                  type: array
+                  items:
+                    type: string
+                expires_at:
+                  type: [string, "null"]
+                  format: date-time
+                revoked_at:
+                  type: [string, "null"]
+                  format: date-time
+                token_storage:
+                  type: string
+                  enum: [discarded_after_login]
         guest:
           oneOf:
             - $ref: "#/components/schemas/GuestIdentity"

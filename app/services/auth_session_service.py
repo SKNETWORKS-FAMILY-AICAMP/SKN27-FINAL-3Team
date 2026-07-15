@@ -1,28 +1,27 @@
-"""Mock auth/session identity helpers for guest and JWT boundary tests."""
+"""Guest and signed app-JWT identity helpers for the canonical auth boundary."""
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from app.services.auth_error_contract import build_auth_error, is_valid_mock_bearer_header
+from app.services.auth_error_contract import build_auth_error
 from app.services.google_auth_service import decode_access_token
 
 
-MOCK_GUEST_TTL_SECONDS = 7 * 24 * 60 * 60
+GUEST_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 def create_guest_session(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Create or refresh a mock guest identity without binding it to login."""
+    """Create or refresh a guest identity without binding it to a login."""
 
     payload = payload or {}
     now = _now()
-    guest_id = _normalize_guest_id(payload.get("guest_id")) or f"gst_{uuid4().hex[:12]}"
+    guest_id = _normalize_guest_id(payload.get("guest_id")) or f"gst_{uuid4().hex}"
     session_id = _text(payload.get("session_id")) or None
     issued_at = now.isoformat()
-    expires_at = (now + timedelta(seconds=MOCK_GUEST_TTL_SECONDS)).isoformat()
+    expires_at = (now + timedelta(seconds=GUEST_TTL_SECONDS)).isoformat()
 
     return {
         "auth_state": "guest",
@@ -31,7 +30,7 @@ def create_guest_session(payload: dict[str, Any] | None = None) -> dict[str, Any
             "status": "active",
             "issued_at": issued_at,
             "expires_at": expires_at,
-            "ttl_seconds": MOCK_GUEST_TTL_SECONDS,
+            "ttl_seconds": GUEST_TTL_SECONDS,
             "policy_status": "review_required",
         },
         "subject": {
@@ -45,13 +44,16 @@ def create_guest_session(payload: dict[str, Any] | None = None) -> dict[str, Any
         "session_binding": {
             "session_id": session_id,
             "can_bind_to_chat_session": bool(session_id),
-            "binding_policy": "guest_id may start chat sessions, but account merge requires explicit user confirmation.",
+            "binding_policy": (
+                "guest_id may start chat sessions, but account merge requires "
+                "explicit user confirmation."
+            ),
         },
         "rate_limit": _rate_limit_policy(subject_id=f"guest:{guest_id}"),
         "merge_policy": _merge_policy(),
         "limitations": [
-            "Mock guest identity contract; canonical Django endpoint persists the identity preview when available.",
-            "Guest TTL and quota values are review-required and not production policy.",
+            "The canonical Django endpoint persists this guest identity.",
+            "Guest TTL and quota values remain deployment policy inputs.",
         ],
     }
 
@@ -62,71 +64,36 @@ def get_current_auth_subject(
     guest_id: str | None = None,
     session_id: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Return current mock auth subject or an auth error envelope."""
+    """Return the current guest or signature-verified app-JWT subject."""
 
     if authorization_header:
-        valid, error_body = is_valid_mock_bearer_header(authorization_header)
-        if not valid:
-            return int(error_body["error"]["status"]), error_body
-
-        token = authorization_header.strip().split()[1]
+        token = _bearer_token_from_header(authorization_header)
+        if not token:
+            return 401, build_auth_error(
+                "token_invalid",
+                reason="malformed_authorization_header",
+            )
         app_jwt_valid, app_jwt_claims = decode_access_token(token)
-        if not app_jwt_valid and token.count(".") == 2:
+        if not app_jwt_valid:
             reason = str(app_jwt_claims.get("reason") or "invalid_app_jwt")
             if reason == "expired_token":
                 return 401, build_auth_error("token_expired")
-            if reason != "not_app_jwt":
-                return 401, build_auth_error("token_invalid", reason=reason)
-        if app_jwt_valid:
-            user_id = str(app_jwt_claims["sub"])
-            auth_session_id = str(app_jwt_claims["jti"])
-            return 200, {
-                "auth_state": "authenticated",
-                "user": {
-                    "user_id": user_id,
-                    "email": app_jwt_claims.get("email"),
-                    "display_name": app_jwt_claims.get("name") or "Google user",
-                    "status": "active",
-                    "auth_provider": app_jwt_claims.get("auth_provider") or "google",
-                    "provider_subject": app_jwt_claims.get("provider_subject"),
-                    "policy_status": "app_jwt_verified",
-                },
-                "guest": _guest_snapshot(guest_id),
-                "subject": {
-                    "subject_id": f"user:{user_id}",
-                    "subject_type": "user",
-                    "user_id": user_id,
-                    "guest_id": _normalize_guest_id(guest_id),
-                    "auth_session_id": auth_session_id,
-                    "is_authenticated": True,
-                },
-                "auth_session": {
-                    "auth_session_id": auth_session_id,
-                    "jwt_jti": auth_session_id,
-                    "status": "active",
-                    "verification": "app_jwt_hmac",
-                    "provider": app_jwt_claims.get("auth_provider") or "google",
-                },
-                "session_binding": {
-                    "session_id": _text(session_id) or None,
-                    "can_bind_to_chat_session": bool(session_id),
-                },
-                "rate_limit": _rate_limit_policy(subject_id=f"user:{user_id}"),
-                "merge_policy": _merge_policy(),
-                "limitations": [
-                    "App JWT is verified locally; Google ID token verification happens at the login boundary.",
-                ],
-            }
+            if reason == "not_app_jwt":
+                reason = "app_jwt_required"
+            return 401, build_auth_error("token_invalid", reason=reason)
 
-        auth_session_id = _auth_session_id_for_token(token)
-        user_id = _user_id_for_token(token)
+        user_id = str(app_jwt_claims["sub"])
+        auth_session_id = str(app_jwt_claims["jti"])
         return 200, {
             "auth_state": "authenticated",
             "user": {
                 "user_id": user_id,
-                "display_name": "Mock user",
+                "email": app_jwt_claims.get("email"),
+                "display_name": app_jwt_claims.get("name") or "Google user",
                 "status": "active",
-                "policy_status": "mock_only",
+                "auth_provider": app_jwt_claims.get("auth_provider") or "google",
+                "provider_subject": app_jwt_claims.get("provider_subject"),
+                "policy_status": "app_jwt_verified",
             },
             "guest": _guest_snapshot(guest_id),
             "subject": {
@@ -141,7 +108,8 @@ def get_current_auth_subject(
                 "auth_session_id": auth_session_id,
                 "jwt_jti": auth_session_id,
                 "status": "active",
-                "verification": "mock_bearer_shape_only",
+                "verification": "app_jwt_hmac",
+                "provider": app_jwt_claims.get("auth_provider") or "google",
             },
             "session_binding": {
                 "session_id": _text(session_id) or None,
@@ -150,8 +118,7 @@ def get_current_auth_subject(
             "rate_limit": _rate_limit_policy(subject_id=f"user:{user_id}"),
             "merge_policy": _merge_policy(),
             "limitations": [
-                "Mock Bearer token validation checks token shape only, not JWT signature.",
-                "auth_session_id is derived from the mock token until real JWT session validation is connected.",
+                "App JWT is verified locally; Google ID-token verification happens at login."
             ],
         }
 
@@ -176,7 +143,7 @@ def get_current_auth_subject(
             "rate_limit": _rate_limit_policy(subject_id=f"guest:{normalized_guest_id}"),
             "merge_policy": _merge_policy(),
             "limitations": [
-                "Guest subject is accepted for identity preview only; protected APIs still require Bearer auth in the current mock middleware.",
+                "Guest identity is available for preview endpoints; protected APIs require an app JWT."
             ],
         }
 
@@ -218,8 +185,8 @@ def _rate_limit_policy(*, subject_id: str) -> dict[str, Any]:
             f"rate_limit:{subject_id}:agent_run",
         ],
         "notes": [
-            "Exact quota numbers are intentionally not fixed in this mock contract.",
-            "File upload limits should also consider IP-based protection.",
+            "Quota values are supplied by the canonical usage policy.",
+            "File-upload protection also applies deployment-level IP controls.",
         ],
     }
 
@@ -232,17 +199,11 @@ def _merge_policy() -> dict[str, Any]:
     }
 
 
-def _auth_session_id_for_token(token: str) -> str:
-    if token == "dev-mock-token":
-        return "auth_dev_mock"
-    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
-    return f"auth_{digest}"
-
-
-def _user_id_for_token(token: str) -> str:
-    if token.startswith("usr_"):
-        return token.split(":", 1)[0]
-    return "usr_mock"
+def _bearer_token_from_header(value: str | None) -> str:
+    parts = _text(value).split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return ""
+    return parts[1]
 
 
 def _normalize_guest_id(value: Any) -> str | None:

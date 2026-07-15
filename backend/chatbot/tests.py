@@ -587,9 +587,7 @@ class ProductionReadinessTests(TestCase):
         SECRET_KEY=("prod-secret-key-prod-secret-key-123456"),
         ALLOWED_HOSTS=["app.legaldrive.test"],
         DJANGO_DATABASE_ENGINE="postgres",
-        GOOGLE_AUTH_ALLOW_MOCK=False,
-        APP_AUTH_ALLOW_MOCK_BEARER=False,
-        GOOGLE_CLIENT_ID="google-client-id",
+        GOOGLE_CLIENT_ID="google-client-id.apps.googleusercontent.com",
         GOOGLE_CLIENT_SECRET=("google-client-secret"),
         GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
         APP_JWT_SECRET=("app-jwt-secret-app-jwt-secret-123456"),
@@ -617,8 +615,6 @@ class ProductionReadinessTests(TestCase):
         SECRET_KEY=("replace-with-django-secret-key-from-secret-manager"),
         ALLOWED_HOSTS=["app.example.com"],
         DJANGO_DATABASE_ENGINE="postgres",
-        GOOGLE_AUTH_ALLOW_MOCK=False,
-        APP_AUTH_ALLOW_MOCK_BEARER=False,
         GOOGLE_CLIENT_ID="replace-with-google-oauth-web-client-id",
         GOOGLE_CLIENT_SECRET=fixture_value("replace-with-google", "-oauth-client-secret"),
         GOOGLE_POPUP_REDIRECT_URI="https://app.example.com",
@@ -650,8 +646,6 @@ class ProductionReadinessTests(TestCase):
         SECRET_KEY=("prod-secret-key-prod-secret-key-123456"),
         ALLOWED_HOSTS=["app.legaldrive.test"],
         DJANGO_DATABASE_ENGINE="postgres",
-        GOOGLE_AUTH_ALLOW_MOCK=False,
-        APP_AUTH_ALLOW_MOCK_BEARER=False,
         GOOGLE_CLIENT_ID="google-client-id.apps.googleusercontent.com",
         GOOGLE_CLIENT_SECRET=("google-client-secret-realistic-value"),
         GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
@@ -886,7 +880,6 @@ class ProductionReadinessTests(TestCase):
         self.assertNotIn("api_key", json.dumps(body))
 
     @override_settings(
-        GOOGLE_AUTH_ALLOW_MOCK=False,
         GOOGLE_CLIENT_ID="google-client-id.apps.googleusercontent.com",
         GOOGLE_CLIENT_SECRET=("google-client-secret-realistic-value"),
         GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
@@ -1410,7 +1403,6 @@ class RemovedChatbotMockApiContract:
         self.assertFalse(UploadedFile.objects.filter(original_filename="expired-guest.pdf").exists())
         self.assertFalse(Report.objects.filter(report_id="rep_expired_guest_guard").exists())
 
-    @override_settings(GOOGLE_AUTH_ALLOW_MOCK=False, APP_AUTH_ALLOW_MOCK_BEARER=False)
     def test_real_auth_mode_rejects_legacy_dev_mock_bearer(self):
         response = Client(HTTP_AUTHORIZATION="Bearer dev-mock-token").post(
             "/api/chat/messages/",
@@ -1423,7 +1415,6 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(error["code"], "token_invalid")
         self.assertEqual(error["auth"]["reason"], "app_jwt_required")
 
-    @override_settings(APP_AUTH_ALLOW_MOCK_BEARER=False)
     def test_real_auth_mode_accepts_backend_app_jwt(self):
         login_response = Client().post(
             "/api/auth/login/",
@@ -1885,7 +1876,6 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(error["auth"]["reason"], "invalid_google_code_request_header")
 
     @override_settings(
-        GOOGLE_AUTH_ALLOW_MOCK=False,
         GOOGLE_CLIENT_ID="real-google-client",
         GOOGLE_CLIENT_SECRET="x",
         GOOGLE_POPUP_REDIRECT_URI="http://127.0.0.1:5173",

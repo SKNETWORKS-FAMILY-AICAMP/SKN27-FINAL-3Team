@@ -1,5 +1,11 @@
 # Google auth and app JWT boundary - 2026-06-30
 
+> [!IMPORTANT]
+> This document is a historical design snapshot. Its `/api/auth/login/` and
+> mock-login instructions are superseded by the live authorization-code contract
+> in [`../ops/google-oauth-live-e2e.md`](../ops/google-oauth-live-e2e.md) and
+> [`../api/openapi-v0.yaml`](../api/openapi-v0.yaml).
+
 ## Conclusion
 
 The first Google login implementation is now a boundary layer, not a full
