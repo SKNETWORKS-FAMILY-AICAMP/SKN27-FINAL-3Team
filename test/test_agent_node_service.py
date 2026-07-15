@@ -988,7 +988,18 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
     assert provisions[0]["match_reason"] == "legal_rag_fallback:django_rag_tables"
 
 
-def test_execute_sync_objection_report_generation_adapter_returns_form_envelope():
+def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(monkeypatch):
+    from ai.agents.objection_report_generation import agent as objection_agent
+
+    monkeypatch.setattr(
+        objection_agent,
+        "_draft_petition_text",
+        lambda **_kwargs: {
+            "petition_purpose": "처분의 취소 또는 감경을 요청합니다.",
+            "petition_reason": "어린이보호구역 정차는 긴급 상황에 따른 불가피한 조치였습니다.",
+        },
+    )
+
     execution = execute_mock_node(
         {
             "execution_mode": "sync",
@@ -1066,72 +1077,50 @@ def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"
     assert output["evidence"][0]["source_type"] == "user_uploaded_file"
     assert output["evidence"][-1]["source_type"] == "user_statement"
+    assert structured_result["drafting_source"] == "llm"
+    assert structured_result["applicant_info"]["name"] == "본인 입력 필요"
+    assert structured_result["disposition_details"]["violation_text"] == "어린이보호구역 정차 위반"
+    assert structured_result["petition_purpose"] == "처분의 취소 또는 감경을 요청합니다."
+    assert [section["title"] for section in structured_result["form_sections"]] == [
+        "신청인 정보",
+        "대상처분 내역",
+        "신청취지",
+        "신청이유",
+        "첨부 서류",
+    ]
     assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
 
 
-def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_inputs():
+def test_execute_sync_objection_report_generation_adapter_falls_back_when_llm_drafting_fails(monkeypatch):
+    from ai.agents.objection_report_generation import agent as objection_agent
+
+    monkeypatch.setattr(objection_agent, "_draft_petition_text", lambda **_kwargs: None)
+
     execution = execute_mock_node(
         {
             "execution_mode": "sync",
             "node_code": "objection_report_generation",
-            "analysis_plan_id": "plan_sync_objection_fault_ratio",
-            "job_id": "job_sync_objection_fault_ratio",
-            "session_id": "ses_sync_objection_fault_ratio",
-            "message_id": "msg_sync_objection_fault_ratio",
-            "user_text": "신호 없는 교차로에서 직진 중 우측 골목 차량과 접촉했습니다.",
+            "analysis_plan_id": "plan_sync_objection_fallback",
+            "job_id": "job_sync_objection_fallback",
+            "session_id": "ses_sync_objection_fallback",
+            "message_id": "msg_sync_objection_fallback",
+            "user_text": "긴급 정차였습니다.",
+            "context": {
+                "user_facts": "어린이보호구역에서 갑작스러운 보행자 진입으로 짧게 정차했습니다.",
+            },
             "upstream_results": {
-                "text_ml_case_search": {
+                "fine_notice_analysis": {
                     "status": "success",
                     "structured_result": {
-                        "query_text": "신호 없는 교차로에서 직진 중 우측 골목 차량과 접촉했습니다.",
-                        "normalized_description": "무신호 교차로 직진 차량과 우측 진입 차량 접촉 사고",
-                        "accident_type_candidates": ["intersection_no_signal", "side_entry_collision"],
-                        "issue_tags": ["선진입", "일시정지", "시야 제한"],
-                        "similar_cases": [
-                            {
-                                "case_id": "case_fault_001",
-                                "title": "무신호 교차로 직진/진입 사고",
-                                "summary": "선진입과 감속 여부를 함께 본 사례입니다.",
-                                "source_ref": "case_fault_001",
-                            }
-                        ],
-                        "recommended_evidence": [
-                            "original blackbox or dashcam video",
-                            "scene photos including lane, signal, and impact position",
-                        ],
+                        "notice_fields": {
+                            "agency": "강남구청 교통과",
+                            "violation_text": "어린이보호구역 정차 위반",
+                        },
                     },
-                    "evidence": [
-                        {
-                            "source_type": "review_case",
-                            "title": "무신호 교차로 직진/진입 사고",
-                            "source_reference": "case_fault_001",
-                            "metadata": {"case_id": "case_fault_001"},
-                            "confidence": 0.76,
-                        }
-                    ],
                 },
                 "law_ground_search": {
                     "status": "success",
-                    "structured_result": {
-                        "law_provisions": [
-                            {
-                                "source_name": "도로교통법",
-                                "article_no": "제25조",
-                                "provision_text": "교차로 통행방법 및 우선순위 관련 조항입니다.",
-                                "source_ref": "law:road_traffic:25",
-                                "retrieval_score": 0.79,
-                            }
-                        ],
-                    },
-                    "evidence": [
-                        {
-                            "source_type": "law",
-                            "title": "도로교통법 제25조",
-                            "source_reference": "law:road_traffic:25",
-                            "metadata": {"article": "제25조"},
-                            "confidence": 0.79,
-                        }
-                    ],
+                    "structured_result": {"matched_laws": []},
                 },
             },
         }
@@ -1139,19 +1128,8 @@ def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_i
 
     output = execution["agent_output"]
     structured_result = output["structured_result"]
-
-    assert execution["execution_mode"] == "sync"
-    assert output["node_code"] == "objection_report_generation"
-    assert output["status"] == "success"
-    assert structured_result["document_type"] == "objection_form"
-    assert structured_result["document_variant"] == "traffic_accident"
-    assert structured_result["document_title"] == "교통사고 이의신청서 초안"
-    assert structured_result["recipient_agency"] == "관할 경찰서 또는 분쟁조정 기관"
-    assert structured_result["requested_action"] == "사고 사실관계 재검토 및 과실비율 조정 검토"
-    assert structured_result["readiness"]["ready_for_download"] is True
-    assert any("선진입" in item for item in structured_result["objection_reasons"])
-    assert any("블랙박스" in item for item in structured_result["required_attachments"])
-    assert any(item["source_type"] == "review_case" for item in output["evidence"])
+    assert structured_result["drafting_source"] == "rule_based_fallback"
+    assert any("규칙 기반 문장으로 대체" in item for item in output["limitations"])
     assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
 
 
