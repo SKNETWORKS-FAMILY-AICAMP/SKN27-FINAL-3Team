@@ -80,6 +80,10 @@ def load_analysis_result(
             "executions": executions,
         }
     )
+    # The repository status is the canonical terminal outcome.  Recomputing it
+    # from a mixture of successful and failed node rows can incorrectly turn a
+    # Supervisor-gated failure into a public "partial" result.
+    result["status"] = status
     result.update(
         {
             "cards": deepcopy(job.get("cards") or []),
@@ -87,6 +91,10 @@ def load_analysis_result(
             "report_links": deepcopy(job.get("report_links") or []),
             "attachments": deepcopy(job.get("attachments") or []),
             "reporting_payload": deepcopy(job.get("reporting_payload") or None),
+            "supervisor_reporting_handoff": deepcopy(
+                job.get("supervisor_reporting_handoff") or None
+            ),
+            "reporting_pipeline": deepcopy(job.get("reporting_pipeline") or None),
             "supervisor_state": deepcopy(job.get("supervisor_state") or None),
             "supervisor_execution": deepcopy(job.get("supervisor_execution") or None),
             "work_item": deepcopy(job.get("work_item")),

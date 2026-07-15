@@ -115,10 +115,12 @@ def test_export_neo4j_imports_optional_extra_relations(tmp_path: Path):
 def test_expand_with_law_graph_records_relation_type():
     session = FakeLawGraphSession()
     result = _expand_with_law_graph(
-        core_provisions=[{"chunk_id": "core", "score": 0.8}],
+        core_provisions=[{"chunk_id": "core", "source_id": "law", "score": 0.8}],
         article_refs=[],
         session=session,
         core_scores={"core": 0.8},
+        temporal_basis={"mode": "as_of", "effective_at": "2026-01-01"},
+        scope={"allowed_source_types": ["law"]},
     )
 
     assert session.graph_params["relation_types"] == ["HAS_PENALTY", "HAS_APPENDIX", "HAS_EXCEPTION", "RELATED_TO"]
@@ -155,6 +157,7 @@ class FakeLawGraphSession:
                 "relation_type": "HAS_PENALTY",
                 "c2": {
                     "chunk_id": "expanded",
+                    "source_id": "law",
                     "source_ref": "law/v1/제160조",
                     "source_name": "Test Law",
                     "article_no": "제160조",
@@ -163,6 +166,9 @@ class FakeLawGraphSession:
                     "provision_text": "Penalty text",
                     "source_type": "law",
                     "source_url": "https://example.test",
+                    "is_searchable": True,
+                    "enforce_date": "2020-01-01",
+                    "expire_date": None,
                 },
             }
         ]

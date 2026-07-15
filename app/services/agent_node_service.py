@@ -836,9 +836,18 @@ def _run_objection_report_generation_adapter(
             "adapter": "ai.agents.objection_report_generation.run_objection_report_generation",
             "execution_mode": "sync",
             "source_status": raw_output.get("status"),
-            "input_source": "agent_input.upstream_results",
+            "input_source": (
+                "agent_input.context.supervisor_reporting_handoff"
+                if _dict_context(agent_input).get("handoff_required") is True
+                else "agent_input.upstream_results"
+            ),
         },
     )
+
+
+def _dict_context(agent_input: dict[str, Any]) -> dict[str, Any]:
+    context = agent_input.get("context")
+    return context if isinstance(context, dict) else {}
 
 
 def _fine_notice_state(agent_input: dict[str, Any]) -> dict[str, Any]:
@@ -950,6 +959,8 @@ def _complete_adapter_output(
 ) -> dict[str, Any]:
     source_status = str(raw_output.get("status") or "partial")
     structured_result = deepcopy(raw_output.get("structured_result") or {})
+    if "missing_fields" in raw_output and "missing_fields" not in structured_result:
+        structured_result["missing_fields"] = deepcopy(raw_output.get("missing_fields") or [])
     structured_result = _normalize_adapter_structured_result(
         structured_result,
         node_code=node["node_code"],

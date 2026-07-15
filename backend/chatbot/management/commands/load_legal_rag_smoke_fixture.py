@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,7 @@ def _load_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
                 "source_type": str(row.get("source_type") or "law"),
                 "source_name": _required(row, "source_name"),
                 "source_url": str(row.get("source_url") or ""),
+                "effective_date": date.fromisoformat(_required(row, "effective_date")),
                 "status": "active",
                 "metadata": {"smoke_fixture": True, "source": "legal_rag_smoke_fixture"},
             },

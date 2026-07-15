@@ -1,6 +1,6 @@
 # Django Demo Backend Workspace
 
-중간발표용 mock API 워크스페이스다. 실제 Agent, RAG, MCP, 외부 API 호출 없이 프론트엔드가 앱 흐름을 붙일 수 있도록 최소 Django endpoint를 제공한다.
+Django canonical API 워크스페이스다. 운영 경로는 실제 인증과 Agent adapter를 사용하고, 명시적인 `/api/mock/...` alias만 회귀 테스트용 mock 경계로 남긴다.
 
 ## 실행
 
@@ -32,7 +32,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health/
 
 ```powershell
 Invoke-RestMethod `
-  -Headers @{ Authorization = "Bearer dev-mock-token" } `
+  -Headers @{ Authorization = "Bearer <app-jwt-issued-after-google-login>" } `
   http://127.0.0.1:8000/api/agents/nodes/
 ```
 
@@ -48,7 +48,6 @@ docker compose up --build backend
 docker run --rm -p 8000:8000 `
   -e DJANGO_SECRET_KEY=dev-secret `
   -e DJANGO_DEBUG=1 `
-  -e MOCK_REQUIRE_AUTH=1 `
   -e DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1 `
   --name skn27-demo-backend `
   skn27-demo-backend
@@ -56,23 +55,22 @@ docker run --rm -p 8000:8000 `
 
 ## 인증/JWT 경계
 
-현재 mock API는 실제 JWT 서명 검증은 수행하지 않는다. 대신 `MOCK_REQUIRE_AUTH=1`을 기본값으로 두고 보호된 `/api/...`, `/api/mock/...` endpoint에서 `Authorization: Bearer ...` 헤더의 존재와 형식을 확인한다. 토큰이 없거나 형식이 맞지 않으면 운영 전환 때 사용할 `auth_error.v1` envelope와 `WWW-Authenticate` header로 `401`을 반환한다.
+보호된 canonical endpoint는 백엔드가 발급한 app JWT의 서명, issuer, audience, 만료, DB의 활성 `auth_session`을 검증한다. 토큰이 없거나 잘못됐거나 이미 revoke된 경우 `auth_error.v1` envelope와 `WWW-Authenticate` header로 `401`을 반환한다.
 
-`POST /api/auth/login/`은 기존 Google ID token/mock profile 로그인 경계를 유지한다. 로컬/테스트에서는 `GOOGLE_AUTH_ALLOW_MOCK=1`로 `google_sub`, `email`, `display_name` mock profile을 받아 app Bearer token을 발급하고, `users`, `auth_sessions`, `auth_events`에 저장한다.
-
-권장 Google 로그인 경계는 `POST /api/auth/google/code/`다. 프론트는 Google Identity Services `google.accounts.oauth2.initCodeClient()`로 authorization code만 받고, `X-Requested-With: XmlHttpRequest` header와 함께 백엔드로 전송한다. 백엔드는 Google token endpoint에서 code를 교환하고, Google `sub`를 `social_accounts.provider_user_id`로 저장하며, Google API token은 `oauth_connections`에 backend-only 보호 필드로 저장한다. 브라우저 응답에는 Google access token과 refresh token 원문을 포함하지 않는다.
+유일한 공개 Google 로그인 경계는 `POST /api/auth/google/code/`다. 프론트는 Google Identity Services `google.accounts.oauth2.initCodeClient()`로 authorization code만 받고, 공개 client ID, 정확한 frontend origin, `X-Requested-With: XmlHttpRequest` header와 함께 백엔드로 전송한다. 백엔드는 요청 origin/client ID/redirect origin을 서버 설정과 비교한 뒤 Google token endpoint에서 code를 한 번 교환하고, 검증된 Google `sub`를 `social_accounts.provider_user_id`로 저장한다. 로그인 전용 Google access/refresh/ID token은 신원 확인 직후 폐기하며 저장하거나 클라이언트에 반환하지 않는다.
 
 실제 Google Code Flow 모드는 다음 환경변수가 필요하다.
 
-- `GOOGLE_AUTH_ALLOW_MOCK=0`
-- `APP_AUTH_ALLOW_MOCK_BEARER=0`
 - `GOOGLE_CLIENT_ID=<Google OAuth web client id>`
 - `GOOGLE_CLIENT_SECRET=<Google OAuth client secret>`
 - `GOOGLE_POPUP_REDIRECT_URI=<frontend origin, 예: http://127.0.0.1:5173>`
 - `VITE_GOOGLE_CLIENT_ID=<same frontend client id>`
-- `OAUTH_TOKEN_SECRET=<Google token 보호용 secret>`
+- `APP_JWT_SECRET=<32자 이상의 app JWT secret>`
+- `OAUTH_TOKEN_SECRET=<32자 이상의 별도 OAuth integration secret>`
+- `GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT=20`
+- `GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS=<trusted reverse-proxy CIDRs only; empty for direct access>`
 
-공개 endpoint는 `GET /api/health/`, `GET /api/mock/chat/scenarios/`로 제한한다. 운영 전환 시에는 같은 middleware 위치에서 실제 JWT 검증 또는 DRF authentication layer로 교체하고, 권한 부족은 같은 envelope의 `forbidden`/`403`으로 반환한다.
+Google 로그인 관점에서 인증 없이 호출되는 공개 login endpoint는 `POST /api/auth/google/code/` 하나다. 그 밖의 보호된 canonical endpoint는 app JWT와 활성 `auth_session`을 요구하며, 권한 부족은 같은 envelope의 `forbidden`/`403`으로 반환한다.
 
 인증 실패 응답 예시:
 
@@ -102,7 +100,6 @@ docker run --rm -p 8000:8000 `
 | Method | Canonical path | Mock path |
 |---|---|---|
 | `POST` | `/api/auth/guest-session/` | - |
-| `POST` | `/api/auth/login/` | - |
 | `POST` | `/api/auth/google/code/` | - |
 | `POST` | `/api/auth/refresh/` | - |
 | `POST` | `/api/auth/logout/` | - |
@@ -126,8 +123,7 @@ docker run --rm -p 8000:8000 `
 |---|---|---|
 | `GET` | `/api/health/` | backend health와 demo scenario 목록 |
 | `POST` | `/api/auth/guest-session/` | 비회원 `guest_id`, rate limit key, merge policy mock 발급 |
-| `POST` | `/api/auth/login/` | Google subject를 `users`/`auth_sessions`에 연결하고 app Bearer token 발급 |
-| `POST` | `/api/auth/google/code/` | Google Authorization Code Flow로 app Bearer token 발급, `social_accounts`/`oauth_connections` 저장 |
+| `POST` | `/api/auth/google/code/` | Google Authorization Code Flow로 app Bearer token 발급, `social_accounts` 저장, 로그인용 provider token 폐기 |
 | `POST` | `/api/auth/refresh/` | Rotate a valid app Bearer token for the same `auth_session_id` |
 | `POST` | `/api/auth/logout/` | Revoke the current `auth_session_id` and return client clear-token action |
 | `GET` | `/api/auth/me/` | 현재 Bearer/guest identity와 `auth_session_id` 분리 상태 확인 |
@@ -252,7 +248,7 @@ Docker 실행 후 smoke check:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health/
 Invoke-RestMethod `
-  -Headers @{ Authorization = "Bearer dev-mock-token" } `
+  -Headers @{ Authorization = "Bearer <app-jwt-issued-after-google-login>" } `
   http://127.0.0.1:8000/api/agents/nodes/
 ```
 

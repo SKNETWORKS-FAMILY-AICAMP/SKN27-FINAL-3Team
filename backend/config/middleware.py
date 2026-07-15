@@ -20,7 +20,6 @@ PUBLIC_PATHS = (
     "/api/health/ready/",
     "/api/capabilities/",
     "/api/auth/guest-session/",
-    "/api/auth/login/",
     "/api/auth/google/code/",
     "/api/auth/refresh/",
 )
@@ -38,6 +37,7 @@ PROTECTED_PREFIXES = (
     "/api/auth/",
     "/api/agents/",
     "/api/analysis/",
+    "/api/cases/",
     "/api/chat/",
     "/api/files/",
     "/api/history/",

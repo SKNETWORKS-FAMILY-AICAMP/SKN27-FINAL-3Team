@@ -175,6 +175,49 @@ def test_appeal_decision_runtime_invokes_real_graph_with_upstream_results(monkey
     ]
 
 
+def test_appeal_decision_runtime_propagates_input_required_missing_fields(monkeypatch):
+    """When reason_intake_node reports input_required, the adapter must surface
+    missing_fields so downstream consumers (e.g. history_event_mock_service,
+    which reads structured_result["missing_fields"]) can re-ask the user.
+    """
+    from ai.agents.appeal_decision_flow import graph as appeal_graph
+
+    def fake_invoke(state):
+        return {
+            "agent_results": {
+                "appeal_judgment": {
+                    "status": "input_required",
+                    "summary": "이의신청 사유 정보 필요",
+                    "structured_result": {
+                        "judgment_status": "input_required",
+                        "fine_type": "administrative_fine",
+                        "notice_stage": "first_notice",
+                    },
+                    "evidence": [],
+                    "missing_fields": ["user_appeal_reason"],
+                    "next_actions": [
+                        "Supervisor가 사용자에게 이의신청 사유 질문 후 재호출"
+                    ],
+                    "limitations": [],
+                }
+            }
+        }
+
+    monkeypatch.setattr(appeal_graph, "invoke", fake_invoke)
+
+    execution = execute_agent_node(
+        {
+            "node_code": "appeal_decision_flow",
+            "user_text": "",
+            "context": {"fine_type": "administrative_fine", "notice_stage": "first_notice"},
+        }
+    )
+
+    output = execution["agent_output"]
+    assert output["execution_status"] == "input_required"
+    assert output["structured_result"]["missing_fields"] == ["user_appeal_reason"]
+
+
 def test_agent_node_registry_exposes_real_adapter_contract():
     nodes = list_agent_nodes()
     law_node = next(node for node in nodes if node["node_code"] == "law_ground_search")
@@ -715,6 +758,156 @@ def test_execute_sync_text_ml_case_search_falls_back_to_django_review_case_rag(m
     assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
 
 
+def test_execute_sync_text_ml_case_search_does_not_fabricate_evidence_when_rag_is_empty(
+    monkeypatch,
+):
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    monkeypatch.setattr(
+        text_ml_agent,
+        "_run_fault_ratio_knowledge_agent",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        text_ml_agent,
+        "search_legal_rag",
+        lambda query, *, top_k, source_type: {
+            "contract_version": "legal_rag_search.v1",
+            "status": "empty",
+            "backend": "django_rag_tables",
+            "query": query,
+            "top_k": top_k,
+            "result_count": 0,
+            "results": [],
+            "error_code": "no_review_case_results",
+        },
+    )
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "text_ml_case_search",
+            "analysis_plan_id": "plan_sync_text_ml_empty",
+            "job_id": "job_sync_text_ml_empty",
+            "session_id": "ses_sync_text_ml_empty",
+            "message_id": "msg_sync_text_ml_empty",
+            "user_text": "교차로 접촉 사고와 유사한 판례를 찾아줘.",
+        }
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+
+    assert output["status"] == "partial"
+    assert structured_result["similar_cases"] == []
+    assert structured_result["top_cases"] == []
+    assert structured_result["reliability_score"] == 0.0
+    assert structured_result["retrieval"]["fallback_used"] is False
+    assert output["evidence"] == []
+    assert "heuristic" not in str(output).lower()
+    assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
+
+
+def test_execute_sync_text_ml_case_search_drops_malformed_rag_hits(monkeypatch):
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    monkeypatch.setattr(
+        text_ml_agent,
+        "_run_fault_ratio_knowledge_agent",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        text_ml_agent,
+        "search_legal_rag",
+        lambda query, *, top_k, source_type: {
+            "contract_version": "legal_rag_search.v1",
+            "status": "ready",
+            "backend": "django_rag_tables",
+            "query": query,
+            "top_k": top_k,
+            "result_count": 4,
+            "results": [
+                {},
+                {
+                    "source_reference": " ",
+                    "source_type": "review_case",
+                    "title": "blank provenance",
+                    "summary": "must be dropped",
+                    "score": 0.9,
+                },
+                {
+                    "source_reference": "review_case:blank-content",
+                    "source_type": "review_case",
+                    "title": " ",
+                    "summary": " ",
+                    "score": 0.8,
+                },
+                {
+                    "source_reference": "review_case:bad-score",
+                    "source_type": "review_case",
+                    "title": "Bad score",
+                    "summary": "must be dropped",
+                    "score": "not-a-number",
+                },
+            ],
+        },
+    )
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "text_ml_case_search",
+            "analysis_plan_id": "plan_sync_text_ml_malformed",
+            "job_id": "job_sync_text_ml_malformed",
+            "session_id": "ses_sync_text_ml_malformed",
+            "message_id": "msg_sync_text_ml_malformed",
+            "user_text": "교차로 접촉 사고 유사 사례를 찾아줘",
+        }
+    )
+
+    output = execution["agent_output"]
+    assert output["status"] == "partial"
+    assert output["structured_result"]["similar_cases"] == []
+    assert output["structured_result"]["top_cases"] == []
+    assert output["structured_result"]["reliability_score"] == 0.0
+    assert output["evidence"] == []
+
+
+def test_text_ml_case_search_preserves_only_valid_rag_provenance_and_score():
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    cases = text_ml_agent._cases_from_retrieval(
+        {
+            "results": [
+                {
+                    "source_reference": "review_case:missing-score",
+                    "source_type": "review_case",
+                    "title": "Missing score",
+                    "summary": "must be dropped",
+                },
+                {
+                    "source_reference": "review_case:valid-001",
+                    "source_type": "review_case",
+                    "title": "Verified intersection case",
+                    "summary": "A source-backed summary.",
+                    "score": 0.73,
+                },
+            ]
+        }
+    )
+
+    assert cases == [
+        {
+            "case_id": "review_case:valid-001",
+            "title": "Verified intersection case",
+            "summary": "A source-backed summary.",
+            "reliability_score": 0.73,
+            "source_type": "review_case",
+            "source_ref": "review_case:valid-001",
+        }
+    ]
+
+
 def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch):
     from ai.agents.law_ground_search import agent as law_agent
 
@@ -803,7 +996,7 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
     monkeypatch.setattr(
         legal_rag_service,
         "search_legal_rag",
-        lambda query, *, top_k, source_type: {
+        lambda query, *, top_k, source_type, temporal_basis, scope: {
             "status": "ready",
             "backend": "django_rag_tables",
             "query": query,
@@ -816,6 +1009,7 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
                     "title": "School zone emergency stopping",
                     "article": "Article 32",
                     "summary": "어린이보호구역 정차 과태료는 긴급 정차 증빙을 확인합니다.",
+                    "provision_text": "어린이보호구역 정차 과태료는 긴급 정차 증빙을 확인합니다.",
                     "source_url": "https://example.test/road-traffic-act",
                     "score": 4.0,
                 }
