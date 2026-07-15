@@ -16,7 +16,9 @@ from chatbot.models import (
     ChatSessionStatus,
     UsageEvent,
     UserAccount,
+    UserAccountStatus,
 )
+from chatbot.repositories import AuthSessionStateError, persist_current_auth_subject
 
 
 TEST_JWT_SIGNING_KEY = "security-hardening-test-signing-key-is-long-enough"
@@ -315,11 +317,13 @@ class AuthSessionRotationSecurityTests(TestCase):
 
         logout = client.post("/api/auth/logout/", data={}, content_type="application/json")
         protected = client.get("/api/analysis/jobs/")
+        case_list = client.get("/api/cases/")
         refresh = client.post("/api/auth/refresh/", data={}, content_type="application/json")
         auth_me = client.get("/api/auth/me/")
 
         self.assertEqual(logout.status_code, 200)
         self.assertEqual(protected.status_code, 401)
+        self.assertEqual(case_list.status_code, 401)
         self.assertEqual(refresh.status_code, 401)
         self.assertEqual(auth_me.status_code, 401)
         session = AuthSession.objects.get(auth_session_id=auth_session_id)
@@ -345,4 +349,60 @@ class AuthSessionRotationSecurityTests(TestCase):
             AuthSession.objects.filter(
                 auth_session_id="auth_unpersisted_refresh"
             ).exists()
+        )
+
+    def test_suspended_user_cannot_use_active_session(self) -> None:
+        token, _auth_session_id = persisted_session_token("usr_suspended_session")
+        UserAccount.objects.filter(user_id="usr_suspended_session").update(
+            status=UserAccountStatus.SUSPENDED
+        )
+        client = Client(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        mypage = client.get("/api/mypage/summary/")
+        cases = client.get("/api/cases/")
+        refresh = client.post("/api/auth/refresh/", data={}, content_type="application/json")
+
+        for response in (mypage, cases, refresh):
+            self.assertEqual(response.status_code, 401)
+            self.assertEqual(
+                response.json()["error"]["auth"]["reason"],
+                "user_account_inactive",
+            )
+
+    def test_auth_session_with_deleted_user_relation_is_rejected(self) -> None:
+        token, auth_session_id = persisted_session_token("usr_deleted_session")
+        UserAccount.objects.get(user_id="usr_deleted_session").delete()
+        client = Client(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        mypage = client.get("/api/mypage/summary/")
+        refresh = client.post(
+            "/api/auth/refresh/",
+            data={},
+            content_type="application/json",
+        )
+
+        for response in (mypage, refresh):
+            self.assertEqual(response.status_code, 401)
+            self.assertEqual(
+                response.json()["error"]["auth"]["reason"],
+                "auth_session_user_missing",
+            )
+        self.assertIsNone(AuthSession.objects.get(auth_session_id=auth_session_id).user)
+
+    def test_user_subject_without_user_id_cannot_be_persisted(self) -> None:
+        with self.assertRaises(AuthSessionStateError) as error:
+            persist_current_auth_subject(
+                {
+                    "contract_version": "google_auth_code.v1",
+                    "subject": {
+                        "subject_type": "user",
+                        "subject_id": "user:missing",
+                        "auth_session_id": "auth_missing_user_id",
+                    },
+                }
+            )
+
+        self.assertEqual(error.exception.reason, "auth_session_user_missing")
+        self.assertFalse(
+            AuthSession.objects.filter(auth_session_id="auth_missing_user_id").exists()
         )

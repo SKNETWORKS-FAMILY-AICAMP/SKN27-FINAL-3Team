@@ -96,6 +96,15 @@ GOOGLE_USERINFO_ENDPOINT = os.environ.get(
     "GOOGLE_USERINFO_ENDPOINT",
     "https://openidconnect.googleapis.com/v1/userinfo",
 )
+GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT = _positive_int_env(
+    "GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT",
+    20,
+)
+GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS = [
+    cidr.strip()
+    for cidr in os.environ.get("GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS", "").split(",")
+    if cidr.strip()
+]
 APP_JWT_SECRET = os.environ.get("APP_JWT_SECRET", SECRET_KEY)
 OAUTH_TOKEN_SECRET = os.environ.get("OAUTH_TOKEN_SECRET", APP_JWT_SECRET)
 SUPERVISOR_LLM_ENABLED = os.environ.get("SUPERVISOR_LLM_ENABLED", "0") == "1"

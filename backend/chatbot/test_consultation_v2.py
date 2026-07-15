@@ -372,9 +372,12 @@ class ConsultationCaseApiTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 403)
-        CaseApiErrorResponse.model_validate(response.json())
-        self.assertEqual(response.json()["error"]["code"], "login_required")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["code"], "auth_required")
+        self.assertEqual(
+            response.json()["error"]["auth"]["reason"],
+            "missing_token",
+        )
 
     def test_case_creation_validates_typed_request_before_repository(self) -> None:
         response = self.client.post(
