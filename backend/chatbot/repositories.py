@@ -8389,13 +8389,55 @@ def _worker_report_objection_form_body(
 ) -> str:
     agency = _text(report_data.get("recipient_agency")) or "관할 처분 기관"
     title = _text(report_data.get("document_title")) or "처분 이의신청서"
+    header_lines = [
+        "## 문서 정보",
+        "- 문서 유형: 이의신청서 초안",
+        f"- 리포트 ID: {report.report_id}",
+        f"- 사건 ID: {report.job.job_id if report.job_id else report.session.session_id if report.session_id else '-'}",
+        "",
+        "## 제출 정보",
+        f"- 수신: {agency}",
+        f"- 제목: {title}",
+        "",
+    ]
+    footer_lines = [
+        "## 제출 전 확인",
+        "- 이 문서는 AI가 작성한 제출 전 검토용 초안입니다.",
+        "- 관할 기관, 제출 기한, 인적 사항, 사건 번호와 첨부자료를 최종 확인하세요.",
+    ]
+
+    form_sections = _list_or_empty(report_data.get("form_sections"))
+    if form_sections:
+        section_lines: list[str] = []
+        for section in form_sections:
+            if not isinstance(section, dict):
+                continue
+            section_title = _text(section.get("title")) or "섹션"
+            section_body = _text(section.get("body"))
+            section_lines.append(f"## {section_title}")
+            section_lines.extend(
+                line if line.startswith("-") else f"- {line}"
+                for line in section_body.split("\n")
+                if line.strip()
+            )
+            section_lines.append("")
+        return "\n".join(header_lines + section_lines + footer_lines) + "\n"
+
+    # Fallback for reports persisted before form_sections existed in this shape.
     facts = _compact_repeated_fact_text(
         _text(report_data.get("case_summary"))
         or _text(reporting_payload.get("summary"))
         or report.content_summary
     )
-    purpose = _text(report_data.get("requested_action")) or "처분의 재검토를 요청합니다."
-    reasons = _dedupe_text_values(_list_or_empty(report_data.get("objection_reasons")))
+    purpose = (
+        _text(report_data.get("petition_purpose"))
+        or _text(report_data.get("requested_action"))
+        or "처분의 재검토를 요청합니다."
+    )
+    reasons = _dedupe_text_values(
+        _list_or_empty(report_data.get("objection_reasons"))
+        or [_text(report_data.get("petition_reasons"))]
+    )
     if not reasons:
         reasons = ["상담 분석 결과와 제출 증빙을 근거로 처분의 재검토를 요청합니다."]
     legal_grounds = _report_legal_ground_lines(
@@ -8407,15 +8449,7 @@ def _worker_report_objection_form_body(
     if not attachments:
         attachments = ["고지서 원본 및 사실관계를 입증하는 자료"]
     lines = [
-        "## 문서 정보",
-        "- 문서 유형: 이의신청서 초안",
-        f"- 리포트 ID: {report.report_id}",
-        f"- 사건 ID: {report.job.job_id if report.job_id else report.session.session_id if report.session_id else '-'}",
-        "",
-        "## 제출 정보",
-        f"- 수신: {agency}",
-        f"- 제목: {title}",
-        "",
+        *header_lines,
         "## 신청 취지",
         f"- {purpose}",
         "",
@@ -8434,9 +8468,7 @@ def _worker_report_objection_form_body(
         "## 첨부 자료",
         *[f"- {attachment}" for attachment in attachments],
         "",
-        "## 제출 전 확인",
-        "- 이 문서는 AI가 작성한 제출 전 검토용 초안입니다.",
-        "- 관할 기관, 제출 기한, 인적 사항, 사건 번호와 첨부자료를 최종 확인하세요.",
+        *footer_lines,
     ]
     return "\n".join(lines) + "\n"
 
