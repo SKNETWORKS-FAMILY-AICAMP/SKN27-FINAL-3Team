@@ -68,7 +68,21 @@ def run_objection_report_generation(
     applicant_info = _applicant_info(agent_input, notice_result)
     required_attachments = _required_attachments(agent_input=agent_input, notice_result=notice_result)
 
+    appeal_decision = _appeal_decision(appeal_result)
+    appeal_gate = _appeal_gate(appeal_decision)
+
     limitations_extra: list[str] = []
+    if appeal_gate["blocked"] and appeal_gate["reason"]:
+        limitations_extra.append(appeal_gate["reason"])
+    if appeal_decision.get("risk_judgment_failed"):
+        limitations_extra.append(
+            "appeal_decision_flow의 위험도 판정이 기술 오류로 완료되지 못해 안전 기본값으로 처리되었습니다."
+        )
+    if appeal_decision.get("merit_judgment_failed"):
+        limitations_extra.append(
+            "appeal_decision_flow의 이의제기 실익 판정이 기술 오류로 완료되지 못했습니다."
+        )
+
     petition = None
     if notice_result:
         petition = _draft_petition_text(
@@ -114,13 +128,14 @@ def run_objection_report_generation(
             required_attachments=required_attachments,
         ),
         "report_actions": _report_actions(),
-        "appeal_decision": _appeal_decision(appeal_result),
+        "appeal_decision": appeal_decision,
         "supervisor_handoff": _handoff_trace(agent_input),
         "missing_fields": missing_fields,
         "readiness": {
-            "ready_for_download": not missing_fields,
+            "ready_for_download": not missing_fields and not appeal_gate["blocked"],
             "requires_user_review": True,
-            "review_reason": "제출 전 사실관계, 관할 기관, 기한, 증빙자료를 사용자가 최종 확인해야 합니다.",
+            "review_reason": appeal_gate["reason"]
+            or "제출 전 사실관계, 관할 기관, 기한, 증빙자료를 사용자가 최종 확인해야 합니다.",
         },
         "drafting_source": drafting_source,
     }
@@ -129,7 +144,7 @@ def run_objection_report_generation(
     handoff_gate = handoff.get("gate") if isinstance(handoff.get("gate"), dict) else {}
     status = (
         "success"
-        if not missing_fields and handoff_gate.get("status") != "draft"
+        if not missing_fields and not appeal_gate["blocked"] and handoff_gate.get("status") != "draft"
         else "partial"
     )
     return _output(
@@ -141,7 +156,6 @@ def run_objection_report_generation(
         evidence=_evidence(
             agent_input,
             notice_output,
-            text_ml_output,
             law_output,
             appeal_output,
             user_facts,
@@ -379,20 +393,10 @@ def _required_attachments(
     agent_input: dict[str, Any],
     notice_result: dict[str, Any],
 ) -> list[str]:
-    if document_variant == "traffic_accident":
-        attachments = [
-            "사고 접수 서류",
-            "블랙박스 원본 또는 영상 캡처",
-            "현장 사진",
-            "보험사 접수 내역",
-            "상대방 진술 또는 목격자 진술",
-        ]
-        attachments.extend(_text_list(text_ml_result.get("recommended_evidence")))
-    else:
-        attachments = ["고지서 원본", "이의신청 사유서", "관련 증빙자료"]
-        required_documents = notice_result.get("required_documents")
-        if isinstance(required_documents, list):
-            attachments.extend(_text(item) for item in required_documents)
+    attachments = ["고지서 원본", "이의신청 사유서", "관련 증빙자료"]
+    required_documents = notice_result.get("required_documents")
+    if isinstance(required_documents, list):
+        attachments.extend(_text(item) for item in required_documents)
     attachment_candidates = agent_input.get("attachments") or []
     if _handoff_required(agent_input):
         handoff = _supervisor_handoff(agent_input)
@@ -660,15 +664,41 @@ def _appeal_decision(appeal_result: dict[str, Any]) -> dict[str, Any]:
         "overall_possibility",
         "merit",
         "merit_basis",
+        "merit_judgment_failed",
         "merit_relief_type",
+        "relief_type_judgment_failed",
         "risk_flag",
-        "risk_basis",
+        "risk_trigger_category",
+        "risk_judgment_failed",
+        "computed_deadline",
+        "deadline_passed",
+        "legal_evidence_status",
+        "legal_evidence_reason",
         "guide",
     )
     return {
         field: deepcopy(appeal_result.get(field))
         for field in allowed_fields
         if field in appeal_result
+    }
+
+
+def _appeal_gate(appeal_decision: dict[str, Any]) -> dict[str, Any]:
+    judgment_status = appeal_decision.get("judgment_status")
+    deadline_passed = appeal_decision.get("deadline_passed")
+
+    if judgment_status == "denied":
+        reason = "이의신청 가능 기한이 이미 지난 것으로 판단되어 제출 전 재확인이 반드시 필요합니다."
+    elif judgment_status == "not_applicable":
+        reason = "이 사건 유형은 이의신청 대상이 아닌 것으로 판단되었습니다."
+    elif deadline_passed is True:
+        reason = "이의신청 기한이 지난 것으로 확인되어 제출 전 재확인이 반드시 필요합니다."
+    else:
+        reason = ""
+
+    return {
+        "blocked": judgment_status in {"denied", "not_applicable"} or deadline_passed is True,
+        "reason": reason,
     }
 
 
