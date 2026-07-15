@@ -8,6 +8,7 @@ import {
   persistAuthSession,
   readStoredAuthSession,
   readStoredAuthToken,
+  scheduleAppJwtRefresh,
 } from "./authSession.js";
 
 const ROUTES = [
@@ -90,6 +91,8 @@ export default function FrontendAppShell({
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
   const [pendingReportScreenDownload, setPendingReportScreenDownload] = useState(null);
   const reportWorkbenchRef = useRef(null);
+  const authRefreshContextRef = useRef({ guestId, sessionId });
+  authRefreshContextRef.current = { guestId, sessionId };
 
   const effectiveAuthToken = activeAuthToken || "";
   const identity = {
@@ -142,6 +145,67 @@ export default function FrontendAppShell({
       active = false;
     };
   }, [api]);
+
+  useEffect(() => {
+    if (!activeAuthToken || !authSessionId) {
+      return undefined;
+    }
+
+    let refreshEffectActive = true;
+    const cleanupRefreshTimer = scheduleAppJwtRefresh({
+      token: activeAuthToken,
+      refresh: async () => {
+        const refreshContext = authRefreshContextRef.current;
+        try {
+          const refreshResult = await api.refreshAuthToken(
+            {
+              guest_id: refreshContext.guestId || undefined,
+              session_id: refreshContext.sessionId || undefined,
+            },
+            {
+              authToken: activeAuthToken,
+              authSessionId,
+              guestId: refreshContext.guestId,
+            }
+          );
+          if (!refreshEffectActive) {
+            return;
+          }
+          const nextToken = refreshResult?.access_token || "";
+          const nextAuthSessionId = refreshResult?.subject?.auth_session_id || "";
+          if (!nextToken || !nextAuthSessionId) {
+            throw new Error("Auth refresh response is incomplete.");
+          }
+          const nextGuestId = refreshResult?.subject?.guest_id || refreshContext.guestId || "";
+          setActiveAuthToken(nextToken);
+          setAuthSessionId(nextAuthSessionId);
+          setGuestId(nextGuestId);
+          persistAuthSession({ guestId: nextGuestId });
+        } catch (_error) {
+          if (!refreshEffectActive) {
+            return;
+          }
+          clearStoredAuthSession();
+          if (refreshContext.guestId) {
+            persistAuthSession({ guestId: refreshContext.guestId });
+          }
+          setActiveAuthToken("");
+          setAuthSessionId("");
+          setMypageSummary(null);
+          setHistoryEvents(null);
+          setCurrentReport(null);
+          setReportList([]);
+          setPendingAuthAction(null);
+          setStatusMessage("인증 세션이 만료되었습니다. Google 계정으로 다시 로그인해 주세요.");
+        }
+      },
+    });
+
+    return () => {
+      refreshEffectActive = false;
+      cleanupRefreshTimer();
+    };
+  }, [api, activeAuthToken, authSessionId]);
 
   useEffect(() => {
     if (!pendingReportScreenDownload || activeRoute !== "reporting" || !reportWorkbenchRef.current) {

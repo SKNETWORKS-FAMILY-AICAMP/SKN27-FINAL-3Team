@@ -46,12 +46,20 @@ CSRF_TRUSTED_ORIGINS=<frontend-origin>
 GOOGLE_CLIENT_ID=<google-oauth-web-client-id>
 GOOGLE_CLIENT_SECRET=<secret-store-value>
 GOOGLE_POPUP_REDIRECT_URI=<frontend-origin>
+VITE_GOOGLE_CLIENT_ID=<same-google-oauth-web-client-id>
+GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT=20
+GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS=<comma-separated-controlled-proxy-cidrs-or-empty>
 APP_JWT_SECRET=<secret-store-value>
 OAUTH_TOKEN_SECRET=<secret-store-value>
 ```
 
 The readiness command reports `fail` when any required value is missing or still
 contains a placeholder.
+
+For the exact Google Cloud Console, local, staging, replay, and evidence-capture
+sequence, follow [google-oauth-live-e2e.md](google-oauth-live-e2e.md). The popup
+redirect value is an origin, not a callback path, and the frontend and backend
+must use the same Google Web client ID.
 
 ## 3. Database And Worker
 
@@ -339,6 +347,13 @@ packages.
 
 After Google Cloud OAuth settings are registered, verify code-flow settings:
 
+Set `GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT` (default `20`). Keep
+`GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS` empty for direct access; behind a reverse
+proxy, list only the proxy CIDRs controlled by this deployment. The application
+then stores only an HMAC-derived rate-limit subject, never the raw client IP.
+Google 429/5xx and network failures return 503; do not retry the same one-time
+code automatically. Start a fresh Google login to obtain a new code.
+
 ```powershell
 $env:DJANGO_ENV_FILE=".env.production"
 python backend\manage.py smoke_google_oauth_code --format text
@@ -357,8 +372,21 @@ from the configured frontend redirect flow, then run:
 
 ```powershell
 $env:DJANGO_ENV_FILE=".env.production"
-python backend\manage.py smoke_google_oauth_code --code "<one-time-code>" --require-exchange --format text
+python backend\manage.py smoke_google_oauth_code --prompt-code --require-exchange --format text
 ```
+
+To prove that the provider rejects reuse of that same one-time code, use a fresh
+code and run both exchanges in one sanitized command:
+
+```powershell
+$env:DJANGO_ENV_FILE=".env.production"
+python backend\manage.py smoke_google_oauth_code --prompt-code --require-exchange --verify-replay-rejection --format json
+```
+
+`--prompt-code` uses a hidden terminal prompt so the one-time code is not stored
+in the process argument list or shell history. Non-interactive automation may use
+the short-lived `GOOGLE_OAUTH_SMOKE_CODE` environment variable instead; clear it
+immediately after the command exits.
 
 Run the file scan smoke before allowing uploaded files into Agent handoff:
 

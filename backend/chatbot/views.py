@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import ipaddress
 import json
 import logging
 from uuid import uuid4
 
+from django.conf import settings
+from django.core.cache import cache
 from django.db import DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
@@ -41,7 +45,7 @@ from app.services.attachment_mock_service import (
     list_attachments as list_mock_attachments,
     register_attachment as register_mock_attachment,
 )
-from app.services.auth_session_mock_service import (
+from app.services.auth_session_service import (
     create_guest_session as _create_guest_session,
     get_current_auth_subject as _get_current_auth_subject,
 )
@@ -54,9 +58,9 @@ from app.services.chat_orchestration_service import (
 )
 from app.services.google_auth_service import (
     create_google_code_login as _create_google_code_login,
-    create_google_login as _create_google_login,
     create_logout as _create_logout,
     create_token_refresh as _create_token_refresh,
+    validate_google_code_request_boundary as _validate_google_code_request_boundary,
 )
 from app.services.history_event_mock_service import (
     HISTORY_EVENT_VERSION,
@@ -89,6 +93,8 @@ from chatbot.request_parsing import (
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
     AuthSessionStateError,
+    ReportReferenceError,
+    SessionBindingError,
     UploadStorageUnavailableError,
     UploadValidationError,
     access_subject_from_payload,
@@ -185,53 +191,73 @@ def guest_session(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @require_http_methods(["POST", "OPTIONS"])
-def auth_login(request: HttpRequest) -> JsonResponse:
-    body = _json_body(request)
-    status, payload = _create_google_login(body)
-    if status < 400:
-        payload["persistence"] = persist_current_auth_subject(
-            payload,
-            session_id=body.get("session_id"),
-        )
-    _record_history_safely(
-        request,
-        event_type="auth_login_completed",
-        status="success" if status < 400 else "failed",
-        summary="Google login boundary was processed.",
-        actor=_actor_from_auth_me_payload(request, payload),
-        subject=subject_from_payload({"session_id": body.get("session_id")}),
-        source=_history_source(request),
-        metadata={
-            "http_status": status,
-            "provider": payload.get("provider"),
-            "subject_type": (payload.get("subject") or {}).get("subject_type")
-            if isinstance(payload.get("subject"), dict)
-            else None,
-            "error_code": (payload.get("error") or {}).get("code")
-            if isinstance(payload.get("error"), dict)
-            else None,
-        },
-    )
-    response = _json_response(request, payload, status=status)
-    if status in {401, 403} and isinstance(payload.get("error"), dict):
-        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
-    return response
-
-
-@csrf_exempt
-@require_http_methods(["POST", "OPTIONS"])
 def auth_google_code(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
+    request_error = _validate_google_code_request_boundary(
+        body,
+        request_headers=dict(request.headers.items()),
+    )
+    if request_error is not None:
+        status, payload = request_error
+        response = _json_response(request, payload, status=status)
+        if status in {401, 403} and isinstance(payload.get("error"), dict):
+            response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+        return response
+    try:
+        binding_error = _google_code_session_binding_error(body)
+    except DatabaseError:
+        payload = build_auth_error(
+            "provider_unavailable",
+            reason="google_login_session_store_unavailable",
+        )
+        return _json_response(request, payload, status=503)
+    if binding_error:
+        payload = build_auth_error("forbidden", reason=binding_error)
+        response = _json_response(request, payload, status=403)
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+        return response
+    rate_subject = _google_oauth_rate_limit_subject(request)
+    cached_block = _get_cached_google_oauth_block(rate_subject)
+    if cached_block is not None:
+        return _google_oauth_rate_limit_response(request, cached_block)
+    try:
+        usage = record_usage_event(
+            rate_subject,
+            scope="google_oauth_code_exchange",
+            record_blocked_event=False,
+        )
+    except DatabaseError:
+        payload = build_auth_error(
+            "provider_unavailable",
+            reason="google_oauth_rate_limit_store_unavailable",
+        )
+        return _json_response(request, payload, status=503)
+    if not usage["allowed"]:
+        _cache_google_oauth_block(rate_subject, usage)
+        return _google_oauth_rate_limit_response(request, usage)
     status, payload = _create_google_code_login(
         body,
         request_headers=dict(request.headers.items()),
     )
-    if status < 400:
-        payload["persistence"] = persist_current_auth_subject(
-            payload,
-            session_id=body.get("session_id"),
-        )
     _strip_private_oauth_payload(payload)
+    if status < 400:
+        try:
+            payload["persistence"] = persist_current_auth_subject(
+                payload,
+                session_id=body.get("session_id"),
+            )
+        except AuthSessionStateError as exc:
+            status = 401
+            payload = build_auth_error("token_invalid", reason=exc.reason)
+        except SessionBindingError as exc:
+            status = 403
+            payload = build_auth_error("forbidden", reason=exc.reason)
+        except DatabaseError:
+            status = 503
+            payload = build_auth_error(
+                "provider_unavailable",
+                reason="google_login_persistence_unavailable",
+            )
     _record_history_safely(
         request,
         event_type="auth_google_code_completed",
@@ -254,6 +280,182 @@ def auth_google_code(request: HttpRequest) -> JsonResponse:
     if status in {401, 403} and isinstance(payload.get("error"), dict):
         response["WWW-Authenticate"] = build_www_authenticate_header(payload)
     return response
+
+
+def _google_code_session_binding_error(body: dict) -> str:
+    session_id = str(body.get("session_id") or "").strip()
+    if not session_id:
+        return ""
+    session_access = get_chat_session_access_metadata(session_id)
+    if session_access is None:
+        return ""
+    if str(session_access.get("owner_id") or "").strip():
+        return "google_session_already_owned"
+
+    expected_guest_id = _normalized_guest_id_for_binding(session_access.get("guest_id"))
+    request_guest_id = _normalized_guest_id_for_binding(body.get("guest_id"))
+    if not expected_guest_id:
+        return "google_session_unbound"
+    if request_guest_id != expected_guest_id:
+        return "google_guest_session_mismatch"
+    return ""
+
+
+def _normalized_guest_id_for_binding(value: object) -> str:
+    guest_id = str(value or "").strip()
+    if not guest_id:
+        return ""
+    return guest_id if guest_id.startswith("gst_") else f"gst_{guest_id}"
+
+
+def _google_oauth_rate_limit_subject(request: HttpRequest) -> dict[str, str]:
+    client_ip = _google_oauth_client_ip(request)
+    secret = str(settings.APP_JWT_SECRET or settings.SECRET_KEY).encode("utf-8")
+    digest = hmac.new(
+        secret,
+        f"google_oauth_code_exchange.v1:{client_ip}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+    return {"guest_id": f"oauth_{digest}"}
+
+
+def _google_oauth_block_cache_key(subject: dict[str, str]) -> str:
+    return f"google_oauth_code_exchange:block:{subject['guest_id']}"
+
+
+def _get_cached_google_oauth_block(
+    subject: dict[str, str],
+) -> dict[str, object] | None:
+    try:
+        cached = cache.get(_google_oauth_block_cache_key(subject))
+    except Exception as exc:  # pragma: no cover - cache backend failure boundary.
+        logger.warning(
+            "Google OAuth block cache read failed error_type=%s",
+            exc.__class__.__name__,
+        )
+        return None
+    return dict(cached) if isinstance(cached, dict) else None
+
+
+def _cache_google_oauth_block(
+    subject: dict[str, str],
+    usage: dict[str, object],
+) -> None:
+    public_usage = {
+        key: usage.get(key)
+        for key in (
+            "scope",
+            "limit_count",
+            "used_count",
+            "remaining_count",
+            "reset_at",
+        )
+        if key in usage
+    }
+    try:
+        cache.set(
+            _google_oauth_block_cache_key(subject),
+            public_usage,
+            timeout=300,
+        )
+    except Exception as exc:  # pragma: no cover - cache backend failure boundary.
+        logger.warning(
+            "Google OAuth block cache write failed error_type=%s",
+            exc.__class__.__name__,
+        )
+
+
+def _google_oauth_client_ip(request: HttpRequest) -> str:
+    remote_ip = _normalized_ip_address(request.META.get("REMOTE_ADDR"))
+    if not remote_ip:
+        return "unknown"
+
+    trusted_networks = _google_oauth_trusted_proxy_networks()
+    if not _ip_is_in_networks(remote_ip, trusted_networks):
+        return remote_ip
+
+    forwarded_values = [
+        _normalized_ip_address(value)
+        for value in str(request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")
+        if value.strip()
+    ]
+    if not forwarded_values or any(not value for value in forwarded_values):
+        return remote_ip
+
+    current_ip = remote_ip
+    for forwarded_ip in reversed(forwarded_values):
+        if not _ip_is_in_networks(current_ip, trusted_networks):
+            break
+        current_ip = forwarded_ip
+    return current_ip
+
+
+def _google_oauth_trusted_proxy_networks() -> tuple[
+    ipaddress.IPv4Network | ipaddress.IPv6Network,
+    ...,
+]:
+    configured = settings.GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS
+    values = configured.split(",") if isinstance(configured, str) else configured
+    networks = []
+    for value in values:
+        try:
+            networks.append(ipaddress.ip_network(str(value).strip(), strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
+def _normalized_ip_address(value: object) -> str:
+    try:
+        return ipaddress.ip_address(str(value or "").strip()).compressed
+    except ValueError:
+        return ""
+
+
+def _ip_is_in_networks(
+    value: str,
+    networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...],
+) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return any(
+        address.version == network.version and address in network
+        for network in networks
+    )
+
+
+def _google_oauth_rate_limit_response(
+    request: HttpRequest,
+    usage: dict[str, object],
+) -> JsonResponse:
+    public_usage = {
+        key: usage.get(key)
+        for key in (
+            "scope",
+            "limit_count",
+            "used_count",
+            "remaining_count",
+            "reset_at",
+        )
+        if key in usage
+    }
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "rate_limit.v1",
+                "type": "rate_limit",
+                "code": "rate_limit_exceeded",
+                "status": 429,
+                "message": "Google 로그인 요청 한도를 초과했습니다.",
+                "required_action": "wait_then_restart_google_login",
+                "usage": public_usage,
+            }
+        },
+        status=429,
+    )
 
 
 @csrf_exempt
@@ -1009,6 +1211,12 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             request,
             chat_response=chat_response,
         )
+
+    if chat_response["status"] == "supervisor_unavailable":
+        _refund_usage_safely(usage, reason="supervisor_unavailable")
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "planning_blocked"
+        return _json_response(request, chat_response, status=503)
 
     if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
         chat_response["usage"] = usage
