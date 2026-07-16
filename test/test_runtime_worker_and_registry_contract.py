@@ -37,6 +37,7 @@ def test_public_agent_registry_is_typed_and_never_exposes_mock_execution() -> No
         "law_ground_search",
         "objection_report_generation",
         "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
     }
     for node in nodes:
         assert node["contract_version"] == "agent_capability.v1"

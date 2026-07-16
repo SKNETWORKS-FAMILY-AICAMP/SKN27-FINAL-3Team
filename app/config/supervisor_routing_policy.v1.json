@@ -7,6 +7,11 @@
       "keywords": []
     },
     {
+      "intent": "traffic_accident_confirmation_ocr",
+      "attachment_purposes": ["traffic_accident_confirmation"],
+      "keywords": []
+    },
+    {
       "intent": "fine_notice_procedure",
       "attachment_purposes": [],
       "keywords": ["과태료", "고지서", "범칙금", "의견제출", "이의신청"]
@@ -44,6 +49,12 @@
       "agent_result_validation",
       "final_response_merge"
     ],
+    "traffic_accident_confirmation_ocr": [
+      "input_context_validation",
+      "traffic_accident_confirmation_ocr",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
     "fine_notice_procedure": [
       "input_context_validation",
       "law_ground_search",
@@ -76,6 +87,7 @@
       "fine_notice_analysis",
       "law_ground_search",
       "text_ml_case_search",
+      "traffic_accident_confirmation_ocr",
       "vision_media_analysis"
     ],
     "report_required_nodes": {
@@ -96,6 +108,7 @@
     "law_ground_search",
     "objection_report_generation",
     "text_ml_case_search",
+    "traffic_accident_confirmation_ocr",
     "vision_media_analysis"
   ]
 }

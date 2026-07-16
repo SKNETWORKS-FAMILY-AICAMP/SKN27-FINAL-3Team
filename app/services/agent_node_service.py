@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.contracts.agent_registry import AgentCapabilityContract
+from app.security.pii_masking import sanitize_pii
 from app.services.agent_adapter_contract import (
     build_adapter_context,
     build_agent_adapter_input,
@@ -29,6 +30,11 @@ from app.services.supervisor_control_service import (
 
 DL_MOCK_NODE_CODES = {"vision_media_analysis"}
 REPORTING_NODE_CODE = "objection_report_generation"
+TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE = "traffic_accident_confirmation_ocr"
+TRAFFIC_ACCIDENT_CONFIRMATION_ATTACHMENT_PURPOSE = "traffic_accident_confirmation"
+TRAFFIC_ACCIDENT_CONFIRMATION_REQUIRED_ATTACHMENT = (
+    "attachments[purpose=traffic_accident_confirmation, scan_ready]"
+)
 
 try:
     from chatbot.object_storage import read_object_bytes, storage_reference_from_uri
@@ -116,6 +122,19 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "status": "sync_adapter_ready",
         "adapter_modes": ["sync"],
     },
+    "traffic_accident_confirmation_ocr": {
+        "order": 45,
+        "node_name": "교통사고 사실확인원 OCR 노드",
+        "node_code": "traffic_accident_confirmation_ocr",
+        "node_type": "agent",
+        "owner": "leejaegang27",
+        "description": "검증 완료된 교통사고 사실확인원 이미지에서 사고 사실관계 필드를 추출합니다.",
+        "required_inputs": [TRAFFIC_ACCIDENT_CONFIRMATION_REQUIRED_ATTACHMENT],
+        "produces": ["ocr_evidence", "extracted_fields", "document_check"],
+        "handoff_to": ["agent_result_validation", "text_ml_case_search"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["sync"],
+    },
     "vision_media_analysis": {
         "order": 50,
         "node_name": "영상·이미지 분석 노드",
@@ -187,6 +206,7 @@ PRODUCTION_AGENT_TIMEOUT_SECONDS = {
     "law_ground_search": 30,
     "objection_report_generation": 30,
     "text_ml_case_search": 60,
+    "traffic_accident_confirmation_ocr": 120,
 }
 
 
@@ -518,6 +538,7 @@ def _sync_adapter_node_codes() -> set[str]:
         "law_ground_search",
         "objection_report_generation",
         "text_ml_case_search",
+        TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE,
     }
 
 
@@ -1007,6 +1028,8 @@ def _run_sync_adapter(
         return _run_objection_report_generation_adapter(agent_input, adapter_context)
     if node_code == "text_ml_case_search":
         return _run_text_ml_case_search_adapter(agent_input, adapter_context)
+    if node_code == TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE:
+        return _run_traffic_accident_confirmation_ocr_adapter(agent_input, adapter_context)
     raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
 
 
@@ -1141,6 +1164,186 @@ def _run_fine_notice_analysis_adapter(
             "input_source": state.get("_input_source"),
         },
     )
+
+
+def _run_traffic_accident_confirmation_ocr_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    state, attachment, input_error = _traffic_accident_confirmation_ocr_state(agent_input)
+    adapter_trace = {
+        "adapter": "etl.fault_cases.src.OCR.traffic_accident_confirmation_ocr.graph",
+        "execution_mode": "sync",
+        "input_source": "canonical_scan_ready_attachment" if attachment else "missing",
+    }
+    if input_error:
+        return _complete_adapter_output(
+            {
+                "status": "partial",
+                "execution_status": "input_required",
+                "summary": "교통사고 사실확인원 OCR에는 검사 완료된 이미지 첨부파일이 필요합니다.",
+                "structured_result": {
+                    "missing_fields": [TRAFFIC_ACCIDENT_CONFIRMATION_REQUIRED_ATTACHMENT],
+                    "input_error": input_error,
+                    "ocr_evidence": [],
+                },
+                "evidence": [],
+                "next_actions": ["request_scan_ready_traffic_accident_confirmation"],
+                "limitations": [
+                    "Inline, unresolved, or unscanned attachments are not passed to OCR."
+                ],
+            },
+            node=adapter_context["node"],
+            agent_input=agent_input,
+            adapter_trace=adapter_trace,
+        )
+
+    try:
+        from etl.fault_cases.src.OCR.traffic_accident_confirmation_ocr.graph import graph
+
+        result = graph.invoke(state)
+    except Exception as exc:
+        return _complete_adapter_output(
+            {
+                "status": "failed",
+                "summary": "교통사고 사실확인원 OCR 처리 중 오류가 발생했습니다.",
+                "structured_result": {
+                    "ocr_evidence": _traffic_accident_ocr_evidence(attachment),
+                    "error_code": exc.__class__.__name__,
+                },
+                "evidence": _traffic_accident_ocr_evidence_records(attachment),
+                "next_actions": ["retry_sync_adapter"],
+                "limitations": ["Traffic accident confirmation OCR failed before returning an envelope."],
+            },
+            node=adapter_context["node"],
+            agent_input=agent_input,
+            adapter_trace=adapter_trace,
+        )
+
+    raw_output = (
+        result.get("agent_results", {}).get(TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE)
+        if isinstance(result, dict)
+        else None
+    )
+    if not isinstance(raw_output, dict):
+        raw_output = {
+            "status": "partial",
+            "summary": "교통사고 사실확인원 OCR이 표준 결과 형식을 반환하지 않았습니다.",
+            "structured_result": {},
+            "evidence": [],
+            "next_actions": ["check_traffic_accident_confirmation_ocr_output"],
+            "limitations": ["The OCR graph did not return a complete envelope."],
+        }
+
+    raw_output = deepcopy(raw_output)
+    raw_output["structured_result"] = _traffic_accident_ocr_structured_result(
+        raw_output.get("structured_result"),
+        attachment=attachment,
+    )
+    raw_output["evidence"] = _traffic_accident_ocr_evidence_records(attachment)
+    adapter_trace["source_status"] = raw_output.get("status")
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace=adapter_trace,
+    )
+
+
+def _traffic_accident_confirmation_ocr_state(
+    agent_input: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None, str | None]:
+    attachment = next(
+        (
+            item
+            for item in agent_input.get("attachments") or []
+            if isinstance(item, dict) and _is_scan_ready_traffic_accident_confirmation(item)
+        ),
+        None,
+    )
+    if attachment is None:
+        return {}, None, "scan_ready_attachment_required"
+
+    storage_uri = str(attachment.get("storage_uri") or "")
+    image_bytes = _attachment_object_storage_bytes(attachment, storage_uri)
+    if not image_bytes:
+        return {}, attachment, "scan_ready_attachment_unavailable"
+
+    return (
+        {
+            "document_image": base64.b64encode(image_bytes).decode("ascii"),
+            "document_mime_type": str(attachment.get("content_type") or ""),
+            "source_filename": str(attachment.get("filename") or ""),
+            "agent_results": {},
+        },
+        attachment,
+        None,
+    )
+
+
+def _is_scan_ready_traffic_accident_confirmation(attachment: dict[str, Any]) -> bool:
+    storage_uri = str(attachment.get("storage_uri") or "")
+    object_storage = attachment.get("object_storage")
+    return bool(
+        attachment.get("purpose") == TRAFFIC_ACCIDENT_CONFIRMATION_ATTACHMENT_PURPOSE
+        and attachment.get("metadata_source") == "canonical_scan_gate"
+        and attachment.get("resolution_status") == "scan_ready"
+        and attachment.get("status") == "ready"
+        and attachment.get("scan_status") == "clean"
+        and storage_uri.startswith("s3://")
+        and isinstance(object_storage, dict)
+        and object_storage.get("resource_type") == "uploaded_file"
+        and object_storage.get("status") == "ready"
+        and object_storage.get("storage_uri") == storage_uri
+    )
+
+
+def _traffic_accident_ocr_structured_result(
+    raw_structured_result: Any,
+    *,
+    attachment: dict[str, Any],
+) -> dict[str, Any]:
+    raw = raw_structured_result if isinstance(raw_structured_result, dict) else {}
+    allowed_fields = {
+        "document_check",
+        "page_info",
+        "scene_diagram",
+        "quality",
+        "privacy",
+        "extracted_fields",
+        "missing_fields",
+        "failure_reason",
+    }
+    structured = sanitize_pii({key: deepcopy(raw[key]) for key in allowed_fields if key in raw})
+    structured["ocr_evidence"] = _traffic_accident_ocr_evidence(attachment)
+    return structured
+
+
+def _traffic_accident_ocr_evidence(attachment: dict[str, Any] | None) -> list[dict[str, str]]:
+    if not isinstance(attachment, dict):
+        return []
+    return [
+        {
+            "attachment_id": str(attachment.get("attachment_id") or ""),
+            "storage_uri": str(attachment.get("storage_uri") or ""),
+            "content_type": str(attachment.get("content_type") or ""),
+        }
+    ]
+
+
+def _traffic_accident_ocr_evidence_records(attachment: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence = _traffic_accident_ocr_evidence(attachment)
+    if not evidence:
+        return []
+    return [
+        {
+            "source_type": "user_uploaded_file",
+            "title": "교통사고 사실확인원 첨부파일",
+            "source_reference": evidence[0]["attachment_id"],
+            "metadata": evidence[0],
+            "confidence": None,
+        }
+    ]
 
 
 def _run_law_ground_search_adapter(
@@ -1391,7 +1594,7 @@ def _complete_adapter_output(
         "node_type": node["node_type"],
         "owner": node["owner"],
         "status": _adapter_result_status(source_status),
-        "execution_status": source_status,
+        "execution_status": raw_output.get("execution_status") or source_status,
         "summary": raw_output.get("summary") or _summary_for_node(node["node_code"], _adapter_result_status(source_status)),
         "structured_result": structured_result,
         "evidence": deepcopy(raw_output.get("evidence") or []),
@@ -1422,6 +1625,8 @@ def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, An
         marker = "text_ml_case_search sync adapter is connected through the RAG-backed case-search port."
     elif "objection_report_generation" in adapter:
         marker = "objection_report_generation sync adapter is connected through Supervisor sync execution mode."
+    elif "traffic_accident_confirmation_ocr" in adapter:
+        marker = "traffic_accident_confirmation_ocr is connected through the canonical scan-ready attachment boundary."
     else:
         marker = "Sync adapter is connected through Supervisor sync execution mode."
     if marker not in limitations:
@@ -1545,11 +1750,14 @@ def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Excep
         "fine_notice_analysis": "ai.agents.fine_notice_analysis.graph",
         "law_ground_search": "ai.agents.law_ground_search.run_law_ground_search",
         "text_ml_case_search": "ai.agents.text_ml_case_search.run_text_ml_case_search",
+        "traffic_accident_confirmation_ocr": "etl.fault_cases.src.OCR.traffic_accident_confirmation_ocr.graph",
     }
     if node_code == "fine_notice_analysis":
         input_source = "attachment" if _has_fine_notice_attachment(agent_input) else "missing"
     elif node_code == "law_ground_search":
         input_source = "agent_input.context"
+    elif node_code == TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE:
+        input_source = "canonical_scan_ready_attachment"
     else:
         input_source = "agent_input"
     return {

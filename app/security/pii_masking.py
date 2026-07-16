@@ -95,7 +95,7 @@ _RESIDENT_ID_PATTERN = re.compile(r"\b\d{6}\s*-\s*[1-8]\d{6}\b")
 _DRIVER_LICENSE_PATTERN = re.compile(
     r"\b(?:[가-힣]{2}\s*)?\d{2}\s*[- ]?\s*\d{2}\s*[- ]?\s*\d{6}\s*[- ]?\s*\d{2}\b"
 )
-_MOBILE_PHONE_PATTERN = re.compile(r"\b01[016789]\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}\b")
+_MOBILE_PHONE_PATTERN = re.compile(r"(?<!\d)01[016789]\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}(?!\d)")
 _LANDLINE_PHONE_PATTERN = re.compile(r"\b0\d{1,2}\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}\b")
 _VEHICLE_NUMBER_PATTERN = re.compile(
     r"\b(?:[가-힣]{2}\s*)?\d{2,3}\s*[가-힣]\s*\d{3,4}\b"
