@@ -9,6 +9,7 @@ from uuid import uuid4
 from app.security.chat_input_privacy import protect_chat_input_payload
 from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS, build_consultation_state_v2
+from app.services.law_ground_contract import normalize_law_evidence
 from app.services.supervisor_control_service import (
     evaluate_case_promotion,
     reduce_consultation_fact_state,
@@ -240,7 +241,10 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
             summaries.append(summary)
         if node_code:
             structured_results[node_code] = dict(output.get("structured_result") or {})
-        evidence.extend(item for item in output.get("evidence", []) if isinstance(item, dict))
+        output_evidence = [item for item in output.get("evidence", []) if isinstance(item, dict)]
+        if node_code == "law_ground_search":
+            output_evidence = normalize_law_evidence(output_evidence)
+        evidence.extend(output_evidence)
         limitations.extend(str(item) for item in output.get("limitations", []) if str(item).strip())
 
     status = _combined_status(statuses)

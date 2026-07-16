@@ -263,7 +263,7 @@ def test_agent_response_is_composed_from_execution_results() -> None:
                         "status": "partial",
                         "summary": "관련 조문 후보를 확인했습니다.",
                         "structured_result": {"matched_laws": ["도로교통법"]},
-                        "evidence": [{"source_reference": "law:1"}],
+                        "evidence": [{"source_ref": "law:1", "source_type": "law"}],
                         "limitations": ["사건별 적용 여부는 추가 확인이 필요합니다."],
                     },
                 },
@@ -277,5 +277,6 @@ def test_agent_response_is_composed_from_execution_results() -> None:
     )
     assert response["structured_results"]["text_ml_case_search"]["ratio_range"] == "A 70 : B 30"
     assert [item["source_reference"] for item in response["evidence"]] == ["review:1", "law:1"]
+    assert "source_ref" not in response["evidence"][1]
     assert response["limitations"] == ["사건별 적용 여부는 추가 확인이 필요합니다."]
 

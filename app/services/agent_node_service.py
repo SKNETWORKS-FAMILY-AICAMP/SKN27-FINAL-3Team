@@ -22,6 +22,10 @@ from app.services.agent_adapter_contract import (
 )
 from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.legal_rag_service import search_legal_rag
+from app.services.law_ground_contract import (
+    normalize_law_evidence,
+    normalize_law_structured_result,
+)
 from app.services.supervisor_control_service import (
     SUPERVISOR_INTERNAL_NODE_CODES,
     run_supervisor_control_node,
@@ -104,7 +108,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "owner": "techshin31",
         "description": "법령, 시행령, 규칙, 판례 근거 후보를 검색해 Supervisor 병합용 근거를 만든다.",
         "required_inputs": ["law_code|violation_text|search_query"],
-        "produces": ["matched_laws", "source_ref", "applicability_limit"],
+        "produces": ["matched_laws", "source_reference", "retrieval", "applicability_limit"],
         "handoff_to": ["appeal_decision_flow", "agent_result_validation", "objection_report_generation"],
         "status": "sync_adapter_ready",
         "adapter_modes": ["sync"],
@@ -1365,21 +1369,6 @@ def _run_law_ground_search_adapter(
             "next_actions": ["check_law_ground_search_agent_output"],
             "limitations": ["The law_ground_search adapter did not return a dictionary."],
         }
-    structured_result = raw_output.get("structured_result")
-    if isinstance(structured_result, dict) and "matched_laws" not in structured_result:
-        structured_result["matched_laws"] = [
-            {
-                **deepcopy(provision),
-                "source_reference": provision.get("source_reference")
-                or provision.get("source_ref")
-                or provision.get("chunk_id"),
-                "law_name": provision.get("law_name") or provision.get("source_name"),
-                "article": provision.get("article") or provision.get("article_no"),
-                "summary": provision.get("summary") or provision.get("provision_text"),
-            }
-            for provision in structured_result.get("law_provisions") or []
-            if isinstance(provision, dict)
-        ]
     return _complete_adapter_output(
         raw_output,
         node=adapter_context["node"],
@@ -1585,6 +1574,9 @@ def _complete_adapter_output(
         adapter_trace=adapter_trace,
     )
     structured_result.setdefault("adapter_trace", adapter_trace)
+    evidence = deepcopy(raw_output.get("evidence") or [])
+    if node["node_code"] == "law_ground_search":
+        evidence = normalize_law_evidence(evidence)
     return {
         "session_id": agent_input.get("session_id"),
         "message_id": agent_input.get("message_id"),
@@ -1597,7 +1589,7 @@ def _complete_adapter_output(
         "execution_status": raw_output.get("execution_status") or source_status,
         "summary": raw_output.get("summary") or _summary_for_node(node["node_code"], _adapter_result_status(source_status)),
         "structured_result": structured_result,
-        "evidence": deepcopy(raw_output.get("evidence") or []),
+        "evidence": evidence,
         "next_actions": deepcopy(raw_output.get("next_actions") or []),
         "limitations": _adapter_limitations(raw_output, adapter_trace),
         "created_at": raw_output.get("created_at") or _now_iso(),
@@ -1658,56 +1650,8 @@ def _normalize_adapter_structured_result(
         structured.setdefault("ratio_range_label", "Fault ratio is not fixed; review issues and evidence first.")
         structured.setdefault("recommended_evidence", [])
     elif node_code == "law_ground_search":
-        provisions = [
-            item
-            for item in structured.get("law_provisions") or []
-            if isinstance(item, dict)
-        ]
-        retrieval = (
-            deepcopy(structured.get("retrieval"))
-            if isinstance(structured.get("retrieval"), dict)
-            else next(
-                (
-                    deepcopy(item.get("_retrieval"))
-                    for item in provisions
-                    if isinstance(item.get("_retrieval"), dict)
-                ),
-                {},
-            )
-        )
-        matched_laws = []
-        for provision in provisions:
-            matched_laws.append(
-                {
-                    "law_name": provision.get("source_name"),
-                    "article": provision.get("article_no"),
-                    "title": provision.get("article_title"),
-                    "summary": provision.get("provision_text"),
-                    "source_url": provision.get("source_url"),
-                    "source_reference": (
-                        provision.get("source_ref") or provision.get("chunk_id")
-                    ),
-                    "score": provision.get("retrieval_score") or provision.get("score"),
-                }
-            )
-        backend = retrieval.get("backend") or _law_retrieval_backend(provisions)
-        if backend:
-            retrieval.setdefault("backend", backend)
-        retrieval.setdefault("status", "ready" if provisions else "empty")
-        retrieval.setdefault("attempted_backends", [])
-        structured["matched_laws"] = matched_laws
-        structured["retrieval"] = retrieval
-        structured["retrieval_quality"] = backend or "unavailable"
+        structured = normalize_law_structured_result(structured)
     return structured
-
-
-def _law_retrieval_backend(provisions: list[dict[str, Any]]) -> str:
-    for provision in provisions:
-        reason = str(provision.get("match_reason") or "")
-        marker = "legal_rag_fallback:"
-        if reason.startswith(marker):
-            return reason.removeprefix(marker)
-    return ""
 
 
 def _adapter_error_output(

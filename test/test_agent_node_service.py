@@ -950,7 +950,14 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
                 "source_url": "https://example.test/law/road-traffic#article-5",
                 "provision_text": "Drivers must follow traffic signals.",
                 "score": 0.82,
+                "matched_token_count": 3,
+                "query_token_count": 4,
                 "match_reason": "query_term_match",
+                "_retrieval": {
+                    "backend": "django_rag_tables",
+                    "status": "ready",
+                    "attempted_backends": ["django_rag_tables"],
+                },
             }
         ]
 
@@ -989,11 +996,73 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
     assert output["status"] == "success"
     assert calls[0]["query_text"] == "road traffic signal violation article 5"
     assert structured_result["law_provisions"][0]["chunk_id"] == "road_traffic:article_5"
+    assert structured_result["matched_laws"] == [
+        {
+            "law_name": "Road Traffic Act",
+            "article": "5",
+            "title": "Signal compliance",
+            "summary": "Drivers must follow traffic signals.",
+            "source_url": "https://example.test/law/road-traffic#article-5",
+            "source_reference": "law_db:road_traffic#article_5",
+            "score": 0.82,
+        }
+    ]
+    assert structured_result["retrieval"] == {
+        "backend": "django_rag_tables",
+        "status": "ready",
+        "attempted_backends": ["django_rag_tables"],
+        "contract_version": "law_retrieval.v1",
+    }
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"
     assert structured_result["adapter_trace"]["input_source"] == "agent_input.context"
     assert output["evidence"][0]["source_type"] == "law"
-    assert output["evidence"][0]["source_ref"] == "law_db:road_traffic#article_5"
+    assert output["evidence"][0]["source_reference"] == "law_db:road_traffic#article_5"
+    assert "source_ref" not in output["evidence"][0]
     assert validate_agent_output_envelope(output, expected_node_code="law_ground_search")["valid"]
+
+
+def test_law_ground_agent_emits_canonical_provision_source_reference(monkeypatch):
+    from ai.agents.law_ground_search import agent as law_agent
+
+    monkeypatch.setattr(law_agent, "_get_neo4j_session", lambda: None)
+    monkeypatch.setattr(
+        law_agent,
+        "search_law_provisions",
+        lambda **_kwargs: [
+            {
+                "source_ref": "law:road-traffic:5",
+                "chunk_id": "road-traffic:5",
+                "source_name": "Road Traffic Act",
+                "source_type": "law",
+                "article_no": "Article 5",
+                "provision_text": "Drivers must follow traffic signals.",
+                "source_url": "https://example.test/law/road-traffic#article-5",
+                "score": 0.82,
+            }
+        ],
+    )
+
+    output = law_agent.run_law_ground_search(
+        {
+            "session_id": "ses_direct_law",
+            "message_id": "msg_direct_law",
+            "job_id": "job_direct_law",
+            "context": {
+                "query": {
+                    "raw_text": "road traffic signal violation article 5",
+                    "search_query": "road traffic signal violation article 5",
+                },
+                "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-17"},
+                "scope": {"jurisdiction": "KR"},
+            },
+        },
+        {},
+    )
+
+    provision = output["structured_result"]["law_provisions"][0]
+    assert provision["source_reference"] == "law:road-traffic:5"
+    assert "source_ref" not in provision
+    assert output["evidence"][0]["source_reference"] == "law:road-traffic:5"
 
 
 def test_law_ground_search_falls_back_to_django_rag(monkeypatch):

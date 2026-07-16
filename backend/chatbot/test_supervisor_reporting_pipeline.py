@@ -24,6 +24,7 @@ from chatbot.models import (
     ConfirmedFactVersion,
     Report,
     ReportStatus,
+    RetrievalEvent,
 )
 from chatbot.repositories import (
     authorize_report_download_metadata,
@@ -117,7 +118,14 @@ def _agent_output(node_code: str, *, status: str = "success") -> dict:
                     "summary": "persisted legal ground",
                     "source_reference": "law:1",
                 }
-            ]
+            ],
+            "retrieval": {
+                "contract_version": "law_retrieval.v1",
+                "status": "ready",
+                "backend": "django_rag_tables",
+                "attempted_backends": ["postgres_lexical", "django_rag_tables"],
+            },
+            "retrieval_quality": "django_rag_tables",
         },
         "text_ml_case_search": {
             "query_text": "confirmed intersection collision facts",
@@ -707,6 +715,42 @@ class SupervisorReportingPipelineTests(TestCase):
             job.metadata["supervisor_reporting_handoff"]["handoff_id"],
         )
         self.assertEqual(job_detail["latest_report_id"], report.report_id)
+        law_result = AgentResult.objects.get(job=job, node_code="law_ground_search")
+        self.assertEqual(
+            law_result.structured_result["retrieval"]["attempted_backends"],
+            ["postgres_lexical", "django_rag_tables"],
+        )
+        law_api_result = next(
+            item
+            for item in job_detail["agent_results"]
+            if item["node_code"] == "law_ground_search"
+        )
+        self.assertEqual(
+            law_api_result["structured_result"]["retrieval"],
+            law_result.structured_result["retrieval"],
+        )
+        law_supervisor_result = next(
+            item
+            for item in job_detail["supervisor_execution"]["node_results"]
+            if item["node_code"] == "law_ground_search"
+        )
+        self.assertEqual(
+            law_supervisor_result["structured_result"]["matched_laws"][0][
+                "source_reference"
+            ],
+            "law:1",
+        )
+        retrieval_event = RetrievalEvent.objects.get(
+            invocation__job=job,
+            invocation__node_code="law_ground_search",
+        )
+        self.assertEqual(retrieval_event.source_refs, ["law:1"])
+        self.assertEqual(retrieval_event.metadata["retrieval_status"], "ready")
+        self.assertEqual(retrieval_event.metadata["retrieval_backend"], "django_rag_tables")
+        self.assertEqual(
+            retrieval_event.metadata["attempted_backends"],
+            ["postgres_lexical", "django_rag_tables"],
+        )
         self.assertEqual(job_detail["report_links"][0]["report_id"], report.report_id)
         report_detail = get_report_record_detail(report.report_id)
         self.assertEqual(report_detail["content"]["contract_version"], "analysis_report.v1")
