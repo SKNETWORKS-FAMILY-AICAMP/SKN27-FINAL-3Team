@@ -14,7 +14,7 @@ from .state import TrafficAccidentConfirmationOCRState
 NODE_NAME = "교통사고사실확인원 OCR 노드"
 NODE_CODE = "traffic_accident_confirmation_ocr"
 DEFAULT_OUTPUT_DIR = Path("etl/fault_cases/artifacts/OCR_output")
-SENSITIVE_OUTPUT_KEYS = {"document_image"}
+SENSITIVE_OUTPUT_KEYS = {"document_image", "raw_text_redacted"}
 
 
 def make_envelope(
@@ -57,20 +57,6 @@ def update_agent_results(
     return results
 
 
-def _safe_source_stem(source_filename: str | None) -> str:
-    source_stem = Path(source_filename or "unknown").stem
-    safe_chars = []
-
-    for char in source_stem:
-        if char.isalnum() or char in {"-", "_", "."}:
-            safe_chars.append(char)
-        else:
-            safe_chars.append("_")
-
-    safe_name = "".join(safe_chars).strip("._")
-    return safe_name or "unknown"
-
-
 def _strip_sensitive_keys(value):
     if isinstance(value, dict):
         return {
@@ -91,11 +77,10 @@ def save_ocr_output(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    source_stem = _safe_source_stem(source_filename)
     status = str(result.get("status") or OUTPUT_STATUS_UNKNOWN)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
     short_id = uuid.uuid4().hex[:8]
-    file_path = output_path / f"{timestamp}_{source_stem}_{status}_{short_id}.json"
+    file_path = output_path / f"{timestamp}_{status}_{short_id}.json"
 
     safe_result = sanitize_pii(_strip_sensitive_keys(result))
     file_path.write_text(

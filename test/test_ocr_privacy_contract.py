@@ -123,3 +123,26 @@ def test_saved_ocr_json_masks_nested_pii_errors_and_secrets(monkeypatch) -> None
     assert "document_image" not in saved
     assert "raw-base64-image" not in writes[0]
     assert MASK_TOKEN in writes[0]
+
+
+def test_saved_ocr_output_omits_raw_text_and_source_filename_pii(tmp_path) -> None:
+    source_filename = "홍길동_교통사고사실확인원.jpg"
+    source = {
+        "status": "success",
+        "structured_result": {
+            "raw_text_redacted": "홍길동 서울특별시 강남구 테헤란로 123",
+        },
+    }
+
+    saved_path = Path(
+        traffic_ocr_utils.save_ocr_output(
+            source,
+            source_filename=source_filename,
+            output_dir=tmp_path,
+        )
+    )
+    saved = json.loads(saved_path.read_text(encoding="utf-8"))
+
+    assert "raw_text_redacted" not in saved["structured_result"]
+    assert "홍길동" not in saved_path.name
+    assert "홍길동" not in saved_path.read_text(encoding="utf-8")
