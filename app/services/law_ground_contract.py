@@ -7,6 +7,7 @@ from typing import Any
 
 
 LAW_RETRIEVAL_CONTRACT_VERSION = "law_retrieval.v1"
+FAILED_RETRIEVAL_STATUSES = {"failed", "error", "unavailable"}
 
 
 def normalize_law_structured_result(value: Any) -> dict[str, Any]:
@@ -35,10 +36,12 @@ def normalize_law_structured_result(value: Any) -> dict[str, Any]:
         retrieval["contract_version"] = LAW_RETRIEVAL_CONTRACT_VERSION
 
     current_status = _text(retrieval.get("status"))
-    if matched_laws:
-        retrieval["status"] = current_status or "ready"
-    elif current_status in {"failed", "error", "unavailable"}:
+    if current_status in FAILED_RETRIEVAL_STATUSES:
+        provisions = []
+        matched_laws = []
         retrieval["status"] = current_status
+    elif matched_laws:
+        retrieval["status"] = current_status or "ready"
     else:
         retrieval["status"] = "empty"
 

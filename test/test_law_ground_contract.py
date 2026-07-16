@@ -5,6 +5,33 @@ from app.services.law_ground_contract import (
 )
 
 
+def test_failed_retrieval_removes_preexisting_source_backed_law_matches() -> None:
+    structured = normalize_law_structured_result(
+        {
+            "matched_laws": [
+                {
+                    "law_name": "Road Traffic Act",
+                    "article": "Article 5",
+                    "source_reference": "law:road-traffic:5",
+                }
+            ],
+            "retrieval": {
+                "backend": "django_rag_tables",
+                "status": "failed",
+                "attempted_backends": ["postgres_lexical", "django_rag_tables"],
+            },
+        }
+    )
+
+    assert structured["matched_laws"] == []
+    assert structured["retrieval"] == {
+        "backend": "django_rag_tables",
+        "status": "failed",
+        "attempted_backends": ["postgres_lexical", "django_rag_tables"],
+        "contract_version": LAW_RETRIEVAL_CONTRACT_VERSION,
+    }
+
+
 def test_legacy_source_alias_is_accepted_only_at_the_contract_boundary() -> None:
     structured = normalize_law_structured_result(
         {
