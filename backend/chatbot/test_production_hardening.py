@@ -102,6 +102,7 @@ class ProductionApiContractTests(SimpleTestCase):
                 "law_ground_search",
                 "objection_report_generation",
                 "text_ml_case_search",
+                "traffic_accident_confirmation_ocr",
             },
         )
         self.assertNotIn("vision_media_analysis", str(body))

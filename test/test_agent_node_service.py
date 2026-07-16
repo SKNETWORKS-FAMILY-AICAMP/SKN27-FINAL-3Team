@@ -26,6 +26,7 @@ def test_agent_node_registry_lists_all_integration_nodes():
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
         "vision_media_analysis",
         "appeal_decision_flow",
         "objection_report_generation",
@@ -36,6 +37,9 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert fine_notice_node["status"] == "sync_adapter_ready"
     assert "sync" in fine_notice_node["adapter_modes"]
     text_ml_node = next(node for node in nodes if node["node_code"] == "text_ml_case_search")
+    traffic_ocr_node = next(
+        node for node in nodes if node["node_code"] == "traffic_accident_confirmation_ocr"
+    )
     law_node = next(node for node in nodes if node["node_code"] == "law_ground_search")
     vision_node = next(node for node in nodes if node["node_code"] == "vision_media_analysis")
     objection_node = next(node for node in nodes if node["node_code"] == "objection_report_generation")
@@ -45,6 +49,9 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert text_ml_node["status"] == "sync_adapter_ready"
     assert text_ml_node["adapter_modes"] == ["sync"]
     assert text_ml_node["adapter_contract"]["execution_modes"] == ["sync"]
+    assert traffic_ocr_node["status"] == "sync_adapter_ready"
+    assert traffic_ocr_node["adapter_modes"] == ["sync"]
+    assert traffic_ocr_node["adapter_contract"]["execution_modes"] == ["sync"]
     assert vision_node["status"] == "mock_contract_only"
     assert vision_node["adapter_modes"] == ["mock"]
     assert vision_node["adapter_contract"]["execution_modes"] == ["mock"]
@@ -65,6 +72,7 @@ def test_only_vision_agent_advertises_mock_execution():
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
         "appeal_decision_flow",
         "objection_report_generation",
     }:
@@ -79,6 +87,7 @@ def test_public_agent_registry_includes_every_non_dl_runtime_agent():
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
         "appeal_decision_flow",
         "objection_report_generation",
     }
