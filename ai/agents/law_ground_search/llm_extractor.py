@@ -74,7 +74,7 @@ class OpenAILawKeywordExtractor:
             "{\n"
             "  \"law_code\": \"대표적인 법령 코드\",\n"
             "  \"violation_text\": \"위반 행위 요약\",\n"
-            "  \"matched_laws\": [{\"title\": \"법령명\", \"article\": \"조항\", \"summary\": \"조항 요약\", \"source_ref\": \"해당 조문의 chunk_id\"}],\n"
+            "  \"matched_laws\": [{\"title\": \"법령명\", \"article\": \"조항\", \"summary\": \"조항 요약\", \"source_reference\": \"해당 조문의 chunk_id\"}],\n"
             "  \"reduction_eligible\": true/false,\n"
             "  \"reduction_rate\": 0.2 등 (없으면 null),\n"
             "  \"special_reduction\": false (또는 null),\n"

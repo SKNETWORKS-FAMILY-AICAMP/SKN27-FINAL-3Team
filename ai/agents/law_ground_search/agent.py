@@ -118,6 +118,21 @@ def run_law_ground_search(
     # 5. Rule Guard 필터링
     valid_provisions, limitations = validate_and_filter_provisions(raw_provisions, scope)
     output["limitations"].extend(limitations)
+    sourced_provisions = []
+    for provision in valid_provisions:
+        source_reference = (
+            provision.get("source_reference")
+            or provision.get("source_ref")
+            or provision.get("chunk_id")
+        )
+        if not str(source_reference or "").strip():
+            output["limitations"].append(
+                f"Missing source_reference; legal provision was excluded: {provision.get('chunk_id')}"
+            )
+            continue
+        provision["source_reference"] = str(source_reference).strip()
+        sourced_provisions.append(provision)
+    valid_provisions = sourced_provisions
     final_conf_res = evaluate_confidence(valid_provisions)
     retrieval_metadata = next(
         (
@@ -129,6 +144,7 @@ def run_law_ground_search(
     )
     for provision in valid_provisions:
         provision.pop("_retrieval", None)
+        provision.pop("source_ref", None)
 
     # 6. 결과 구성
     if not valid_provisions:
@@ -155,7 +171,7 @@ def run_law_ground_search(
         evidence_list = []
         for prov in valid_provisions:
             evidence_list.append({
-                "source_ref": prov.get("source_ref"),
+                "source_reference": prov["source_reference"],
                 "chunk_id": prov.get("chunk_id"),
                 "source_name": prov.get("source_name"),
                 "source_type": prov.get("source_type"),

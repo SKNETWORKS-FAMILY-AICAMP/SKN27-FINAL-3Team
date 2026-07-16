@@ -143,6 +143,33 @@ def test_repeated_analysis_cards_use_unique_react_keys() -> None:
     assert shell.count("key={analysisCardKey(card, index)}") == 4
 
 
+def test_frontend_renders_canonical_law_ground_results_and_retrieval_status() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    styles = read_text(ROOT / "app" / "web" / "styles.css")
+
+    for token in (
+        "function LawGroundInsightPanel",
+        'node?.node_code !== "law_ground_search"',
+        "structuredResult.matched_laws",
+        "item.source_reference",
+        "retrieval.backend",
+        "retrieval.status",
+        "retrieval.attempted_backends",
+    ):
+        assert token in shell
+    assert shell.count("<LawGroundInsightPanel") == 2
+    for class_name in (
+        "agent-insight-panel",
+        "agent-insight-head",
+        "agent-insight-grid",
+        "agent-insight-section",
+    ):
+        assert class_name in shell
+        assert f".{class_name}" in styles
+    assert "fault-ratio-insight-" not in shell
+    assert "fault-ratio-insight-" not in styles
+
+
 def test_deferred_vision_and_aws_ops_are_not_runtime_modules() -> None:
     assert not (ROOT / "app" / "services" / "vision_pipeline_service.py").exists()
     assert not (ROOT / "app" / "services" / "aws_ops_mcp_service.py").exists()
