@@ -491,16 +491,16 @@ def _reportlab_pdf_bytes_via_bundled_python(*, report_id: str, title: str, body_
         return None
 USAGE_POLICY_LIMITS = {
     "anonymous": {
-        "chat_message": 2,
-        "file_upload": 1,
-        "agent_run": 1,
-        "report_action": 1,
+        "chat_message": 200,
+        "file_upload": 100,
+        "agent_run": 100,
+        "report_action": 100,
     },
     "guest": {
-        "chat_message": 5,
-        "file_upload": 3,
-        "agent_run": 3,
-        "report_action": 2,
+        "chat_message": 200,
+        "file_upload": 100,
+        "agent_run": 100,
+        "report_action": 100,
         "google_oauth_code_exchange": settings.GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT,
     },
     "free": {
