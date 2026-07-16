@@ -75,6 +75,7 @@ def build_supervisor_state_with_optional_llm(
             fallback_state,
             reason="invalid_contract",
             config=config,
+            candidate=candidate,
         )
     return _with_llm_metadata(
         normalized,
@@ -660,7 +661,13 @@ def _fail_closed_supervisor_state(
     *,
     reason: str,
     config: dict[str, Any],
+    candidate: Any = None,
 ) -> dict[str, Any]:
+    # Even when the full LLM response doesn't pass the strict contract check (or
+    # is otherwise unusable), it may still contain a perfectly fine list of missing
+    # fields/follow-up questions. Surface those leniently so the user is at least
+    # asked something concrete, instead of silently asking nothing.
+    lenient_questions = _lenient_missing_fields(candidate)
     state = {
         "contract_version": fallback_state.get("contract_version")
         or "supervisor_conversation.v1",
@@ -669,8 +676,10 @@ def _fail_closed_supervisor_state(
         "conversation_turn_count": fallback_state.get("conversation_turn_count", 0),
         "conversation_summary": "",
         "collected_facts": [],
-        "missing_fields": [],
-        "next_questions": [],
+        "missing_fields": [
+            {"field": item["field"]} for item in lenient_questions if item.get("field")
+        ],
+        "next_questions": lenient_questions,
         "agent_input_packages": [],
         "reporting_payload": None,
         "blocked_reason": reason,
@@ -681,6 +690,27 @@ def _fail_closed_supervisor_state(
         reason=reason,
         config=config,
     )
+
+
+def _lenient_missing_fields(candidate: Any) -> list[dict[str, Any]]:
+    """Pull usable {field, question} entries out of a candidate that otherwise
+    failed strict contract validation (or wasn't validated at all)."""
+
+    if not isinstance(candidate, dict):
+        return []
+    raw_questions = candidate.get("next_questions")
+    if not isinstance(raw_questions, list):
+        return []
+    questions: list[dict[str, Any]] = []
+    for item in raw_questions:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question") or "").strip()
+        if not question:
+            continue
+        field = str(item.get("field") or "").strip()
+        questions.append({"field": field or None, "question": question})
+    return questions
 
 
 def _fail_closed_supervisor_plan(

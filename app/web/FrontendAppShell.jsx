@@ -307,6 +307,22 @@ export default function FrontendAppShell({
     };
   }
 
+  // Local dev only: fakes "logged in" purely in the browser so the logged-in UI can be
+  // reviewed, with zero backend calls. Deliberately does NOT set an auth token — leaving
+  // it empty keeps identity.authToken falsy, so requests still go out with X-Guest-Id and
+  // hit the backend's guest-allowed paths (chat/messages, files, reports, auth/me) instead
+  // of being forced through real Bearer-JWT validation with a fake, unparseable token.
+  // Screens that strictly require a real session (mypage summary/history) will still
+  // come back empty/error, since there's no real auth session in the database.
+  function previewLoggedInUi() {
+    const previewSessionId = sessionId || `ses_preview_${Date.now()}`;
+    const previewGuestId = guestId || `gst_preview_${Date.now()}`;
+    setSessionId(previewSessionId);
+    setGuestId(previewGuestId);
+    setAuthSessionId(`auth_preview_${Date.now()}`);
+    setStatusMessage("UI 미리보기 모드입니다. 실제 로그인이 아니라 화면만 로그인 상태로 보여주는 것이라, 마이페이지 등 실제 데이터가 필요한 화면은 비어있거나 에러일 수 있습니다.");
+  }
+
   async function logoutAndResetSession() {
     setStatusMessage("로그아웃하고 새 계정으로 시작할 준비를 하고 있습니다.");
     const logoutIdentity = identity;
@@ -825,6 +841,7 @@ export default function FrontendAppShell({
     });
   }
 
+
   async function keepConversationTemporary() {
     setSaveDecision("session_only");
     setSavePromptVisible(false);
@@ -1083,12 +1100,14 @@ export default function FrontendAppShell({
               isSubmitting={isSubmitting}
               isSavingConversation={isSavingConversation}
               onKeepTemporary={keepConversationTemporary}
+              onPreviewLoggedInUi={previewLoggedInUi}
               onRegisterAttachment={registerAttachmentMetadata}
               onOpenReporting={() => setActiveRoute("reporting")}
               onRunReportAction={runCurrentReportAction}
               onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
               pendingAuthAction={pendingAuthAction}
+              showPreviewLoggedInUi={Boolean(import.meta.env.DEV)}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
@@ -1578,6 +1597,7 @@ function ChatScreenV2({
   onKeepTemporary,
   onRegisterAttachment,
   onOpenReporting,
+  onPreviewLoggedInUi,
   onRunReportAction,
   onSaveConversation,
   onSubmit,
@@ -1592,6 +1612,7 @@ function ChatScreenV2({
   setAttachmentPurpose,
   setQuestion,
   setSelectedUploadFile,
+  showPreviewLoggedInUi,
   statusMessage,
   submittedQuestion,
   supervisorExecution,
@@ -1623,14 +1644,11 @@ function ChatScreenV2({
     "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어",
     "보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘",
   ];
-  const [isReportingExpanded, setIsReportingExpanded] = useState(false);
-
   return (
     <section className="screen">
       <div className="screen-header">
         <div className="screen-title">
           <h2>AI 교통 상담</h2>
-          <p>로그인 없이 먼저 이야기하고, 저장이나 정밀 분석이 필요해질 때 계정을 연결합니다.</p>
         </div>
         <div className="screen-actions">
           <button className="button" type="button" onClick={onKeepTemporary}>
@@ -1639,6 +1657,16 @@ function ChatScreenV2({
           <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
             {isSavingConversation ? "연결 중" : "Google 로그인 후 저장"}
           </button>
+          {showPreviewLoggedInUi && (
+            <button
+              className="button"
+              type="button"
+              onClick={onPreviewLoggedInUi}
+              title="로컬 개발 전용: 백엔드 호출 없이 화면만 로그인 상태로 바꿈"
+            >
+              UI 미리보기 (로그인 상태로 보기)
+            </button>
+          )}
         </div>
       </div>
 
@@ -1740,65 +1768,14 @@ function ChatScreenV2({
                         <p>{message.content}</p>
                         {!isUser && isLatestAssistant && (
                           <>
-                            {analysisCards.length > 0 && (
-                              <div className="result-cards">
-                                {analysisCards.map((card, index) => (
-                                  <div className="result-card" key={analysisCardKey(card, index)}>
-                                    <span className={card.status === "success" ? "tag green" : "tag amber"}>
-                                      {card.card_type}
-                                    </span>
-                                    <strong>{card.title}</strong>
-                                    <p>{card.summary}</p>
-                                    {caseResultRoute(card) && (
-                                      <div className="result-card-actions">
-                                        <button
-                                          className="button primary small"
-                                          type="button"
-                                          onClick={() => onOpenCaseResult(caseResultRoute(card))}
-                                        >
-                                          결과 화면 열기
-                                        </button>
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            {(supervisorState || reportingPayload || analysisCards.length > 0) && (
-                              <details
-                                className="reporting-disclosure"
-                                open={isReportingExpanded}
-                                onToggle={(event) => setIsReportingExpanded(event.currentTarget.open)}
-                              >
-                                <summary className="reporting-disclosure__summary">
-                                  <span className="reporting-disclosure__title">
-                                    <span className="reporting-disclosure__icon" aria-hidden="true">↗</span>
-                                    <span>
-                                      <strong>분석·리포팅 보기</strong>
-                                      <small>핵심 답변은 위에 두고, 근거와 저장 작업은 필요할 때 확인하세요.</small>
-                                    </span>
-                                  </span>
-                                  <span className="reporting-disclosure__action">{isReportingExpanded ? "접기" : "펼쳐보기"}</span>
-                                </summary>
-                                <div className="reporting-disclosure__body">
-                                  {supervisorState && (
-                                    <AnalysisProgressPanel
-                                      analysisCards={analysisCards}
-                                      reportingPayload={reportingPayload}
-                                      supervisorState={supervisorState}
-                                    />
-                                  )}
-                                  {reportingPayload && <ReportingPreviewPanel reportingPayload={reportingPayload} />}
-                                  {(reportingPayload || analysisCards.length > 0) && (
-                                    <ReportActionPanel
-                                      currentReport={currentReport}
-                                      isAuthenticated={Boolean(authSessionId)}
-                                      onRunReportAction={onRunReportAction}
-                                      reportActionStatus={reportActionStatus}
-                                    />
-                                  )}
-                                </div>
-                              </details>
+                            <MissingFieldsPrompt supervisorState={supervisorState} />
+                            {(reportingPayload || analysisCards.length > 0) && (
+                              <ReportActionPanel
+                                currentReport={currentReport}
+                                isAuthenticated={Boolean(authSessionId)}
+                                onRunReportAction={onRunReportAction}
+                                reportActionStatus={reportActionStatus}
+                              />
                             )}
                             {visibleReportingPayload && (
                               <ReportReadyNotice
@@ -1814,6 +1791,15 @@ function ChatScreenV2({
                     </article>
                   );
                 })}
+                {isSubmitting && (
+                  <article className="message" aria-live="polite">
+                    <span className="message-avatar">AI</span>
+                    <div className="bubble wide bubble-loading">
+                      <span className="typing-dots"><span></span><span></span><span></span></span>
+                      <span>AI가 답변을 정리하고 있어요</span>
+                    </div>
+                  </article>
+                )}
               </>
             )}
           </div>
@@ -1875,7 +1861,7 @@ function ChatScreenV2({
             </button>
           </div>
 
-          {statusMessage && (
+          {statusMessage && !isSubmitting && (
             <p className="status-message inside" role="status">
               {statusMessage}
             </p>
@@ -1886,71 +1872,21 @@ function ChatScreenV2({
   );
 }
 
-function AnalysisProgressPanel({ analysisCards, reportingPayload, supervisorState }) {
-  const facts = Array.isArray(supervisorState?.collected_facts) ? supervisorState.collected_facts : [];
+function MissingFieldsPrompt({ supervisorState }) {
   const questions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
-  const hasAnalysis = analysisCards.length > 0;
-  const hasReport = Boolean(reportingPayload);
-  const steps = [
-    { label: "입력 확인", description: "상담 내용과 첨부 자료를 확인했습니다.", status: "완료" },
-    {
-      label: "자료 분석",
-      description: "사건 유형에 필요한 정보를 정리합니다.",
-      status: hasAnalysis ? "완료" : "진행 중",
-    },
-    {
-      label: "근거 확인",
-      description: "관련 법령과 사례의 적용 조건을 확인합니다.",
-      status: hasAnalysis ? "완료" : "대기",
-    },
-    {
-      label: "리포트 준비",
-      description: "확인된 결과와 다음 행동을 정리합니다.",
-      status: hasReport ? "완료" : "대기",
-    },
-  ];
-
+  if (!questions.length) {
+    return null;
+  }
   return (
-    <section className="analysis-progress" aria-label="분석 진행 상태">
-      <div className="flow-panel-head">
-        <div>
-          <span className="eyebrow">분석 진행</span>
-          <strong>{questions.length > 0 ? "추가 정보가 필요합니다" : "상담 내용을 순서대로 확인하고 있습니다"}</strong>
-          <p>{supervisorState.conversation_summary}</p>
-        </div>
-        <span className={questions.length > 0 ? "tag amber" : "tag green"}>{questions.length > 0 ? "답변 필요" : "진행 중"}</span>
-      </div>
-
-      <div className="agent-plan">
-        {steps.map((step, index) => (
-          <div className="plan-step" key={step.label}>
-            <span className="plan-index">{step.status === "완료" ? "✓" : index + 1}</span>
-            <div><strong>{step.label}</strong><p>{step.description}</p></div>
-            <span className="plan-status">{step.status}</span>
-          </div>
+    <div className="missing-fields-prompt" role="status">
+      <strong>지금 분석에 필요한 정보예요</strong>
+      <ul>
+        {questions.map((item, index) => (
+          <li key={item.field || index}>{item.question}</li>
         ))}
-      </div>
-
-      {facts.length > 0 && (
-        <div className="fact-grid">
-          {facts.map((item) => (
-            <div className="fact-item" key={item.field}>
-              <span>{item.label}</span>
-              <strong>{item.value}</strong>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {questions.length > 0 && (
-        <div className="question-list">
-          <strong>추가로 알려주세요</strong>
-          {questions.map((item) => (
-            <p key={item.field}>{item.question}</p>
-          ))}
-        </div>
-      )}
-    </section>
+      </ul>
+      <p>위 항목을 알고 계신 만큼만 이어서 입력해 주세요.</p>
+    </div>
   );
 }
 
@@ -2027,55 +1963,6 @@ function FaultRatioInsightPanel({ node, compact = false }) {
       )}
     </article>
   );
-}
-
-function ReportingPreviewPanel({ reportingPayload }) {
-  const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
-  const documentSections = sections.filter(isSubmissionDocumentSection);
-  const supportingSections = sections.filter((section) => !isSubmissionDocumentSection(section));
-
-  return (
-    <section className="reporting-preview" aria-label="리포팅 미리보기">
-      <div className="flow-panel-head">
-        <div>
-          <span className="eyebrow">리포트 미리보기</span>
-          <strong>{reportingPayload.title || "상담 분석 리포트"}</strong>
-          <p>{reportingPayload.summary}</p>
-        </div>
-        <span className={reportingPayload.stage === "agent_execution_ready" ? "tag green" : "tag amber"}>
-          {reportStatusLabel(reportingPayload.stage)}
-        </span>
-      </div>
-      {documentSections.length > 0 && (
-        <div className="report-document-highlights" aria-label="제출 문서 미리보기">
-          {documentSections.map((section) => (
-            <article key={`document-${section.title}`}>
-              <span className="tag green">제출 문서</span>
-              <strong>{section.title}</strong>
-              {(section.items || []).slice(0, 6).map((item, index) => (
-                <p key={`${section.title}-document-${index}`}>{compactValue(item)}</p>
-              ))}
-            </article>
-          ))}
-        </div>
-      )}
-      <div className="report-section-list">
-        {supportingSections.map((section) => (
-          <article key={section.title}>
-            <strong>{section.title}</strong>
-            {(section.items || []).slice(0, 4).map((item, index) => (
-              <p key={`${section.title}-${index}`}>{compactValue(item)}</p>
-            ))}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function isSubmissionDocumentSection(section) {
-  const title = String(section?.title || "");
-  return /이의신청서|의견제출서|제출 가이드라인|제출 가이드|초안/.test(title);
 }
 
 function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportActionStatus }) {
