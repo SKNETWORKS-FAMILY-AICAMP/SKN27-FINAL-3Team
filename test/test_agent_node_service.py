@@ -1113,6 +1113,47 @@ def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(
     assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
 
 
+def test_reporting_agent_consumes_appeal_decision_from_supervisor_upstream_results():
+    execution = execute_mock_node(
+        {
+            "node_code": "objection_report_generation",
+            "session_id": "ses_report_handoff",
+            "message_id": "msg_report_handoff",
+            "user_text": "The violation facts are different and I want to object.",
+            "upstream_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "structured_result": {"issuing_authority": "Seoul", "violation_text": "signal"},
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {"matched_laws": []},
+                },
+                "appeal_decision_flow": {
+                    "status": "success",
+                    "structured_result": {
+                        "judgment_status": "success",
+                        "overall_possibility": "review_recommended",
+                        "merit_basis": "The submitted facts require review.",
+                    },
+                    "evidence": [
+                        {
+                            "source_type": "agent_analysis",
+                            "source_reference": "appeal:1",
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    structured = execution["agent_output"]["structured_result"]
+    assert execution["execution_mode"] == "sync"
+    assert structured["appeal_decision"]["judgment_status"] == "success"
+    assert any("review_recommended" in reason for reason in structured["objection_reasons"])
+    assert any(item.get("source_reference") == "appeal:1" for item in execution["agent_output"]["evidence"])
+
+
 def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_inputs():
     execution = execute_mock_node(
         {
@@ -1123,6 +1164,19 @@ def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_i
             "session_id": "ses_sync_objection_fault_ratio",
             "message_id": "msg_sync_objection_fault_ratio",
             "user_text": "신호 없는 교차로에서 직진 중 우측 골목 차량과 접촉했습니다.",
+            "context": {
+                "objection_form": {
+                    "applicant_name": "홍길동",
+                    "recipient": "서울강남경찰서장 귀하",
+                    "case_number": "2026-교통-12345",
+                    "incident_at": "2026년 7월 1일 14시 20분경",
+                    "location": "서울특별시 강남구 무신호 교차로",
+                    "police_station": "서울강남경찰서",
+                    "investigation_result_summary": "신청인 차량이 가해 차량으로 판단되었습니다.",
+                    "objection_points": ["상대 차량의 일시정지 의무 위반", "블랙박스 증거 미반영"],
+                    "specific_request": "블랙박스 원본을 재검토하고 현장을 재조사해 주세요.",
+                }
+            },
             "upstream_results": {
                 "text_ml_case_search": {
                     "status": "success",

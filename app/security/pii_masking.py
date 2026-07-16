@@ -120,6 +120,17 @@ _SECRET_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
 )
 
+TEXT_CATEGORY_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "secret": _SECRET_PATTERNS,
+    "resident_id": (_RESIDENT_ID_PATTERN,),
+    "driver_license": (_DRIVER_LICENSE_PATTERN,),
+    "phone": (_MOBILE_PHONE_PATTERN, _LANDLINE_PHONE_PATTERN),
+    "vehicle_number": (_VEHICLE_NUMBER_PATTERN, _DIPLOMATIC_VEHICLE_PATTERN),
+    "email": (_EMAIL_PATTERN,),
+    "name": (_NAME_LABEL_PATTERN,),
+    "address": (_ADDRESS_LABEL_PATTERN,),
+}
+
 
 def mask_name(value: str | None) -> str | None:
     return _mask_nonempty(value)
@@ -167,6 +178,21 @@ def mask_text(value: str) -> str:
         masked,
     )
     return masked
+
+
+def detect_text_categories(value: str) -> dict[str, int]:
+    """Return only sensitivity category counts, never matched source values."""
+
+    counts: dict[str, int] = {}
+    for category, patterns in TEXT_CATEGORY_PATTERNS.items():
+        matched_spans = {
+            match.span()
+            for pattern in patterns
+            for match in pattern.finditer(value)
+        }
+        if matched_spans:
+            counts[category] = len(matched_spans)
+    return counts
 
 
 def sanitize_pii(value: Any) -> Any:
