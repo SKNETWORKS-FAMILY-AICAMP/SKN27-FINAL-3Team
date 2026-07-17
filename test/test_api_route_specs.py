@@ -214,6 +214,24 @@ def test_analysis_job_api_route_specs_promote_existing_django_endpoints() -> Non
     assert all(spec.contract_status == "shadow" for spec in actual.values())
 
 
+def test_analysis_job_error_response_accepts_live_not_found_envelopes() -> None:
+    analysis_contracts = importlib.import_module("app.contracts.analysis_job")
+
+    for code in ("analysis_job_not_found", "analysis_result_not_found"):
+        response = analysis_contracts.AnalysisJobErrorResponse.model_validate(
+            {
+                "error": {
+                    "code": code,
+                    "message": "Requested analysis resource was not found.",
+                }
+            }
+        )
+        assert response.error.code == code
+        assert response.error.contract_version is None
+        assert response.error.type is None
+        assert response.error.status is None
+
+
 def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
     route_specs = importlib.import_module("app.contracts.api_route_specs")
 

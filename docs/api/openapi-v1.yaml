@@ -1003,34 +1003,40 @@ components:
       additionalProperties: true
       properties:
         contract_version:
-          maxLength: 64
-          minLength: 1
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
           title: Contract Version
-          type: string
         type:
-          maxLength: 64
-          minLength: 1
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
           title: Type
-          type: string
         code:
           maxLength: 120
           minLength: 1
           title: Code
           type: string
         status:
-          maximum: 599
-          minimum: 400
+          anyOf:
+          - maximum: 599
+            minimum: 400
+            type: integer
+          - type: 'null'
+          default: null
           title: Status
-          type: integer
         message:
           minLength: 1
           title: Message
           type: string
       required:
-      - contract_version
-      - type
       - code
-      - status
       - message
       title: AnalysisJobError
       type: object

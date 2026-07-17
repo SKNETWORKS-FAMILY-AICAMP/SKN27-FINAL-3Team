@@ -55,10 +55,10 @@ class AnalysisResultResponse(AnalysisJobContractModel):
 
 
 class AnalysisJobError(AnalysisJobContractModel):
-    contract_version: str = Field(min_length=1, max_length=64)
-    type: str = Field(min_length=1, max_length=64)
+    contract_version: str | None = Field(default=None, min_length=1, max_length=64)
+    type: str | None = Field(default=None, min_length=1, max_length=64)
     code: str = Field(min_length=1, max_length=120)
-    status: int = Field(ge=400, le=599)
+    status: int | None = Field(default=None, ge=400, le=599)
     message: str = Field(min_length=1)
 
 
