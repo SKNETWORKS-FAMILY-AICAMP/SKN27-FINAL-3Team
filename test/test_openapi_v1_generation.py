@@ -27,6 +27,8 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/auth/refresh/",
         "/api/auth/logout/",
         "/api/auth/me/",
+        "/api/files/",
+        "/api/files/{attachment_id}/",
         "/api/cases/",
         "/api/cases/{case_id}/workspace/",
         "/api/cases/{case_id}/facts/confirm/",
@@ -75,8 +77,13 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
             continue
         for operation in path_item.values():
             assert operation["x-contract-status"] == "shadow"
-            assert operation["x-django-route-name"].startswith("canonical-consultation-")
-            assert operation["security"] == [{"bearerAuth": []}]
+            assert operation["x-django-route-name"].startswith("canonical-")
+            expected_security = (
+                [{}, {"bearerAuth": []}]
+                if path.startswith("/api/files/")
+                else [{"bearerAuth": []}]
+            )
+            assert operation["security"] == expected_security
 
     schemas = document["components"]["schemas"]
     for schema_name in (
@@ -100,6 +107,13 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "AuthSubjectResponse",
         "AuthErrorResponse",
         "RateLimitErrorResponse",
+        "FileUploadRequest",
+        "FileAttachmentResponse",
+        "FileAttachmentListResponse",
+        "FileAttachmentDetailResponse",
+        "FileUploadValidationErrorResponse",
+        "FileUploadTooLargeErrorResponse",
+        "FileAttachmentNotFoundErrorResponse",
     ):
         assert schema_name in schemas
 
@@ -176,6 +190,51 @@ def test_auth_session_routes_document_runtime_auth_boundary() -> None:
     assert current_subject["responses"]["401"]["x-error-codes"] == [
         "token_invalid",
         "token_expired",
+    ]
+
+
+def test_file_routes_document_canonical_upload_and_owner_boundary() -> None:
+    generator = importlib.import_module("app.contracts.openapi_v1")
+    document = generator.build_openapi_document()
+    paths = document["paths"]
+
+    collection = paths["/api/files/"]
+    assert set(collection) == {"get", "post"}
+    upload = collection["post"]
+    assert upload["operationId"] == "uploadFileAttachment"
+    assert upload["security"] == [{}, {"bearerAuth": []}]
+    assert set(upload["requestBody"]["content"]) == {
+        "application/json",
+        "multipart/form-data",
+    }
+    assert upload["requestBody"]["content"]["multipart/form-data"]["schema"] == {
+        "$ref": "#/components/schemas/FileUploadRequest"
+    }
+    assert upload["responses"]["400"]["x-error-codes"] == [
+        "session_id_required"
+    ]
+    assert upload["responses"]["413"]["x-error-codes"] == ["file_too_large"]
+    assert upload["responses"]["429"]["x-error-codes"] == [
+        "rate_limit_exceeded"
+    ]
+    assert upload["responses"]["503"]["x-error-codes"] == [
+        "upload_storage_unavailable"
+    ]
+
+    file_detail = paths["/api/files/{attachment_id}/"]["get"]
+    assert file_detail["operationId"] == "getFileAttachment"
+    assert file_detail["parameters"][0] == {
+        "name": "attachment_id",
+        "in": "path",
+        "required": True,
+        "description": "Canonical uploaded-file identifier",
+        "schema": {"type": "string", "minLength": 1, "maxLength": 128},
+    }
+    assert file_detail["responses"]["403"]["x-error-codes"] == [
+        "object_access_denied"
+    ]
+    assert file_detail["responses"]["404"]["x-error-codes"] == [
+        "attachment_not_found"
     ]
 
 

@@ -37,10 +37,24 @@ from app.contracts.consultation_case import (
     StartCaseAnalysisRequest,
     StartCaseAnalysisResponse,
 )
+from app.contracts.file_attachment import (
+    FileAttachmentDetailResponse,
+    FileAttachmentListResponse,
+    FileAttachmentNotFoundErrorResponse,
+    FileAttachmentResponse,
+    FileGuestSessionErrorResponse,
+    FileObjectAccessErrorResponse,
+    FileRateLimitErrorResponse,
+    FileUploadRequest,
+    FileUploadStorageErrorResponse,
+    FileUploadTooLargeErrorResponse,
+    FileUploadValidationErrorResponse,
+)
 
 
 HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 ContractStatus = Literal["shadow", "generated"]
+RequestMediaType = Literal["application/json", "multipart/form-data"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +94,7 @@ class RouteSpec:
     path_parameters: tuple[PathParameterSpec, ...] = ()
     request_parameters: tuple["RequestParameterSpec", ...] = ()
     request_body_required: bool = True
+    request_media_types: tuple[RequestMediaType, ...] = ("application/json",)
     auth_optional: bool = False
 
     def __post_init__(self) -> None:
@@ -92,6 +107,10 @@ class RouteSpec:
             )
         if self.auth_required and self.auth_optional:
             raise ValueError("a route cannot require and optionally accept Bearer auth")
+        if not self.request_media_types or len(set(self.request_media_types)) != len(
+            self.request_media_types
+        ):
+            raise ValueError("route request media types must be non-empty and unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +157,15 @@ def _auth_errors(
     return tuple(
         RouteErrorSpec(status=status, codes=codes, response_model=response_model)
         for status, codes in entries
+    )
+
+
+def _file_errors(
+    *entries: tuple[int, tuple[str, ...], type[BaseModel]],
+) -> tuple[RouteErrorSpec, ...]:
+    return tuple(
+        RouteErrorSpec(status=status, codes=codes, response_model=response_model)
+        for status, codes, response_model in entries
     )
 
 
@@ -287,6 +315,32 @@ GOOGLE_CODE_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 )
 
 
+GUEST_FILE_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    RequestParameterSpec(
+        name="X-Guest-Id",
+        location="header",
+        description="Optional guest identity header when no Bearer token is supplied.",
+    ),
+)
+
+
+FILE_LIST_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    *GUEST_FILE_REQUEST_PARAMETERS,
+    RequestParameterSpec(
+        name="session_id",
+        location="query",
+        description="Optional chat session identifier used to scope file listing.",
+    ),
+)
+
+
+ATTACHMENT_ID_PATH_PARAMETER = PathParameterSpec(
+    name="attachment_id",
+    description="Canonical uploaded-file identifier",
+    max_length=128,
+)
+
+
 AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
     RouteSpec(
         operation_id="createGuestSession",
@@ -404,8 +458,79 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
 )
 
 
+FILE_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="listFileAttachments",
+        method="GET",
+        path="/api/files/",
+        route_name="canonical-files",
+        view_name="attachments",
+        request_model=None,
+        response_model=FileAttachmentListResponse,
+        success_status=200,
+        errors=_file_errors(
+            (401, ("guest_session_invalid",), FileGuestSessionErrorResponse),
+            (403, ("object_access_denied",), FileObjectAccessErrorResponse),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Files",),
+        summary="List canonical file attachments visible to the current subject",
+        request_parameters=FILE_LIST_REQUEST_PARAMETERS,
+    ),
+    RouteSpec(
+        operation_id="uploadFileAttachment",
+        method="POST",
+        path="/api/files/",
+        route_name="canonical-files",
+        view_name="attachments",
+        request_model=FileUploadRequest,
+        response_model=FileAttachmentResponse,
+        success_status=200,
+        errors=_file_errors(
+            (400, ("session_id_required",), FileUploadValidationErrorResponse),
+            (401, ("guest_session_invalid",), FileGuestSessionErrorResponse),
+            (403, ("object_access_denied",), FileObjectAccessErrorResponse),
+            (413, ("file_too_large",), FileUploadTooLargeErrorResponse),
+            (429, ("rate_limit_exceeded",), FileRateLimitErrorResponse),
+            (503, ("upload_storage_unavailable",), FileUploadStorageErrorResponse),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Files",),
+        summary="Upload or register a file attachment through the quarantine boundary",
+        request_parameters=GUEST_FILE_REQUEST_PARAMETERS,
+        request_media_types=("application/json", "multipart/form-data"),
+    ),
+    RouteSpec(
+        operation_id="getFileAttachment",
+        method="GET",
+        path="/api/files/{attachment_id}/",
+        route_name="canonical-file-detail",
+        view_name="attachment_detail",
+        request_model=None,
+        response_model=FileAttachmentDetailResponse,
+        success_status=200,
+        errors=_file_errors(
+            (401, ("guest_session_invalid",), FileGuestSessionErrorResponse),
+            (403, ("object_access_denied",), FileObjectAccessErrorResponse),
+            (404, ("attachment_not_found",), FileAttachmentNotFoundErrorResponse),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Files",),
+        summary="Read one canonical file attachment after owner authorization",
+        path_parameters=(ATTACHMENT_ID_PATH_PARAMETER,),
+        request_parameters=FILE_LIST_REQUEST_PARAMETERS,
+    ),
+)
+
+
 API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
-    CASE_API_ROUTE_SPECS + AUTH_SESSION_API_ROUTE_SPECS
+    CASE_API_ROUTE_SPECS + AUTH_SESSION_API_ROUTE_SPECS + FILE_API_ROUTE_SPECS
 )
 
 
@@ -472,27 +597,6 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         route_name="canonical-chat-save-state",
         view_name="update_chat_save_state",
         reason="Conversation ownership and save-state DTOs are pending.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/files/",
-        route_name="canonical-files",
-        view_name="attachments",
-        reason="File list DTO and owner-scoped query service are pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/files/",
-        route_name="canonical-files",
-        view_name="attachments",
-        reason="Multipart upload DTO and scan-gate application service are pending.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/files/{attachment_id}/",
-        route_name="canonical-file-detail",
-        view_name="attachment_detail",
-        reason="File detail DTO and owner-scoped query service are pending.",
     ),
     DeferredRouteSpec(
         method="GET",
