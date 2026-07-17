@@ -97,9 +97,8 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
         operation["requestBody"] = {
             "required": spec.request_body_required,
             "content": {
-                "application/json": {
-                    "schema": _schema_ref(spec.request_model),
-                }
+                media_type: {"schema": _schema_ref(spec.request_model)}
+                for media_type in spec.request_media_types
             },
         }
     return operation

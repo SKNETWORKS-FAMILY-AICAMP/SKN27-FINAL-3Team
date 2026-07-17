@@ -480,6 +480,200 @@ paths:
         description: Optional chat session binding identifier.
         schema:
           type: string
+  /api/files/:
+    get:
+      tags:
+      - Files
+      summary: List canonical file attachments visible to the current subject
+      operationId: listFileAttachments
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-files
+      x-django-view: attachments
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachmentListResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileGuestSessionErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileObjectAccessErrorResponse'
+          x-error-codes:
+          - object_access_denied
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to scope file listing.
+        schema:
+          type: string
+    post:
+      tags:
+      - Files
+      summary: Upload or register a file attachment through the quarantine boundary
+      operationId: uploadFileAttachment
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-files
+      x-django-view: attachments
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachmentResponse'
+        '400':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadValidationErrorResponse'
+          x-error-codes:
+          - session_id_required
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileGuestSessionErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileObjectAccessErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '413':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadTooLargeErrorResponse'
+          x-error-codes:
+          - file_too_large
+        '429':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRateLimitErrorResponse'
+          x-error-codes:
+          - rate_limit_exceeded
+        '503':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadStorageErrorResponse'
+          x-error-codes:
+          - upload_storage_unavailable
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileUploadRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FileUploadRequest'
+  /api/files/{attachment_id}/:
+    get:
+      tags:
+      - Files
+      summary: Read one canonical file attachment after owner authorization
+      operationId: getFileAttachment
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-file-detail
+      x-django-view: attachment_detail
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachmentDetailResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileGuestSessionErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileObjectAccessErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachmentNotFoundErrorResponse'
+          x-error-codes:
+          - attachment_not_found
+      parameters:
+      - name: attachment_id
+        in: path
+        required: true
+        description: Canonical uploaded-file identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to scope file listing.
+        schema:
+          type: string
 components:
   securitySchemes:
     bearerAuth:
@@ -1714,6 +1908,580 @@ components:
       - contract_version
       - case
       title: CreateConsultationCaseResponse
+      type: object
+    FileAttachment:
+      additionalProperties: true
+      properties:
+        attachment_id:
+          maxLength: 128
+          minLength: 1
+          title: Attachment Id
+          type: string
+        session_id:
+          maxLength: 128
+          minLength: 1
+          title: Session Id
+          type: string
+        purpose:
+          maxLength: 64
+          minLength: 1
+          title: Purpose
+          type: string
+        type:
+          maxLength: 64
+          minLength: 1
+          title: Type
+          type: string
+        original_filename:
+          maxLength: 255
+          minLength: 1
+          title: Original Filename
+          type: string
+        filename:
+          maxLength: 255
+          minLength: 1
+          title: Filename
+          type: string
+        content_type:
+          maxLength: 255
+          minLength: 1
+          title: Content Type
+          type: string
+        size_bytes:
+          minimum: 0
+          title: Size Bytes
+          type: integer
+        storage_uri:
+          minLength: 1
+          title: Storage Uri
+          type: string
+        object_storage:
+          additionalProperties: true
+          title: Object Storage
+          type: object
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        scan_status:
+          maxLength: 64
+          minLength: 1
+          title: Scan Status
+          type: string
+        privacy_risk:
+          title: Privacy Risk
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        checks:
+          additionalProperties: true
+          title: Checks
+          type: object
+        agent_handoff:
+          additionalProperties: true
+          title: Agent Handoff
+          type: object
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+        case_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Case Id
+        message_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        retention_expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Retention Expires At
+        deleted_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Deleted At
+        scan_result:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Scan Result
+      required:
+      - attachment_id
+      - session_id
+      - purpose
+      - type
+      - original_filename
+      - filename
+      - content_type
+      - size_bytes
+      - storage_uri
+      - object_storage
+      - status
+      - scan_status
+      - privacy_risk
+      - created_at
+      - checks
+      - agent_handoff
+      - limitations
+      - persistence
+      title: FileAttachment
+      type: object
+    FileAttachmentDetailResponse:
+      additionalProperties: true
+      properties:
+        attachment:
+          $ref: '#/components/schemas/FileAttachment'
+      required:
+      - attachment
+      title: FileAttachmentDetailResponse
+      type: object
+    FileAttachmentListResponse:
+      additionalProperties: true
+      properties:
+        attachments:
+          items:
+            $ref: '#/components/schemas/FileAttachment'
+          title: Attachments
+          type: array
+      required:
+      - attachments
+      title: FileAttachmentListResponse
+      type: object
+    FileAttachmentNotFoundError:
+      additionalProperties: true
+      properties:
+        code:
+          const: attachment_not_found
+          title: Code
+          type: string
+        message:
+          title: Message
+          type: string
+      required:
+      - code
+      - message
+      title: FileAttachmentNotFoundError
+      type: object
+    FileAttachmentNotFoundErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileAttachmentNotFoundError'
+      required:
+      - error
+      title: FileAttachmentNotFoundErrorResponse
+      type: object
+    FileAttachmentResponse:
+      additionalProperties: true
+      properties:
+        attachment:
+          $ref: '#/components/schemas/FileAttachment'
+      required:
+      - attachment
+      title: FileAttachmentResponse
+      type: object
+    FileGuestSessionError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: guest_identity_policy.v1
+          title: Contract Version
+          type: string
+        type:
+          const: authorization
+          title: Type
+          type: string
+        code:
+          const: guest_session_invalid
+          title: Code
+          type: string
+        status:
+          const: 401
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: refresh_guest_session
+          title: Required Action
+          type: string
+        reason:
+          title: Reason
+          type: string
+        guest_id:
+          title: Guest Id
+          type: string
+        guest_status:
+          title: Guest Status
+          type: string
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - reason
+      - guest_id
+      - guest_status
+      title: FileGuestSessionError
+      type: object
+    FileGuestSessionErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileGuestSessionError'
+      required:
+      - error
+      title: FileGuestSessionErrorResponse
+      type: object
+    FileObjectAccessError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: object_access.v1
+          title: Contract Version
+          type: string
+        type:
+          const: object_access
+          title: Type
+          type: string
+        code:
+          const: object_access_denied
+          title: Code
+          type: string
+        status:
+          const: 403
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: login_or_owner_match
+          title: Required Action
+          type: string
+        access:
+          additionalProperties: true
+          title: Access
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - access
+      title: FileObjectAccessError
+      type: object
+    FileObjectAccessErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileObjectAccessError'
+      required:
+      - error
+      title: FileObjectAccessErrorResponse
+      type: object
+    FileRateLimitError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: rate_limit.v1
+          title: Contract Version
+          type: string
+        type:
+          const: rate_limit
+          title: Type
+          type: string
+        code:
+          const: rate_limit_exceeded
+          title: Code
+          type: string
+        status:
+          const: 429
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          title: Required Action
+          type: string
+        usage:
+          additionalProperties: true
+          title: Usage
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - usage
+      title: FileRateLimitError
+      type: object
+    FileRateLimitErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileRateLimitError'
+      required:
+      - error
+      title: FileRateLimitErrorResponse
+      type: object
+    FileUploadRequest:
+      additionalProperties: true
+      properties:
+        session_id:
+          maxLength: 128
+          minLength: 1
+          title: Session Id
+          type: string
+        file:
+          anyOf:
+          - format: binary
+            type: string
+          - type: 'null'
+          default: null
+          title: File
+        case_id:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Case Id
+        message_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        purpose:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Purpose
+        type:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Type
+        filename:
+          anyOf:
+          - maxLength: 255
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Filename
+        original_filename:
+          anyOf:
+          - maxLength: 255
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Original Filename
+        content_type:
+          anyOf:
+          - maxLength: 255
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Content Type
+        size_bytes:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          default: null
+          title: Size Bytes
+      required:
+      - session_id
+      title: FileUploadRequest
+      type: object
+    FileUploadStorageError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: file_upload_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: service_unavailable
+          title: Type
+          type: string
+        code:
+          const: upload_storage_unavailable
+          title: Code
+          type: string
+        status:
+          const: 503
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: retry_upload
+          title: Required Action
+          type: string
+        retryable:
+          const: true
+          title: Retryable
+          type: boolean
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - retryable
+      title: FileUploadStorageError
+      type: object
+    FileUploadStorageErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileUploadStorageError'
+      required:
+      - error
+      title: FileUploadStorageErrorResponse
+      type: object
+    FileUploadTooLargeError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: file_upload_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: validation
+          title: Type
+          type: string
+        code:
+          const: file_too_large
+          title: Code
+          type: string
+        status:
+          const: 413
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        size_bytes:
+          minimum: 0
+          title: Size Bytes
+          type: integer
+        limit_bytes:
+          minimum: 1
+          title: Limit Bytes
+          type: integer
+        required_action:
+          const: select_smaller_file
+          title: Required Action
+          type: string
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - size_bytes
+      - limit_bytes
+      - required_action
+      title: FileUploadTooLargeError
+      type: object
+    FileUploadTooLargeErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileUploadTooLargeError'
+      required:
+      - error
+      title: FileUploadTooLargeErrorResponse
+      type: object
+    FileUploadValidationError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: file_upload_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: validation
+          title: Type
+          type: string
+        code:
+          const: session_id_required
+          title: Code
+          type: string
+        status:
+          const: 400
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: create_or_select_session
+          title: Required Action
+          type: string
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      title: FileUploadValidationError
+      type: object
+    FileUploadValidationErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileUploadValidationError'
+      required:
+      - error
+      title: FileUploadValidationErrorResponse
       type: object
     GoogleAuthorizationCodeRequest:
       additionalProperties: true

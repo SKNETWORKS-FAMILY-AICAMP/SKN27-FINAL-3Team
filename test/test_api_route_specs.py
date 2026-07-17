@@ -95,7 +95,9 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
     actual = {(spec.method, spec.path): spec for spec in route_specs.CASE_API_ROUTE_SPECS}
     assert set(actual) == set(expected)
     assert route_specs.API_ROUTE_SPECS == (
-        route_specs.CASE_API_ROUTE_SPECS + route_specs.AUTH_SESSION_API_ROUTE_SPECS
+        route_specs.CASE_API_ROUTE_SPECS
+        + route_specs.AUTH_SESSION_API_ROUTE_SPECS
+        + route_specs.FILE_API_ROUTE_SPECS
     )
 
     for key, expected_spec in expected.items():
@@ -150,6 +152,31 @@ def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> Non
     assert all(spec.contract_status == "shadow" for spec in actual.values())
 
 
+def test_file_api_route_specs_promote_existing_django_endpoints() -> None:
+    file_contracts = importlib.import_module("app.contracts.file_attachment")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    actual = {
+        (spec.method, spec.path): spec for spec in route_specs.FILE_API_ROUTE_SPECS
+    }
+    assert set(actual) == {
+        ("GET", "/api/files/"),
+        ("POST", "/api/files/"),
+        ("GET", "/api/files/{attachment_id}/"),
+    }
+    assert actual[("POST", "/api/files/")].request_model is (
+        file_contracts.FileUploadRequest
+    )
+    assert actual[("POST", "/api/files/")].request_media_types == (
+        "application/json",
+        "multipart/form-data",
+    )
+    assert actual[("GET", "/api/files/{attachment_id}/")].path_parameters[0].name == (
+        "attachment_id"
+    )
+    assert all(spec.contract_status == "shadow" for spec in actual.values())
+
+
 def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
     route_specs = importlib.import_module("app.contracts.api_route_specs")
 
@@ -167,9 +194,6 @@ def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
         ("POST", "/api/chat/sessions/"),
         ("POST", "/api/chat/messages/"),
         ("POST", "/api/chat/save-state/"),
-        ("GET", "/api/files/"),
-        ("POST", "/api/files/"),
-        ("GET", "/api/files/{attachment_id}/"),
         ("GET", "/api/analysis/jobs/"),
         ("POST", "/api/analysis/jobs/"),
         ("GET", "/api/analysis/jobs/{job_id}/"),
