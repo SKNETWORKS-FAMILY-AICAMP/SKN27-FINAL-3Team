@@ -25,6 +25,14 @@ from app.contracts.auth_session import (
     GuestSessionResponse,
     RateLimitErrorResponse,
 )
+from app.contracts.analysis_job import (
+    AnalysisJobAcceptedResponse,
+    AnalysisJobDetailResponse,
+    AnalysisJobErrorResponse,
+    AnalysisJobListResponse,
+    AnalysisJobRequest,
+    AnalysisResultResponse,
+)
 from app.contracts.consultation_case import (
     CaseApiErrorCode,
     CaseApiErrorResponse,
@@ -96,6 +104,7 @@ class RouteSpec:
     request_body_required: bool = True
     request_media_types: tuple[RequestMediaType, ...] = ("application/json",)
     auth_optional: bool = False
+    success_statuses: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         placeholders = tuple(re.findall(r"\{([^{}]+)\}", self.path))
@@ -111,6 +120,11 @@ class RouteSpec:
             self.request_media_types
         ):
             raise ValueError("route request media types must be non-empty and unique")
+        if self.success_statuses and (
+            self.success_status not in self.success_statuses
+            or len(set(self.success_statuses)) != len(self.success_statuses)
+        ):
+            raise ValueError("success status codes must include the primary status and be unique")
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +180,19 @@ def _file_errors(
     return tuple(
         RouteErrorSpec(status=status, codes=codes, response_model=response_model)
         for status, codes, response_model in entries
+    )
+
+
+def _analysis_job_errors(
+    *entries: tuple[int, tuple[str, ...]],
+) -> tuple[RouteErrorSpec, ...]:
+    return tuple(
+        RouteErrorSpec(
+            status=status,
+            codes=codes,
+            response_model=AnalysisJobErrorResponse,
+        )
+        for status, codes in entries
     )
 
 
@@ -338,6 +365,32 @@ ATTACHMENT_ID_PATH_PARAMETER = PathParameterSpec(
     name="attachment_id",
     description="Canonical uploaded-file identifier",
     max_length=128,
+)
+
+
+ANALYSIS_JOB_ID_PATH_PARAMETER = PathParameterSpec(
+    name="job_id",
+    description="Canonical asynchronous analysis job identifier",
+    max_length=128,
+)
+
+
+ANALYSIS_JOB_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    RequestParameterSpec(
+        name="X-Guest-Id",
+        location="header",
+        description="Optional guest identity header when no Bearer token is supplied.",
+    ),
+)
+
+
+ANALYSIS_JOB_LIST_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    *ANALYSIS_JOB_REQUEST_PARAMETERS,
+    RequestParameterSpec(
+        name="session_id",
+        location="query",
+        description="Optional chat session identifier used to scope analysis job listing.",
+    ),
 )
 
 
@@ -529,8 +582,111 @@ FILE_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
 )
 
 
+ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="listAnalysisJobs",
+        method="GET",
+        path="/api/analysis/jobs/",
+        route_name="canonical-analysis-jobs",
+        view_name="analysis_jobs",
+        request_model=None,
+        response_model=AnalysisJobListResponse,
+        success_status=200,
+        errors=_analysis_job_errors(
+            (403, ("object_access_denied",)),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Analysis",),
+        summary="List analysis jobs visible to the current subject",
+        request_parameters=ANALYSIS_JOB_LIST_REQUEST_PARAMETERS,
+    ),
+    RouteSpec(
+        operation_id="queueAnalysisJob",
+        method="POST",
+        path="/api/analysis/jobs/",
+        route_name="canonical-analysis-jobs",
+        view_name="analysis_jobs",
+        request_model=AnalysisJobRequest,
+        response_model=AnalysisJobAcceptedResponse,
+        success_status=202,
+        errors=_analysis_job_errors(
+            (400, ("analysis_job_session_required",)),
+            (403, ("object_access_denied",)),
+            (
+                409,
+                (
+                    "analysis_plan_not_executable",
+                    "attachment_scan_blocked",
+                    "analysis_job_id_conflict",
+                    "analysis_job_reservation_pending",
+                ),
+            ),
+            (429, ("rate_limit_exceeded",)),
+            (503, ("analysis_job_unavailable",)),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Analysis",),
+        summary="Queue an owner-scoped Supervisor analysis plan for asynchronous execution",
+        request_parameters=ANALYSIS_JOB_REQUEST_PARAMETERS,
+        request_body_required=False,
+    ),
+    RouteSpec(
+        operation_id="getAnalysisJob",
+        method="GET",
+        path="/api/analysis/jobs/{job_id}/",
+        route_name="canonical-analysis-job-detail",
+        view_name="analysis_job_detail",
+        request_model=None,
+        response_model=AnalysisJobDetailResponse,
+        success_status=200,
+        errors=_analysis_job_errors(
+            (401, ("guest_session_invalid",)),
+            (403, ("object_access_denied",)),
+            (404, ("analysis_job_not_found",)),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Analysis",),
+        summary="Read one asynchronous analysis job after owner authorization",
+        path_parameters=(ANALYSIS_JOB_ID_PATH_PARAMETER,),
+        request_parameters=ANALYSIS_JOB_REQUEST_PARAMETERS,
+    ),
+    RouteSpec(
+        operation_id="getAnalysisResult",
+        method="GET",
+        path="/api/analysis/results/{job_id}/",
+        route_name="canonical-analysis-result",
+        view_name="analysis_result",
+        request_model=None,
+        response_model=AnalysisResultResponse,
+        success_status=200,
+        success_statuses=(200, 202),
+        errors=_analysis_job_errors(
+            (401, ("guest_session_invalid",)),
+            (403, ("object_access_denied",)),
+            (404, ("analysis_result_not_found",)),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Analysis",),
+        summary="Read a completed result or pending state for an authorized analysis job",
+        path_parameters=(ANALYSIS_JOB_ID_PATH_PARAMETER,),
+        request_parameters=ANALYSIS_JOB_REQUEST_PARAMETERS,
+    ),
+)
+
+
 API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
-    CASE_API_ROUTE_SPECS + AUTH_SESSION_API_ROUTE_SPECS + FILE_API_ROUTE_SPECS
+    CASE_API_ROUTE_SPECS
+    + AUTH_SESSION_API_ROUTE_SPECS
+    + FILE_API_ROUTE_SPECS
+    + ANALYSIS_JOB_API_ROUTE_SPECS
 )
 
 
@@ -597,34 +753,6 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         route_name="canonical-chat-save-state",
         view_name="update_chat_save_state",
         reason="Conversation ownership and save-state DTOs are pending.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/analysis/jobs/",
-        route_name="canonical-analysis-jobs",
-        view_name="analysis_jobs",
-        reason="Owner-scoped analysis job list DTO is pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/analysis/jobs/",
-        route_name="canonical-analysis-jobs",
-        view_name="analysis_jobs",
-        reason="Queued analysis job request/response DTO promotion remains pending.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/analysis/jobs/{job_id}/",
-        route_name="canonical-analysis-job-detail",
-        view_name="analysis_job_detail",
-        reason="Query service exists; owner authorization and response DTO remain pending.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/analysis/results/{job_id}/",
-        route_name="canonical-analysis-result",
-        view_name="analysis_result",
-        reason="Query service exists; owner authorization and response DTO remain pending.",
     ),
     DeferredRouteSpec(
         method="GET",
