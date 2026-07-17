@@ -78,6 +78,8 @@ def load_analysis_result(
             "job_id": job_id,
             "status_counts": deepcopy(job.get("status_counts") or {}),
             "executions": executions,
+            "supervisor_state": deepcopy(job.get("supervisor_state") or {}),
+            "attachments": deepcopy(job.get("attachments") or []),
         }
     )
     # The repository status is the canonical terminal outcome.  Recomputing it

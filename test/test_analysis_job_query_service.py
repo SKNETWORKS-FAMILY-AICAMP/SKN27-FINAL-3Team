@@ -108,6 +108,8 @@ def test_completed_result_normalizes_only_dict_agent_outputs_for_composer() -> N
                     },
                 }
             ],
+            "supervisor_state": {},
+            "attachments": [],
         }
     ]
 

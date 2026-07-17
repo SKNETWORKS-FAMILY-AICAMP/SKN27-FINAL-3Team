@@ -774,6 +774,54 @@ p {
   color: var(--ink-soft, #555);
 }
 
+.follow-up-note {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e9d8b4;
+  border-radius: 8px;
+  background: var(--amber-soft);
+}
+
+.follow-up-note p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--ink-soft, #555);
+}
+
+.follow-up-group {
+  margin-top: 8px;
+}
+
+.follow-up-group-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.follow-up-group-required .follow-up-group-label {
+  color: #b3401f;
+}
+
+.follow-up-group-optional .follow-up-group-label {
+  color: var(--ink-soft, #555);
+}
+
+.follow-up-note ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.follow-up-note li {
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.follow-up-note p:last-child,
+.follow-up-group:last-child {
+  margin-bottom: 0;
+}
+
 .persona-run {
   margin-top: 14px;
   display: grid;
@@ -2258,6 +2306,12 @@ button.report-list-card.active {
   }
 
   .sidebar {
+    display: none;
+  }
+
+  /* mobile-bottom-nav (rendered alongside the sidebar on chatbot/mypage/
+     reporting) already covers navigation at this width — avoid showing both. */
+  .topbar-with-mobile-nav {
     display: none;
   }
 

@@ -11,11 +11,9 @@ import {
   scheduleAppJwtRefresh,
 } from "./authSession.js";
 
-const ROUTES = [
-  { id: "entry", label: "서비스 안내" },
-  { id: "chatbot", label: "상담" },
-  { id: "mypage", label: "내 사건" },
-  { id: "history", label: "과거 이력" },
+const TAB_ROUTES = [
+  { id: "chatbot", label: "사고·과태료 상담" },
+  { id: "mypage", label: "마이페이지" },
   { id: "reporting", label: "리포트" },
 ];
 
@@ -114,7 +112,10 @@ export default function FrontendAppShell({
   const analysisCards = analysisResponse?.cards?.length
     ? normalizeAnalysisCards(analysisResponse.cards)
     : [];
-  const assistantAnswer = assistantMessageText(analysisResponse?.assistant_message);
+  const assistantAnswer =
+    analysisResponse?.assistant_message?.core_answer ||
+    assistantMessageText(analysisResponse?.assistant_message);
+  const assistantFollowUp = analysisResponse?.assistant_message?.follow_up || null;
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -196,7 +197,7 @@ export default function FrontendAppShell({
           setCurrentReport(null);
           setReportList([]);
           setPendingAuthAction(null);
-          setStatusMessage("인증 세션이 만료되었습니다. Google 계정으로 다시 로그인해 주세요.");
+          setStatusMessage("로그인이 만료되었습니다. Google 계정으로 다시 로그인해 주세요.");
         }
       },
     });
@@ -227,7 +228,7 @@ export default function FrontendAppShell({
   }, [activeRoute, pendingReportScreenDownload]);
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
-    setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 임시 세션을 준비하고 있습니다.");
+    setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 준비하고 있습니다.");
     try {
       const guest = await api.createGuestSession({
         guest_id: guestId,
@@ -375,7 +376,7 @@ export default function FrontendAppShell({
           filename: selectedUploadFile?.name || `${attachmentPurpose}-sample.txt`,
           purpose: attachmentPurpose,
         });
-        setStatusMessage("자료 업로드를 위해 Google 로그인 후 현재 상담 세션에 이어서 연결합니다.");
+        setStatusMessage("자료 업로드를 위해 Google 로그인 후 지금 하던 상담에 이어서 연결합니다.");
         const loginState = await loginAndBindCurrentSession({
           source: "attachment_upload",
           nextRoute: "chatbot",
@@ -495,7 +496,11 @@ export default function FrontendAppShell({
       return;
     }
     if (!persistedReportId) {
-      setReportActionStatus("분석 워커가 리포트를 저장할 때까지 기다린 뒤 다시 시도해 주세요.");
+      setReportActionStatus(
+        hasReportGenerationNode(supervisorState)
+          ? "분석 워커가 리포트를 저장할 때까지 기다린 뒤 다시 시도해 주세요."
+          : "이번 상담 유형은 별도 리포트 문서를 만들지 않습니다."
+      );
       return;
     }
     setReportActionStatus(
@@ -510,7 +515,7 @@ export default function FrontendAppShell({
       let nextIdentity = identity;
       if (!authSessionId) {
         setPendingAuthAction({ type: `report_${action}`, jobId });
-        setReportActionStatus("리포트 작업을 위해 Google 로그인 후 같은 상담 세션으로 이어갑니다.");
+        setReportActionStatus("리포트 작업을 위해 Google 로그인 후 같은 상담으로 이어갑니다.");
         const loginState = await loginAndBindCurrentSession({
           source: `report_${action}`,
           nextRoute: "chatbot",
@@ -750,9 +755,12 @@ export default function FrontendAppShell({
         ...conversationHistory,
         {
           role: "assistant",
-          content: assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
+          content:
+            workerResult?.assistant_message?.core_answer ||
+            assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
           status: workerResult?.status || "partial",
           pending_questions: workerResult?.pending_questions || [],
+          followUp: workerResult?.assistant_message?.follow_up || null,
         },
       ]);
       setAnalysisResponse(workerResult);
@@ -765,7 +773,7 @@ export default function FrontendAppShell({
       setSaveDecision(effectiveAuthSessionId ? "saved" : "undecided");
       setStatusMessage(
         effectiveAuthSessionId
-          ? "상담 응답을 받았습니다. 이 상담은 로그인 계정에 연결됩니다."
+          ? ""
           : canSaveGuestConversation
             ? workerResult?.status === "success"
               ? "상담 응답을 받았습니다. 저장 여부를 선택할 수 있습니다."
@@ -827,7 +835,7 @@ export default function FrontendAppShell({
       setStatusMessage("현재 상담을 Google 계정 기준 내 사건 이력에 저장했습니다.");
       return loginState;
     } catch (_error) {
-      setStatusMessage("로그인 또는 저장 연결에 실패했습니다. 상담은 현재 임시 세션에서 계속 진행할 수 있습니다.");
+      setStatusMessage("로그인 또는 저장 연결에 실패했습니다. 상담은 지금 상태로 계속 진행할 수 있습니다.");
       return null;
     } finally {
       setIsSavingConversation(false);
@@ -860,7 +868,7 @@ export default function FrontendAppShell({
       }
     }
     setStatusMessage(
-      "이번 상담은 임시 세션으로만 계속 진행합니다. 저장하지 않으면 내 사건 이력에는 표시하지 않습니다."
+      "이번 상담은 임시로만 계속 진행합니다. 저장하지 않으면 내 사건 이력에는 표시하지 않습니다."
     );
   }
 
@@ -1026,8 +1034,7 @@ export default function FrontendAppShell({
 
   return (
     <div className="app-shell" data-auth-state={authContext.auth_state}>
-      {activeRoute === "entry" && (
-      <header className="topbar">
+      <header className={activeRoute === "entry" ? "topbar" : "topbar topbar-with-mobile-nav"}>
         <div className="topbar-inner">
           <button
             className="brand"
@@ -1039,7 +1046,7 @@ export default function FrontendAppShell({
             <span>교통분쟁 AI</span>
           </button>
           <nav className="top-actions" aria-label="주요 메뉴">
-            {ROUTES.map((route) => (
+            {TAB_ROUTES.map((route) => (
               <button
                 className={activeRoute === route.id ? "button active" : "button ghost"}
                 aria-current={activeRoute === route.id ? "page" : undefined}
@@ -1050,13 +1057,28 @@ export default function FrontendAppShell({
                 {route.label}
               </button>
             ))}
-            <button className="button primary" onClick={() => setActiveRoute("chatbot")} type="button">
-              상담 시작
-            </button>
+            {activeRoute === "entry" && (
+              <button className="button primary" onClick={() => setActiveRoute("chatbot")} type="button">
+                상담 시작
+              </button>
+            )}
+            {authSessionId ? (
+              <button className="button ghost" type="button" onClick={logoutAndResetSession}>
+                로그아웃
+              </button>
+            ) : (
+              <button
+                className="button primary"
+                type="button"
+                onClick={saveConversationAfterLogin}
+                disabled={isSavingConversation}
+              >
+                {isSavingConversation ? "연결 중" : "Google 로그인"}
+              </button>
+            )}
           </nav>
         </div>
       </header>
-      )}
 
       <div className={activeRoute === "entry" ? "layout is-entry" : "layout"}>
         {activeRoute !== "entry" && (
@@ -1092,6 +1114,7 @@ export default function FrontendAppShell({
               attachmentPurpose={attachmentPurpose}
               attachmentPurposes={attachmentPurposes}
               assistantAnswer={assistantAnswer}
+              assistantFollowUp={assistantFollowUp}
               authSessionId={authSessionId}
               chatMessages={chatMessages}
               currentReport={currentReport}
@@ -1413,11 +1436,11 @@ function EntryScreenV2({ onGuestStart, onOpenChat }) {
             바로 상담 시작
           </button>
           <button className="button large" type="button" onClick={onGuestStart}>
-            비회원 세션 만들기
+            비회원으로 상담 시작
           </button>
         </div>
         <p className="entry-note">
-          저장을 선택하지 않으면 현재 상담은 임시 세션 기준으로만 유지하고, 마이페이지 이력으로 넘기지 않습니다.
+          저장을 선택하지 않으면 현재 상담은 임시로만 유지하고, 마이페이지 이력으로 넘기지 않습니다.
         </p>
       </div>
 
@@ -1431,7 +1454,7 @@ function EntryScreenV2({ onGuestStart, onOpenChat }) {
             <span>1</span>
             <div>
               <strong>질문부터 시작</strong>
-              <p>로그인 화면으로 막지 않고 게스트 상담 세션을 먼저 엽니다.</p>
+              <p>로그인 화면으로 막지 않고 비회원 상담을 먼저 엽니다.</p>
             </div>
           </div>
           <div className="flow-step">
@@ -1529,15 +1552,6 @@ function ConversationSidebar({
         )}
       </section>
 
-      <nav className="sidebar-mini-nav" aria-label="보조 화면">
-        <button className={activeRoute === "mypage" ? "nav-item active" : "nav-item"} type="button" onClick={() => onNavigate("mypage")}>
-          내 사건 전체
-        </button>
-        <button className={activeRoute === "reporting" ? "nav-item active" : "nav-item"} type="button" onClick={() => onNavigate("reporting")}>
-          리포트
-        </button>
-      </nav>
-
         <section className="sidebar-auth" aria-label="계정 상태">
           <div className="profile-row">
             <span className="avatar">{isAuthenticated ? "G" : isGuestReady ? "비" : "AI"}</span>
@@ -1586,6 +1600,7 @@ function ChatScreenV2({
   attachmentPurpose,
   attachmentPurposes,
   assistantAnswer,
+  assistantFollowUp,
   capabilityError,
   authSessionId,
   chatMessages,
@@ -1624,13 +1639,18 @@ function ChatScreenV2({
     : submittedQuestion
       ? [
           { role: "user", content: submittedQuestion },
-          { role: "assistant", content: assistantAnswer || "상담 내용을 기준으로 확인 가능한 항목을 정리했습니다." },
+          {
+            role: "assistant",
+            content: assistantAnswer || "상담 내용을 기준으로 확인 가능한 항목을 정리했습니다.",
+            followUp: assistantFollowUp,
+          },
         ]
       : [];
   const hasConversation = visibleMessages.length > 0;
   const latestAssistantIndex = latestMessageIndex(visibleMessages, "assistant");
   const isAuthenticated = Boolean(authSessionId);
   const visibleReportingPayload = isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;
+  const canGenerateReport = hasReportGenerationNode(supervisorState);
   const uploadButtonLabel = isRegisteringAttachment
     ? "등록 중"
     : selectedUploadFile
@@ -1652,7 +1672,7 @@ function ChatScreenV2({
         </div>
         <div className="screen-actions">
           <button className="button" type="button" onClick={onKeepTemporary}>
-            이번 세션만 유지
+            저장하지 않고 계속하기
           </button>
           <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
             {isSavingConversation ? "연결 중" : "Google 로그인 후 저장"}
@@ -1731,7 +1751,7 @@ function ChatScreenV2({
             <strong>{hasConversation ? "게스트 상담 진행 중" : "아직 대화가 없습니다."}</strong>
             <p>
               {hasConversation
-                ? "저장 선택 전까지는 임시 세션 상담으로 다룹니다."
+                ? "저장 선택 전까지는 임시 상담으로 다룹니다."
                 : "질문을 입력하면 이 영역에 상담 맥락이 쌓입니다."}
             </p>
           </div>
@@ -1758,18 +1778,12 @@ function ChatScreenV2({
                     <article className={isUser ? "message user" : "message"} key={`${message.role}-${index}`}>
                       <span className="message-avatar">{isUser ? "나" : "AI"}</span>
                       <div className={isUser ? "bubble" : "bubble wide"}>
-                        {!isUser && (
-                          <strong>
-                            {supervisorState
-                              ? "상담 내용을 분석에 필요한 정보로 정리했습니다."
-                              : "상담 내용을 기준으로 확인 가능한 항목을 정리했습니다."}
-                          </strong>
-                        )}
                         <p>{message.content}</p>
+                        {!isUser && message.followUp && <FollowUpNote followUp={message.followUp} />}
                         {!isUser && isLatestAssistant && (
                           <>
                             <MissingFieldsPrompt supervisorState={supervisorState} />
-                            {(reportingPayload || analysisCards.length > 0) && (
+                            {canGenerateReport && (reportingPayload || analysisCards.length > 0) && (
                               <ReportActionPanel
                                 currentReport={currentReport}
                                 isAuthenticated={Boolean(authSessionId)}
@@ -1777,7 +1791,7 @@ function ChatScreenV2({
                                 reportActionStatus={reportActionStatus}
                               />
                             )}
-                            {visibleReportingPayload && (
+                            {canGenerateReport && visibleReportingPayload && (
                               <ReportReadyNotice
                                 isAuthenticated={Boolean(authSessionId)}
                                 onOpenReporting={onOpenReporting}
@@ -1824,7 +1838,7 @@ function ChatScreenV2({
 
           {saveDecision === "session_only" && (
             <section className="save-choice-panel is-muted" aria-label="임시 상담 유지">
-              <strong>이번 상담은 임시 세션으로 유지합니다.</strong>
+              <strong>이번 상담은 임시로 유지합니다.</strong>
               <p>나중에 저장이 필요해지면 Google 로그인 후 다시 연결할 수 있습니다.</p>
             </section>
           )}
@@ -1839,16 +1853,6 @@ function ChatScreenV2({
 
           <div className="chat-input">
             <div className="input-stack">
-              <div className="chat-input__context">
-                <div>
-                  <span>지금 필요한 건 완벽한 문장이 아니에요</span>
-                  <strong>사고·고지서 상황을 아는 만큼만 적어주세요</strong>
-                </div>
-                <small>장소 · 시간 · 상대방 행동 · 받은 안내 내용을 떠오르는 대로 적으면 됩니다.</small>
-              </div>
-              <div className="attachment-strip">
-                <span>자료 업로드와 정밀 분석은 상담 중 필요한 시점에 로그인 후 진행합니다.</span>
-              </div>
               <textarea
                 aria-label="상담 메시지 입력"
                 placeholder="사고 상황, 고지서 내용, 보험사 설명처럼 지금 기억나는 내용을 입력해 주세요."
@@ -1886,6 +1890,41 @@ function MissingFieldsPrompt({ supervisorState }) {
         ))}
       </ul>
       <p>위 항목을 알고 계신 만큼만 이어서 입력해 주세요.</p>
+    </div>
+  );
+}
+
+function FollowUpNote({ followUp }) {
+  const message = String(followUp?.message || "").trim();
+  const items = Array.isArray(followUp?.items) ? followUp.items : [];
+  if (!message) {
+    return null;
+  }
+  const requiredItems = items.filter((item) => item?.required);
+  const optionalItems = items.filter((item) => !item?.required);
+  return (
+    <div className="follow-up-note" role="status">
+      <p>{message}</p>
+      {requiredItems.length > 0 && (
+        <div className="follow-up-group follow-up-group-required">
+          <span className="follow-up-group-label">꼭 필요해요</span>
+          <ul>
+            {requiredItems.map((item, index) => (
+              <li key={item.label || index}>{item.label}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {optionalItems.length > 0 && (
+        <div className="follow-up-group follow-up-group-optional">
+          <span className="follow-up-group-label">알려주시면 더 좋아요</span>
+          <ul>
+            {optionalItems.map((item, index) => (
+              <li key={item.label || index}>{item.label}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -3022,7 +3061,24 @@ function isReportingPayloadReady(reportingPayload, supervisorState) {
   }
   const pendingQuestions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
   const missingFields = Array.isArray(supervisorState?.missing_fields) ? supervisorState.missing_fields : [];
-  return reportingPayload.stage === "agent_execution_ready" && pendingQuestions.length === 0 && missingFields.length === 0;
+  // `reporting_payload.stage` is only populated on the Supervisor-LLM path
+  // (supervisor_llm_service._normalized_reporting_payload); the rule-based
+  // fallback builder never sets it. `supervisor_state.stage` is set reliably
+  // on both paths, so check that instead.
+  return supervisorState?.stage === "agent_execution_ready" && pendingQuestions.length === 0 && missingFields.length === 0;
+}
+
+function hasReportGenerationNode(supervisorState) {
+  // Only routing intents whose Agent plan includes objection_report_generation
+  // (currently just fine_notice_objection, see NODE_PLANS in
+  // chat_orchestration_service.py) ever produce a persisted report. Showing
+  // the save/download actions for other intents (e.g. traffic_law_search)
+  // leads users to a "wait for the worker" message that never resolves,
+  // because nothing is ever generated for those intents.
+  const packages = Array.isArray(supervisorState?.agent_input_packages)
+    ? supervisorState.agent_input_packages
+    : [];
+  return packages.some((item) => item?.node_code === "objection_report_generation");
 }
 
 function openReportScreenPrintWindow(container, { filenameBase, title } = {}) {
