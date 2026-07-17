@@ -612,7 +612,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         response_model=AnalysisJobAcceptedResponse,
         success_status=202,
         errors=_analysis_job_errors(
-            (400, ("analysis_job_session_required",)),
+            (400, ("analysis_job_session_required", "chat_input_rejected")),
             (403, ("object_access_denied",)),
             (
                 409,

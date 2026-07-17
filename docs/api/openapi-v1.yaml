@@ -740,6 +740,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - analysis_job_session_required
+          - chat_input_rejected
         '403':
           description: Typed API error response
           content:
