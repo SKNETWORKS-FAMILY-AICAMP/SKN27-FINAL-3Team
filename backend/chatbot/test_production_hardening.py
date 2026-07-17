@@ -341,13 +341,13 @@ class ProductionApiContractTests(SimpleTestCase):
         enqueue.assert_not_called()
 
     def test_analysis_job_rejects_blocked_input_before_reservation_or_usage(self) -> None:
-        secret = "sk-synthetic123456789"
+        blocked_credential = "sk-synthetic123456789"
         request = RequestFactory().post(
             "/api/analysis/jobs/",
             data={
                 "session_id": "ses_privacy_rejected",
                 "job_id": "job_privacy_rejected",
-                "user_text": f"API key is {secret}",
+                "user_text": f"API key is {blocked_credential}",
             },
             content_type="application/json",
         )
@@ -365,7 +365,7 @@ class ProductionApiContractTests(SimpleTestCase):
         body = json.loads(response.content)
         self.assertEqual(body["error"]["code"], "chat_input_rejected")
         self.assertEqual(body["error"]["required_action"], "remove_sensitive_input")
-        self.assertNotIn(secret, str(body))
+        self.assertNotIn(blocked_credential, str(body))
         reserve.assert_not_called()
         record_usage.assert_not_called()
         submit_message.assert_not_called()
