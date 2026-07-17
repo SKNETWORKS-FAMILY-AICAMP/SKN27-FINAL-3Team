@@ -8,7 +8,11 @@ from typing import Any
 import yaml
 from pydantic import BaseModel
 
-from app.contracts.api_route_specs import API_ROUTE_SPECS, RouteSpec
+from app.contracts.api_route_specs import (
+    API_ROUTE_SPECS,
+    RequestParameterSpec,
+    RouteSpec,
+)
 
 
 def _schema_ref(model: type[BaseModel]) -> dict[str, str]:
@@ -41,7 +45,7 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
         "tags": list(spec.tags),
         "summary": spec.summary,
         "operationId": spec.operation_id,
-        "security": [{"bearerAuth": []}] if spec.auth_required else [],
+        "security": _security_requirements(spec),
         "x-contract-status": spec.contract_status,
         "x-django-route-name": spec.route_name,
         "x-django-view": spec.view_name,
@@ -68,24 +72,30 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
             },
         },
     }
-    if spec.path_parameters:
+    parameters = [
+        {
+            "name": parameter.name,
+            "in": "path",
+            "required": True,
+            "description": parameter.description,
+            "schema": {
+                "type": "string",
+                "minLength": parameter.min_length,
+                "maxLength": parameter.max_length,
+            },
+        }
+        for parameter in spec.path_parameters
+    ]
+    parameters.extend(
+        _request_parameter(parameter) for parameter in spec.request_parameters
+    )
+    if parameters:
         operation["parameters"] = [
-            {
-                "name": parameter.name,
-                "in": "path",
-                "required": True,
-                "description": parameter.description,
-                "schema": {
-                    "type": "string",
-                    "minLength": parameter.min_length,
-                    "maxLength": parameter.max_length,
-                },
-            }
-            for parameter in spec.path_parameters
+            *parameters
         ]
     if spec.request_model is not None:
         operation["requestBody"] = {
-            "required": True,
+            "required": spec.request_body_required,
             "content": {
                 "application/json": {
                     "schema": _schema_ref(spec.request_model),
@@ -93,6 +103,29 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
             },
         }
     return operation
+
+
+def _security_requirements(spec: RouteSpec) -> list[dict[str, list[str]]]:
+    if spec.auth_required:
+        return [{"bearerAuth": []}]
+    if spec.auth_optional:
+        return [{}, {"bearerAuth": []}]
+    return []
+
+
+def _request_parameter(parameter: RequestParameterSpec) -> dict[str, Any]:
+    schema: dict[str, Any] = {"type": "string"}
+    if parameter.format:
+        schema["format"] = parameter.format
+    if parameter.allowed_values:
+        schema["enum"] = list(parameter.allowed_values)
+    return {
+        "name": parameter.name,
+        "in": parameter.location,
+        "required": parameter.required,
+        "description": parameter.description,
+        "schema": schema,
+    }
 
 
 def build_openapi_document(

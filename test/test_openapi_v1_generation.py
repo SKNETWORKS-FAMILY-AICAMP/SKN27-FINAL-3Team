@@ -11,7 +11,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_openapi_v1_is_generated_from_case_route_specs() -> None:
+def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
     module_path = ROOT / "app" / "contracts" / "openapi_v1.py"
     assert module_path.exists(), "OpenAPI v1 generator must exist"
 
@@ -22,6 +22,11 @@ def test_openapi_v1_is_generated_from_case_route_specs() -> None:
     assert document["info"]["version"] == "1.0.0"
     assert document["x-contract-mode"] == "shadow"
     assert set(document["paths"]) == {
+        "/api/auth/guest-session/",
+        "/api/auth/google/code/",
+        "/api/auth/refresh/",
+        "/api/auth/logout/",
+        "/api/auth/me/",
         "/api/cases/",
         "/api/cases/{case_id}/workspace/",
         "/api/cases/{case_id}/facts/confirm/",
@@ -65,7 +70,9 @@ def test_openapi_v1_is_generated_from_case_route_specs() -> None:
         "fact_readiness_not_met",
     ]
 
-    for path_item in document["paths"].values():
+    for path, path_item in document["paths"].items():
+        if path.startswith("/api/auth/"):
+            continue
         for operation in path_item.values():
             assert operation["x-contract-status"] == "shadow"
             assert operation["x-django-route-name"].startswith("canonical-consultation-")
@@ -82,8 +89,94 @@ def test_openapi_v1_is_generated_from_case_route_specs() -> None:
         "StartCaseAnalysisRequest",
         "StartCaseAnalysisResponse",
         "CaseApiErrorResponse",
+        "GuestSessionRequest",
+        "GuestSessionResponse",
+        "GoogleAuthorizationCodeRequest",
+        "GoogleAuthorizationCodeResponse",
+        "AuthTokenRefreshRequest",
+        "AuthTokenRefreshResponse",
+        "AuthLogoutRequest",
+        "AuthLogoutResponse",
+        "AuthSubjectResponse",
+        "AuthErrorResponse",
+        "RateLimitErrorResponse",
     ):
         assert schema_name in schemas
+
+
+def test_auth_session_routes_document_runtime_auth_boundary() -> None:
+    generator = importlib.import_module("app.contracts.openapi_v1")
+    document = generator.build_openapi_document()
+    paths = document["paths"]
+
+    guest_session = paths["/api/auth/guest-session/"]["post"]
+    assert guest_session["operationId"] == "createGuestSession"
+    assert guest_session["security"] == []
+    assert guest_session["requestBody"]["required"] is False
+
+    google_code = paths["/api/auth/google/code/"]["post"]
+    assert google_code["operationId"] == "exchangeGoogleAuthorizationCode"
+    assert google_code["security"] == []
+    assert google_code["parameters"] == [
+        {
+            "name": "Origin",
+            "in": "header",
+            "required": True,
+            "description": "Exact frontend origin configured for Google code exchange.",
+            "schema": {"type": "string", "format": "uri"},
+        },
+        {
+            "name": "X-Requested-With",
+            "in": "header",
+            "required": True,
+            "description": "Browser request marker required before Google provider exchange.",
+            "schema": {"type": "string", "enum": ["XmlHttpRequest"]},
+        },
+    ]
+    assert google_code["responses"]["429"]["x-error-codes"] == [
+        "rate_limit_exceeded"
+    ]
+
+    for path in ("/api/auth/refresh/", "/api/auth/logout/"):
+        operation = paths[path]["post"]
+        assert operation["security"] == [{}, {"bearerAuth": []}]
+        assert operation["requestBody"]["required"] is False
+        assert operation["responses"]["401"]["x-error-codes"] == [
+            "auth_required",
+            "token_invalid",
+            "token_expired",
+        ]
+
+    current_subject = paths["/api/auth/me/"]["get"]
+    assert current_subject["operationId"] == "getCurrentAuthSubject"
+    assert current_subject["security"] == [{}, {"bearerAuth": []}]
+    assert current_subject["parameters"] == [
+        {
+            "name": "X-Guest-Id",
+            "in": "header",
+            "required": False,
+            "description": "Optional guest identity header when no Bearer token is supplied.",
+            "schema": {"type": "string"},
+        },
+        {
+            "name": "guest_id",
+            "in": "query",
+            "required": False,
+            "description": "Optional query fallback for the guest identity.",
+            "schema": {"type": "string"},
+        },
+        {
+            "name": "session_id",
+            "in": "query",
+            "required": False,
+            "description": "Optional chat session binding identifier.",
+            "schema": {"type": "string"},
+        },
+    ]
+    assert current_subject["responses"]["401"]["x-error-codes"] == [
+        "token_invalid",
+        "token_expired",
+    ]
 
 
 def test_openapi_v1_yaml_rendering_is_deterministic_and_parseable() -> None:

@@ -12,6 +12,19 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.contracts.auth_session import (
+    AuthErrorResponse,
+    AuthLogoutRequest,
+    AuthLogoutResponse,
+    AuthSubjectResponse,
+    AuthTokenRefreshRequest,
+    AuthTokenRefreshResponse,
+    GoogleAuthorizationCodeRequest,
+    GoogleAuthorizationCodeResponse,
+    GuestSessionRequest,
+    GuestSessionResponse,
+    RateLimitErrorResponse,
+)
 from app.contracts.consultation_case import (
     CaseApiErrorCode,
     CaseApiErrorResponse,
@@ -45,7 +58,7 @@ class PathParameterSpec:
 @dataclass(frozen=True, slots=True)
 class RouteErrorSpec:
     status: int
-    codes: tuple[CaseApiErrorCode, ...]
+    codes: tuple[str, ...]
     response_model: type[BaseModel]
 
 
@@ -65,6 +78,9 @@ class RouteSpec:
     tags: tuple[str, ...]
     summary: str
     path_parameters: tuple[PathParameterSpec, ...] = ()
+    request_parameters: tuple["RequestParameterSpec", ...] = ()
+    request_body_required: bool = True
+    auth_optional: bool = False
 
     def __post_init__(self) -> None:
         placeholders = tuple(re.findall(r"\{([^{}]+)\}", self.path))
@@ -74,6 +90,22 @@ class RouteSpec:
                 f"path parameter drift for {self.method} {self.path}: "
                 f"placeholders={placeholders!r}, specs={parameters!r}"
             )
+        if self.auth_required and self.auth_optional:
+            raise ValueError("a route cannot require and optionally accept Bearer auth")
+
+
+@dataclass(frozen=True, slots=True)
+class RequestParameterSpec:
+    name: str
+    location: Literal["header", "query"]
+    description: str
+    required: bool = False
+    format: str | None = None
+    allowed_values: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("request parameter name is required")
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +127,16 @@ def _case_errors(
             codes=codes,
             response_model=CaseApiErrorResponse,
         )
+        for status, codes in entries
+    )
+
+
+def _auth_errors(
+    *entries: tuple[int, tuple[str, ...]],
+    response_model: type[BaseModel] = AuthErrorResponse,
+) -> tuple[RouteErrorSpec, ...]:
+    return tuple(
+        RouteErrorSpec(status=status, codes=codes, response_model=response_model)
         for status, codes in entries
     )
 
@@ -227,7 +269,144 @@ CASE_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
 )
 
 
-API_ROUTE_SPECS: tuple[RouteSpec, ...] = CASE_API_ROUTE_SPECS
+GOOGLE_CODE_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    RequestParameterSpec(
+        name="Origin",
+        location="header",
+        description="Exact frontend origin configured for Google code exchange.",
+        required=True,
+        format="uri",
+    ),
+    RequestParameterSpec(
+        name="X-Requested-With",
+        location="header",
+        description="Browser request marker required before Google provider exchange.",
+        required=True,
+        allowed_values=("XmlHttpRequest",),
+    ),
+)
+
+
+AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="createGuestSession",
+        method="POST",
+        path="/api/auth/guest-session/",
+        route_name="auth-guest-session",
+        view_name="guest_session",
+        request_model=GuestSessionRequest,
+        response_model=GuestSessionResponse,
+        success_status=200,
+        errors=(),
+        auth_required=False,
+        contract_status="shadow",
+        tags=("Auth",),
+        summary="Issue or refresh a guest identity",
+        request_body_required=False,
+    ),
+    RouteSpec(
+        operation_id="exchangeGoogleAuthorizationCode",
+        method="POST",
+        path="/api/auth/google/code/",
+        route_name="auth-google-code",
+        view_name="auth_google_code",
+        request_model=GoogleAuthorizationCodeRequest,
+        response_model=GoogleAuthorizationCodeResponse,
+        success_status=200,
+        errors=(
+            *_auth_errors(
+                (401, ("token_invalid",)),
+                (403, ("forbidden",)),
+                (503, ("provider_unavailable",)),
+            ),
+            *_auth_errors(
+                (429, ("rate_limit_exceeded",)),
+                response_model=RateLimitErrorResponse,
+            ),
+        ),
+        auth_required=False,
+        contract_status="shadow",
+        tags=("Auth",),
+        summary="Exchange a one-time Google authorization code for an app Bearer token",
+        request_parameters=GOOGLE_CODE_PARAMETERS,
+    ),
+    RouteSpec(
+        operation_id="refreshAuthToken",
+        method="POST",
+        path="/api/auth/refresh/",
+        route_name="auth-refresh",
+        view_name="auth_refresh",
+        request_model=AuthTokenRefreshRequest,
+        response_model=AuthTokenRefreshResponse,
+        success_status=200,
+        errors=_auth_errors(
+            (401, ("auth_required", "token_invalid", "token_expired")),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Auth",),
+        summary="Rotate a valid app Bearer token",
+        request_body_required=False,
+    ),
+    RouteSpec(
+        operation_id="logoutAuthSession",
+        method="POST",
+        path="/api/auth/logout/",
+        route_name="auth-logout",
+        view_name="auth_logout",
+        request_model=AuthLogoutRequest,
+        response_model=AuthLogoutResponse,
+        success_status=200,
+        errors=_auth_errors(
+            (401, ("auth_required", "token_invalid", "token_expired")),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Auth",),
+        summary="Revoke the current auth session and clear client auth state",
+        request_body_required=False,
+    ),
+    RouteSpec(
+        operation_id="getCurrentAuthSubject",
+        method="GET",
+        path="/api/auth/me/",
+        route_name="auth-me",
+        view_name="auth_me",
+        request_model=None,
+        response_model=AuthSubjectResponse,
+        success_status=200,
+        errors=_auth_errors((401, ("token_invalid", "token_expired"))),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Auth",),
+        summary="Inspect current anonymous, guest, or authenticated subject",
+        request_parameters=(
+            RequestParameterSpec(
+                name="X-Guest-Id",
+                location="header",
+                description="Optional guest identity header when no Bearer token is supplied.",
+            ),
+            RequestParameterSpec(
+                name="guest_id",
+                location="query",
+                description="Optional query fallback for the guest identity.",
+            ),
+            RequestParameterSpec(
+                name="session_id",
+                location="query",
+                description="Optional chat session binding identifier.",
+            ),
+        ),
+    ),
+)
+
+
+API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    CASE_API_ROUTE_SPECS + AUTH_SESSION_API_ROUTE_SPECS
+)
 
 
 DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
@@ -258,41 +437,6 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         route_name="capabilities",
         view_name="capabilities",
         reason="Capability DTO exists in runtime data but is not registered as a route contract.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/auth/guest-session/",
-        route_name="auth-guest-session",
-        view_name="guest_session",
-        reason="Guest authentication request and response DTOs are pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/auth/google/code/",
-        route_name="auth-google-code",
-        view_name="auth_google_code",
-        reason="Google authorization-code and CSRF error DTOs are pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/auth/refresh/",
-        route_name="auth-refresh",
-        view_name="auth_refresh",
-        reason="Rotating credential and revoked-session DTOs are pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/auth/logout/",
-        route_name="auth-logout",
-        view_name="auth_logout",
-        reason="Logout and revoked-session DTOs are pending.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/auth/me/",
-        route_name="auth-me",
-        view_name="auth_me",
-        reason="Current principal success and auth-error DTOs are pending.",
     ),
     DeferredRouteSpec(
         method="GET",
