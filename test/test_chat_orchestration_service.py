@@ -237,6 +237,17 @@ def test_accident_initial_message_uses_llm_only_for_fact_candidates(build_superv
     fact_state = response["consultation_state"]["fact_state"]
     assert fact_state["missing_fields"] == []
     assert all(not record["confirmed"] for record in fact_state["facts"].values())
+    case_evidence = response["consultation_state"]["v2"]["case_evidence"]
+    assert case_evidence["schema_version"] == "case_evidence.v1"
+    assert case_evidence["facts"] == {}
+    assert set(case_evidence["claims"]) == {
+        "road_layout",
+        "vehicle_actions",
+        "signal_priority",
+        "collision_location",
+    }
+    assert response["supervisor_state"]["case_evidence"] == case_evidence
+    assert response["pending_questions"][0]["field"] == "material_evidence"
     assert response["consultation_state"]["promotion_gate"]["requirements"][0] == "fact_confirmation"
     assert response["analysis_plan"]["steps"] == []
 

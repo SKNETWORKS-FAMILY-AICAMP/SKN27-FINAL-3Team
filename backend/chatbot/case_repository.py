@@ -11,6 +11,11 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from app.services.case_evidence_service import (
+    build_case_evidence,
+    case_evidence_readiness,
+    material_fact_values,
+)
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS
 from chatbot.models import (
     AgentWorkItemStatus,
@@ -20,6 +25,7 @@ from chatbot.models import (
     CaseStatus,
     ChatSession,
     ConfirmedFactVersion,
+    UploadedFileStatus,
 )
 from chatbot.retention_policy import upload_retention_expires_at
 from chatbot.repositories import enqueue_analysis_job_work
@@ -204,7 +210,19 @@ def get_case_workspace(case_id: str) -> dict[str, Any]:
     case = Case.objects.filter(case_id=case_id, deleted_at__isnull=True).first()
     if case is None:
         raise CaseNotFound("case was not found")
-    facts = [fact_version_to_api(version) for version in case.fact_versions.all()]
+    fact_versions = list(case.fact_versions.all())
+    facts = [fact_version_to_api(version) for version in fact_versions]
+    latest_fact_version = max(fact_versions, key=lambda version: version.version_no, default=None)
+    case_evidence = (
+        build_case_evidence(
+            facts=_dict(latest_fact_version.facts),
+            sources=_dict_list(latest_fact_version.sources),
+            conflicts=_dict_list(latest_fact_version.conflicts),
+            material_source_refs=_ready_case_attachment_ids(case),
+        )
+        if latest_fact_version is not None
+        else build_case_evidence(facts={}, sources=[], conflicts=[])
+    )
     jobs = [
         {
             "job_id": job.job_id,
@@ -228,6 +246,7 @@ def get_case_workspace(case_id: str) -> dict[str, Any]:
         "case": case_to_api(case),
         "consultation_state": _dict(case.metadata).get("consultation_state") or {},
         "confirmed_facts": facts,
+        "case_evidence": case_evidence,
         "analysis_jobs": jobs,
         "reports": reports,
         "attachments": [
@@ -356,14 +375,18 @@ def start_case_analysis(
         fact_version = fact_query.order_by("-version_no").first()
         if fact_version is None:
             raise ConfirmedFactsRequired("confirmed facts are required before analysis")
-        required_fields = [field for field, _question in CORE_FACT_QUESTIONS]
-        missing_fields = [field for field in required_fields if not _text(fact_version.facts.get(field))]
-        if missing_fields or fact_version.conflicts:
+        case_evidence = build_case_evidence(
+            facts=_dict(fact_version.facts),
+            sources=_dict_list(fact_version.sources),
+            conflicts=_dict_list(fact_version.conflicts),
+            material_source_refs=_ready_case_attachment_ids(case),
+        )
+        readiness = case_evidence_readiness(case_evidence)
+        if not readiness["ready"]:
             raise FactReadinessNotMet(
-                "confirmed facts do not meet the analysis readiness gate",
+                "material evidence does not meet the analysis readiness gate",
                 details={
-                    "required_fields": required_fields,
-                    "missing_fields": missing_fields,
+                    **readiness,
                     "conflict_count": len(fact_version.conflicts),
                 },
             )
@@ -411,13 +434,13 @@ def start_case_analysis(
                     "status": "ready",
                     "execution_mode": "sync",
                     "depends_on": [node_codes[index - 2]] if index > 1 else [],
-                    "required_inputs": ["confirmed_facts.v1"],
+                    "required_inputs": ["confirmed_facts.v1", "case_evidence.v1"],
                 }
                 for index, node_code in enumerate(node_codes, start=1)
             ],
         }
-        confirmed_user_facts = json.dumps(
-            fact_version.facts,
+        material_user_facts = json.dumps(
+            material_fact_values(case_evidence),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -427,10 +450,12 @@ def start_case_analysis(
             "user_id": owner_id,
             "session_id": session.session_id,
             "case_id": case.case_id,
-            "user_text": confirmed_user_facts,
+            "user_text": material_user_facts,
             "confirmed_facts": fact_version_to_api(fact_version),
+            "case_evidence": case_evidence,
             "context": {
-                "user_facts": confirmed_user_facts,
+                "user_facts": material_user_facts,
+                "case_evidence": case_evidence,
             },
         }
         job_payload = {
@@ -461,6 +486,7 @@ def start_case_analysis(
             "case_id": case.case_id,
             "fact_version_id": fact_version.fact_version_id,
             "confirmed_facts_schema": "confirmed_facts.v1",
+            "case_evidence_schema": "case_evidence.v1",
         }
         job.save(update_fields=["case", "metadata", "updated_at"])
         case.status = CaseStatus.QUEUED
@@ -532,6 +558,17 @@ def fact_version_to_api(version: ConfirmedFactVersion) -> dict[str, Any]:
         "user_edit_history": version.user_edit_history,
         "confirmed_by": version.confirmed_by,
         "confirmed_at": version.confirmed_at.isoformat() if version.confirmed_at else None,
+    }
+
+
+def _ready_case_attachment_ids(case: Case) -> set[str]:
+    return {
+        _text(attachment_id)
+        for attachment_id in case.uploaded_files.filter(
+            status=UploadedFileStatus.READY.value,
+            deleted_at__isnull=True,
+        ).values_list("attachment_id", flat=True)
+        if _text(attachment_id)
     }
 
 

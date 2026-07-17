@@ -279,6 +279,19 @@ class ConsultationCaseApiTests(TestCase):
         )
         self.assertEqual(create_response.status_code, 201)
         created = create_response.json()["case"]
+        UploadedFile.objects.create(
+            attachment_id="att_police_001",
+            owner_id=self.owner_id,
+            session=self.session,
+            case=Case.objects.get(case_id=created["case_id"]),
+            purpose="supporting_evidence",
+            file_type="pdf",
+            original_filename="police-record.pdf",
+            content_type="application/pdf",
+            storage_uri="mock://case-evidence/att_police_001",
+            status="ready",
+            scan_status="passed",
+        )
 
         premature = self.client.post(
             f"/api/cases/{created['case_id']}/analysis/jobs/",
@@ -296,7 +309,7 @@ class ConsultationCaseApiTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
-            "sources": [{"source_type": "user_confirmation", "source_ref": "case-form"}],
+            "sources": [{"source_type": "official_document", "source_ref": "att_police_001"}],
             "conflicts": [],
             "user_edit_history": [],
         }
@@ -340,6 +353,17 @@ class ConsultationCaseApiTests(TestCase):
         self.assertIn(
             '"road_layout":"four_way_intersection"',
             analysis_job.work_items.get().payload["execution_payload"]["context"]["user_facts"],
+        )
+        execution_payload = analysis_job.work_items.get().payload["execution_payload"]
+        self.assertEqual(execution_payload["case_evidence"]["schema_version"], "case_evidence.v1")
+        self.assertEqual(
+            execution_payload["context"]["case_evidence"]["facts"]["road_layout"]["value"],
+            "four_way_intersection",
+        )
+        self.assertEqual(execution_payload["case_evidence"]["claims"], {})
+        self.assertEqual(
+            analysis_job.metadata["analysis_plan"]["steps"][0]["required_inputs"],
+            ["confirmed_facts.v1", "case_evidence.v1"],
         )
 
         facts_retry_response = self.client.post(
@@ -422,6 +446,52 @@ class ConsultationCaseApiTests(TestCase):
             ["vehicle_actions", "signal_priority", "collision_location"],
         )
         self.assertFalse(apps.get_model("chatbot", "AgentWorkItem").objects.exists())
+
+    def test_user_confirmed_claims_do_not_start_case_analysis_without_material_evidence(self) -> None:
+        create_response = self.client.post(
+            "/api/cases/",
+            data={
+                "session_id": self.session.session_id,
+                "title": "Claim-only case evidence test",
+                "case_type": "accident_fault",
+                "consultation_state": {"schema_version": "consultation_state.v2"},
+            },
+            content_type="application/json",
+        )
+        case_id = create_response.json()["case"]["case_id"]
+        facts_response = self.client.post(
+            f"/api/cases/{case_id}/facts/confirm/",
+            data={
+                "facts": {
+                    "road_layout": "four_way_intersection",
+                    "vehicle_actions": "ego_straight_other_left_turn",
+                    "signal_priority": "ego_green",
+                    "collision_location": "front_left",
+                },
+                "sources": [{"source_type": "user_confirmation", "source_ref": "case-form"}],
+                "conflicts": [],
+            },
+            content_type="application/json",
+        )
+        fact_version_id = facts_response.json()["fact_version"]["fact_version_id"]
+
+        response = self.client.post(
+            f"/api/cases/{case_id}/analysis/jobs/",
+            data={"fact_version_id": fact_version_id},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        CaseApiErrorResponse.model_validate(response.json())
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "fact_readiness_not_met")
+        self.assertEqual(error["details"]["missing_fields"], [])
+        self.assertEqual(
+            error["details"]["unverified_fields"],
+            ["road_layout", "vehicle_actions", "signal_priority", "collision_location"],
+        )
+        self.assertEqual(error["details"]["conflict_fields"], [])
+        self.assertFalse(AgentWorkItem.objects.exists())
 
     def test_case_creation_requires_authenticated_user(self) -> None:
         response = Client().post(

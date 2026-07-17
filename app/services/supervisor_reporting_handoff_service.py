@@ -294,7 +294,15 @@ def _sanitize_case_context(value: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "user_facts": sanitize_sensitive_text(context.get("user_facts")),
         "attachment_refs": attachment_refs,
+        "case_evidence": _sanitize_case_evidence(context.get("case_evidence")),
     }
+
+
+def _sanitize_case_evidence(value: Any) -> dict[str, Any]:
+    evidence = value if isinstance(value, dict) else {}
+    if _text(evidence.get("schema_version")) != "case_evidence.v1":
+        return {}
+    return _sanitize_value(evidence)
 
 
 def _canonical_fingerprint(value: dict[str, Any]) -> str:
