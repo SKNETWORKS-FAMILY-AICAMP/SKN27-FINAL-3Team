@@ -18,6 +18,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
+from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
     ConfirmCaseFactsRequest,
@@ -785,6 +786,10 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     usage = None
     if _is_canonical_mock_request(request):
+        try:
+            identity_body = protect_chat_input_payload(identity_body)
+        except ChatInputRejected as exc:
+            return _analysis_job_chat_input_rejected_response(request, exc)
         requested_session_id = str(identity_body.get("session_id") or "")
         if requested_session_id:
             session_access = get_chat_session_access_metadata(requested_session_id)
@@ -2464,6 +2469,8 @@ def _analysis_job_request_fingerprint(payload: dict[str, object]) -> str:
         "owner_id",
         "user_id",
         "auth_context",
+        "safe_user_text",
+        "privacy_gateway",
     }
     request_contract = {
         "contract_version": "analysis_job_request_fingerprint.v1",
@@ -2526,6 +2533,27 @@ def _analysis_job_request_error_response(
                 "code": code,
                 "status": 400,
                 "message": message,
+            }
+        },
+        status=400,
+    )
+
+
+def _analysis_job_chat_input_rejected_response(
+    request: HttpRequest,
+    error: ChatInputRejected,
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "chat_input_privacy.v1",
+                "type": "validation",
+                "code": "chat_input_rejected",
+                "status": 400,
+                "message": error.decision.message,
+                "required_action": "remove_sensitive_input",
+                "privacy_gateway": error.decision.public_metadata(),
             }
         },
         status=400,

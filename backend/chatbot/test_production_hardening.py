@@ -340,6 +340,37 @@ class ProductionApiContractTests(SimpleTestCase):
         record_usage.assert_not_called()
         enqueue.assert_not_called()
 
+    def test_analysis_job_rejects_blocked_input_before_reservation_or_usage(self) -> None:
+        secret = "sk-synthetic123456789"
+        request = RequestFactory().post(
+            "/api/analysis/jobs/",
+            data={
+                "session_id": "ses_privacy_rejected",
+                "job_id": "job_privacy_rejected",
+                "user_text": f"API key is {secret}",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.reserve_analysis_job_request") as reserve,
+            patch("chatbot.views.record_usage_event") as record_usage,
+            patch("chatbot.views.submit_message") as submit_message,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+        ):
+            response = analysis_jobs(request)
+
+        self.assertEqual(response.status_code, 400)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "chat_input_rejected")
+        self.assertEqual(body["error"]["required_action"], "remove_sensitive_input")
+        self.assertNotIn(secret, str(body))
+        reserve.assert_not_called()
+        record_usage.assert_not_called()
+        submit_message.assert_not_called()
+        enqueue.assert_not_called()
+
     def test_analysis_job_post_queues_plan_without_inline_agent_execution(self) -> None:
         chat_response = {
             "contract_version": "chat_message_accepted.v2",

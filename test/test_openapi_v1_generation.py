@@ -257,6 +257,10 @@ def test_analysis_job_routes_document_async_owner_scoped_contract() -> None:
     assert jobs["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AnalysisJobAcceptedResponse"
     }
+    assert jobs["post"]["responses"]["400"]["x-error-codes"] == [
+        "analysis_job_session_required",
+        "chat_input_rejected",
+    ]
     assert jobs["post"]["responses"]["409"]["x-error-codes"] == [
         "analysis_plan_not_executable",
         "attachment_scan_blocked",
