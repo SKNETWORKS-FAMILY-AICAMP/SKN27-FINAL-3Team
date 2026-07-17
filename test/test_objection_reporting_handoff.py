@@ -73,7 +73,16 @@ def _handoff() -> dict:
         ),
         target_node_code="objection_report_generation",
         report_type="fine_notice_objection",
-        case_context={"user_facts": "persisted confirmed facts"},
+        case_context={
+            "user_facts": "persisted confirmed facts",
+            "case_evidence": {
+                "schema_version": "case_evidence.v1",
+                "facts": {"road_layout": {"value": "intersection"}},
+                "claims": {"signal_priority": {"value": "user statement"}},
+                "unknowns": [{"field": "collision_location", "reason": "missing_fact"}],
+                "evidence_source": {},
+            },
+        },
     )
 
 
@@ -118,6 +127,8 @@ def test_reporting_uses_strict_persisted_handoff_and_ignores_poisoned_upstream()
     )
     assert structured["appeal_decision"]["overall_possibility"] == "medium"
     assert structured["appeal_decision"]["guide"] == {"summary": "persisted guide"}
+    assert structured["case_evidence"]["facts"]["road_layout"]["value"] == "intersection"
+    assert structured["case_evidence"]["claims"]["signal_priority"]["value"] == "user statement"
 
 
 def test_reporting_fails_closed_when_strict_handoff_is_missing() -> None:

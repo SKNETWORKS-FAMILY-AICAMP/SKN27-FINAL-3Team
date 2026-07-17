@@ -329,6 +329,7 @@ def test_case_success_schemas_are_structural_in_openapi() -> None:
             "case",
             "consultation_state",
             "confirmed_facts",
+            "case_evidence",
             "analysis_jobs",
             "reports",
             "attachments",

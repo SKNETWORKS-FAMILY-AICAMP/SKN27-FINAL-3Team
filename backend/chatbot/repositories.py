@@ -6706,6 +6706,7 @@ def _build_reporting_handoff(
             # findings arrive separately through the persisted result rows.
             "user_facts": _text(context.get("user_facts")),
             "attachment_refs": attachments,
+            "case_evidence": _dict_or_empty(context.get("case_evidence")),
         },
         reporting_step_executable=reporting_step_executable,
     )

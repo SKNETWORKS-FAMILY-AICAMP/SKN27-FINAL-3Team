@@ -108,6 +108,7 @@ class CaseWorkspace(StrictResponse):
     case: ConsultationCaseRecord
     consultation_state: dict[str, Any]
     confirmed_facts: list[ConfirmedFactRecord]
+    case_evidence: dict[str, Any]
     analysis_jobs: list[CaseWorkspaceAnalysisJob]
     reports: list[CaseWorkspaceReport]
     attachments: list[CaseWorkspaceAttachment]

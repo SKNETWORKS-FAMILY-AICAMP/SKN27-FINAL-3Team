@@ -2193,6 +2193,10 @@ components:
             $ref: '#/components/schemas/ConfirmedFactRecord'
           title: Confirmed Facts
           type: array
+        case_evidence:
+          additionalProperties: true
+          title: Case Evidence
+          type: object
         analysis_jobs:
           items:
             $ref: '#/components/schemas/CaseWorkspaceAnalysisJob'
@@ -2213,6 +2217,7 @@ components:
       - case
       - consultation_state
       - confirmed_facts
+      - case_evidence
       - analysis_jobs
       - reports
       - attachments

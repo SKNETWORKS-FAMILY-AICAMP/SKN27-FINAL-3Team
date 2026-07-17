@@ -331,6 +331,13 @@ def test_case_success_models_reject_nested_contract_drift() -> None:
                 "case": case,
                 "consultation_state": {},
                 "confirmed_facts": [fact_version],
+                "case_evidence": {
+                    "schema_version": "case_evidence.v1",
+                    "facts": {},
+                    "claims": {},
+                    "unknowns": [],
+                    "evidence_source": {},
+                },
                 "analysis_jobs": [
                     {
                         "job_id": "job_123",

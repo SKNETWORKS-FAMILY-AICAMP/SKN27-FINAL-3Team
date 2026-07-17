@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.security.chat_input_privacy import protect_chat_input_payload
 from app.services.attachment_mock_service import resolve_attachment_references
+from app.services.case_evidence_service import build_case_evidence
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS, build_consultation_state_v2
 from app.services.law_ground_contract import normalize_law_evidence
 from app.services.supervisor_control_service import (
@@ -70,16 +71,39 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
         fact_state = reduce_consultation_fact_state(
             {**payload, "fact_candidates": fact_candidates}
         )
+        fact_sources = [
+            dict(item)
+            for item in payload.get("fact_sources") or []
+            if isinstance(item, dict)
+        ]
         consultation_state = build_consultation_state_v2(
             user_text=user_text,
             facts=fact_state["fact_values"],
-            sources=[
-                dict(item)
-                for item in payload.get("fact_sources") or []
-                if isinstance(item, dict)
-            ],
+            sources=fact_sources,
             conflicts=fact_state["conflicts"],
         )
+        case_evidence = build_case_evidence(
+            facts=fact_state["fact_values"],
+            sources=fact_sources,
+            conflicts=fact_state["conflicts"],
+            material_source_refs=set(),
+        )
+        consultation_state = {
+            **consultation_state,
+            "case_evidence": case_evidence,
+            "next_questions": [
+                *list(consultation_state.get("next_questions") or []),
+                *(
+                    []
+                    if consultation_state.get("next_questions")
+                    else _case_evidence_questions(case_evidence)
+                ),
+            ],
+        }
+        accident_supervisor_state = {
+            **accident_supervisor_state,
+            "case_evidence": case_evidence,
+        }
         auth_context = payload.get("auth_context") if isinstance(payload.get("auth_context"), dict) else {}
         promotion_gate = evaluate_case_promotion(
             consultation_state,
@@ -430,6 +454,40 @@ def _consultation_hold_response(
         },
         "limitations": list(consultation_state.get("limitations") or []),
     }
+
+
+def _case_evidence_questions(case_evidence: dict[str, Any]) -> list[dict[str, Any]]:
+    claim_fields = sorted(
+        field
+        for field in (case_evidence.get("claims") or {})
+        if str(field).strip()
+    )
+    conflict_fields = sorted(
+        {
+            str(item.get("field") or "").strip()
+            for item in case_evidence.get("unknowns") or []
+            if isinstance(item, dict) and item.get("reason") == "conflicting_claim"
+        }
+        - {""}
+    )
+    questions: list[dict[str, Any]] = []
+    if claim_fields:
+        questions.append(
+            {
+                "field": "material_evidence",
+                "fields": claim_fields,
+                "question": "현재 입력은 사용자 진술입니다. 과실·법령 판단 전에 해당 사실을 확인할 수 있는 자료를 첨부해 주세요.",
+            }
+        )
+    if conflict_fields:
+        questions.append(
+            {
+                "field": "resolve_conflict",
+                "fields": conflict_fields,
+                "question": "서로 다른 진술이 있어 판단을 보류했습니다. 정확한 사실과 이를 확인할 수 있는 자료를 알려 주세요.",
+            }
+        )
+    return questions
 
 
 def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> dict[str, Any]:

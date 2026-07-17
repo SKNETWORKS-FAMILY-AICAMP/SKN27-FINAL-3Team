@@ -175,6 +175,7 @@ def run_objection_report_generation(
         ),
         "appeal_decision": _appeal_decision(appeal_result),
         "supervisor_handoff": _handoff_trace(agent_input),
+        "case_evidence": _case_evidence(agent_input),
         "missing_fields": combined_missing_fields,
         "readiness": {
             "ready_for_download": not combined_missing_fields,
@@ -289,6 +290,16 @@ def _user_facts(agent_input: dict[str, Any]) -> str:
         if text:
             return text
     return ""
+
+
+def _case_evidence(agent_input: dict[str, Any]) -> dict[str, Any]:
+    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+    handoff = _supervisor_handoff(agent_input)
+    case_context = handoff.get("case_context") if isinstance(handoff.get("case_context"), dict) else {}
+    value = case_context.get("case_evidence") if _handoff_required(agent_input) else context.get("case_evidence")
+    if not isinstance(value, dict) or value.get("schema_version") != "case_evidence.v1":
+        return {}
+    return deepcopy(value)
 
 
 def _slot_facts(slot_state: dict[str, Any]) -> str:
