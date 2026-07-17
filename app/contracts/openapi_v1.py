@@ -50,14 +50,17 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
         "x-django-route-name": spec.route_name,
         "x-django-view": spec.view_name,
         "responses": {
-            str(spec.success_status): {
+            str(status): {
                 "description": "Successful response",
                 "content": {
                     "application/json": {
                         "schema": _schema_ref(spec.response_model),
                     }
                 },
-            },
+            }
+            for status in (spec.success_statuses or (spec.success_status,))
+        }
+        | {
             **{
                 str(error.status): {
                     "description": "Typed API error response",

@@ -674,6 +674,242 @@ paths:
         description: Optional chat session identifier used to scope file listing.
         schema:
           type: string
+  /api/analysis/jobs/:
+    get:
+      tags:
+      - Analysis
+      summary: List analysis jobs visible to the current subject
+      operationId: listAnalysisJobs
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-analysis-jobs
+      x-django-view: analysis_jobs
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobListResponse'
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - object_access_denied
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to scope analysis job listing.
+        schema:
+          type: string
+    post:
+      tags:
+      - Analysis
+      summary: Queue an owner-scoped Supervisor analysis plan for asynchronous execution
+      operationId: queueAnalysisJob
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-analysis-jobs
+      x-django-view: analysis_jobs
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobAcceptedResponse'
+        '400':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_job_session_required
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '409':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_plan_not_executable
+          - attachment_scan_blocked
+          - analysis_job_id_conflict
+          - analysis_job_reservation_pending
+        '429':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - rate_limit_exceeded
+        '503':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_job_unavailable
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisJobRequest'
+  /api/analysis/jobs/{job_id}/:
+    get:
+      tags:
+      - Analysis
+      summary: Read one asynchronous analysis job after owner authorization
+      operationId: getAnalysisJob
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-analysis-job-detail
+      x-django-view: analysis_job_detail
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobDetailResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_job_not_found
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        description: Canonical asynchronous analysis job identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+  /api/analysis/results/{job_id}/:
+    get:
+      tags:
+      - Analysis
+      summary: Read a completed result or pending state for an authorized analysis job
+      operationId: getAnalysisResult
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-analysis-result
+      x-django-view: analysis_result
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResultResponse'
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResultResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_result_not_found
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        description: Canonical asynchronous analysis job identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
 components:
   securitySchemes:
     bearerAuth:
@@ -681,6 +917,236 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    AnalysisJobAccepted:
+      additionalProperties: true
+      properties:
+        job_id:
+          maxLength: 128
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        contract_version:
+          maxLength: 64
+          minLength: 1
+          title: Contract Version
+          type: string
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        message_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        execution_mode:
+          maxLength: 64
+          minLength: 1
+          title: Execution Mode
+          type: string
+      required:
+      - job_id
+      - status
+      - contract_version
+      - execution_mode
+      title: AnalysisJobAccepted
+      type: object
+    AnalysisJobAcceptedResponse:
+      additionalProperties: true
+      properties:
+        job:
+          $ref: '#/components/schemas/AnalysisJobAccepted'
+      required:
+      - job
+      title: AnalysisJobAcceptedResponse
+      type: object
+    AnalysisJobSummary:
+      additionalProperties: true
+      properties:
+        job_id:
+          maxLength: 128
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+      required:
+      - job_id
+      - status
+      title: AnalysisJobSummary
+      type: object
+    AnalysisJobDetailResponse:
+      additionalProperties: true
+      properties:
+        job:
+          $ref: '#/components/schemas/AnalysisJobSummary'
+      required:
+      - job
+      title: AnalysisJobDetailResponse
+      type: object
+    AnalysisJobError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Contract Version
+        type:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Type
+        code:
+          maxLength: 120
+          minLength: 1
+          title: Code
+          type: string
+        status:
+          anyOf:
+          - maximum: 599
+            minimum: 400
+            type: integer
+          - type: 'null'
+          default: null
+          title: Status
+        message:
+          minLength: 1
+          title: Message
+          type: string
+      required:
+      - code
+      - message
+      title: AnalysisJobError
+      type: object
+    AnalysisJobErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/AnalysisJobError'
+      required:
+      - error
+      title: AnalysisJobErrorResponse
+      type: object
+    AnalysisJobListResponse:
+      additionalProperties: true
+      properties:
+        jobs:
+          items:
+            $ref: '#/components/schemas/AnalysisJobSummary'
+          title: Jobs
+          type: array
+      required:
+      - jobs
+      title: AnalysisJobListResponse
+      type: object
+    AnalysisJobRequest:
+      additionalProperties: true
+      properties:
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        job_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Job Id
+        message_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        user_text:
+          anyOf:
+          - minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: User Text
+        routing_intent:
+          anyOf:
+          - maxLength: 120
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Routing Intent
+        attachments:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          default: null
+          title: Attachments
+      title: AnalysisJobRequest
+      type: object
+    AnalysisResult:
+      additionalProperties: true
+      properties:
+        job_id:
+          maxLength: 128
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        contract_version:
+          maxLength: 64
+          minLength: 1
+          title: Contract Version
+          type: string
+      required:
+      - job_id
+      - status
+      - contract_version
+      title: AnalysisResult
+      type: object
+    AnalysisResultResponse:
+      additionalProperties: true
+      properties:
+        result:
+          $ref: '#/components/schemas/AnalysisResult'
+      required:
+      - result
+      title: AnalysisResultResponse
+      type: object
     AuthErrorDetail:
       additionalProperties: true
       properties:

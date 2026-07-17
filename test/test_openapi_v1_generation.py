@@ -29,6 +29,9 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/auth/me/",
         "/api/files/",
         "/api/files/{attachment_id}/",
+        "/api/analysis/jobs/",
+        "/api/analysis/jobs/{job_id}/",
+        "/api/analysis/results/{job_id}/",
         "/api/cases/",
         "/api/cases/{case_id}/workspace/",
         "/api/cases/{case_id}/facts/confirm/",
@@ -80,7 +83,7 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
             assert operation["x-django-route-name"].startswith("canonical-")
             expected_security = (
                 [{}, {"bearerAuth": []}]
-                if path.startswith("/api/files/")
+                if path.startswith(("/api/files/", "/api/analysis/"))
                 else [{"bearerAuth": []}]
             )
             assert operation["security"] == expected_security
@@ -114,6 +117,11 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "FileUploadValidationErrorResponse",
         "FileUploadTooLargeErrorResponse",
         "FileAttachmentNotFoundErrorResponse",
+        "AnalysisJobRequest",
+        "AnalysisJobAcceptedResponse",
+        "AnalysisJobListResponse",
+        "AnalysisJobDetailResponse",
+        "AnalysisResultResponse",
     ):
         assert schema_name in schemas
 
@@ -236,6 +244,36 @@ def test_file_routes_document_canonical_upload_and_owner_boundary() -> None:
     assert file_detail["responses"]["404"]["x-error-codes"] == [
         "attachment_not_found"
     ]
+
+
+def test_analysis_job_routes_document_async_owner_scoped_contract() -> None:
+    generator = importlib.import_module("app.contracts.openapi_v1")
+    paths = generator.build_openapi_document()["paths"]
+
+    jobs = paths["/api/analysis/jobs/"]
+    assert set(jobs) == {"get", "post"}
+    assert jobs["post"]["operationId"] == "queueAnalysisJob"
+    assert jobs["post"]["security"] == [{}, {"bearerAuth": []}]
+    assert jobs["post"]["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AnalysisJobAcceptedResponse"
+    }
+    assert jobs["post"]["responses"]["409"]["x-error-codes"] == [
+        "analysis_plan_not_executable",
+        "attachment_scan_blocked",
+        "analysis_job_id_conflict",
+        "analysis_job_reservation_pending",
+    ]
+
+    detail = paths["/api/analysis/jobs/{job_id}/"]["get"]
+    assert detail["parameters"][0]["name"] == "job_id"
+    assert detail["responses"]["404"]["x-error-codes"] == ["analysis_job_not_found"]
+
+    result = paths["/api/analysis/results/{job_id}/"]["get"]
+    assert result["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AnalysisResultResponse"
+    }
+    assert result["responses"]["202"]["description"] == "Successful response"
+    assert result["responses"]["404"]["x-error-codes"] == ["analysis_result_not_found"]
 
 
 def test_openapi_v1_yaml_rendering_is_deterministic_and_parseable() -> None:
