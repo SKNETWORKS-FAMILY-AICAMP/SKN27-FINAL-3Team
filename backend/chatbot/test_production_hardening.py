@@ -17,6 +17,7 @@ from chatbot.views import (
     agent_nodes,
     analysis_jobs,
     analysis_result,
+    run_agent_plan,
     submit_chat_message,
 )
 
@@ -370,6 +371,65 @@ class ProductionApiContractTests(SimpleTestCase):
         record_usage.assert_not_called()
         submit_message.assert_not_called()
         enqueue.assert_not_called()
+
+    def test_chat_message_rejects_blocked_input_before_usage_or_queueing(self) -> None:
+        blocked_credential = "sk-synthetic123456789"
+        request = RequestFactory().post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_chat_privacy_rejected",
+                "user_text": f"API key is {blocked_credential}",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None),
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.record_usage_event", return_value={"allowed": True}) as record_usage,
+            patch("chatbot.views.submit_message", side_effect=AssertionError("planner must not run")) as submit,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+        ):
+            response = submit_chat_message(request)
+
+        self.assertEqual(response.status_code, 400)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "chat_input_rejected")
+        self.assertEqual(body["error"]["required_action"], "remove_sensitive_input")
+        self.assertNotIn(blocked_credential, str(body))
+        record_usage.assert_not_called()
+        submit.assert_not_called()
+        enqueue.assert_not_called()
+
+    def test_agent_plan_rejects_blocked_input_before_planning_or_execution(self) -> None:
+        blocked_credential = "sk-synthetic123456789"
+        request = RequestFactory().post(
+            "/api/agent-plan/",
+            data={
+                "session_id": "ses_agent_plan_privacy_rejected",
+                "user_text": f"API key is {blocked_credential}",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch("chatbot.views.submit_message", side_effect=AssertionError("planner must not run")) as submit,
+            patch("chatbot.views.execute_agent_plan") as execute,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch("chatbot.views.persist_analysis_job_execution") as persist,
+        ):
+            response = run_agent_plan(request)
+
+        self.assertEqual(response.status_code, 400)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "chat_input_rejected")
+        self.assertEqual(body["error"]["required_action"], "remove_sensitive_input")
+        self.assertNotIn(blocked_credential, str(body))
+        submit.assert_not_called()
+        execute.assert_not_called()
+        enqueue.assert_not_called()
+        persist.assert_not_called()
 
     def test_analysis_job_post_queues_plan_without_inline_agent_execution(self) -> None:
         chat_response = {

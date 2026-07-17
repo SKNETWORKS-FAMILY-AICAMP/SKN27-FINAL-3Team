@@ -789,7 +789,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         try:
             identity_body = protect_chat_input_payload(identity_body)
         except ChatInputRejected as exc:
-            return _analysis_job_chat_input_rejected_response(request, exc)
+            return _chat_input_rejected_response(request, exc)
         requested_session_id = str(identity_body.get("session_id") or "")
         if requested_session_id:
             session_access = get_chat_session_access_metadata(requested_session_id)
@@ -1185,6 +1185,10 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     policy_response = _canonical_guest_identity_policy_response(request, identity_body)
     if policy_response is not None:
         return policy_response
+    try:
+        identity_body = protect_chat_input_payload(identity_body)
+    except ChatInputRejected as exc:
+        return _chat_input_rejected_response(request, exc)
     requested_session_id = str(identity_body.get("session_id") or "")
     if requested_session_id:
         session_access = get_chat_session_access_metadata(requested_session_id)
@@ -1534,6 +1538,10 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     execution_payload = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     if _is_canonical_mock_request(request):
+        try:
+            execution_payload = protect_chat_input_payload(execution_payload)
+        except ChatInputRejected as exc:
+            return _chat_input_rejected_response(request, exc)
         execution_payload = apply_attachment_scan_gate(execution_payload)
     chat_response = None
     analysis_plan = execution_payload.get("analysis_plan")
@@ -2539,7 +2547,7 @@ def _analysis_job_request_error_response(
     )
 
 
-def _analysis_job_chat_input_rejected_response(
+def _chat_input_rejected_response(
     request: HttpRequest,
     error: ChatInputRejected,
 ) -> JsonResponse:
