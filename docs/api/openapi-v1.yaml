@@ -269,6 +269,217 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/StartCaseAnalysisRequest'
+  /api/auth/guest-session/:
+    post:
+      tags:
+      - Auth
+      summary: Issue or refresh a guest identity
+      operationId: createGuestSession
+      security: []
+      x-contract-status: shadow
+      x-django-route-name: auth-guest-session
+      x-django-view: guest_session
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestSessionResponse'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestSessionRequest'
+  /api/auth/google/code/:
+    post:
+      tags:
+      - Auth
+      summary: Exchange a one-time Google authorization code for an app Bearer token
+      operationId: exchangeGoogleAuthorizationCode
+      security: []
+      x-contract-status: shadow
+      x-django-route-name: auth-google-code
+      x-django-view: auth_google_code
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoogleAuthorizationCodeResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - token_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - forbidden
+        '503':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - provider_unavailable
+        '429':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitErrorResponse'
+          x-error-codes:
+          - rate_limit_exceeded
+      parameters:
+      - name: Origin
+        in: header
+        required: true
+        description: Exact frontend origin configured for Google code exchange.
+        schema:
+          type: string
+          format: uri
+      - name: X-Requested-With
+        in: header
+        required: true
+        description: Browser request marker required before Google provider exchange.
+        schema:
+          type: string
+          enum:
+          - XmlHttpRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleAuthorizationCodeRequest'
+  /api/auth/refresh/:
+    post:
+      tags:
+      - Auth
+      summary: Rotate a valid app Bearer token
+      operationId: refreshAuthToken
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: auth-refresh
+      x-django-view: auth_refresh
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenRefreshResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthTokenRefreshRequest'
+  /api/auth/logout/:
+    post:
+      tags:
+      - Auth
+      summary: Revoke the current auth session and clear client auth state
+      operationId: logoutAuthSession
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: auth-logout
+      x-django-view: auth_logout
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthLogoutResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLogoutRequest'
+  /api/auth/me/:
+    get:
+      tags:
+      - Auth
+      summary: Inspect current anonymous, guest, or authenticated subject
+      operationId: getCurrentAuthSubject
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: auth-me
+      x-django-view: auth_me
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSubjectResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - token_invalid
+          - token_expired
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      - name: guest_id
+        in: query
+        required: false
+        description: Optional query fallback for the guest identity.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session binding identifier.
+        schema:
+          type: string
 components:
   securitySchemes:
     bearerAuth:
@@ -276,6 +487,590 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    AuthErrorDetail:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: auth_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: auth
+          title: Type
+          type: string
+        code:
+          enum:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - forbidden
+          - provider_unavailable
+          title: Code
+          type: string
+        message:
+          title: Message
+          type: string
+        status:
+          enum:
+          - 401
+          - 403
+          - 503
+          title: Status
+          type: integer
+        missing_fields:
+          items:
+            type: string
+          title: Missing Fields
+          type: array
+        retryable:
+          title: Retryable
+          type: boolean
+        required_action:
+          title: Required Action
+          type: string
+        auth:
+          additionalProperties:
+            type: string
+          title: Auth
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - message
+      - status
+      - missing_fields
+      - retryable
+      - required_action
+      - auth
+      title: AuthErrorDetail
+      type: object
+    AuthErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/AuthErrorDetail'
+      required:
+      - error
+      title: AuthErrorResponse
+      type: object
+    AuthLogoutRequest:
+      additionalProperties: true
+      properties:
+        guest_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        access_token:
+          anyOf:
+          - maxLength: 8192
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Access Token
+      title: AuthLogoutRequest
+      type: object
+    AuthClientAction:
+      additionalProperties: true
+      properties:
+        clear_access_token:
+          title: Clear Access Token
+          type: boolean
+        clear_google_profile:
+          title: Clear Google Profile
+          type: boolean
+        next_auth_state:
+          enum:
+          - anonymous
+          - guest
+          title: Next Auth State
+          type: string
+      required:
+      - clear_access_token
+      - clear_google_profile
+      - next_auth_state
+      title: AuthClientAction
+      type: object
+    AuthSession:
+      additionalProperties: true
+      properties:
+        auth_session_id:
+          maxLength: 128
+          minLength: 1
+          title: Auth Session Id
+          type: string
+        jwt_jti:
+          maxLength: 128
+          minLength: 1
+          title: Jwt Jti
+          type: string
+        status:
+          enum:
+          - active
+          - revoked
+          - expired
+          title: Status
+          type: string
+        verification:
+          maxLength: 128
+          minLength: 1
+          title: Verification
+          type: string
+        provider:
+          const: google
+          title: Provider
+          type: string
+      required:
+      - auth_session_id
+      - jwt_jti
+      - status
+      - verification
+      - provider
+      title: AuthSession
+      type: object
+    AuthSubject:
+      additionalProperties: true
+      properties:
+        subject_id:
+          maxLength: 256
+          minLength: 1
+          title: Subject Id
+          type: string
+        subject_type:
+          enum:
+          - anonymous
+          - guest
+          - user
+          title: Subject Type
+          type: string
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: User Id
+        guest_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        auth_session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Auth Session Id
+        is_authenticated:
+          title: Is Authenticated
+          type: boolean
+      required:
+      - subject_id
+      - subject_type
+      - is_authenticated
+      title: AuthSubject
+      type: object
+    AuthUser:
+      additionalProperties: true
+      properties:
+        user_id:
+          maxLength: 128
+          minLength: 1
+          title: User Id
+          type: string
+        email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Email
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Display Name
+        picture:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Picture
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Status
+        auth_provider:
+          const: google
+          title: Auth Provider
+          type: string
+        provider_subject:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Provider Subject
+        policy_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Policy Status
+      required:
+      - user_id
+      - auth_provider
+      title: AuthUser
+      type: object
+    GuestIdentity:
+      additionalProperties: true
+      properties:
+        guest_id:
+          maxLength: 128
+          minLength: 1
+          title: Guest Id
+          type: string
+        status:
+          const: active
+          title: Status
+          type: string
+        issued_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Issued At
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Expires At
+        ttl_seconds:
+          anyOf:
+          - minimum: 1
+            type: integer
+          - type: 'null'
+          default: null
+          title: Ttl Seconds
+        policy_status:
+          title: Policy Status
+          type: string
+      required:
+      - guest_id
+      - status
+      - policy_status
+      title: GuestIdentity
+      type: object
+    SessionBinding:
+      additionalProperties: true
+      properties:
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        can_bind_to_chat_session:
+          title: Can Bind To Chat Session
+          type: boolean
+        binding_policy:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Binding Policy
+      required:
+      - can_bind_to_chat_session
+      title: SessionBinding
+      type: object
+    AuthLogoutResponse:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: auth_logout.v1
+          title: Contract Version
+          type: string
+        auth_state:
+          const: anonymous
+          title: Auth State
+          type: string
+        provider:
+          const: google
+          title: Provider
+          type: string
+        revoked_at:
+          format: date-time
+          title: Revoked At
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        guest:
+          anyOf:
+          - $ref: '#/components/schemas/GuestIdentity'
+          - type: 'null'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        auth_session:
+          $ref: '#/components/schemas/AuthSession'
+        session_binding:
+          $ref: '#/components/schemas/SessionBinding'
+        client_action:
+          $ref: '#/components/schemas/AuthClientAction'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+      required:
+      - contract_version
+      - auth_state
+      - provider
+      - revoked_at
+      - user
+      - guest
+      - subject
+      - auth_session
+      - session_binding
+      - client_action
+      - limitations
+      - persistence
+      title: AuthLogoutResponse
+      type: object
+    MergePolicy:
+      additionalProperties: true
+      properties:
+        guest_to_user_merge:
+          const: user_confirmation_required
+          title: Guest To User Merge
+          type: string
+        auto_merge:
+          title: Auto Merge
+          type: boolean
+        reason:
+          minLength: 1
+          title: Reason
+          type: string
+      required:
+      - guest_to_user_merge
+      - auto_merge
+      - reason
+      title: MergePolicy
+      type: object
+    RateLimitPolicy:
+      additionalProperties: true
+      properties:
+        subject_id:
+          maxLength: 256
+          minLength: 1
+          title: Subject Id
+          type: string
+        policy_status:
+          maxLength: 128
+          minLength: 1
+          title: Policy Status
+          type: string
+        keys:
+          items:
+            type: string
+          title: Keys
+          type: array
+        notes:
+          items:
+            type: string
+          title: Notes
+          type: array
+      required:
+      - subject_id
+      - policy_status
+      - keys
+      - notes
+      title: RateLimitPolicy
+      type: object
+    AuthSubjectResponse:
+      additionalProperties: true
+      properties:
+        auth_state:
+          enum:
+          - anonymous
+          - guest
+          - authenticated
+          title: Auth State
+          type: string
+        user:
+          anyOf:
+          - $ref: '#/components/schemas/AuthUser'
+          - type: 'null'
+        guest:
+          anyOf:
+          - $ref: '#/components/schemas/GuestIdentity'
+          - type: 'null'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        auth_session:
+          anyOf:
+          - $ref: '#/components/schemas/AuthSession'
+          - type: 'null'
+          default: null
+        session_binding:
+          anyOf:
+          - $ref: '#/components/schemas/SessionBinding'
+          - type: 'null'
+          default: null
+        rate_limit:
+          $ref: '#/components/schemas/RateLimitPolicy'
+        merge_policy:
+          $ref: '#/components/schemas/MergePolicy'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+      required:
+      - auth_state
+      - user
+      - guest
+      - subject
+      - rate_limit
+      - merge_policy
+      - limitations
+      - persistence
+      title: AuthSubjectResponse
+      type: object
+    AuthTokenRefreshRequest:
+      additionalProperties: true
+      properties:
+        guest_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        access_token:
+          anyOf:
+          - maxLength: 8192
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Access Token
+      title: AuthTokenRefreshRequest
+      type: object
+    AuthTokenRefreshResponse:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: auth_token_refresh.v1
+          title: Contract Version
+          type: string
+        auth_state:
+          const: authenticated
+          title: Auth State
+          type: string
+        provider:
+          const: google
+          title: Provider
+          type: string
+        access_token:
+          maxLength: 8192
+          minLength: 1
+          title: Access Token
+          type: string
+        token_type:
+          const: Bearer
+          title: Token Type
+          type: string
+        expires_in:
+          minimum: 1
+          title: Expires In
+          type: integer
+        issued_at:
+          format: date-time
+          title: Issued At
+          type: string
+        expires_at:
+          format: date-time
+          title: Expires At
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        guest:
+          anyOf:
+          - $ref: '#/components/schemas/GuestIdentity'
+          - type: 'null'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        auth_session:
+          $ref: '#/components/schemas/AuthSession'
+        session_binding:
+          $ref: '#/components/schemas/SessionBinding'
+        rate_limit:
+          $ref: '#/components/schemas/RateLimitPolicy'
+        merge_policy:
+          $ref: '#/components/schemas/MergePolicy'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+      required:
+      - contract_version
+      - auth_state
+      - provider
+      - access_token
+      - token_type
+      - expires_in
+      - issued_at
+      - expires_at
+      - user
+      - guest
+      - subject
+      - auth_session
+      - session_binding
+      - rate_limit
+      - merge_policy
+      - limitations
+      - persistence
+      title: AuthTokenRefreshResponse
+      type: object
     CaseLoginRequiredError:
       additionalProperties: false
       properties:
@@ -919,6 +1714,267 @@ components:
       - contract_version
       - case
       title: CreateConsultationCaseResponse
+      type: object
+    GoogleAuthorizationCodeRequest:
+      additionalProperties: true
+      properties:
+        auth_flow:
+          const: google_authorization_code_popup
+          default: google_authorization_code_popup
+          title: Auth Flow
+          type: string
+        provider:
+          const: google
+          default: google
+          title: Provider
+          type: string
+        client_id:
+          maxLength: 256
+          minLength: 1
+          title: Client Id
+          type: string
+        code:
+          maxLength: 4096
+          minLength: 1
+          title: Code
+          type: string
+          writeOnly: true
+        purpose:
+          const: LOGIN
+          default: LOGIN
+          title: Purpose
+          type: string
+        scope:
+          anyOf:
+          - maxLength: 512
+            type: string
+          - type: 'null'
+          default: null
+          title: Scope
+        guest_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        redirect_uri:
+          format: uri
+          maxLength: 2048
+          minLength: 1
+          title: Redirect Uri
+          type: string
+      required:
+      - client_id
+      - code
+      - redirect_uri
+      title: GoogleAuthorizationCodeRequest
+      type: object
+    GoogleAuthorizationCodeResponse:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: google_auth_code.v1
+          title: Contract Version
+          type: string
+        auth_state:
+          const: authenticated
+          title: Auth State
+          type: string
+        provider:
+          const: google
+          title: Provider
+          type: string
+        access_token:
+          maxLength: 8192
+          minLength: 1
+          title: Access Token
+          type: string
+        token_type:
+          const: Bearer
+          title: Token Type
+          type: string
+        expires_in:
+          minimum: 1
+          title: Expires In
+          type: integer
+        issued_at:
+          format: date-time
+          title: Issued At
+          type: string
+        expires_at:
+          format: date-time
+          title: Expires At
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        guest:
+          anyOf:
+          - $ref: '#/components/schemas/GuestIdentity'
+          - type: 'null'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        auth_session:
+          $ref: '#/components/schemas/AuthSession'
+        session_binding:
+          $ref: '#/components/schemas/SessionBinding'
+        rate_limit:
+          $ref: '#/components/schemas/RateLimitPolicy'
+        merge_policy:
+          $ref: '#/components/schemas/MergePolicy'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+        auth_mode:
+          const: authorization_code
+          title: Auth Mode
+          type: string
+        google:
+          additionalProperties: true
+          title: Google
+          type: object
+      required:
+      - contract_version
+      - auth_state
+      - provider
+      - access_token
+      - token_type
+      - expires_in
+      - issued_at
+      - expires_at
+      - user
+      - guest
+      - subject
+      - auth_session
+      - session_binding
+      - rate_limit
+      - merge_policy
+      - limitations
+      - persistence
+      - auth_mode
+      - google
+      title: GoogleAuthorizationCodeResponse
+      type: object
+    GuestSessionRequest:
+      additionalProperties: true
+      properties:
+        guest_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+      title: GuestSessionRequest
+      type: object
+    GuestSessionResponse:
+      additionalProperties: true
+      properties:
+        auth_state:
+          const: guest
+          title: Auth State
+          type: string
+        guest:
+          $ref: '#/components/schemas/GuestIdentity'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        session_binding:
+          $ref: '#/components/schemas/SessionBinding'
+        rate_limit:
+          $ref: '#/components/schemas/RateLimitPolicy'
+        merge_policy:
+          $ref: '#/components/schemas/MergePolicy'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+      required:
+      - auth_state
+      - guest
+      - subject
+      - session_binding
+      - rate_limit
+      - merge_policy
+      - limitations
+      - persistence
+      title: GuestSessionResponse
+      type: object
+    RateLimitErrorDetail:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: rate_limit.v1
+          title: Contract Version
+          type: string
+        type:
+          const: rate_limit
+          title: Type
+          type: string
+        code:
+          const: rate_limit_exceeded
+          title: Code
+          type: string
+        status:
+          const: 429
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          title: Required Action
+          type: string
+        usage:
+          additionalProperties: true
+          title: Usage
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - usage
+      title: RateLimitErrorDetail
+      type: object
+    RateLimitErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/RateLimitErrorDetail'
+      required:
+      - error
+      title: RateLimitErrorResponse
       type: object
     StartCaseAnalysisRequest:
       additionalProperties: false

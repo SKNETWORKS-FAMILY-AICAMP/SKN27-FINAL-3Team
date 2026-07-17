@@ -94,7 +94,9 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
 
     actual = {(spec.method, spec.path): spec for spec in route_specs.CASE_API_ROUTE_SPECS}
     assert set(actual) == set(expected)
-    assert route_specs.API_ROUTE_SPECS == route_specs.CASE_API_ROUTE_SPECS
+    assert route_specs.API_ROUTE_SPECS == (
+        route_specs.CASE_API_ROUTE_SPECS + route_specs.AUTH_SESSION_API_ROUTE_SPECS
+    )
 
     for key, expected_spec in expected.items():
         spec = actual[key]
@@ -120,6 +122,34 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
     assert len(operation_ids) == len(set(operation_ids))
 
 
+def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> None:
+    auth_contracts = importlib.import_module("app.contracts.auth_session")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    actual = {
+        (spec.method, spec.path): spec
+        for spec in route_specs.AUTH_SESSION_API_ROUTE_SPECS
+    }
+    assert set(actual) == {
+        ("POST", "/api/auth/guest-session/"),
+        ("POST", "/api/auth/google/code/"),
+        ("POST", "/api/auth/refresh/"),
+        ("POST", "/api/auth/logout/"),
+        ("GET", "/api/auth/me/"),
+    }
+
+    assert actual[("POST", "/api/auth/guest-session/")].response_model is (
+        auth_contracts.GuestSessionResponse
+    )
+    assert actual[("POST", "/api/auth/google/code/")].request_model is (
+        auth_contracts.GoogleAuthorizationCodeRequest
+    )
+    assert actual[("POST", "/api/auth/refresh/")].auth_optional is True
+    assert actual[("POST", "/api/auth/logout/")].auth_optional is True
+    assert actual[("GET", "/api/auth/me/")].auth_optional is True
+    assert all(spec.contract_status == "shadow" for spec in actual.values())
+
+
 def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
     route_specs = importlib.import_module("app.contracts.api_route_specs")
 
@@ -132,11 +162,6 @@ def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
         ("GET", "/api/health/live/"),
         ("GET", "/api/health/ready/"),
         ("GET", "/api/capabilities/"),
-        ("POST", "/api/auth/guest-session/"),
-        ("POST", "/api/auth/google/code/"),
-        ("POST", "/api/auth/refresh/"),
-        ("POST", "/api/auth/logout/"),
-        ("GET", "/api/auth/me/"),
         ("GET", "/api/mypage/summary/"),
         ("GET", "/api/history/"),
         ("POST", "/api/chat/sessions/"),
