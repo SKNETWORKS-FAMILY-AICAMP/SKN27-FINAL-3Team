@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -58,6 +58,11 @@ from app.contracts.file_attachment import (
     FileUploadTooLargeErrorResponse,
     FileUploadValidationErrorResponse,
 )
+from app.contracts.report import (
+    ReportApiErrorResponse,
+    ReportDetailResponse,
+    ReportListResponse,
+)
 
 
 HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
@@ -85,6 +90,35 @@ class RouteErrorSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class ResponseContentSpec:
+    """One explicit success response body representation."""
+
+    media_type: str
+    response_model: type[BaseModel] | None = None
+    schema: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.media_type.strip():
+            raise ValueError("response media type is required")
+        if (self.response_model is None) == (self.schema is None):
+            raise ValueError("response content requires exactly one model or schema")
+
+
+@dataclass(frozen=True, slots=True)
+class ResponseHeaderSpec:
+    """One declared public header on a successful response."""
+
+    name: str
+    description: str
+    schema: dict[str, Any]
+    required: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.name.strip() or not self.schema:
+            raise ValueError("response header name and schema are required")
+
+
+@dataclass(frozen=True, slots=True)
 class RouteSpec:
     operation_id: str
     method: HttpMethod
@@ -92,7 +126,7 @@ class RouteSpec:
     route_name: str
     view_name: str
     request_model: type[BaseModel] | None
-    response_model: type[BaseModel]
+    response_model: type[BaseModel] | None
     success_status: int
     errors: tuple[RouteErrorSpec, ...]
     auth_required: bool
@@ -105,6 +139,8 @@ class RouteSpec:
     request_media_types: tuple[RequestMediaType, ...] = ("application/json",)
     auth_optional: bool = False
     success_statuses: tuple[int, ...] = ()
+    success_content: tuple[ResponseContentSpec, ...] = ()
+    success_headers: tuple[ResponseHeaderSpec, ...] = ()
 
     def __post_init__(self) -> None:
         placeholders = tuple(re.findall(r"\{([^{}]+)\}", self.path))
@@ -116,6 +152,18 @@ class RouteSpec:
             )
         if self.auth_required and self.auth_optional:
             raise ValueError("a route cannot require and optionally accept Bearer auth")
+        if self.response_model is None and not self.success_content:
+            raise ValueError("route requires a JSON response model or explicit success content")
+        if self.response_model is not None and self.success_content:
+            raise ValueError("route cannot combine a response model with explicit success content")
+        if len({content.media_type for content in self.success_content}) != len(
+            self.success_content
+        ):
+            raise ValueError("success response media types must be unique")
+        if len({header.name.lower() for header in self.success_headers}) != len(
+            self.success_headers
+        ):
+            raise ValueError("success response headers must be unique")
         if not self.request_media_types or len(set(self.request_media_types)) != len(
             self.request_media_types
         ):
@@ -191,6 +239,19 @@ def _analysis_job_errors(
             status=status,
             codes=codes,
             response_model=AnalysisJobErrorResponse,
+        )
+        for status, codes in entries
+    )
+
+
+def _report_errors(
+    *entries: tuple[int, tuple[str, ...]],
+) -> tuple[RouteErrorSpec, ...]:
+    return tuple(
+        RouteErrorSpec(
+            status=status,
+            codes=codes,
+            response_model=ReportApiErrorResponse,
         )
         for status, codes in entries
     )
@@ -342,12 +403,15 @@ GOOGLE_CODE_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 )
 
 
+GUEST_ID_HEADER_PARAMETER = RequestParameterSpec(
+    name="X-Guest-Id",
+    location="header",
+    description="Optional guest identity header when no Bearer token is supplied.",
+)
+
+
 GUEST_FILE_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
-    RequestParameterSpec(
-        name="X-Guest-Id",
-        location="header",
-        description="Optional guest identity header when no Bearer token is supplied.",
-    ),
+    GUEST_ID_HEADER_PARAMETER,
 )
 
 
@@ -376,11 +440,7 @@ ANALYSIS_JOB_ID_PATH_PARAMETER = PathParameterSpec(
 
 
 ANALYSIS_JOB_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
-    RequestParameterSpec(
-        name="X-Guest-Id",
-        location="header",
-        description="Optional guest identity header when no Bearer token is supplied.",
-    ),
+    GUEST_ID_HEADER_PARAMETER,
 )
 
 
@@ -682,11 +742,181 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
 )
 
 
+REPORT_ID_PATH_PARAMETER = PathParameterSpec(
+    name="report_id",
+    description="Canonical report identifier",
+    max_length=64,
+)
+
+REPORT_GUEST_ID_HEADER_PARAMETER = RequestParameterSpec(
+    name="X-Guest-Id",
+    location="header",
+    description=(
+        "Optional guest identity header evaluated before login enforcement. "
+        "It can return guest_session_invalid for expired or inactive guest "
+        "sessions but does not authorize report reads."
+    ),
+)
+
+
+REPORT_LIST_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    REPORT_GUEST_ID_HEADER_PARAMETER,
+    RequestParameterSpec(
+        name="session_id",
+        location="query",
+        description="Optional chat session identifier used to filter the report collection.",
+    ),
+)
+
+
+REPORT_DETAIL_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    REPORT_GUEST_ID_HEADER_PARAMETER,
+    RequestParameterSpec(
+        name="session_id",
+        location="query",
+        description="Optional chat session context associated with this report read.",
+    ),
+)
+
+REPORT_DOWNLOAD_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    *REPORT_DETAIL_REQUEST_PARAMETERS,
+    RequestParameterSpec(
+        name="document_type",
+        location="query",
+        description="Optional normalized report document type for PDF rendering.",
+    ),
+)
+
+REPORT_DOCUMENT_SUCCESS_HEADERS: tuple[ResponseHeaderSpec, ...] = (
+    ResponseHeaderSpec(
+        name="Content-Disposition",
+        description="Attachment filename for the rendered report document.",
+        schema={"type": "string"},
+        required=True,
+    ),
+    ResponseHeaderSpec(
+        name="X-API-Surface",
+        description="Public API surface label for the rendered report.",
+        schema={"type": "string"},
+        required=True,
+    ),
+    ResponseHeaderSpec(
+        name="X-Execution-Mode",
+        description="Public execution mode label for the rendered report.",
+        schema={"type": "string"},
+        required=True,
+    ),
+    ResponseHeaderSpec(
+        name="X-Report-Document-Type",
+        description="Normalized document type rendered into the PDF.",
+        schema={"type": "string"},
+        required=True,
+    ),
+)
+
+REPORT_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="listReports",
+        method="GET",
+        path="/api/reports/",
+        route_name="canonical-report-action",
+        view_name="report_action",
+        request_model=None,
+        response_model=ReportListResponse,
+        success_status=200,
+        errors=_report_errors(
+            (
+                401,
+                (
+                    "auth_required",
+                    "token_invalid",
+                    "token_expired",
+                    "guest_session_invalid",
+                ),
+            ),
+            (403, ("login_required",)),
+        ),
+        auth_required=True,
+        contract_status="shadow",
+        tags=("Reports",),
+        summary="List reports owned by the authenticated user",
+        request_parameters=REPORT_LIST_REQUEST_PARAMETERS,
+    ),
+    RouteSpec(
+        operation_id="getReportDetail",
+        method="GET",
+        path="/api/reports/{report_id}/",
+        route_name="canonical-report-detail",
+        view_name="report_detail",
+        request_model=None,
+        response_model=ReportDetailResponse,
+        success_status=200,
+        errors=_report_errors(
+            (
+                401,
+                (
+                    "auth_required",
+                    "token_invalid",
+                    "token_expired",
+                    "guest_session_invalid",
+                ),
+            ),
+            (403, ("login_required", "object_access_denied")),
+            (404, ("report_not_found",)),
+        ),
+        auth_required=True,
+        contract_status="shadow",
+        tags=("Reports",),
+        summary="Read one report owned by the authenticated user",
+        path_parameters=(REPORT_ID_PATH_PARAMETER,),
+        request_parameters=REPORT_DETAIL_REQUEST_PARAMETERS,
+    ),
+    RouteSpec(
+        operation_id="downloadReportDocument",
+        method="GET",
+        path="/api/reports/{report_id}/download/",
+        route_name="canonical-download-report",
+        view_name="download_report",
+        request_model=None,
+        response_model=None,
+        success_status=200,
+        errors=_report_errors(
+            (
+                401,
+                (
+                    "auth_required",
+                    "token_invalid",
+                    "token_expired",
+                    "guest_session_invalid",
+                ),
+            ),
+            (403, ("login_required", "object_access_denied")),
+            (404, ("report_not_found",)),
+            (409, ("report_not_ready",)),
+        ),
+        auth_required=True,
+        contract_status="shadow",
+        tags=("Reports",),
+        summary="Download an authorized report as a PDF document",
+        path_parameters=(REPORT_ID_PATH_PARAMETER,),
+        request_parameters=REPORT_DOWNLOAD_REQUEST_PARAMETERS,
+        success_content=(
+            ResponseContentSpec(
+                media_type="application/pdf",
+                schema={"type": "string", "format": "binary"},
+            ),
+        ),
+        success_headers=REPORT_DOCUMENT_SUCCESS_HEADERS,
+    ),
+)
+
+
 API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
     CASE_API_ROUTE_SPECS
     + AUTH_SESSION_API_ROUTE_SPECS
     + FILE_API_ROUTE_SPECS
     + ANALYSIS_JOB_API_ROUTE_SPECS
+    + REPORT_API_ROUTE_SPECS
 )
 
 
@@ -762,31 +992,10 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         reason="Typed node DTO exists but route request/error contracts are pending.",
     ),
     DeferredRouteSpec(
-        method="GET",
-        path="/api/reports/",
-        route_name="canonical-report-action",
-        view_name="report_action",
-        reason="Owner-scoped report list DTO and application service are pending.",
-    ),
-    DeferredRouteSpec(
         method="POST",
         path="/api/reports/",
         route_name="canonical-report-action",
         view_name="report_action",
         reason="Report generation still contains legacy runtime behavior.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/reports/{report_id}/",
-        route_name="canonical-report-detail",
-        view_name="report_detail",
-        reason="Report detail DTO and application query service are pending.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/reports/{report_id}/download/",
-        route_name="canonical-download-report",
-        view_name="download_report",
-        reason="Binary PDF response and signed-access contract are pending.",
     ),
 )

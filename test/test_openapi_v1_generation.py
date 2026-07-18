@@ -36,6 +36,9 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/cases/{case_id}/workspace/",
         "/api/cases/{case_id}/facts/confirm/",
         "/api/cases/{case_id}/analysis/jobs/",
+        "/api/reports/",
+        "/api/reports/{report_id}/",
+        "/api/reports/{report_id}/download/",
     }
 
     case_collection = document["paths"]["/api/cases/"]
@@ -122,8 +125,48 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "AnalysisJobListResponse",
         "AnalysisJobDetailResponse",
         "AnalysisResultResponse",
+        "ReportListResponse",
+        "ReportDetailResponse",
+        "ReportApiErrorResponse",
     ):
         assert schema_name in schemas
+
+
+def test_openapi_registers_models_declared_by_explicit_success_content() -> None:
+    report_contracts = importlib.import_module("app.contracts.report")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+    generator = importlib.import_module("app.contracts.openapi_v1")
+
+    explicit_content_route = route_specs.RouteSpec(
+        operation_id="explicitContentModel",
+        method="GET",
+        path="/api/contracts/explicit-content/",
+        route_name="canonical-explicit-content",
+        view_name="explicit_content",
+        request_model=None,
+        response_model=None,
+        success_status=200,
+        errors=(),
+        auth_required=False,
+        contract_status="shadow",
+        tags=("Contracts",),
+        summary="Explicit content model registration probe",
+        success_content=(
+            route_specs.ResponseContentSpec(
+                media_type="application/json",
+                response_model=report_contracts.ReportListResponse,
+            ),
+        ),
+    )
+
+    document = generator.build_openapi_document((explicit_content_route,))
+
+    assert document["paths"]["/api/contracts/explicit-content/"]["get"]["responses"][
+        "200"
+    ]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ReportListResponse"
+    }
+    assert "ReportListResponse" in document["components"]["schemas"]
 
 
 def test_auth_session_routes_document_runtime_auth_boundary() -> None:
@@ -278,6 +321,36 @@ def test_analysis_job_routes_document_async_owner_scoped_contract() -> None:
     }
     assert result["responses"]["202"]["description"] == "Successful response"
     assert result["responses"]["404"]["x-error-codes"] == ["analysis_result_not_found"]
+
+
+def test_report_download_openapi_uses_binary_pdf_and_public_attachment_headers() -> None:
+    generator = importlib.import_module("app.contracts.openapi_v1")
+    paths = generator.build_openapi_document()["paths"]
+
+    reports = paths["/api/reports/"]
+    assert set(reports) == {"get"}
+    assert reports["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ReportListResponse"}
+
+    detail = paths["/api/reports/{report_id}/"]["get"]
+    assert detail["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/ReportDetailResponse"
+    }
+    assert detail["responses"]["404"]["x-error-codes"] == ["report_not_found"]
+
+    download = paths["/api/reports/{report_id}/download/"]["get"]
+    response = download["responses"]["200"]
+    assert response["content"] == {
+        "application/pdf": {"schema": {"type": "string", "format": "binary"}}
+    }
+    assert response["headers"]["Content-Disposition"] == {
+        "description": "Attachment filename for the rendered report document.",
+        "required": True,
+        "schema": {"type": "string"},
+    }
+    assert "X-Report-Storage-URI" not in response["headers"]
+    assert download["responses"]["409"]["x-error-codes"] == ["report_not_ready"]
 
 
 def test_openapi_v1_yaml_rendering_is_deterministic_and_parseable() -> None:
