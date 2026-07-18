@@ -24,7 +24,11 @@ def _component_schemas(specs: Iterable[RouteSpec]) -> dict[str, dict[str, Any]]:
     for spec in specs:
         if spec.request_model is not None:
             models[spec.request_model.__name__] = spec.request_model
-        models[spec.response_model.__name__] = spec.response_model
+        if spec.response_model is not None:
+            models[spec.response_model.__name__] = spec.response_model
+        for content in spec.success_content:
+            if content.response_model is not None:
+                models[content.response_model.__name__] = content.response_model
         for error in spec.errors:
             models[error.response_model.__name__] = error.response_model
 
@@ -50,14 +54,7 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
         "x-django-route-name": spec.route_name,
         "x-django-view": spec.view_name,
         "responses": {
-            str(status): {
-                "description": "Successful response",
-                "content": {
-                    "application/json": {
-                        "schema": _schema_ref(spec.response_model),
-                    }
-                },
-            }
+            str(status): _success_response(spec)
             for status in (spec.success_statuses or (spec.success_status,))
         }
         | {
@@ -105,6 +102,40 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
             },
         }
     return operation
+
+
+def _success_response(spec: RouteSpec) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "description": "Successful response",
+        "content": _success_response_content(spec),
+    }
+    if spec.success_headers:
+        response["headers"] = {
+            header.name: {
+                "description": header.description,
+                "required": header.required,
+                "schema": dict(header.schema),
+            }
+            for header in spec.success_headers
+        }
+    return response
+
+
+def _success_response_content(spec: RouteSpec) -> dict[str, dict[str, Any]]:
+    if not spec.success_content:
+        assert spec.response_model is not None
+        return {"application/json": {"schema": _schema_ref(spec.response_model)}}
+    return {
+        content.media_type: {"schema": _content_schema(content)}
+        for content in spec.success_content
+    }
+
+
+def _content_schema(content: Any) -> dict[str, Any]:
+    if content.response_model is not None:
+        return _schema_ref(content.response_model)
+    assert content.schema is not None
+    return dict(content.schema)
 
 
 def _security_requirements(spec: RouteSpec) -> list[dict[str, list[str]]]:
