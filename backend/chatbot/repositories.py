@@ -32,6 +32,10 @@ from app.services.history_event_mock_service import (
     build_agent_execution_events,
     build_history_event,
 )
+from app.services.chat_session_followup_service import (
+    CHAT_SESSION_FOLLOWUP_STATE_VERSION,
+    build_chat_followup_snapshot,
+)
 from app.services.supervisor_reporting_handoff_service import (
     build_supervisor_reporting_handoff,
     sanitize_sensitive_text,
@@ -848,6 +852,81 @@ def get_chat_session_access_metadata(session_id: str | None) -> dict[str, Any] |
         "session_id": session.session_id,
         "owner_id": session.owner_id,
         "guest_id": _chat_session_guest_id(session),
+    }
+
+
+def load_chat_followup_state(session_id: str | None) -> dict[str, Any] | None:
+    """Load a versioned follow-up snapshot after the caller authorizes the session."""
+
+    normalized_session_id = _text(session_id)
+    if not normalized_session_id:
+        return None
+    session = ChatSession.objects.filter(session_id=normalized_session_id).only("metadata").first()
+    if session is None:
+        return None
+    state = _dict_or_empty(session.metadata).get("chat_followup_state")
+    if not isinstance(state, dict):
+        return None
+    if state.get("contract_version") != CHAT_SESSION_FOLLOWUP_STATE_VERSION:
+        return None
+    return deepcopy(state)
+
+
+def persist_chat_followup_state(
+    payload: dict[str, Any],
+    chat_response: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist a user-safe follow-up boundary without creating an analysis job."""
+
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(
+        chat_response.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
+    if session is None:
+        raise ValueError("chat_response must include session_id")
+
+    message_id = _text(chat_response.get("message_id"))
+    if not message_id:
+        raise ValueError("chat_response must include message_id")
+    conversation_save_state = conversation_save_state_from_payload(payload)
+    snapshot = build_chat_followup_snapshot(payload, chat_response)
+
+    with transaction.atomic():
+        session = ChatSession.objects.select_for_update().get(pk=session.pk)
+        session.metadata = {
+            **_metadata_with_conversation_save_state(
+                session.metadata,
+                conversation_save_state,
+                raw_payload=payload,
+            ),
+            "chat_followup_state": snapshot,
+        }
+        session.current_intent = _text(chat_response.get("routing_intent"))
+        session.save(update_fields=["metadata", "current_intent", "updated_at"])
+        message, _message_created = ChatMessage.objects.update_or_create(
+            message_id=message_id,
+            defaults={
+                "session": session,
+                "role": MessageRole.USER,
+                "content": _message_content(payload),
+                "routing_intent": _text(chat_response.get("routing_intent")),
+                "metadata": {
+                    "source": "canonical_chat_followup",
+                    "response_status": _text(chat_response.get("status")),
+                    "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+                    "conversation_save_state": conversation_save_state,
+                },
+            },
+        )
+
+    return {
+        "message_id": message.message_id,
+        "session_id": session.session_id,
+        "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+        "conversation_save_state": conversation_save_state,
+        "followup_state_version": CHAT_SESSION_FOLLOWUP_STATE_VERSION,
     }
 
 
