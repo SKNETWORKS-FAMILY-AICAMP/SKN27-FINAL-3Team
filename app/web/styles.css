@@ -17,6 +17,43 @@
   --shadow: 0 16px 42px rgba(24, 36, 50, 0.12);
 }
 
+.deadline-guidance-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid #d6a24d;
+  border-radius: 16px;
+  background: #fff8e9;
+  color: #47300b;
+}
+
+.deadline-guidance-panel--overdue {
+  border-color: #b84a3e;
+  background: #fff0ee;
+  color: #681d16;
+}
+
+.deadline-guidance-panel__title {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.deadline-guidance-panel strong {
+  font-size: 1.05rem;
+}
+
+.deadline-guidance-panel p,
+.deadline-guidance-panel ul {
+  margin: 0;
+}
+
+.deadline-guidance-panel ul {
+  padding-left: 20px;
+}
+
 * {
   box-sizing: border-box;
 }

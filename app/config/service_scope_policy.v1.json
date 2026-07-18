@@ -1,0 +1,118 @@
+{
+  "contract_version": "service_scope_policy.v1",
+  "supported_intents": {
+    "accident_initial_consultation": {
+      "scope_code": "vehicle_to_vehicle_accident",
+      "reason": "차량 간 교통사고의 사실관계와 과실 쟁점은 확인 가능한 자료를 기준으로 정리할 수 있습니다.",
+      "limitations": [
+        "과실 비율이나 법적 책임을 확정하지 않으며, 사실관계와 증빙자료 확인이 먼저 필요합니다."
+      ],
+      "next_actions": [
+        "사고 위치, 각 차량의 진행 방향, 충돌 위치를 확인해 주세요."
+      ]
+    },
+    "fine_notice_analysis": {
+      "scope_code": "traffic_fine_notice",
+      "reason": "교통 과태료 고지서의 정보와 이의제기 관련 확인 항목을 정리할 수 있습니다.",
+      "limitations": [
+        "고지서 원문과 관할 기관, 실제 수령일을 사용자가 최종 확인해야 합니다."
+      ],
+      "next_actions": [
+        "고지서 원문 또는 확인 가능한 고지 정보를 제출해 주세요."
+      ]
+    },
+    "fine_notice_procedure": {
+      "scope_code": "traffic_fine_procedure",
+      "reason": "교통 과태료 이의제기 절차의 일반 정보를 정리할 수 있습니다.",
+      "limitations": [
+        "개별 사건의 제출 가능 여부나 법적 결과를 확정하지 않습니다."
+      ],
+      "next_actions": [
+        "고지서의 처분 내용과 제출 기한을 확인해 주세요."
+      ]
+    },
+    "traffic_law_search": {
+      "scope_code": "traffic_law_reference",
+      "reason": "교통 관련 법령과 근거 자료를 참고 정보로 정리할 수 있습니다.",
+      "limitations": [
+        "법률 자문이나 개별 사건의 확정 판단을 제공하지 않습니다."
+      ],
+      "next_actions": [
+        "확인하려는 교통 상황이나 법령 질문을 구체적으로 알려 주세요."
+      ]
+    }
+  },
+  "excluded_cases": [
+    {
+      "scope_code": "vehicle_pedestrian_collision",
+      "decision": "expert_handoff",
+      "keywords": ["보행자", "횡단보도"],
+      "reason": "보행자가 포함된 사고는 인명 피해와 책임 판단 위험이 있어 이 서비스에서 과실이나 책임을 분석하지 않습니다.",
+      "limitations": [
+        "서비스 범위를 벗어난 사고 유형이며, 법적 책임이나 과실을 확정할 수 없습니다."
+      ],
+      "next_actions": [
+        "필요하면 사고 사실확인 자료를 보존하고 전문가 상담을 받아 주세요."
+      ]
+    },
+    {
+      "scope_code": "vehicle_cycle_collision",
+      "decision": "expert_handoff",
+      "keywords": ["자전거", "킥보드"],
+      "reason": "자전거 또는 개인형 이동장치가 포함된 사고는 이 서비스의 자동 분석 범위에 포함되지 않습니다.",
+      "limitations": [
+        "서비스 범위를 벗어난 사고 유형이며, 책임 비율을 확정할 수 없습니다."
+      ],
+      "next_actions": [
+        "사고 사진과 진술, 경찰 또는 보험사 안내를 보존하고 전문가에게 확인해 주세요."
+      ]
+    },
+    {
+      "scope_code": "facility_collision",
+      "decision": "guidance_only",
+      "keywords": ["시설물", "가드레일", "전봇대"],
+      "reason": "시설물 충돌 사고는 이 서비스의 자동 과실 분석 범위에 포함되지 않습니다.",
+      "limitations": [
+        "시설물 관리 주체와 손해 범위에 따라 별도 확인이 필요합니다."
+      ],
+      "next_actions": [
+        "사고 현장과 시설물 상태를 기록하고 관리 주체 또는 보험사에 문의해 주세요."
+      ]
+    },
+    {
+      "scope_code": "civil_liability_determination",
+      "decision": "guidance_only",
+      "keywords": ["민사 과실 확정", "법적 확정 판결"],
+      "reason": "민사상 과실이나 법적 책임의 확정 판단은 이 서비스에서 제공하지 않습니다.",
+      "limitations": [
+        "서비스는 근거와 확인 항목을 정리할 수 있지만, 법적 결론을 대신하지 않습니다."
+      ],
+      "next_actions": [
+        "사실관계와 증빙자료를 정리한 뒤 필요한 경우 전문가 상담을 받아 주세요."
+      ]
+    },
+    {
+      "scope_code": "unsupported_consultation",
+      "decision": "guidance_only",
+      "keywords": ["상속", "이혼", "부동산 분쟁"],
+      "reason": "현재 서비스는 차량 간 교통사고 과실, 교통 과태료 고지서, 관련 절차와 근거 확인을 중심으로 지원합니다.",
+      "limitations": [
+        "지원 범위 밖의 문제에 대한 분석, 법률 자문, 확정 판단은 제공하지 않습니다."
+      ],
+      "next_actions": [
+        "교통사고 또는 교통 과태료 관련 질문인지 확인해 주세요."
+      ]
+    }
+  ],
+  "unclassified_intent": {
+    "scope_code": "scope_confirmation_required",
+    "decision": "proceed",
+    "reason": "지원 범위를 확인하려면 교통사고 또는 교통 과태료와 관련된 상황을 조금 더 알려 주세요.",
+    "limitations": [
+      "현재 입력만으로는 지원 범위와 필요한 확인 항목을 판단할 수 없습니다."
+    ],
+    "next_actions": [
+      "사고 유형, 고지서 여부, 확인하려는 교통 상황을 알려 주세요."
+    ]
+  }
+}

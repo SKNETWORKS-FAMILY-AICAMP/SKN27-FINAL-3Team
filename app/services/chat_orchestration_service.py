@@ -11,6 +11,7 @@ from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.case_evidence_service import build_case_evidence
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS, build_consultation_state_v2
 from app.services.law_ground_contract import normalize_law_evidence
+from app.services.service_scope_policy_service import evaluate_service_scope
 from app.services.supervisor_control_service import (
     evaluate_case_promotion,
     reduce_consultation_fact_state,
@@ -51,6 +52,19 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
         return _needs_input_response(session_id=session_id, message_id=message_id)
 
     routing_intent = route_supervisor_input(user_text, attachments)
+    service_scope = evaluate_service_scope(
+        user_text=user_text,
+        attachments=attachments,
+        routing_intent=routing_intent,
+    )
+    if service_scope["decision"] != "proceed":
+        return _scope_guidance_response(
+            session_id=session_id,
+            message_id=message_id,
+            routing_intent=routing_intent,
+            attachments=attachments,
+            service_scope=service_scope,
+        )
     report_requested = report_generation_requested(user_text)
     if routing_intent == "accident_initial_consultation":
         accident_supervisor_state = build_supervisor_state_with_optional_llm(
@@ -243,6 +257,7 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
             "structured_results": dict(merged.get("structured_results") or {}),
             "evidence": list(merged.get("evidence") or []),
             "limitations": list(merged.get("limitations") or []),
+            "deadline_guidance": dict(merged.get("deadline_guidance") or {}),
             "pending_questions": list(merged.get("pending_questions") or []),
             "cards": list(merged.get("cards") or []),
             "report_links": list(merged.get("report_links") or []),
@@ -316,6 +331,45 @@ def _needs_input_response(*, session_id: str, message_id: str) -> dict[str, Any]
             "steps": [],
         },
         "limitations": [],
+    }
+
+
+def _scope_guidance_response(
+    *,
+    session_id: str,
+    message_id: str,
+    routing_intent: str,
+    attachments: list[dict[str, Any]],
+    service_scope: dict[str, Any],
+) -> dict[str, Any]:
+    message = str(service_scope["reason"])
+    return {
+        "contract_version": "chat_message_accepted.v2",
+        "message_id": message_id,
+        "session_id": session_id,
+        "routing_intent": routing_intent,
+        "status": "scope_guidance",
+        "created_at": _now_iso(),
+        "assistant_message": {"answer": message, "summary": message},
+        "progress": {"status": "scope_guidance", "active_node": "", "message": message},
+        "pending_questions": [],
+        "cards": [],
+        "report_links": [],
+        "attachments": attachments,
+        "blocked_attachments": [],
+        "supervisor_state": {},
+        "reporting_payload": None,
+        "service_scope": service_scope,
+        "analysis_plan": {
+            "contract_version": "analysis_plan.v2",
+            "plan_id": f"plan_{uuid4().hex[:12]}",
+            "session_id": session_id,
+            "message_id": message_id,
+            "routing_intent": routing_intent,
+            "status": "blocked",
+            "steps": [],
+        },
+        "limitations": list(service_scope["limitations"]),
     }
 
 

@@ -1226,6 +1226,11 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["execution_mode"] = "planning_blocked"
         return _json_response(request, chat_response, status=503)
 
+    if chat_response["status"] == "scope_guidance":
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "scope_guidance"
+        return _json_response(request, chat_response)
+
     if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
         chat_response["usage"] = usage
         execution_modes = {
@@ -1548,6 +1553,16 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
     if not analysis_plan:
         chat_response = submit_message(execution_payload)
         analysis_plan = chat_response["analysis_plan"]
+
+    if chat_response and chat_response.get("status") == "scope_guidance":
+        return _json_response(
+            request,
+            {
+                "analysis_plan": analysis_plan,
+                "chat_response": chat_response,
+                "execution_mode": "scope_guidance",
+            },
+        )
 
     response = {"analysis_plan": analysis_plan}
     if chat_response:
