@@ -279,6 +279,14 @@ class ProductionApiContractTests(SimpleTestCase):
             patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
             patch("chatbot.views.record_usage_event", return_value={"allowed": True}),
             patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch(
+                "chatbot.views.persist_chat_followup_state",
+                return_value={
+                    "session_id": "ses_need_more_input",
+                    "message_id": "msg_followup_saved",
+                    "followup_state_version": "chat_session_followup_state.v1",
+                },
+            ) as persist_followup,
         ):
             response = submit_chat_message(request)
 
@@ -290,6 +298,7 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertIsNone(body["reporting_payload"])
         self.assertEqual(body["report_links"], [])
         enqueue.assert_not_called()
+        persist_followup.assert_called_once()
 
     def test_scan_blocked_chat_message_does_not_consume_usage_quota(self) -> None:
         request = RequestFactory().post(

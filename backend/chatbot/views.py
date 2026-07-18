@@ -58,6 +58,10 @@ from app.services.chat_orchestration_service import (
     create_session,
     submit_message,
 )
+from app.services.chat_session_followup_service import (
+    followup_routing_intent,
+    merge_chat_followup_payload,
+)
 from app.services.google_auth_service import (
     create_google_code_login as _create_google_code_login,
     create_logout as _create_logout,
@@ -119,6 +123,7 @@ from chatbot.repositories import (
     list_report_records,
     list_uploaded_files,
     mark_conversation_save_state,
+    load_chat_followup_state,
     enqueue_analysis_job_work,
     process_agent_work_items,
     persist_current_auth_subject,
@@ -126,6 +131,7 @@ from chatbot.repositories import (
     persist_auth_token_refresh,
     persist_analysis_job_execution,
     persist_guest_session_identity,
+    persist_chat_followup_state,
     record_agent_history_event_records,
     record_history_event_record,
     record_usage_event,
@@ -1191,6 +1197,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     except ChatInputRejected as exc:
         return _chat_input_rejected_response(request, exc)
     requested_session_id = str(identity_body.get("session_id") or "")
+    session_access = None
     if requested_session_id:
         session_access = get_chat_session_access_metadata(requested_session_id)
         if session_access is not None:
@@ -1204,11 +1211,22 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             chat_response=_scan_blocked_chat_response_from_payload(identity_body),
         )
 
+    stored_followup_state = None
+    if requested_session_id and session_access is not None:
+        stored_followup_state = load_chat_followup_state(requested_session_id)
+        identity_body = merge_chat_followup_payload(
+            identity_body,
+            stored_followup_state,
+        )
+
     usage = record_usage_event(identity_body, scope="chat_message")
     if not usage["allowed"]:
         return _rate_limit_response(request, usage)
     try:
-        chat_response = submit_message(identity_body)
+        chat_response = submit_message(
+            identity_body,
+            routing_intent_override=followup_routing_intent(stored_followup_state),
+        )
     except Exception:
         _refund_usage_safely(usage, reason="chat_planning_failed")
         raise
@@ -1233,6 +1251,15 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         return _json_response(request, chat_response)
 
     if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
+        if chat_response["status"] in {"needs_input", "case_ready"}:
+            try:
+                chat_response["persistence"] = persist_chat_followup_state(
+                    identity_body,
+                    chat_response,
+                )
+            except Exception:
+                _refund_usage_safely(usage, reason="chat_followup_persistence_failed")
+                raise
         chat_response["usage"] = usage
         execution_modes = {
             "needs_input": "input_collection",

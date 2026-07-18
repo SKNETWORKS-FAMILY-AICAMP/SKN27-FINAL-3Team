@@ -46,12 +46,13 @@ def build_scope_guidance_response(
     message_id: str,
     user_text: str,
     attachments: list[dict[str, Any]],
+    routing_intent: str = "",
 ) -> dict[str, Any] | None:
     """Return a non-executable response when the declared service boundary applies."""
 
     if not user_text and not attachments:
         return None
-    routing_intent = route_supervisor_input(user_text, attachments)
+    routing_intent = routing_intent or route_supervisor_input(user_text, attachments)
     service_scope = evaluate_service_scope(
         user_text=user_text,
         attachments=attachments,
@@ -68,7 +69,11 @@ def build_scope_guidance_response(
     )
 
 
-def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
+def submit_message(
+    payload: dict[str, Any],
+    *,
+    routing_intent_override: str = "",
+) -> dict[str, Any]:
     payload = protect_chat_input_payload(payload)
     payload = resolve_attachment_references(payload)
     session_id = str(payload.get("session_id") or f"ses_{uuid4().hex[:12]}")
@@ -79,15 +84,16 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
     if not user_text and not attachments:
         return _needs_input_response(session_id=session_id, message_id=message_id)
 
+    routing_intent = routing_intent_override or route_supervisor_input(user_text, attachments)
     scope_guidance = build_scope_guidance_response(
         session_id=session_id,
         message_id=message_id,
         user_text=user_text,
         attachments=attachments,
+        routing_intent=routing_intent,
     )
     if scope_guidance is not None:
         return scope_guidance
-    routing_intent = route_supervisor_input(user_text, attachments)
     report_requested = report_generation_requested(user_text)
     if routing_intent == "accident_initial_consultation":
         accident_supervisor_state = build_supervisor_state_with_optional_llm(
