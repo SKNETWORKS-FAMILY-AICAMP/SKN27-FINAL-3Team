@@ -40,6 +40,34 @@ def create_session(user_id: str | None = None) -> dict[str, Any]:
     }
 
 
+def build_scope_guidance_response(
+    *,
+    session_id: str,
+    message_id: str,
+    user_text: str,
+    attachments: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return a non-executable response when the declared service boundary applies."""
+
+    if not user_text and not attachments:
+        return None
+    routing_intent = route_supervisor_input(user_text, attachments)
+    service_scope = evaluate_service_scope(
+        user_text=user_text,
+        attachments=attachments,
+        routing_intent=routing_intent,
+    )
+    if service_scope["decision"] == "proceed":
+        return None
+    return _scope_guidance_response(
+        session_id=session_id,
+        message_id=message_id,
+        routing_intent=routing_intent,
+        attachments=attachments,
+        service_scope=service_scope,
+    )
+
+
 def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
     payload = protect_chat_input_payload(payload)
     payload = resolve_attachment_references(payload)
@@ -51,20 +79,15 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
     if not user_text and not attachments:
         return _needs_input_response(session_id=session_id, message_id=message_id)
 
-    routing_intent = route_supervisor_input(user_text, attachments)
-    service_scope = evaluate_service_scope(
+    scope_guidance = build_scope_guidance_response(
+        session_id=session_id,
+        message_id=message_id,
         user_text=user_text,
         attachments=attachments,
-        routing_intent=routing_intent,
     )
-    if service_scope["decision"] != "proceed":
-        return _scope_guidance_response(
-            session_id=session_id,
-            message_id=message_id,
-            routing_intent=routing_intent,
-            attachments=attachments,
-            service_scope=service_scope,
-        )
+    if scope_guidance is not None:
+        return scope_guidance
+    routing_intent = route_supervisor_input(user_text, attachments)
     report_requested = report_generation_requested(user_text)
     if routing_intent == "accident_initial_consultation":
         accident_supervisor_state = build_supervisor_state_with_optional_llm(

@@ -31,7 +31,7 @@
 **Produces:** `evaluate_service_scope(...) -> dict[str, Any]`:
 `contract_version`, `decision` (`proceed`, `guidance_only`, `expert_handoff`), `scope_code`, `reason`, `limitations`, and `next_actions`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 from app.services.service_scope_policy_service import evaluate_service_scope
@@ -68,13 +68,13 @@ def test_fine_notice_analysis_is_in_scope() -> None:
     assert result["decision"] == "proceed"
 ```
 
-- [ ] **Step 2: Prove the tests fail**
+- [x] **Step 2: Prove the tests fail**
 
 Run: `D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test_service_scope_policy_service.py`
 
 Expected: import failure.
 
-- [ ] **Step 3: Implement the declarative policy**
+- [x] **Step 3: Implement the declarative policy**
 
 Use this policy structure, adding Korean `reason`, `limitations`, and `next_actions` for every excluded case:
 
@@ -114,7 +114,7 @@ Use this policy structure, adding Korean `reason`, `limitations`, and `next_acti
 
 The service uses `lru_cache`, validates the policy version/types, normalizes text once, applies exclusions before supported intents, and returns `guidance_only` for any non-supported intent.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test_service_scope_policy_service.py`
 
@@ -133,7 +133,7 @@ Expected: PASS.
 
 **Produces:** `chat_message_accepted.v2` with `status: "scope_guidance"`, `service_scope`, no plan steps, and no reporting payload.
 
-- [ ] **Step 1: Write failing regressions**
+- [x] **Step 1: Write failing regressions**
 
 ```python
 def test_unsupported_accident_does_not_call_supervisor_or_create_plan(monkeypatch) -> None:
@@ -166,13 +166,13 @@ def test_scope_guidance_chat_endpoint_does_not_enqueue_job(self):
     self.assertNotIn("work_item", response.json())
 ```
 
-- [ ] **Step 2: Prove the tests fail**
+- [x] **Step 2: Prove the tests fail**
 
 Run: `D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test_chat_orchestration_service.py backend/chatbot/test_consultation_v2.py`
 
 Expected: excluded input reaches accident consultation or queueing.
 
-- [ ] **Step 3: Implement one scope response builder**
+- [x] **Step 3: Implement one scope response builder**
 
 In `chat_orchestration_service.py`, return a private `_scope_guidance_response` when the decision is not `proceed`:
 
@@ -190,7 +190,7 @@ In `chat_orchestration_service.py`, return a private `_scope_guidance_response` 
 
 In `submit_chat_message`, return it before usage/queue persistence with `execution_mode: "scope_guidance"`. In `run_agent_plan`, return the non-executed response when `submit_message` supplies `scope_guidance`, rather than passing an empty plan to `execute_agent_plan`.
 
-- [ ] **Step 4: Verify the boundary and privacy regression**
+- [x] **Step 4: Verify the boundary and privacy regression**
 
 Run: `D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test_chat_orchestration_service.py backend/chatbot/test_consultation_v2.py test/test_chat_input_privacy.py`
 
@@ -215,7 +215,7 @@ Expected: PASS.
 
 **Produces:** `deadline_guidance.v1` with `status` (`overdue`, `due_soon`, `normal`, `needs_confirmation`), `deadline`, `days_remaining`, `source_node_code`, `limitations`, and `next_actions`.
 
-- [ ] **Step 1: Write failing service and merge tests**
+- [x] **Step 1: Write failing service and merge tests**
 
 ```python
 from datetime import date, timedelta
@@ -266,13 +266,13 @@ def test_final_merge_places_deadline_card_before_agent_cards() -> None:
     assert merged["cards"][0]["card_type"] == "deadline_guidance"
 ```
 
-- [ ] **Step 2: Prove the tests fail**
+- [x] **Step 2: Prove the tests fail**
 
 Run: `D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test_deadline_guidance_service.py test/test_supervisor_control_service.py test/test_chat_orchestration_service.py`
 
 Expected: import/contract failure.
 
-- [ ] **Step 3: Implement policy-driven presentation metadata**
+- [x] **Step 3: Implement policy-driven presentation metadata**
 
 `deadline_guidance_policy.v1.json` owns `due_soon_days` and all Korean messages/actions. The service parses only ISO dates already emitted by the verified agent; missing/invalid dates return `needs_confirmation`.
 
@@ -280,7 +280,7 @@ Expected: import/contract failure.
 
 Pass `deadlineGuidance={analysisResponse?.deadline_guidance}` into `CaseResultScreen`. Render a top warning panel only from this contract; remove no existing cards and do not use static deadlines.
 
-- [ ] **Step 4: Verify service, async result, and web build**
+- [x] **Step 4: Verify service, async result, and web build**
 
 Run: `D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test_deadline_guidance_service.py test/test_supervisor_control_service.py test/test_chat_orchestration_service.py test/test_analysis_job_query_service.py`
 
@@ -297,11 +297,11 @@ Expected: PASS.
 - Modify: `docs/ops/project-readiness-master-checklist.md`
 - Modify: `backend/chatbot/test_production_hardening.py`
 
-- [ ] **Step 1: Record proven #222 completion**
+- [x] **Step 1: Record proven #222 completion**
 
 Change only the six complete A-2 fact/claim/evidence entries and recommended sequence item 2 to `[x] #221 / PR #222`. Do not mark the Supervisor end-to-end or real generative-agent items complete.
 
-- [ ] **Step 2: Add API regression**
+- [x] **Step 2: Add API regression**
 
 ```python
 def test_chat_scope_guidance_is_a_safe_client_response(self):
@@ -316,13 +316,13 @@ def test_chat_scope_guidance_is_a_safe_client_response(self):
     self.assertEqual(response.json()["analysis_plan"]["steps"], [])
 ```
 
-- [ ] **Step 3: Run backend regression**
+- [x] **Step 3: Run backend regression**
 
 Run: `D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe backend/manage.py test chatbot.test_consultation_v2 chatbot.test_production_hardening -v 1`
 
 Expected: PASS.
 
-- [ ] **Step 4: Run final scoped suite**
+- [x] **Step 4: Run final scoped suite**
 
 Run: `D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test_service_scope_policy_service.py test/test_deadline_guidance_service.py test/test_chat_orchestration_service.py test/test_supervisor_control_service.py test/test_analysis_job_query_service.py`
 

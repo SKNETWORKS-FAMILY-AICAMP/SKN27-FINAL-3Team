@@ -466,6 +466,46 @@ class ProductionApiContractTests(SimpleTestCase):
         persist.assert_not_called()
         record_events.assert_not_called()
 
+    def test_agent_plan_rejects_out_of_scope_input_when_plan_is_supplied(self) -> None:
+        request = RequestFactory().post(
+            "/api/agent-plan/",
+            data={
+                "session_id": "ses_scope_prebuilt_plan",
+                "user_text": "차가 보행자와 충돌한 사고의 과실을 확정해 주세요.",
+                "analysis_plan": {
+                    "plan_id": "plan_scope_prebuilt",
+                    "routing_intent": "accident_initial_consultation",
+                    "steps": [{"order": 1, "node_code": "law_ground_search"}],
+                },
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch(
+                "chatbot.views.execute_agent_plan",
+                return_value={"executions": [], "status_counts": {}},
+            ) as execute,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch(
+                "chatbot.views.persist_analysis_job_execution",
+                return_value={"backend": "postgresql", "status": "saved"},
+            ) as persist,
+            patch("chatbot.views._record_agent_events_safely") as record_events,
+        ):
+            response = run_agent_plan(request)
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body["execution_mode"], "scope_guidance")
+        self.assertEqual(body["chat_response"]["status"], "scope_guidance")
+        self.assertEqual(body["analysis_plan"]["steps"], [])
+        execute.assert_not_called()
+        enqueue.assert_not_called()
+        persist.assert_not_called()
+        record_events.assert_not_called()
+
     def test_analysis_job_post_queues_plan_without_inline_agent_execution(self) -> None:
         chat_response = {
             "contract_version": "chat_message_accepted.v2",
