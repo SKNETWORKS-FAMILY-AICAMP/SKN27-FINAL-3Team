@@ -23,6 +23,20 @@ def test_empty_message_requests_input_without_creating_an_agent_plan() -> None:
     assert "mock" not in str(response).lower()
 
 
+def test_out_of_scope_accident_does_not_create_a_supervisor_plan() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_scope_boundary",
+            "user_text": "차가 보행자와 충돌한 사고의 과실을 확정해 주세요.",
+        }
+    )
+
+    assert response["status"] == "scope_guidance"
+    assert response["service_scope"]["decision"] == "expert_handoff"
+    assert response["analysis_plan"]["steps"] == []
+    assert response["reporting_payload"] is None
+
+
 def test_fine_notice_message_queues_supervisor_boundaries_and_supported_real_agents() -> None:
     response = submit_message(
         {
@@ -291,3 +305,43 @@ def test_agent_response_is_composed_from_execution_results() -> None:
     assert "source_ref" not in response["evidence"][1]
     assert response["limitations"] == ["사건별 적용 여부는 추가 확인이 필요합니다."]
 
+
+
+def test_composed_agent_response_preserves_deadline_guidance() -> None:
+    response = compose_agent_response(
+        {
+            "job_id": "job_deadline",
+            "executions": [
+                {
+                    "node_code": "final_response_merge",
+                    "agent_output": {
+                        "status": "partial",
+                        "summary": "deadline guidance",
+                        "structured_result": {
+                            "assistant_message": {
+                                "answer": "deadline guidance",
+                                "summary": "deadline guidance",
+                            },
+                            "deadline_guidance": {
+                                "contract_version": "deadline_guidance.v1",
+                                "status": "needs_confirmation",
+                            },
+                            "cards": [
+                                {
+                                    "card_type": "deadline_guidance",
+                                    "title": "deadline confirmation",
+                                }
+                            ],
+                            "evidence": [],
+                            "limitations": [],
+                            "pending_questions": [],
+                            "report_links": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert response["deadline_guidance"]["status"] == "needs_confirmation"
+    assert response["cards"][0]["card_type"] == "deadline_guidance"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from app.services.supervisor_control_service import (
     evaluate_case_promotion,
     merge_final_response,
@@ -187,3 +189,30 @@ def test_final_response_merge_uses_only_validation_accepted_results() -> None:
     assert merged["assistant_message"]["answer"] == "도로교통법 근거 후보를 확인했습니다."
     assert "노출되면 안 됩니다" not in str(merged)
     assert merged["evidence"] == [{"source_reference": "law:1"}]
+
+
+def test_final_response_merge_prepends_deadline_guidance_card() -> None:
+    deadline = (date.today() + timedelta(days=2)).isoformat()
+    merged = merge_final_response(
+        {
+            "appeal_decision_flow": {
+                "status": "success",
+                "summary": "기한을 확인했습니다.",
+                "structured_result": {
+                    "computed_deadline": deadline,
+                    "deadline_passed": False,
+                },
+                "evidence": [{"source_reference": "notice:1"}],
+                "limitations": [],
+            },
+            "agent_result_validation": {
+                "structured_result": {
+                    "accepted_results": ["appeal_decision_flow"],
+                },
+            },
+        }
+    )
+
+    assert merged["deadline_guidance"]["status"] == "due_soon"
+    assert merged["deadline_guidance"]["deadline"] == deadline
+    assert merged["cards"][0]["card_type"] == "deadline_guidance"

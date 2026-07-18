@@ -11,6 +11,7 @@ from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.case_evidence_service import build_case_evidence
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS, build_consultation_state_v2
 from app.services.law_ground_contract import normalize_law_evidence
+from app.services.service_scope_policy_service import evaluate_service_scope
 from app.services.supervisor_control_service import (
     evaluate_case_promotion,
     reduce_consultation_fact_state,
@@ -39,6 +40,34 @@ def create_session(user_id: str | None = None) -> dict[str, Any]:
     }
 
 
+def build_scope_guidance_response(
+    *,
+    session_id: str,
+    message_id: str,
+    user_text: str,
+    attachments: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return a non-executable response when the declared service boundary applies."""
+
+    if not user_text and not attachments:
+        return None
+    routing_intent = route_supervisor_input(user_text, attachments)
+    service_scope = evaluate_service_scope(
+        user_text=user_text,
+        attachments=attachments,
+        routing_intent=routing_intent,
+    )
+    if service_scope["decision"] == "proceed":
+        return None
+    return _scope_guidance_response(
+        session_id=session_id,
+        message_id=message_id,
+        routing_intent=routing_intent,
+        attachments=attachments,
+        service_scope=service_scope,
+    )
+
+
 def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
     payload = protect_chat_input_payload(payload)
     payload = resolve_attachment_references(payload)
@@ -50,6 +79,14 @@ def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
     if not user_text and not attachments:
         return _needs_input_response(session_id=session_id, message_id=message_id)
 
+    scope_guidance = build_scope_guidance_response(
+        session_id=session_id,
+        message_id=message_id,
+        user_text=user_text,
+        attachments=attachments,
+    )
+    if scope_guidance is not None:
+        return scope_guidance
     routing_intent = route_supervisor_input(user_text, attachments)
     report_requested = report_generation_requested(user_text)
     if routing_intent == "accident_initial_consultation":
@@ -243,6 +280,7 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
             "structured_results": dict(merged.get("structured_results") or {}),
             "evidence": list(merged.get("evidence") or []),
             "limitations": list(merged.get("limitations") or []),
+            "deadline_guidance": dict(merged.get("deadline_guidance") or {}),
             "pending_questions": list(merged.get("pending_questions") or []),
             "cards": list(merged.get("cards") or []),
             "report_links": list(merged.get("report_links") or []),
@@ -316,6 +354,45 @@ def _needs_input_response(*, session_id: str, message_id: str) -> dict[str, Any]
             "steps": [],
         },
         "limitations": [],
+    }
+
+
+def _scope_guidance_response(
+    *,
+    session_id: str,
+    message_id: str,
+    routing_intent: str,
+    attachments: list[dict[str, Any]],
+    service_scope: dict[str, Any],
+) -> dict[str, Any]:
+    message = str(service_scope["reason"])
+    return {
+        "contract_version": "chat_message_accepted.v2",
+        "message_id": message_id,
+        "session_id": session_id,
+        "routing_intent": routing_intent,
+        "status": "scope_guidance",
+        "created_at": _now_iso(),
+        "assistant_message": {"answer": message, "summary": message},
+        "progress": {"status": "scope_guidance", "active_node": "", "message": message},
+        "pending_questions": [],
+        "cards": [],
+        "report_links": [],
+        "attachments": attachments,
+        "blocked_attachments": [],
+        "supervisor_state": {},
+        "reporting_payload": None,
+        "service_scope": service_scope,
+        "analysis_plan": {
+            "contract_version": "analysis_plan.v2",
+            "plan_id": f"plan_{uuid4().hex[:12]}",
+            "session_id": session_id,
+            "message_id": message_id,
+            "routing_intent": routing_intent,
+            "status": "blocked",
+            "steps": [],
+        },
+        "limitations": list(service_scope["limitations"]),
     }
 
 

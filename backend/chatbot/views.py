@@ -53,6 +53,7 @@ from app.services.auth_session_service import (
 from app.services.auth_error_contract import build_auth_error, build_www_authenticate_header
 from app.services.capability_catalog import capability_catalog_payload
 from app.services.chat_orchestration_service import (
+    build_scope_guidance_response,
     compose_agent_response,
     create_session,
     submit_message,
@@ -1226,6 +1227,11 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["execution_mode"] = "planning_blocked"
         return _json_response(request, chat_response, status=503)
 
+    if chat_response["status"] == "scope_guidance":
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "scope_guidance"
+        return _json_response(request, chat_response)
+
     if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
         chat_response["usage"] = usage
         execution_modes = {
@@ -1545,9 +1551,40 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
         execution_payload = apply_attachment_scan_gate(execution_payload)
     chat_response = None
     analysis_plan = execution_payload.get("analysis_plan")
+    if analysis_plan:
+        attachments = [
+            item
+            for item in execution_payload.get("attachments", [])
+            if isinstance(item, dict)
+        ]
+        scope_guidance = build_scope_guidance_response(
+            session_id=str(execution_payload.get("session_id") or f"ses_{uuid4().hex[:12]}"),
+            message_id=str(execution_payload.get("message_id") or f"msg_{uuid4().hex[:12]}"),
+            user_text=str(execution_payload.get("user_text") or "").strip(),
+            attachments=attachments,
+        )
+        if scope_guidance is not None:
+            return _json_response(
+                request,
+                {
+                    "analysis_plan": scope_guidance["analysis_plan"],
+                    "chat_response": scope_guidance,
+                    "execution_mode": "scope_guidance",
+                },
+            )
     if not analysis_plan:
         chat_response = submit_message(execution_payload)
         analysis_plan = chat_response["analysis_plan"]
+
+    if chat_response and chat_response.get("status") == "scope_guidance":
+        return _json_response(
+            request,
+            {
+                "analysis_plan": analysis_plan,
+                "chat_response": chat_response,
+                "execution_mode": "scope_guidance",
+            },
+        )
 
     response = {"analysis_plan": analysis_plan}
     if chat_response:

@@ -569,6 +569,25 @@ class ConsultationCaseApiTests(TestCase):
         self.assertNotIn("work_item", body)
         self.assertFalse(apps.get_model("chatbot", "AgentWorkItem").objects.exists())
 
+    def test_out_of_scope_accident_returns_guidance_without_worker_queue(self) -> None:
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": self.session.session_id,
+                "user_text": "차가 보행자와 충돌한 사고의 과실을 확정해 주세요.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "scope_guidance")
+        self.assertEqual(body["execution_mode"], "scope_guidance")
+        self.assertEqual(body["analysis_plan"]["steps"], [])
+        self.assertEqual(body["service_scope"]["decision"], "expert_handoff")
+        self.assertNotIn("work_item", body)
+        self.assertFalse(apps.get_model("chatbot", "AgentWorkItem").objects.exists())
+
     def test_complete_accident_intake_requires_case_before_worker_queue(self) -> None:
         response = self.client.post(
             "/api/chat/messages/",

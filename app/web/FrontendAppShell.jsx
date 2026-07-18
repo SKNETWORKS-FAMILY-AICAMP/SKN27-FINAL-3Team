@@ -115,6 +115,7 @@ export default function FrontendAppShell({
     ? normalizeAnalysisCards(analysisResponse.cards)
     : [];
   const assistantAnswer = assistantMessageText(analysisResponse?.assistant_message);
+  const deadlineGuidance = analysisResponse?.deadline_guidance || null;
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -1113,6 +1114,7 @@ export default function FrontendAppShell({
               analysisCards={analysisCards}
               caseType={activeRoute === "faultResult" ? "fault" : caseType}
               currentReport={currentReport}
+              deadlineGuidance={deadlineGuidance}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenReport={() => setActiveRoute("reporting")}
@@ -2439,10 +2441,30 @@ function reportSectionsForInspector(sections, mode) {
   return sections;
 }
 
+function DeadlineGuidancePanel({ guidance }) {
+  const nextActions = Array.isArray(guidance?.next_actions) ? guidance.next_actions : [];
+  const limitations = Array.isArray(guidance?.limitations) ? guidance.limitations : [];
+
+  return (
+    <aside className={`deadline-guidance-panel deadline-guidance-panel--${guidance.status}`} role="alert">
+      <span className="deadline-guidance-panel__title">{guidance.card_title}</span>
+      <strong>{guidance.reason}</strong>
+      {limitations[0] && <p>{limitations[0]}</p>}
+      {nextActions.length > 0 && (
+        <ul>
+          {nextActions.map((action) => <li key={action}>{action}</li>)}
+        </ul>
+      )}
+    </aside>
+  );
+}
+
+
 function CaseResultScreen({
   analysisCards = [],
   caseType = "fine",
   currentReport = null,
+  deadlineGuidance = null,
   isAuthenticated = false,
   onOpenChat,
   onOpenReport,
@@ -2502,6 +2524,9 @@ function CaseResultScreen({
       </div>
 
       <div className="dashboard case-result-dashboard">
+        {deadlineGuidance && deadlineGuidance.status !== "normal" && (
+          <DeadlineGuidancePanel guidance={deadlineGuidance} />
+        )}
         <div className="summary-grid">
           {metrics.map((metric) => (
             <MetricCard key={metric.label} label={metric.label} value={metric.value} detail={metric.detail} />

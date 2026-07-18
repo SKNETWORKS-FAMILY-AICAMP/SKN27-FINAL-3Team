@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS
+from app.services.deadline_guidance_service import build_deadline_guidance
 from app.services.supervisor_routing_service import agent_result_validation_policy
 
 
@@ -179,6 +180,23 @@ def merge_final_response(
         limitations.extend(_string_list(report_output.get("limitations")))
 
     questions = _dict_list(pending_questions)
+    deadline_guidance = _deadline_guidance(accepted, structured_results)
+    cards = _result_cards(accepted, upstream_results)
+    if deadline_guidance and deadline_guidance["status"] != "normal":
+        cards.insert(
+            0,
+            {
+                "card_type": "deadline_guidance",
+                "status": (
+                    "success"
+                    if deadline_guidance["status"] == "due_soon"
+                    else "partial"
+                ),
+                "title": deadline_guidance["card_title"],
+                "summary": deadline_guidance["reason"],
+            },
+        )
+        limitations.extend(_string_list(deadline_guidance["limitations"]))
     if summaries:
         answer = "\n\n".join(_dedupe_strings(summaries))
     elif questions:
@@ -186,17 +204,21 @@ def merge_final_response(
     else:
         answer = "검증을 통과한 분석 결과가 없습니다. 입력 자료와 근거를 확인한 뒤 다시 시도해 주세요."
 
+    next_actions = (
+        _string_list(deadline_guidance["next_actions"])
+        if deadline_guidance and deadline_guidance["status"] != "normal"
+        else ["answer_pending_question"] if questions else ["review_verified_results"]
+    )
     return {
         "assistant_message": {"answer": answer, "summary": answer},
         "structured_results": structured_results,
         "evidence": _dedupe_evidence(evidence),
         "limitations": _dedupe_strings(limitations),
+        "deadline_guidance": deadline_guidance,
         "pending_questions": questions,
-        "cards": _result_cards(accepted, upstream_results),
+        "cards": cards,
         "report_links": [],
-        "next_actions": (
-            ["answer_pending_question"] if questions else ["review_verified_results"]
-        ),
+        "next_actions": next_actions,
     }
 
 
@@ -402,6 +424,18 @@ def _result_cards(
         }
         for node_code in accepted
     ]
+
+
+def _deadline_guidance(
+    accepted: list[str],
+    structured_results: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    if "appeal_decision_flow" not in accepted:
+        return None
+    return build_deadline_guidance(
+        structured_results.get("appeal_decision_flow") or {},
+        source_node_code="appeal_decision_flow",
+    )
 
 
 def _source_by_field(value: Any) -> dict[str, dict[str, Any]]:
