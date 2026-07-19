@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 
 import pytest
@@ -374,6 +375,106 @@ def test_supervisor_llm_accepts_complete_exact_agent_package_contract(monkeypatc
     ]
     assert state["agent_input_packages"][0]["owner"] == "workzion2"
     assert state["agent_input_packages"][0]["payload"]["evidence_status"] == "verified"
+
+
+def test_state_package_normalization_keeps_only_fallback_selectors_and_payload_fields():
+    fallback_packages = [
+        {
+            "schema_version": "agent_input_schema.v1",
+            "node_code": "fine_notice_analysis",
+            "owner": "workzion2",
+            "status": "ready",
+            "missing_fields": [],
+            "attachments": [
+                {
+                    "attachment_id": "att_notice",
+                    "storage_uri": "server://fallback/raw",
+                }
+            ],
+            "payload": {
+                "notice_text": "fallback notice",
+                "attachments": [
+                    {"attachment_id": "att_notice", "scan_status": "clean"}
+                ],
+            },
+        }
+    ]
+    candidate_packages = [
+        {
+            "node_code": "fine_notice_analysis",
+            "payload": {
+                "notice_text": "LLM notice",
+                "attachments": [
+                    {
+                        "attachment_id": "att_notice",
+                        "content_base64": "llm-secret",
+                    },
+                    {"attachment_id": "att_unknown", "storage_uri": "llm://unknown"},
+                ],
+                "untrusted_payload_field": "must not persist",
+            },
+        }
+    ]
+
+    packages = service._safe_agent_input_packages(candidate_packages, fallback_packages)
+
+    assert packages[0]["owner"] == "workzion2"
+    assert packages[0]["payload"] == {
+        "notice_text": "LLM notice",
+        "attachments": [{"attachment_id": "att_notice"}],
+    }
+    assert packages[0]["attachments"] == [{"attachment_id": "att_notice"}]
+    stored = json.dumps(packages, ensure_ascii=False)
+    assert "secret" not in stored
+    assert "storage_uri" not in stored
+    assert "untrusted_payload_field" not in stored
+
+
+def test_plan_package_normalization_keeps_only_fallback_selectors_and_payload_fields():
+    fallback_packages = [
+        {
+            "schema_version": "agent_input_schema.v1",
+            "node_code": "law_ground_search",
+            "owner": "techshin31",
+            "status": "ready",
+            "missing_fields": [],
+            "attachments": [
+                {"attachment_id": "att_law", "storage_uri": "server://fallback/raw"}
+            ],
+            "payload": {
+                "search_query": "fallback query",
+                "attachments": [{"attachment_id": "att_law", "scan_status": "clean"}],
+            },
+        }
+    ]
+    candidate_packages = [
+        {
+            "node_code": "law_ground_search",
+            "payload": {
+                "search_query": "LLM query",
+                "attachments": [
+                    {
+                        "attachment_id": "att_law",
+                        "content_base64": "llm-secret",
+                    },
+                    {"attachment_id": "att_unknown", "storage_uri": "llm://unknown"},
+                ],
+                "untrusted_payload_field": "must not persist",
+            },
+        }
+    ]
+
+    packages = service._safe_plan_agent_packages(candidate_packages, fallback_packages)
+
+    assert packages[0]["payload"] == {
+        "search_query": "LLM query",
+        "attachments": [{"attachment_id": "att_law"}],
+    }
+    assert packages[0]["attachments"] == [{"attachment_id": "att_law"}]
+    stored = json.dumps(packages, ensure_ascii=False)
+    assert "secret" not in stored
+    assert "storage_uri" not in stored
+    assert "untrusted_payload_field" not in stored
 
 
 def test_supervisor_llm_plan_unknown_package_does_not_expand_fallback(monkeypatch):
