@@ -8,6 +8,7 @@ import {
   persistAuthSession,
   readStoredAuthSession,
   readStoredAuthToken,
+  scheduleAppJwtRefresh,
 } from "./authSession.js";
 
 const ROUTES = [
@@ -90,6 +91,8 @@ export default function FrontendAppShell({
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
   const [pendingReportScreenDownload, setPendingReportScreenDownload] = useState(null);
   const reportWorkbenchRef = useRef(null);
+  const authRefreshContextRef = useRef({ guestId, sessionId });
+  authRefreshContextRef.current = { guestId, sessionId };
 
   const effectiveAuthToken = activeAuthToken || "";
   const identity = {
@@ -112,6 +115,7 @@ export default function FrontendAppShell({
     ? normalizeAnalysisCards(analysisResponse.cards)
     : [];
   const assistantAnswer = assistantMessageText(analysisResponse?.assistant_message);
+  const deadlineGuidance = analysisResponse?.deadline_guidance || null;
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -142,6 +146,67 @@ export default function FrontendAppShell({
       active = false;
     };
   }, [api]);
+
+  useEffect(() => {
+    if (!activeAuthToken || !authSessionId) {
+      return undefined;
+    }
+
+    let refreshEffectActive = true;
+    const cleanupRefreshTimer = scheduleAppJwtRefresh({
+      token: activeAuthToken,
+      refresh: async () => {
+        const refreshContext = authRefreshContextRef.current;
+        try {
+          const refreshResult = await api.refreshAuthToken(
+            {
+              guest_id: refreshContext.guestId || undefined,
+              session_id: refreshContext.sessionId || undefined,
+            },
+            {
+              authToken: activeAuthToken,
+              authSessionId,
+              guestId: refreshContext.guestId,
+            }
+          );
+          if (!refreshEffectActive) {
+            return;
+          }
+          const nextToken = refreshResult?.access_token || "";
+          const nextAuthSessionId = refreshResult?.subject?.auth_session_id || "";
+          if (!nextToken || !nextAuthSessionId) {
+            throw new Error("Auth refresh response is incomplete.");
+          }
+          const nextGuestId = refreshResult?.subject?.guest_id || refreshContext.guestId || "";
+          setActiveAuthToken(nextToken);
+          setAuthSessionId(nextAuthSessionId);
+          setGuestId(nextGuestId);
+          persistAuthSession({ guestId: nextGuestId });
+        } catch (_error) {
+          if (!refreshEffectActive) {
+            return;
+          }
+          clearStoredAuthSession();
+          if (refreshContext.guestId) {
+            persistAuthSession({ guestId: refreshContext.guestId });
+          }
+          setActiveAuthToken("");
+          setAuthSessionId("");
+          setMypageSummary(null);
+          setHistoryEvents(null);
+          setCurrentReport(null);
+          setReportList([]);
+          setPendingAuthAction(null);
+          setStatusMessage("인증 세션이 만료되었습니다. Google 계정으로 다시 로그인해 주세요.");
+        }
+      },
+    });
+
+    return () => {
+      refreshEffectActive = false;
+      cleanupRefreshTimer();
+    };
+  }, [api, activeAuthToken, authSessionId]);
 
   useEffect(() => {
     if (!pendingReportScreenDownload || activeRoute !== "reporting" || !reportWorkbenchRef.current) {
@@ -355,10 +420,11 @@ export default function FrontendAppShell({
   }
 
   async function runCurrentReportAction(action = "download_report") {
-    const jobId = analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || "";
+    const jobId = currentReport?.job_id || analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || "";
     const documentType = action === "download_objection" ? "objection_form" : "report";
     const reportAction = action === "save" ? "save" : "download";
     const activeReportingPayload = currentReport?.content?.reporting_payload || visibleReportingPayload;
+    const persistedReportId = persistedAnalysisReportId(analysisResponse, currentReport);
     if (action === "download_report") {
       if (!currentReport && !activeReportingPayload) {
         setReportActionStatus("PDF로 저장할 리포트 화면이 아직 없습니다.");
@@ -413,6 +479,10 @@ export default function FrontendAppShell({
       setActiveRoute("chatbot");
       return;
     }
+    if (!persistedReportId) {
+      setReportActionStatus("분석 워커가 리포트를 저장할 때까지 기다린 뒤 다시 시도해 주세요.");
+      return;
+    }
     setReportActionStatus(
       reportAction === "download"
         ? documentType === "objection_form"
@@ -421,7 +491,7 @@ export default function FrontendAppShell({
         : "리포트를 저장하고 있습니다."
     );
     try {
-      let activeSessionId = analysisResponse?.session_id || sessionId;
+      let activeSessionId = currentReport?.session_id || analysisResponse?.session_id || sessionId;
       let nextIdentity = identity;
       if (!authSessionId) {
         setPendingAuthAction({ type: `report_${action}`, jobId });
@@ -434,40 +504,49 @@ export default function FrontendAppShell({
         nextIdentity = loginState.identity;
         setPendingAuthAction(null);
       }
-      const report = await api.runReportAction(
-        {
-          action: reportAction,
-          document_type: documentType,
-          report_id: currentReport?.report_id || `rep_${jobId}`,
-          job_id: jobId,
-          session_id: activeSessionId,
-          report_type: activeReportingPayload?.report_type || currentReport?.report_type || "general",
-          title: activeReportingPayload?.title || currentReport?.title || "상담 분석 리포트",
-          reporting_payload: activeReportingPayload,
-        },
-        nextIdentity
-      );
-      setCurrentReport(report);
-      let downloadedFilename = "";
-      if (reportAction === "download" && report?.report_id) {
-        downloadedFilename = await triggerReportDownload({
-          reportId: report.report_id,
+      if (persistedReportId) {
+        const detailResult = await api.getReportDetail({
+          reportId: persistedReportId,
           sessionId: activeSessionId,
-          requestIdentity: nextIdentity,
-          documentType,
+          identity: nextIdentity,
         });
+        const persistedReport = detailResult?.report || currentReport || {
+          report_id: persistedReportId,
+          session_id: activeSessionId,
+          content: { reporting_payload: activeReportingPayload },
+        };
+        setCurrentReport(persistedReport);
+        let downloadedFilename = "";
+        if (reportAction === "download") {
+          downloadedFilename = await triggerReportDownload({
+            reportId: persistedReportId,
+            sessionId: activeSessionId,
+            requestIdentity: nextIdentity,
+            documentType,
+          });
+        } else {
+          await api.updateConversationSaveState(
+            {
+              session_id: activeSessionId,
+              conversation_save_state: "saved",
+              conversation_save_source: "worker_report_save_action",
+            },
+            nextIdentity
+          );
+        }
+        setReportActionStatus(
+          reportAction === "download"
+            ? `다운로드 완료: ${downloadedFilename || persistedReportId}`
+            : `리포트 저장 완료: ${persistedReportId}`
+        );
+        if (nextIdentity.authSessionId) {
+          await loadMyPageSummary({ identity: nextIdentity, sessionId: activeSessionId });
+          await loadHistoryEvents({ identity: nextIdentity, sessionId: activeSessionId });
+          await loadReports({ identity: nextIdentity, sessionId: activeSessionId });
+        }
+        setActiveRoute("reporting");
+        return;
       }
-      setReportActionStatus(
-        reportAction === "download"
-          ? `다운로드 완료: ${downloadedFilename || report.download_url || report.report_id}`
-          : `리포트 저장 완료: ${report.report_id}`
-      );
-      if (nextIdentity.authSessionId) {
-        await loadMyPageSummary({ identity: nextIdentity, sessionId: activeSessionId });
-        await loadHistoryEvents({ identity: nextIdentity, sessionId: activeSessionId });
-        await loadReports({ identity: nextIdentity, sessionId: activeSessionId });
-      }
-      setActiveRoute("reporting");
     } catch (_error) {
       setPendingAuthAction(null);
       setReportActionStatus(`리포트 action 실행에 실패했습니다. ${_error?.message || ""}`.trim());
@@ -618,6 +697,8 @@ export default function FrontendAppShell({
       userId: followupLoginState?.userId || null,
     });
     setChatMessages(conversationHistory);
+    setCurrentReport(null);
+    setReportActionStatus("");
 
     try {
       const submitIdentity = {
@@ -1033,6 +1114,7 @@ export default function FrontendAppShell({
               analysisCards={analysisCards}
               caseType={activeRoute === "faultResult" ? "fault" : caseType}
               currentReport={currentReport}
+              deadlineGuidance={deadlineGuidance}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenReport={() => setActiveRoute("reporting")}
@@ -1094,6 +1176,12 @@ export default function FrontendAppShell({
       </div>
     </div>
   );
+}
+
+function persistedAnalysisReportId(analysisResponse, currentReport) {
+  const reportLinks = Array.isArray(analysisResponse?.report_links) ? analysisResponse.report_links : [];
+  const analysisReportId = reportLinks.find((link) => link?.report_id)?.report_id || "";
+  return currentReport?.report_id || analysisReportId || "";
 }
 
 function EntryScreen({ onGuestStart, onOpenChat }) {
@@ -1894,12 +1982,12 @@ function FaultRatioInsightPanel({ node, compact = false }) {
   }
 
   return (
-    <article className={compact ? "fault-ratio-insight-panel compact" : "fault-ratio-insight-panel"}>
-      <div className="fault-ratio-insight-head">
+    <article className={compact ? "agent-insight-panel compact" : "agent-insight-panel"}>
+      <div className="agent-insight-head">
         <span className="tag">과실 쟁점</span>
         <strong>유사 사례와 제출 자료 검토</strong>
       </div>
-      <div className="fault-ratio-insight-grid">
+      <div className="agent-insight-grid">
         <p>
           <span>검토 범위</span>
           <strong>{compactValue(ratioRangeLabel)}</strong>
@@ -1914,7 +2002,7 @@ function FaultRatioInsightPanel({ node, compact = false }) {
         </p>
       </div>
       {similarCases.length > 0 && (
-        <div className="fault-ratio-insight-section">
+        <div className="agent-insight-section">
           <strong>참고한 유사 사례</strong>
           {similarCases.slice(0, compact ? 2 : 3).map((item, index) => (
             <p key={item.source_ref || item.source_reference || item.case_id || `similar-case-${index}`}>
@@ -1924,17 +2012,84 @@ function FaultRatioInsightPanel({ node, compact = false }) {
         </div>
       )}
       {recommendedEvidence.length > 0 && (
-        <div className="fault-ratio-insight-section">
+        <div className="agent-insight-section">
           <strong>추가하면 좋은 자료</strong>
           <p>{compactValue(recommendedEvidence)}</p>
         </div>
       )}
       {limitations.length > 0 && (
-        <div className="fault-ratio-insight-section">
+        <div className="agent-insight-section">
           <strong>검토 시 확인할 한계</strong>
           <ul>
             {limitations.slice(0, compact ? 2 : 3).map((item, index) => (
               <li key={`fault-ratio-limitation-${index}`}>{compactValue(item)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function LawGroundInsightPanel({ node, compact = false }) {
+  const structuredResult = node?.structured_result || {};
+  const retrieval = structuredResult.retrieval || {};
+  const matchedLaws = Array.isArray(structuredResult.matched_laws)
+    ? structuredResult.matched_laws
+    : [];
+  const attemptedBackends = Array.isArray(retrieval.attempted_backends)
+    ? retrieval.attempted_backends
+    : [];
+  const limitations = Array.isArray(node?.limitations) ? node.limitations : [];
+
+  if (!node || node?.node_code !== "law_ground_search") {
+    return null;
+  }
+
+  return (
+    <article className={compact ? "agent-insight-panel compact" : "agent-insight-panel"}>
+      <div className="agent-insight-head">
+        <span className="tag">법령 근거</span>
+        <strong>검색 출처와 적용 후보</strong>
+      </div>
+      <div className="agent-insight-grid">
+        <p>
+          <span>검색 상태</span>
+          <strong>{compactValue(retrieval.status || (matchedLaws.length > 0 ? "ready" : "empty"))}</strong>
+        </p>
+        <p>
+          <span>검색 저장소</span>
+          <strong>{compactValue(retrieval.backend || "unavailable")}</strong>
+        </p>
+        <p>
+          <span>확인된 근거</span>
+          <strong>{matchedLaws.length}건</strong>
+        </p>
+      </div>
+      {matchedLaws.length > 0 && (
+        <div className="agent-insight-section">
+          <strong>관련 법령 후보</strong>
+          {matchedLaws.slice(0, compact ? 2 : 4).map((item, index) => (
+            <p key={item.source_reference || `law-ground-${index}`}>
+              <strong>{compactValue([item.law_name || item.title, item.article].filter(Boolean).join(" "))}</strong>
+              {item.summary && <span>{compactValue(item.summary)}</span>}
+              <small>출처: {compactValue(item.source_reference)}</small>
+            </p>
+          ))}
+        </div>
+      )}
+      {attemptedBackends.length > 0 && (
+        <div className="agent-insight-section">
+          <strong>검색 시도 경로</strong>
+          <p>{compactValue(retrieval.attempted_backends)}</p>
+        </div>
+      )}
+      {limitations.length > 0 && (
+        <div className="agent-insight-section">
+          <strong>적용 전 확인사항</strong>
+          <ul>
+            {limitations.slice(0, compact ? 2 : 3).map((item, index) => (
+              <li key={`law-ground-limitation-${index}`}>{compactValue(item)}</li>
             ))}
           </ul>
         </div>
@@ -2286,10 +2441,30 @@ function reportSectionsForInspector(sections, mode) {
   return sections;
 }
 
+function DeadlineGuidancePanel({ guidance }) {
+  const nextActions = Array.isArray(guidance?.next_actions) ? guidance.next_actions : [];
+  const limitations = Array.isArray(guidance?.limitations) ? guidance.limitations : [];
+
+  return (
+    <aside className={`deadline-guidance-panel deadline-guidance-panel--${guidance.status}`} role="alert">
+      <span className="deadline-guidance-panel__title">{guidance.card_title}</span>
+      <strong>{guidance.reason}</strong>
+      {limitations[0] && <p>{limitations[0]}</p>}
+      {nextActions.length > 0 && (
+        <ul>
+          {nextActions.map((action) => <li key={action}>{action}</li>)}
+        </ul>
+      )}
+    </aside>
+  );
+}
+
+
 function CaseResultScreen({
   analysisCards = [],
   caseType = "fine",
   currentReport = null,
+  deadlineGuidance = null,
   isAuthenticated = false,
   onOpenChat,
   onOpenReport,
@@ -2306,6 +2481,7 @@ function CaseResultScreen({
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
+  const lawGroundNode = nodeResults.find((node) => node?.node_code === "law_ground_search");
   const reportStatus = reportingPayload?.stage || currentReport?.status || "draft";
   const reportStatusText = reportStatusLabel(reportStatus);
   const facts = Array.isArray(supervisorState?.collected_facts) ? supervisorState.collected_facts : [];
@@ -2348,6 +2524,9 @@ function CaseResultScreen({
       </div>
 
       <div className="dashboard case-result-dashboard">
+        {deadlineGuidance && deadlineGuidance.status !== "normal" && (
+          <DeadlineGuidancePanel guidance={deadlineGuidance} />
+        )}
         <div className="summary-grid">
           {metrics.map((metric) => (
             <MetricCard key={metric.label} label={metric.label} value={metric.value} detail={metric.detail} />
@@ -2382,6 +2561,7 @@ function CaseResultScreen({
                   ))}
                 </div>
               )}
+              {lawGroundNode && <LawGroundInsightPanel node={lawGroundNode} />}
 
               {analysisCards.length > 0 && (
                 <div className="case-result-card-list">
@@ -2522,6 +2702,7 @@ function ReportingScreen({
   const sections = Array.isArray(activeReportingPayload?.sections) ? activeReportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
+  const lawGroundNode = nodeResults.find((node) => node?.node_code === "law_ground_search");
   const reportPersistence = currentReport?.persistence || {};
   const reportMetadata = currentReport?.metadata || {};
   const reportStatus = activeReportingPayload?.stage || currentReport?.status || reportPersistence.status || "draft";
@@ -2802,6 +2983,7 @@ function ReportingScreen({
                 <p>분석 항목 {analysisCards.length}건과 근거·누락 자료를 리포트에 반영했습니다.</p>
               </div>
               {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
+              {lawGroundNode && <LawGroundInsightPanel compact node={lawGroundNode} />}
               {selectedInspectorMode !== "overview" && (
                 <div className="inspector-section report-inspector-detail">
                   <span className="tag green">{inspectorDetail.label}</span>

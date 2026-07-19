@@ -2,6 +2,75 @@ export const GOOGLE_PROFILE_STORAGE_KEY = "skn27.auth.googleProfile";
 export const AUTH_SESSION_STORAGE_KEY = "skn27.auth.session";
 export const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/client";
 export const GOOGLE_LOGIN_SCOPE = "openid email profile";
+export const APP_JWT_REFRESH_EARLY_MS = 5 * 60 * 1000;
+
+export function millisecondsUntilAppJwtRefresh(
+  token,
+  { nowMs = Date.now(), refreshEarlyMs = APP_JWT_REFRESH_EARLY_MS } = {}
+) {
+  const expiresAtMs = readUnverifiedJwtExpirationMs(token);
+  if (expiresAtMs === null) {
+    return null;
+  }
+  return Math.max(0, expiresAtMs - Number(nowMs) - Number(refreshEarlyMs));
+}
+
+export function scheduleAppJwtRefresh({
+  token,
+  refresh,
+  nowMs = Date.now(),
+  setTimer = (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearTimer = (timerId) => window.clearTimeout(timerId),
+} = {}) {
+  const delayMs = millisecondsUntilAppJwtRefresh(token, { nowMs });
+  if (delayMs === null || typeof refresh !== "function") {
+    return () => {};
+  }
+
+  let disposed = false;
+  let refreshInFlight = null;
+  const runRefresh = () => {
+    if (disposed) {
+      return Promise.resolve();
+    }
+    if (refreshInFlight) {
+      return refreshInFlight;
+    }
+    refreshInFlight = Promise.resolve()
+      .then(refresh)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+    return refreshInFlight;
+  };
+  const timerId = setTimer(runRefresh, delayMs);
+
+  return () => {
+    disposed = true;
+    clearTimer(timerId);
+  };
+}
+
+function readUnverifiedJwtExpirationMs(token) {
+  const payloadSegment = String(token || "").split(".")[1];
+  if (!payloadSegment) {
+    return null;
+  }
+  try {
+    const base64 = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+    const payload = JSON.parse(new TextDecoder().decode(bytes));
+    const expiresAtSeconds = Number(payload?.exp);
+    if (!Number.isFinite(expiresAtSeconds) || expiresAtSeconds <= 0) {
+      return null;
+    }
+    // This unverified claim controls only refresh timing. The backend still verifies the JWT.
+    return expiresAtSeconds * 1000;
+  } catch (_error) {
+    return null;
+  }
+}
 
 export function buildAuthContext({ authState, guestId, authSessionId, sessionId, userId }) {
   return {
@@ -23,6 +92,7 @@ export async function buildGoogleLoginPayload({
   });
   return {
     auth_flow: "google_authorization_code_popup",
+    client_id: String(googleClientId || "").trim(),
     code,
     purpose,
     scope: GOOGLE_LOGIN_SCOPE,
@@ -64,7 +134,7 @@ export async function requestGoogleAuthorizationCode({ clientId, scope = GOOGLE_
       scope,
       ux_mode: "popup",
       include_granted_scopes: true,
-      prompt: "consent",
+      select_account: true,
       callback: (response) => {
         if (response?.code) {
           settle(resolve, response.code);
@@ -178,20 +248,27 @@ export function readStoredAuthToken() {
 }
 
 export function readStoredAuthSession() {
-  return readStoredJson(AUTH_SESSION_STORAGE_KEY) || {};
+  const storedSession = readStoredJson(AUTH_SESSION_STORAGE_KEY) || {};
+  if (storedSession.auth_session_id || storedSession.user_id) {
+    removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+    writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
+      guest_id: storedSession.guest_id || null,
+    });
+    return {
+      guest_id: storedSession.guest_id || null,
+    };
+  }
+  return storedSession;
 }
 
 export function readStoredGoogleProfile() {
   return readStoredJson(GOOGLE_PROFILE_STORAGE_KEY);
 }
 
-export function persistAuthSession({ accessToken, googleProfile, authSessionId, guestId, sessionId, userId }) {
-  writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null);
+export function persistAuthSession({ guestId }) {
+  removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
   writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
-    auth_session_id: authSessionId || null,
     guest_id: guestId || null,
-    session_id: sessionId || null,
-    user_id: userId || null,
   });
 }
 

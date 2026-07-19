@@ -33,6 +33,12 @@ AUTH_ERROR_TEMPLATES: dict[str, dict[str, Any]] = {
         "required_action": "none",
         "reason": "permission_denied",
     },
+    "provider_unavailable": {
+        "status": 503,
+        "message": "외부 로그인 서비스를 일시적으로 사용할 수 없습니다.",
+        "required_action": "restart_google_login",
+        "reason": "provider_unavailable",
+    },
 }
 
 
@@ -81,24 +87,3 @@ def list_auth_error_contracts() -> dict[str, dict[str, Any]]:
         code: build_auth_error(code)["error"]
         for code in sorted(AUTH_ERROR_TEMPLATES)
     }
-
-
-def is_valid_mock_bearer_header(header_value: str | None) -> tuple[bool, dict[str, Any] | None]:
-    """Validate only the mock Bearer header shape, not JWT signatures."""
-
-    if not header_value:
-        return False, build_auth_error("auth_required")
-
-    parts = header_value.strip().split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return False, build_auth_error("token_invalid", reason="malformed_authorization_header")
-
-    token = parts[1].strip()
-    if not token:
-        return False, build_auth_error("token_invalid", reason="empty_token")
-    if token == "expired":
-        return False, build_auth_error("token_expired")
-    if token == "invalid":
-        return False, build_auth_error("token_invalid")
-
-    return True, None

@@ -13,7 +13,7 @@ from ..run_staging_pipeline import (
     start_postgres_service,
 )
 from .loader import DEFAULT_DOCUMENT_STRATEGY, build_search_documents
-from .schema import create_search_schema
+from .schema import DEFAULT_EMBEDDING_MODEL, create_search_schema
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,7 +34,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-core-load-id", type=int, default=None, help="Specific core_loads.load_id to build from.")
     parser.add_argument("--mode", choices=("replace-search",), default="replace-search", help="Replace active search documents.")
     parser.add_argument("--document-strategy", default=DEFAULT_DOCUMENT_STRATEGY, help="Search text construction strategy label.")
-    parser.add_argument("--embedding-model", default=None, help="Embedding model label to store before embedding is generated.")
+    parser.add_argument(
+        "--embedding-model",
+        default=DEFAULT_EMBEDDING_MODEL,
+        help="Embedding model label to store before embedding is generated.",
+    )
     parser.add_argument("--description", default="fault standard search document build", help="Search load description.")
     parser.add_argument("--create-schema-only", action="store_true", help="Create search schema and tables only.")
     parser.add_argument("--allow-validation-issues", action="store_true", help="Build even if core validation fails.")

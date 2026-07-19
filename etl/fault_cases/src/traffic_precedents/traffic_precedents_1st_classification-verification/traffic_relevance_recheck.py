@@ -175,12 +175,22 @@ def prepare_output_paths(out_dir: Path, fresh: bool) -> Dict[str, Path]:
     return paths
 
 
+def first_value(row: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, "", []):
+            return str(value)
+    return ""
+
+
 def text_of(row: Dict[str, Any]) -> str:
     parts = [
-        row.get("case_name"),
-        row.get("holding"),
-        row.get("summary"),
-        row.get("main_text", "")[:3000],
+        first_value(row, "사건명", "case_name"),
+        first_value(row, "판시사항", "holding"),
+        first_value(row, "판결요지", "summary"),
+        first_value(row, "주문"),
+        first_value(row, "이유"),
+        first_value(row, "판례내용", "main_text", "full_text")[:3000],
     ]
     return " ".join(str(part) for part in parts if part)
 

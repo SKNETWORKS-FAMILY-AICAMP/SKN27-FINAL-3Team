@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+dnf update -y
+dnf install -y docker curl unzip
+systemctl enable --now docker amazon-ssm-agent
+
+install -d -m 0755 /etc/docker
+cat >/etc/docker/daemon.json <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "20m",
+    "max-file": "5"
+  }
+}
+EOF
+systemctl restart docker
+
+# IMDSv2 needs hop-limit 2 for the three app containers that use the tightly
+# scoped runtime role. Every other container on the pilot bridge is blocked at
+# DOCKER-USER before packets can reach the host metadata endpoint.
+cat >/usr/local/sbin/skn27-imds-firewall.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+for _attempt in $(seq 1 30); do
+  if iptables -n -L DOCKER-USER >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+iptables -n -L DOCKER-USER >/dev/null
+
+metadata_cidr="169.254.169.254/32"
+iptables -C DOCKER-USER -d "$metadata_cidr" -j REJECT 2>/dev/null || \
+  iptables -I DOCKER-USER 1 -d "$metadata_cidr" -j REJECT
+for allowed_cidr in 172.31.0.5/32 172.31.0.6/32 172.31.0.7/32; do
+  iptables -C DOCKER-USER -s "$allowed_cidr" -d "$metadata_cidr" -j ACCEPT 2>/dev/null || \
+    iptables -I DOCKER-USER 1 -s "$allowed_cidr" -d "$metadata_cidr" -j ACCEPT
+done
+EOF
+chmod 0755 /usr/local/sbin/skn27-imds-firewall.sh
+
+cat >/etc/systemd/system/skn27-imds-firewall.service <<'EOF'
+[Unit]
+Description=Restrict Docker access to EC2 instance metadata
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/skn27-imds-firewall.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now skn27-imds-firewall.service
+
+install -d -m 0755 /usr/local/lib/docker/cli-plugins
+compose_tmp=$(mktemp -d)
+trap 'rm -rf "$compose_tmp"' EXIT
+curl --fail --show-error --location \
+  "https://github.com/docker/compose/releases/download/${docker_compose_version}/docker-compose-linux-x86_64" \
+  --output "$compose_tmp/docker-compose-linux-x86_64"
+curl --fail --show-error --location \
+  "https://github.com/docker/compose/releases/download/${docker_compose_version}/checksums.txt" \
+  --output "$compose_tmp/checksums.txt"
+(
+  cd "$compose_tmp"
+  grep -E '[ *]docker-compose-linux-x86_64$' checksums.txt | sha256sum --check -
+)
+install -m 0755 "$compose_tmp/docker-compose-linux-x86_64" /usr/local/lib/docker/cli-plugins/docker-compose
+rm -rf "$compose_tmp"
+trap - EXIT
+
+install -d -m 0750 /opt/skn27-pilot/releases /opt/skn27-pilot/shared
+
+# A small pilot host runs ClamAV and Elasticsearch together. Swap prevents a
+# transient signature/index spike from immediately killing the Django workers.
+if ! swapon --show | grep -q /swapfile; then
+  fallocate -l 4G /swapfile
+  chmod 0600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
+cat >/etc/sysctl.d/99-skn27-pilot.conf <<'EOF'
+vm.max_map_count=262144
+vm.swappiness=10
+EOF
+sysctl --system

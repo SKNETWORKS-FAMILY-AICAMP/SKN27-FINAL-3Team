@@ -98,8 +98,8 @@ python traffic_fault_ratio_recheck.py --fresh
 
 ```bash
 python traffic_fault_ratio_recheck.py \
-  --fault-ratio-dir database/traffic_prec_fault_ratio \
-  --out-dir database/traffic_prec_fault_ratio_verified \
+  --fault-ratio-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio \
+  --out-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_verified \
   --fresh
 ```
 
@@ -110,7 +110,7 @@ python traffic_fault_ratio_recheck.py \
 기본 입력 폴더:
 
 ```text
-database/traffic_prec_fault_ratio/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio/
 ```
 
 입력 파일:
@@ -134,7 +134,7 @@ database/traffic_prec_fault_ratio/
 기본 출력 폴더:
 
 ```text
-database/traffic_prec_fault_ratio_verified/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_verified/
 ```
 
 출력 파일:
@@ -162,7 +162,7 @@ database/traffic_prec_fault_ratio_verified/
 최종 RAG 데이터베이스 적재 후보는 다음 파일 하나입니다.
 
 ```text
-database/traffic_prec_fault_ratio_verified/01_fault_ratio_confirmed_cases.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_verified/01_fault_ratio_confirmed_cases.jsonl
 ```
 
 `03_fault_ratio_verified_all.jsonl`은 전체 추적용이지 RAG 적재 입력이 아닙니다.
@@ -196,6 +196,14 @@ traffic_but_no_fault_ratio
 
 2차 분류 결과 row에는 다음 필드가 붙어 있습니다.
 
+검증 단계에서 사건유형을 다시 확인할 때는 새 전처리 산출물의 한글 필드를 우선 사용하고, 기존 영문 필드를 fallback으로 사용합니다.
+
+```text
+사건명 / case_name
+사건번호 / case_number
+사건종류명 / case_category
+```
+
 | 필드 | 의미 |
 |---|---|
 | `fault_ratio_label` | 2차 분류 라벨 |
@@ -211,6 +219,7 @@ traffic_but_no_fault_ratio
 | `fault_ratio_party_fault_terms` | 당사자별 과실 판단 표현 |
 | `fault_ratio_damage_terms` | 손해배상/보험/구상금 표현 |
 | `fault_ratio_no_fault_terms` | 비과실비율 쪽 신호 |
+| `preprocessed_fault_ratio` | 전처리 단계에서 추출한 과실비율 값 |
 
 2차 검증은 이 필드들을 다시 조합해 판단합니다.
 
@@ -373,7 +382,7 @@ damage_or_insurance_context
 | 구분 | 1차 검증/재정리 | 2차 검증/재정리 |
 |---|---|---|
 | 핵심 질문 | 진짜 교통사고 관련 판례인가? | 진짜 과실비율 판단용 판례인가? |
-| 입력 폴더 | `database/traffic_prec_reclass/` | `database/traffic_prec_fault_ratio/` |
+| 입력 폴더 | `etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_reclass/` | `etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio/` |
 | 중간 라벨 | `possible_traffic_review` | `fault_ratio_possible_review` |
 | 최종 confirmed | `confirmed_traffic` | `fault_ratio_confirmed` |
 | 최종 제외 | `non_traffic` | `traffic_but_no_fault_ratio` |
@@ -409,13 +418,13 @@ damage_or_insurance_context
 
 ```text
 2차 분류 결과
-database/traffic_prec_fault_ratio/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio/
   01_fault_ratio_confirmed_cases.jsonl
   02_fault_ratio_possible_review.jsonl
   03_traffic_but_no_fault_ratio_cases.jsonl
 ↓
 2차 검증 및 재정리
-database/traffic_prec_fault_ratio_verified/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_verified/
   01_fault_ratio_confirmed_cases.jsonl
   02_traffic_but_no_fault_ratio_cases.jsonl
 ↓

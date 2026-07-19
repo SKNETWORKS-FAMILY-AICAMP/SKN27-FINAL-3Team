@@ -328,7 +328,7 @@ def flatten_packages_to_tables(packages: List[Dict[str, Any]], sections: List[Di
         tables["parties"].extend(package["parties"])
         tables["base_faults"].append({"rule_id": rule_id, **package["base_fault"]})
         tables["roundabout_contexts"].append({"rule_id": rule_id, **package["roundabout_context"]})
-        tables["lane_paths"].append({"rule_id": rule_id, **package["lane_path_context"]})
+        tables["lane_paths"].extend(build_lane_path_rows(rule_id, package["lane_path_context"]))
         tables["lane_steps"].extend(build_lane_step_rows(rule_id, package["lane_path_context"]))
         tables["adjustment_factors"].extend(package["adjustment_factors"])
         tables["rule_blocks"].extend(package["blocks"])
@@ -339,6 +339,36 @@ def flatten_packages_to_tables(packages: List[Dict[str, Any]], sections: List[Di
 
     # table row 묶음을 반환합니다.
     return tables
+
+
+def build_lane_path_rows(rule_id: str, lane_path_context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert red/blue path context into party-level lane path rows."""
+
+    rows: List[Dict[str, Any]] = []
+    for color, party_key in [("red", "A"), ("blue", "B")]:
+        steps = lane_path_context.get(f"{color}_lane_steps", []) or []
+        lanes = [step.get("lane") for step in steps if step.get("lane")]
+        rows.append({
+            "lane_path_id": f"lane_path_{rule_id}_{party_key}",
+            "rule_id": rule_id,
+            "party_key": party_key,
+            "entry_direction": first_step_value(steps, "진입", "direction"),
+            "exit_direction": first_step_value(steps, "진출", "direction"),
+            "entry_lane": first_step_value(steps, "진입", "lane"),
+            "circulation_lane": first_step_value(steps, "회전", "lane"),
+            "exit_lane": first_step_value(steps, "진출", "lane"),
+            "is_lane_changing": len(set(lanes)) > 1,
+            "is_exiting": any(step.get("movement") == "진출" for step in steps),
+            "raw_text": lane_path_context.get(f"{color}_path_text"),
+        })
+    return rows
+
+
+def first_step_value(steps: List[Dict[str, Any]], movement: str, key: str) -> Any:
+    for step in steps:
+        if step.get("movement") == movement and step.get(key) is not None:
+            return step.get(key)
+    return None
 
 
 def build_lane_step_rows(rule_id: str, lane_path_context: Dict[str, Any]) -> List[Dict[str, Any]]:

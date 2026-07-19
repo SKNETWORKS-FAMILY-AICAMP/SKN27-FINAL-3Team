@@ -129,6 +129,47 @@ Core = 정제되어 서비스에서 쓰는 기준 데이터
 
 검색용 문장은 반드시 Core 기준으로 만들어야 Neo4j와 계산 결과가 맞는다.
 
+Core와 Search Documents를 분리하는 이유는 단순히 테이블을 많이 만들기 위한 것이 아니다.
+
+인정기준에는 변하면 안 되는 기준 데이터와, 검색 품질을 높이기 위해 계속 바뀔 수 있는 검색 문장이 함께 존재한다.
+
+```text
+Core
+-> 기준표, 당사자, 기본과실, 수정요소, 법령, 참고사례처럼 의미가 고정된 구조 데이터
+-> 과실 계산, 관리자 화면, Neo4j 그래프 생성의 기준
+-> 자주 바뀌면 안 되는 본 데이터
+
+Search Documents
+-> Core 데이터를 사용자 자연어 검색에 맞게 다시 문장화한 데이터
+-> search_text, embedding, document_strategy, metadata를 포함
+-> 검색 실험, 임베딩 모델 변경, 문장 구성 방식 변경에 따라 다시 만들 수 있는 데이터
+```
+
+만약 Core와 Search Documents를 하나의 테이블로 합치면 처음 구현은 단순해 보일 수 있다. 하지만 시간이 지나면 계산용 컬럼, 그래프 생성용 컬럼, 검색용 문장, 임베딩 실험용 컬럼이 한 테이블에 섞인다.
+
+특히 검색문장은 실험하면서 계속 바뀔 수 있다.
+
+```text
+검색문장 v1:
+차47-3 버스정류장 출발 버스 진로변경 A40:B60
+
+검색문장 v2:
+정차 후 출발한 버스차량과 그 앞으로 진로변경한 차량 간 사고 기준이다.
+기본과실은 A40:B60이고, B가 진로변경 신호를 불이행하면 B 과실에 +10이 적용될 수 있다.
+
+검색문장 v3:
+사용자 표현 보강: 버스정류장, 출발 버스, 끼어들기, 진로변경, 깜빡이 미점등, 과실비율 40:60
+```
+
+이런 검색문장 실험 때문에 Core의 기준 데이터까지 같이 흔들리면 안 된다. 그래서 Core는 안정적인 기준 데이터로 두고, Search Documents는 Core를 바탕으로 언제든 재생성 가능한 검색용 데이터로 분리한다.
+
+정리하면 다음과 같다.
+
+```text
+Core = 변하면 안 되는 기준 구조
+Search Documents = 검색 품질을 위해 바꿀 수 있는 표현 구조
+```
+
 예를 들어 Core에 다음 데이터가 있다.
 
 ```text
@@ -2187,7 +2228,7 @@ CREATE TABLE rule_search_documents (
     document_type TEXT NOT NULL,
     search_text TEXT NOT NULL,
 
-    embedding VECTOR(3072),
+    embedding VECTOR(1024),
 
     metadata JSONB,
 
@@ -2196,8 +2237,8 @@ CREATE TABLE rule_search_documents (
 );
 ```
 
-`VECTOR(3072)`는 OpenAI `text-embedding-3-large` 기준 예시다.  
-다른 모델을 쓰면 차원이 달라질 수 있다.
+`VECTOR(1024)`는 현재 인정기준 Search 실험 기준인 `text-embedding-3-small-1024`에 맞춘 차원이다.  
+판례 쪽 기존 baseline은 `text-embedding-3-small` 1536차원이지만, 인정기준 후속 실험에서는 1024차원 index를 별도로 두는 기준으로 정리한다.
 
 ---
 
@@ -2553,7 +2594,8 @@ client = OpenAI()
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
     response = client.embeddings.create(
-        model="text-embedding-3-large",
+        model="text-embedding-3-small",
+        dimensions=1024,
         input=texts,
     )
     return [item.embedding for item in response.data]
@@ -3559,6 +3601,20 @@ core = 계산/Neo4j/서비스용 정규화 데이터
 search = core를 검색 가능한 문장으로 재구성한 데이터
 ```
 
+여기서 중요한 점은 Core와 Search의 변경 주기가 다르다는 것이다.
+
+```text
+Core
+-> 인정기준의 정답 구조
+-> 기준표와 기본과실, 수정요소가 바뀌지 않는 한 자주 재생성하지 않는다.
+
+Search
+-> 검색용 표현 구조
+-> 검색 품질 개선, 임베딩 모델 변경, 문장 구성 전략 변경 때 다시 만들 수 있다.
+```
+
+따라서 search schema는 Core를 복사한 테이블이 아니라, Core를 사용자 질문에 잘 걸리도록 재구성한 검색 전용 산출물이다.
+
 이번 구현은 아래 순서로 진행한다.
 
 ```text
@@ -3631,7 +3687,7 @@ embedding_created_at
 search_text_tsv
 ```
 
-`embedding` 컬럼은 `VECTOR(3072)`로 만든다. 이는 OpenAI `text-embedding-3-large` 기준 차원이다. 실제 embedding 값은 다음 단계에서 별도 py로 채운다.
+`embedding` 컬럼은 `VECTOR(1024)`로 만든다. 현재 기본 embedding label은 `text-embedding-3-small-1024`이고, 실제 embedding 생성 시에는 `text-embedding-3-small`에 `dimensions=1024`를 지정해야 한다. 실제 embedding 값은 다음 단계에서 별도 py로 채운다.
 
 ## 생성되는 document_type
 
@@ -3708,11 +3764,10 @@ python -m etl.fault_cases.src.fault_standard.loading.search.run_search_build --s
 embedding model 이름만 미리 기록하고 싶으면 아래처럼 실행한다.
 
 ```powershell
-python -m etl.fault_cases.src.fault_standard.loading.search.run_search_build `
-  --embedding-model text-embedding-3-large
+python -m etl.fault_cases.src.fault_standard.loading.search.run_search_build
 ```
 
-주의할 점은 위 명령은 embedding 값을 실제로 생성하지 않는다. `embedding_model` 이름만 기록하고, `embedding` 컬럼은 NULL 상태로 둔다. 실제 embedding 생성은 API 키와 네트워크 호출이 필요한 다음 단계에서 별도 py로 만든다.
+주의할 점은 위 명령은 embedding 값을 실제로 생성하지 않는다. 기본 `embedding_model` 이름인 `text-embedding-3-small-1024`만 기록하고, `embedding` 컬럼은 NULL 상태로 둔다. 실제 embedding 생성은 API 키와 네트워크 호출이 필요한 다음 단계에서 별도 py로 만든다.
 
 ## 결과 확인 SQL
 

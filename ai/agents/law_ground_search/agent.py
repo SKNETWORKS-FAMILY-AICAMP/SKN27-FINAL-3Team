@@ -1,9 +1,12 @@
-import os
+import logging
+import os
 from datetime import datetime
 from typing import Any, Protocol
 from .query_understanding import process_query
 from .search import search_law_provisions, evaluate_confidence
 from .rule_guard import validate_input_envelope, validate_and_filter_provisions
+
+logger = logging.getLogger(__name__)
 
 class LLMExtractor(Protocol):
     def extract_legal_keywords(self, text: str) -> list[str]: ...
@@ -22,8 +25,11 @@ def _get_neo4j_session():
             password = os.environ.get("NEO4J_PASSWORD", "password")
             _neo4j_driver = GraphDatabase.driver(uri, auth=(user, password))
         return _neo4j_driver.session()
-    except Exception as e:
-        print(f"[Warning] Neo4j 연결 실패: {e}")
+    except Exception as exc:
+        logger.warning(
+            "Neo4j connection failed; error_class=%s",
+            exc.__class__.__name__,
+        )
         return None
 
 def run_law_ground_search(
@@ -59,14 +65,12 @@ def run_law_ground_search(
         neo4j_session=session
     )
     
-    print(f"\n[QU 디버그] 원본 질문: {qp_result.original_query}")
-    print(f"[QU 디버그] 부스팅된 질문(Hint Graph 반영): {qp_result.boosted_query}")
-
     if not qp_result.searchability:
         output["status"] = "failed"
         output["summary"] = "질의가 입력되지 않았습니다."
         output["missing_fields"] = qp_result.missing_fields
-        if session: session.close()
+        if session:
+            session.close()
         return output
 
     # 3. Vector Search & Neo4j Law Graph Expansion
@@ -114,7 +118,33 @@ def run_law_ground_search(
     # 5. Rule Guard 필터링
     valid_provisions, limitations = validate_and_filter_provisions(raw_provisions, scope)
     output["limitations"].extend(limitations)
+    sourced_provisions = []
+    for provision in valid_provisions:
+        source_reference = (
+            provision.get("source_reference")
+            or provision.get("source_ref")
+            or provision.get("chunk_id")
+        )
+        if not str(source_reference or "").strip():
+            output["limitations"].append(
+                f"Missing source_reference; legal provision was excluded: {provision.get('chunk_id')}"
+            )
+            continue
+        provision["source_reference"] = str(source_reference).strip()
+        sourced_provisions.append(provision)
+    valid_provisions = sourced_provisions
     final_conf_res = evaluate_confidence(valid_provisions)
+    retrieval_metadata = next(
+        (
+            provision.get("_retrieval")
+            for provision in valid_provisions
+            if isinstance(provision.get("_retrieval"), dict)
+        ),
+        None,
+    )
+    for provision in valid_provisions:
+        provision.pop("_retrieval", None)
+        provision.pop("source_ref", None)
 
     # 6. 결과 구성
     if not valid_provisions:
@@ -130,13 +160,18 @@ def run_law_ground_search(
                 output["structured_result"].update(api_result)
         
         output["structured_result"]["law_provisions"] = valid_provisions
+        if retrieval_metadata:
+            output["structured_result"]["retrieval_quality"] = (
+                retrieval_metadata.get("backend") or "django_rag_tables"
+            )
+            output["structured_result"]["retrieval"] = retrieval_metadata
         
         
         # Evidence 배열 추출
         evidence_list = []
         for prov in valid_provisions:
             evidence_list.append({
-                "source_ref": prov.get("source_ref"),
+                "source_reference": prov["source_reference"],
                 "chunk_id": prov.get("chunk_id"),
                 "source_name": prov.get("source_name"),
                 "source_type": prov.get("source_type"),
@@ -158,7 +193,7 @@ def run_law_ground_search(
                 output["summary"] = f"조문 {len(valid_provisions)}건 검색됨. 다만 신뢰도가 낮아 추가 확인이 필요합니다."
                 output["limitations"].append(f"최종 검색 신뢰도 부족: {final_conf_res['reason']}")
 
-    if session and not neo4j_session: 
+    if session and not neo4j_session:
         session.close()
 
     return output

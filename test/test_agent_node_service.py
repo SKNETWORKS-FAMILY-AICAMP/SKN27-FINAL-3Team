@@ -7,9 +7,11 @@ from app.services.agent_adapter_contract import (
     validate_agent_output_envelope,
 )
 from app.services.agent_node_service import (
+    execute_agent_node,
     execute_mock_node,
     execute_mock_plan,
     list_agent_nodes,
+    list_public_agent_nodes,
 )
 from app.services.attachment_mock_service import register_attachment
 from app.services.chatbot_mock_service import build_analysis_plan
@@ -24,7 +26,9 @@ def test_agent_node_registry_lists_all_integration_nodes():
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
         "vision_media_analysis",
+        "appeal_decision_flow",
         "objection_report_generation",
         "agent_result_validation",
     } <= node_codes
@@ -33,21 +37,194 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert fine_notice_node["status"] == "sync_adapter_ready"
     assert "sync" in fine_notice_node["adapter_modes"]
     text_ml_node = next(node for node in nodes if node["node_code"] == "text_ml_case_search")
+    traffic_ocr_node = next(
+        node for node in nodes if node["node_code"] == "traffic_accident_confirmation_ocr"
+    )
     law_node = next(node for node in nodes if node["node_code"] == "law_ground_search")
     vision_node = next(node for node in nodes if node["node_code"] == "vision_media_analysis")
     objection_node = next(node for node in nodes if node["node_code"] == "objection_report_generation")
     assert law_node["status"] == "sync_adapter_ready"
-    assert law_node["adapter_modes"] == ["mock", "sync"]
-    assert law_node["adapter_contract"]["execution_modes"] == ["mock", "sync"]
+    assert law_node["adapter_modes"] == ["sync"]
+    assert law_node["adapter_contract"]["execution_modes"] == ["sync"]
     assert text_ml_node["status"] == "sync_adapter_ready"
-    assert text_ml_node["adapter_modes"] == ["mock", "sync"]
-    assert text_ml_node["adapter_contract"]["execution_modes"] == ["mock", "sync"]
+    assert text_ml_node["adapter_modes"] == ["sync"]
+    assert text_ml_node["adapter_contract"]["execution_modes"] == ["sync"]
+    assert traffic_ocr_node["status"] == "sync_adapter_ready"
+    assert traffic_ocr_node["adapter_modes"] == ["sync"]
+    assert traffic_ocr_node["adapter_contract"]["execution_modes"] == ["sync"]
     assert vision_node["status"] == "mock_contract_only"
     assert vision_node["adapter_modes"] == ["mock"]
     assert vision_node["adapter_contract"]["execution_modes"] == ["mock"]
     assert objection_node["status"] == "sync_adapter_ready"
-    assert objection_node["adapter_modes"] == ["mock", "sync"]
-    assert objection_node["adapter_contract"]["execution_modes"] == ["mock", "sync"]
+    assert objection_node["adapter_modes"] == ["sync"]
+    assert objection_node["adapter_contract"]["execution_modes"] == ["sync"]
+
+
+def test_only_vision_agent_advertises_mock_execution():
+    agents = {
+        node["node_code"]: node
+        for node in list_agent_nodes()
+        if node["node_type"] == "agent"
+    }
+
+    assert agents["vision_media_analysis"]["adapter_modes"] == ["mock"]
+    for node_code in {
+        "fine_notice_analysis",
+        "law_ground_search",
+        "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
+        "appeal_decision_flow",
+        "objection_report_generation",
+    }:
+        assert agents[node_code]["adapter_modes"] == ["sync"]
+        assert agents[node_code]["adapter_contract"]["execution_modes"] == ["sync"]
+
+
+def test_public_agent_registry_includes_every_non_dl_runtime_agent():
+    public_codes = {node["node_code"] for node in list_public_agent_nodes()}
+
+    assert public_codes == {
+        "fine_notice_analysis",
+        "law_ground_search",
+        "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
+        "appeal_decision_flow",
+        "objection_report_generation",
+    }
+    assert "vision_media_analysis" not in public_codes
+
+
+def test_legacy_mock_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypatch):
+    calls = []
+
+    def fake_execute_agent_node(payload):
+        calls.append(payload)
+        return {
+            "execution_mode": "sync",
+            "node_code": payload["node_code"],
+            "agent_output": {"status": "success"},
+        }
+
+    monkeypatch.setattr(agent_node_service, "execute_agent_node", fake_execute_agent_node)
+
+    result = execute_mock_node({"node_code": "law_ground_search", "user_text": "법률 근거"})
+
+    assert result["execution_mode"] == "sync"
+    assert len(calls) == 1
+    assert calls[0]["node_code"] == "law_ground_search"
+    assert calls[0]["user_text"] == "법률 근거"
+    assert calls[0]["attachment_resolution"]["unresolved_attachment_ids"] == []
+
+
+def test_legacy_mock_entrypoint_keeps_dl_agent_as_explicit_mock():
+    result = execute_mock_node(
+        {
+            "node_code": "vision_media_analysis",
+            "attachments": [{"attachment_id": "att_vision", "purpose": "evidence"}],
+        }
+    )
+
+    assert result["execution_mode"] == "mock"
+    assert result["node_code"] == "vision_media_analysis"
+
+
+def test_appeal_decision_runtime_invokes_real_graph_with_upstream_results(monkeypatch):
+    from ai.agents.appeal_decision_flow import graph as appeal_graph
+
+    received_states = []
+
+    def fake_invoke(state):
+        received_states.append(state)
+        return {
+            "agent_results": {
+                "appeal_judgment": {
+                    "status": "success",
+                    "summary": "이의신청 판단을 완료했습니다.",
+                    "structured_result": {
+                        "judgment_status": "success",
+                        "overall_possibility": "review_available",
+                        "guide": {"next_step": "review_report"},
+                    },
+                    "evidence": [],
+                    "next_actions": ["review_report"],
+                    "limitations": [],
+                }
+            }
+        }
+
+    monkeypatch.setattr(appeal_graph, "invoke", fake_invoke)
+
+    execution = execute_agent_node(
+        {
+            "node_code": "appeal_decision_flow",
+            "user_text": "표지판이 가려져 있었으므로 이의를 신청하고 싶습니다.",
+            "context": {"fine_type": "administrative_fine", "notice_stage": "first_notice"},
+            "upstream_results": {
+                "fine_notice_analysis": {
+                    "structured_result": {"violation_text": "신호위반"}
+                }
+            },
+        }
+    )
+
+    assert execution["execution_mode"] == "sync"
+    assert execution["agent_output"]["status"] == "success"
+    assert execution["agent_output"]["structured_result"]["judgment_status"] == "success"
+    assert execution["agent_output"]["structured_result"]["adapter_trace"]["adapter"] == (
+        "ai.agents.appeal_decision_flow.graph"
+    )
+    assert received_states == [
+        {
+            "fine_type": "administrative_fine",
+            "notice_stage": "first_notice",
+            "violation_text": "신호위반",
+            "user_appeal_reason": "표지판이 가려져 있었으므로 이의를 신청하고 싶습니다.",
+            "agent_results": {},
+        }
+    ]
+
+
+def test_appeal_decision_runtime_propagates_input_required_missing_fields(monkeypatch):
+    """When reason_intake_node reports input_required, the adapter must surface
+    missing_fields so downstream consumers (e.g. history_event_mock_service,
+    which reads structured_result["missing_fields"]) can re-ask the user.
+    """
+    from ai.agents.appeal_decision_flow import graph as appeal_graph
+
+    def fake_invoke(state):
+        return {
+            "agent_results": {
+                "appeal_judgment": {
+                    "status": "input_required",
+                    "summary": "이의신청 사유 정보 필요",
+                    "structured_result": {
+                        "judgment_status": "input_required",
+                        "fine_type": "administrative_fine",
+                        "notice_stage": "first_notice",
+                    },
+                    "evidence": [],
+                    "missing_fields": ["user_appeal_reason"],
+                    "next_actions": [
+                        "Supervisor가 사용자에게 이의신청 사유 질문 후 재호출"
+                    ],
+                    "limitations": [],
+                }
+            }
+        }
+
+    monkeypatch.setattr(appeal_graph, "invoke", fake_invoke)
+
+    execution = execute_agent_node(
+        {
+            "node_code": "appeal_decision_flow",
+            "user_text": "",
+            "context": {"fine_type": "administrative_fine", "notice_stage": "first_notice"},
+        }
+    )
+
+    output = execution["agent_output"]
+    assert output["execution_status"] == "input_required"
+    assert output["structured_result"]["missing_fields"] == ["user_appeal_reason"]
 
 
 def test_agent_node_registry_exposes_real_adapter_contract():
@@ -107,7 +284,7 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
     )
     context_validation = validate_adapter_context_envelope(
         execution["adapter_context"],
-        expected_execution_mode="mock",
+        expected_execution_mode="sync",
     )
 
     assert input_validation["valid"]
@@ -119,7 +296,7 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
     assert execution["agent_input"]["slot_state"]["contract_version"] == "slot_filling_state.v1"
 
 
-def test_execute_mock_node_returns_common_agent_output_envelope():
+def test_legacy_mock_entrypoint_returns_real_common_agent_output_envelope():
     execution = execute_mock_node(
         {
             "node_code": "law_ground_search",
@@ -130,11 +307,10 @@ def test_execute_mock_node_returns_common_agent_output_envelope():
 
     output = execution["agent_output"]
 
-    assert execution["execution_mode"] == "mock"
+    assert execution["execution_mode"] == "sync"
     assert output["node_code"] == "law_ground_search"
-    assert output["status"] == "success"
-    assert output["structured_result"]["matched_laws"]
-    assert output["evidence"][0]["source_type"] == "law"
+    assert output["status"] in {"success", "partial", "failed"}
+    assert "matched_laws" in output["structured_result"]
     assert execution["adapter_context"]["execution_id"] == execution["execution_id"]
     assert execution["adapter_context"]["node"]["adapter_contract"]["adapter_key"] == "law_ground_search"
     assert "upstream_results" in execution["agent_input"]
@@ -302,8 +478,7 @@ def test_execute_mock_plan_maps_analysis_steps_to_node_executions():
 
     assert execution["plan_id"] == plan["plan_id"]
     assert len(execution["executions"]) == len(plan["steps"])
-    assert execution["status_counts"]["success"] >= 3
-    assert execution["status_counts"]["partial"] >= 1
+    assert all(item["execution_mode"] == "sync" for item in execution["executions"])
     assert "fine_notice_analysis" in {
         item["agent_output"]["node_code"] for item in execution["executions"]
     }
@@ -409,7 +584,7 @@ def test_execute_sync_fine_notice_adapter_reads_canonical_object_attachment(monk
     assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
 
 
-def test_execute_plan_can_mix_sync_fine_notice_with_mock_supervisor_steps():
+def test_legacy_plan_entrypoint_does_not_mock_supervisor_steps():
     plan = {
         "plan_id": "plan_hybrid_fine",
         "session_id": "ses_hybrid_fine",
@@ -426,10 +601,10 @@ def test_execute_plan_can_mix_sync_fine_notice_with_mock_supervisor_steps():
         item for item in execution["executions"] if item["node_code"] == "fine_notice_analysis"
     )
 
-    assert execution["execution_mode"] == "hybrid"
+    assert execution["execution_mode"] == "sync"
     assert fine_execution["execution_mode"] == "sync"
     assert fine_execution["agent_output"]["status"] == "failed"
-    assert execution["executions"][0]["execution_mode"] == "mock"
+    assert all(item["execution_mode"] == "sync" for item in execution["executions"])
 
 
 def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypatch):
@@ -592,6 +767,156 @@ def test_execute_sync_text_ml_case_search_falls_back_to_django_review_case_rag(m
     assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
 
 
+def test_execute_sync_text_ml_case_search_does_not_fabricate_evidence_when_rag_is_empty(
+    monkeypatch,
+):
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    monkeypatch.setattr(
+        text_ml_agent,
+        "_run_fault_ratio_knowledge_agent",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        text_ml_agent,
+        "search_legal_rag",
+        lambda query, *, top_k, source_type: {
+            "contract_version": "legal_rag_search.v1",
+            "status": "empty",
+            "backend": "django_rag_tables",
+            "query": query,
+            "top_k": top_k,
+            "result_count": 0,
+            "results": [],
+            "error_code": "no_review_case_results",
+        },
+    )
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "text_ml_case_search",
+            "analysis_plan_id": "plan_sync_text_ml_empty",
+            "job_id": "job_sync_text_ml_empty",
+            "session_id": "ses_sync_text_ml_empty",
+            "message_id": "msg_sync_text_ml_empty",
+            "user_text": "교차로 접촉 사고와 유사한 판례를 찾아줘.",
+        }
+    )
+
+    output = execution["agent_output"]
+    structured_result = output["structured_result"]
+
+    assert output["status"] == "partial"
+    assert structured_result["similar_cases"] == []
+    assert structured_result["top_cases"] == []
+    assert structured_result["reliability_score"] == 0.0
+    assert structured_result["retrieval"]["fallback_used"] is False
+    assert output["evidence"] == []
+    assert "heuristic" not in str(output).lower()
+    assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
+
+
+def test_execute_sync_text_ml_case_search_drops_malformed_rag_hits(monkeypatch):
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    monkeypatch.setattr(
+        text_ml_agent,
+        "_run_fault_ratio_knowledge_agent",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        text_ml_agent,
+        "search_legal_rag",
+        lambda query, *, top_k, source_type: {
+            "contract_version": "legal_rag_search.v1",
+            "status": "ready",
+            "backend": "django_rag_tables",
+            "query": query,
+            "top_k": top_k,
+            "result_count": 4,
+            "results": [
+                {},
+                {
+                    "source_reference": " ",
+                    "source_type": "review_case",
+                    "title": "blank provenance",
+                    "summary": "must be dropped",
+                    "score": 0.9,
+                },
+                {
+                    "source_reference": "review_case:blank-content",
+                    "source_type": "review_case",
+                    "title": " ",
+                    "summary": " ",
+                    "score": 0.8,
+                },
+                {
+                    "source_reference": "review_case:bad-score",
+                    "source_type": "review_case",
+                    "title": "Bad score",
+                    "summary": "must be dropped",
+                    "score": "not-a-number",
+                },
+            ],
+        },
+    )
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "text_ml_case_search",
+            "analysis_plan_id": "plan_sync_text_ml_malformed",
+            "job_id": "job_sync_text_ml_malformed",
+            "session_id": "ses_sync_text_ml_malformed",
+            "message_id": "msg_sync_text_ml_malformed",
+            "user_text": "교차로 접촉 사고 유사 사례를 찾아줘",
+        }
+    )
+
+    output = execution["agent_output"]
+    assert output["status"] == "partial"
+    assert output["structured_result"]["similar_cases"] == []
+    assert output["structured_result"]["top_cases"] == []
+    assert output["structured_result"]["reliability_score"] == 0.0
+    assert output["evidence"] == []
+
+
+def test_text_ml_case_search_preserves_only_valid_rag_provenance_and_score():
+    from ai.agents.text_ml_case_search import agent as text_ml_agent
+
+    cases = text_ml_agent._cases_from_retrieval(
+        {
+            "results": [
+                {
+                    "source_reference": "review_case:missing-score",
+                    "source_type": "review_case",
+                    "title": "Missing score",
+                    "summary": "must be dropped",
+                },
+                {
+                    "source_reference": "review_case:valid-001",
+                    "source_type": "review_case",
+                    "title": "Verified intersection case",
+                    "summary": "A source-backed summary.",
+                    "score": 0.73,
+                },
+            ]
+        }
+    )
+
+    assert cases == [
+        {
+            "case_id": "review_case:valid-001",
+            "title": "Verified intersection case",
+            "summary": "A source-backed summary.",
+            "reliability_score": 0.73,
+            "source_type": "review_case",
+            "source_ref": "review_case:valid-001",
+        }
+    ]
+
+
 def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch):
     from ai.agents.law_ground_search import agent as law_agent
 
@@ -625,7 +950,14 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
                 "source_url": "https://example.test/law/road-traffic#article-5",
                 "provision_text": "Drivers must follow traffic signals.",
                 "score": 0.82,
+                "matched_token_count": 3,
+                "query_token_count": 4,
                 "match_reason": "query_term_match",
+                "_retrieval": {
+                    "backend": "django_rag_tables",
+                    "status": "ready",
+                    "attempted_backends": ["django_rag_tables"],
+                },
             }
         ]
 
@@ -664,11 +996,73 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
     assert output["status"] == "success"
     assert calls[0]["query_text"] == "road traffic signal violation article 5"
     assert structured_result["law_provisions"][0]["chunk_id"] == "road_traffic:article_5"
+    assert structured_result["matched_laws"] == [
+        {
+            "law_name": "Road Traffic Act",
+            "article": "5",
+            "title": "Signal compliance",
+            "summary": "Drivers must follow traffic signals.",
+            "source_url": "https://example.test/law/road-traffic#article-5",
+            "source_reference": "law_db:road_traffic#article_5",
+            "score": 0.82,
+        }
+    ]
+    assert structured_result["retrieval"] == {
+        "backend": "django_rag_tables",
+        "status": "ready",
+        "attempted_backends": ["django_rag_tables"],
+        "contract_version": "law_retrieval.v1",
+    }
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"
     assert structured_result["adapter_trace"]["input_source"] == "agent_input.context"
     assert output["evidence"][0]["source_type"] == "law"
-    assert output["evidence"][0]["source_ref"] == "law_db:road_traffic#article_5"
+    assert output["evidence"][0]["source_reference"] == "law_db:road_traffic#article_5"
+    assert "source_ref" not in output["evidence"][0]
     assert validate_agent_output_envelope(output, expected_node_code="law_ground_search")["valid"]
+
+
+def test_law_ground_agent_emits_canonical_provision_source_reference(monkeypatch):
+    from ai.agents.law_ground_search import agent as law_agent
+
+    monkeypatch.setattr(law_agent, "_get_neo4j_session", lambda: None)
+    monkeypatch.setattr(
+        law_agent,
+        "search_law_provisions",
+        lambda **_kwargs: [
+            {
+                "source_ref": "law:road-traffic:5",
+                "chunk_id": "road-traffic:5",
+                "source_name": "Road Traffic Act",
+                "source_type": "law",
+                "article_no": "Article 5",
+                "provision_text": "Drivers must follow traffic signals.",
+                "source_url": "https://example.test/law/road-traffic#article-5",
+                "score": 0.82,
+            }
+        ],
+    )
+
+    output = law_agent.run_law_ground_search(
+        {
+            "session_id": "ses_direct_law",
+            "message_id": "msg_direct_law",
+            "job_id": "job_direct_law",
+            "context": {
+                "query": {
+                    "raw_text": "road traffic signal violation article 5",
+                    "search_query": "road traffic signal violation article 5",
+                },
+                "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-17"},
+                "scope": {"jurisdiction": "KR"},
+            },
+        },
+        {},
+    )
+
+    provision = output["structured_result"]["law_provisions"][0]
+    assert provision["source_reference"] == "law:road-traffic:5"
+    assert "source_ref" not in provision
+    assert output["evidence"][0]["source_reference"] == "law:road-traffic:5"
 
 
 def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
@@ -680,7 +1074,7 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
     monkeypatch.setattr(
         legal_rag_service,
         "search_legal_rag",
-        lambda query, *, top_k, source_type: {
+        lambda query, *, top_k, source_type, temporal_basis, scope: {
             "status": "ready",
             "backend": "django_rag_tables",
             "query": query,
@@ -693,6 +1087,7 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
                     "title": "School zone emergency stopping",
                     "article": "Article 32",
                     "summary": "어린이보호구역 정차 과태료는 긴급 정차 증빙을 확인합니다.",
+                    "provision_text": "어린이보호구역 정차 과태료는 긴급 정차 증빙을 확인합니다.",
                     "source_url": "https://example.test/road-traffic-act",
                     "score": 4.0,
                 }
@@ -796,6 +1191,47 @@ def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(
     assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
 
 
+def test_reporting_agent_consumes_appeal_decision_from_supervisor_upstream_results():
+    execution = execute_mock_node(
+        {
+            "node_code": "objection_report_generation",
+            "session_id": "ses_report_handoff",
+            "message_id": "msg_report_handoff",
+            "user_text": "The violation facts are different and I want to object.",
+            "upstream_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "structured_result": {"issuing_authority": "Seoul", "violation_text": "signal"},
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {"matched_laws": []},
+                },
+                "appeal_decision_flow": {
+                    "status": "success",
+                    "structured_result": {
+                        "judgment_status": "success",
+                        "overall_possibility": "review_recommended",
+                        "merit_basis": "The submitted facts require review.",
+                    },
+                    "evidence": [
+                        {
+                            "source_type": "agent_analysis",
+                            "source_reference": "appeal:1",
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    structured = execution["agent_output"]["structured_result"]
+    assert execution["execution_mode"] == "sync"
+    assert structured["appeal_decision"]["judgment_status"] == "success"
+    assert any("review_recommended" in reason for reason in structured["objection_reasons"])
+    assert any(item.get("source_reference") == "appeal:1" for item in execution["agent_output"]["evidence"])
+
+
 def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_inputs():
     execution = execute_mock_node(
         {
@@ -806,6 +1242,19 @@ def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_i
             "session_id": "ses_sync_objection_fault_ratio",
             "message_id": "msg_sync_objection_fault_ratio",
             "user_text": "신호 없는 교차로에서 직진 중 우측 골목 차량과 접촉했습니다.",
+            "context": {
+                "objection_form": {
+                    "applicant_name": "홍길동",
+                    "recipient": "서울강남경찰서장 귀하",
+                    "case_number": "2026-교통-12345",
+                    "incident_at": "2026년 7월 1일 14시 20분경",
+                    "location": "서울특별시 강남구 무신호 교차로",
+                    "police_station": "서울강남경찰서",
+                    "investigation_result_summary": "신청인 차량이 가해 차량으로 판단되었습니다.",
+                    "objection_points": ["상대 차량의 일시정지 의무 위반", "블랙박스 증거 미반영"],
+                    "specific_request": "블랙박스 원본을 재검토하고 현장을 재조사해 주세요.",
+                }
+            },
             "upstream_results": {
                 "text_ml_case_search": {
                     "status": "success",

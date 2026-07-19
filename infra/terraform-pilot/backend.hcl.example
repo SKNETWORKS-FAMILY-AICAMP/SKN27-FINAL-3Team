@@ -1,0 +1,6 @@
+bucket = "REPLACE_WITH_PRECREATED_STATE_BUCKET"
+key    = "skn27-pilot/terraform.tfstate"
+region = "ap-northeast-2"
+
+# versions.tf enforces encrypted S3 storage and Terraform's native S3 lock
+# file. The bucket is intentionally bootstrapped outside this stack.

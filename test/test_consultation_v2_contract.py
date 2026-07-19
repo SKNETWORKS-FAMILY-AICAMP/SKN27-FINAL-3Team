@@ -66,6 +66,43 @@ def test_chat_report_ready_notice_uses_a_locally_declared_gated_payload() -> Non
     assert "{visibleReportingPayload && (" in chat_screen
 
 
+def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_it() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    action_start = shell.index('async function runCurrentReportAction')
+    action_end = shell.index('async function triggerReportDownload', action_start)
+    report_action = shell[action_start:action_end]
+
+    assert "const persistedReportId = persistedAnalysisReportId(analysisResponse, currentReport);" in report_action
+    assert "if (persistedReportId) {" in report_action
+    assert "api.getReportDetail" in report_action
+    assert "reportId: persistedReportId" in report_action
+    persisted_branch = report_action[report_action.index("if (persistedReportId) {"):]
+    save_state_call = persisted_branch.index("api.updateConversationSaveState")
+    save_success = persisted_branch.index("setReportActionStatus")
+    assert save_state_call < save_success
+    assert 'conversation_save_state: "saved"' in persisted_branch
+    assert 'conversation_save_source: "worker_report_save_action"' in persisted_branch
+    assert "api.runReportAction" not in report_action
+    assert "function persistedAnalysisReportId(analysisResponse, currentReport)" in shell
+    helper_start = shell.index("function persistedAnalysisReportId(analysisResponse, currentReport)")
+    helper_end = shell.index("function EntryScreen", helper_start)
+    helper = shell[helper_start:helper_end]
+    helper_return = next(line for line in helper.splitlines() if line.strip().startswith("return "))
+    assert helper_return.index("currentReport?.report_id") < helper_return.index("analysisReportId")
+    assert (
+        "const activeReportingPayload = currentReport?.content?.reporting_payload || "
+        "visibleReportingPayload;"
+    ) in report_action
+    assert (
+        "let activeSessionId = currentReport?.session_id || "
+        "analysisResponse?.session_id || sessionId;"
+    ) in report_action
+
+    submit_start = shell.index("async function submitServiceMessage")
+    submit_end = shell.index("async function saveConversationWithGoogle", submit_start)
+    assert "setCurrentReport(null);" in shell[submit_start:submit_end]
+
+
 def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 
@@ -104,6 +141,33 @@ def test_repeated_analysis_cards_use_unique_react_keys() -> None:
 
     assert "function analysisCardKey(card, index)" in shell
     assert shell.count("key={analysisCardKey(card, index)}") == 4
+
+
+def test_frontend_renders_canonical_law_ground_results_and_retrieval_status() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    styles = read_text(ROOT / "app" / "web" / "styles.css")
+
+    for token in (
+        "function LawGroundInsightPanel",
+        'node?.node_code !== "law_ground_search"',
+        "structuredResult.matched_laws",
+        "item.source_reference",
+        "retrieval.backend",
+        "retrieval.status",
+        "retrieval.attempted_backends",
+    ):
+        assert token in shell
+    assert shell.count("<LawGroundInsightPanel") == 2
+    for class_name in (
+        "agent-insight-panel",
+        "agent-insight-head",
+        "agent-insight-grid",
+        "agent-insight-section",
+    ):
+        assert class_name in shell
+        assert f".{class_name}" in styles
+    assert "fault-ratio-insight-" not in shell
+    assert "fault-ratio-insight-" not in styles
 
 
 def test_deferred_vision_and_aws_ops_are_not_runtime_modules() -> None:
@@ -152,7 +216,7 @@ def test_design_doc_and_feature_flags_are_versioned() -> None:
     assert "AWS_OPS_MCP_ENABLED" not in env_example
 
 
-def test_retention_policy_explicitly_defers_physical_db_and_s3_purge_worker() -> None:
+def test_retention_policy_documents_physical_db_and_s3_purge_worker() -> None:
     retention_doc = read_text(ROOT / "docs" / "ops" / "retention-enforcement-follow-up.md")
 
     for token in (
@@ -162,7 +226,11 @@ def test_retention_policy_explicitly_defers_physical_db_and_s3_purge_worker() ->
         "원본 이미지·영상 30일",
         "retention_expires_at",
         "DB·S3 실제 삭제 worker",
-        "다음 PR",
+        "purge_expired_uploads",
+        "retryable",
+        "tombstone",
         "사용자 명시 삭제",
     ):
         assert token in retention_doc
+
+    assert "다음 PR에서 구현" not in retention_doc

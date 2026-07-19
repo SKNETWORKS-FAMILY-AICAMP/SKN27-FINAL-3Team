@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from copy import deepcopy
 from datetime import timedelta, timezone as datetime_timezone
 from io import BytesIO
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, close_old_connections, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -25,6 +31,14 @@ from app.services.history_event_mock_service import (
     SENSITIVE_METADATA_KEYS,
     build_agent_execution_events,
     build_history_event,
+)
+from app.services.chat_session_followup_service import (
+    CHAT_SESSION_FOLLOWUP_STATE_VERSION,
+    build_chat_followup_snapshot,
+)
+from app.services.supervisor_reporting_handoff_service import (
+    build_supervisor_reporting_handoff,
+    sanitize_sensitive_text,
 )
 from chatbot.models import (
     AgentInvocation,
@@ -43,6 +57,7 @@ from chatbot.models import (
     AuthSession,
     AuthSessionStatus,
     Case,
+    CaseStatus,
     ConfirmedFactVersion,
     ChatMessage,
     ChatSession,
@@ -68,11 +83,15 @@ from chatbot.models import (
     UploadedFileStatus,
 )
 from chatbot.object_storage import (
+    build_quarantine_upload_storage_reference,
     build_report_storage_reference,
     build_upload_storage_reference,
     copy_object,
     delete_object,
+    delete_source_uri,
+    object_storage_bucket,
     object_storage_policy,
+    object_storage_prefix,
     storage_reference_from_uri,
     write_object,
     write_object_from_source_uri,
@@ -91,6 +110,82 @@ REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
 ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
 REPORT_PDF_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_report_renderer.py"
+UPLOAD_STORAGE_LIFECYCLE_VERSION = "upload_storage_lifecycle.v1"
+REPORT_STAGING_CLEANUP_BATCH_VERSION = "report_staging_cleanup_batch.v1"
+REPORT_STAGING_CLEANUP_PENDING = "staging_cleanup_pending"
+SUCCESSFUL_STORAGE_DELETE_STATUSES = {"deleted", "not_found"}
+DEFAULT_REPORT_STAGING_CLEANUP_LIMIT = 100
+REPORTING_AGENT_NODE_CODE = "objection_report_generation"
+DL_OPTIONAL_NODE_CODES = {"vision_media_analysis"}
+REPORT_SENSITIVE_FIELDS = {
+    "access_token",
+    "agent_input",
+    "api_key",
+    "authorization",
+    "client_secret",
+    "password",
+    "raw_output",
+    "reasoning",
+    "refresh_token",
+    "secret",
+    "token",
+}
+REPORT_SENSITIVE_FIELD_KEYS = {
+    "accesstoken",
+    "agentinput",
+    "apikey",
+    "authorization",
+    "clientsecret",
+    "idtoken",
+    "localpath",
+    "ocrraw",
+    "ocrtext",
+    "password",
+    "presignedurl",
+    "prompt",
+    "rawoutput",
+    "rawpayload",
+    "rawtext",
+    "reasoning",
+    "refreshtoken",
+    "secret",
+    "signedurl",
+    "token",
+    "transcript",
+    "usertext",
+}
+REPORT_SENSITIVE_FIELD_FRAGMENTS = (
+    "accesstoken",
+    "accesskey",
+    "agentinput",
+    "apikey",
+    "authorization",
+    "bearer",
+    "chainofthought",
+    "clientsecret",
+    "cookie",
+    "credential",
+    "documenttext",
+    "extractedtext",
+    "fulltext",
+    "idtoken",
+    "localpath",
+    "password",
+    "privatekey",
+    "rawoutput",
+    "rawpayload",
+    "rawtext",
+    "reasoning",
+    "refreshtoken",
+    "secret",
+    "scratchpad",
+    "signedurl",
+    "storagepath",
+    "storageuri",
+    "token",
+    "transcript",
+    "usertext",
+)
 
 
 class ReportReferenceError(ValueError):
@@ -98,6 +193,58 @@ class ReportReferenceError(ValueError):
 
     def __init__(self, reason: str, internal_message: str) -> None:
         super().__init__(internal_message)
+        self.reason = reason
+
+
+class PaidAgentCallRetryBlockedError(RuntimeError):
+    """Automatic retry is unsafe because a paid Agent call may have run."""
+
+
+class SupersededCaseAnalysisError(RuntimeError):
+    """Newer confirmed case facts invalidated this worker execution."""
+
+
+class CaseFactProvenanceError(RuntimeError):
+    """A Case-bound paid execution lacks confirmed immutable fact provenance."""
+
+
+class AuthSessionStateError(ValueError):
+    """Fail-closed auth-session persistence error safe to expose as a reason code."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class SessionBindingError(PermissionError):
+    """Stable chat-session ownership error safe to expose as a reason code."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__("chat session cannot be bound to this identity")
+        self.reason = reason
+
+
+class UploadStorageUnavailableError(RuntimeError):
+    """Retryable upload error raised when quarantine persistence did not finish."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__("quarantine object storage is unavailable")
+        self.reason = reason or "quarantine_write_failed"
+
+
+class AttachmentScanGateError(RuntimeError):
+    """Queued work item no longer has access to every requested attachment."""
+
+    def __init__(self) -> None:
+        super().__init__("queued attachment is no longer available")
+        self.reason = "attachment_scan_gate_blocked"
+
+
+class UploadValidationError(ValueError):
+    """Stable validation error for canonical upload boundary requirements."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
         self.reason = reason
 
 
@@ -358,6 +505,7 @@ USAGE_POLICY_LIMITS = {
         "file_upload": 3,
         "agent_run": 3,
         "report_action": 2,
+        "google_oauth_code_exchange": settings.GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT,
     },
     "free": {
         "chat_message": 100,
@@ -437,11 +585,28 @@ def register_uploaded_file(
     metadata exposes the object-storage adapter URI and fallback envelope.
     """
 
+    if not _text(payload.get("session_id")):
+        raise UploadValidationError("session_id_required")
+    owner_id = _owner_id(payload)
+    guest_id = _payload_guest_id(payload)
+    _get_or_create_session(
+        payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=guest_id,
+    )
     registration_payload = dict(payload)
     registration_payload.pop("attachment_id", None)
-    attachment = register_mock_attachment(registration_payload, upload_file=upload_file)
-    owner_id = _owner_id(payload)
-    return persist_uploaded_file_metadata(attachment, owner_id=owner_id, raw_payload=payload)
+    attachment = register_mock_attachment(
+        registration_payload,
+        upload_file=upload_file,
+        max_upload_bytes=int(getattr(settings, "FILE_UPLOAD_MAX_BYTES", 20 * 1024 * 1024)),
+    )
+    return persist_uploaded_file_metadata(
+        attachment,
+        owner_id=owner_id,
+        raw_payload=payload,
+        binary_upload=upload_file is not None,
+    )
 
 
 def persist_uploaded_file_metadata(
@@ -449,8 +614,16 @@ def persist_uploaded_file_metadata(
     *,
     owner_id: str = "",
     raw_payload: dict[str, Any] | None = None,
+    binary_upload: bool | None = None,
 ) -> dict[str, Any]:
-    session = _get_or_create_session(attachment.get("session_id"), owner_id=owner_id)
+    if not _text(attachment.get("session_id")):
+        raise UploadValidationError("session_id_required")
+    guest_id = _payload_guest_id(raw_payload or {})
+    session = _get_or_create_session(
+        attachment.get("session_id"),
+        owner_id=owner_id,
+        guest_id=guest_id,
+    )
     if session is not None and session.owner_id and session.owner_id != owner_id:
         raise PermissionError("session does not belong to authenticated owner")
     case = None
@@ -487,7 +660,7 @@ def persist_uploaded_file_metadata(
         )
     retention_expires_at = upload_retention_expires_at(
         owner_id=effective_owner_id,
-        guest_id=_text((raw_payload or {}).get("guest_id")),
+        guest_id=guest_id,
         file_type=_text(attachment.get("type")),
         content_type=_text(attachment.get("content_type")),
     )
@@ -496,20 +669,77 @@ def persist_uploaded_file_metadata(
         attachment,
         owner_id=effective_owner_id,
     )
-    object_storage_write = write_object_from_source_uri(
-        object_storage,
+    quarantine_storage = build_quarantine_upload_storage_reference(
+        attachment,
+        owner_id=effective_owner_id,
+    )
+    quarantine_write = write_object_from_source_uri(
+        quarantine_storage,
         fallback_payload=attachment,
     )
-    object_storage["write_result"] = object_storage_write
-    object_storage["status"] = object_storage_write["status"]
-    object_storage["writes_binary"] = object_storage_write["writes_binary"]
-    object_storage["persistence_state"] = object_storage_write["persistence_state"]
-    metadata["source_storage_uri"] = _text(attachment.get("storage_uri"))
+    quarantine_ready = (
+        quarantine_write.get("status") == "written"
+        and bool(quarantine_write.get("exists"))
+    )
+    source_storage_uri = _text(attachment.get("storage_uri"))
+    has_binary_upload = (
+        binary_upload
+        if binary_upload is not None
+        else source_storage_uri.startswith("mock://uploads/")
+    )
+    if not quarantine_ready and has_binary_upload:
+        delete_source_uri(source_storage_uri, attachment_id=attachment_id)
+        raise UploadStorageUnavailableError(
+            _text(quarantine_write.get("reason")) or "quarantine_write_failed"
+        )
+    source_cleanup = (
+        delete_source_uri(source_storage_uri, attachment_id=attachment_id)
+        if quarantine_ready or not has_binary_upload
+        else {"status": "retained", "reason": "quarantine_write_incomplete"}
+    )
+    upload_scan_status = (
+        "not_started"
+        if quarantine_ready
+        else (
+            "awaiting_upload"
+            if quarantine_write.get("reason") == "source_file_unavailable"
+            else "upload_error"
+        )
+    )
+    upload_status = (
+        UploadedFileStatus.UPLOADED
+        if quarantine_ready
+        else UploadedFileStatus.PENDING
+    )
+    object_storage.update(
+        {
+            "status": "pending_scan" if quarantine_ready else "awaiting_upload",
+            "writes_binary": False,
+            "persistence_state": "quarantine_pending",
+        }
+    )
+    quarantine_storage.update(
+        {
+            "status": quarantine_write.get("status"),
+            "writes_binary": bool(quarantine_write.get("writes_binary")),
+            "persistence_state": quarantine_write.get("persistence_state"),
+        }
+    )
+    metadata["source_storage_uri"] = source_storage_uri
     metadata["object_storage"] = object_storage
-    metadata["object_storage_write"] = object_storage_write
+    metadata["object_storage_write"] = quarantine_write
+    metadata["upload_storage_lifecycle"] = {
+        "contract_version": UPLOAD_STORAGE_LIFECYCLE_VERSION,
+        "state": "quarantined" if quarantine_ready else upload_scan_status,
+        "quarantine": quarantine_storage,
+        "clean": object_storage,
+        "quarantine_write": quarantine_write,
+        "source_cleanup": source_cleanup,
+    }
     agent_handoff = dict(attachment.get("agent_handoff") or {})
     agent_handoff["storage_uri"] = object_storage["storage_uri"]
     agent_handoff["object_storage"] = object_storage
+    agent_handoff["scan_status"] = upload_scan_status
 
     with transaction.atomic():
         existing_file = (
@@ -536,8 +766,8 @@ def persist_uploaded_file_metadata(
                 "size_bytes": _positive_int_or_none(attachment.get("size_bytes")),
                 "storage_uri": object_storage["storage_uri"],
                 "privacy_risk": True,
-                "status": _model_status(attachment.get("status")),
-                "scan_status": "not_started",
+                "status": upload_status,
+                "scan_status": upload_scan_status,
                 "agent_handoff": agent_handoff,
                 "metadata": metadata,
                 "retention_expires_at": retention_expires_at,
@@ -625,6 +855,81 @@ def get_chat_session_access_metadata(session_id: str | None) -> dict[str, Any] |
     }
 
 
+def load_chat_followup_state(session_id: str | None) -> dict[str, Any] | None:
+    """Load a versioned follow-up snapshot after the caller authorizes the session."""
+
+    normalized_session_id = _text(session_id)
+    if not normalized_session_id:
+        return None
+    session = ChatSession.objects.filter(session_id=normalized_session_id).only("metadata").first()
+    if session is None:
+        return None
+    state = _dict_or_empty(session.metadata).get("chat_followup_state")
+    if not isinstance(state, dict):
+        return None
+    if state.get("contract_version") != CHAT_SESSION_FOLLOWUP_STATE_VERSION:
+        return None
+    return deepcopy(state)
+
+
+def persist_chat_followup_state(
+    payload: dict[str, Any],
+    chat_response: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist a user-safe follow-up boundary without creating an analysis job."""
+
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(
+        chat_response.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
+    if session is None:
+        raise ValueError("chat_response must include session_id")
+
+    message_id = _text(chat_response.get("message_id"))
+    if not message_id:
+        raise ValueError("chat_response must include message_id")
+    conversation_save_state = conversation_save_state_from_payload(payload)
+    snapshot = build_chat_followup_snapshot(payload, chat_response)
+
+    with transaction.atomic():
+        session = ChatSession.objects.select_for_update().get(pk=session.pk)
+        session.metadata = {
+            **_metadata_with_conversation_save_state(
+                session.metadata,
+                conversation_save_state,
+                raw_payload=payload,
+            ),
+            "chat_followup_state": snapshot,
+        }
+        session.current_intent = _text(chat_response.get("routing_intent"))
+        session.save(update_fields=["metadata", "current_intent", "updated_at"])
+        message, _message_created = ChatMessage.objects.update_or_create(
+            message_id=message_id,
+            defaults={
+                "session": session,
+                "role": MessageRole.USER,
+                "content": _message_content(payload),
+                "routing_intent": _text(chat_response.get("routing_intent")),
+                "metadata": {
+                    "source": "canonical_chat_followup",
+                    "response_status": _text(chat_response.get("status")),
+                    "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+                    "conversation_save_state": conversation_save_state,
+                },
+            },
+        )
+
+    return {
+        "message_id": message.message_id,
+        "session_id": session.session_id,
+        "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+        "conversation_save_state": conversation_save_state,
+        "followup_state_version": CHAT_SESSION_FOLLOWUP_STATE_VERSION,
+    }
+
+
 def conversation_save_state_from_payload(
     payload: dict[str, Any],
     *,
@@ -689,6 +994,11 @@ def mark_conversation_save_state(
 
         messages_updated = _update_session_message_save_state(session, normalized_state)
         jobs_updated = _update_session_job_save_state(session, normalized_state, owner_id=owner_id)
+        reports_updated = _update_session_report_save_state(
+            session,
+            normalized_state,
+            owner_id=owner_id,
+        )
         history_events_updated = _update_session_history_save_state(session.session_id, normalized_state)
 
     session_cache = write_chat_session_state(session)
@@ -699,6 +1009,7 @@ def mark_conversation_save_state(
         "guest_id": guest_id or _chat_session_guest_id(session) or None,
         "chat_messages_updated": messages_updated,
         "analysis_jobs_updated": jobs_updated,
+        "reports_updated": reports_updated,
         "history_events_updated": history_events_updated,
         "session_cache": session_cache,
     }
@@ -713,7 +1024,11 @@ def persist_chat_message_analysis_boundary(
     """Persist the canonical chat message and its analysis-job boundary."""
 
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(chat_response.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        chat_response.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("chat_response must include session_id")
 
@@ -916,6 +1231,35 @@ def persist_guest_session_identity(
     }
 
 
+def _locked_active_auth_session(
+    *,
+    auth_session_id: str,
+    user_id: str,
+) -> AuthSession:
+    auth_session = (
+        AuthSession.objects.select_for_update()
+        .select_related("user")
+        .filter(auth_session_id=auth_session_id)
+        .first()
+    )
+    if auth_session is None:
+        raise AuthSessionStateError("auth_session_not_persisted")
+    if auth_session.status != AuthSessionStatus.ACTIVE or auth_session.revoked_at is not None:
+        raise AuthSessionStateError("auth_session_revoked")
+    if auth_session.expires_at and auth_session.expires_at <= timezone.now():
+        raise AuthSessionStateError("auth_session_expired")
+    expected_subject_id = f"user:{user_id}"
+    if auth_session.subject_type != "user" or auth_session.subject_id != expected_subject_id:
+        raise AuthSessionStateError("auth_session_subject_mismatch")
+    if auth_session.user is None:
+        raise AuthSessionStateError("auth_session_user_missing")
+    if auth_session.user.user_id != user_id:
+        raise AuthSessionStateError("auth_session_subject_mismatch")
+    if auth_session.user.status != UserAccountStatus.ACTIVE:
+        raise AuthSessionStateError("user_account_inactive")
+    return auth_session
+
+
 def persist_current_auth_subject(
     auth_payload: dict[str, Any],
     *,
@@ -929,39 +1273,68 @@ def persist_current_auth_subject(
     user_id = _text(subject.get("user_id"))
     guest_id = _normalize_guest_id(subject.get("guest_id"))
     auth_session_id = _text(subject.get("auth_session_id"))
-    auth_source = "auth_google_code" if auth_payload.get("contract_version") == "google_auth_code.v1" else "auth_me"
-    auth_event_type = "auth_google_code_completed" if auth_source == "auth_google_code" else "auth_me_checked"
+    contract_version = _text(auth_payload.get("contract_version"))
+    login_sources = {
+        "google_auth.v1": ("auth_google_login", "auth_google_login_completed"),
+        "google_auth_code.v1": ("auth_google_code", "auth_google_code_completed"),
+    }
+    auth_source, auth_event_type = login_sources.get(
+        contract_version,
+        ("auth_me", "auth_me_checked"),
+    )
+
+    if subject_type == "user" and not user_id:
+        raise AuthSessionStateError("auth_session_user_missing")
+    if user_id and (
+        subject_type != "user" or subject_id != f"user:{user_id}"
+    ):
+        raise AuthSessionStateError("auth_session_subject_mismatch")
 
     with transaction.atomic():
         user = _get_or_create_user_account(user_id)
+        if user_id and user is None:
+            raise AuthSessionStateError("auth_session_user_missing")
+        if user is not None and user.status != UserAccountStatus.ACTIVE:
+            raise AuthSessionStateError("user_account_inactive")
         if user is not None:
             _update_user_account_from_auth_payload(user, auth_payload)
         guest = _get_or_create_guest_identity(guest_id)
         auth_session = None
         if auth_session_id:
-            auth_session, _created = AuthSession.objects.update_or_create(
-                auth_session_id=auth_session_id,
-                defaults={
-                    "user": user,
-                    "guest": guest,
-                    "subject_type": subject_type,
-                    "subject_id": subject_id,
-                    "status": AuthSessionStatus.ACTIVE,
-                    "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
-                    "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
-                    "revoked_at": None,
-                    "metadata": {
-                        "source": auth_source,
-                        "auth_state": auth_payload.get("auth_state"),
-                        "verification": _dict_or_empty(auth_payload.get("auth_session")).get(
-                            "verification"
-                        ),
-                        "google": _safe_google_connection_metadata(auth_payload),
-                        "rate_limit": auth_payload.get("rate_limit") or {},
-                        "merge_policy": auth_payload.get("merge_policy") or {},
-                    },
-                },
-            )
+            session_metadata = {
+                "source": auth_source,
+                "auth_state": auth_payload.get("auth_state"),
+                "verification": _dict_or_empty(auth_payload.get("auth_session")).get(
+                    "verification"
+                ),
+                "google": _safe_google_connection_metadata(auth_payload),
+                "rate_limit": auth_payload.get("rate_limit") or {},
+                "merge_policy": auth_payload.get("merge_policy") or {},
+            }
+            if contract_version in login_sources:
+                auth_session = AuthSession.objects.create(
+                    auth_session_id=auth_session_id,
+                    user=user,
+                    guest=guest,
+                    subject_type=subject_type,
+                    subject_id=subject_id,
+                    status=AuthSessionStatus.ACTIVE,
+                    issued_at=_datetime_or_none(auth_payload.get("issued_at")),
+                    expires_at=_datetime_or_none(auth_payload.get("expires_at")),
+                    revoked_at=None,
+                    metadata=session_metadata,
+                )
+            else:
+                auth_session = _locked_active_auth_session(
+                    auth_session_id=auth_session_id,
+                    user_id=user_id,
+                )
+                auth_session.user = user
+                auth_session.guest = guest
+                existing_metadata = dict(auth_session.metadata or {})
+                existing_metadata.update(session_metadata)
+                auth_session.metadata = existing_metadata
+                auth_session.save(update_fields=["user", "guest", "metadata", "updated_at"])
         google_persistence = _upsert_google_oauth_subject(user, auth_payload)
         chat_session = _bind_chat_session_auth_context(
             session_id=session_id,
@@ -1030,32 +1403,52 @@ def persist_auth_token_refresh(
     user_id = _text(subject.get("user_id"))
     guest_id = _normalize_guest_id(subject.get("guest_id"))
     auth_session_id = _text(subject.get("auth_session_id"))
-    if not user_id or not auth_session_id:
-        return _auth_persistence_skipped("missing_refresh_subject")
+    auth_session_payload = _dict_or_empty(auth_payload.get("auth_session"))
+    rotation = _dict_or_empty(auth_session_payload.get("rotation"))
+    previous_auth_session_id = _text(rotation.get("previous_auth_session_id"))
+    if not user_id or not auth_session_id or not previous_auth_session_id:
+        raise AuthSessionStateError("missing_refresh_subject")
+    if auth_session_id == previous_auth_session_id:
+        raise AuthSessionStateError("auth_session_rotation_required")
 
     with transaction.atomic():
-        user = _get_or_create_user_account(user_id)
+        previous_auth_session = _locked_active_auth_session(
+            auth_session_id=previous_auth_session_id,
+            user_id=user_id,
+        )
+        user = previous_auth_session.user or _get_or_create_user_account(user_id)
         if user is not None:
             _update_user_account_from_auth_payload(user, auth_payload)
         guest = _get_or_create_guest_identity(guest_id)
-        auth_session, _created = AuthSession.objects.update_or_create(
+        revoked_at = timezone.now()
+        previous_metadata = dict(previous_auth_session.metadata or {})
+        previous_metadata["rotation"] = {
+            "rotated_to": auth_session_id,
+            "rotated_at": revoked_at.isoformat(),
+        }
+        previous_auth_session.status = AuthSessionStatus.REVOKED
+        previous_auth_session.revoked_at = revoked_at
+        previous_auth_session.metadata = previous_metadata
+        previous_auth_session.save(
+            update_fields=["status", "revoked_at", "metadata", "updated_at"]
+        )
+        auth_session = AuthSession.objects.create(
             auth_session_id=auth_session_id,
-            defaults={
-                "user": user,
-                "guest": guest,
-                "subject_type": "user",
-                "subject_id": f"user:{user_id}",
-                "status": AuthSessionStatus.ACTIVE,
-                "issued_at": _datetime_or_none(auth_payload.get("issued_at")),
-                "expires_at": _datetime_or_none(auth_payload.get("expires_at")),
-                "revoked_at": None,
-                "metadata": {
-                    "source": "auth_refresh",
-                    "auth_state": auth_payload.get("auth_state"),
-                    "verification": _dict_or_empty(auth_payload.get("auth_session")).get("verification"),
-                    "refresh_policy": _dict_or_empty(auth_payload.get("auth_session")).get("refresh_policy"),
-                    "rate_limit": auth_payload.get("rate_limit") or {},
-                },
+            user=user,
+            guest=guest,
+            subject_type="user",
+            subject_id=f"user:{user_id}",
+            status=AuthSessionStatus.ACTIVE,
+            issued_at=_datetime_or_none(auth_payload.get("issued_at")),
+            expires_at=_datetime_or_none(auth_payload.get("expires_at")),
+            revoked_at=None,
+            metadata={
+                "source": "auth_refresh",
+                "auth_state": auth_payload.get("auth_state"),
+                "verification": auth_session_payload.get("verification"),
+                "refresh_policy": auth_session_payload.get("refresh_policy"),
+                "rotated_from": previous_auth_session_id,
+                "rate_limit": auth_payload.get("rate_limit") or {},
             },
         )
         chat_session = _bind_chat_session_auth_context(
@@ -1081,6 +1474,7 @@ def persist_auth_token_refresh(
                 "auth_state": auth_payload.get("auth_state"),
                 "chat_session_id": chat_session.session_id if chat_session else None,
                 "expires_at": auth_payload.get("expires_at"),
+                "previous_auth_session_id": previous_auth_session_id,
             },
         )
 
@@ -1099,6 +1493,7 @@ def persist_auth_token_refresh(
         "user_id": user.user_id if user else None,
         "guest_id": guest.guest_id if guest else None,
         "auth_session_id": auth_session.auth_session_id,
+        "previous_auth_session_id": previous_auth_session_id,
         "auth_session_status": auth_session.status,
         "event_id": event.event_id,
         "session_id": chat_session.session_id if chat_session else None,
@@ -1307,6 +1702,7 @@ def record_usage_event(
     *,
     scope: str,
     amount: int = 1,
+    record_blocked_event: bool = True,
 ) -> dict[str, Any]:
     """Record and enforce a lightweight subject-scoped usage quota."""
 
@@ -1319,7 +1715,7 @@ def record_usage_event(
     now = timezone.now()
 
     with transaction.atomic():
-        quota, _created = UsageQuota.objects.get_or_create(
+        quota, _created = UsageQuota.objects.select_for_update().get_or_create(
             quota_id=_usage_quota_id(subject_id, scope),
             defaults={
                 "subject_id": subject_id,
@@ -1338,6 +1734,8 @@ def record_usage_event(
                 },
             },
         )
+        if not _created:
+            quota = UsageQuota.objects.select_for_update().get(pk=quota.pk)
         if not _created and quota.metadata.get("policy_managed"):
             quota.metadata = {
                 **quota.metadata,
@@ -1358,33 +1756,38 @@ def record_usage_event(
             quota.used_count = projected_count
         quota.save(update_fields=["limit_count", "used_count", "reset_at", "metadata", "updated_at"])
 
-        usage_event = UsageEvent.objects.create(
-            usage_event_id=_usage_event_id(subject_id, scope),
-            subject_id=subject_id,
-            scope=scope,
-            amount=normalized_amount if allowed else 0,
-            quota_key=quota_key,
-            metadata={
-                "source": "canonical_usage_enforcement",
-                "status": "allowed" if allowed else "blocked",
-                "subject_type": subject_type,
-                "plan_code": policy["plan_code"],
-                "subscription_id": policy["subscription_id"],
-                "policy_code_item": policy["policy_code_item"],
-                "limit_count": quota.limit_count,
-                "used_count": quota.used_count,
-                "requested_amount": normalized_amount,
-                "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
-            },
-        )
+        usage_event = None
+        if allowed or record_blocked_event:
+            usage_event = UsageEvent.objects.create(
+                usage_event_id=_usage_event_id(subject_id, scope),
+                subject_id=subject_id,
+                scope=scope,
+                amount=normalized_amount if allowed else 0,
+                quota_key=quota_key,
+                metadata={
+                    "source": "canonical_usage_enforcement",
+                    "status": "allowed" if allowed else "blocked",
+                    "subject_type": subject_type,
+                    "plan_code": policy["plan_code"],
+                    "subscription_id": policy["subscription_id"],
+                    "policy_code_item": policy["policy_code_item"],
+                    "limit_count": quota.limit_count,
+                    "used_count": quota.used_count,
+                    "requested_amount": normalized_amount,
+                    "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
+                },
+            )
 
     return {
         "backend": "postgresql",
-        "tables": [UsageQuota._meta.db_table, UsageEvent._meta.db_table],
+        "tables": [
+            UsageQuota._meta.db_table,
+            *([UsageEvent._meta.db_table] if usage_event is not None else []),
+        ],
         "quota_table": UsageQuota._meta.db_table,
         "usage_event_table": UsageEvent._meta.db_table,
         "quota_id": quota.quota_id,
-        "usage_event_id": usage_event.usage_event_id,
+        "usage_event_id": usage_event.usage_event_id if usage_event is not None else None,
         "subject_id": subject_id,
         "subject_type": subject_type,
         "scope": scope,
@@ -1401,6 +1804,52 @@ def record_usage_event(
         else None,
         "reset_at": quota.reset_at.isoformat() if quota.reset_at else None,
         "status": "allowed" if allowed else "blocked",
+    }
+
+
+def refund_usage_event(usage: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    """Refund one allowed usage reservation exactly once after a rejected request."""
+
+    usage_event_id = _text(usage.get("usage_event_id"))
+    quota_id = _text(usage.get("quota_id"))
+    if not usage_event_id or not quota_id:
+        return {"status": "skipped", "reason": "missing_usage_reference"}
+
+    with transaction.atomic():
+        usage_event = (
+            UsageEvent.objects.select_for_update()
+            .filter(usage_event_id=usage_event_id)
+            .first()
+        )
+        if usage_event is None:
+            return {"status": "skipped", "reason": "usage_event_not_found"}
+        metadata = _dict_or_empty(usage_event.metadata)
+        if usage_event.amount <= 0 or metadata.get("status") != "allowed":
+            return {"status": "skipped", "reason": "usage_not_refundable"}
+        quota = UsageQuota.objects.select_for_update().filter(quota_id=quota_id).first()
+        if quota is None:
+            return {"status": "skipped", "reason": "usage_quota_not_found"}
+
+        refunded_amount = usage_event.amount
+        quota.used_count = max(0, quota.used_count - refunded_amount)
+        quota.save(update_fields=["used_count", "updated_at"])
+        usage_event.amount = 0
+        usage_event.metadata = {
+            **metadata,
+            "status": "refunded",
+            "refund_reason": _text(reason) or "request_rejected",
+            "refunded_amount": refunded_amount,
+            "refunded_at": timezone.now().isoformat(),
+            "used_count": quota.used_count,
+        }
+        usage_event.save(update_fields=["amount", "metadata"])
+
+    return {
+        "status": "refunded",
+        "usage_event_id": usage_event.usage_event_id,
+        "quota_id": quota.quota_id,
+        "refunded_amount": refunded_amount,
+        "used_count": quota.used_count,
     }
 
 
@@ -1559,11 +2008,17 @@ def history_event_to_api(event: HistoryEvent) -> dict[str, Any]:
 def persist_analysis_job_execution(
     payload: dict[str, Any],
     job_payload: dict[str, Any],
+    *,
+    publish_cache: bool = True,
 ) -> dict[str, Any]:
     """Persist a canonical analysis job and its agent execution outputs."""
 
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        job_payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("job_payload must include session_id")
 
@@ -1580,6 +2035,24 @@ def persist_analysis_job_execution(
     }
 
     with transaction.atomic():
+        existing_job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=job_id)
+            .only("metadata")
+            .first()
+        )
+        existing_metadata = _dict_or_empty(existing_job.metadata if existing_job else None)
+        preserved_metadata = {
+            key: existing_metadata[key]
+            for key in (
+                "idempotency",
+                "work_queue",
+                "case_id",
+                "fact_version_id",
+                "confirmed_facts_schema",
+            )
+            if key in existing_metadata
+        }
         message = None
         if message_id:
             message, _message_created = ChatMessage.objects.update_or_create(
@@ -1618,15 +2091,29 @@ def persist_analysis_job_execution(
                 "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
                 "status_counts": job_payload.get("status_counts") or {},
                 "metadata": {
+                    **preserved_metadata,
                     "source": "canonical_analysis_job",
                     "analysis_plan": analysis_plan,
                     "assistant_message": chat_response.get("assistant_message"),
                     "case_status": chat_response.get("case_status"),
                     "cards": chat_response.get("cards", []),
-                    "pending_questions": chat_response.get("pending_questions", []),
+                    "pending_questions": (
+                        job_payload.get("pending_questions")
+                        or chat_response.get("pending_questions", [])
+                    ),
                     "report_links": chat_response.get("report_links", []),
                     "supervisor_state": chat_response.get("supervisor_state", {}),
                     "reporting_payload": chat_response.get("reporting_payload", {}),
+                    "supervisor_reporting_handoff": (
+                        job_payload.get("supervisor_reporting_handoff")
+                        or existing_metadata.get("supervisor_reporting_handoff")
+                        or {}
+                    ),
+                    "reporting_pipeline": (
+                        job_payload.get("reporting_pipeline")
+                        or existing_metadata.get("reporting_pipeline")
+                        or {}
+                    ),
                     "attachments": job_payload.get("attachments", []),
                     "blocked_attachments": job_payload.get("blocked_attachments", []),
                     "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
@@ -1653,8 +2140,18 @@ def persist_analysis_job_execution(
         )
         retrieval_events_saved = RetrievalEvent.objects.filter(job=job).count()
 
-    progress_cache = write_analysis_job_progress(job)
-    session_cache = write_chat_session_state(session, latest_job=job)
+    if publish_cache:
+        progress_cache = write_analysis_job_progress(job)
+        session_cache = write_chat_session_state(session, latest_job=job)
+    else:
+        progress_cache = {
+            "status": "deferred",
+            "reason": "transaction_not_committed",
+        }
+        session_cache = {
+            "status": "deferred",
+            "reason": "transaction_not_committed",
+        }
 
     return {
         "backend": "postgresql",
@@ -1683,26 +2180,203 @@ def persist_analysis_job_execution(
     }
 
 
+def reserve_analysis_job_request(
+    payload: dict[str, Any],
+    *,
+    job_id: str,
+    request_fingerprint: str,
+) -> dict[str, Any]:
+    """Reserve a caller-supplied job id before quota use or plan generation."""
+
+    normalized_job_id = _text(job_id)
+    normalized_fingerprint = _text(request_fingerprint)
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(
+        payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
+    if not normalized_job_id or not normalized_fingerprint or session is None:
+        raise ValueError("job_id, request_fingerprint, and session_id are required")
+    if owner_id and session.owner_id and session.owner_id != owner_id:
+        raise PermissionError("analysis job session belongs to another owner")
+
+    now = timezone.now()
+    reservation_token = secrets.token_urlsafe(32)
+    reservation_metadata = {
+        "source": "canonical_analysis_job_reservation",
+        "idempotency": {
+            "contract_version": "analysis_job_idempotency.v1",
+            "request_fingerprint": normalized_fingerprint,
+            "state": "reserved",
+            "reserved_at": now.isoformat(),
+            "reservation_token": reservation_token,
+            "reservation_generation": 1,
+        },
+    }
+    with transaction.atomic():
+        job, created = AnalysisJob.objects.select_for_update().get_or_create(
+            job_id=normalized_job_id,
+            defaults={
+                "session": session,
+                "owner_id": owner_id or session.owner_id,
+                "status": AnalysisJobStatus.QUEUED.value,
+                "progress_message": "Analysis request reserved.",
+                "metadata": reservation_metadata,
+            },
+        )
+        if not created:
+            job = AnalysisJob.objects.select_for_update().select_related("session").get(pk=job.pk)
+            effective_owner = job.owner_id or job.session.owner_id
+            if owner_id and effective_owner and effective_owner != owner_id:
+                raise PermissionError("analysis job belongs to another owner")
+            if job.session_id != session.pk:
+                raise ValueError("analysis job id is already bound to another session")
+            metadata = _dict_or_empty(job.metadata)
+            idempotency = _dict_or_empty(metadata.get("idempotency"))
+            if _text(idempotency.get("request_fingerprint")) != normalized_fingerprint:
+                raise ValueError("analysis job id is already bound to another request")
+            stale_after = _agent_worker_setting(
+                "ANALYSIS_JOB_RESERVATION_STALE_AFTER_SECONDS",
+                300,
+            )
+            stale_cutoff = now - timedelta(seconds=stale_after)
+            is_recoverable_stale_reservation = (
+                metadata.get("source") == "canonical_analysis_job_reservation"
+                and not job.work_items.exists()
+                and job.updated_at <= stale_cutoff
+            )
+            if is_recoverable_stale_reservation:
+                recovered_token = secrets.token_urlsafe(32)
+                recovered_generation = max(
+                    1,
+                    _positive_int_or_default(
+                        idempotency.get("reservation_generation"),
+                        default=1,
+                    )
+                    + 1,
+                )
+                job.progress_message = "Analysis request reservation recovered."
+                job.metadata = {
+                    **reservation_metadata,
+                    "idempotency": {
+                        **reservation_metadata["idempotency"],
+                        "reservation_token": recovered_token,
+                        "reservation_generation": recovered_generation,
+                    },
+                }
+                job.save(update_fields=["progress_message", "metadata", "updated_at"])
+                return {
+                    "status": "reserved",
+                    "created": False,
+                    "acquired": True,
+                    "recovered": True,
+                    "job_id": job.job_id,
+                    "reservation_token": recovered_token,
+                    "reservation_generation": recovered_generation,
+                }
+            return {
+                "status": "existing",
+                "created": False,
+                "acquired": False,
+                "recovered": False,
+                "job_id": job.job_id,
+                "reservation_token": "",
+                "reservation_generation": idempotency.get("reservation_generation"),
+            }
+    return {
+        "status": "reserved",
+        "created": True,
+        "acquired": True,
+        "recovered": False,
+        "job_id": normalized_job_id,
+        "reservation_token": reservation_token,
+        "reservation_generation": 1,
+    }
+
+
+def release_analysis_job_reservation(
+    *,
+    job_id: str,
+    request_fingerprint: str,
+    reservation_token: str,
+) -> bool:
+    """Delete an unqueued reservation so a rejected or failed plan can be retried."""
+
+    with transaction.atomic():
+        job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=_text(job_id), metadata__source="canonical_analysis_job_reservation")
+            .first()
+        )
+        if job is None or job.work_items.exists():
+            return False
+        idempotency = _dict_or_empty(_dict_or_empty(job.metadata).get("idempotency"))
+        if _text(idempotency.get("request_fingerprint")) != _text(request_fingerprint):
+            return False
+        if _text(idempotency.get("reservation_token")) != _text(reservation_token):
+            return False
+        job.delete()
+        return True
+
+
+def renew_analysis_job_reservation(
+    *,
+    job_id: str,
+    request_fingerprint: str,
+    reservation_token: str,
+) -> bool:
+    """Refresh only the current reservation holder's lease before quota use."""
+
+    with transaction.atomic():
+        job = (
+            AnalysisJob.objects.select_for_update()
+            .filter(job_id=_text(job_id), metadata__source="canonical_analysis_job_reservation")
+            .first()
+        )
+        if job is None or job.work_items.exists():
+            return False
+        idempotency = _dict_or_empty(_dict_or_empty(job.metadata).get("idempotency"))
+        if _text(idempotency.get("request_fingerprint")) != _text(request_fingerprint):
+            return False
+        if _text(idempotency.get("reservation_token")) != _text(reservation_token):
+            return False
+        job.progress_message = "Analysis request reservation active."
+        job.save(update_fields=["progress_message", "updated_at"])
+        return True
+
+
 def enqueue_analysis_job_work(
     payload: dict[str, Any],
     job_payload: dict[str, Any],
     *,
     max_attempts: int = 2,
+    server_execution_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist a queued worker item without executing the agent plan inline."""
 
+    from app.services.supervisor_execution_input_service import (
+        SERVER_EXECUTION_CONTEXT_FIELD,
+        serialize_server_execution_context,
+    )
+
+    server_execution_context_envelope = serialize_server_execution_context(
+        server_execution_context
+    )
+    persisted_request_payload = dict(payload)
+    persisted_request_payload.pop(SERVER_EXECUTION_CONTEXT_FIELD, None)
     owner_id = _owner_id(payload)
-    session = _get_or_create_session(job_payload.get("session_id"), owner_id=owner_id)
+    session = _get_or_create_session(
+        job_payload.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
     if session is None:
         raise ValueError("job_payload must include session_id")
+    if owner_id and session.owner_id and session.owner_id != owner_id:
+        raise PermissionError("analysis job session belongs to another owner")
 
-    conversation_save_state = conversation_save_state_from_payload(payload)
-    session.metadata = _metadata_with_conversation_save_state(
-        session.metadata,
-        conversation_save_state,
-        raw_payload=payload,
-    )
-    session.save(update_fields=["metadata", "updated_at"])
+    conversation_save_state = conversation_save_state_from_payload(persisted_request_payload)
 
     job_id = _text(job_payload.get("job_id"))
     if not job_id:
@@ -1711,11 +2385,42 @@ def enqueue_analysis_job_work(
     message_id = _text(job_payload.get("message_id"))
     chat_response = _dict_or_empty(job_payload.get("chat_response"))
     analysis_plan = _dict_or_empty(job_payload.get("analysis_plan") or chat_response.get("analysis_plan"))
-    active_node = _text(job_payload.get("active_node")) or _analysis_plan_first_node(analysis_plan)
+    active_node = _text(job_payload.get("active_node")) or _analysis_plan_first_executable_node(
+        analysis_plan
+    )
     progress_message = _text(job_payload.get("progress_message")) or "Agent worker item queued."
     work_item_id = _agent_work_item_id(job_id)
+    requested_idempotency = _dict_or_empty(job_payload.get("idempotency"))
+    requested_fingerprint = _text(requested_idempotency.get("request_fingerprint"))
+    requested_reservation_token = _text(requested_idempotency.get("reservation_token"))
+    session_case_id = ChatSession.objects.filter(pk=session.pk).values_list(
+        "case_id",
+        flat=True,
+    ).first()
 
     with transaction.atomic():
+        locked_case = (
+            Case.objects.select_for_update().get(pk=session_case_id)
+            if session_case_id
+            else None
+        )
+        session = ChatSession.objects.select_for_update().get(pk=session.pk)
+        if session.case_id != session_case_id:
+            raise RuntimeError("analysis session case binding changed during enqueue")
+        if session.case_id and (
+            locked_case is None or locked_case.pk != session.case_id
+        ):
+            raise RuntimeError("analysis session case lock is unavailable during enqueue")
+        if session.owner_id:
+            if not owner_id or session.owner_id != owner_id:
+                raise PermissionError("analysis job session belongs to another owner")
+        session.metadata = _metadata_with_conversation_save_state(
+            session.metadata,
+            conversation_save_state,
+            raw_payload=persisted_request_payload,
+        )
+        session.save(update_fields=["metadata", "updated_at"])
+
         message = None
         if message_id:
             message, _message_created = ChatMessage.objects.update_or_create(
@@ -1723,7 +2428,7 @@ def enqueue_analysis_job_work(
                 defaults={
                     "session": session,
                     "role": MessageRole.USER,
-                    "content": _message_content(payload),
+                    "content": _message_content(persisted_request_payload),
                     "routing_intent": _text(job_payload.get("routing_intent")),
                     "metadata": {
                         "source": "canonical_analysis_job_queue",
@@ -1740,52 +2445,138 @@ def enqueue_analysis_job_work(
                 },
             )
 
-        job, _job_created = AnalysisJob.objects.update_or_create(
-            job_id=job_id,
-            defaults={
-                "session": session,
-                "message": message,
-                "owner_id": owner_id or session.owner_id,
-                "routing_intent": _text(job_payload.get("routing_intent")),
-                "mock_scenario": _text(job_payload.get("mock_scenario")),
-                "status": AnalysisJobStatus.QUEUED.value,
-                "active_node": active_node,
-                "progress_message": progress_message,
-                "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
-                "status_counts": _analysis_plan_status_counts(analysis_plan),
-                "metadata": {
-                    "source": "canonical_analysis_job_queue",
-                    "analysis_plan": analysis_plan,
-                    "assistant_message": chat_response.get("assistant_message"),
-                    "case_status": chat_response.get("case_status"),
-                    "cards": chat_response.get("cards", []),
-                    "pending_questions": chat_response.get("pending_questions", []),
-                    "report_links": chat_response.get("report_links", []),
-                    "supervisor_state": chat_response.get("supervisor_state", {}),
-                    "reporting_payload": chat_response.get("reporting_payload", {}),
-                    "attachments": job_payload.get("attachments", []),
-                    "blocked_attachments": job_payload.get("blocked_attachments", []),
-                    "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
-                    "attachment_resolution": job_payload.get("attachment_resolution", {}),
-                    "scan_gate": job_payload.get("scan_gate", {}),
-                    "limitations": job_payload.get("limitations", []),
-                    "work_queue": {
-                        "contract_version": "agent_worker_queue.v1",
-                        "work_item_id": work_item_id,
-                        "status": AgentWorkItemStatus.QUEUED.value,
-                    },
-                },
+        queue_metadata = {
+            "source": "canonical_analysis_job_queue",
+            "analysis_plan": analysis_plan,
+            "assistant_message": chat_response.get("assistant_message"),
+            "case_status": chat_response.get("case_status"),
+            "cards": chat_response.get("cards", []),
+            "pending_questions": chat_response.get("pending_questions", []),
+            "report_links": chat_response.get("report_links", []),
+            "supervisor_state": chat_response.get("supervisor_state", {}),
+            "reporting_payload": chat_response.get("reporting_payload", {}),
+            "attachments": job_payload.get("attachments", []),
+            "blocked_attachments": job_payload.get("blocked_attachments", []),
+            "attachment_scan_policy": job_payload.get("attachment_scan_policy", {}),
+            "attachment_resolution": job_payload.get("attachment_resolution", {}),
+            "scan_gate": job_payload.get("scan_gate", {}),
+            "limitations": job_payload.get("limitations", []),
+            "work_queue": {
+                "contract_version": "agent_worker_queue.v1",
+                "work_item_id": work_item_id,
+                "status": AgentWorkItemStatus.QUEUED.value,
             },
+        }
+        if requested_idempotency:
+            queue_metadata["idempotency"] = {
+                **requested_idempotency,
+                "contract_version": "analysis_job_idempotency.v1",
+                "state": "queued",
+            }
+        job_defaults = {
+            "session": session,
+            "case": locked_case,
+            "message": message,
+            "owner_id": owner_id or session.owner_id,
+            "routing_intent": _text(job_payload.get("routing_intent")),
+            "mock_scenario": _text(job_payload.get("mock_scenario")),
+            "status": AnalysisJobStatus.QUEUED.value,
+            "active_node": active_node,
+            "progress_message": progress_message,
+            "analysis_plan_id": _text(
+                job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")
+            ),
+            "status_counts": _queued_analysis_plan_status_counts(analysis_plan),
+            "metadata": queue_metadata,
+        }
+        job, job_created = AnalysisJob.objects.select_for_update().get_or_create(
+            job_id=job_id,
+            defaults=job_defaults,
         )
-        _append_analysis_job_event(
-            job,
-            status=AnalysisJobStatus.QUEUED.value,
-            active_node=active_node,
-            message=progress_message,
-            source="agent_worker_queue",
-            metadata={"work_item_id": work_item_id},
-        )
-        work_item, _work_item_created = AgentWorkItem.objects.update_or_create(
+        requested_owner_id = owner_id or session.owner_id
+        reservation_promoted = False
+        if not job_created:
+            effective_owner_id = job.owner_id or job.session.owner_id
+            if requested_owner_id and effective_owner_id and effective_owner_id != requested_owner_id:
+                raise PermissionError("analysis job belongs to another owner")
+            if job.session_id != session.pk:
+                raise ValueError("analysis job id is already bound to another session")
+            existing_metadata = _dict_or_empty(job.metadata)
+            existing_idempotency = _dict_or_empty(existing_metadata.get("idempotency"))
+            existing_fingerprint = _text(existing_idempotency.get("request_fingerprint"))
+            existing_reservation_token = _text(
+                existing_idempotency.get("reservation_token")
+            )
+            if requested_fingerprint or existing_fingerprint:
+                if not requested_fingerprint or requested_fingerprint != existing_fingerprint:
+                    raise ValueError("analysis job id is already bound to another request")
+            if existing_reservation_token or requested_reservation_token:
+                if (
+                    not requested_reservation_token
+                    or requested_reservation_token != existing_reservation_token
+                ):
+                    raise ValueError("analysis job reservation holder is stale")
+
+            if existing_metadata.get("source") == "canonical_analysis_job_reservation":
+                if not requested_fingerprint or not requested_reservation_token:
+                    raise ValueError("analysis job reservation requires a request fingerprint")
+                if job.work_items.exists():
+                    raise ValueError("analysis job reservation has an invalid work item binding")
+                for field_name, field_value in job_defaults.items():
+                    setattr(job, field_name, field_value)
+                job.save(update_fields=[*job_defaults, "updated_at"])
+                reservation_promoted = True
+
+            requested_plan_id = _text(
+                job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")
+            )
+            if (
+                not requested_fingerprint
+                and job.analysis_plan_id
+                and requested_plan_id != job.analysis_plan_id
+            ):
+                raise ValueError("analysis job id is already bound to another plan")
+            if (
+                job.status
+                in {
+                    AnalysisJobStatus.SUCCESS.value,
+                    AnalysisJobStatus.PARTIAL.value,
+                    AnalysisJobStatus.FAILED.value,
+                }
+                and not job.work_items.exists()
+            ):
+                raise ValueError("terminal analysis job cannot create a new work item")
+
+        work_item_payload: dict[str, Any] = {
+            "contract_version": "agent_worker_queue.v1",
+            "persistence_mode": "analysis_job",
+            "request_payload": _json_compatible(persisted_request_payload),
+            "job_payload": _json_compatible(
+                {
+                    **job_payload,
+                    "status": AnalysisJobStatus.QUEUED.value,
+                    "active_node": active_node,
+                    "progress_message": progress_message,
+                    "node_execution": {},
+                }
+            ),
+            "execution_payload": _json_compatible(
+                {
+                    **persisted_request_payload,
+                    "job_id": job_id,
+                    "session_id": session.session_id,
+                    "message_id": message_id,
+                    "attachments": job_payload.get("attachments", []),
+                }
+            ),
+            "analysis_plan": _json_compatible(analysis_plan),
+        }
+        if server_execution_context_envelope:
+            work_item_payload["server_execution_context"] = _json_compatible(
+                server_execution_context_envelope
+            )
+
+        work_item, work_item_created = AgentWorkItem.objects.get_or_create(
             work_item_id=work_item_id,
             defaults={
                 "job": job,
@@ -1797,30 +2588,7 @@ def enqueue_analysis_job_work(
                 "started_at": None,
                 "completed_at": None,
                 "next_run_at": timezone.now(),
-                "payload": {
-                    "contract_version": "agent_worker_queue.v1",
-                    "persistence_mode": "analysis_job",
-                    "request_payload": _json_compatible(payload),
-                    "job_payload": _json_compatible(
-                        {
-                            **job_payload,
-                            "status": AnalysisJobStatus.QUEUED.value,
-                            "active_node": active_node,
-                            "progress_message": progress_message,
-                            "node_execution": {},
-                        }
-                    ),
-                    "execution_payload": _json_compatible(
-                        {
-                            **payload,
-                            "job_id": job_id,
-                            "session_id": session.session_id,
-                            "message_id": message_id,
-                            "attachments": job_payload.get("attachments", []),
-                        }
-                    ),
-                    "analysis_plan": _json_compatible(analysis_plan),
-                },
+                "payload": work_item_payload,
                 "result": {},
                 "error_code": "",
                 "metadata": {
@@ -1830,12 +2598,23 @@ def enqueue_analysis_job_work(
                 },
             },
         )
+        if work_item.job_id != job.pk:
+            raise ValueError("agent work item is already bound to another analysis job")
+        if job_created or work_item_created or reservation_promoted:
+            _append_analysis_job_event(
+                job,
+                status=AnalysisJobStatus.QUEUED.value,
+                active_node=active_node,
+                message=progress_message,
+                source="agent_worker_queue",
+                metadata={"work_item_id": work_item_id},
+            )
 
     progress_cache = write_analysis_job_progress(job)
     session_cache = write_chat_session_state(session, latest_job=job)
     return {
         "backend": "postgresql",
-        "status": AgentWorkItemStatus.QUEUED.value,
+        "status": work_item.status,
         "execution_mode": "async_worker",
         "progress_state": _work_item_progress_state(work_item, job_status=job.status),
         "tables": [AnalysisJob._meta.db_table, AgentWorkItem._meta.db_table],
@@ -1890,30 +2669,165 @@ def process_agent_work_item(work_item_id: str) -> dict[str, Any]:
     claimed = _claim_agent_work_item(normalized_work_item_id)
     if not claimed["claimed"]:
         return claimed
+    claimed_attempt_no = int(claimed.get("attempt_no") or 0)
 
     try:
         work_item = AgentWorkItem.objects.select_related("job", "job__session").get(
             work_item_id=normalized_work_item_id
         )
-        node_execution = _execute_agent_work_item_plan(work_item)
-        final_status = _analysis_job_status_from_node_execution(node_execution)
+        with _agent_work_item_lease_heartbeat(
+            normalized_work_item_id,
+            expected_attempt_no=claimed_attempt_no,
+        ):
+            pipeline = _execute_agent_work_item_pipeline(
+                work_item,
+                expected_attempt_no=claimed_attempt_no,
+            )
+        node_execution = _dict_or_empty(pipeline.get("node_execution"))
+        reporting_handoff = _dict_or_empty(pipeline.get("reporting_handoff"))
+        reporting_blocked = pipeline.get("reporting_blocked") is True
+        final_status = (
+            _analysis_reporting_job_status(
+                node_execution,
+                handoff=reporting_handoff,
+                reporting_blocked=reporting_blocked,
+            )
+            if pipeline.get("requires_reporting_bundle") is True
+            else _analysis_job_status_from_node_execution(node_execution)
+        )
         completed_job_payload = _completed_job_payload_for_work_item(
             work_item,
             node_execution=node_execution,
             final_status=final_status,
         )
-        persistence = persist_analysis_job_execution(
-            _dict_or_empty(work_item.payload.get("request_payload")),
-            completed_job_payload,
+        if reporting_handoff:
+            completed_job_payload["supervisor_reporting_handoff"] = reporting_handoff
+            completed_job_payload["reporting_pipeline"] = {
+                "contract_version": "analysis_reporting_pipeline.v1",
+                "phase": "finalizing",
+                "reporting_blocked": reporting_blocked,
+            }
+        final_binding = AgentWorkItem.objects.filter(
+            work_item_id=normalized_work_item_id
+        ).values(
+            "job_id",
+            "job__case_id",
+            "job__session_id",
+            "job__session__case_id",
+        ).first()
+        if final_binding is None:
+            return _agent_work_item_skipped(
+                "work_item_not_found",
+                work_item_id=normalized_work_item_id,
+            )
+        final_case_ids = sorted(
+            {
+                case_id
+                for case_id in (
+                    final_binding["job__case_id"],
+                    final_binding["job__session__case_id"],
+                )
+                if case_id is not None
+            }
         )
-        return _complete_agent_work_item(
-            normalized_work_item_id,
-            final_status=final_status,
-            node_execution=node_execution,
-            persistence=persistence,
+        with transaction.atomic():
+            locked_cases = {
+                case.pk: case
+                for case in Case.objects.select_for_update()
+                .filter(pk__in=final_case_ids)
+                .order_by("pk")
+            }
+            locked_session = ChatSession.objects.select_for_update().get(
+                pk=final_binding["job__session_id"]
+            )
+            locked_job = AnalysisJob.objects.select_for_update().get(
+                pk=final_binding["job_id"]
+            )
+            leased_work_item = AgentWorkItem.objects.select_for_update().get(
+                work_item_id=normalized_work_item_id
+            )
+            if (
+                leased_work_item.job_id != locked_job.pk
+                or locked_job.session_id != locked_session.pk
+                or locked_job.case_id != locked_session.case_id
+                or locked_job.case_id != final_binding["job__case_id"]
+            ):
+                raise PaidAgentCallRetryBlockedError(
+                    "analysis job case binding changed before final persistence"
+                )
+            locked_case = locked_cases.get(locked_job.case_id)
+            if not _worker_lease_is_current(
+                leased_work_item,
+                expected_attempt_no=claimed_attempt_no,
+            ):
+                return _agent_work_item_skipped(
+                    "stale_worker_lease",
+                    work_item_id=normalized_work_item_id,
+                    current_status=leased_work_item.status,
+                )
+            if locked_case is not None and not _case_analysis_job_is_current(
+                locked_job,
+                locked_case,
+            ):
+                raise SupersededCaseAnalysisError(
+                    "newer confirmed facts superseded this analysis before persistence"
+                )
+            if locked_case is not None and not _case_analysis_job_has_confirmed_fact_provenance(
+                locked_job,
+                locked_case,
+            ):
+                raise CaseFactProvenanceError(
+                    "Case-bound result persistence requires confirmed fact provenance"
+                )
+            locked_job.session = locked_session
+            leased_work_item.job = locked_job
+            persistence = persist_analysis_job_execution(
+                _dict_or_empty(work_item.payload.get("request_payload")),
+                completed_job_payload,
+                publish_cache=False,
+            )
+            if pipeline.get("requires_reporting_bundle") is True:
+                reporting_bundle = persist_analysis_reporting_bundle(
+                    job_id=leased_work_item.job.job_id,
+                    final_status=final_status,
+                    handoff=reporting_handoff,
+                )
+                persistence = {
+                    **persistence,
+                    "reporting_bundle": reporting_bundle,
+                }
+            completion = _complete_agent_work_item(
+                normalized_work_item_id,
+                final_status=final_status,
+                node_execution=node_execution,
+                persistence=persistence,
+                expected_attempt_no=claimed_attempt_no,
+                publish_cache=False,
+            )
+        completed_job = (
+            AnalysisJob.objects.select_related("session")
+            .get(job_id=completion["job_id"])
         )
+        progress_cache = write_analysis_job_progress(completed_job)
+        session_cache = write_chat_session_state(
+            completed_job.session,
+            latest_job=completed_job,
+        )
+        completion["progress_cache"] = progress_cache
+        completion["session_cache"] = session_cache
+        if isinstance(completion.get("persistence"), dict):
+            completion["persistence"] = {
+                **completion["persistence"],
+                "progress_cache": progress_cache,
+                "session_cache": session_cache,
+            }
+        return completion
     except Exception as exc:  # pragma: no cover - exercised through retry smoke tests.
-        return _fail_agent_work_item(normalized_work_item_id, exc)
+        return _fail_agent_work_item(
+            normalized_work_item_id,
+            exc,
+            expected_attempt_no=claimed_attempt_no,
+        )
 
 
 def persist_analysis_display_result(result_payload: dict[str, Any]) -> dict[str, Any]:
@@ -1949,6 +2863,636 @@ def persist_analysis_display_result(result_payload: dict[str, Any]) -> dict[str,
     }
 
 
+def persist_analysis_reporting_bundle(
+    *,
+    job_id: str,
+    final_status: str,
+    handoff: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist display and canonical JSON Report before worker completion.
+
+    PDF rendering and object-storage export remain on-demand operations.  This
+    transaction deliberately has no network side effects.
+    """
+
+    normalized_job_id = _text(job_id)
+    binding = AnalysisJob.objects.filter(job_id=normalized_job_id).values(
+        "id",
+        "case_id",
+        "session_id",
+        "session__case_id",
+    ).first()
+    if binding is None:
+        raise AnalysisJob.DoesNotExist(normalized_job_id)
+    case_ids = sorted(
+        {
+            case_id
+            for case_id in (binding["case_id"], binding["session__case_id"])
+            if case_id is not None
+        }
+    )
+    with transaction.atomic():
+        locked_cases = {
+            case.pk: case
+            for case in Case.objects.select_for_update()
+            .filter(pk__in=case_ids)
+            .order_by("pk")
+        }
+        locked_session = ChatSession.objects.select_for_update().get(
+            pk=binding["session_id"]
+        )
+        job = AnalysisJob.objects.select_for_update().get(
+            pk=binding["id"]
+        )
+        case = locked_cases.get(job.case_id)
+        if (
+            job.session_id != locked_session.pk
+            or job.case_id != locked_session.case_id
+            or job.case_id != binding["case_id"]
+            or (job.case_id is not None and case is None)
+        ):
+            raise ReportReferenceError(
+                "case_binding_changed",
+                "analysis job case binding changed during report finalization",
+            )
+        job.session = locked_session
+        if case is not None and not _case_analysis_job_is_current(job, case):
+            return {
+                "backend": "postgresql",
+                "contract_version": "analysis_reporting_bundle.v1",
+                "status": "superseded",
+                "display_result_id": None,
+                "report_id": None,
+            }
+        if case is not None and not _case_analysis_job_has_confirmed_fact_provenance(
+            job,
+            case,
+        ):
+            raise ReportReferenceError(
+                "fact_version_required",
+                "case analysis report requires active confirmed fact provenance",
+            )
+        fact_version_id = _text(_dict_or_empty(job.metadata).get("fact_version_id"))
+        if case is not None and not fact_version_id:
+            raise ReportReferenceError(
+                "fact_version_required",
+                "case analysis report requires its confirmed fact version",
+            )
+        source_fact_version = _source_fact_version_for_report(
+            case=case,
+            fact_version_id=fact_version_id,
+        )
+        agent_results = list(AgentResult.objects.filter(job=job))
+        agent_results.sort(key=_persisted_agent_result_sort_key)
+        gate = _dict_or_empty(handoff.get("gate"))
+        gate_status = _text(gate.get("status"))
+        reporting_not_ready = handoff.get("ready_for_reporting") is not True
+        if reporting_not_ready:
+            if Report.objects.filter(job=job).exists():
+                raise ReportReferenceError(
+                    "non_ready_job_has_report",
+                    "a non-ready Reporting handoff cannot reuse an existing report",
+                )
+            non_ready_status = (
+                AnalysisJobStatus.PARTIAL.value
+                if gate_status == "draft"
+                else AnalysisJobStatus.FAILED.value
+            )
+            display_result = _upsert_worker_reporting_display(
+                job,
+                final_status=non_ready_status,
+                handoff=handoff,
+                agent_results=agent_results,
+                reporting_result=None,
+                report_id="",
+                report_status="",
+            )
+            _update_job_reporting_bundle_metadata(
+                job,
+                handoff=handoff,
+                reporting_payload={},
+                report_links=[],
+                display_result=display_result,
+                report=None,
+                phase=gate_status or "blocked",
+            )
+            if case is not None:
+                case.status = CaseStatus.NEEDS_INPUT.value
+                case.save(update_fields=["status", "updated_at"])
+            return {
+                "backend": "postgresql",
+                "contract_version": "analysis_reporting_bundle.v1",
+                "status": gate_status or "blocked",
+                "display_result_id": display_result.display_result_id,
+                "report_id": None,
+            }
+
+        reporting_results = [
+            result
+            for result in agent_results
+            if result.node_code == REPORTING_AGENT_NODE_CODE
+        ]
+        if len(reporting_results) != 1:
+            raise RuntimeError("exactly one persisted Reporting Agent result is required")
+        reporting_result = reporting_results[0]
+        if not _reporting_result_matches_handoff(reporting_result, handoff):
+            raise ReportReferenceError(
+                "reporting_result_handoff_mismatch",
+                "persisted Reporting result is not bound to this Supervisor handoff",
+            )
+        report_owner_id = _text(job.owner_id or job.session.owner_id)
+        report_guest_id = _chat_session_guest_id(job.session)
+        if not report_owner_id and not report_guest_id:
+            raise PermissionError("analysis report requires an owner or guest binding")
+        report_status = (
+            ReportStatus.READY.value
+            if final_status == AnalysisJobStatus.SUCCESS.value
+            and reporting_result.status == AgentResultStatus.SUCCESS.value
+            and gate.get("status") == "ready"
+            else ReportStatus.DRAFT.value
+        )
+        report_id = _worker_report_id(job.job_id)
+        reporting_payload = _worker_reporting_payload(
+            handoff=handoff,
+            reporting_result=reporting_result,
+            report_status=report_status,
+        )
+        report_links = _worker_report_links(report_id, report_status=report_status)
+        display_result = _upsert_worker_reporting_display(
+            job,
+            final_status=final_status,
+            handoff=handoff,
+            agent_results=agent_results,
+            reporting_result=reporting_result,
+            report_id=report_id,
+            report_status=report_status,
+        )
+        quality = _worker_report_quality(
+            final_status=final_status,
+            report_status=report_status,
+            agent_results=agent_results,
+        )
+        source = {
+            "contract_version": "analysis_report_source.v1",
+            "handoff_id": handoff.get("handoff_id"),
+            "handoff_fingerprint": _dict_or_empty(handoff.get("source")).get("fingerprint"),
+            "analysis_result_ids": _list_or_empty(
+                _dict_or_empty(handoff.get("source")).get("result_ids")
+            ),
+            "reporting_result_id": reporting_result.result_id,
+            "fact_version_id": fact_version_id or None,
+        }
+        report_content = {
+            "contract_version": "analysis_report.v1",
+            "format": "json",
+            "action": "worker_finalize",
+            "reporting_payload": reporting_payload,
+            "source": source,
+            "quality": quality,
+        }
+        request_fingerprint = _canonical_json_fingerprint(report_content)
+        existing_report = Report.objects.select_for_update().filter(report_id=report_id).first()
+        if existing_report is not None:
+            existing_fingerprint = _text(
+                _dict_or_empty(existing_report.metadata).get("request_fingerprint")
+            )
+            if existing_report.job_id != job.pk or existing_fingerprint != request_fingerprint:
+                raise ReportReferenceError(
+                    "report_id_payload_mismatch",
+                    "worker report id is already bound to a different canonical payload",
+                )
+            expected_fact_version_pk = (
+                source_fact_version.pk if source_fact_version is not None else None
+            )
+            if existing_report.source_fact_version_id != expected_fact_version_pk:
+                raise ReportReferenceError(
+                    "report_fact_version_mismatch",
+                    "worker report is bound to a different confirmed fact version",
+                )
+            report = existing_report
+            report.display_result = display_result
+            report.status = report_status
+            report.save(update_fields=["display_result", "status", "updated_at"])
+            reused = True
+        else:
+            version_no = case.current_report_version + 1 if case else 1
+            report = Report.objects.create(
+                report_id=report_id,
+                owner_id=report_owner_id,
+                session=job.session,
+                job=job,
+                case=case,
+                source_fact_version=source_fact_version,
+                display_result=display_result,
+                report_type=_report_type(_dict_or_empty(handoff.get("target")).get("report_type")),
+                version_no=version_no,
+                status=report_status,
+                title=_text(reporting_payload.get("title")) or "Analysis report",
+                storage_uri="",
+                content_summary=(
+                    _reporting_payload_content_summary(reporting_payload)
+                    or _sanitize_report_text(reporting_result.summary)
+                ),
+                content=report_content,
+                metadata={
+                    "source": "analysis_worker_reporting",
+                    "request_fingerprint": request_fingerprint,
+                    "persistence_state": "database_finalized",
+                    "artifact_state": "deferred",
+                    "object_storage_status": "not_requested",
+                    "guest_id": report_guest_id or None,
+                    "report_quality": quality,
+                    "supervisor_reporting_handoff": {
+                        "handoff_id": handoff.get("handoff_id"),
+                        "fingerprint": source["handoff_fingerprint"],
+                        "result_ids": source["analysis_result_ids"],
+                    },
+                },
+            )
+            if case and version_no > case.current_report_version:
+                case.current_report_version = version_no
+                case.save(update_fields=["current_report_version", "updated_at"])
+            reused = False
+
+        if case:
+            case.status = (
+                CaseStatus.READY.value
+                if report_status == ReportStatus.READY.value
+                else CaseStatus.NEEDS_INPUT.value
+            )
+            case.save(update_fields=["status", "updated_at"])
+
+        _update_job_reporting_bundle_metadata(
+            job,
+            handoff=handoff,
+            reporting_payload=reporting_payload,
+            report_links=report_links,
+            display_result=display_result,
+            report=report,
+            phase="database_finalized",
+        )
+        return {
+            "backend": "postgresql",
+            "contract_version": "analysis_reporting_bundle.v1",
+            "status": "reused" if reused else "saved",
+            "display_result_id": display_result.display_result_id,
+            "report_id": report.report_id,
+            "report_status": report.status,
+            "artifact_state": "deferred",
+        }
+
+
+def _persisted_agent_result_sort_key(result: AgentResult) -> tuple[int, str, str]:
+    plan_step = _dict_or_empty(_dict_or_empty(result.raw_output).get("plan_step"))
+    order = _positive_int_or_default(plan_step.get("order"), default=10_000)
+    return (order, result.node_code, result.result_id)
+
+
+def _upsert_worker_reporting_display(
+    job: AnalysisJob,
+    *,
+    final_status: str,
+    handoff: dict[str, Any],
+    agent_results: list[AgentResult],
+    reporting_result: AgentResult | None,
+    report_id: str,
+    report_status: str,
+) -> AnalysisDisplayResult:
+    source = _dict_or_empty(handoff.get("source"))
+    source_fingerprint = _text(source.get("fingerprint"))
+    existing = AnalysisDisplayResult.objects.select_for_update().filter(job=job).first()
+    existing_fingerprint = _text(
+        _dict_or_empty(existing.assistant_message).get("source_fingerprint")
+        if existing
+        else ""
+    )
+    if existing_fingerprint and existing_fingerprint != source_fingerprint:
+        raise ReportReferenceError(
+            "display_result_payload_mismatch",
+            "display result is already bound to a different Reporting handoff",
+        )
+    limitations = _dedupe_safe_report_text_values(
+        limitation
+        for result in agent_results
+        for limitation in _list_or_empty(result.limitations)
+    )
+    if reporting_result is None:
+        answer = "Required persisted analysis results did not pass the Reporting gate."
+        summary = answer
+        pending_questions = [
+            {"reason_code": reason_code}
+            for reason_code in _list_or_empty(_dict_or_empty(handoff.get("gate")).get("reason_codes"))
+        ]
+        cards = []
+        report_links = []
+    else:
+        answer = (
+            _sanitize_report_text(reporting_result.summary)
+            or "Analysis report is ready for review."
+        )
+        summary = answer
+        structured = _sanitize_report_value(
+            _dict_or_empty(reporting_result.structured_result)
+        )
+        pending_questions = [
+            {"field": field}
+            for field in _list_or_empty(structured.get("missing_fields"))
+        ]
+        cards = [
+            {
+                "card_type": "analysis_report",
+                "report_id": report_id,
+                "status": report_status,
+                "title": _sanitize_report_text(structured.get("document_title"))
+                or "Analysis report",
+            }
+        ]
+        report_links = _worker_report_links(report_id, report_status=report_status)
+    display_result, _created = AnalysisDisplayResult.objects.update_or_create(
+        display_result_id=_display_result_id(job.job_id),
+        defaults={
+            "job": job,
+            "assistant_message": {
+                "contract_version": "analysis_display_message.v1",
+                "status": final_status,
+                "answer": answer,
+                "summary": summary,
+                "report_id": report_id or None,
+                "report_status": report_status or None,
+                "source_fingerprint": source_fingerprint,
+            },
+            "progress": [
+                {
+                    "result_id": result.result_id,
+                    "node_code": result.node_code,
+                    "status": result.status,
+                    "summary": _sanitize_report_text(result.summary),
+                }
+                for result in agent_results
+            ],
+            "cards": cards,
+            "pending_questions": pending_questions,
+            "attachments": _safe_worker_display_attachments(
+                _dict_or_empty(job.metadata).get("attachments")
+            ),
+            "report_links": report_links,
+            "limitations": limitations,
+        },
+    )
+    return display_result
+
+
+def _worker_reporting_payload(
+    *,
+    handoff: dict[str, Any],
+    reporting_result: AgentResult,
+    report_status: str,
+) -> dict[str, Any]:
+    structured = _sanitize_report_value(
+        _dict_or_empty(reporting_result.structured_result)
+    )
+    safe_summary = _sanitize_report_text(reporting_result.summary)
+    return {
+        "contract_version": "reporting_payload.v2",
+        "source": "supervisor_agent_result_aggregation",
+        "source_node_codes": _list_or_empty(handoff.get("source_node_codes")),
+        "report_type": _dict_or_empty(handoff.get("target")).get("report_type"),
+        "stage": (
+            "agent_execution_ready"
+            if report_status == ReportStatus.READY.value
+            else "draft"
+        ),
+        "title": _sanitize_report_text(structured.get("document_title"))
+        or "Analysis report",
+        "summary": safe_summary,
+        "sections": _normalize_worker_reporting_sections(
+            _list_or_empty(structured.get("form_sections"))
+        ),
+        "data": structured,
+        "evidence": _sanitize_report_value(_list_or_empty(reporting_result.evidence)),
+        "next_actions": _sanitize_report_value(
+            _list_or_empty(reporting_result.next_actions)
+        ),
+        "limitations": _sanitize_report_value(
+            _list_or_empty(reporting_result.limitations)
+        ),
+        "provenance": {
+            "handoff_id": handoff.get("handoff_id"),
+            "fingerprint": _dict_or_empty(handoff.get("source")).get("fingerprint"),
+        },
+    }
+
+
+def _normalize_worker_reporting_sections(sections: list[Any]) -> list[dict[str, Any]]:
+    normalized_sections: list[dict[str, Any]] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        normalized = _sanitize_report_value(section)
+        body = _text(normalized.get("body"))
+        items = _list_or_empty(normalized.get("items"))
+        if body and not items:
+            items = [body]
+        normalized["items"] = items
+        normalized_sections.append(normalized)
+    return normalized_sections
+
+
+def _worker_report_quality(
+    *,
+    final_status: str,
+    report_status: str,
+    agent_results: list[AgentResult],
+) -> dict[str, Any]:
+    limitations = _dedupe_safe_report_text_values(
+        limitation
+        for result in agent_results
+        for limitation in _list_or_empty(result.limitations)
+    )
+    return {
+        "contract_version": "report_quality.v2",
+        "analysis_job_status": final_status,
+        "agent_status_counts": _agent_status_counts(agent_results),
+        "partial_report": report_status != ReportStatus.READY.value,
+        "review_required": True,
+        "limitation_count": len(limitations),
+        "limitations": limitations[:12],
+    }
+
+
+def _worker_report_links(report_id: str, *, report_status: str) -> list[dict[str, Any]]:
+    links = [
+        {
+            "report_id": report_id,
+            "action": "detail",
+            "endpoint": f"/api/reports/{report_id}/",
+        }
+    ]
+    if report_status == ReportStatus.READY.value:
+        links.append(
+            {
+                "report_id": report_id,
+                "action": "download",
+                "endpoint": f"/api/reports/{report_id}/download/",
+            }
+        )
+    return links
+
+
+def _update_job_reporting_bundle_metadata(
+    job: AnalysisJob,
+    *,
+    handoff: dict[str, Any],
+    reporting_payload: dict[str, Any],
+    report_links: list[dict[str, Any]],
+    display_result: AnalysisDisplayResult,
+    report: Report | None,
+    phase: str,
+) -> None:
+    metadata = dict(_dict_or_empty(job.metadata))
+    metadata.update(
+        {
+            "supervisor_reporting_handoff": handoff,
+            "reporting_payload": reporting_payload,
+            "report_links": report_links,
+            "assistant_message": display_result.assistant_message,
+            "reporting_pipeline": {
+                "contract_version": "analysis_reporting_pipeline.v1",
+                "phase": phase,
+                "display_result_id": display_result.display_result_id,
+                "report_id": report.report_id if report else None,
+            },
+        }
+    )
+    job.metadata = metadata
+    job.save(update_fields=["metadata", "updated_at"])
+
+
+def _worker_report_id(job_id: str) -> str:
+    readable = f"rep_{job_id}"
+    if len(readable) <= 64:
+        return readable
+    return f"rep_{hashlib.sha256(job_id.encode('utf-8')).hexdigest()[:24]}"
+
+
+def _canonical_json_fingerprint(value: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _dedupe_text_values(values) -> list[str]:
+    deduped = []
+    for value in values:
+        text = _text(value)
+        if text and text not in deduped:
+            deduped.append(text)
+    return deduped
+
+
+def _dedupe_safe_report_text_values(values) -> list[str]:
+    return _dedupe_text_values(
+        safe_value
+        for value in values
+        if (safe_value := _sanitize_report_text(value))
+    )
+
+
+def _safe_worker_display_attachments(value: Any) -> list[dict[str, str]]:
+    attachments: list[dict[str, str]] = []
+    for item in _list_or_empty(value):
+        if not isinstance(item, dict):
+            continue
+        attachment: dict[str, str] = {}
+        for field in ("attachment_id", "purpose", "filename"):
+            safe_value = _sanitize_report_text(item.get(field))
+            if safe_value:
+                attachment[field] = safe_value
+        if attachment:
+            attachments.append(attachment)
+    return attachments
+
+
+def _sanitize_report_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            if _is_sensitive_report_field(key) or _is_credential_url(item):
+                continue
+            sanitized[str(key)] = _sanitize_report_value(item)
+        return sanitized
+    if isinstance(value, list):
+        return [
+            _sanitize_report_value(item)
+            for item in value
+            if not _is_credential_url(item)
+        ]
+    if isinstance(value, tuple):
+        return [
+            _sanitize_report_value(item)
+            for item in value
+            if not _is_credential_url(item)
+        ]
+    if _is_credential_url(value):
+        return None
+    if isinstance(value, str):
+        return sanitize_sensitive_text(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _is_sensitive_report_field(key: Any) -> bool:
+    normalized = str(key).strip().lower()
+    collapsed = "".join(character for character in normalized if character.isalnum())
+    return bool(
+        normalized in REPORT_SENSITIVE_FIELDS
+        or collapsed in REPORT_SENSITIVE_FIELD_KEYS
+        or collapsed.endswith("token")
+        or any(fragment in collapsed for fragment in REPORT_SENSITIVE_FIELD_FRAGMENTS)
+    )
+
+
+def _is_credential_url(value: Any) -> bool:
+    if not isinstance(value, str) or "://" not in value:
+        return False
+    try:
+        parsed = urlsplit(value)
+        if parsed.username is not None or parsed.password is not None:
+            return True
+        query_keys = {
+            "".join(character for character in key.lower() if character.isalnum())
+            for key, _item in parse_qsl(parsed.query, keep_blank_values=True)
+        }
+    except ValueError:
+        return False
+    return bool(
+        query_keys
+        & {
+            "accesstoken",
+            "credential",
+            "googleaccessid",
+            "sig",
+            "signature",
+            "token",
+            "xamzcredential",
+            "xamzsecuritytoken",
+            "xamzsignature",
+            "xgoogcredential",
+            "xgoogsecuritytoken",
+            "xgoogsignature",
+        }
+    )
+
+
+def _sanitize_report_text(value: Any) -> str:
+    return sanitize_sensitive_text(value)
+
+
 def persist_report_action(
     payload: dict[str, Any],
     report_payload: dict[str, Any],
@@ -1961,7 +3505,15 @@ def persist_report_action(
 
     owner_id = _owner_id(payload)
     job = AnalysisJob.objects.filter(job_id=_text(payload.get("job_id"))).first()
-    session = job.session if job else _get_or_create_session(payload.get("session_id"), owner_id=owner_id)
+    session = (
+        job.session
+        if job
+        else _get_or_create_session(
+            payload.get("session_id"),
+            owner_id=owner_id,
+            guest_id=_payload_guest_id(payload),
+        )
+    )
     display_result = _display_result_for_job(job)
     report_quality = _report_quality_snapshot(job, display_result, report_payload)
     report_owner_id = owner_id or (job.owner_id if job else "") or (session.owner_id if session else "")
@@ -1993,6 +3545,7 @@ def persist_report_action(
         source_uri=source_storage_uri,
     )
 
+    cleanup_pending_report_pk: int | None = None
     with transaction.atomic():
         locked_case = (
             Case.objects.select_for_update().get(pk=case.pk)
@@ -2025,6 +3578,15 @@ def persist_report_action(
                     existing_report,
                     report_quality=report_quality,
                 )
+            if (
+                _text(
+                    _dict_or_empty(existing_report.metadata).get(
+                        "persistence_state"
+                    )
+                )
+                == REPORT_STAGING_CLEANUP_PENDING
+            ):
+                cleanup_pending_report_pk = existing_report.pk
             report = existing_report
         else:
             version_no = locked_case.current_report_version + 1 if locked_case is not None else 1
@@ -2080,6 +3642,11 @@ def persist_report_action(
                 locked_case.current_report_version = version_no
                 locked_case.save(update_fields=["current_report_version", "updated_at"])
 
+    if cleanup_pending_report_pk is not None:
+        _purge_pending_report_staging_object(cleanup_pending_report_pk)
+        report = Report.objects.get(pk=cleanup_pending_report_pk)
+        return _report_persistence_result(report, report_quality=report_quality)
+
     staging_storage = _staging_report_storage_reference(object_storage)
     try:
         staging_write = write_object(
@@ -2095,14 +3662,22 @@ def persist_report_action(
         )
     except Exception:
         cleanup = _safe_delete_staged_object(staging_storage)
-        _mark_report_storage_failure(report.pk, cleanup=cleanup)
+        _mark_report_storage_failure(
+            report.pk,
+            cleanup=cleanup,
+            staging_storage=staging_storage,
+        )
         raise
     if staging_write.get("writes_binary"):
         try:
             promotion = copy_object(staging_storage, object_storage)
         except Exception:
             cleanup = _safe_delete_staged_object(staging_storage)
-            _mark_report_storage_failure(report.pk, cleanup=cleanup)
+            _mark_report_storage_failure(
+                report.pk,
+                cleanup=cleanup,
+                staging_storage=staging_storage,
+            )
             raise
     else:
         promotion = {
@@ -2111,10 +3686,18 @@ def persist_report_action(
             "persistence_state": "staging_write_failed",
             "reason": "staging_write_failed",
         }
-    cleanup = (
-        _safe_delete_staged_object(staging_storage)
-        if staging_write.get("writes_binary")
-        else {"status": "not_required"}
+    cleanup = _safe_delete_staged_object(staging_storage)
+    cleanup_completed = _report_staging_cleanup_completed(
+        cleanup,
+        reference=staging_storage,
+    )
+    cleanup_target_state = (
+        "finalized" if promotion.get("writes_binary") else "storage_failed"
+    )
+    persistence_state = (
+        cleanup_target_state
+        if cleanup_completed
+        else REPORT_STAGING_CLEANUP_PENDING
     )
     finalized_storage = {
         **object_storage,
@@ -2136,11 +3719,15 @@ def persist_report_action(
                 "object_storage_write": promotion,
                 "object_storage_staging_write": staging_write,
                 "object_storage_staging_cleanup": cleanup,
-                "persistence_state": (
-                    "finalized" if promotion.get("writes_binary") else "storage_failed"
+                "object_storage_staging": _minimal_report_storage_reference(
+                    staging_storage
                 ),
+                "staging_cleanup_target_state": cleanup_target_state,
+                "persistence_state": persistence_state,
             }
         )
+        if persistence_state != REPORT_STAGING_CLEANUP_PENDING:
+            metadata.pop("staging_cleanup_target_state", None)
         report.content = content
         report.metadata = metadata
         report.save(update_fields=["content", "metadata", "updated_at"])
@@ -2180,17 +3767,33 @@ def _mark_report_storage_failure(
     report_pk: int,
     *,
     cleanup: dict[str, Any],
+    staging_storage: dict[str, Any],
 ) -> None:
     with transaction.atomic():
         failed_report = Report.objects.select_for_update().get(pk=report_pk)
         metadata = dict(failed_report.metadata or {})
+        cleanup_completed = _report_staging_cleanup_completed(
+            cleanup,
+            reference=staging_storage,
+        )
         metadata.update(
             {
                 "object_storage_status": "failed",
                 "object_storage_staging_cleanup": cleanup,
-                "persistence_state": "storage_failed",
+                "object_storage_staging": _minimal_report_storage_reference(
+                    staging_storage
+                ),
+                "persistence_state": (
+                    "storage_failed"
+                    if cleanup_completed
+                    else REPORT_STAGING_CLEANUP_PENDING
+                ),
             }
         )
+        if cleanup_completed:
+            metadata.pop("staging_cleanup_target_state", None)
+        else:
+            metadata["staging_cleanup_target_state"] = "storage_failed"
         failed_report.metadata = metadata
         failed_report.save(update_fields=["metadata", "updated_at"])
 
@@ -2204,6 +3807,145 @@ def _staging_report_storage_reference(reference: dict[str, Any]) -> dict[str, An
     staging["storage_uri"] = f"s3://{bucket}/{staging_key}" if bucket else staging_key
     staging["resource_id"] = f"{_text(reference.get('resource_id'))}:staging"
     return staging
+
+
+def purge_pending_report_staging(*, limit: int | None = None) -> dict[str, Any]:
+    """Retry deletion of staged report objects before finalizing their state."""
+
+    resolved_limit = _positive_report_staging_cleanup_limit(limit)
+    queryset = (
+        Report.objects.filter(
+            metadata__persistence_state=REPORT_STAGING_CLEANUP_PENDING
+        )
+        .order_by("updated_at", "pk")
+        .values_list("pk", flat=True)
+    )
+    selected_pks = list(queryset[:resolved_limit])
+    batch = {
+        "contract_version": REPORT_STAGING_CLEANUP_BATCH_VERSION,
+        "status": "pass",
+        "selected": len(selected_pks),
+        "cleaned": 0,
+        "retryable": 0,
+        "skipped": 0,
+    }
+    for report_pk in selected_pks:
+        outcome = _purge_pending_report_staging_object(report_pk)
+        batch[outcome] += 1
+    if batch["retryable"]:
+        batch["status"] = "warn"
+    return batch
+
+
+def _purge_pending_report_staging_object(report_pk: int) -> str:
+    report = Report.objects.filter(pk=report_pk).first()
+    if report is None:
+        return "skipped"
+    metadata = _dict_or_empty(report.metadata)
+    if _text(metadata.get("persistence_state")) != REPORT_STAGING_CLEANUP_PENDING:
+        return "skipped"
+    staging_reference = _validated_report_staging_reference(report)
+    if not staging_reference:
+        cleanup = {"status": "skipped", "reason": "staging_reference_invalid"}
+    else:
+        cleanup = _safe_delete_staged_object(staging_reference)
+    cleanup_completed = bool(staging_reference) and _report_staging_cleanup_completed(
+        cleanup,
+        reference=staging_reference,
+    )
+
+    with transaction.atomic():
+        locked_report = Report.objects.select_for_update().filter(pk=report_pk).first()
+        if locked_report is None:
+            return "skipped"
+        locked_metadata = _dict_or_empty(locked_report.metadata)
+        if (
+            _text(locked_metadata.get("persistence_state"))
+            != REPORT_STAGING_CLEANUP_PENDING
+        ):
+            return "skipped"
+        locked_metadata["object_storage_staging_cleanup"] = cleanup
+        if cleanup_completed:
+            locked_metadata["persistence_state"] = (
+                _text(locked_metadata.get("staging_cleanup_target_state"))
+                or "finalized"
+            )
+            locked_metadata.pop("staging_cleanup_target_state", None)
+        locked_report.metadata = locked_metadata
+        locked_report.save(update_fields=["metadata", "updated_at"])
+    return "cleaned" if cleanup_completed else "retryable"
+
+
+def _validated_report_staging_reference(report: Report) -> dict[str, Any]:
+    metadata = _dict_or_empty(report.metadata)
+    final_reference = _dict_or_empty(metadata.get("object_storage"))
+    if (
+        _text(final_reference.get("resource_type")) != "report"
+        or _text(final_reference.get("resource_id")) != report.report_id
+        or _text(final_reference.get("bucket")) != object_storage_bucket()
+    ):
+        return {}
+    final_key = _text(final_reference.get("key"))
+    prefix = object_storage_prefix().strip("/")
+    expected_prefix = f"{prefix}/reports/" if prefix else "reports/"
+    if (
+        not final_key.startswith(expected_prefix)
+        or ".." in final_key.split("/")
+        or "\\" in final_key
+    ):
+        return {}
+    expected = _staging_report_storage_reference(final_reference)
+    stored = _dict_or_empty(metadata.get("object_storage_staging"))
+    for field in ("provider", "bucket", "key", "resource_type", "resource_id"):
+        if stored and _text(stored.get(field)) != _text(expected.get(field)):
+            return {}
+    return expected
+
+
+def _report_staging_cleanup_completed(
+    cleanup: dict[str, Any],
+    *,
+    reference: dict[str, Any],
+) -> bool:
+    if cleanup.get("status") not in SUCCESSFUL_STORAGE_DELETE_STATUSES:
+        return False
+    provider = _text(reference.get("provider")) or _text(
+        object_storage_policy().get("provider")
+    )
+    return provider != "s3" or bool(cleanup.get("permanent"))
+
+
+def _minimal_report_storage_reference(reference: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: reference[key]
+        for key in (
+            "policy_version",
+            "backend",
+            "provider",
+            "bucket",
+            "key",
+            "resource_type",
+            "resource_id",
+        )
+        if reference.get(key) not in (None, "")
+    }
+
+
+def _positive_report_staging_cleanup_limit(value: int | None) -> int:
+    raw_value = (
+        value
+        if value is not None
+        else getattr(
+            settings,
+            "REPORT_STAGING_CLEANUP_LIMIT",
+            DEFAULT_REPORT_STAGING_CLEANUP_LIMIT,
+        )
+    )
+    try:
+        parsed = int(raw_value)
+    except (TypeError, ValueError):
+        return DEFAULT_REPORT_STAGING_CLEANUP_LIMIT
+    return parsed if parsed > 0 else DEFAULT_REPORT_STAGING_CLEANUP_LIMIT
 
 
 def _report_request_fingerprint(
@@ -2320,6 +4062,31 @@ def _source_fact_version_for_report(
     return fact_version
 
 
+def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
+    """Load the minimum report identity needed for authorization.
+
+    This function intentionally performs no PDF rendering or object-storage
+    resolution so callers can authorize before doing expensive work.
+    """
+
+    report = Report.objects.select_related("session").filter(report_id=report_id).first()
+    if report is None:
+        return None
+    metadata = _dict_or_empty(report.metadata)
+    owner_id = _text(report.owner_id or (report.session.owner_id if report.session_id else ""))
+    guest_id = _normalize_guest_id(metadata.get("guest_id"))
+    if not guest_id and report.session_id:
+        guest_id = _chat_session_guest_id(report.session)
+    return {
+        "report_id": report.report_id,
+        "owner_id": owner_id or None,
+        "guest_id": guest_id or None,
+        "session_id": report.session.session_id if report.session_id else None,
+        "status": report.status,
+        "source": _text(metadata.get("source")),
+    }
+
+
 def get_report_download_metadata(report_id: str, *, document_type: str | None = None) -> dict[str, Any] | None:
     report = (
         Report.objects.select_related("session", "job", "display_result")
@@ -2358,7 +4125,11 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
     return {
         "report_id": report.report_id,
         "document_type": normalized_document_type,
-        "owner_id": report.owner_id,
+        "owner_id": report.owner_id or (report.session.owner_id if report.session_id else ""),
+        "guest_id": (
+            _normalize_guest_id(_dict_or_empty(report.metadata).get("guest_id"))
+            or (_chat_session_guest_id(report.session) if report.session_id else None)
+        ),
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
         "filename": filename,
@@ -2382,7 +4153,10 @@ def list_report_records(
     if session_id:
         reports = reports.filter(session__session_id=session_id)
     if owner_id:
-        reports = reports.filter(owner_id=owner_id)
+        reports = reports.filter(
+            Q(owner_id=owner_id)
+            | Q(owner_id="", session__owner_id=owner_id)
+        )
     return [_report_record_summary(report) for report in reports]
 
 
@@ -2402,9 +4176,12 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
     return {
         **_report_record_summary(report),
         "content": {
+            "contract_version": _text(content.get("contract_version")),
             "reporting_payload": reporting_payload,
             "format": _text(content.get("format")),
             "action": _text(content.get("action")),
+            "source": _dict_or_empty(content.get("source")),
+            "quality": _dict_or_empty(content.get("quality")),
         },
         "metadata": {
             "report_quality": _dict_or_empty(metadata.get("report_quality")),
@@ -2427,8 +4204,13 @@ def _report_record_summary(report: Report) -> dict[str, Any]:
     content = _dict_or_empty(report.content)
     reporting_payload = _dict_or_empty(content.get("reporting_payload"))
     report_quality = _dict_or_empty(metadata.get("report_quality"))
+    is_worker_draft = (
+        metadata.get("source") == "analysis_worker_reporting"
+        and report.status != ReportStatus.READY.value
+    )
     return {
         "report_id": report.report_id,
+        "source": _text(metadata.get("source")),
         "report_type": report.report_type,
         "screen_id": _text(reporting_payload.get("screen_id")),
         "title": report.title,
@@ -2436,7 +4218,11 @@ def _report_record_summary(report: Report) -> dict[str, Any]:
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
         "summary": report.content_summary,
-        "download_url": f"/api/reports/{report.report_id}/download/",
+        "download_url": (
+            None
+            if is_worker_draft
+            else f"/api/reports/{report.report_id}/download/"
+        ),
         "partial_report": bool(report_quality.get("partial_report")),
         "created_at": report.created_at.isoformat(),
         "updated_at": report.updated_at.isoformat(),
@@ -2449,11 +4235,17 @@ def authorize_report_download_metadata(
 ) -> dict[str, Any]:
     """Authorize report metadata download before the object body is returned."""
 
+    owner_id = _text(download.get("owner_id"))
+    guest_id = _normalize_guest_id(download.get("guest_id"))
     resource = {
         "type": "report",
         "report_id": download.get("report_id"),
-        "owner_id": download.get("owner_id"),
-        "session_id": download.get("session_id"),
+        "owner_id": owner_id or None,
+        "guest_id": guest_id or None,
+        # A bare session id is guessable and is not an ownership binding for a
+        # report.  Keep it only as contextual metadata once an owner/guest
+        # binding exists.
+        "session_id": download.get("session_id") if owner_id or guest_id else None,
         "storage_backend": download.get("storage_backend"),
     }
     return authorize_resource_access(resource, payload)
@@ -2461,10 +4253,25 @@ def authorize_report_download_metadata(
 
 def access_subject_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     auth_context = _dict_or_empty(payload.get("auth_context"))
-    user_id = _owner_id(payload) or _text(auth_context.get("user_id"))
-    guest_id = _normalize_guest_id(payload.get("guest_id") or auth_context.get("guest_id"))
+    context_has_identity = any(
+        key in auth_context
+        for key in (
+            "subject_id",
+            "subject_type",
+            "user_id",
+            "guest_id",
+            "auth_session_id",
+        )
+    )
+    if context_has_identity:
+        user_id = _text(auth_context.get("user_id"))
+        guest_id = _normalize_guest_id(auth_context.get("guest_id"))
+        auth_session_id = _text(auth_context.get("auth_session_id"))
+    else:
+        user_id = _owner_id(payload)
+        guest_id = _normalize_guest_id(payload.get("guest_id"))
+        auth_session_id = _text(payload.get("auth_session_id"))
     session_id = _text(payload.get("session_id") or auth_context.get("session_id"))
-    auth_session_id = _text(payload.get("auth_session_id") or auth_context.get("auth_session_id"))
 
     if user_id:
         subject_type = "user"
@@ -2514,8 +4321,13 @@ def authorize_resource_access(
         allowed = bool(session_id and session_id == resource_session_id)
         reason = "session_match" if allowed else "session_mismatch"
     else:
-        allowed = True
-        reason = "legacy_unowned_resource"
+        object_identifiers = (
+            resource.get("attachment_id"),
+            resource.get("job_id"),
+            resource.get("report_id"),
+        )
+        allowed = not any(_text(value) for value in object_identifiers)
+        reason = "unscoped_collection" if allowed else "unbound_resource"
 
     return {
         "contract_version": "object_access.v1",
@@ -2528,6 +4340,7 @@ def authorize_resource_access(
                 "type": resource.get("type"),
                 "report_id": resource.get("report_id"),
                 "attachment_id": resource.get("attachment_id"),
+                "job_id": resource.get("job_id"),
                 "session_id": resource_session_id or None,
                 "owner_id": resource_owner_id or None,
                 "guest_id": resource_guest_id or None,
@@ -2570,7 +4383,10 @@ def get_mycase_summary(
     if session_id:
         saved_reports = saved_reports.filter(session__session_id=session_id)
     if owner_id:
-        saved_reports = saved_reports.filter(owner_id=owner_id)
+        saved_reports = saved_reports.filter(
+            Q(owner_id=owner_id)
+            | Q(owner_id="", session__owner_id=owner_id)
+        )
 
     report_rows = list(saved_reports.select_related("session"))
     saved_report_count = sum(1 for report in report_rows if _conversation_is_saved_for_report(report))
@@ -2607,6 +4423,63 @@ def get_mycase_summary(
             "authorization is still mock bearer/guest-shape based.",
         ],
     }
+
+
+def get_analysis_job_access_metadata(job_id: str) -> dict[str, Any] | None:
+    """Return the minimum ownership record needed before exposing a job."""
+
+    job = (
+        AnalysisJob.objects.select_related("session")
+        .filter(job_id=_text(job_id))
+        .only("job_id", "owner_id", "session__session_id", "session__owner_id")
+        .first()
+    )
+    if job is None:
+        return None
+    return {
+        "type": "analysis_job",
+        "job_id": job.job_id,
+        "owner_id": job.owner_id or job.session.owner_id,
+        "session_id": job.session.session_id,
+    }
+
+
+def list_analysis_job_records(
+    *,
+    owner_id: str,
+    session_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List only jobs owned by the authenticated principal."""
+
+    normalized_owner_id = _text(owner_id)
+    if not normalized_owner_id:
+        return []
+    queryset = (
+        AnalysisJob.objects.select_related("session")
+        .filter(
+            Q(owner_id=normalized_owner_id)
+            | Q(owner_id="", session__owner_id=normalized_owner_id)
+        )
+        .order_by("-updated_at")
+    )
+    if session_id:
+        queryset = queryset.filter(session__session_id=_text(session_id))
+    return [
+        {
+            "contract_version": "analysis_job_summary.v1",
+            "job_id": job.job_id,
+            "session_id": job.session.session_id,
+            "owner_id": job.owner_id or job.session.owner_id,
+            "routing_intent": job.routing_intent,
+            "status": job.status,
+            "active_node": job.active_node,
+            "progress_message": job.progress_message,
+            "analysis_plan_id": job.analysis_plan_id,
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+        }
+        for job in queryset
+    ]
 
 
 def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
@@ -2670,7 +4543,11 @@ def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
         "report_links": display_payload["report_links"],
         "limitations": display_payload["limitations"],
         "supervisor_state": _dict_or_empty(metadata.get("supervisor_state")),
+        "supervisor_reporting_handoff": _dict_or_empty(
+            metadata.get("supervisor_reporting_handoff")
+        ),
         "reporting_payload": _dict_or_empty(metadata.get("reporting_payload")),
+        "reporting_pipeline": _dict_or_empty(metadata.get("reporting_pipeline")),
         "supervisor_execution": supervisor_execution,
         "agent_results": node_results,
         "agent_result_count": len(agent_results),
@@ -2773,11 +4650,11 @@ def _agent_result_node_results(agent_results: list[AgentResult]) -> list[dict[st
                     "depends_on": plan_step.get("depends_on") or [],
                 },
                 "status": result.status,
-                "summary": result.summary,
-                "structured_result": result.structured_result or {},
-                "evidence": result.evidence or [],
-                "next_actions": result.next_actions or [],
-                "limitations": result.limitations or [],
+                "summary": _sanitize_report_text(result.summary),
+                "structured_result": _sanitize_report_value(result.structured_result or {}),
+                "evidence": _sanitize_report_value(result.evidence or []),
+                "next_actions": _sanitize_report_value(result.next_actions or []),
+                "limitations": _sanitize_report_value(result.limitations or []),
                 "created_at": result.created_at.isoformat(),
             }
         )
@@ -2887,23 +4764,65 @@ def _uploaded_file_object_storage(uploaded_file: UploadedFile) -> dict[str, Any]
     )
 
 
-def _get_or_create_session(session_id: Any, *, owner_id: str) -> ChatSession | None:
+def _get_or_create_session(
+    session_id: Any,
+    *,
+    owner_id: str,
+    guest_id: str = "",
+) -> ChatSession | None:
     normalized_session_id = _text(session_id)
     if not normalized_session_id:
         return None
 
-    session, _created = ChatSession.objects.get_or_create(
-        session_id=normalized_session_id,
-        defaults={
-            "owner_id": owner_id,
-            "status": ChatSessionStatus.ACTIVE,
-            "metadata": {"created_by": "canonical_file_upload"},
-        },
+    normalized_owner_id = _text(owner_id)
+    normalized_guest_id = _normalize_guest_id(guest_id)
+    initial_auth_context = (
+        {"guest_id": normalized_guest_id, "subject_type": "guest"}
+        if normalized_guest_id
+        else {}
     )
-    if owner_id and not session.owner_id:
-        session.owner_id = owner_id
-        session.save(update_fields=["owner_id", "updated_at"])
-    return session
+    with transaction.atomic():
+        session, created = ChatSession.objects.select_for_update().get_or_create(
+            session_id=normalized_session_id,
+            defaults={
+                "owner_id": normalized_owner_id,
+                "status": ChatSessionStatus.ACTIVE,
+                "metadata": {
+                    "created_by": "canonical_session_binding",
+                    **(
+                        {"auth_context": initial_auth_context}
+                        if initial_auth_context
+                        else {}
+                    ),
+                },
+            },
+        )
+        if created:
+            return session
+
+        existing_guest_id = _chat_session_guest_id(session)
+        if session.owner_id:
+            if not normalized_owner_id or session.owner_id != normalized_owner_id:
+                raise SessionBindingError("session_owned_by_another_identity")
+            return session
+
+        if normalized_owner_id:
+            if not existing_guest_id:
+                raise SessionBindingError("session_unbound")
+            if not normalized_guest_id or existing_guest_id != normalized_guest_id:
+                raise SessionBindingError("guest_session_binding_mismatch")
+            session.owner_id = normalized_owner_id
+            session.save(update_fields=["owner_id", "updated_at"])
+            return session
+
+        if existing_guest_id:
+            if not normalized_guest_id or existing_guest_id != normalized_guest_id:
+                raise SessionBindingError("guest_session_binding_mismatch")
+            return session
+
+        if normalized_guest_id:
+            raise SessionBindingError("session_unbound")
+        return session
 
 
 def _conversation_save_state_result(status: str, save_state: str, *, reason: str | None = None) -> dict[str, Any]:
@@ -2998,6 +4917,24 @@ def _update_session_job_save_state(session: ChatSession, save_state: str, *, own
     return updated
 
 
+def _update_session_report_save_state(
+    session: ChatSession,
+    save_state: str,
+    *,
+    owner_id: str = "",
+) -> int:
+    updated = 0
+    for report in Report.objects.select_for_update().filter(session=session):
+        report.metadata = _metadata_with_conversation_save_state(report.metadata, save_state)
+        update_fields = ["metadata", "updated_at"]
+        if save_state == "saved" and owner_id and not report.owner_id:
+            report.owner_id = owner_id
+            update_fields.append("owner_id")
+        report.save(update_fields=update_fields)
+        updated += 1
+    return updated
+
+
 def _update_session_history_save_state(session_id: str, save_state: str) -> int:
     updated = 0
     for event in HistoryEvent.objects.filter(subject_session_id=session_id):
@@ -3013,7 +4950,11 @@ def _bind_chat_session_auth_context(
     owner_id: str,
     auth_context: dict[str, Any],
 ) -> ChatSession | None:
-    session = _get_or_create_session(session_id, owner_id=owner_id)
+    session = _get_or_create_session(
+        session_id,
+        owner_id=owner_id,
+        guest_id=_normalize_guest_id(auth_context.get("guest_id")),
+    )
     if session is None:
         return None
 
@@ -3105,6 +5046,11 @@ def _owner_id(payload: dict[str, Any]) -> str:
     return _text(payload.get("owner_id") or payload.get("user_id"))
 
 
+def _payload_guest_id(payload: dict[str, Any]) -> str:
+    auth_context = _dict_or_empty(payload.get("auth_context"))
+    return _normalize_guest_id(payload.get("guest_id") or auth_context.get("guest_id"))
+
+
 def _message_content(payload: dict[str, Any]) -> str:
     return _text(payload.get("user_text") or payload.get("message") or payload.get("content"))
 
@@ -3137,6 +5083,21 @@ def _analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int
         status = _text(step.get("status")) or "unknown"
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _queued_analysis_plan_status_counts(analysis_plan: dict[str, Any]) -> dict[str, int]:
+    from app.services.agent_node_service import executable_analysis_plan_steps
+
+    return {"queued": len(executable_analysis_plan_steps(analysis_plan))}
+
+
+def _analysis_plan_first_executable_node(analysis_plan: dict[str, Any]) -> str:
+    from app.services.agent_node_service import executable_analysis_plan_steps
+
+    steps = executable_analysis_plan_steps(analysis_plan)
+    if not steps:
+        return ""
+    return _text(steps[0].get("node_code"))
 
 
 def _analysis_plan_first_node(analysis_plan: dict[str, Any]) -> str:
@@ -3205,6 +5166,36 @@ def _analysis_job_status_from_node_execution(node_execution: dict[str, Any]) -> 
     return AnalysisJobStatus.SUCCESS.value
 
 
+def _analysis_reporting_job_status(
+    node_execution: dict[str, Any],
+    *,
+    handoff: dict[str, Any],
+    reporting_blocked: bool,
+) -> str:
+    gate_status = _text(_dict_or_empty(handoff.get("gate")).get("status"))
+    if gate_status == "draft":
+        return AnalysisJobStatus.PARTIAL.value
+    if reporting_blocked or gate_status == "blocked":
+        return AnalysisJobStatus.FAILED.value
+
+    reporting_statuses = [
+        _text(_dict_or_empty(execution.get("agent_output")).get("status"))
+        for execution in _list_or_empty(node_execution.get("executions"))
+        if isinstance(execution, dict)
+        and _text(execution.get("node_code")) == REPORTING_AGENT_NODE_CODE
+    ]
+    if len(reporting_statuses) != 1:
+        return AnalysisJobStatus.FAILED.value
+    reporting_status = reporting_statuses[0]
+    if reporting_status == AgentResultStatus.FAILED.value:
+        return AnalysisJobStatus.FAILED.value
+    if reporting_status == AgentResultStatus.PARTIAL.value:
+        return AnalysisJobStatus.PARTIAL.value
+    if gate_status == "ready" and reporting_status == AgentResultStatus.SUCCESS.value:
+        return AnalysisJobStatus.SUCCESS.value
+    return AnalysisJobStatus.FAILED.value
+
+
 def _final_node_from_execution(node_execution: dict[str, Any]) -> str:
     completed = _list_or_empty(node_execution.get("completed_node_codes"))
     if completed:
@@ -3240,6 +5231,71 @@ def _agent_worker_setting(name: str, default: int) -> int:
     return _positive_int_or_default(getattr(settings, name, default), default=default)
 
 
+def _worker_lease_is_current(
+    work_item: AgentWorkItem,
+    *,
+    expected_attempt_no: int,
+) -> bool:
+    return (
+        work_item.status == AgentWorkItemStatus.RUNNING.value
+        and work_item.attempt_no == expected_attempt_no
+    )
+
+
+def _refresh_agent_work_item_lease(
+    work_item_id: str,
+    *,
+    expected_attempt_no: int,
+) -> bool:
+    updated = AgentWorkItem.objects.filter(
+        work_item_id=_text(work_item_id),
+        status=AgentWorkItemStatus.RUNNING.value,
+        attempt_no=expected_attempt_no,
+    ).update(locked_at=timezone.now())
+    return updated == 1
+
+
+@contextmanager
+def _agent_work_item_lease_heartbeat(
+    work_item_id: str,
+    *,
+    expected_attempt_no: int,
+) -> Iterator[None]:
+    configured_interval = _agent_worker_setting("AGENT_WORKER_HEARTBEAT_SECONDS", 30)
+    stale_after = _agent_worker_setting("AGENT_WORKER_STALE_AFTER_SECONDS", 900)
+    interval_seconds = min(configured_interval, max(1, stale_after // 3))
+    stop_event = Event()
+
+    def refresh_until_stopped() -> None:
+        close_old_connections()
+        try:
+            while not stop_event.wait(interval_seconds):
+                try:
+                    refreshed = _refresh_agent_work_item_lease(
+                        work_item_id,
+                        expected_attempt_no=expected_attempt_no,
+                    )
+                except (DatabaseError, OSError):
+                    close_old_connections()
+                    continue
+                if not refreshed:
+                    break
+        finally:
+            close_old_connections()
+
+    heartbeat = Thread(
+        target=refresh_until_stopped,
+        name=f"agent-work-heartbeat-{work_item_id}",
+        daemon=True,
+    )
+    heartbeat.start()
+    try:
+        yield
+    finally:
+        stop_event.set()
+        heartbeat.join(timeout=5)
+
+
 def _agent_work_item_skipped(
     reason: str,
     *,
@@ -3260,6 +5316,89 @@ def _agent_work_item_skipped(
     if next_run_at:
         result["next_run_at"] = next_run_at
     return result
+
+
+def _case_analysis_job_is_current(job: AnalysisJob, case: Case) -> bool:
+    case_metadata = _dict_or_empty(case.metadata)
+    job_metadata = _dict_or_empty(job.metadata)
+    active_job_id = _text(case_metadata.get("active_analysis_job_id"))
+    active_fact_version_id = _text(case_metadata.get("active_fact_version_id"))
+    job_fact_version_id = _text(job_metadata.get("fact_version_id"))
+    if active_job_id and active_job_id != job.job_id:
+        return False
+    if active_fact_version_id and active_fact_version_id != job_fact_version_id:
+        return False
+    return True
+
+
+def _case_analysis_job_has_confirmed_fact_provenance(
+    job: AnalysisJob,
+    case: Case,
+) -> bool:
+    case_metadata = _dict_or_empty(case.metadata)
+    job_fact_version_id = _text(_dict_or_empty(job.metadata).get("fact_version_id"))
+    active_job_id = _text(case_metadata.get("active_analysis_job_id"))
+    active_fact_version_id = _text(case_metadata.get("active_fact_version_id"))
+    if (
+        not job_fact_version_id
+        or active_job_id != job.job_id
+        or active_fact_version_id != job_fact_version_id
+    ):
+        return False
+    return ConfirmedFactVersion.objects.filter(
+        case=case,
+        fact_version_id=job_fact_version_id,
+        status="confirmed",
+    ).exists()
+
+
+def _agent_work_item_case_is_current(work_item: AgentWorkItem) -> bool:
+    if not work_item.job.case_id:
+        return True
+    case = Case.objects.filter(pk=work_item.job.case_id).first()
+    return case is not None and _case_analysis_job_is_current(work_item.job, case)
+
+
+def _paid_agent_retry_requires_manual_recovery(job: AnalysisJob) -> bool:
+    guards = list(
+        AgentInvocation.objects.filter(
+            job=job,
+            node_code__startswith="__paid_",
+        )
+    )
+    if not guards:
+        return False
+    analysis_plan = _dict_or_empty(_dict_or_empty(job.metadata).get("analysis_plan"))
+    try:
+        analysis_phase_plan, reporting_phase_plan = _partition_reporting_plan(
+            analysis_plan
+        )
+    except ValueError:
+        return True
+    for guard in guards:
+        guard_metadata = _dict_or_empty(guard.metadata)
+        phase = _text(guard_metadata.get("phase"))
+        expected_snapshot = guard_metadata.get("expected_node_codes")
+        if isinstance(expected_snapshot, list):
+            node_codes = [
+                _text(node_code)
+                for node_code in expected_snapshot
+                if _text(node_code)
+            ]
+        elif phase == "reporting":
+            node_codes = [REPORTING_AGENT_NODE_CODE]
+        elif phase == "analysis":
+            guarded_plan = analysis_phase_plan if reporting_phase_plan else analysis_plan
+            node_codes = _analysis_plan_node_codes(guarded_plan)
+        else:
+            node_codes = []
+        checkpoint_exists = bool(node_codes) and _persisted_analysis_results_complete(
+            job,
+            node_codes=node_codes,
+        )
+        if not checkpoint_exists:
+            return True
+    return False
 
 
 def _upsert_initial_job_event(
@@ -3324,12 +5463,59 @@ def _requeue_stale_agent_work_items(
     )
     cutoff = now - timedelta(seconds=stale_after)
     requeued: list[dict[str, Any]] = []
+    candidates = list(
+        AgentWorkItem.objects.filter(
+            status=AgentWorkItemStatus.RUNNING.value,
+            locked_at__isnull=False,
+            locked_at__lte=cutoff,
+        )
+        .order_by("locked_at")
+        .values(
+            "work_item_id",
+            "job_id",
+            "job__case_id",
+            "job__session_id",
+            "job__session__case_id",
+        )[:50]
+    )
+    candidate_ids = [item["work_item_id"] for item in candidates]
+    job_ids = sorted({item["job_id"] for item in candidates})
+    session_ids = sorted({item["job__session_id"] for item in candidates})
+    case_ids = sorted(
+        {
+            case_id
+            for item in candidates
+            for case_id in (
+                item["job__case_id"],
+                item["job__session__case_id"],
+            )
+            if case_id is not None
+        }
+    )
 
     with transaction.atomic():
+        locked_cases = {
+            case.pk: case
+            for case in Case.objects.select_for_update()
+            .filter(pk__in=case_ids)
+            .order_by("pk")
+        }
+        locked_sessions = {
+            session.pk: session
+            for session in ChatSession.objects.select_for_update()
+            .filter(pk__in=session_ids)
+            .order_by("pk")
+        }
+        locked_jobs = {
+            job.pk: job
+            for job in AnalysisJob.objects.select_for_update()
+            .filter(pk__in=job_ids)
+            .order_by("pk")
+        }
         stale_items = list(
             AgentWorkItem.objects.select_for_update()
-            .select_related("job", "job__session")
             .filter(
+                work_item_id__in=candidate_ids,
                 status=AgentWorkItemStatus.RUNNING.value,
                 locked_at__isnull=False,
                 locked_at__lte=cutoff,
@@ -3337,8 +5523,23 @@ def _requeue_stale_agent_work_items(
             .order_by("locked_at")[:50]
         )
         for work_item in stale_items:
-            job = work_item.job
-            can_retry = work_item.attempt_no < work_item.max_attempts
+            job = locked_jobs.get(work_item.job_id)
+            if job is None:
+                continue
+            locked_session = locked_sessions.get(job.session_id)
+            if (
+                locked_session is None
+                or job.case_id != locked_session.case_id
+                or (job.case_id is not None and job.case_id not in locked_cases)
+            ):
+                continue
+            job.session = locked_session
+            work_item.job = job
+            paid_retry_blocked = _paid_agent_retry_requires_manual_recovery(job)
+            can_retry = (
+                work_item.attempt_no < work_item.max_attempts
+                and not paid_retry_blocked
+            )
             work_item.status = (
                 AgentWorkItemStatus.RETRYING.value
                 if can_retry
@@ -3347,10 +5548,18 @@ def _requeue_stale_agent_work_items(
             work_item.locked_at = None
             work_item.completed_at = None if can_retry else now
             work_item.next_run_at = now if can_retry else None
-            work_item.error_code = "worker_lock_timeout"
+            work_item.error_code = (
+                "paid_agent_call_retry_blocked"
+                if paid_retry_blocked
+                else "worker_lock_timeout"
+            )
             work_item.result = {
-                "error_code": "worker_lock_timeout",
-                "message": f"Agent worker lock exceeded {stale_after} seconds.",
+                "error_code": work_item.error_code,
+                "message": (
+                    "Agent worker outcome requires manual recovery before another paid call."
+                    if paid_retry_blocked
+                    else f"Agent worker lock exceeded {stale_after} seconds."
+                ),
                 "retryable": can_retry,
                 "stale_after_seconds": stale_after,
             }
@@ -3369,7 +5578,11 @@ def _requeue_stale_agent_work_items(
             message = (
                 "Agent worker lock expired; item was requeued."
                 if can_retry
-                else "Agent worker lock expired; item failed."
+                else (
+                    "Agent worker paid-call outcome requires manual recovery."
+                    if paid_retry_blocked
+                    else "Agent worker lock expired; item failed."
+                )
             )
             _update_job_worker_state(
                 job,
@@ -3387,11 +5600,20 @@ def _requeue_stale_agent_work_items(
                 metadata={
                     "work_item_id": work_item.work_item_id,
                     "attempt_no": work_item.attempt_no,
-                    "error_code": "worker_lock_timeout",
+                    "error_code": work_item.error_code,
                     "retryable": can_retry,
                     "stale_after_seconds": stale_after,
                 },
             )
+            if not can_retry and job.case_id:
+                case = locked_cases.get(job.case_id)
+                if case is None:
+                    raise RuntimeError(
+                        "analysis job case binding changed during stale requeue"
+                    )
+                if _case_analysis_job_is_current(job, case):
+                    case.status = CaseStatus.NEEDS_INPUT.value
+                    case.save(update_fields=["status", "updated_at"])
             requeued.append(
                 {
                     "work_item_id": work_item.work_item_id,
@@ -3412,15 +5634,54 @@ def _requeue_stale_agent_work_items(
 
 
 def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
+    binding = AgentWorkItem.objects.filter(work_item_id=work_item_id).values(
+        "job_id",
+        "job__case_id",
+        "job__session_id",
+        "job__session__case_id",
+    ).first()
+    if binding is None:
+        return _agent_work_item_skipped("work_item_not_found", work_item_id=work_item_id)
+    case_ids = sorted(
+        {
+            case_id
+            for case_id in (
+                binding["job__case_id"],
+                binding["job__session__case_id"],
+            )
+            if case_id is not None
+        }
+    )
     with transaction.atomic():
-        work_item = (
-            AgentWorkItem.objects.select_for_update()
-            .select_related("job", "job__session")
-            .filter(work_item_id=work_item_id)
-            .first()
+        locked_cases = {
+            case.pk: case
+            for case in Case.objects.select_for_update()
+            .filter(pk__in=case_ids)
+            .order_by("pk")
+        }
+        locked_session = ChatSession.objects.select_for_update().get(
+            pk=binding["job__session_id"]
         )
+        job = AnalysisJob.objects.select_for_update().get(pk=binding["job_id"])
+        work_item = AgentWorkItem.objects.select_for_update().filter(
+            work_item_id=work_item_id
+        ).first()
         if work_item is None:
             return _agent_work_item_skipped("work_item_not_found", work_item_id=work_item_id)
+        if (
+            work_item.job_id != job.pk
+            or job.session_id != locked_session.pk
+            or job.case_id != locked_session.case_id
+            or job.case_id != binding["job__case_id"]
+        ):
+            return _agent_work_item_skipped(
+                "case_binding_changed",
+                work_item_id=work_item.work_item_id,
+                current_status=work_item.status,
+            )
+        locked_case = locked_cases.get(job.case_id)
+        job.session = locked_session
+        work_item.job = job
         if work_item.status not in {
             AgentWorkItemStatus.QUEUED.value,
             AgentWorkItemStatus.RETRYING.value,
@@ -3439,6 +5700,114 @@ def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
                 current_status=work_item.status,
                 next_run_at=work_item.next_run_at,
             )
+
+        case = locked_case
+        if job.case_id and (case is None or case.pk != job.case_id):
+            return _agent_work_item_skipped(
+                "case_binding_changed",
+                work_item_id=work_item.work_item_id,
+                current_status=work_item.status,
+            )
+        if case is not None and not _case_analysis_job_is_current(job, case):
+            work_item.status = AgentWorkItemStatus.CANCELED.value
+            work_item.completed_at = now
+            work_item.locked_at = None
+            work_item.next_run_at = None
+            work_item.error_code = "superseded_case_analysis"
+            work_item.result = {
+                "error_code": "superseded_case_analysis",
+                "message": "A newer case analysis superseded this work item.",
+                "retryable": False,
+            }
+            work_item.save(
+                update_fields=[
+                    "status",
+                    "completed_at",
+                    "locked_at",
+                    "next_run_at",
+                    "error_code",
+                    "result",
+                    "updated_at",
+                ]
+            )
+            _update_job_worker_state(
+                job,
+                status=AnalysisJobStatus.FAILED.value,
+                active_node=job.active_node,
+                progress_message="Case analysis was superseded by newer confirmed facts.",
+                work_item=work_item,
+            )
+            _append_analysis_job_event(
+                job,
+                status=AnalysisJobStatus.FAILED.value,
+                active_node=job.active_node,
+                message="Case analysis was superseded by newer confirmed facts.",
+                source="agent_worker_queue",
+                metadata={
+                    "work_item_id": work_item.work_item_id,
+                    "reason": "superseded_case_analysis",
+                },
+            )
+            return _agent_work_item_skipped(
+                "superseded_case_analysis",
+                work_item_id=work_item.work_item_id,
+                current_status=work_item.status,
+            )
+
+        if case is not None and not _case_analysis_job_has_confirmed_fact_provenance(
+            job,
+            case,
+        ):
+            work_item.status = AgentWorkItemStatus.FAILED.value
+            work_item.completed_at = now
+            work_item.locked_at = None
+            work_item.next_run_at = None
+            work_item.error_code = "case_fact_provenance_required"
+            work_item.result = {
+                "error_code": "case_fact_provenance_required",
+                "message": "Case analysis requires an active confirmed fact version.",
+                "retryable": False,
+            }
+            work_item.save(
+                update_fields=[
+                    "status",
+                    "completed_at",
+                    "locked_at",
+                    "next_run_at",
+                    "error_code",
+                    "result",
+                    "updated_at",
+                ]
+            )
+            _update_job_worker_state(
+                job,
+                status=AnalysisJobStatus.FAILED.value,
+                active_node=job.active_node,
+                progress_message="Case analysis requires confirmed fact provenance.",
+                work_item=work_item,
+            )
+            _append_analysis_job_event(
+                job,
+                status=AnalysisJobStatus.FAILED.value,
+                active_node=job.active_node,
+                message="Case analysis requires confirmed fact provenance.",
+                source="agent_worker_queue",
+                metadata={
+                    "work_item_id": work_item.work_item_id,
+                    "reason": "case_fact_provenance_required",
+                },
+            )
+            case.status = CaseStatus.NEEDS_INPUT.value
+            case.save(update_fields=["status", "updated_at"])
+            return _agent_work_item_skipped(
+                "case_fact_provenance_required",
+                work_item_id=work_item.work_item_id,
+                current_status=work_item.status,
+            )
+
+        if case is not None:
+            case.status = CaseStatus.ANALYZING.value
+            case.save(update_fields=["status", "updated_at"])
 
         work_item.status = AgentWorkItemStatus.RUNNING.value
         work_item.attempt_no += 1
@@ -3460,8 +5829,9 @@ def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
             ]
         )
 
-        job = work_item.job
-        active_node = _analysis_plan_first_node(_dict_or_empty(work_item.payload.get("analysis_plan")))
+        active_node = _analysis_plan_first_executable_node(
+            _dict_or_empty(work_item.payload.get("analysis_plan"))
+        )
         _update_job_worker_state(
             job,
             status=AnalysisJobStatus.RUNNING.value,
@@ -3493,16 +5863,1129 @@ def _claim_agent_work_item(work_item_id: str) -> dict[str, Any]:
 
 
 def _execute_agent_work_item_plan(work_item: AgentWorkItem) -> dict[str, Any]:
+    """Execute the full stored plan after the caller has applied dispatch policy."""
+
     from app.services.agent_node_service import execute_agent_plan
 
     queue_payload = _dict_or_empty(work_item.payload)
     analysis_plan = _dict_or_empty(queue_payload.get("analysis_plan"))
+    execution_payload = _resolved_agent_work_item_execution_payload(work_item)
+    return execute_agent_plan(analysis_plan, execution_payload)
+
+
+def _execute_cost_guarded_agent_phase(
+    work_item: AgentWorkItem,
+    *,
+    phase: str,
+    analysis_plan: dict[str, Any],
+    execution_payload: dict[str, Any],
+    expected_attempt_no: int,
+    execute_stored_work_item_plan: bool = False,
+) -> dict[str, Any]:
+    """Reserve a durable fingerprint before a potentially paid Agent dispatch.
+
+    If the process loses the response or cannot checkpoint it, a retry fails
+    closed instead of issuing the same paid call again.
+    """
+
+    from app.services.agent_node_service import (
+        execute_agent_plan,
+        validate_supervisor_plan_handoff,
+    )
+
+    validate_supervisor_plan_handoff(analysis_plan, execution_payload)
+
+    invocation = _reserve_paid_agent_phase_call(
+        work_item,
+        phase=phase,
+        analysis_plan=analysis_plan,
+        execution_payload=execution_payload,
+        expected_attempt_no=expected_attempt_no,
+    )
+    try:
+        execution = (
+            _execute_agent_work_item_plan(work_item)
+            if execute_stored_work_item_plan
+            else execute_agent_plan(analysis_plan, execution_payload)
+        )
+    except Exception as exc:
+        try:
+            _mark_paid_agent_phase_call(
+                invocation.invocation_id,
+                state="provider_outcome_ambiguous",
+                status=AgentInvocationStatus.FAILED.value,
+                error_code=exc.__class__.__name__,
+            )
+        except Exception:
+            pass
+        raise PaidAgentCallRetryBlockedError(
+            f"automatic retry blocked after {phase} Agent dispatch"
+        ) from exc
+    try:
+        _mark_paid_agent_phase_call(
+            invocation.invocation_id,
+            state="provider_response_received",
+            status=AgentInvocationStatus.SUCCESS.value,
+        )
+    except Exception as exc:
+        raise PaidAgentCallRetryBlockedError(
+            f"automatic retry blocked after {phase} Agent response"
+        ) from exc
+    return execution
+
+
+def _reserve_paid_agent_phase_call(
+    work_item: AgentWorkItem,
+    *,
+    phase: str,
+    analysis_plan: dict[str, Any],
+    execution_payload: dict[str, Any],
+    expected_attempt_no: int,
+) -> AgentInvocation:
+    binding = AgentWorkItem.objects.filter(
+        work_item_id=work_item.work_item_id
+    ).values(
+        "job_id",
+        "job__case_id",
+        "job__session_id",
+        "job__session__case_id",
+    ).first()
+    if binding is None:
+        raise RuntimeError("work item disappeared before paid Agent dispatch")
+    case_ids = sorted(
+        {
+            case_id
+            for case_id in (
+                binding["job__case_id"],
+                binding["job__session__case_id"],
+            )
+            if case_id is not None
+        }
+    )
+    with transaction.atomic():
+        locked_cases = {
+            case.pk: case
+            for case in Case.objects.select_for_update()
+            .filter(pk__in=case_ids)
+            .order_by("pk")
+        }
+        locked_session = ChatSession.objects.select_for_update().get(
+            pk=binding["job__session_id"]
+        )
+        locked_job = AnalysisJob.objects.select_for_update().get(
+            pk=binding["job_id"]
+        )
+        locked_work_item = AgentWorkItem.objects.select_for_update().get(
+            work_item_id=work_item.work_item_id
+        )
+        if not _worker_lease_is_current(
+            locked_work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            raise RuntimeError("stale worker lease before paid Agent dispatch")
+        if locked_work_item.job_id != work_item.job_id:
+            raise PaidAgentCallRetryBlockedError(
+                "work item job binding changed before paid Agent dispatch"
+            )
+        if (
+            locked_job.session_id != locked_session.pk
+            or locked_work_item.job_id != locked_job.pk
+            or locked_job.case_id != locked_session.case_id
+            or locked_job.case_id != binding["job__case_id"]
+        ):
+            raise PaidAgentCallRetryBlockedError(
+                "analysis job case binding changed before paid Agent dispatch"
+            )
+        if locked_job.status != AnalysisJobStatus.RUNNING.value:
+            raise RuntimeError("analysis job is not running before paid Agent dispatch")
+        locked_case = locked_cases.get(locked_job.case_id)
+        if locked_case is not None and not _case_analysis_job_is_current(
+            locked_job,
+            locked_case,
+        ):
+            raise SupersededCaseAnalysisError(
+                "newer confirmed facts superseded this analysis before paid dispatch"
+            )
+        if locked_case is not None and not _case_analysis_job_has_confirmed_fact_provenance(
+            locked_job,
+            locked_case,
+        ):
+            raise CaseFactProvenanceError(
+                "Case-bound paid dispatch requires confirmed fact provenance"
+            )
+        locked_work_item.locked_at = timezone.now()
+        locked_work_item.save(update_fields=["locked_at", "updated_at"])
+
+        invocation_id = _paid_agent_phase_invocation_id(
+            locked_job.job_id,
+            phase,
+        )
+        expected_node_codes = _executable_analysis_plan_node_codes(
+            analysis_plan,
+            execution_payload,
+        )
+        if not expected_node_codes:
+            raise RuntimeError("paid Agent dispatch has no executable plan steps")
+        request_fingerprint = _canonical_json_fingerprint(
+            {
+                "contract_version": "paid_agent_call_guard.v1",
+                "job_id": locked_job.job_id,
+                "phase": phase,
+                "analysis_plan": _json_compatible(analysis_plan),
+                "execution_payload": _json_compatible(execution_payload),
+                "expected_node_codes": expected_node_codes,
+            }
+        )
+        existing = AgentInvocation.objects.select_for_update().filter(
+            invocation_id=invocation_id
+        ).first()
+        if existing is not None:
+            existing_fingerprint = _text(
+                _dict_or_empty(existing.metadata).get("request_fingerprint")
+            )
+            if existing_fingerprint != request_fingerprint:
+                raise ReportReferenceError(
+                    "paid_agent_request_mismatch",
+                    "paid Agent phase is already bound to a different request",
+                )
+            raise PaidAgentCallRetryBlockedError(
+                f"automatic retry blocked for previously dispatched {phase} Agent call"
+            )
+        return AgentInvocation.objects.create(
+            invocation_id=invocation_id,
+            job=locked_job,
+            node_code=f"__paid_{phase}_phase__"[:64],
+            status=AgentInvocationStatus.RUNNING.value,
+            attempt_no=max(1, locked_work_item.attempt_no),
+            execution_mode="async_worker",
+            started_at=timezone.now(),
+            completed_at=None,
+            retryable=False,
+            metadata={
+                "contract_version": "paid_agent_call_guard.v1",
+                "source": "agent_worker_paid_call_guard",
+                "phase": phase,
+                "state": "dispatch_reserved",
+                "request_fingerprint": request_fingerprint,
+                "expected_node_codes": expected_node_codes,
+                "automatic_retry_allowed": False,
+                "work_item_id": locked_work_item.work_item_id,
+                "attempt_no": locked_work_item.attempt_no,
+                "case_id": locked_case.case_id if locked_case is not None else None,
+                "active_analysis_job_id": _text(
+                    _dict_or_empty(locked_case.metadata).get("active_analysis_job_id")
+                ) if locked_case is not None else "",
+                "active_fact_version_id": _text(
+                    _dict_or_empty(locked_case.metadata).get("active_fact_version_id")
+                ) if locked_case is not None else "",
+                "job_fact_version_id": _text(
+                    _dict_or_empty(locked_job.metadata).get("fact_version_id")
+                ),
+            },
+        )
+
+
+def _mark_paid_agent_phase_call(
+    invocation_id: str,
+    *,
+    state: str,
+    status: str,
+    error_code: str = "",
+) -> None:
+    with transaction.atomic():
+        invocation = AgentInvocation.objects.select_for_update().get(
+            invocation_id=invocation_id
+        )
+        invocation.status = status
+        invocation.completed_at = timezone.now()
+        invocation.retryable = False
+        invocation.error_code = _text(error_code)
+        invocation.metadata = {
+            **_dict_or_empty(invocation.metadata),
+            "state": state,
+            "automatic_retry_allowed": False,
+        }
+        invocation.save(
+            update_fields=[
+                "status",
+                "completed_at",
+                "retryable",
+                "error_code",
+                "metadata",
+            ]
+        )
+
+
+def _paid_agent_phase_invocation_id(job_id: str, phase: str) -> str:
+    readable_id = f"ainv_{job_id}_paid_{phase}"
+    if len(readable_id) <= 64:
+        return readable_id
+    digest = hashlib.sha256(f"{job_id}:{phase}".encode("utf-8")).hexdigest()[:24]
+    return f"ainv_paid_{digest}"
+
+
+def _execute_agent_work_item_pipeline(
+    work_item: AgentWorkItem,
+    *,
+    expected_attempt_no: int,
+) -> dict[str, Any]:
+    """Execute a plan, committing analysis rows before strict Reporting handoff."""
+
+    queue_payload = _dict_or_empty(work_item.payload)
+    analysis_plan = _dict_or_empty(queue_payload.get("analysis_plan"))
+    analysis_phase_plan, reporting_phase_plan = _partition_reporting_plan(analysis_plan)
+    if not reporting_phase_plan:
+        execution_payload = _resolved_agent_work_item_execution_payload(work_item)
+        node_codes = _paid_phase_expected_node_codes(
+            work_item.job,
+            phase="analysis",
+            analysis_plan=analysis_plan,
+            execution_payload=execution_payload,
+        )
+        if not node_codes:
+            node_execution = _node_execution_envelope(
+                work_item.job,
+                analysis_plan=analysis_plan,
+                executions=[],
+            )
+        elif _persisted_analysis_results_complete(
+            work_item.job,
+            node_codes=node_codes,
+        ):
+            node_execution = _node_execution_from_persisted_results(
+                work_item.job,
+                analysis_plan=analysis_plan,
+                node_codes=node_codes,
+            )
+        else:
+            node_execution = _execute_cost_guarded_agent_phase(
+                work_item,
+                phase="analysis",
+                analysis_plan=analysis_plan,
+                execution_payload=execution_payload,
+                expected_attempt_no=expected_attempt_no,
+                execute_stored_work_item_plan=True,
+            )
+            try:
+                _persist_worker_execution_checkpoint(
+                    work_item,
+                    node_execution=node_execution,
+                    phase="execution_persisted",
+                    expected_attempt_no=expected_attempt_no,
+                )
+            except Exception as exc:
+                raise PaidAgentCallRetryBlockedError(
+                    "automatic retry blocked after Agent checkpoint failure"
+                ) from exc
+        return {
+            "node_execution": node_execution,
+            "reporting_handoff": {},
+            "reporting_blocked": False,
+            "requires_reporting_bundle": False,
+        }
+
+    execution_payload = _resolved_agent_work_item_execution_payload(work_item)
+    analysis_node_codes = _paid_phase_expected_node_codes(
+        work_item.job,
+        phase="analysis",
+        analysis_plan=analysis_phase_plan,
+        execution_payload=execution_payload,
+    )
+    reporting_node_codes = _paid_phase_expected_node_codes(
+        work_item.job,
+        phase="reporting",
+        analysis_plan=reporting_phase_plan,
+        execution_payload=execution_payload,
+    )
+    reporting_step_executable = reporting_node_codes == [REPORTING_AGENT_NODE_CODE]
+    all_node_codes = [*analysis_node_codes, *reporting_node_codes]
+
+    persisted_handoff = _current_persisted_reporting_handoff(
+        work_item,
+        analysis_phase_plan=analysis_phase_plan,
+        execution_payload=execution_payload,
+        reporting_step_executable=reporting_step_executable,
+    )
+    if persisted_handoff:
+        analysis_execution = _node_execution_from_persisted_results(
+            work_item.job,
+            analysis_plan=analysis_plan,
+            node_codes=analysis_node_codes,
+        )
+    elif _persisted_analysis_results_complete(
+        work_item.job,
+        node_codes=analysis_node_codes,
+    ):
+        analysis_execution = _node_execution_from_persisted_results(
+            work_item.job,
+            analysis_plan=analysis_plan,
+            node_codes=analysis_node_codes,
+        )
+        persisted_handoff = _build_and_persist_reporting_handoff(
+            work_item,
+            analysis_phase_plan=analysis_phase_plan,
+            execution_payload=execution_payload,
+            expected_attempt_no=expected_attempt_no,
+            reporting_step_executable=reporting_step_executable,
+        )
+    elif analysis_node_codes:
+        analysis_execution = _execute_cost_guarded_agent_phase(
+            work_item,
+            phase="analysis",
+            analysis_plan=analysis_phase_plan,
+            execution_payload=execution_payload,
+            expected_attempt_no=expected_attempt_no,
+        )
+        try:
+            _persist_worker_execution_checkpoint(
+                work_item,
+                node_execution=analysis_execution,
+                phase="analysis_persisted",
+                expected_attempt_no=expected_attempt_no,
+            )
+        except Exception as exc:
+            raise PaidAgentCallRetryBlockedError(
+                "automatic retry blocked after analysis Agent checkpoint failure"
+            ) from exc
+        persisted_handoff = _build_and_persist_reporting_handoff(
+            work_item,
+            analysis_phase_plan=analysis_phase_plan,
+            execution_payload=execution_payload,
+            expected_attempt_no=expected_attempt_no,
+            reporting_step_executable=reporting_step_executable,
+        )
+    else:
+        analysis_execution = _node_execution_envelope(
+            work_item.job,
+            analysis_plan=analysis_plan,
+            executions=[],
+        )
+        persisted_handoff = _build_and_persist_reporting_handoff(
+            work_item,
+            analysis_phase_plan=analysis_phase_plan,
+            execution_payload=execution_payload,
+            expected_attempt_no=expected_attempt_no,
+            reporting_step_executable=reporting_step_executable,
+        )
+
+    if not _agent_work_item_case_is_current(work_item):
+        return {
+            "node_execution": analysis_execution,
+            "reporting_handoff": persisted_handoff,
+            "reporting_blocked": True,
+            "requires_reporting_bundle": True,
+            "superseded_case_analysis": True,
+        }
+
+    if persisted_handoff.get("ready_for_reporting") is not True:
+        return {
+            "node_execution": analysis_execution,
+            "reporting_handoff": persisted_handoff,
+            "reporting_blocked": True,
+            "requires_reporting_bundle": True,
+        }
+
+    persisted_reporting_rows = list(AgentResult.objects.filter(
+        job=work_item.job,
+        node_code=REPORTING_AGENT_NODE_CODE,
+    ))
+    matching_reporting_result = (
+        persisted_reporting_rows[0]
+        if len(persisted_reporting_rows) == 1
+        and _reporting_result_matches_handoff(
+            persisted_reporting_rows[0],
+            persisted_handoff,
+        )
+        else None
+    )
+    if matching_reporting_result is not None:
+        combined_execution = _node_execution_from_persisted_results(
+            work_item.job,
+            analysis_plan=analysis_plan,
+            node_codes=all_node_codes,
+        )
+    elif len(persisted_reporting_rows) > 1:
+        raise RuntimeError("duplicate persisted Reporting Agent results")
+    else:
+        reporting_payload = _reporting_execution_payload(
+            execution_payload,
+            handoff=persisted_handoff,
+        )
+        reporting_execution = _execute_cost_guarded_agent_phase(
+            work_item,
+            phase="reporting",
+            analysis_plan=reporting_phase_plan,
+            execution_payload=reporting_payload,
+            expected_attempt_no=expected_attempt_no,
+        )
+        if not reporting_execution.get("executions"):
+            raise PaidAgentCallRetryBlockedError(
+                "Reporting Agent did not produce an execution result"
+            )
+        reporting_statuses = [
+            _text(_dict_or_empty(execution.get("agent_output")).get("status"))
+            for execution in _list_or_empty(reporting_execution.get("executions"))
+            if isinstance(execution, dict)
+        ]
+        if reporting_statuses != [AgentResultStatus.SUCCESS.value] and reporting_statuses != [
+            AgentResultStatus.PARTIAL.value
+        ]:
+            raise PaidAgentCallRetryBlockedError(
+                "Reporting Agent failed before report persistence"
+            )
+        _annotate_reporting_execution_handoff(
+            reporting_execution,
+            handoff=persisted_handoff,
+        )
+        combined_execution = _combine_node_executions(
+            analysis_plan,
+            analysis_execution,
+            reporting_execution,
+        )
+        try:
+            _persist_worker_execution_checkpoint(
+                work_item,
+                node_execution=combined_execution,
+                phase="reporting_persisted",
+                expected_attempt_no=expected_attempt_no,
+                handoff=persisted_handoff,
+            )
+        except Exception as exc:
+            raise PaidAgentCallRetryBlockedError(
+                "automatic retry blocked after Reporting Agent checkpoint failure"
+            ) from exc
+
+    return {
+        "node_execution": combined_execution,
+        "reporting_handoff": persisted_handoff,
+        "reporting_blocked": False,
+        "requires_reporting_bundle": True,
+    }
+
+
+def _persisted_analysis_results_complete(
+    job: AnalysisJob,
+    *,
+    node_codes: list[str],
+) -> bool:
+    if not node_codes:
+        return False
+    persisted_counts = {
+        node_code: AgentResult.objects.filter(job=job, node_code=node_code).count()
+        for node_code in node_codes
+    }
+    return all(persisted_counts[node_code] == 1 for node_code in node_codes)
+
+
+def _reporting_result_matches_handoff(
+    reporting_result: AgentResult,
+    handoff: dict[str, Any],
+) -> bool:
+    trace = _dict_or_empty(
+        _dict_or_empty(reporting_result.structured_result).get("supervisor_handoff")
+    )
+    expected = _canonical_reporting_handoff_trace(handoff)
+    return bool(
+        _text(trace.get("source_fingerprint"))
+        and _normalized_reporting_handoff_trace(trace) == expected
+    )
+
+
+def _canonical_reporting_handoff_trace(handoff: dict[str, Any]) -> dict[str, Any]:
+    source = _dict_or_empty(handoff.get("source"))
+    return {
+        "contract_version": _text(handoff.get("contract_version")),
+        "handoff_id": _text(handoff.get("handoff_id")),
+        "gate_status": _text(_dict_or_empty(handoff.get("gate")).get("status")),
+        "source_fingerprint": _text(source.get("fingerprint")),
+        "source_result_ids": _list_or_empty(source.get("result_ids")),
+    }
+
+
+def _normalized_reporting_handoff_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "contract_version": _text(trace.get("contract_version")),
+        "handoff_id": _text(trace.get("handoff_id")),
+        "gate_status": _text(trace.get("gate_status")),
+        "source_fingerprint": _text(trace.get("source_fingerprint")),
+        "source_result_ids": _list_or_empty(trace.get("source_result_ids")),
+    }
+
+
+def _annotate_reporting_execution_handoff(
+    reporting_execution: dict[str, Any],
+    *,
+    handoff: dict[str, Any],
+) -> None:
+    trace = _canonical_reporting_handoff_trace(handoff)
+    for execution in _list_or_empty(reporting_execution.get("executions")):
+        if not isinstance(execution, dict):
+            continue
+        agent_output = _dict_or_empty(execution.get("agent_output"))
+        structured_result = dict(_dict_or_empty(agent_output.get("structured_result")))
+        adapter_trace = _dict_or_empty(structured_result.get("supervisor_handoff"))
+        if not adapter_trace:
+            raise RuntimeError("Reporting Agent omitted Supervisor handoff provenance")
+        if _normalized_reporting_handoff_trace(adapter_trace) != trace:
+            raise RuntimeError("Reporting Agent returned mismatched Supervisor handoff provenance")
+        structured_result["supervisor_handoff"] = trace
+        agent_output["structured_result"] = structured_result
+        execution["agent_output"] = agent_output
+
+
+def _resolved_agent_work_item_execution_payload(work_item: AgentWorkItem) -> dict[str, Any]:
+    from app.services.supervisor_execution_input_service import (
+        build_trusted_worker_execution_payload,
+        read_server_execution_context,
+        requires_supervisor_handoff,
+    )
+
+    queue_payload = _dict_or_empty(work_item.payload)
     job_payload = _dict_or_empty(queue_payload.get("job_payload"))
-    execution_payload = _dict_or_empty(queue_payload.get("execution_payload"))
+    execution_payload = dict(_dict_or_empty(queue_payload.get("execution_payload")))
+    chat_response = dict(_dict_or_empty(job_payload.get("chat_response")))
+    chat_response.setdefault("session_id", work_item.job.session.session_id)
+    chat_response.setdefault("message_id", _text(job_payload.get("message_id")))
+    chat_response.setdefault("attachments", execution_payload.get("attachments") or [])
+    execution_payload = build_trusted_worker_execution_payload(
+        execution_payload,
+        chat_response=chat_response,
+        server_execution_context=read_server_execution_context(
+            queue_payload.get("server_execution_context")
+        ),
+        public_request=requires_supervisor_handoff(execution_payload),
+        server_upstream_results=_persisted_work_item_upstream_results(
+            work_item,
+            analysis_plan=_dict_or_empty(queue_payload.get("analysis_plan")),
+        ),
+    )
     execution_payload.setdefault("job_id", work_item.job.job_id)
     execution_payload.setdefault("session_id", work_item.job.session.session_id)
     execution_payload.setdefault("message_id", _text(job_payload.get("message_id")))
-    return execute_agent_plan(analysis_plan, execution_payload)
+    if "attachments" in execution_payload or "attachment_ids" in execution_payload:
+        from chatbot.file_scan_service import apply_attachment_scan_gate
+
+        execution_payload = apply_attachment_scan_gate(execution_payload)
+        if _list_or_empty(execution_payload.get("blocked_attachments")):
+            raise AttachmentScanGateError
+        from app.services.attachment_mock_service import (
+            resolve_attachment_references,
+        )
+
+        execution_payload = resolve_attachment_references(execution_payload)
+    return execution_payload
+
+
+def _persisted_work_item_upstream_results(
+    work_item: AgentWorkItem,
+    *,
+    analysis_plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Rebuild resumable upstream state from rows owned by this job only."""
+
+    planned_node_codes = {
+        _text(step.get("node_code"))
+        for step in _list_or_empty(analysis_plan.get("steps"))
+        if isinstance(step, dict) and _text(step.get("node_code"))
+    }
+    if not planned_node_codes:
+        return {}
+
+    results = AgentResult.objects.filter(
+        job=work_item.job,
+        node_code__in=planned_node_codes,
+    ).order_by("created_at", "result_id")
+    return {
+        result.node_code: _agent_result_handoff_record(result)
+        for result in results
+    }
+
+
+def _partition_reporting_plan(
+    analysis_plan: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    steps = [step for step in _list_or_empty(analysis_plan.get("steps")) if isinstance(step, dict)]
+    reporting_indexes = [
+        index
+        for index, step in enumerate(steps)
+        if _text(step.get("node_code")) == REPORTING_AGENT_NODE_CODE
+    ]
+    if not reporting_indexes:
+        return analysis_plan, {}
+    if len(reporting_indexes) > 1:
+        raise ValueError("analysis plan must contain exactly one Reporting Agent step")
+    reporting_index = reporting_indexes[0]
+    if reporting_index != len(steps) - 1:
+        raise ValueError("Reporting Agent must be the final executable plan step")
+    analysis_steps = [dict(step) for step in steps[:reporting_index]]
+    reporting_step = dict(steps[reporting_index])
+    reporting_step["source_depends_on"] = _list_or_empty(reporting_step.get("depends_on"))
+    reporting_step["depends_on"] = []
+    return (
+        {**analysis_plan, "steps": analysis_steps},
+        {**analysis_plan, "steps": [reporting_step]},
+    )
+
+
+def _analysis_plan_node_codes(analysis_plan: dict[str, Any]) -> list[str]:
+    return [
+        _text(step.get("node_code"))
+        for step in _list_or_empty(analysis_plan.get("steps"))
+        if isinstance(step, dict) and _text(step.get("node_code"))
+    ]
+
+
+def _executable_analysis_plan_node_codes(
+    analysis_plan: dict[str, Any],
+    execution_payload: dict[str, Any],
+) -> list[str]:
+    from app.services.agent_node_service import executable_analysis_plan_steps
+
+    upstream_results = _dict_or_empty(execution_payload.get("upstream_results"))
+    return [
+        _text(step.get("node_code"))
+        for step in executable_analysis_plan_steps(
+            analysis_plan,
+            completed_node_codes=set(upstream_results),
+        )
+        if _text(step.get("node_code"))
+    ]
+
+
+def _paid_phase_expected_node_codes(
+    job: AnalysisJob,
+    *,
+    phase: str,
+    analysis_plan: dict[str, Any],
+    execution_payload: dict[str, Any],
+) -> list[str]:
+    guard = AgentInvocation.objects.filter(
+        invocation_id=_paid_agent_phase_invocation_id(job.job_id, phase)
+    ).first()
+    if guard is not None:
+        snapshot = _dict_or_empty(guard.metadata).get("expected_node_codes")
+        if isinstance(snapshot, list):
+            return [
+                _text(node_code)
+                for node_code in snapshot
+                if _text(node_code)
+            ]
+    return _executable_analysis_plan_node_codes(analysis_plan, execution_payload)
+
+
+def _reporting_execution_payload(
+    execution_payload: dict[str, Any],
+    *,
+    handoff: dict[str, Any],
+) -> dict[str, Any]:
+    payload = dict(execution_payload)
+    context = dict(_dict_or_empty(payload.get("context")))
+    context.update(
+        {
+            "handoff_required": True,
+            "supervisor_reporting_handoff": handoff,
+        }
+    )
+    payload["context"] = context
+    payload["upstream_results"] = {}
+    return payload
+
+
+def _persist_worker_execution_checkpoint(
+    work_item: AgentWorkItem,
+    *,
+    node_execution: dict[str, Any],
+    phase: str,
+    expected_attempt_no: int,
+    handoff: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    binding = AgentWorkItem.objects.filter(
+        work_item_id=work_item.work_item_id
+    ).values(
+        "job_id",
+        "job__case_id",
+        "job__session_id",
+        "job__session__case_id",
+    ).first()
+    if binding is None:
+        raise RuntimeError("work item disappeared before checkpoint persistence")
+    case_ids = sorted(
+        {
+            case_id
+            for case_id in (
+                binding["job__case_id"],
+                binding["job__session__case_id"],
+            )
+            if case_id is not None
+        }
+    )
+    with transaction.atomic():
+        locked_cases = {
+            case.pk: case
+            for case in Case.objects.select_for_update()
+            .filter(pk__in=case_ids)
+            .order_by("pk")
+        }
+        locked_session = ChatSession.objects.select_for_update().get(
+            pk=binding["job__session_id"]
+        )
+        locked_job = AnalysisJob.objects.select_for_update().get(
+            pk=binding["job_id"]
+        )
+        leased_work_item = AgentWorkItem.objects.select_for_update().get(
+            work_item_id=work_item.work_item_id
+        )
+        if (
+            leased_work_item.job_id != locked_job.pk
+            or locked_job.session_id != locked_session.pk
+            or locked_job.case_id != locked_session.case_id
+            or locked_job.case_id != binding["job__case_id"]
+            or (
+                locked_job.case_id is not None
+                and locked_job.case_id not in locked_cases
+            )
+        ):
+            raise PaidAgentCallRetryBlockedError(
+                "analysis job binding changed before checkpoint persistence"
+            )
+        if not _worker_lease_is_current(
+            leased_work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            raise RuntimeError("stale worker lease during Agent checkpoint")
+        locked_job.session = locked_session
+        leased_work_item.job = locked_job
+        checkpoint_payload = _completed_job_payload_for_work_item(
+            leased_work_item,
+            node_execution=node_execution,
+            final_status=AnalysisJobStatus.RUNNING.value,
+        )
+        checkpoint_payload["active_node"] = (
+            REPORTING_AGENT_NODE_CODE
+            if phase == "analysis_persisted"
+            else _final_node_from_execution(node_execution)
+        )
+        if phase == "execution_persisted":
+            checkpoint_payload["progress_message"] = (
+                "Persisted Agent results; finalizing worker result."
+            )
+            checkpoint_metadata_key = "execution_checkpoint"
+            checkpoint_metadata = {
+                "contract_version": "agent_execution_checkpoint.v1",
+                "phase": phase,
+            }
+        else:
+            checkpoint_payload["progress_message"] = (
+                "Persisted analysis results; preparing Supervisor reporting handoff."
+                if phase == "analysis_persisted"
+                else "Persisted Reporting Agent result; finalizing report bundle."
+            )
+            checkpoint_metadata_key = "reporting_pipeline"
+            checkpoint_metadata = {
+                "contract_version": "analysis_reporting_pipeline.v1",
+                "phase": phase,
+            }
+            checkpoint_payload["reporting_pipeline"] = checkpoint_metadata
+        if handoff:
+            checkpoint_payload["supervisor_reporting_handoff"] = handoff
+        persistence = persist_analysis_job_execution(
+            _dict_or_empty(leased_work_item.payload.get("request_payload")),
+            checkpoint_payload,
+            publish_cache=False,
+        )
+        work_metadata = dict(_dict_or_empty(leased_work_item.metadata))
+        work_metadata[checkpoint_metadata_key] = checkpoint_metadata
+        leased_work_item.metadata = work_metadata
+        leased_work_item.save(update_fields=["metadata", "updated_at"])
+    checkpoint_job = AnalysisJob.objects.select_related("session").get(
+        job_id=work_item.job.job_id
+    )
+    persistence["progress_cache"] = write_analysis_job_progress(checkpoint_job)
+    persistence["session_cache"] = write_chat_session_state(
+        checkpoint_job.session,
+        latest_job=checkpoint_job,
+    )
+    return persistence
+
+
+def _build_and_persist_reporting_handoff(
+    work_item: AgentWorkItem,
+    *,
+    analysis_phase_plan: dict[str, Any],
+    execution_payload: dict[str, Any],
+    expected_attempt_no: int,
+    reporting_step_executable: bool,
+) -> dict[str, Any]:
+    handoff = _build_reporting_handoff(
+        work_item.job,
+        analysis_phase_plan=analysis_phase_plan,
+        execution_payload=execution_payload,
+        reporting_step_executable=reporting_step_executable,
+    )
+    binding = AgentWorkItem.objects.filter(
+        work_item_id=work_item.work_item_id
+    ).values(
+        "job_id",
+        "job__case_id",
+        "job__session_id",
+        "job__session__case_id",
+    ).first()
+    if binding is None:
+        raise RuntimeError("work item disappeared before handoff persistence")
+    case_ids = sorted(
+        {
+            case_id
+            for case_id in (
+                binding["job__case_id"],
+                binding["job__session__case_id"],
+            )
+            if case_id is not None
+        }
+    )
+    with transaction.atomic():
+        locked_cases = {
+            case.pk: case
+            for case in Case.objects.select_for_update()
+            .filter(pk__in=case_ids)
+            .order_by("pk")
+        }
+        locked_session = ChatSession.objects.select_for_update().get(
+            pk=binding["job__session_id"]
+        )
+        job = AnalysisJob.objects.select_for_update().get(pk=binding["job_id"])
+        leased_work_item = AgentWorkItem.objects.select_for_update().get(
+            work_item_id=work_item.work_item_id
+        )
+        if (
+            leased_work_item.job_id != job.pk
+            or job.session_id != locked_session.pk
+            or job.case_id != locked_session.case_id
+            or job.case_id != binding["job__case_id"]
+            or (job.case_id is not None and job.case_id not in locked_cases)
+        ):
+            raise PaidAgentCallRetryBlockedError(
+                "analysis job binding changed before handoff persistence"
+            )
+        if not _worker_lease_is_current(
+            leased_work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            raise RuntimeError("stale worker lease during Supervisor handoff persistence")
+        metadata = dict(_dict_or_empty(job.metadata))
+        metadata["supervisor_reporting_handoff"] = handoff
+        metadata["reporting_pipeline"] = {
+            "contract_version": "analysis_reporting_pipeline.v1",
+            "phase": "handoff_ready",
+            "handoff_id": handoff.get("handoff_id"),
+        }
+        job.metadata = metadata
+        job.save(update_fields=["metadata", "updated_at"])
+        work_metadata = dict(_dict_or_empty(leased_work_item.metadata))
+        work_metadata["reporting_pipeline"] = metadata["reporting_pipeline"]
+        leased_work_item.metadata = work_metadata
+        leased_work_item.save(update_fields=["metadata", "updated_at"])
+    stored_job = AnalysisJob.objects.only("metadata").get(pk=work_item.job_id)
+    return deepcopy(_dict_or_empty(stored_job.metadata).get("supervisor_reporting_handoff"))
+
+
+def _current_persisted_reporting_handoff(
+    work_item: AgentWorkItem,
+    *,
+    analysis_phase_plan: dict[str, Any],
+    execution_payload: dict[str, Any],
+    reporting_step_executable: bool,
+) -> dict[str, Any]:
+    job = AnalysisJob.objects.get(pk=work_item.job_id)
+    stored = _dict_or_empty(_dict_or_empty(job.metadata).get("supervisor_reporting_handoff"))
+    if stored.get("contract_version") != "supervisor_reporting_handoff.v1":
+        return {}
+    rebuilt = _build_reporting_handoff(
+        job,
+        analysis_phase_plan=analysis_phase_plan,
+        execution_payload=execution_payload,
+        reporting_step_executable=reporting_step_executable,
+    )
+    stored_source = _dict_or_empty(stored.get("source"))
+    rebuilt_source = _dict_or_empty(rebuilt.get("source"))
+    if stored_source.get("fingerprint") != rebuilt_source.get("fingerprint"):
+        return {}
+    return rebuilt
+
+
+def _build_reporting_handoff(
+    job: AnalysisJob,
+    *,
+    analysis_phase_plan: dict[str, Any],
+    execution_payload: dict[str, Any],
+    reporting_step_executable: bool,
+) -> dict[str, Any]:
+    node_codes = _analysis_plan_node_codes(analysis_phase_plan)
+    plan_order = {node_code: index for index, node_code in enumerate(node_codes)}
+    agent_results = list(AgentResult.objects.filter(job=job, node_code__in=node_codes))
+    agent_results.sort(key=lambda result: (plan_order.get(result.node_code, 10_000), result.result_id))
+    required = [code for code in node_codes if code not in DL_OPTIONAL_NODE_CODES]
+    optional = [code for code in node_codes if code in DL_OPTIONAL_NODE_CODES]
+    context = _dict_or_empty(execution_payload.get("context"))
+    attachments = [
+        {
+            key: attachment.get(key)
+            for key in ("attachment_id", "purpose", "filename")
+            if attachment.get(key)
+        }
+        for attachment in _list_or_empty(execution_payload.get("attachments"))
+        if isinstance(attachment, dict)
+    ]
+    return build_supervisor_reporting_handoff(
+        job={
+            "job_id": job.job_id,
+            "session_id": job.session.session_id,
+            "message_id": job.message.message_id if job.message_id else None,
+            "analysis_plan_id": job.analysis_plan_id,
+            "routing_intent": job.routing_intent,
+        },
+        results=[_agent_result_handoff_record(result) for result in agent_results],
+        required_node_codes=required,
+        optional_node_codes=optional,
+        target_node_code=REPORTING_AGENT_NODE_CODE,
+        report_type=_report_type(job.routing_intent),
+        case_context={
+            # Raw prompts are not a persisted-fact boundary.  Reporting may
+            # receive only explicitly confirmed/curated facts here; analysis
+            # findings arrive separately through the persisted result rows.
+            "user_facts": _text(context.get("user_facts")),
+            "attachment_refs": attachments,
+            "case_evidence": _dict_or_empty(context.get("case_evidence")),
+        },
+        reporting_step_executable=reporting_step_executable,
+    )
+
+
+def _agent_result_handoff_record(result: AgentResult) -> dict[str, Any]:
+    return {
+        "result_id": result.result_id,
+        "node_code": result.node_code,
+        "status": result.status,
+        "summary": result.summary,
+        "structured_result": result.structured_result or {},
+        "evidence": result.evidence or [],
+        "next_actions": result.next_actions or [],
+        "limitations": result.limitations or [],
+    }
+
+
+def _node_execution_from_persisted_results(
+    job: AnalysisJob,
+    *,
+    analysis_plan: dict[str, Any],
+    node_codes: list[str],
+) -> dict[str, Any]:
+    plan_steps = {
+        _text(step.get("node_code")): step
+        for step in _list_or_empty(analysis_plan.get("steps"))
+        if isinstance(step, dict) and _text(step.get("node_code"))
+    }
+    plan_order = {node_code: index for index, node_code in enumerate(node_codes)}
+    results = list(AgentResult.objects.filter(job=job, node_code__in=node_codes))
+    results.sort(key=lambda result: (plan_order.get(result.node_code, 10_000), result.result_id))
+    executions = []
+    for result in results:
+        raw_output = _dict_or_empty(result.raw_output)
+        agent_output = _dict_or_empty(raw_output.get("agent_output")) or _agent_result_handoff_record(result)
+        executions.append(
+            {
+                "execution_id": _text(raw_output.get("execution_id")) or result.result_id,
+                "execution_mode": _text(raw_output.get("execution_mode")) or "sync",
+                "job_id": job.job_id,
+                "node_code": result.node_code,
+                "node": {
+                    "node_code": result.node_code,
+                    "node_name": result.node_name,
+                    "node_type": agent_output.get("node_type") or "agent",
+                    "owner": agent_output.get("owner") or "",
+                    "status": "sync_adapter_ready",
+                },
+                "adapter_context": _dict_or_empty(raw_output.get("adapter_context")),
+                "plan_step": _dict_or_empty(raw_output.get("plan_step"))
+                or _dict_or_empty(plan_steps.get(result.node_code)),
+                "agent_output": agent_output,
+                "created_at": raw_output.get("created_at"),
+            }
+        )
+    return _node_execution_envelope(job, analysis_plan=analysis_plan, executions=executions)
+
+
+def _combine_node_executions(
+    analysis_plan: dict[str, Any],
+    *node_executions: dict[str, Any],
+) -> dict[str, Any]:
+    executions = []
+    for node_execution in node_executions:
+        executions.extend(
+            execution
+            for execution in _list_or_empty(node_execution.get("executions"))
+            if isinstance(execution, dict)
+        )
+    job_id = _text(next((item.get("job_id") for item in node_executions if item.get("job_id")), ""))
+    job = AnalysisJob.objects.get(job_id=job_id)
+    return _node_execution_envelope(job, analysis_plan=analysis_plan, executions=executions)
+
+
+def _node_execution_envelope(
+    job: AnalysisJob,
+    *,
+    analysis_plan: dict[str, Any],
+    executions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    completed_node_codes = []
+    limitations = []
+    for execution in executions:
+        agent_output = _dict_or_empty(execution.get("agent_output"))
+        status = _text(agent_output.get("status")) or AgentResultStatus.FAILED.value
+        status_counts[status] = status_counts.get(status, 0) + 1
+        node_code = _text(agent_output.get("node_code") or execution.get("node_code"))
+        if status == AgentResultStatus.SUCCESS.value and node_code:
+            completed_node_codes.append(node_code)
+        for limitation in _list_or_empty(agent_output.get("limitations")):
+            if limitation not in limitations:
+                limitations.append(limitation)
+    return {
+        "execution_mode": "sync",
+        "job_id": job.job_id,
+        "plan_id": _text(analysis_plan.get("plan_id")) or job.analysis_plan_id,
+        "session_id": job.session.session_id,
+        "message_id": job.message.message_id if job.message_id else None,
+        "executions": executions,
+        "status_counts": status_counts,
+        "completed_node_codes": completed_node_codes,
+        "limitations": limitations,
+    }
+
+
+def _pending_questions_from_node_execution(
+    job_payload: dict[str, Any],
+    node_execution: dict[str, Any],
+) -> list[Any]:
+    pending_questions = deepcopy(_list_or_empty(job_payload.get("pending_questions")))
+    known_fields = {
+        _text(question.get("field")).strip()
+        for question in pending_questions
+        if isinstance(question, dict) and _text(question.get("field")).strip()
+    }
+    for execution in _list_or_empty(node_execution.get("executions")):
+        agent_output = _dict_or_empty(_dict_or_empty(execution).get("agent_output"))
+        structured_result = _dict_or_empty(agent_output.get("structured_result"))
+        if (
+            _text(agent_output.get("execution_status")) != "input_required"
+            and _text(structured_result.get("judgment_status")) != "input_required"
+        ):
+            continue
+        for field in _list_or_empty(structured_result.get("missing_fields")):
+            normalized_field = _text(field).strip()
+            if normalized_field and normalized_field not in known_fields:
+                pending_questions.append({"field": normalized_field})
+                known_fields.add(normalized_field)
+    return pending_questions
 
 
 def _completed_job_payload_for_work_item(
@@ -3526,6 +7009,7 @@ def _completed_job_payload_for_work_item(
         "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
         "node_execution": node_execution,
         "status_counts": _dict_or_empty(node_execution.get("status_counts")),
+        "pending_questions": _pending_questions_from_node_execution(job_payload, node_execution),
         "work_item_id": work_item.work_item_id,
     }
 
@@ -3536,6 +7020,8 @@ def _complete_agent_work_item(
     final_status: str,
     node_execution: dict[str, Any],
     persistence: dict[str, Any],
+    expected_attempt_no: int,
+    publish_cache: bool = True,
 ) -> dict[str, Any]:
     with transaction.atomic():
         work_item = (
@@ -3543,20 +7029,39 @@ def _complete_agent_work_item(
             .select_related("job", "job__session")
             .get(work_item_id=work_item_id)
         )
+        if not _worker_lease_is_current(
+            work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            return _agent_work_item_skipped(
+                "stale_worker_lease",
+                work_item_id=work_item_id,
+                current_status=work_item.status,
+            )
         job = work_item.job
         ai_session = AiSession.objects.filter(ai_session_id=persistence.get("ai_session_id")).first()
+        reporting_bundle = _dict_or_empty(persistence.get("reporting_bundle"))
+        superseded_case_analysis = reporting_bundle.get("status") == "superseded"
+        if superseded_case_analysis:
+            final_status = AnalysisJobStatus.FAILED.value
         work_item.ai_session = ai_session
-        work_item.status = (
-            AgentWorkItemStatus.FAILED.value
-            if final_status == AnalysisJobStatus.FAILED.value
-            else AgentWorkItemStatus.SUCCESS.value
-        )
+        if superseded_case_analysis:
+            work_item.status = AgentWorkItemStatus.CANCELED.value
+        elif final_status == AnalysisJobStatus.FAILED.value:
+            work_item.status = AgentWorkItemStatus.FAILED.value
+        else:
+            work_item.status = AgentWorkItemStatus.SUCCESS.value
         work_item.completed_at = timezone.now()
         work_item.locked_at = None
         work_item.next_run_at = None
-        work_item.error_code = ""
+        work_item.error_code = (
+            "superseded_case_analysis" if superseded_case_analysis else ""
+        )
         work_item.result = {
             "final_status": final_status,
+            "reason": (
+                "superseded_case_analysis" if superseded_case_analysis else None
+            ),
             "node_execution": _node_execution_summary(node_execution),
             "persistence": {
                 "agent_results_saved": persistence.get("agent_results_saved", 0),
@@ -3576,24 +7081,45 @@ def _complete_agent_work_item(
                 "updated_at",
             ]
         )
+        completion_message = (
+            "Case analysis was superseded by newer confirmed facts."
+            if superseded_case_analysis
+            else _worker_completion_message(final_status)
+        )
         _update_job_worker_state(
             job,
             status=final_status,
             active_node=_final_node_from_execution(node_execution),
-            progress_message=_worker_completion_message(final_status),
+            progress_message=completion_message,
             work_item=work_item,
         )
         _append_analysis_job_event(
             job,
             status=final_status,
             active_node=job.active_node,
-            message=_worker_completion_message(final_status),
+            message=completion_message,
             source="agent_worker_queue",
-            metadata={"work_item_id": work_item.work_item_id, "attempt_no": work_item.attempt_no},
+            metadata={
+                "work_item_id": work_item.work_item_id,
+                "attempt_no": work_item.attempt_no,
+                "reason": (
+                    "superseded_case_analysis" if superseded_case_analysis else None
+                ),
+            },
         )
 
-    progress_cache = write_analysis_job_progress(job)
-    session_cache = write_chat_session_state(job.session, latest_job=job)
+    if publish_cache:
+        progress_cache = write_analysis_job_progress(job)
+        session_cache = write_chat_session_state(job.session, latest_job=job)
+    else:
+        progress_cache = {
+            "status": "deferred",
+            "reason": "transaction_not_committed",
+        }
+        session_cache = {
+            "status": "deferred",
+            "reason": "transaction_not_committed",
+        }
     return {
         "backend": "postgresql",
         "status": work_item.status,
@@ -3608,25 +7134,111 @@ def _complete_agent_work_item(
     }
 
 
-def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
-    error_code = exc.__class__.__name__
-    with transaction.atomic():
-        work_item = (
-            AgentWorkItem.objects.select_for_update()
-            .select_related("job", "job__session")
-            .filter(work_item_id=work_item_id)
-            .first()
+def _fail_agent_work_item(
+    work_item_id: str,
+    exc: Exception,
+    *,
+    expected_attempt_no: int,
+) -> dict[str, Any]:
+    from app.services.agent_node_service import SupervisorHandoffValidationError
+
+    superseded_case_analysis = isinstance(exc, SupersededCaseAnalysisError)
+    case_fact_provenance_required = isinstance(exc, CaseFactProvenanceError)
+    supervisor_handoff_invalid = isinstance(exc, SupervisorHandoffValidationError)
+    error_code = (
+        "superseded_case_analysis"
+        if superseded_case_analysis
+        else (
+            "case_fact_provenance_required"
+            if case_fact_provenance_required
+            else (
+                "supervisor_handoff_invalid"
+                if supervisor_handoff_invalid
+                else exc.__class__.__name__
+            )
         )
+    )
+    binding = AgentWorkItem.objects.filter(work_item_id=work_item_id).values(
+        "job_id",
+        "job__case_id",
+        "job__session_id",
+        "job__session__case_id",
+    ).first()
+    if binding is None:
+        return _agent_work_item_skipped("work_item_not_found", work_item_id=work_item_id)
+    case_ids = sorted(
+        {
+            case_id
+            for case_id in (
+                binding["job__case_id"],
+                binding["job__session__case_id"],
+            )
+            if case_id is not None
+        }
+    )
+    with transaction.atomic():
+        locked_cases = {
+            case.pk: case
+            for case in Case.objects.select_for_update()
+            .filter(pk__in=case_ids)
+            .order_by("pk")
+        }
+        locked_session = ChatSession.objects.select_for_update().get(
+            pk=binding["job__session_id"]
+        )
+        job = AnalysisJob.objects.select_for_update().get(pk=binding["job_id"])
+        work_item = AgentWorkItem.objects.select_for_update().filter(
+            work_item_id=work_item_id
+        ).first()
+        if (
+            work_item is not None
+            and (
+                work_item.job_id != job.pk
+                or job.session_id != locked_session.pk
+                or job.case_id != locked_session.case_id
+                or job.case_id != binding["job__case_id"]
+            )
+        ):
+            return _agent_work_item_skipped(
+                "case_binding_changed",
+                work_item_id=work_item_id,
+                current_status=work_item.status,
+            )
+        locked_case = locked_cases.get(job.case_id)
+        if job.case_id is not None and locked_case is None:
+            return _agent_work_item_skipped(
+                "case_binding_changed",
+                work_item_id=work_item_id,
+                current_status=work_item.status if work_item is not None else "",
+            )
         if work_item is None:
             return _agent_work_item_skipped("work_item_not_found", work_item_id=work_item_id)
-
-        job = work_item.job
-        can_retry = work_item.attempt_no < work_item.max_attempts
-        work_item.status = (
-            AgentWorkItemStatus.RETRYING.value
-            if can_retry
-            else AgentWorkItemStatus.FAILED.value
+        job.session = locked_session
+        work_item.job = job
+        if not _worker_lease_is_current(
+            work_item,
+            expected_attempt_no=expected_attempt_no,
+        ):
+            return _agent_work_item_skipped(
+                "stale_worker_lease",
+                work_item_id=work_item_id,
+                current_status=work_item.status,
+            )
+        can_retry = (
+            work_item.attempt_no < work_item.max_attempts
+            and not isinstance(exc, PaidAgentCallRetryBlockedError)
+            and not superseded_case_analysis
+            and not case_fact_provenance_required
+            and not supervisor_handoff_invalid
         )
+        if superseded_case_analysis:
+            work_item.status = AgentWorkItemStatus.CANCELED.value
+        else:
+            work_item.status = (
+                AgentWorkItemStatus.RETRYING.value
+                if can_retry
+                else AgentWorkItemStatus.FAILED.value
+            )
         work_item.locked_at = None
         work_item.completed_at = None if can_retry else timezone.now()
         retry_after = _agent_worker_retry_backoff(work_item) if can_retry else None
@@ -3634,7 +7246,15 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
         work_item.error_code = error_code
         work_item.result = {
             "error_code": error_code,
-            "message": _text(exc),
+            "message": (
+                "Case analysis was superseded by newer confirmed facts."
+                if superseded_case_analysis
+                else (
+                    "Case analysis requires confirmed fact provenance."
+                    if case_fact_provenance_required
+                    else "Agent worker execution failed."
+                )
+            ),
             "retryable": can_retry,
             "retry_after_seconds": int(retry_after.total_seconds()) if retry_after else 0,
         }
@@ -3650,18 +7270,31 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
             ]
         )
         job_status = AnalysisJobStatus.RUNNING.value if can_retry else AnalysisJobStatus.FAILED.value
+        failure_message = (
+            "Case analysis was superseded by newer confirmed facts."
+            if superseded_case_analysis
+            else (
+                "Case analysis requires confirmed fact provenance."
+                if case_fact_provenance_required
+                else (
+                    "Agent worker item will retry."
+                    if can_retry
+                    else "Agent worker item failed."
+                )
+            )
+        )
         _update_job_worker_state(
             job,
             status=job_status,
             active_node=job.active_node,
-            progress_message="Agent worker item will retry." if can_retry else "Agent worker item failed.",
+            progress_message=failure_message,
             work_item=work_item,
         )
         _append_analysis_job_event(
             job,
             status=job_status,
             active_node=job.active_node,
-            message="Agent worker item will retry." if can_retry else "Agent worker item failed.",
+            message=failure_message,
             source="agent_worker_queue",
             metadata={
                 "work_item_id": work_item.work_item_id,
@@ -3670,6 +7303,12 @@ def _fail_agent_work_item(work_item_id: str, exc: Exception) -> dict[str, Any]:
                 "retryable": can_retry,
             },
         )
+        if not can_retry and not superseded_case_analysis and job.case_id:
+            if locked_case is None or locked_case.pk != job.case_id:
+                raise RuntimeError("analysis job case binding changed during worker failure")
+            if _case_analysis_job_is_current(job, locked_case):
+                locked_case.status = CaseStatus.NEEDS_INPUT.value
+                locked_case.save(update_fields=["status", "updated_at"])
 
     progress_cache = write_analysis_job_progress(job)
     write_chat_session_state(job.session, latest_job=job)
@@ -3965,9 +7604,12 @@ def _usage_policy_for_subject(subject: dict[str, str], *, scope: str) -> dict[st
     plan_code = _usage_plan_code(subject)
     code_item = _ensure_usage_policy_code_item(plan_code)
     limits = _dict_or_empty(code_item.metadata.get("limits"))
-    limit_count = _positive_int_or_none(limits.get(scope))
-    if limit_count is None:
-        limit_count = _default_usage_limit(plan_code, scope)
+    if scope == "google_oauth_code_exchange":
+        limit_count = settings.GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT
+    else:
+        limit_count = _positive_int_or_none(limits.get(scope))
+        if limit_count is None:
+            limit_count = _default_usage_limit(plan_code, scope)
     subscription = _active_subscription_for_subject(subject)
     return {
         "plan_code": plan_code,
@@ -4182,7 +7824,7 @@ def _agent_result_status(status: Any) -> str:
         return status_text
     if status_text in {"pending", "running", "blocked"}:
         return AgentResultStatus.PARTIAL
-    return AgentResultStatus.SUCCESS
+    return AgentResultStatus.FAILED
 
 
 def _agent_invocation_status(status: Any, execution_status: Any) -> str:
@@ -4450,6 +8092,7 @@ def _report_type(value: Any) -> str:
     legacy_aliases = {
         "objection_draft": ReportType.FINE_NOTICE_OBJECTION,
         "fault_analysis": ReportType.FAULT_RATIO_ANALYSIS,
+        "fault_ratio_text": ReportType.FAULT_RATIO_ANALYSIS,
         "generic_supervisor": ReportType.GENERAL,
     }
     return legacy_aliases.get(report_type, ReportType.FINE_NOTICE_OBJECTION)
@@ -4468,6 +8111,29 @@ def _report_status(value: Any) -> str:
 
 def _report_object_storage(report: Report) -> dict[str, Any]:
     metadata = report.metadata if isinstance(report.metadata, dict) else {}
+    if (
+        metadata.get("source") == "analysis_worker_reporting"
+        and metadata.get("artifact_state") == "deferred"
+        and not report.storage_uri
+    ):
+        return {
+            "policy_version": "report_on_demand.v1",
+            "backend": "database",
+            "provider": "on_demand_renderer",
+            "bucket": "",
+            "key": "",
+            "storage_uri": "",
+            "resource_type": "report",
+            "resource_id": report.report_id,
+            "filename": f"{report.report_id}.pdf",
+            "content_type": REPORT_PDF_CONTENT_TYPE,
+            "size_bytes": 0,
+            "status": "generated_on_demand",
+            "source_uri": "",
+            "signed_url_ttl_seconds": 0,
+            "writes_binary": False,
+            "persistence_state": "database_json_ready",
+        }
     object_storage = metadata.get("object_storage")
     if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
         return dict(object_storage)
@@ -4547,7 +8213,10 @@ def _reporting_payload_content_summary(reporting_payload: dict[str, Any]) -> str
         title = _text(section.get("title"))
         if title:
             lines.extend(["", f"## {title}"])
-        for item in _list_or_empty(section.get("items")):
+        section_items = _list_or_empty(section.get("items"))
+        if not section_items and _text(section.get("body")):
+            section_items = [_text(section.get("body"))]
+        for item in section_items:
             text = _reporting_payload_item_text(item)
             if text:
                 lines.append(f"- {text}")
@@ -4836,6 +8505,13 @@ def _report_download_document_type(value: str | None) -> str:
 def _report_objection_form_body(report: Report) -> str:
     content = _dict_or_empty(report.content)
     reporting_payload = _dict_or_empty(content.get("reporting_payload"))
+    report_data = _dict_or_empty(reporting_payload.get("data"))
+    if report_data:
+        return _worker_report_objection_form_body(
+            report,
+            reporting_payload=reporting_payload,
+            report_data=report_data,
+        )
     sections = _list_or_empty(reporting_payload.get("sections"))
     draft_section = _report_section_by_title(sections, ("이의신청서", "의견제출서", "초안"))
     draft_items = _report_section_item_map(draft_section)
@@ -4890,6 +8566,87 @@ def _report_objection_form_body(report: Report) -> str:
         "- 관할 기관의 공식 양식, 접수 기한, 서명 또는 날인 필요 여부를 최종 확인하세요.",
     ]
     return "\n".join(lines) + "\n"
+
+
+def _worker_report_objection_form_body(
+    report: Report,
+    *,
+    reporting_payload: dict[str, Any],
+    report_data: dict[str, Any],
+) -> str:
+    agency = _text(report_data.get("recipient_agency")) or "관할 처분 기관"
+    title = _text(report_data.get("document_title")) or "처분 이의신청서"
+    facts = _compact_repeated_fact_text(
+        _text(report_data.get("case_summary"))
+        or _text(reporting_payload.get("summary"))
+        or report.content_summary
+    )
+    purpose = _text(report_data.get("requested_action")) or "처분의 재검토를 요청합니다."
+    reasons = _dedupe_text_values(_list_or_empty(report_data.get("objection_reasons")))
+    if not reasons:
+        reasons = ["상담 분석 결과와 제출 증빙을 근거로 처분의 재검토를 요청합니다."]
+    legal_grounds = _report_legal_ground_lines(
+        _list_or_empty(report_data.get("legal_grounds"))
+    )
+    attachments = _dedupe_text_values(
+        _list_or_empty(report_data.get("required_attachments"))
+    )
+    if not attachments:
+        attachments = ["고지서 원본 및 사실관계를 입증하는 자료"]
+    lines = [
+        "## 문서 정보",
+        "- 문서 유형: 이의신청서 초안",
+        f"- 리포트 ID: {report.report_id}",
+        f"- 사건 ID: {report.job.job_id if report.job_id else report.session.session_id if report.session_id else '-'}",
+        "",
+        "## 제출 정보",
+        f"- 수신: {agency}",
+        f"- 제목: {title}",
+        "",
+        "## 신청 취지",
+        f"- {purpose}",
+        "",
+        "## 사실관계",
+        f"- {facts}",
+        "",
+        "## 신청 사유",
+        *[f"- {reason}" for reason in reasons],
+        "",
+        "## 관련 법령 및 근거",
+        *(
+            [f"- {ground}" for ground in legal_grounds]
+            or ["- 제출 전 관련 법령과 조문을 다시 확인해야 합니다."]
+        ),
+        "",
+        "## 첨부 자료",
+        *[f"- {attachment}" for attachment in attachments],
+        "",
+        "## 제출 전 확인",
+        "- 이 문서는 AI가 작성한 제출 전 검토용 초안입니다.",
+        "- 관할 기관, 제출 기한, 인적 사항, 사건 번호와 첨부자료를 최종 확인하세요.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _report_legal_ground_lines(values: list[Any]) -> list[str]:
+    lines: list[str] = []
+    for value in values:
+        if isinstance(value, dict):
+            heading = " ".join(
+                item
+                for item in (
+                    _text(value.get("law_name")),
+                    _text(value.get("article")),
+                )
+                if item
+            )
+            summary = _text(value.get("summary"))
+            text = ": ".join(item for item in (heading, summary) if item)
+        else:
+            text = _text(value)
+        if text and text not in lines:
+            lines.append(text)
+    return lines
 
 
 def _report_objection_form_pdf_body(
@@ -5510,7 +9267,13 @@ def _report_download_body(
                 lines.append(f"limitation_{index}: {_text(limitation)}")
     if report.display_result_id:
         lines.append(f"display_result_id: {report.display_result.display_result_id}")
-    if report.content_summary:
+    reporting_summary = _reporting_payload_content_summary(
+        _dict_or_empty(_dict_or_empty(report.content).get("reporting_payload"))
+    )
+    if reporting_summary:
+        lines.append("")
+        lines.append(reporting_summary)
+    elif report.content_summary:
         lines.append("")
         lines.append(report.content_summary)
     return "\n".join(lines) + "\n"
@@ -5534,10 +9297,7 @@ def _report_quality_snapshot(
         AnalysisJobStatus.PARTIAL.value,
         AnalysisJobStatus.FAILED.value,
     }
-    deduped_limitations = []
-    for limitation in limitations:
-        if limitation not in deduped_limitations:
-            deduped_limitations.append(limitation)
+    deduped_limitations = _dedupe_safe_report_text_values(limitations)
     return {
         "contract_version": "report_quality.v1",
         "analysis_job_status": analysis_job_status or None,
@@ -5644,8 +9404,9 @@ def _case_next_actions(agent_results: list[AgentResult]) -> list[Any]:
     actions = []
     for result in agent_results:
         for action in result.next_actions or []:
-            if action not in actions:
-                actions.append(action)
+            safe_action = _sanitize_report_text(action)
+            if safe_action and safe_action not in actions:
+                actions.append(safe_action)
     return actions[:5]
 
 
@@ -5659,11 +9420,7 @@ def _case_limitations(
     for result in agent_results:
         limitations.extend(result.limitations or [])
 
-    deduped = []
-    for limitation in limitations:
-        if limitation not in deduped:
-            deduped.append(limitation)
-    return deduped[:5]
+    return _dedupe_safe_report_text_values(limitations)[:5]
 
 
 def _agent_status_counts(agent_results: list[AgentResult]) -> dict[str, int]:

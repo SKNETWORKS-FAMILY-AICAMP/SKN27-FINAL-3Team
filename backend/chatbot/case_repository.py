@@ -2,19 +2,30 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 from uuid import uuid4
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
+from app.services.case_evidence_service import (
+    build_case_evidence,
+    case_evidence_readiness,
+    material_fact_values,
+)
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS
 from chatbot.models import (
+    AgentWorkItemStatus,
     AnalysisJob,
+    AnalysisJobStatus,
     Case,
     CaseStatus,
     ChatSession,
     ConfirmedFactVersion,
+    UploadedFileStatus,
 )
 from chatbot.retention_policy import upload_retention_expires_at
 from chatbot.repositories import enqueue_analysis_job_work
@@ -52,6 +63,10 @@ class FactReadinessNotMet(CaseConflict):
     code = "fact_readiness_not_met"
 
 
+class CaseAnalysisInProgress(CaseConflict):
+    code = "case_analysis_in_progress"
+
+
 def create_case(
     *,
     owner_id: str,
@@ -80,6 +95,34 @@ def create_case(
             if session.case.owner_id != owner_id:
                 raise CaseOwnerMismatch("case belongs to another user")
             return case_to_api(session.case)
+
+        active_job = (
+            session.analysis_jobs.filter(
+                Q(status=AnalysisJobStatus.RUNNING.value)
+                | Q(metadata__source="canonical_analysis_job_reservation")
+            )
+            .order_by("created_at")
+            .values_list("job_id", flat=True)
+            .first()
+        )
+        active_work_job = (
+            session.analysis_jobs.filter(
+                work_items__status__in=[
+                    AgentWorkItemStatus.QUEUED.value,
+                    AgentWorkItemStatus.RUNNING.value,
+                    AgentWorkItemStatus.RETRYING.value,
+                ]
+            )
+            .order_by("created_at")
+            .values_list("job_id", flat=True)
+            .first()
+        )
+        blocking_job_id = active_job or active_work_job
+        if blocking_job_id:
+            raise CaseAnalysisInProgress(
+                "case creation must wait for the active session analysis to finish",
+                details={"job_id": blocking_job_id, "retryable": True},
+            )
 
         consultation_state = _dict(payload.get("consultation_state"))
         risk_level = _text(_dict(consultation_state.get("risk_gate")).get("level")) or "standard"
@@ -167,7 +210,19 @@ def get_case_workspace(case_id: str) -> dict[str, Any]:
     case = Case.objects.filter(case_id=case_id, deleted_at__isnull=True).first()
     if case is None:
         raise CaseNotFound("case was not found")
-    facts = [fact_version_to_api(version) for version in case.fact_versions.all()]
+    fact_versions = list(case.fact_versions.all())
+    facts = [fact_version_to_api(version) for version in fact_versions]
+    latest_fact_version = max(fact_versions, key=lambda version: version.version_no, default=None)
+    case_evidence = (
+        build_case_evidence(
+            facts=_dict(latest_fact_version.facts),
+            sources=_dict_list(latest_fact_version.sources),
+            conflicts=_dict_list(latest_fact_version.conflicts),
+            material_source_refs=_ready_case_attachment_ids(case),
+        )
+        if latest_fact_version is not None
+        else build_case_evidence(facts={}, sources=[], conflicts=[])
+    )
     jobs = [
         {
             "job_id": job.job_id,
@@ -191,6 +246,7 @@ def get_case_workspace(case_id: str) -> dict[str, Any]:
         "case": case_to_api(case),
         "consultation_state": _dict(case.metadata).get("consultation_state") or {},
         "confirmed_facts": facts,
+        "case_evidence": case_evidence,
         "analysis_jobs": jobs,
         "reports": reports,
         "attachments": [
@@ -216,6 +272,15 @@ def confirm_case_facts(
     facts = _dict(payload.get("facts"))
     if not facts:
         raise CaseConflict("facts are required")
+    sources = _dict_list(payload.get("sources"))
+    conflicts = _dict_list(payload.get("conflicts"))
+    user_edit_history = _dict_list(payload.get("user_edit_history"))
+    request_fingerprint = _confirmed_fact_payload_fingerprint(
+        facts=facts,
+        sources=sources,
+        conflicts=conflicts,
+        user_edit_history=user_edit_history,
+    )
 
     with transaction.atomic():
         case = Case.objects.select_for_update().filter(case_id=case_id, deleted_at__isnull=True).first()
@@ -223,6 +288,32 @@ def confirm_case_facts(
             raise CaseNotFound("case was not found")
         if case.owner_id != owner_id:
             raise CaseOwnerMismatch("case belongs to another user")
+        case_metadata = _dict(case.metadata)
+        confirmation = _dict(case_metadata.get("fact_confirmation"))
+        if confirmation.get("request_fingerprint") == request_fingerprint:
+            existing_version = case.fact_versions.filter(
+                fact_version_id=_text(confirmation.get("fact_version_id")),
+                status="confirmed",
+            ).first()
+            if existing_version is not None:
+                return fact_version_to_api(existing_version)
+        latest_version = case.fact_versions.filter(status="confirmed").order_by(
+            "-version_no"
+        ).first()
+        if latest_version is not None and request_fingerprint == _confirmed_fact_payload_fingerprint(
+            facts=_dict(latest_version.facts),
+            sources=_dict_list(latest_version.sources),
+            conflicts=_dict_list(latest_version.conflicts),
+            user_edit_history=_dict_list(latest_version.user_edit_history),
+        ):
+            case_metadata["fact_confirmation"] = {
+                "contract_version": "confirmed_facts_idempotency.v1",
+                "request_fingerprint": request_fingerprint,
+                "fact_version_id": latest_version.fact_version_id,
+            }
+            case.metadata = case_metadata
+            case.save(update_fields=["metadata", "updated_at"])
+            return fact_version_to_api(latest_version)
         next_version = case.current_fact_version + 1
         fact_version = ConfirmedFactVersion.objects.create(
             fact_version_id=f"fact_{uuid4().hex[:20]}",
@@ -230,15 +321,32 @@ def confirm_case_facts(
             version_no=next_version,
             status="confirmed",
             facts=facts,
-            sources=_dict_list(payload.get("sources")),
-            conflicts=_dict_list(payload.get("conflicts")),
-            user_edit_history=_dict_list(payload.get("user_edit_history")),
+            sources=sources,
+            conflicts=conflicts,
+            user_edit_history=user_edit_history,
             confirmed_by=owner_id,
             confirmed_at=timezone.now(),
         )
         case.current_fact_version = next_version
         case.status = CaseStatus.INTAKE
-        case.save(update_fields=["current_fact_version", "status", "updated_at"])
+        case.metadata = {
+            **case_metadata,
+            "active_analysis_job_id": "",
+            "active_fact_version_id": fact_version.fact_version_id,
+            "fact_confirmation": {
+                "contract_version": "confirmed_facts_idempotency.v1",
+                "request_fingerprint": request_fingerprint,
+                "fact_version_id": fact_version.fact_version_id,
+            },
+        }
+        case.save(
+            update_fields=[
+                "current_fact_version",
+                "status",
+                "metadata",
+                "updated_at",
+            ]
+        )
     return fact_version_to_api(fact_version)
 
 
@@ -267,14 +375,18 @@ def start_case_analysis(
         fact_version = fact_query.order_by("-version_no").first()
         if fact_version is None:
             raise ConfirmedFactsRequired("confirmed facts are required before analysis")
-        required_fields = [field for field, _question in CORE_FACT_QUESTIONS]
-        missing_fields = [field for field in required_fields if not _text(fact_version.facts.get(field))]
-        if missing_fields or fact_version.conflicts:
+        case_evidence = build_case_evidence(
+            facts=_dict(fact_version.facts),
+            sources=_dict_list(fact_version.sources),
+            conflicts=_dict_list(fact_version.conflicts),
+            material_source_refs=_ready_case_attachment_ids(case),
+        )
+        readiness = case_evidence_readiness(case_evidence)
+        if not readiness["ready"]:
             raise FactReadinessNotMet(
-                "confirmed facts do not meet the analysis readiness gate",
+                "material evidence does not meet the analysis readiness gate",
                 details={
-                    "required_fields": required_fields,
-                    "missing_fields": missing_fields,
+                    **readiness,
                     "conflict_count": len(fact_version.conflicts),
                 },
             )
@@ -282,9 +394,33 @@ def start_case_analysis(
         session = case.chat_sessions.order_by("created_at").first()
         if session is None:
             raise CaseConflict("case has no chat session")
+        case_metadata = _dict(case.metadata)
+        active_job_id = _text(case_metadata.get("active_analysis_job_id"))
+        reusable_jobs = case.analysis_jobs.filter(
+            metadata__fact_version_id=fact_version.fact_version_id,
+            status__in=[
+                "queued",
+                "running",
+                "success",
+                "partial",
+            ],
+            work_items__isnull=False,
+        )
+        if active_job_id:
+            reusable_jobs = reusable_jobs.filter(job_id=active_job_id)
+        reusable_job = reusable_jobs.order_by("-created_at").distinct().first()
+        if reusable_job is not None:
+            reusable_work_item = reusable_job.work_items.order_by("created_at").first()
+            if reusable_work_item is not None:
+                return _case_analysis_job_response(reusable_job, reusable_work_item)
+
         plan_id = f"plan_{uuid4().hex[:16]}"
         job_id = f"job_{uuid4().hex[:16]}"
-        node_codes = ["text_ml_case_search", "law_ground_search"]
+        node_codes = [
+            "text_ml_case_search",
+            "law_ground_search",
+            "objection_report_generation",
+        ]
         analysis_plan = {
             "contract_version": "analysis_plan.v2",
             "plan_id": plan_id,
@@ -298,17 +434,23 @@ def start_case_analysis(
                     "status": "ready",
                     "execution_mode": "sync",
                     "depends_on": [node_codes[index - 2]] if index > 1 else [],
-                    "required_inputs": ["confirmed_facts.v1"],
+                    "required_inputs": ["confirmed_facts.v1", "case_evidence.v1"],
                 }
                 for index, node_code in enumerate(node_codes, start=1)
             ],
         }
+        material_user_facts = json.dumps(
+            material_fact_values(case_evidence),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         request_payload = {
             "owner_id": owner_id,
             "user_id": owner_id,
             "session_id": session.session_id,
             "case_id": case.case_id,
-            "confirmed_facts": fact_version_to_api(fact_version),
+            "user_text": material_user_facts,
         }
         job_payload = {
             "job_id": job_id,
@@ -323,14 +465,21 @@ def start_case_analysis(
                 "case_status": CaseStatus.QUEUED,
                 "reporting_payload": {
                     "contract_version": "reporting_payload.v2",
-                    "report_type": "initial_consultation",
+                    "report_type": "fault_ratio_analysis",
                     "case_id": case.case_id,
                     "fact_version_id": fact_version.fact_version_id,
                 },
             },
             "node_execution": {},
         }
-        queue = enqueue_analysis_job_work(request_payload, job_payload)
+        queue = enqueue_analysis_job_work(
+            request_payload,
+            job_payload,
+            server_execution_context={
+                "user_facts": material_user_facts,
+                "case_evidence": case_evidence,
+            },
+        )
         job = AnalysisJob.objects.get(job_id=queue["job_id"])
         job.case = case
         job.metadata = {
@@ -338,10 +487,16 @@ def start_case_analysis(
             "case_id": case.case_id,
             "fact_version_id": fact_version.fact_version_id,
             "confirmed_facts_schema": "confirmed_facts.v1",
+            "case_evidence_schema": "case_evidence.v1",
         }
         job.save(update_fields=["case", "metadata", "updated_at"])
         case.status = CaseStatus.QUEUED
-        case.save(update_fields=["status", "updated_at"])
+        case.metadata = {
+            **case_metadata,
+            "active_analysis_job_id": job.job_id,
+            "active_fact_version_id": fact_version.fact_version_id,
+        }
+        case.save(update_fields=["status", "metadata", "updated_at"])
 
     return {
         "contract_version": "case_analysis_job.v2",
@@ -351,6 +506,27 @@ def start_case_analysis(
             "status": queue["work_item_status"],
         },
         "analysis_plan": {"plan_id": plan_id, "node_codes": node_codes},
+    }
+
+
+def _case_analysis_job_response(job: AnalysisJob, work_item: Any) -> dict[str, Any]:
+    analysis_plan = _dict(_dict(job.metadata).get("analysis_plan"))
+    node_codes = [
+        _text(step.get("node_code"))
+        for step in analysis_plan.get("steps") or []
+        if isinstance(step, dict) and _text(step.get("node_code"))
+    ]
+    return {
+        "contract_version": "case_analysis_job.v2",
+        "job": {"job_id": job.job_id, "status": job.status},
+        "work_item": {
+            "work_item_id": work_item.work_item_id,
+            "status": work_item.status,
+        },
+        "analysis_plan": {
+            "plan_id": job.analysis_plan_id or _text(analysis_plan.get("plan_id")),
+            "node_codes": node_codes,
+        },
     }
 
 
@@ -386,12 +562,45 @@ def fact_version_to_api(version: ConfirmedFactVersion) -> dict[str, Any]:
     }
 
 
+def _ready_case_attachment_ids(case: Case) -> set[str]:
+    return {
+        _text(attachment_id)
+        for attachment_id in case.uploaded_files.filter(
+            status=UploadedFileStatus.READY.value,
+            deleted_at__isnull=True,
+        ).values_list("attachment_id", flat=True)
+        if _text(attachment_id)
+    }
+
+
 def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
 def _dict_list(value: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in value or [] if isinstance(item, dict)]
+
+
+def _confirmed_fact_payload_fingerprint(
+    *,
+    facts: dict[str, Any],
+    sources: list[dict[str, Any]],
+    conflicts: list[dict[str, Any]],
+    user_edit_history: list[dict[str, Any]],
+) -> str:
+    encoded = json.dumps(
+        {
+            "facts": facts,
+            "sources": sources,
+            "conflicts": conflicts,
+            "user_edit_history": user_edit_history,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
 def _text(value: Any) -> str:

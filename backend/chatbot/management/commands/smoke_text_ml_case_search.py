@@ -29,6 +29,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Fail unless the adapter reports that Elasticsearch RAG was enabled.",
         )
+        parser.add_argument(
+            "--require-results",
+            action="store_true",
+            help="Fail unless Elasticsearch-backed similar cases and recommended evidence are returned.",
+        )
         parser.add_argument("--format", choices=["json", "text"], default="json", help="Output format.")
 
     def handle(self, *args, **options):
@@ -81,9 +86,15 @@ class Command(BaseCommand):
 
         if execution.get("execution_mode") != "sync":
             result["status"] = "fail"
+        if agent_output.get("status") not in {"success", "partial"}:
+            result["status"] = "fail"
         if retrieval.get("adapter_source") != "fault_ratio_knowledge_agent":
             result["status"] = "fail"
         if options["require_es"] and not es_rag_enabled:
+            result["status"] = "fail"
+        if options.get("require_results") and (
+            result["similar_case_count"] < 1 or result["recommended_evidence_count"] < 1
+        ):
             result["status"] = "fail"
 
         if options["format"] == "json":

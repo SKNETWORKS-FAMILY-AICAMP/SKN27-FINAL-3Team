@@ -6,6 +6,8 @@ import json
 import re
 from typing import Any
 
+from app.security.pii_masking import sanitize_pii
+
 from .constants import (
     DOCUMENT_TYPE_TRAFFIC_ACCIDENT_CONFIRMATION,
     DOCUMENT_TYPE_UNKNOWN,
@@ -67,7 +69,7 @@ def ocr_node(state: TrafficAccidentConfirmationOCRState) -> dict[str, Any]:
             failure_reason=FAILURE_REASON_OCR_FAILED,
             message="OCR 모델 호출 또는 응답 파싱에 실패했습니다.",
             source_filename=source_filename,
-            limitations=[str(exc)],
+            limitations=[f"ocr_provider_error:{exc.__class__.__name__}"],
         )
 
     masked_response, masked_fields = mask_sensitive_fields(model_response)
@@ -237,7 +239,7 @@ def _parse_json_response(raw_content: str) -> dict[str, Any]:
 
     if not isinstance(parsed, dict):
         raise ValueError("OCR response must be a JSON object.")
-    return parsed
+    return sanitize_pii(parsed)
 
 
 def _clean_base64(document_image: str) -> str:

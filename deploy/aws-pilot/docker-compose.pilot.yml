@@ -1,0 +1,278 @@
+x-backend-environment: &backend-environment
+  PYTHONUTF8: "1"
+  DJANGO_DEBUG: "0"
+  DJANGO_SECURE_SSL_REDIRECT: "1"
+  DJANGO_DATABASE_ENGINE: postgres
+  PGSSLMODE: require
+  REDIS_URL: redis://redis:6379/0
+  OBJECT_STORAGE_PROVIDER: s3
+  OBJECT_STORAGE_PREFIX: canonical
+  OBJECT_STORAGE_SIGNED_URL_TTL_SECONDS: "900"
+  FILE_SCAN_PROVIDER: clamav
+  FILE_SCAN_CLAMAV_HOST: clamav
+  FILE_SCAN_CLAMAV_PORT: "3310"
+  FILE_UPLOAD_MAX_BYTES: ${FILE_UPLOAD_MAX_BYTES:-20971520}
+  FILE_SCAN_MAX_BYTES: ${FILE_SCAN_MAX_BYTES:-52428800}
+  FILE_SCAN_TIMEOUT_SECONDS: "15"
+  FILE_SCAN_CLAIM_STALE_AFTER_SECONDS: "300"
+  FILE_SCAN_RETRY_BACKOFF_SECONDS: "60"
+  FILE_RETENTION_PURGE_LIMIT: "100"
+  SUPERVISOR_LLM_ENABLED: "1"
+  SUPERVISOR_LLM_PROVIDER: openai
+  SUPERVISOR_LLM_TIMEOUT_SECONDS: "20"
+  LEGAL_RAG_VECTOR_ENABLED: "0"
+  LEGAL_PROVISION_DB_ENABLED: "1"
+  LEGAL_RAG_QUERY_EMBEDDING_PROVIDER: sentence-transformers
+  LEGAL_RAG_QUERY_EMBEDDING_MODEL: intfloat/multilingual-e5-large
+  LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS: "1024"
+  LEGAL_RAG_QUERY_EMBEDDING_DEVICE: cpu
+  LEGAL_RAG_QUERY_EMBEDDING_TIMEOUT_SECONDS: "30"
+  LAW_GROUND_SEARCH_ENABLE_NEO4J: "0"
+  TEXT_ML_CASE_SEARCH_SYNC_USE_ES: "1"
+  TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST: http://elasticsearch:9200
+  TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER: elastic
+  TEXT_ML_CASE_SEARCH_ELASTICSEARCH_REQUEST_TIMEOUT: "120"
+  REVIEW_CASE_ES_BM25_INDEX: review_case_chunks_bm25_nori_v1
+  FAULT_RATIO_PRECEDENT_ES_BM25_INDEX: precedent_fault_ratio_chunks_bm25_nori_v1
+
+x-runtime-env-file: &runtime-env-file
+  - path: .runtime.env
+    format: raw
+
+x-edge-env-file: &edge-env-file
+  - path: .edge.env
+    format: raw
+
+x-elasticsearch-env-file: &elasticsearch-env-file
+  - path: .elasticsearch.env
+    format: raw
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  caddy:
+    image: ${CADDY_IMAGE_REF:-caddy:2.11.4-alpine}
+    restart: unless-stopped
+    mem_limit: 96m
+    logging: *default-logging
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    env_file: *edge-env-file
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    depends_on:
+      edge-rate-limit:
+        condition: service_healthy
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_CADDY_IP:-172.31.0.2}
+
+  edge-rate-limit:
+    image: ${HAPROXY_IMAGE_REF:-haproxy:3.4.2-alpine}
+    restart: unless-stopped
+    mem_limit: 64m
+    logging: *default-logging
+    cap_drop: [ALL]
+    cap_add: [SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_EDGE_RATE_LIMIT_IP:-172.31.0.3}
+
+  frontend:
+    image: ${FRONTEND_REPOSITORY_URL:?FRONTEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    restart: unless-stopped
+    mem_limit: 64m
+    logging: *default-logging
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_FRONTEND_IP:-172.31.0.4}
+
+  backend:
+    image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    command: gunicorn --chdir backend --bind 0.0.0.0:8000 --workers 2 --threads 2 --timeout 120 config.wsgi:application
+    restart: unless-stopped
+    env_file: *runtime-env-file
+    environment: *backend-environment
+    mem_limit: 480m
+    logging: *default-logging
+    depends_on:
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; request=urllib.request.Request('http://127.0.0.1:8000/api/health/live/', headers={'Host':'localhost','X-Forwarded-Proto':'https'}); urllib.request.urlopen(request, timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_BACKEND_IP:-172.31.0.5}
+
+  agent-worker:
+    image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    command: python backend/manage.py process_agent_work_items --loop --limit 5
+    restart: unless-stopped
+    env_file: *runtime-env-file
+    environment: *backend-environment
+    mem_limit: 384m
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_AGENT_WORKER_IP:-172.31.0.6}
+
+  file-scan-worker:
+    image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    command: python backend/manage.py process_uploaded_file_scans --loop
+    restart: unless-stopped
+    env_file: *runtime-env-file
+    environment: *backend-environment
+    mem_limit: 256m
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_FILE_SCAN_WORKER_IP:-172.31.0.7}
+
+  redis:
+    image: ${REDIS_IMAGE_REF:-redis:7.4-alpine}
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    mem_limit: 160m
+    logging: *default-logging
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_REDIS_IP:-172.31.0.8}
+
+  elasticsearch:
+    image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:elasticsearch-nori-${RELEASE_TAG:?RELEASE_TAG is required}
+    restart: unless-stopped
+    env_file: *elasticsearch-env-file
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      ES_JAVA_OPTS: -Xms384m -Xmx384m
+    mem_limit: 704m
+    logging: *default-logging
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp]
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u elastic:$${ELASTIC_PASSWORD} http://127.0.0.1:9200/_cluster/health >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      start_period: 60s
+      retries: 10
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_ELASTICSEARCH_IP:-172.31.0.9}
+
+  clamav:
+    image: ${CLAMAV_IMAGE_REF:-clamav/clamav:1.4}
+    restart: unless-stopped
+    mem_limit: 2048m
+    logging: *default-logging
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    environment:
+      CLAMD_CONF_ConcurrentDatabaseReload: "no"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 10
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_CLAMAV_IP:-172.31.0.10}
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
+  redis_data:
+    name: ${PILOT_REDIS_VOLUME_NAME:-skn27-pilot_redis_data}
+  elasticsearch_data:
+    name: ${PILOT_ELASTICSEARCH_VOLUME_NAME:-skn27-pilot_elasticsearch_data}
+  clamav_data:
+    name: ${PILOT_CLAMAV_VOLUME_NAME:-skn27-pilot_clamav_data}
+
+networks:
+  pilot:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${PILOT_NETWORK_SUBNET:-172.31.0.0/24}

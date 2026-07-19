@@ -4,6 +4,7 @@ import tempfile
 from datetime import timedelta
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -209,6 +210,7 @@ class ChatbotPersistenceModelTests(TestCase):
             source_type="law",
             source_name="Road Traffic Act",
             source_url="https://example.test/school-zone",
+            effective_date=(timezone.now() - timedelta(days=3650)).date(),
         )
         RagChunk.objects.create(
             chunk_id="rag_school_zone_emergency_stop",
@@ -587,9 +589,7 @@ class ProductionReadinessTests(TestCase):
         SECRET_KEY=("prod-secret-key-prod-secret-key-123456"),
         ALLOWED_HOSTS=["app.legaldrive.test"],
         DJANGO_DATABASE_ENGINE="postgres",
-        GOOGLE_AUTH_ALLOW_MOCK=False,
-        APP_AUTH_ALLOW_MOCK_BEARER=False,
-        GOOGLE_CLIENT_ID="google-client-id",
+        GOOGLE_CLIENT_ID="google-client-id.apps.googleusercontent.com",
         GOOGLE_CLIENT_SECRET=("google-client-secret"),
         GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
         APP_JWT_SECRET=("app-jwt-secret-app-jwt-secret-123456"),
@@ -617,8 +617,6 @@ class ProductionReadinessTests(TestCase):
         SECRET_KEY=("replace-with-django-secret-key-from-secret-manager"),
         ALLOWED_HOSTS=["app.example.com"],
         DJANGO_DATABASE_ENGINE="postgres",
-        GOOGLE_AUTH_ALLOW_MOCK=False,
-        APP_AUTH_ALLOW_MOCK_BEARER=False,
         GOOGLE_CLIENT_ID="replace-with-google-oauth-web-client-id",
         GOOGLE_CLIENT_SECRET=fixture_value("replace-with-google", "-oauth-client-secret"),
         GOOGLE_POPUP_REDIRECT_URI="https://app.example.com",
@@ -650,8 +648,6 @@ class ProductionReadinessTests(TestCase):
         SECRET_KEY=("prod-secret-key-prod-secret-key-123456"),
         ALLOWED_HOSTS=["app.legaldrive.test"],
         DJANGO_DATABASE_ENGINE="postgres",
-        GOOGLE_AUTH_ALLOW_MOCK=False,
-        APP_AUTH_ALLOW_MOCK_BEARER=False,
         GOOGLE_CLIENT_ID="google-client-id.apps.googleusercontent.com",
         GOOGLE_CLIENT_SECRET=("google-client-secret-realistic-value"),
         GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
@@ -694,6 +690,25 @@ class ProductionReadinessTests(TestCase):
         )
 
     @override_settings(
+        OBJECT_STORAGE_PROVIDER="s3",
+        OBJECT_STORAGE_BUCKET="shared-bucket",
+        OBJECT_STORAGE_QUARANTINE_BUCKET="shared-bucket",
+    )
+    def test_readiness_rejects_shared_clean_and_quarantine_bucket(self):
+        report = build_production_readiness_report(include_database=False)
+
+        object_storage = {
+            check["name"]: check for check in report["checks"]
+        }["object_storage"]
+        self.assertEqual(object_storage["status"], "fail")
+        self.assertTrue(
+            any(
+                "must differ" in detail["message"]
+                for detail in object_storage["details"]
+            )
+        )
+
+    @override_settings(
         LEGAL_RAG_VECTOR_ENABLED=True,
         LEGAL_RAG_QUERY_EMBEDDING_PROVIDER="sentence-transformers",
         LEGAL_RAG_QUERY_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
@@ -711,6 +726,111 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(checks["legal_rag"]["status"], "fail")
         self.assertTrue(
             any("sentence-transformers package is not installed" in detail["message"] for detail in checks["legal_rag"]["details"])
+        )
+
+    @override_settings(
+        LEGAL_RAG_VECTOR_ENABLED=True,
+        LEGAL_RAG_QUERY_EMBEDDING_PROVIDER="sentence-transformers",
+        LEGAL_RAG_QUERY_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
+        LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS="1024",
+        LEGAL_RAG_SEED_EMBEDDING_PROVIDER="openai",
+        LEGAL_RAG_SEED_EMBEDDING_MODEL="text-embedding-3-large",
+        LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS="1024",
+    )
+    def test_readiness_rejects_query_and_seed_embedding_space_mismatch(self):
+        with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
+            report = build_production_readiness_report(include_database=False)
+
+        legal_rag = {check["name"]: check for check in report["checks"]}["legal_rag"]
+        self.assertEqual(legal_rag["status"], "fail")
+        self.assertTrue(
+            any(
+                "does not match the configured seed embedding space" in detail["message"]
+                for detail in legal_rag["details"]
+            )
+        )
+
+    @override_settings(
+        DJANGO_DATABASE_ENGINE="postgres",
+        LEGAL_RAG_VECTOR_ENABLED=False,
+    )
+    def test_readiness_requires_current_lexical_legal_rows_when_vector_is_off(self):
+        class EmptyCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+            def execute(self, _sql, _params):
+                return None
+
+            def fetchone(self):
+                return None
+
+        fake_connection = SimpleNamespace(
+            vendor="postgresql",
+            introspection=SimpleNamespace(table_names=lambda: ["law_chunks"]),
+            cursor=lambda: EmptyCursor(),
+        )
+
+        with patch("chatbot.readiness.connection", fake_connection):
+            report = build_production_readiness_report(include_database=True)
+
+        legal_rag = {check["name"]: check for check in report["checks"]}["legal_rag"]
+        self.assertEqual(legal_rag["status"], "fail")
+        self.assertTrue(
+            any(
+                "No current searchable legal row" in detail["message"]
+                for detail in legal_rag["details"]
+            )
+        )
+
+    @override_settings(
+        DJANGO_DATABASE_ENGINE="postgres",
+        LEGAL_RAG_VECTOR_ENABLED=True,
+        LEGAL_RAG_QUERY_EMBEDDING_PROVIDER="sentence-transformers",
+        LEGAL_RAG_QUERY_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
+        LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS="1024",
+        LEGAL_RAG_SEED_EMBEDDING_PROVIDER="sentence-transformers",
+        LEGAL_RAG_SEED_EMBEDDING_MODEL="intfloat/multilingual-e5-large",
+        LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS="1024",
+    )
+    def test_readiness_requires_an_eligible_row_in_the_configured_vector_space(self):
+        fetch_results = iter([(1,), None])
+
+        class SequencedCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+            def execute(self, _sql, _params):
+                return None
+
+            def fetchone(self):
+                return next(fetch_results)
+
+        fake_connection = SimpleNamespace(
+            vendor="postgresql",
+            introspection=SimpleNamespace(
+                table_names=lambda: ["law_chunks", "law_embeddings"]
+            ),
+            cursor=lambda: SequencedCursor(),
+        )
+
+        with patch("chatbot.readiness.connection", fake_connection):
+            with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
+                report = build_production_readiness_report(include_database=True)
+
+        legal_rag = {check["name"]: check for check in report["checks"]}["legal_rag"]
+        self.assertEqual(legal_rag["status"], "fail")
+        self.assertTrue(
+            any(
+                "No current searchable legal embedding" in detail["message"]
+                for detail in legal_rag["details"]
+            )
         )
 
     @override_settings(
@@ -735,6 +855,76 @@ class ProductionReadinessTests(TestCase):
         self.assertTrue(
             any("elasticsearch package is required" in detail["message"] for detail in checks["text_ml_case_search_rag"]["details"])
         )
+
+    @override_settings(
+        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
+        REVIEW_CASE_ES_BM25_INDEX="shared_chunks_v1",
+        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="shared_chunks_v1",
+    )
+    def test_readiness_rejects_shared_text_ml_elasticsearch_indexes(self):
+        with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
+            report = build_production_readiness_report(include_database=False)
+
+        check = {item["name"]: item for item in report["checks"]}[
+            "text_ml_case_search_rag"
+        ]
+        self.assertEqual(check["status"], "fail")
+        self.assertTrue(
+            any(
+                "non-empty and distinct" in detail["message"]
+                for detail in check["details"]
+            )
+        )
+
+    @override_settings(
+        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
+        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
+        REVIEW_CASE_ES_BM25_INDEX="Invalid Index",
+        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="fault-ratio-index",
+    )
+    def test_readiness_rejects_invalid_text_ml_elasticsearch_index_name(self):
+        with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
+            report = build_production_readiness_report(include_database=False)
+
+        check = {item["name"]: item for item in report["checks"]}[
+            "text_ml_case_search_rag"
+        ]
+        self.assertEqual(check["status"], "fail")
+        self.assertTrue(
+            any("Elasticsearch index" in detail["message"] for detail in check["details"])
+        )
+
+    def test_readiness_legal_row_query_requires_usable_evidence(self):
+        from chatbot import readiness
+
+        class RecordingCursor:
+            sql = ""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+            def execute(self, sql, _params):
+                self.sql = sql
+
+            def fetchone(self):
+                return (1,)
+
+        cursor = RecordingCursor()
+        fake_connection = SimpleNamespace(cursor=lambda: cursor)
+
+        with patch("chatbot.readiness.connection", fake_connection):
+            self.assertTrue(readiness._current_legal_chunk_exists())
+
+        self.assertIn("btrim(c.source_url) <> ''", cursor.sql)
+        self.assertIn("btrim(c.provision_text) <> ''", cursor.sql)
 
     def test_readiness_management_command_outputs_json(self):
         output = StringIO()
@@ -867,7 +1057,6 @@ class ProductionReadinessTests(TestCase):
         self.assertNotIn("api_key", json.dumps(body))
 
     @override_settings(
-        GOOGLE_AUTH_ALLOW_MOCK=False,
         GOOGLE_CLIENT_ID="google-client-id.apps.googleusercontent.com",
         GOOGLE_CLIENT_SECRET=("google-client-secret-realistic-value"),
         GOOGLE_POPUP_REDIRECT_URI="https://app.legaldrive.test",
@@ -911,13 +1100,53 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(body["policy"]["provider"], "mock_s3")
         self.assertTrue(body["policy"]["writes_binary"])
         self.assertEqual(body["policy"]["persistence_state"], "binary_adapter")
-        self.assertEqual(body["upload_write"]["status"], "written")
-        self.assertEqual(body["report_write"]["status"], "written")
+        self.assertEqual(body["upload_write"]["status"], "skipped")
+        self.assertEqual(
+            body["upload_write"]["reason"],
+            "scanner_only_clean_upload",
+        )
+        self.assertEqual(body["report_staging_write"]["status"], "written")
+        self.assertEqual(body["report_write"]["status"], "copied")
+        self.assertEqual(body["report_staging_cleanup"]["status"], "deleted")
+
+    def test_object_storage_smoke_fails_when_staging_is_not_deleted(self):
+        output = StringIO()
+
+        with (
+            tempfile.TemporaryDirectory() as object_root,
+            override_settings(
+                OBJECT_STORAGE_PROVIDER="mock_s3",
+                OBJECT_STORAGE_BUCKET="bucket",
+                OBJECT_STORAGE_PREFIX="canonical",
+                OBJECT_STORAGE_LOCAL_ROOT=object_root,
+            ),
+            patch(
+                "chatbot.management.commands.smoke_object_storage.delete_object",
+                return_value={"status": "skipped", "reason": "delete_failed"},
+            ),
+            self.assertRaises(CommandError),
+        ):
+            call_command(
+                "smoke_object_storage",
+                "--require-binary",
+                "--format",
+                "json",
+                stdout=output,
+            )
+
+        body = json.loads(output.getvalue())
+        self.assertEqual(body["status"], "fail")
+        self.assertEqual(body["error"]["reason"], "report_staging_cleanup_failed")
 
     def test_file_scan_smoke_command_requires_clean_scan(self):
         output = StringIO()
 
-        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root):
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(
+            MOCK_UPLOAD_ROOT=upload_root,
+            OBJECT_STORAGE_LOCAL_ROOT=upload_root,
+            OBJECT_STORAGE_BUCKET="file-scan-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="file-scan-quarantine",
+        ):
             call_command(
                 "smoke_file_scan",
                 "--require-clean",
@@ -931,11 +1160,60 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(body["status"], "pass")
         self.assertEqual(body["scan_status"], "clean")
 
+    def test_file_scan_smoke_supports_split_api_upload_and_scanner_phases(self):
+        upload_output = StringIO()
+        scan_output = StringIO()
+
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(
+            MOCK_UPLOAD_ROOT=upload_root,
+            OBJECT_STORAGE_LOCAL_ROOT=upload_root,
+            OBJECT_STORAGE_BUCKET="file-scan-split-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="file-scan-split-quarantine",
+        ):
+            call_command(
+                "smoke_file_scan",
+                "--phase",
+                "upload",
+                "--attachment-id",
+                "att_file_scan_split",
+                "--format",
+                "json",
+                stdout=upload_output,
+            )
+            uploaded_file = UploadedFile.objects.get(
+                attachment_id="att_file_scan_split"
+            )
+            self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+            self.assertEqual(uploaded_file.scan_status, "not_started")
+
+            call_command(
+                "smoke_file_scan",
+                "--phase",
+                "scan",
+                "--attachment-id",
+                "att_file_scan_split",
+                "--require-clean",
+                "--format",
+                "json",
+                stdout=scan_output,
+            )
+
+        self.assertEqual(json.loads(upload_output.getvalue())["phase"], "upload")
+        scan_body = json.loads(scan_output.getvalue())
+        self.assertEqual(scan_body["phase"], "scan")
+        self.assertEqual(scan_body["status"], "pass")
+        self.assertEqual(scan_body["scan_status"], "clean")
+
     @override_settings(FILE_SCAN_PROVIDER="clamav", FILE_SCAN_CLAMAV_HOST="clamav")
     def test_file_scan_smoke_supports_clamav_provider_clean_scan(self):
         output = StringIO()
 
-        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[]):
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(
+            MOCK_UPLOAD_ROOT=upload_root,
+            OBJECT_STORAGE_LOCAL_ROOT=upload_root,
+            OBJECT_STORAGE_BUCKET="file-scan-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="file-scan-quarantine",
+        ), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[]):
             call_command(
                 "smoke_file_scan",
                 "--attachment-id",
@@ -962,7 +1240,12 @@ class ProductionReadinessTests(TestCase):
             "reason": "connection_failed",
         }
 
-        with tempfile.TemporaryDirectory() as upload_root, override_settings(MOCK_UPLOAD_ROOT=upload_root), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[finding]):
+        with tempfile.TemporaryDirectory() as upload_root, override_settings(
+            MOCK_UPLOAD_ROOT=upload_root,
+            OBJECT_STORAGE_LOCAL_ROOT=upload_root,
+            OBJECT_STORAGE_BUCKET="file-scan-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="file-scan-quarantine",
+        ), patch("chatbot.file_scan_service._clamav_scan_findings", return_value=[finding]):
             with self.assertRaises(CommandError):
                 call_command(
                     "smoke_file_scan",
@@ -975,8 +1258,8 @@ class ProductionReadinessTests(TestCase):
                 )
 
         uploaded_file = UploadedFile.objects.get(attachment_id="att_file_scan_clamav_unavailable")
-        self.assertEqual(uploaded_file.status, UploadedFileStatus.REJECTED)
-        self.assertEqual(uploaded_file.scan_status, "rejected")
+        self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
+        self.assertEqual(uploaded_file.scan_status, "error")
         self.assertEqual(uploaded_file.metadata["scan_result"]["findings"][0]["reason"], "connection_failed")
 
     def legacy_persona_catalog_smoke_command_covers_all_demo_personas(self):
@@ -1297,7 +1580,6 @@ class RemovedChatbotMockApiContract:
         self.assertFalse(UploadedFile.objects.filter(original_filename="expired-guest.pdf").exists())
         self.assertFalse(Report.objects.filter(report_id="rep_expired_guest_guard").exists())
 
-    @override_settings(GOOGLE_AUTH_ALLOW_MOCK=False, APP_AUTH_ALLOW_MOCK_BEARER=False)
     def test_real_auth_mode_rejects_legacy_dev_mock_bearer(self):
         response = Client(HTTP_AUTHORIZATION="Bearer dev-mock-token").post(
             "/api/chat/messages/",
@@ -1310,7 +1592,6 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(error["code"], "token_invalid")
         self.assertEqual(error["auth"]["reason"], "app_jwt_required")
 
-    @override_settings(APP_AUTH_ALLOW_MOCK_BEARER=False)
     def test_real_auth_mode_accepts_backend_app_jwt(self):
         login_response = Client().post(
             "/api/auth/login/",
@@ -1772,7 +2053,6 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(error["auth"]["reason"], "invalid_google_code_request_header")
 
     @override_settings(
-        GOOGLE_AUTH_ALLOW_MOCK=False,
         GOOGLE_CLIENT_ID="real-google-client",
         GOOGLE_CLIENT_SECRET="x",
         GOOGLE_POPUP_REDIRECT_URI="http://127.0.0.1:5173",
@@ -2913,6 +3193,10 @@ class RemovedChatbotMockApiContract:
         body = json.loads(output.getvalue())
         self.assertEqual(body["loop_iteration"], 1)
         self.assertEqual(body["contract_version"], "agent_worker_queue.v1")
+        self.assertEqual(
+            body["report_staging_cleanup"]["contract_version"],
+            "report_staging_cleanup_batch.v1",
+        )
 
     def test_attachment_upload_endpoint_returns_metadata_and_handoff(self):
         upload = SimpleUploadedFile(
@@ -3692,12 +3976,15 @@ class RemovedChatbotMockApiContract:
         )
         self.assertEqual(download_response.status_code, 200)
         self.assertEqual(download_response["X-API-Surface"], "canonical_mock")
-        self.assertEqual(download_response["X-Report-Persistence"], "postgresql")
-        self.assertEqual(download_response["X-Report-Storage-Backend"], "object_storage")
-        self.assertEqual(download_response["X-Report-Storage-URI"], report.storage_uri)
-        self.assertEqual(download_response["X-Report-Object-Key"], report.metadata["object_storage"]["key"])
-        self.assertEqual(download_response["X-Report-Object-Policy"], "object_storage_adapter.v1")
-        self.assertEqual(download_response["X-Report-Access-Decision"], "owner_match")
+        for header in (
+            "X-Report-Persistence",
+            "X-Report-Storage-Backend",
+            "X-Report-Storage-URI",
+            "X-Report-Object-Key",
+            "X-Report-Object-Policy",
+            "X-Report-Access-Decision",
+        ):
+            self.assertNotIn(header, download_response)
         self.assertEqual(download_response["Content-Type"], "application/pdf")
         self.assertIn('filename="rep_canonical_smoke.pdf"', download_response["Content-Disposition"])
         self.assertTrue(download_response.content.startswith(b"%PDF"))
@@ -4038,7 +4325,7 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(report["report_id"], "rep_reports_list_detail")
         self.assertEqual(report["content"]["reporting_payload"]["report_type"], "fault_ratio_analysis")
         self.assertEqual(report["content"]["reporting_payload"]["screen_id"], "UI-REPORT-FAULT-001")
-        self.assertEqual(report["job"]["job_id"], message_body["persistence"]["job_id"])
+        self.assertEqual(report["job_id"], message_body["persistence"]["job_id"])
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")
