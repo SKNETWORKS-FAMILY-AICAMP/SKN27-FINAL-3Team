@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -56,14 +57,19 @@ def test_frontend_uses_canonical_capability_and_async_result_contracts() -> None
 def test_chat_report_ready_notice_uses_a_locally_declared_gated_payload() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     chat_start = shell.index("function ChatScreenV2(")
-    chat_end = shell.index("function AnalysisProgressPanel", chat_start)
+    next_component = re.search(r"\nfunction [A-Za-z0-9_]+\(", shell[chat_start + 1 :])
+    assert next_component is not None
+    chat_end = chat_start + 1 + next_component.start()
     chat_screen = shell[chat_start:chat_end]
 
     assert (
         "const visibleReportingPayload = "
         "isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;"
     ) in chat_screen
-    assert "{visibleReportingPayload && (" in chat_screen
+    assert re.search(
+        r"\{(?:canGenerateReport && )?visibleReportingPayload && \(\s*<ReportReadyNotice",
+        chat_screen,
+    )
 
 
 def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_it() -> None:
@@ -140,7 +146,20 @@ def test_repeated_analysis_cards_use_unique_react_keys() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 
     assert "function analysisCardKey(card, index)" in shell
-    assert shell.count("key={analysisCardKey(card, index)}") == 4
+    card_map_pattern = re.compile(
+        r"\{(?:analysisCards(?:\.slice\([^)]*\))?|supportCards)"
+        r"\.map\(\(card, index\) => \("
+    )
+    keyed_card_map_pattern = re.compile(
+        r"\{(?:analysisCards(?:\.slice\([^)]*\))?|supportCards)"
+        r"\.map\(\(card, index\) => \(\s*<[^>]+"
+        r"key=\{analysisCardKey\(card, index\)\}"
+    )
+
+    card_maps = card_map_pattern.findall(shell)
+    keyed_card_maps = keyed_card_map_pattern.findall(shell)
+    assert card_maps
+    assert len(keyed_card_maps) == len(card_maps)
 
 
 def test_frontend_renders_canonical_law_ground_results_and_retrieval_status() -> None:
