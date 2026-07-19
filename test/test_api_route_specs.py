@@ -235,7 +235,10 @@ def test_report_get_routes_are_modeled_while_report_post_remains_deferred() -> N
     )
     download = modeled[("GET", "/api/reports/{report_id}/download/")]
     assert download.response_model is None
-    assert download.success_content[0].media_type == "application/pdf"
+    assert (
+        download.success_content[0].media_type
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
     assert download.success_content[0].schema == {"type": "string", "format": "binary"}
     assert [
         (parameter.name, parameter.location)

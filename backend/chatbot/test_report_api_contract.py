@@ -213,7 +213,10 @@ class ReportApiContractTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
         self.assertEqual(response["X-API-Surface"], "canonical")
         self.assertEqual(response["X-Execution-Mode"], "async_worker")
         self.assertIn("X-Report-Document-Type", response)

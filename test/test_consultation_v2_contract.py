@@ -109,6 +109,38 @@ def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_i
     assert "setCurrentReport(null);" in shell[submit_start:submit_end]
 
 
+def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    action_start = shell.index("async function runCurrentReportAction")
+    action_end = shell.index("async function triggerReportDownload", action_start)
+    report_action = shell[action_start:action_end]
+
+    assert "setPendingReportScreenDownload" not in shell
+    assert "openReportScreenPrintWindow" not in shell
+    assert "PDF" not in report_action
+    assert 'documentType = action === "download_objection" ? "objection_form" : "report"' in report_action
+    assert "const appealGate = activeReportingPayload?.appeal_gate || null;" in report_action
+    assert "if (appealGate?.blocked === true)" in report_action
+    assert "const actionDefinition =" in report_action
+    assert "const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;" in shell
+    assert "const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;" in shell
+    assert "disabled={appealDownloadBlocked}" in shell
+    assert "DOCX" in shell
+    assert "화면 PDF 저장" not in shell
+    assert "이의신청서 PDF" not in shell
+
+
+def test_download_report_never_returns_pdf_for_the_legacy_non_api_path() -> None:
+    views = read_text(ROOT / "backend" / "chatbot" / "views.py")
+    function_start = views.index("def download_report(")
+    function_end = views.index("def _report_auth_error_response", function_start)
+    download_view = views[function_start:function_end]
+
+    assert "application/pdf" not in download_view
+    assert "render_report_docx(" in download_view
+    assert "REPORT_DOCX_CONTENT_TYPE" in download_view
+
+
 def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 
