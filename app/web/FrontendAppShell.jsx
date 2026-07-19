@@ -321,7 +321,6 @@ export default function FrontendAppShell({
     setSessionId(previewSessionId);
     setGuestId(previewGuestId);
     setAuthSessionId(`auth_preview_${Date.now()}`);
-    setStatusMessage("UI 미리보기 모드입니다. 실제 로그인이 아니라 화면만 로그인 상태로 보여주는 것이라, 마이페이지 등 실제 데이터가 필요한 화면은 비어있거나 에러일 수 있습니다.");
   }
 
   async function logoutAndResetSession() {
@@ -1141,7 +1140,6 @@ export default function FrontendAppShell({
               setAttachmentPurpose={setAttachmentPurpose}
               setQuestion={setQuestion}
               setSelectedUploadFile={setSelectedUploadFile}
-              statusMessage={statusMessage}
               capabilityError={capabilityError}
               submittedQuestion={submittedQuestion}
               supervisorExecution={supervisorExecution}
@@ -1628,7 +1626,6 @@ function ChatScreenV2({
   setQuestion,
   setSelectedUploadFile,
   showPreviewLoggedInUi,
-  statusMessage,
   submittedQuestion,
   supervisorExecution,
   supervisorState,
@@ -1864,12 +1861,6 @@ function ChatScreenV2({
               {isSubmitting ? "정리 중" : "전송"}
             </button>
           </div>
-
-          {statusMessage && !isSubmitting && (
-            <p className="status-message inside" role="status">
-              {statusMessage}
-            </p>
-          )}
         </div>
       </div>
     </section>
