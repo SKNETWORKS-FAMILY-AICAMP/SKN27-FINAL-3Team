@@ -741,6 +741,124 @@ p {
   margin-bottom: 5px;
 }
 
+.bubble-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-soft, #555);
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  animation: typing-dot-bounce 1s infinite ease-in-out;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-dot-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.missing-fields-prompt {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #bdd4ef;
+  border-radius: 8px;
+  background: var(--blue-soft);
+}
+
+.missing-fields-prompt strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.missing-fields-prompt ul {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.missing-fields-prompt li {
+  margin-bottom: 3px;
+}
+
+.missing-fields-prompt p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-soft, #555);
+}
+
+.follow-up-note {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e9d8b4;
+  border-radius: 8px;
+  background: var(--amber-soft);
+}
+
+.follow-up-note p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--ink-soft, #555);
+}
+
+.follow-up-group {
+  margin-top: 8px;
+}
+
+.follow-up-group-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.follow-up-group-required .follow-up-group-label {
+  color: #b3401f;
+}
+
+.follow-up-group-optional .follow-up-group-label {
+  color: var(--ink-soft, #555);
+}
+
+.follow-up-note ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.follow-up-note li {
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.follow-up-note p:last-child,
+.follow-up-group:last-child {
+  margin-bottom: 0;
+}
+
 .persona-run {
   margin-top: 14px;
   display: grid;
@@ -2225,6 +2343,12 @@ button.report-list-card.active {
   }
 
   .sidebar {
+    display: none;
+  }
+
+  /* mobile-bottom-nav (rendered alongside the sidebar on chatbot/mypage/
+     reporting) already covers navigation at this width — avoid showing both. */
+  .topbar-with-mobile-nav {
     display: none;
   }
 

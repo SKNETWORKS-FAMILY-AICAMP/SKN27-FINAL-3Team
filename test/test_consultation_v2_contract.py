@@ -116,8 +116,10 @@ def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> No
         'function assistantMessageText(value, fallback = "")',
         'typeof value === "string"',
         "value.answer || value.summary",
-        "const assistantAnswer = assistantMessageText(analysisResponse?.assistant_message);",
-        'content: assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),',
+        "analysisResponse?.assistant_message?.core_answer ||",
+        "assistantMessageText(analysisResponse?.assistant_message);",
+        "workerResult?.assistant_message?.core_answer ||",
+        'assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),',
         "const assistantMessage = assistantMessageText(",
         "assistant_message: assistantMessageText(",
     ):
