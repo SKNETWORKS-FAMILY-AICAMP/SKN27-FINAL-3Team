@@ -8,7 +8,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import timedelta, timezone as datetime_timezone
@@ -31,6 +31,10 @@ from app.services.history_event_mock_service import (
     SENSITIVE_METADATA_KEYS,
     build_agent_execution_events,
     build_history_event,
+)
+from app.services.chat_session_followup_service import (
+    CHAT_SESSION_FOLLOWUP_STATE_VERSION,
+    build_chat_followup_snapshot,
 )
 from app.services.supervisor_reporting_handoff_service import (
     build_supervisor_reporting_handoff,
@@ -848,6 +852,81 @@ def get_chat_session_access_metadata(session_id: str | None) -> dict[str, Any] |
         "session_id": session.session_id,
         "owner_id": session.owner_id,
         "guest_id": _chat_session_guest_id(session),
+    }
+
+
+def load_chat_followup_state(session_id: str | None) -> dict[str, Any] | None:
+    """Load a versioned follow-up snapshot after the caller authorizes the session."""
+
+    normalized_session_id = _text(session_id)
+    if not normalized_session_id:
+        return None
+    session = ChatSession.objects.filter(session_id=normalized_session_id).only("metadata").first()
+    if session is None:
+        return None
+    state = _dict_or_empty(session.metadata).get("chat_followup_state")
+    if not isinstance(state, dict):
+        return None
+    if state.get("contract_version") != CHAT_SESSION_FOLLOWUP_STATE_VERSION:
+        return None
+    return deepcopy(state)
+
+
+def persist_chat_followup_state(
+    payload: dict[str, Any],
+    chat_response: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist a user-safe follow-up boundary without creating an analysis job."""
+
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(
+        chat_response.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
+    if session is None:
+        raise ValueError("chat_response must include session_id")
+
+    message_id = _text(chat_response.get("message_id"))
+    if not message_id:
+        raise ValueError("chat_response must include message_id")
+    conversation_save_state = conversation_save_state_from_payload(payload)
+    snapshot = build_chat_followup_snapshot(payload, chat_response)
+
+    with transaction.atomic():
+        session = ChatSession.objects.select_for_update().get(pk=session.pk)
+        session.metadata = {
+            **_metadata_with_conversation_save_state(
+                session.metadata,
+                conversation_save_state,
+                raw_payload=payload,
+            ),
+            "chat_followup_state": snapshot,
+        }
+        session.current_intent = _text(chat_response.get("routing_intent"))
+        session.save(update_fields=["metadata", "current_intent", "updated_at"])
+        message, _message_created = ChatMessage.objects.update_or_create(
+            message_id=message_id,
+            defaults={
+                "session": session,
+                "role": MessageRole.USER,
+                "content": _message_content(payload),
+                "routing_intent": _text(chat_response.get("routing_intent")),
+                "metadata": {
+                    "source": "canonical_chat_followup",
+                    "response_status": _text(chat_response.get("status")),
+                    "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+                    "conversation_save_state": conversation_save_state,
+                },
+            },
+        )
+
+    return {
+        "message_id": message.message_id,
+        "session_id": session.session_id,
+        "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+        "conversation_save_state": conversation_save_state,
+        "followup_state_version": CHAT_SESSION_FOLLOWUP_STATE_VERSION,
     }
 
 
@@ -2272,9 +2351,20 @@ def enqueue_analysis_job_work(
     job_payload: dict[str, Any],
     *,
     max_attempts: int = 2,
+    server_execution_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist a queued worker item without executing the agent plan inline."""
 
+    from app.services.supervisor_execution_input_service import (
+        SERVER_EXECUTION_CONTEXT_FIELD,
+        serialize_server_execution_context,
+    )
+
+    server_execution_context_envelope = serialize_server_execution_context(
+        server_execution_context
+    )
+    persisted_request_payload = dict(payload)
+    persisted_request_payload.pop(SERVER_EXECUTION_CONTEXT_FIELD, None)
     owner_id = _owner_id(payload)
     session = _get_or_create_session(
         job_payload.get("session_id"),
@@ -2286,7 +2376,7 @@ def enqueue_analysis_job_work(
     if owner_id and session.owner_id and session.owner_id != owner_id:
         raise PermissionError("analysis job session belongs to another owner")
 
-    conversation_save_state = conversation_save_state_from_payload(payload)
+    conversation_save_state = conversation_save_state_from_payload(persisted_request_payload)
 
     job_id = _text(job_payload.get("job_id"))
     if not job_id:
@@ -2327,7 +2417,7 @@ def enqueue_analysis_job_work(
         session.metadata = _metadata_with_conversation_save_state(
             session.metadata,
             conversation_save_state,
-            raw_payload=payload,
+            raw_payload=persisted_request_payload,
         )
         session.save(update_fields=["metadata", "updated_at"])
 
@@ -2338,7 +2428,7 @@ def enqueue_analysis_job_work(
                 defaults={
                     "session": session,
                     "role": MessageRole.USER,
-                    "content": _message_content(payload),
+                    "content": _message_content(persisted_request_payload),
                     "routing_intent": _text(job_payload.get("routing_intent")),
                     "metadata": {
                         "source": "canonical_analysis_job_queue",
@@ -2457,6 +2547,35 @@ def enqueue_analysis_job_work(
             ):
                 raise ValueError("terminal analysis job cannot create a new work item")
 
+        work_item_payload: dict[str, Any] = {
+            "contract_version": "agent_worker_queue.v1",
+            "persistence_mode": "analysis_job",
+            "request_payload": _json_compatible(persisted_request_payload),
+            "job_payload": _json_compatible(
+                {
+                    **job_payload,
+                    "status": AnalysisJobStatus.QUEUED.value,
+                    "active_node": active_node,
+                    "progress_message": progress_message,
+                    "node_execution": {},
+                }
+            ),
+            "execution_payload": _json_compatible(
+                {
+                    **persisted_request_payload,
+                    "job_id": job_id,
+                    "session_id": session.session_id,
+                    "message_id": message_id,
+                    "attachments": job_payload.get("attachments", []),
+                }
+            ),
+            "analysis_plan": _json_compatible(analysis_plan),
+        }
+        if server_execution_context_envelope:
+            work_item_payload["server_execution_context"] = _json_compatible(
+                server_execution_context_envelope
+            )
+
         work_item, work_item_created = AgentWorkItem.objects.get_or_create(
             work_item_id=work_item_id,
             defaults={
@@ -2469,30 +2588,7 @@ def enqueue_analysis_job_work(
                 "started_at": None,
                 "completed_at": None,
                 "next_run_at": timezone.now(),
-                "payload": {
-                    "contract_version": "agent_worker_queue.v1",
-                    "persistence_mode": "analysis_job",
-                    "request_payload": _json_compatible(payload),
-                    "job_payload": _json_compatible(
-                        {
-                            **job_payload,
-                            "status": AnalysisJobStatus.QUEUED.value,
-                            "active_node": active_node,
-                            "progress_message": progress_message,
-                            "node_execution": {},
-                        }
-                    ),
-                    "execution_payload": _json_compatible(
-                        {
-                            **payload,
-                            "job_id": job_id,
-                            "session_id": session.session_id,
-                            "message_id": message_id,
-                            "attachments": job_payload.get("attachments", []),
-                        }
-                    ),
-                    "analysis_plan": _json_compatible(analysis_plan),
-                },
+                "payload": work_item_payload,
                 "result": {},
                 "error_code": "",
                 "metadata": {
@@ -5792,7 +5888,12 @@ def _execute_cost_guarded_agent_phase(
     closed instead of issuing the same paid call again.
     """
 
-    from app.services.agent_node_service import execute_agent_plan
+    from app.services.agent_node_service import (
+        execute_agent_plan,
+        validate_supervisor_plan_handoff,
+    )
+
+    validate_supervisor_plan_handoff(analysis_plan, execution_payload)
 
     invocation = _reserve_paid_agent_phase_call(
         work_item,
@@ -6333,9 +6434,31 @@ def _annotate_reporting_execution_handoff(
 
 
 def _resolved_agent_work_item_execution_payload(work_item: AgentWorkItem) -> dict[str, Any]:
+    from app.services.supervisor_execution_input_service import (
+        build_trusted_worker_execution_payload,
+        read_server_execution_context,
+        requires_supervisor_handoff,
+    )
+
     queue_payload = _dict_or_empty(work_item.payload)
     job_payload = _dict_or_empty(queue_payload.get("job_payload"))
     execution_payload = dict(_dict_or_empty(queue_payload.get("execution_payload")))
+    chat_response = dict(_dict_or_empty(job_payload.get("chat_response")))
+    chat_response.setdefault("session_id", work_item.job.session.session_id)
+    chat_response.setdefault("message_id", _text(job_payload.get("message_id")))
+    chat_response.setdefault("attachments", execution_payload.get("attachments") or [])
+    execution_payload = build_trusted_worker_execution_payload(
+        execution_payload,
+        chat_response=chat_response,
+        server_execution_context=read_server_execution_context(
+            queue_payload.get("server_execution_context")
+        ),
+        public_request=requires_supervisor_handoff(execution_payload),
+        server_upstream_results=_persisted_work_item_upstream_results(
+            work_item,
+            analysis_plan=_dict_or_empty(queue_payload.get("analysis_plan")),
+        ),
+    )
     execution_payload.setdefault("job_id", work_item.job.job_id)
     execution_payload.setdefault("session_id", work_item.job.session.session_id)
     execution_payload.setdefault("message_id", _text(job_payload.get("message_id")))
@@ -6351,6 +6474,31 @@ def _resolved_agent_work_item_execution_payload(work_item: AgentWorkItem) -> dic
 
         execution_payload = resolve_attachment_references(execution_payload)
     return execution_payload
+
+
+def _persisted_work_item_upstream_results(
+    work_item: AgentWorkItem,
+    *,
+    analysis_plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Rebuild resumable upstream state from rows owned by this job only."""
+
+    planned_node_codes = {
+        _text(step.get("node_code"))
+        for step in _list_or_empty(analysis_plan.get("steps"))
+        if isinstance(step, dict) and _text(step.get("node_code"))
+    }
+    if not planned_node_codes:
+        return {}
+
+    results = AgentResult.objects.filter(
+        job=work_item.job,
+        node_code__in=planned_node_codes,
+    ).order_by("created_at", "result_id")
+    return {
+        result.node_code: _agent_result_handoff_record(result)
+        for result in results
+    }
 
 
 def _partition_reporting_plan(
@@ -6706,6 +6854,7 @@ def _build_reporting_handoff(
             # findings arrive separately through the persisted result rows.
             "user_facts": _text(context.get("user_facts")),
             "attachment_refs": attachments,
+            "case_evidence": _dict_or_empty(context.get("case_evidence")),
         },
         reporting_step_executable=reporting_step_executable,
     )
@@ -6991,15 +7140,22 @@ def _fail_agent_work_item(
     *,
     expected_attempt_no: int,
 ) -> dict[str, Any]:
+    from app.services.agent_node_service import SupervisorHandoffValidationError
+
     superseded_case_analysis = isinstance(exc, SupersededCaseAnalysisError)
     case_fact_provenance_required = isinstance(exc, CaseFactProvenanceError)
+    supervisor_handoff_invalid = isinstance(exc, SupervisorHandoffValidationError)
     error_code = (
         "superseded_case_analysis"
         if superseded_case_analysis
         else (
             "case_fact_provenance_required"
             if case_fact_provenance_required
-            else exc.__class__.__name__
+            else (
+                "supervisor_handoff_invalid"
+                if supervisor_handoff_invalid
+                else exc.__class__.__name__
+            )
         )
     )
     binding = AgentWorkItem.objects.filter(work_item_id=work_item_id).values(
@@ -7073,6 +7229,7 @@ def _fail_agent_work_item(
             and not isinstance(exc, PaidAgentCallRetryBlockedError)
             and not superseded_case_analysis
             and not case_fact_provenance_required
+            and not supervisor_handoff_invalid
         )
         if superseded_case_analysis:
             work_item.status = AgentWorkItemStatus.CANCELED.value

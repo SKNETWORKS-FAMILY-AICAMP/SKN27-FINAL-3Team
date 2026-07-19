@@ -116,6 +116,7 @@ export default function FrontendAppShell({
     analysisResponse?.assistant_message?.core_answer ||
     assistantMessageText(analysisResponse?.assistant_message);
   const assistantFollowUp = analysisResponse?.assistant_message?.follow_up || null;
+  const deadlineGuidance = analysisResponse?.deadline_guidance || null;
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -1153,6 +1154,7 @@ export default function FrontendAppShell({
               analysisCards={analysisCards}
               caseType={activeRoute === "faultResult" ? "fault" : caseType}
               currentReport={currentReport}
+              deadlineGuidance={deadlineGuidance}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenReport={() => setActiveRoute("reporting")}
@@ -1946,12 +1948,12 @@ function FaultRatioInsightPanel({ node, compact = false }) {
   }
 
   return (
-    <article className={compact ? "fault-ratio-insight-panel compact" : "fault-ratio-insight-panel"}>
-      <div className="fault-ratio-insight-head">
+    <article className={compact ? "agent-insight-panel compact" : "agent-insight-panel"}>
+      <div className="agent-insight-head">
         <span className="tag">과실 쟁점</span>
         <strong>유사 사례와 제출 자료 검토</strong>
       </div>
-      <div className="fault-ratio-insight-grid">
+      <div className="agent-insight-grid">
         <p>
           <span>검토 범위</span>
           <strong>{compactValue(ratioRangeLabel)}</strong>
@@ -1966,7 +1968,7 @@ function FaultRatioInsightPanel({ node, compact = false }) {
         </p>
       </div>
       {similarCases.length > 0 && (
-        <div className="fault-ratio-insight-section">
+        <div className="agent-insight-section">
           <strong>참고한 유사 사례</strong>
           {similarCases.slice(0, compact ? 2 : 3).map((item, index) => (
             <p key={item.source_ref || item.source_reference || item.case_id || `similar-case-${index}`}>
@@ -1976,13 +1978,13 @@ function FaultRatioInsightPanel({ node, compact = false }) {
         </div>
       )}
       {recommendedEvidence.length > 0 && (
-        <div className="fault-ratio-insight-section">
+        <div className="agent-insight-section">
           <strong>추가하면 좋은 자료</strong>
           <p>{compactValue(recommendedEvidence)}</p>
         </div>
       )}
       {limitations.length > 0 && (
-        <div className="fault-ratio-insight-section">
+        <div className="agent-insight-section">
           <strong>검토 시 확인할 한계</strong>
           <ul>
             {limitations.slice(0, compact ? 2 : 3).map((item, index) => (
@@ -1993,6 +1995,122 @@ function FaultRatioInsightPanel({ node, compact = false }) {
       )}
     </article>
   );
+}
+
+function LawGroundInsightPanel({ node, compact = false }) {
+  const structuredResult = node?.structured_result || {};
+  const retrieval = structuredResult.retrieval || {};
+  const matchedLaws = Array.isArray(structuredResult.matched_laws)
+    ? structuredResult.matched_laws
+    : [];
+  const attemptedBackends = Array.isArray(retrieval.attempted_backends)
+    ? retrieval.attempted_backends
+    : [];
+  const limitations = Array.isArray(node?.limitations) ? node.limitations : [];
+
+  if (!node || node?.node_code !== "law_ground_search") {
+    return null;
+  }
+
+  return (
+    <article className={compact ? "agent-insight-panel compact" : "agent-insight-panel"}>
+      <div className="agent-insight-head">
+        <span className="tag">법령 근거</span>
+        <strong>검색 출처와 적용 후보</strong>
+      </div>
+      <div className="agent-insight-grid">
+        <p>
+          <span>검색 상태</span>
+          <strong>{compactValue(retrieval.status || (matchedLaws.length > 0 ? "ready" : "empty"))}</strong>
+        </p>
+        <p>
+          <span>검색 저장소</span>
+          <strong>{compactValue(retrieval.backend || "unavailable")}</strong>
+        </p>
+        <p>
+          <span>확인된 근거</span>
+          <strong>{matchedLaws.length}건</strong>
+        </p>
+      </div>
+      {matchedLaws.length > 0 && (
+        <div className="agent-insight-section">
+          <strong>관련 법령 후보</strong>
+          {matchedLaws.slice(0, compact ? 2 : 4).map((item, index) => (
+            <p key={item.source_reference || `law-ground-${index}`}>
+              <strong>{compactValue([item.law_name || item.title, item.article].filter(Boolean).join(" "))}</strong>
+              {item.summary && <span>{compactValue(item.summary)}</span>}
+              <small>출처: {compactValue(item.source_reference)}</small>
+            </p>
+          ))}
+        </div>
+      )}
+      {attemptedBackends.length > 0 && (
+        <div className="agent-insight-section">
+          <strong>검색 시도 경로</strong>
+          <p>{compactValue(retrieval.attempted_backends)}</p>
+        </div>
+      )}
+      {limitations.length > 0 && (
+        <div className="agent-insight-section">
+          <strong>적용 전 확인사항</strong>
+          <ul>
+            {limitations.slice(0, compact ? 2 : 3).map((item, index) => (
+              <li key={`law-ground-limitation-${index}`}>{compactValue(item)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function ReportingPreviewPanel({ reportingPayload }) {
+  const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
+  const documentSections = sections.filter(isSubmissionDocumentSection);
+  const supportingSections = sections.filter((section) => !isSubmissionDocumentSection(section));
+
+  return (
+    <section className="reporting-preview" aria-label="리포팅 미리보기">
+      <div className="flow-panel-head">
+        <div>
+          <span className="eyebrow">리포트 미리보기</span>
+          <strong>{reportingPayload.title || "상담 분석 리포트"}</strong>
+          <p>{reportingPayload.summary}</p>
+        </div>
+        <span className={reportingPayload.stage === "agent_execution_ready" ? "tag green" : "tag amber"}>
+          {reportStatusLabel(reportingPayload.stage)}
+        </span>
+      </div>
+      {documentSections.length > 0 && (
+        <div className="report-document-highlights" aria-label="제출 문서 미리보기">
+          {documentSections.map((section) => (
+            <article key={`document-${section.title}`}>
+              <span className="tag green">제출 문서</span>
+              <strong>{section.title}</strong>
+              {(section.items || []).slice(0, 6).map((item, index) => (
+                <p key={`${section.title}-document-${index}`}>{compactValue(item)}</p>
+              ))}
+            </article>
+          ))}
+        </div>
+      )}
+      <div className="report-section-list">
+        {supportingSections.map((section) => (
+          <article key={section.title}>
+            <strong>{section.title}</strong>
+            {(section.items || []).slice(0, 4).map((item, index) => (
+              <p key={`${section.title}-${index}`}>{compactValue(item)}</p>
+            ))}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function isSubmissionDocumentSection(section) {
+  const title = String(section?.title || "");
+  return /이의신청서|의견제출서|제출 가이드라인|제출 가이드|초안/.test(title);
 }
 
 function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportActionStatus }) {
@@ -2289,10 +2407,30 @@ function reportSectionsForInspector(sections, mode) {
   return sections;
 }
 
+function DeadlineGuidancePanel({ guidance }) {
+  const nextActions = Array.isArray(guidance?.next_actions) ? guidance.next_actions : [];
+  const limitations = Array.isArray(guidance?.limitations) ? guidance.limitations : [];
+
+  return (
+    <aside className={`deadline-guidance-panel deadline-guidance-panel--${guidance.status}`} role="alert">
+      <span className="deadline-guidance-panel__title">{guidance.card_title}</span>
+      <strong>{guidance.reason}</strong>
+      {limitations[0] && <p>{limitations[0]}</p>}
+      {nextActions.length > 0 && (
+        <ul>
+          {nextActions.map((action) => <li key={action}>{action}</li>)}
+        </ul>
+      )}
+    </aside>
+  );
+}
+
+
 function CaseResultScreen({
   analysisCards = [],
   caseType = "fine",
   currentReport = null,
+  deadlineGuidance = null,
   isAuthenticated = false,
   onOpenChat,
   onOpenReport,
@@ -2309,6 +2447,7 @@ function CaseResultScreen({
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
+  const lawGroundNode = nodeResults.find((node) => node?.node_code === "law_ground_search");
   const reportStatus = reportingPayload?.stage || currentReport?.status || "draft";
   const reportStatusText = reportStatusLabel(reportStatus);
   const facts = Array.isArray(supervisorState?.collected_facts) ? supervisorState.collected_facts : [];
@@ -2351,6 +2490,9 @@ function CaseResultScreen({
       </div>
 
       <div className="dashboard case-result-dashboard">
+        {deadlineGuidance && deadlineGuidance.status !== "normal" && (
+          <DeadlineGuidancePanel guidance={deadlineGuidance} />
+        )}
         <div className="summary-grid">
           {metrics.map((metric) => (
             <MetricCard key={metric.label} label={metric.label} value={metric.value} detail={metric.detail} />
@@ -2385,6 +2527,7 @@ function CaseResultScreen({
                   ))}
                 </div>
               )}
+              {lawGroundNode && <LawGroundInsightPanel node={lawGroundNode} />}
 
               {analysisCards.length > 0 && (
                 <div className="case-result-card-list">
@@ -2525,6 +2668,7 @@ function ReportingScreen({
   const sections = Array.isArray(activeReportingPayload?.sections) ? activeReportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
+  const lawGroundNode = nodeResults.find((node) => node?.node_code === "law_ground_search");
   const reportPersistence = currentReport?.persistence || {};
   const reportMetadata = currentReport?.metadata || {};
   const reportStatus = activeReportingPayload?.stage || currentReport?.status || reportPersistence.status || "draft";
@@ -2805,6 +2949,7 @@ function ReportingScreen({
                 <p>분석 항목 {analysisCards.length}건과 근거·누락 자료를 리포트에 반영했습니다.</p>
               </div>
               {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
+              {lawGroundNode && <LawGroundInsightPanel compact node={lawGroundNode} />}
               {selectedInspectorMode !== "overview" && (
                 <div className="inspector-section report-inspector-detail">
                   <span className="tag green">{inspectorDetail.label}</span>

@@ -1,6 +1,17 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from app.services.chat_orchestration_service import compose_agent_response, submit_message
+from app.services.supervisor_llm_service import validate_slot_filling_state
+from app.services.supervisor_routing_service import routing_policy_metadata
+
+
+def test_supervisor_routing_uses_a_versioned_external_policy() -> None:
+    metadata = routing_policy_metadata()
+
+    assert metadata["contract_version"] == "supervisor_routing_policy.v1"
+    assert metadata["source"].endswith("supervisor_routing_policy.v1.json")
 
 
 def test_empty_message_requests_input_without_creating_an_agent_plan() -> None:
@@ -12,7 +23,21 @@ def test_empty_message_requests_input_without_creating_an_agent_plan() -> None:
     assert "mock" not in str(response).lower()
 
 
-def test_fine_notice_message_queues_only_supported_real_agents() -> None:
+def test_out_of_scope_accident_does_not_create_a_supervisor_plan() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_scope_boundary",
+            "user_text": "차가 보행자와 충돌한 사고의 과실을 확정해 주세요.",
+        }
+    )
+
+    assert response["status"] == "scope_guidance"
+    assert response["service_scope"]["decision"] == "expert_handoff"
+    assert response["analysis_plan"]["steps"] == []
+    assert response["reporting_payload"] is None
+
+
+def test_fine_notice_message_queues_supervisor_boundaries_and_supported_real_agents() -> None:
     response = submit_message(
         {
             "session_id": "ses_1",
@@ -22,12 +47,14 @@ def test_fine_notice_message_queues_only_supported_real_agents() -> None:
     )
 
     assert response["status"] == "queued"
-    assert response["routing_intent"] == "fine_notice_objection"
+    assert response["routing_intent"] == "fine_notice_analysis"
     assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
+        "input_context_validation",
         "fine_notice_analysis",
         "law_ground_search",
         "appeal_decision_flow",
-        "objection_report_generation",
+        "agent_result_validation",
+        "final_response_merge",
     ]
     assert response["assistant_message"] is None
     assert "vision_media_analysis" not in str(response)
@@ -105,16 +132,138 @@ def test_enabled_supervisor_need_more_input_does_not_queue_or_report(monkeypatch
     assert response["supervisor_state"]["stage"] == "need_more_input"
 
 
+def test_fine_notice_procedure_question_does_not_run_ocr_appeal_or_report() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_procedure",
+            "user_text": "과태료 이의신청 절차와 제출 기한이 궁금합니다.",
+            "attachments": [],
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
+        "input_context_validation",
+        "law_ground_search",
+        "agent_result_validation",
+        "final_response_merge",
+    ]
+
+
+def test_report_node_is_planned_only_when_document_generation_is_explicitly_requested() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_report",
+            "user_text": "첨부한 고지서를 분석하고 이의신청서 초안을 작성해 주세요.",
+            "attachments": [{"attachment_id": "att_1", "purpose": "fine_notice", "status": "ready"}],
+        }
+    )
+
+    assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
+        "input_context_validation",
+        "fine_notice_analysis",
+        "law_ground_search",
+        "appeal_decision_flow",
+        "agent_result_validation",
+        "objection_report_generation",
+        "final_response_merge",
+    ]
+
+
+def test_supervisor_fallback_builds_valid_slot_state_for_reporting_handoff() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_slot_state",
+            "user_text": "prepare an objection report",
+            "attachments": [{"attachment_id": "att_1", "purpose": "fine_notice", "status": "ready"}],
+        }
+    )
+
+    validation = validate_slot_filling_state(
+        response["supervisor_state"],
+        response["analysis_plan"],
+    )
+    packages = response["supervisor_state"]["agent_input_packages"]
+    assert validation["valid"] is True
+    assert packages
+    assert all(package["status"] == "ready" for package in packages)
+    assert all(
+        package["payload"]["slot_state"]["contract_version"] == "slot_filling_state.v1"
+        for package in packages
+    )
+
+
 def test_fault_ratio_message_requires_case_and_does_not_enable_unsupported_media_analysis() -> None:
     response = submit_message(
         {"session_id": "ses_1", "user_text": "교차로에서 충돌했는데 과실비율이 궁금합니다."}
     )
 
-    assert response["routing_intent"] == "fault_ratio_text"
+    assert response["routing_intent"] == "accident_initial_consultation"
     assert response["status"] == "needs_input"
     assert response["analysis_plan"]["steps"] == []
     assert response["consultation_state"]["v2"]["schema_version"] == "consultation_state.v2"
     assert "vision_media_analysis" not in str(response)
+
+
+def test_fault_ratio_followup_answer_is_accumulated_before_next_question() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_followup",
+            "user_text": "신호등이 있는 사거리 교차로입니다.",
+            "conversation_history": [
+                {"role": "user", "content": "사고 과실을 상담하고 싶어요."},
+                {"role": "assistant", "content": "사고 장소의 도로 형태를 알려주세요."},
+                {"role": "user", "content": "신호등이 있는 사거리 교차로입니다."},
+            ],
+        }
+    )
+
+    reduced = response["consultation_state"]["fact_state"]
+    assert reduced["facts"]["road_layout"]["value"] == "신호등이 있는 사거리 교차로입니다."
+    assert response["pending_questions"][0]["field"] == "vehicle_actions"
+
+
+@patch("app.services.chat_orchestration_service.build_supervisor_state_with_optional_llm")
+def test_accident_initial_message_uses_llm_only_for_fact_candidates(build_supervisor_state) -> None:
+    build_supervisor_state.return_value = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "need_fact_confirmation",
+        "collected_facts": [
+            {"field": "road_layout", "value": "사거리 교차로", "confidence": 0.9},
+            {"field": "vehicle_actions", "value": "A 직진, B 좌회전", "confidence": 0.9},
+            {"field": "signal_priority", "value": "A 녹색 신호", "confidence": 0.8},
+            {"field": "collision_location", "value": "A 앞범퍼와 B 우측면", "confidence": 0.9},
+        ],
+        "missing_fields": [],
+        "next_questions": [],
+        "agent_input_packages": [],
+        "reporting_payload": None,
+    }
+
+    response = submit_message(
+        {
+            "session_id": "ses_initial_facts",
+            "message_id": "msg_initial_facts",
+            "user_text": "사거리에서 저는 직진하고 상대는 좌회전하다 충돌했습니다. 제 신호는 녹색이었습니다.",
+        }
+    )
+
+    fact_state = response["consultation_state"]["fact_state"]
+    assert fact_state["missing_fields"] == []
+    assert all(not record["confirmed"] for record in fact_state["facts"].values())
+    case_evidence = response["consultation_state"]["v2"]["case_evidence"]
+    assert case_evidence["schema_version"] == "case_evidence.v1"
+    assert case_evidence["facts"] == {}
+    assert set(case_evidence["claims"]) == {
+        "road_layout",
+        "vehicle_actions",
+        "signal_priority",
+        "collision_location",
+    }
+    assert response["supervisor_state"]["case_evidence"] == case_evidence
+    assert response["pending_questions"][0]["field"] == "material_evidence"
+    assert response["consultation_state"]["promotion_gate"]["requirements"][0] == "fact_confirmation"
+    assert response["analysis_plan"]["steps"] == []
 
 
 def test_agent_response_is_composed_from_execution_results() -> None:
@@ -139,7 +288,7 @@ def test_agent_response_is_composed_from_execution_results() -> None:
                         "status": "partial",
                         "summary": "관련 조문 후보를 확인했습니다.",
                         "structured_result": {"matched_laws": ["도로교통법"]},
-                        "evidence": [{"source_reference": "law:1"}],
+                        "evidence": [{"source_ref": "law:1", "source_type": "law"}],
                         "limitations": ["사건별 적용 여부는 추가 확인이 필요합니다."],
                     },
                 },
@@ -153,6 +302,7 @@ def test_agent_response_is_composed_from_execution_results() -> None:
     )
     assert response["structured_results"]["text_ml_case_search"]["ratio_range"] == "A 70 : B 30"
     assert [item["source_reference"] for item in response["evidence"]] == ["review:1", "law:1"]
+    assert "source_ref" not in response["evidence"][1]
     assert response["limitations"] == ["사건별 적용 여부는 추가 확인이 필요합니다."]
     assert response["assistant_message"]["follow_up"] is None
 
@@ -310,3 +460,43 @@ def test_empty_search_asks_user_to_rephrase_when_all_categories_are_already_give
     follow_up = response["assistant_message"]["follow_up"]
     assert follow_up["items"] == []
 
+
+
+def test_composed_agent_response_preserves_deadline_guidance() -> None:
+    response = compose_agent_response(
+        {
+            "job_id": "job_deadline",
+            "executions": [
+                {
+                    "node_code": "final_response_merge",
+                    "agent_output": {
+                        "status": "partial",
+                        "summary": "deadline guidance",
+                        "structured_result": {
+                            "assistant_message": {
+                                "answer": "deadline guidance",
+                                "summary": "deadline guidance",
+                            },
+                            "deadline_guidance": {
+                                "contract_version": "deadline_guidance.v1",
+                                "status": "needs_confirmation",
+                            },
+                            "cards": [
+                                {
+                                    "card_type": "deadline_guidance",
+                                    "title": "deadline confirmation",
+                                }
+                            ],
+                            "evidence": [],
+                            "limitations": [],
+                            "pending_questions": [],
+                            "report_links": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert response["deadline_guidance"]["status"] == "needs_confirmation"
+    assert response["cards"][0]["card_type"] == "deadline_guidance"

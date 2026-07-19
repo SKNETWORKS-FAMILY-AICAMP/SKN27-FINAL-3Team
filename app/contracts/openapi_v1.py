@@ -8,7 +8,11 @@ from typing import Any
 import yaml
 from pydantic import BaseModel
 
-from app.contracts.api_route_specs import API_ROUTE_SPECS, RouteSpec
+from app.contracts.api_route_specs import (
+    API_ROUTE_SPECS,
+    RequestParameterSpec,
+    RouteSpec,
+)
 
 
 def _schema_ref(model: type[BaseModel]) -> dict[str, str]:
@@ -20,7 +24,11 @@ def _component_schemas(specs: Iterable[RouteSpec]) -> dict[str, dict[str, Any]]:
     for spec in specs:
         if spec.request_model is not None:
             models[spec.request_model.__name__] = spec.request_model
-        models[spec.response_model.__name__] = spec.response_model
+        if spec.response_model is not None:
+            models[spec.response_model.__name__] = spec.response_model
+        for content in spec.success_content:
+            if content.response_model is not None:
+                models[content.response_model.__name__] = content.response_model
         for error in spec.errors:
             models[error.response_model.__name__] = error.response_model
 
@@ -41,19 +49,15 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
         "tags": list(spec.tags),
         "summary": spec.summary,
         "operationId": spec.operation_id,
-        "security": [{"bearerAuth": []}] if spec.auth_required else [],
+        "security": _security_requirements(spec),
         "x-contract-status": spec.contract_status,
         "x-django-route-name": spec.route_name,
         "x-django-view": spec.view_name,
         "responses": {
-            str(spec.success_status): {
-                "description": "Successful response",
-                "content": {
-                    "application/json": {
-                        "schema": _schema_ref(spec.response_model),
-                    }
-                },
-            },
+            str(status): _success_response(spec)
+            for status in (spec.success_statuses or (spec.success_status,))
+        }
+        | {
             **{
                 str(error.status): {
                     "description": "Typed API error response",
@@ -68,31 +72,93 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
             },
         },
     }
-    if spec.path_parameters:
+    parameters = [
+        {
+            "name": parameter.name,
+            "in": "path",
+            "required": True,
+            "description": parameter.description,
+            "schema": {
+                "type": "string",
+                "minLength": parameter.min_length,
+                "maxLength": parameter.max_length,
+            },
+        }
+        for parameter in spec.path_parameters
+    ]
+    parameters.extend(
+        _request_parameter(parameter) for parameter in spec.request_parameters
+    )
+    if parameters:
         operation["parameters"] = [
-            {
-                "name": parameter.name,
-                "in": "path",
-                "required": True,
-                "description": parameter.description,
-                "schema": {
-                    "type": "string",
-                    "minLength": parameter.min_length,
-                    "maxLength": parameter.max_length,
-                },
-            }
-            for parameter in spec.path_parameters
+            *parameters
         ]
     if spec.request_model is not None:
         operation["requestBody"] = {
-            "required": True,
+            "required": spec.request_body_required,
             "content": {
-                "application/json": {
-                    "schema": _schema_ref(spec.request_model),
-                }
+                media_type: {"schema": _schema_ref(spec.request_model)}
+                for media_type in spec.request_media_types
             },
         }
     return operation
+
+
+def _success_response(spec: RouteSpec) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "description": "Successful response",
+        "content": _success_response_content(spec),
+    }
+    if spec.success_headers:
+        response["headers"] = {
+            header.name: {
+                "description": header.description,
+                "required": header.required,
+                "schema": dict(header.schema),
+            }
+            for header in spec.success_headers
+        }
+    return response
+
+
+def _success_response_content(spec: RouteSpec) -> dict[str, dict[str, Any]]:
+    if not spec.success_content:
+        assert spec.response_model is not None
+        return {"application/json": {"schema": _schema_ref(spec.response_model)}}
+    return {
+        content.media_type: {"schema": _content_schema(content)}
+        for content in spec.success_content
+    }
+
+
+def _content_schema(content: Any) -> dict[str, Any]:
+    if content.response_model is not None:
+        return _schema_ref(content.response_model)
+    assert content.schema is not None
+    return dict(content.schema)
+
+
+def _security_requirements(spec: RouteSpec) -> list[dict[str, list[str]]]:
+    if spec.auth_required:
+        return [{"bearerAuth": []}]
+    if spec.auth_optional:
+        return [{}, {"bearerAuth": []}]
+    return []
+
+
+def _request_parameter(parameter: RequestParameterSpec) -> dict[str, Any]:
+    schema: dict[str, Any] = {"type": "string"}
+    if parameter.format:
+        schema["format"] = parameter.format
+    if parameter.allowed_values:
+        schema["enum"] = list(parameter.allowed_values)
+    return {
+        "name": parameter.name,
+        "in": parameter.location,
+        "required": parameter.required,
+        "description": parameter.description,
+        "schema": schema,
+    }
 
 
 def build_openapi_document(

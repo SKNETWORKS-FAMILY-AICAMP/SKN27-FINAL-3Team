@@ -3976,12 +3976,15 @@ class RemovedChatbotMockApiContract:
         )
         self.assertEqual(download_response.status_code, 200)
         self.assertEqual(download_response["X-API-Surface"], "canonical_mock")
-        self.assertEqual(download_response["X-Report-Persistence"], "postgresql")
-        self.assertEqual(download_response["X-Report-Storage-Backend"], "object_storage")
-        self.assertEqual(download_response["X-Report-Storage-URI"], report.storage_uri)
-        self.assertEqual(download_response["X-Report-Object-Key"], report.metadata["object_storage"]["key"])
-        self.assertEqual(download_response["X-Report-Object-Policy"], "object_storage_adapter.v1")
-        self.assertEqual(download_response["X-Report-Access-Decision"], "owner_match")
+        for header in (
+            "X-Report-Persistence",
+            "X-Report-Storage-Backend",
+            "X-Report-Storage-URI",
+            "X-Report-Object-Key",
+            "X-Report-Object-Policy",
+            "X-Report-Access-Decision",
+        ):
+            self.assertNotIn(header, download_response)
         self.assertEqual(download_response["Content-Type"], "application/pdf")
         self.assertIn('filename="rep_canonical_smoke.pdf"', download_response["Content-Disposition"])
         self.assertTrue(download_response.content.startswith(b"%PDF"))
@@ -4322,7 +4325,7 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(report["report_id"], "rep_reports_list_detail")
         self.assertEqual(report["content"]["reporting_payload"]["report_type"], "fault_ratio_analysis")
         self.assertEqual(report["content"]["reporting_payload"]["screen_id"], "UI-REPORT-FAULT-001")
-        self.assertEqual(report["job"]["job_id"], message_body["persistence"]["job_id"])
+        self.assertEqual(report["job_id"], message_body["persistence"]["job_id"])
 
     def test_canonical_report_download_denies_other_owner(self):
         session = ChatSession.objects.create(session_id="ses_private_report", owner_id="usr_mock")

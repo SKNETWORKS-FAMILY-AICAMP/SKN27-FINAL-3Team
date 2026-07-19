@@ -18,6 +18,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
+from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
     ConfirmCaseFactsRequest,
@@ -52,9 +53,18 @@ from app.services.auth_session_service import (
 from app.services.auth_error_contract import build_auth_error, build_www_authenticate_header
 from app.services.capability_catalog import capability_catalog_payload
 from app.services.chat_orchestration_service import (
+    build_scope_guidance_response,
     compose_agent_response,
     create_session,
     submit_message,
+)
+from app.services.chat_session_followup_service import (
+    followup_routing_intent,
+    merge_chat_followup_payload,
+)
+from app.services.supervisor_execution_input_service import (
+    build_trusted_worker_execution_payload,
+    sanitize_public_supervisor_request,
 )
 from app.services.google_auth_service import (
     create_google_code_login as _create_google_code_login,
@@ -70,6 +80,14 @@ from app.services.history_event_mock_service import (
     record_history_event as record_sidecar_history_event,
     source_from_request,
     subject_from_payload,
+)
+from app.services.report_query_service import (
+    WORKER_REPORT_SOURCE,
+    compose_report_detail_response,
+    compose_report_error_response,
+    compose_report_list_response,
+    report_api_surface,
+    report_execution_mode,
 )
 from chatbot.api_response import (
     is_canonical_mock_request as _is_canonical_mock_request,
@@ -117,6 +135,7 @@ from chatbot.repositories import (
     list_report_records,
     list_uploaded_files,
     mark_conversation_save_state,
+    load_chat_followup_state,
     enqueue_analysis_job_work,
     process_agent_work_items,
     persist_current_auth_subject,
@@ -124,6 +143,7 @@ from chatbot.repositories import (
     persist_auth_token_refresh,
     persist_analysis_job_execution,
     persist_guest_session_identity,
+    persist_chat_followup_state,
     record_agent_history_event_records,
     record_history_event_record,
     record_usage_event,
@@ -785,6 +805,11 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     usage = None
     if _is_canonical_mock_request(request):
+        try:
+            identity_body = protect_chat_input_payload(identity_body)
+        except ChatInputRejected as exc:
+            return _chat_input_rejected_response(request, exc)
+        identity_body = sanitize_public_supervisor_request(identity_body)
         requested_session_id = str(identity_body.get("session_id") or "")
         if requested_session_id:
             session_access = get_chat_session_access_metadata(requested_session_id)
@@ -950,13 +975,18 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
                 },
                 status=409,
             )
-        node_execution = _queued_node_execution_placeholder(
+        execution_payload = build_trusted_worker_execution_payload(
             identity_body,
+            chat_response=chat_response,
+            public_request=True,
+        )
+        node_execution = _queued_node_execution_placeholder(
+            execution_payload,
             analysis_plan=analysis_plan,
             chat_response=chat_response,
         )
         job_payload = _agent_plan_job_payload(
-            identity_body,
+            execution_payload,
             {
                 "analysis_plan": analysis_plan,
                 "chat_response": chat_response,
@@ -999,7 +1029,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
                 _refund_usage_safely(usage, reason="analysis_reservation_lost")
                 return _analysis_job_conflict_response(request)
         try:
-            persistence = enqueue_analysis_job_work(identity_body, job_payload)
+            persistence = enqueue_analysis_job_work(execution_payload, job_payload)
         except PermissionError:
             _refund_usage_safely(usage, reason="analysis_queue_access_denied")
             _release_analysis_job_reservation_safely(
@@ -1180,7 +1210,13 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     policy_response = _canonical_guest_identity_policy_response(request, identity_body)
     if policy_response is not None:
         return policy_response
+    try:
+        identity_body = protect_chat_input_payload(identity_body)
+    except ChatInputRejected as exc:
+        return _chat_input_rejected_response(request, exc)
+    identity_body = sanitize_public_supervisor_request(identity_body)
     requested_session_id = str(identity_body.get("session_id") or "")
+    session_access = None
     if requested_session_id:
         session_access = get_chat_session_access_metadata(requested_session_id)
         if session_access is not None:
@@ -1194,11 +1230,22 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             chat_response=_scan_blocked_chat_response_from_payload(identity_body),
         )
 
+    stored_followup_state = None
+    if requested_session_id and session_access is not None:
+        stored_followup_state = load_chat_followup_state(requested_session_id)
+        identity_body = merge_chat_followup_payload(
+            identity_body,
+            stored_followup_state,
+        )
+
     usage = record_usage_event(identity_body, scope="chat_message")
     if not usage["allowed"]:
         return _rate_limit_response(request, usage)
     try:
-        chat_response = submit_message(identity_body)
+        chat_response = submit_message(
+            identity_body,
+            routing_intent_override=followup_routing_intent(stored_followup_state),
+        )
     except Exception:
         _refund_usage_safely(usage, reason="chat_planning_failed")
         raise
@@ -1217,7 +1264,21 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["execution_mode"] = "planning_blocked"
         return _json_response(request, chat_response, status=503)
 
+    if chat_response["status"] == "scope_guidance":
+        chat_response["usage"] = usage
+        chat_response["execution_mode"] = "scope_guidance"
+        return _json_response(request, chat_response)
+
     if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
+        if chat_response["status"] in {"needs_input", "case_ready"}:
+            try:
+                chat_response["persistence"] = persist_chat_followup_state(
+                    identity_body,
+                    chat_response,
+                )
+            except Exception:
+                _refund_usage_safely(usage, reason="chat_followup_persistence_failed")
+                raise
         chat_response["usage"] = usage
         execution_modes = {
             "needs_input": "input_collection",
@@ -1227,21 +1288,11 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["execution_mode"] = execution_modes[chat_response["status"]]
         return _json_response(request, chat_response)
 
-    execution_payload = {
-        **identity_body,
-        "session_id": chat_response.get("session_id"),
-        "message_id": chat_response.get("message_id"),
-        "attachments": chat_response.get("attachments", []),
-        "execution_mode": "sync",
-        "context": {
-            **(
-                identity_body.get("context")
-                if isinstance(identity_body.get("context"), dict)
-                else {}
-            ),
-            "supervisor_handoff": chat_response.get("supervisor_state", {}),
-        },
-    }
+    execution_payload = build_trusted_worker_execution_payload(
+        identity_body,
+        chat_response=chat_response,
+        public_request=True,
+    )
 
     node_execution = _queued_node_execution_placeholder(
         execution_payload,
@@ -1529,12 +1580,47 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     execution_payload = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     if _is_canonical_mock_request(request):
+        try:
+            execution_payload = protect_chat_input_payload(execution_payload)
+        except ChatInputRejected as exc:
+            return _chat_input_rejected_response(request, exc)
         execution_payload = apply_attachment_scan_gate(execution_payload)
     chat_response = None
     analysis_plan = execution_payload.get("analysis_plan")
+    if analysis_plan:
+        attachments = [
+            item
+            for item in execution_payload.get("attachments", [])
+            if isinstance(item, dict)
+        ]
+        scope_guidance = build_scope_guidance_response(
+            session_id=str(execution_payload.get("session_id") or f"ses_{uuid4().hex[:12]}"),
+            message_id=str(execution_payload.get("message_id") or f"msg_{uuid4().hex[:12]}"),
+            user_text=str(execution_payload.get("user_text") or "").strip(),
+            attachments=attachments,
+        )
+        if scope_guidance is not None:
+            return _json_response(
+                request,
+                {
+                    "analysis_plan": scope_guidance["analysis_plan"],
+                    "chat_response": scope_guidance,
+                    "execution_mode": "scope_guidance",
+                },
+            )
     if not analysis_plan:
         chat_response = submit_message(execution_payload)
         analysis_plan = chat_response["analysis_plan"]
+
+    if chat_response and chat_response.get("status") == "scope_guidance":
+        return _json_response(
+            request,
+            {
+                "analysis_plan": analysis_plan,
+                "chat_response": chat_response,
+                "execution_mode": "scope_guidance",
+            },
+        )
 
     response = {"analysis_plan": analysis_plan}
     if chat_response:
@@ -1609,6 +1695,12 @@ def process_agent_work_items_once(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "POST", "OPTIONS"])
 def report_action(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
+        auth_response = _report_auth_error_response(
+            request,
+            session_id=request.GET.get("session_id"),
+        )
+        if auth_response is not None:
+            return auth_response
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
         subject = access_subject_from_payload(identity_payload)["subject"]
         if _is_canonical_mock_request(request):
@@ -1629,21 +1721,18 @@ def report_action(request: HttpRequest) -> JsonResponse:
             owner_id=str(subject.get("user_id") or "") if _is_canonical_mock_request(request) else request.GET.get("owner_id"),
         )
         has_worker_reports = any(
-            report.get("source") == "analysis_worker_reporting"
+            report.get("source") == WORKER_REPORT_SOURCE
             for report in reports
         )
         return _json_response(
             request,
-            {
-                "api_surface": (
-                    "canonical"
-                    if _is_canonical_mock_request(request) and has_worker_reports
-                    else "canonical_mock"
-                    if _is_canonical_mock_request(request)
-                    else "mock"
+            compose_report_list_response(
+                reports,
+                api_surface=report_api_surface(
+                    canonical=_is_canonical_mock_request(request),
+                    source=WORKER_REPORT_SOURCE if has_worker_reports else "",
                 ),
-                "reports": reports,
-            },
+            ),
         )
 
     body = _json_body(request)
@@ -1677,6 +1766,12 @@ def report_action(request: HttpRequest) -> JsonResponse:
 def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
     access_metadata = None
     if _is_canonical_mock_request(request):
+        auth_response = _report_auth_error_response(
+            request,
+            session_id=request.GET.get("session_id"),
+        )
+        if auth_response is not None:
+            return auth_response
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
         subject = access_subject_from_payload(identity_payload)["subject"]
         guest_violation = _guest_identity_policy_violation(subject)
@@ -1695,44 +1790,40 @@ def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
         if access_metadata is not None:
             access = authorize_report_download_metadata(access_metadata, identity_payload)
             if not access["allowed"]:
-                return _object_access_denied_response(request, access)
+                return _report_object_access_denied_response(request, access)
 
     report = get_report_record_detail(report_id)
     if report is None:
-        return _json_response(
+        return _report_error_response(
             request,
             {
-                "error": {
-                    "code": "report_not_found",
-                    "message": "Requested report was not found.",
-                }
+                "code": "report_not_found",
+                "message": "Requested report was not found.",
             },
             status=404,
         )
     return _json_response(
         request,
-        {
-            "api_surface": (
-                "canonical"
-                if _is_canonical_mock_request(request)
-                and report.get("source") == "analysis_worker_reporting"
-                else "canonical_mock"
-                if _is_canonical_mock_request(request)
-                else "mock"
+        compose_report_detail_response(
+            report,
+            api_surface=report_api_surface(
+                canonical=_is_canonical_mock_request(request),
+                source=report.get("source"),
             ),
-            "execution_mode": (
-                "async_worker"
-                if report.get("source") == "analysis_worker_reporting"
-                else "mock"
-            ),
-            "report": report,
-        },
+            execution_mode=report_execution_mode(source=report.get("source")),
+        ),
     )
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
     if _is_canonical_mock_request(request):
+        auth_response = _report_auth_error_response(
+            request,
+            session_id=request.GET.get("session_id"),
+        )
+        if auth_response is not None:
+            return auth_response
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
         subject = access_subject_from_payload(identity_payload)["subject"]
         guest_violation = _guest_identity_policy_violation(subject)
@@ -1749,55 +1840,57 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             )
         access_metadata = get_report_access_metadata(report_id)
         if access_metadata is None:
-            return _json_response(
+            return _report_error_response(
                 request,
                 {
-                    "error": {
-                        "code": "report_not_found",
-                        "message": "Requested report was not found.",
-                    }
+                    "code": "report_not_found",
+                    "message": "Requested report was not found.",
                 },
                 status=404,
             )
         access = authorize_report_download_metadata(access_metadata, identity_payload)
         if not access["allowed"]:
-            return _object_access_denied_response(request, access)
+            return _report_object_access_denied_response(request, access)
         if (
-            access_metadata.get("source") == "analysis_worker_reporting"
+            access_metadata.get("source") == WORKER_REPORT_SOURCE
             and access_metadata.get("status") != "ready"
         ):
-            return _json_response(
+            return _report_error_response(
                 request,
                 {
-                    "error": {
-                        "contract_version": "report_download.v1",
-                        "code": "report_not_ready",
-                        "message": "Draft analysis reports are preview-only until the Reporting gate is ready.",
-                        "report_id": report_id,
-                        "status": access_metadata.get("status"),
-                    }
+                    "contract_version": "report_download.v1",
+                    "code": "report_not_ready",
+                    "message": "Draft analysis reports are preview-only until the Reporting gate is ready.",
+                    "report_id": report_id,
+                    "status": access_metadata.get("status"),
                 },
                 status=409,
             )
         document_type = request.GET.get("document_type")
         download = get_report_download_metadata(report_id, document_type=document_type)
         if download is not None:
-            is_worker_report = access_metadata.get("source") == "analysis_worker_reporting"
             response = HttpResponse(
                 download["body"],
                 content_type=download["content_type"],
             )
             response["Content-Disposition"] = f'attachment; filename="{download["filename"]}"'
-            response["X-API-Surface"] = "canonical" if is_worker_report else "canonical_mock"
-            response["X-Execution-Mode"] = "async_worker" if is_worker_report else "mock"
-            response["X-Report-Persistence"] = "postgresql"
-            response["X-Report-Storage-Backend"] = download["storage_backend"]
-            response["X-Report-Storage-URI"] = download["storage_uri"]
-            response["X-Report-Object-Key"] = download["object_key"]
-            response["X-Report-Object-Policy"] = download["object_storage"].get("policy_version", "")
-            response["X-Report-Access-Decision"] = access["reason"]
+            response["X-API-Surface"] = report_api_surface(
+                canonical=True,
+                source=access_metadata.get("source"),
+            )
+            response["X-Execution-Mode"] = report_execution_mode(
+                source=access_metadata.get("source"),
+            )
             response["X-Report-Document-Type"] = download.get("document_type", "")
             return response
+        return _report_error_response(
+            request,
+            {
+                "code": "report_not_found",
+                "message": "Requested report was not found.",
+            },
+            status=404,
+        )
 
     response = HttpResponse(
         build_report_download_pdf_body(
@@ -1812,6 +1905,67 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
         response["X-API-Surface"] = "canonical_mock"
         response["X-Execution-Mode"] = "mock"
     return response
+
+
+def _report_auth_error_response(
+    request: HttpRequest,
+    *,
+    session_id: str | None,
+) -> JsonResponse | None:
+    """Surface malformed or expired bearer credentials before report access checks."""
+
+    status, payload = _get_current_auth_subject(
+        authorization_header=request.headers.get("Authorization"),
+        guest_id=request.headers.get("X-Guest-Id") or request.GET.get("guest_id"),
+        session_id=session_id,
+    )
+    if status < 400:
+        return None
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    response = _report_error_response(
+        request,
+        error
+        or {
+            "code": "token_invalid",
+            "message": "Authentication token could not be verified.",
+        },
+        status=status,
+    )
+    if status == 401:
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+    return response
+
+
+def _report_error_response(
+    request: HttpRequest,
+    error: dict[str, object],
+    *,
+    status: int,
+) -> JsonResponse:
+    """Serialize a report failure through the narrow public error projection."""
+
+    return _json_response(request, compose_report_error_response(error), status=status)
+
+
+def _report_object_access_denied_response(
+    request: HttpRequest,
+    access: dict[str, object],
+) -> JsonResponse:
+    """Return authorization details without the raw owner or storage metadata."""
+
+    return _report_error_response(
+        request,
+        {
+            "contract_version": "object_access.v1",
+            "type": "object_access",
+            "code": "object_access_denied",
+            "status": 403,
+            "message": "요청한 데이터에 접근할 권한이 없습니다.",
+            "required_action": "login_or_owner_match",
+            "access": access,
+        },
+        status=403,
+    )
 
 
 def _history_actor(request: HttpRequest, payload: dict[str, object] | None = None) -> dict[str, object]:
@@ -2464,6 +2618,8 @@ def _analysis_job_request_fingerprint(payload: dict[str, object]) -> str:
         "owner_id",
         "user_id",
         "auth_context",
+        "safe_user_text",
+        "privacy_gateway",
     }
     request_contract = {
         "contract_version": "analysis_job_request_fingerprint.v1",
@@ -2526,6 +2682,27 @@ def _analysis_job_request_error_response(
                 "code": code,
                 "status": 400,
                 "message": message,
+            }
+        },
+        status=400,
+    )
+
+
+def _chat_input_rejected_response(
+    request: HttpRequest,
+    error: ChatInputRejected,
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "chat_input_privacy.v1",
+                "type": "validation",
+                "code": "chat_input_rejected",
+                "status": 400,
+                "message": error.decision.message,
+                "required_action": "remove_sensitive_input",
+                "privacy_gateway": error.decision.public_metadata(),
             }
         },
         status=400,

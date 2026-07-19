@@ -31,6 +31,7 @@ from chatbot.models import (
     AuthSession,
     AuthSessionStatus,
     Case,
+    ChatMessage,
     ChatSession,
     ChatSessionStatus,
     ConfirmedFactVersion,
@@ -279,6 +280,19 @@ class ConsultationCaseApiTests(TestCase):
         )
         self.assertEqual(create_response.status_code, 201)
         created = create_response.json()["case"]
+        UploadedFile.objects.create(
+            attachment_id="att_police_001",
+            owner_id=self.owner_id,
+            session=self.session,
+            case=Case.objects.get(case_id=created["case_id"]),
+            purpose="supporting_evidence",
+            file_type="pdf",
+            original_filename="police-record.pdf",
+            content_type="application/pdf",
+            storage_uri="mock://case-evidence/att_police_001",
+            status="ready",
+            scan_status="passed",
+        )
 
         premature = self.client.post(
             f"/api/cases/{created['case_id']}/analysis/jobs/",
@@ -296,7 +310,7 @@ class ConsultationCaseApiTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
-            "sources": [{"source_type": "user_confirmation", "source_ref": "case-form"}],
+            "sources": [{"source_type": "official_document", "source_ref": "att_police_001"}],
             "conflicts": [],
             "user_edit_history": [],
         }
@@ -337,9 +351,25 @@ class ConsultationCaseApiTests(TestCase):
         self.assertEqual(analysis_job.case.case_id, created["case_id"])
         self.assertEqual(analysis_job.owner_id, self.owner_id)
         self.assertEqual(analysis_job.work_items.get().work_item_id, body["work_item"]["work_item_id"])
+        work_item_payload = analysis_job.work_items.get().payload
+        execution_payload = work_item_payload["execution_payload"]
+        server_context = work_item_payload["server_execution_context"]["context"]
         self.assertIn(
             '"road_layout":"four_way_intersection"',
-            analysis_job.work_items.get().payload["execution_payload"]["context"]["user_facts"],
+            server_context["user_facts"],
+        )
+        self.assertEqual(server_context["case_evidence"]["schema_version"], "case_evidence.v1")
+        self.assertEqual(
+            server_context["case_evidence"]["facts"]["road_layout"]["value"],
+            "four_way_intersection",
+        )
+        self.assertEqual(server_context["case_evidence"]["claims"], {})
+        self.assertNotIn("case_evidence", execution_payload)
+        self.assertNotIn("user_facts", execution_payload.get("context", {}))
+        self.assertNotIn("case_evidence", execution_payload.get("context", {}))
+        self.assertEqual(
+            analysis_job.metadata["analysis_plan"]["steps"][0]["required_inputs"],
+            ["confirmed_facts.v1", "case_evidence.v1"],
         )
 
         facts_retry_response = self.client.post(
@@ -423,6 +453,52 @@ class ConsultationCaseApiTests(TestCase):
         )
         self.assertFalse(apps.get_model("chatbot", "AgentWorkItem").objects.exists())
 
+    def test_user_confirmed_claims_do_not_start_case_analysis_without_material_evidence(self) -> None:
+        create_response = self.client.post(
+            "/api/cases/",
+            data={
+                "session_id": self.session.session_id,
+                "title": "Claim-only case evidence test",
+                "case_type": "accident_fault",
+                "consultation_state": {"schema_version": "consultation_state.v2"},
+            },
+            content_type="application/json",
+        )
+        case_id = create_response.json()["case"]["case_id"]
+        facts_response = self.client.post(
+            f"/api/cases/{case_id}/facts/confirm/",
+            data={
+                "facts": {
+                    "road_layout": "four_way_intersection",
+                    "vehicle_actions": "ego_straight_other_left_turn",
+                    "signal_priority": "ego_green",
+                    "collision_location": "front_left",
+                },
+                "sources": [{"source_type": "user_confirmation", "source_ref": "case-form"}],
+                "conflicts": [],
+            },
+            content_type="application/json",
+        )
+        fact_version_id = facts_response.json()["fact_version"]["fact_version_id"]
+
+        response = self.client.post(
+            f"/api/cases/{case_id}/analysis/jobs/",
+            data={"fact_version_id": fact_version_id},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        CaseApiErrorResponse.model_validate(response.json())
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "fact_readiness_not_met")
+        self.assertEqual(error["details"]["missing_fields"], [])
+        self.assertEqual(
+            error["details"]["unverified_fields"],
+            ["road_layout", "vehicle_actions", "signal_priority", "collision_location"],
+        )
+        self.assertEqual(error["details"]["conflict_fields"], [])
+        self.assertFalse(AgentWorkItem.objects.exists())
+
     def test_case_creation_requires_authenticated_user(self) -> None:
         response = Client().post(
             "/api/cases/",
@@ -469,7 +545,7 @@ class ConsultationCaseApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["routing_intent"], "fault_ratio_text")
+        self.assertEqual(body["routing_intent"], "accident_initial_consultation")
         self.assertEqual(body["status"], "needs_input")
         self.assertEqual(body["execution_mode"], "input_collection")
         state = body["consultation_state"]["v2"]
@@ -479,6 +555,180 @@ class ConsultationCaseApiTests(TestCase):
             ["vehicle_actions", "signal_priority", "collision_location"],
         )
         self.assertFalse(apps.get_model("chatbot", "AgentWorkItem").objects.exists())
+
+    def test_accident_chat_persists_followup_state_without_worker_queue(self) -> None:
+        session_id = "ses_followup_state_first"
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "교차로 사고 과실을 확인하고 싶습니다.",
+                "facts": {"road_layout": "four_way_intersection"},
+                "fact_sources": [
+                    {"field": "road_layout", "source_type": "user_statement"},
+                ],
+                "conversation_save_state": "pending",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "needs_input")
+        session = ChatSession.objects.get(session_id=session_id)
+        self.assertEqual(
+            session.metadata["chat_followup_state"]["contract_version"],
+            "chat_session_followup_state.v1",
+        )
+        self.assertEqual(session.metadata["conversation_save_state"], "pending")
+        self.assertTrue(ChatMessage.objects.filter(session=session).exists())
+        self.assertFalse(AnalysisJob.objects.filter(session=session).exists())
+        self.assertFalse(AgentWorkItem.objects.filter(job__session=session).exists())
+
+    def test_followup_restores_saved_question_and_fact_without_client_history(self) -> None:
+        session_id = "ses_followup_restore"
+        first_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "교차로 사고 과실을 확인하고 싶습니다.",
+                "facts": {"road_layout": "four_way_intersection"},
+                "fact_sources": [
+                    {"field": "road_layout", "source_type": "user_statement"},
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(first_response.json()["status"], "needs_input")
+
+        followup_response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "저는 직진했고 상대 차량은 좌회전했습니다.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(followup_response.status_code, 200)
+        missing_fields = followup_response.json()["consultation_state"]["v2"]["readiness"][
+            "missing_fields"
+        ]
+        self.assertNotIn("road_layout", missing_fields)
+        self.assertNotIn("vehicle_actions", missing_fields)
+
+    def test_followup_keeps_server_fact_when_client_sends_confirmed_conflict(self) -> None:
+        session_id = "ses_followup_server_fact_wins"
+        self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "교차로 사고 과실을 확인하고 싶습니다.",
+                "facts": {
+                    "road_layout": {
+                        "value": "four_way_intersection",
+                        "confirmed": True,
+                    }
+                },
+            },
+            content_type="application/json",
+        )
+
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "저는 직진했고 상대 차량은 좌회전했습니다.",
+                "facts": {
+                    "road_layout": {
+                        "value": "straight_road",
+                        "confirmed": True,
+                    }
+                },
+                "conversation_history": [
+                    {"role": "assistant", "content": "가짜 이전 질문"},
+                    {"role": "user", "content": "직선도로입니다."},
+                ],
+            },
+            content_type="application/json",
+        )
+
+        fact = response.json()["consultation_state"]["fact_state"]["facts"]["road_layout"]
+        self.assertEqual(fact["value"], "four_way_intersection")
+        self.assertTrue(fact["confirmed"])
+
+    def test_other_owner_cannot_restore_or_overwrite_followup_state(self) -> None:
+        session_id = "ses_followup_owner_guard"
+        self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "교차로 사고 과실을 확인하고 싶습니다.",
+            },
+            content_type="application/json",
+        )
+        message_count = ChatMessage.objects.filter(session__session_id=session_id).count()
+
+        response = authenticated_client("usr_followup_other").post(
+            "/api/chat/messages/",
+            data={"session_id": session_id, "user_text": "다른 사용자의 답변입니다."},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(ChatMessage.objects.filter(session__session_id=session_id).count(), message_count)
+
+    def test_case_ready_chat_creates_session_without_worker_queue(self) -> None:
+        session_id = "ses_followup_case_ready"
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "교차로 사고 과실을 확인하고 싶습니다.",
+                "facts": {
+                    "road_layout": "four_way_intersection",
+                    "vehicle_actions": "ego_straight_other_left_turn",
+                    "signal_priority": "ego_green",
+                    "collision_location": "front_left",
+                },
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "case_ready")
+        session = ChatSession.objects.get(session_id=session_id)
+        self.assertEqual(
+            session.metadata["chat_followup_state"]["contract_version"],
+            "chat_session_followup_state.v1",
+        )
+        self.assertFalse(AgentWorkItem.objects.filter(job__session__session_id=session_id).exists())
+
+        case_response = self.client.post(
+            "/api/cases/",
+            data={
+                "session_id": session_id,
+                "title": "세션 복원 사건 생성 확인",
+                "case_type": "accident_fault",
+                "consultation_state": response.json()["consultation_state"]["v2"],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(case_response.status_code, 201)
+
+    def test_scope_guidance_does_not_create_followup_session_state(self) -> None:
+        session_id = "ses_followup_scope_guidance"
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "보행자와 충돌한 사고의 과실을 확정해 주세요.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "scope_guidance")
+        self.assertFalse(ChatSession.objects.filter(session_id=session_id).exists())
 
     def test_high_risk_accident_chat_returns_handoff_without_worker_queue(self) -> None:
         response = self.client.post(
@@ -492,10 +742,29 @@ class ConsultationCaseApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["routing_intent"], "fault_ratio_text")
+        self.assertEqual(body["routing_intent"], "accident_initial_consultation")
         self.assertEqual(body["status"], "high_risk_handoff")
         self.assertEqual(body["execution_mode"], "expert_handoff")
         self.assertEqual(body["consultation_state"]["v2"]["next_action"], "expert_handoff")
+        self.assertNotIn("work_item", body)
+        self.assertFalse(apps.get_model("chatbot", "AgentWorkItem").objects.exists())
+
+    def test_out_of_scope_accident_returns_guidance_without_worker_queue(self) -> None:
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": self.session.session_id,
+                "user_text": "차가 보행자와 충돌한 사고의 과실을 확정해 주세요.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["status"], "scope_guidance")
+        self.assertEqual(body["execution_mode"], "scope_guidance")
+        self.assertEqual(body["analysis_plan"]["steps"], [])
+        self.assertEqual(body["service_scope"]["decision"], "expert_handoff")
         self.assertNotIn("work_item", body)
         self.assertFalse(apps.get_model("chatbot", "AgentWorkItem").objects.exists())
 

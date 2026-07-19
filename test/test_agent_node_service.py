@@ -26,6 +26,7 @@ def test_agent_node_registry_lists_all_integration_nodes():
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
         "vision_media_analysis",
         "appeal_decision_flow",
         "objection_report_generation",
@@ -36,6 +37,9 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert fine_notice_node["status"] == "sync_adapter_ready"
     assert "sync" in fine_notice_node["adapter_modes"]
     text_ml_node = next(node for node in nodes if node["node_code"] == "text_ml_case_search")
+    traffic_ocr_node = next(
+        node for node in nodes if node["node_code"] == "traffic_accident_confirmation_ocr"
+    )
     law_node = next(node for node in nodes if node["node_code"] == "law_ground_search")
     vision_node = next(node for node in nodes if node["node_code"] == "vision_media_analysis")
     objection_node = next(node for node in nodes if node["node_code"] == "objection_report_generation")
@@ -45,6 +49,9 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert text_ml_node["status"] == "sync_adapter_ready"
     assert text_ml_node["adapter_modes"] == ["sync"]
     assert text_ml_node["adapter_contract"]["execution_modes"] == ["sync"]
+    assert traffic_ocr_node["status"] == "sync_adapter_ready"
+    assert traffic_ocr_node["adapter_modes"] == ["sync"]
+    assert traffic_ocr_node["adapter_contract"]["execution_modes"] == ["sync"]
     assert vision_node["status"] == "mock_contract_only"
     assert vision_node["adapter_modes"] == ["mock"]
     assert vision_node["adapter_contract"]["execution_modes"] == ["mock"]
@@ -65,6 +72,7 @@ def test_only_vision_agent_advertises_mock_execution():
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
         "appeal_decision_flow",
         "objection_report_generation",
     }:
@@ -79,6 +87,7 @@ def test_public_agent_registry_includes_every_non_dl_runtime_agent():
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
+        "traffic_accident_confirmation_ocr",
         "appeal_decision_flow",
         "objection_report_generation",
     }
@@ -941,7 +950,14 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
                 "source_url": "https://example.test/law/road-traffic#article-5",
                 "provision_text": "Drivers must follow traffic signals.",
                 "score": 0.82,
+                "matched_token_count": 3,
+                "query_token_count": 4,
                 "match_reason": "query_term_match",
+                "_retrieval": {
+                    "backend": "django_rag_tables",
+                    "status": "ready",
+                    "attempted_backends": ["django_rag_tables"],
+                },
             }
         ]
 
@@ -980,11 +996,73 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
     assert output["status"] == "success"
     assert calls[0]["query_text"] == "road traffic signal violation article 5"
     assert structured_result["law_provisions"][0]["chunk_id"] == "road_traffic:article_5"
+    assert structured_result["matched_laws"] == [
+        {
+            "law_name": "Road Traffic Act",
+            "article": "5",
+            "title": "Signal compliance",
+            "summary": "Drivers must follow traffic signals.",
+            "source_url": "https://example.test/law/road-traffic#article-5",
+            "source_reference": "law_db:road_traffic#article_5",
+            "score": 0.82,
+        }
+    ]
+    assert structured_result["retrieval"] == {
+        "backend": "django_rag_tables",
+        "status": "ready",
+        "attempted_backends": ["django_rag_tables"],
+        "contract_version": "law_retrieval.v1",
+    }
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"
     assert structured_result["adapter_trace"]["input_source"] == "agent_input.context"
     assert output["evidence"][0]["source_type"] == "law"
-    assert output["evidence"][0]["source_ref"] == "law_db:road_traffic#article_5"
+    assert output["evidence"][0]["source_reference"] == "law_db:road_traffic#article_5"
+    assert "source_ref" not in output["evidence"][0]
     assert validate_agent_output_envelope(output, expected_node_code="law_ground_search")["valid"]
+
+
+def test_law_ground_agent_emits_canonical_provision_source_reference(monkeypatch):
+    from ai.agents.law_ground_search import agent as law_agent
+
+    monkeypatch.setattr(law_agent, "_get_neo4j_session", lambda: None)
+    monkeypatch.setattr(
+        law_agent,
+        "search_law_provisions",
+        lambda **_kwargs: [
+            {
+                "source_ref": "law:road-traffic:5",
+                "chunk_id": "road-traffic:5",
+                "source_name": "Road Traffic Act",
+                "source_type": "law",
+                "article_no": "Article 5",
+                "provision_text": "Drivers must follow traffic signals.",
+                "source_url": "https://example.test/law/road-traffic#article-5",
+                "score": 0.82,
+            }
+        ],
+    )
+
+    output = law_agent.run_law_ground_search(
+        {
+            "session_id": "ses_direct_law",
+            "message_id": "msg_direct_law",
+            "job_id": "job_direct_law",
+            "context": {
+                "query": {
+                    "raw_text": "road traffic signal violation article 5",
+                    "search_query": "road traffic signal violation article 5",
+                },
+                "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-17"},
+                "scope": {"jurisdiction": "KR"},
+            },
+        },
+        {},
+    )
+
+    provision = output["structured_result"]["law_provisions"][0]
+    assert provision["source_reference"] == "law:road-traffic:5"
+    assert "source_ref" not in provision
+    assert output["evidence"][0]["source_reference"] == "law:road-traffic:5"
 
 
 def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
@@ -1113,6 +1191,47 @@ def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(
     assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
 
 
+def test_reporting_agent_consumes_appeal_decision_from_supervisor_upstream_results():
+    execution = execute_mock_node(
+        {
+            "node_code": "objection_report_generation",
+            "session_id": "ses_report_handoff",
+            "message_id": "msg_report_handoff",
+            "user_text": "The violation facts are different and I want to object.",
+            "upstream_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "structured_result": {"issuing_authority": "Seoul", "violation_text": "signal"},
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {"matched_laws": []},
+                },
+                "appeal_decision_flow": {
+                    "status": "success",
+                    "structured_result": {
+                        "judgment_status": "success",
+                        "overall_possibility": "review_recommended",
+                        "merit_basis": "The submitted facts require review.",
+                    },
+                    "evidence": [
+                        {
+                            "source_type": "agent_analysis",
+                            "source_reference": "appeal:1",
+                        }
+                    ],
+                },
+            },
+        }
+    )
+
+    structured = execution["agent_output"]["structured_result"]
+    assert execution["execution_mode"] == "sync"
+    assert structured["appeal_decision"]["judgment_status"] == "success"
+    assert any("review_recommended" in reason for reason in structured["objection_reasons"])
+    assert any(item.get("source_reference") == "appeal:1" for item in execution["agent_output"]["evidence"])
+
+
 def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_inputs():
     execution = execute_mock_node(
         {
@@ -1123,6 +1242,19 @@ def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_i
             "session_id": "ses_sync_objection_fault_ratio",
             "message_id": "msg_sync_objection_fault_ratio",
             "user_text": "신호 없는 교차로에서 직진 중 우측 골목 차량과 접촉했습니다.",
+            "context": {
+                "objection_form": {
+                    "applicant_name": "홍길동",
+                    "recipient": "서울강남경찰서장 귀하",
+                    "case_number": "2026-교통-12345",
+                    "incident_at": "2026년 7월 1일 14시 20분경",
+                    "location": "서울특별시 강남구 무신호 교차로",
+                    "police_station": "서울강남경찰서",
+                    "investigation_result_summary": "신청인 차량이 가해 차량으로 판단되었습니다.",
+                    "objection_points": ["상대 차량의 일시정지 의무 위반", "블랙박스 증거 미반영"],
+                    "specific_request": "블랙박스 원본을 재검토하고 현장을 재조사해 주세요.",
+                }
+            },
             "upstream_results": {
                 "text_ml_case_search": {
                     "status": "success",

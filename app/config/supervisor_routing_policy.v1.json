@@ -1,0 +1,114 @@
+{
+  "contract_version": "supervisor_routing_policy.v1",
+  "intent_rules": [
+    {
+      "intent": "fine_notice_analysis",
+      "attachment_purposes": ["fine_notice"],
+      "keywords": []
+    },
+    {
+      "intent": "traffic_accident_confirmation_ocr",
+      "attachment_purposes": ["traffic_accident_confirmation"],
+      "keywords": []
+    },
+    {
+      "intent": "fine_notice_procedure",
+      "attachment_purposes": [],
+      "keywords": ["과태료", "고지서", "범칙금", "의견제출", "이의신청"]
+    },
+    {
+      "intent": "traffic_law_search",
+      "attachment_purposes": [],
+      "keywords": ["법령", "조문", "도로교통법", "법적 근거"]
+    },
+    {
+      "intent": "accident_initial_consultation",
+      "attachment_purposes": [],
+      "keywords": [
+        "과실",
+        "사고",
+        "충돌",
+        "접촉",
+        "교차로",
+        "보행자",
+        "구급차",
+        "다쳐",
+        "accident",
+        "collision",
+        "fault"
+      ]
+    }
+  ],
+  "default_intent": "general_consultation",
+  "plans": {
+    "fine_notice_analysis": [
+      "input_context_validation",
+      "fine_notice_analysis",
+      "law_ground_search",
+      "appeal_decision_flow",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
+    "traffic_accident_confirmation_ocr": [
+      "input_context_validation",
+      "traffic_accident_confirmation_ocr",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
+    "fine_notice_procedure": [
+      "input_context_validation",
+      "law_ground_search",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
+    "traffic_law_search": [
+      "input_context_validation",
+      "law_ground_search",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
+    "general_consultation": [
+      "input_context_validation",
+      "law_ground_search",
+      "agent_result_validation",
+      "final_response_merge"
+    ]
+  },
+  "report_policy": {
+    "supported_intent": "fine_notice_analysis",
+    "insert_before": "final_response_merge",
+    "node_code": "objection_report_generation",
+    "document_terms": ["신청서", "의견서", "보고서", "리포트", "문서"],
+    "action_terms": ["작성", "만들", "생성", "초안", "다운로드"]
+  },
+  "agent_result_validation_policy": {
+    "evidence_required_node_codes": [
+      "appeal_decision_flow",
+      "fine_notice_analysis",
+      "law_ground_search",
+      "text_ml_case_search",
+      "traffic_accident_confirmation_ocr",
+      "vision_media_analysis"
+    ],
+    "report_required_nodes": {
+      "fine_notice_analysis": [
+        "fine_notice_analysis",
+        "law_ground_search",
+        "appeal_decision_flow"
+      ],
+      "accident_precision_analysis": [
+        "text_ml_case_search",
+        "law_ground_search"
+      ]
+    }
+  },
+  "public_agent_node_codes": [
+    "appeal_decision_flow",
+    "fine_notice_analysis",
+    "law_ground_search",
+    "objection_report_generation",
+    "text_ml_case_search",
+    "traffic_accident_confirmation_ocr",
+    "vision_media_analysis"
+  ]
+}

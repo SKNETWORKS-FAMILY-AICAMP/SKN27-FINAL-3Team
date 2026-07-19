@@ -24,6 +24,9 @@ from chatbot.models import (
     ConfirmedFactVersion,
     Report,
     ReportStatus,
+    RetrievalEvent,
+    UploadedFile,
+    UploadedFileStatus,
 )
 from chatbot.repositories import (
     authorize_report_download_metadata,
@@ -117,7 +120,14 @@ def _agent_output(node_code: str, *, status: str = "success") -> dict:
                     "summary": "persisted legal ground",
                     "source_reference": "law:1",
                 }
-            ]
+            ],
+            "retrieval": {
+                "contract_version": "law_retrieval.v1",
+                "status": "ready",
+                "backend": "django_rag_tables",
+                "attempted_backends": ["postgres_lexical", "django_rag_tables"],
+            },
+            "retrieval_quality": "django_rag_tables",
         },
         "text_ml_case_search": {
             "query_text": "confirmed intersection collision facts",
@@ -239,6 +249,30 @@ def _reporting_handoff_from_payload(payload: dict) -> dict | None:
     return handoff if isinstance(handoff, dict) else None
 
 
+def _ready_case_evidence_source(
+    *,
+    case: Case,
+    owner_id: str,
+    session: ChatSession,
+    suffix: str,
+) -> list[dict[str, str]]:
+    attachment_id = f"att_reporting_evidence_{suffix}"
+    UploadedFile.objects.create(
+        attachment_id=attachment_id,
+        owner_id=owner_id,
+        session=session,
+        case=case,
+        purpose="supporting_evidence",
+        file_type="pdf",
+        original_filename=f"{attachment_id}.pdf",
+        content_type="application/pdf",
+        storage_uri=f"mock://reporting-evidence/{attachment_id}",
+        status=UploadedFileStatus.READY.value,
+        scan_status="passed",
+    )
+    return [{"source_type": "official_document", "source_ref": attachment_id}]
+
+
 class SupervisorReportingPipelineTests(TestCase):
     def test_confirmed_case_worker_uses_real_reporting_adapter_and_creates_report(self) -> None:
         from app.services.agent_node_service import execute_agent_plan as real_execute_plan
@@ -250,7 +284,7 @@ class SupervisorReportingPipelineTests(TestCase):
             title="Confirmed case Reporting",
             current_fact_version=1,
         )
-        ChatSession.objects.create(
+        session = ChatSession.objects.create(
             session_id="ses_reporting_confirmed_case",
             owner_id=owner_id,
             case=case,
@@ -267,6 +301,12 @@ class SupervisorReportingPipelineTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
+            sources=_ready_case_evidence_source(
+                case=case,
+                owner_id=owner_id,
+                session=session,
+                suffix="confirmed_case",
+            ),
             conflicts=[],
             confirmed_by=owner_id,
             confirmed_at=timezone.now(),
@@ -320,7 +360,7 @@ class SupervisorReportingPipelineTests(TestCase):
             owner_id=owner_id,
             title="Superseded case analysis",
         )
-        ChatSession.objects.create(
+        session = ChatSession.objects.create(
             session_id="ses_reporting_superseded_case",
             owner_id=owner_id,
             case=case,
@@ -333,6 +373,12 @@ class SupervisorReportingPipelineTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
+            "sources": _ready_case_evidence_source(
+                case=case,
+                owner_id=owner_id,
+                session=session,
+                suffix="queued_superseded",
+            ),
             "conflicts": [],
         }
         first_fact = confirm_case_facts(
@@ -386,7 +432,7 @@ class SupervisorReportingPipelineTests(TestCase):
             owner_id=owner_id,
             title="Predispatch superseded case analysis",
         )
-        ChatSession.objects.create(
+        session = ChatSession.objects.create(
             session_id="ses_reporting_predispatch_superseded",
             owner_id=owner_id,
             case=case,
@@ -399,6 +445,12 @@ class SupervisorReportingPipelineTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
+            "sources": _ready_case_evidence_source(
+                case=case,
+                owner_id=owner_id,
+                session=session,
+                suffix="predispatch_superseded",
+            ),
             "conflicts": [],
         }
         first_fact = confirm_case_facts(
@@ -457,7 +509,7 @@ class SupervisorReportingPipelineTests(TestCase):
             owner_id=owner_id,
             title="Mid-run superseded case analysis",
         )
-        ChatSession.objects.create(
+        session = ChatSession.objects.create(
             session_id="ses_reporting_midrun_superseded",
             owner_id=owner_id,
             case=case,
@@ -470,6 +522,12 @@ class SupervisorReportingPipelineTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
+            "sources": _ready_case_evidence_source(
+                case=case,
+                owner_id=owner_id,
+                session=session,
+                suffix="midrun_superseded",
+            ),
             "conflicts": [],
         }
         first_fact = confirm_case_facts(
@@ -707,6 +765,42 @@ class SupervisorReportingPipelineTests(TestCase):
             job.metadata["supervisor_reporting_handoff"]["handoff_id"],
         )
         self.assertEqual(job_detail["latest_report_id"], report.report_id)
+        law_result = AgentResult.objects.get(job=job, node_code="law_ground_search")
+        self.assertEqual(
+            law_result.structured_result["retrieval"]["attempted_backends"],
+            ["postgres_lexical", "django_rag_tables"],
+        )
+        law_api_result = next(
+            item
+            for item in job_detail["agent_results"]
+            if item["node_code"] == "law_ground_search"
+        )
+        self.assertEqual(
+            law_api_result["structured_result"]["retrieval"],
+            law_result.structured_result["retrieval"],
+        )
+        law_supervisor_result = next(
+            item
+            for item in job_detail["supervisor_execution"]["node_results"]
+            if item["node_code"] == "law_ground_search"
+        )
+        self.assertEqual(
+            law_supervisor_result["structured_result"]["matched_laws"][0][
+                "source_reference"
+            ],
+            "law:1",
+        )
+        retrieval_event = RetrievalEvent.objects.get(
+            invocation__job=job,
+            invocation__node_code="law_ground_search",
+        )
+        self.assertEqual(retrieval_event.source_refs, ["law:1"])
+        self.assertEqual(retrieval_event.metadata["retrieval_status"], "ready")
+        self.assertEqual(retrieval_event.metadata["retrieval_backend"], "django_rag_tables")
+        self.assertEqual(
+            retrieval_event.metadata["attempted_backends"],
+            ["postgres_lexical", "django_rag_tables"],
+        )
         self.assertEqual(job_detail["report_links"][0]["report_id"], report.report_id)
         report_detail = get_report_record_detail(report.report_id)
         self.assertEqual(report_detail["content"]["contract_version"], "analysis_report.v1")

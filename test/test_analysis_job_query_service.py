@@ -151,6 +151,40 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
     }
 
 
+def test_completed_result_prepends_composed_deadline_card_to_persisted_cards() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    deadline_card = {
+        "card_type": "deadline_guidance",
+        "title": "deadline guidance",
+        "status": "partial",
+    }
+    outcome = load_analysis_result(
+        "job_deadline",
+        load_job=lambda _job_id: {
+            "job_id": "job_deadline",
+            "status": "partial",
+            "cards": [{"card_type": "verified_agent_result", "title": "law result"}],
+            "agent_results": [],
+        },
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "status": "partial",
+            "deadline_guidance": {
+                "contract_version": "deadline_guidance.v1",
+                "status": "due_soon",
+            },
+            "cards": [deadline_card],
+        },
+    )
+
+    assert outcome.payload["deadline_guidance"]["status"] == "due_soon"
+    assert outcome.payload["cards"] == [
+        deadline_card,
+        {"card_type": "verified_agent_result", "title": "law result"},
+    ]
+
+
 def test_completed_result_uses_canonical_persisted_terminal_status() -> None:
     from app.services.analysis_job_query_service import load_analysis_result
 

@@ -28,12 +28,16 @@ class ApiRouteSpecShadowTests(SimpleTestCase):
         }
         modeled_route_names = {spec.route_name for spec in API_ROUTE_SPECS}
         deferred_route_names = {spec.route_name for spec in DEFERRED_ROUTE_SPECS}
+        modeled_endpoints = {(spec.method, spec.path) for spec in API_ROUTE_SPECS}
+        deferred_endpoints = {
+            (spec.method, spec.path) for spec in DEFERRED_ROUTE_SPECS
+        }
 
         self.assertEqual(
             api_route_names,
             modeled_route_names | deferred_route_names,
         )
-        self.assertFalse(modeled_route_names & deferred_route_names)
+        self.assertFalse(modeled_endpoints & deferred_endpoints)
 
         for spec in DEFERRED_ROUTE_SPECS:
             concrete_path = spec.path
