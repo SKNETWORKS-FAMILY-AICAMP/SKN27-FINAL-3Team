@@ -30,6 +30,12 @@ from app.services.supervisor_control_service import (
     SUPERVISOR_INTERNAL_NODE_CODES,
     run_supervisor_control_node,
 )
+from app.services.supervisor_execution_input_service import (
+    bind_supervisor_plan_step_payload,
+    is_ready_supervisor_handoff,
+    requires_supervisor_handoff,
+)
+from app.services.supervisor_routing_service import PUBLIC_AGENT_NODE_CODES
 
 
 DL_MOCK_NODE_CODES = {"vision_media_analysis"}
@@ -39,6 +45,11 @@ TRAFFIC_ACCIDENT_CONFIRMATION_ATTACHMENT_PURPOSE = "traffic_accident_confirmatio
 TRAFFIC_ACCIDENT_CONFIRMATION_REQUIRED_ATTACHMENT = (
     "attachments[purpose=traffic_accident_confirmation, scan_ready]"
 )
+
+
+class SupervisorHandoffValidationError(RuntimeError):
+    """Raised before dispatch when a server Supervisor handoff is unusable."""
+
 
 try:
     from chatbot.object_storage import read_object_bytes, storage_reference_from_uri
@@ -405,31 +416,25 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
     """Execute a canonical plan without fixture or heuristic output fallbacks."""
 
     executions = []
-    upstream_results = deepcopy(payload.get("upstream_results", {}))
+    upstream_results = _initial_plan_upstream_results(payload)
+    supervisor_handoff_state = _supervisor_handoff_state(payload)
     supervisor_handoff: dict[str, Any] = {}
     executable_steps = executable_analysis_plan_steps(
         analysis_plan,
         completed_node_codes=set(upstream_results),
     )
     for step in executable_steps:
-        step_payload = deepcopy(payload)
-        step_payload.update(
-            {
-                "analysis_plan_id": analysis_plan.get("plan_id"),
-                "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
-                "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
-                "node_code": step.get("node_code"),
-                "execution_mode": "sync",
-                "required_inputs": step.get("required_inputs", []),
-                "depends_on": step.get("depends_on", []),
-                "plan_step": step,
-                "upstream_results": deepcopy(upstream_results),
-            }
+        step_payload = _build_plan_step_payload(
+            analysis_plan=analysis_plan,
+            payload=payload,
+            step=step,
+            upstream_results=upstream_results,
         )
-        if isinstance(step.get("context"), dict):
-            context = deepcopy(payload.get("context") if isinstance(payload.get("context"), dict) else {})
-            context.update(deepcopy(step["context"]))
-            step_payload["context"] = context
+        _validate_supervisor_step_binding(
+            step_payload,
+            step=step,
+            handoff_state=supervisor_handoff_state,
+        )
         if (
             step.get("node_code") == REPORTING_NODE_CODE
             and not _reporting_execution_authorized(
@@ -533,6 +538,74 @@ def executable_analysis_plan_steps(
         selected.append(candidate)
         available.add(node_code)
     return selected
+
+
+def validate_supervisor_plan_handoff(
+    analysis_plan: dict[str, Any],
+    payload: dict[str, Any],
+) -> None:
+    """Reject malformed Supervisor packages before any paid dispatch reservation.
+
+    The runtime repeats this validation before each individual node.  This
+    preflight exists only to guarantee malformed server state has no dispatch
+    side effect at the queue boundary.
+    """
+
+    upstream_results = _initial_plan_upstream_results(payload)
+    handoff_state = _supervisor_handoff_state(payload)
+    if handoff_state == "absent":
+        return
+    for step in executable_analysis_plan_steps(
+        analysis_plan,
+        completed_node_codes=set(upstream_results),
+    ):
+        if str(step.get("node_code") or "").strip() not in PUBLIC_AGENT_NODE_CODES:
+            continue
+        step_payload = _build_plan_step_payload(
+            analysis_plan=analysis_plan,
+            payload=payload,
+            step=step,
+            upstream_results=upstream_results,
+        )
+        _validate_supervisor_step_binding(
+            step_payload,
+            step=step,
+            handoff_state=handoff_state,
+        )
+
+
+def _build_plan_step_payload(
+    *,
+    analysis_plan: dict[str, Any],
+    payload: dict[str, Any],
+    step: dict[str, Any],
+    upstream_results: dict[str, Any],
+) -> dict[str, Any]:
+    """Create one runtime input from a server plan and current result state."""
+
+    step_payload = deepcopy(payload)
+    step_payload.update(
+        {
+            "analysis_plan_id": analysis_plan.get("plan_id"),
+            "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
+            "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
+            "node_code": step.get("node_code"),
+            "execution_mode": "sync",
+            "required_inputs": step.get("required_inputs", []),
+            "depends_on": step.get("depends_on", []),
+            "plan_step": step,
+            "upstream_results": deepcopy(upstream_results),
+        }
+    )
+    if isinstance(step.get("context"), dict):
+        context = deepcopy(payload.get("context") if isinstance(payload.get("context"), dict) else {})
+        context.update(deepcopy(step["context"]))
+        step_payload["context"] = context
+    return bind_supervisor_plan_step_payload(
+        step_payload,
+        step=step,
+        upstream_results=upstream_results,
+    )
 
 
 def _sync_adapter_node_codes() -> set[str]:
@@ -701,6 +774,47 @@ def _payload_node_code(payload: dict[str, Any]) -> str:
     if isinstance(agent_input, dict) and agent_input.get("node_code"):
         return str(agent_input["node_code"])
     return str(payload.get("node_code") or "unknown_node")
+
+
+def _initial_plan_upstream_results(payload: dict[str, Any]) -> dict[str, Any]:
+    """Accept persisted upstream state only for non-Supervisor legacy callers."""
+
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    if (
+        requires_supervisor_handoff(payload)
+        or is_ready_supervisor_handoff(context.get("supervisor_handoff"))
+    ):
+        return {}
+    upstream_results = payload.get("upstream_results")
+    return deepcopy(upstream_results) if isinstance(upstream_results, dict) else {}
+
+
+def _supervisor_handoff_state(payload: dict[str, Any]) -> str:
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    if "supervisor_handoff" not in context:
+        return "missing_required" if requires_supervisor_handoff(payload) else "absent"
+    return "ready" if is_ready_supervisor_handoff(context.get("supervisor_handoff")) else "invalid"
+
+
+def _validate_supervisor_step_binding(
+    payload: dict[str, Any],
+    *,
+    step: dict[str, Any],
+    handoff_state: str,
+) -> None:
+    node_code = str(step.get("node_code") or "").strip()
+    if node_code not in PUBLIC_AGENT_NODE_CODES or handoff_state == "absent":
+        return
+    if handoff_state != "ready":
+        raise SupervisorHandoffValidationError(
+            "Supervisor Agent input package handoff is invalid"
+        )
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    package = context.get("supervisor_agent_package")
+    if not isinstance(package, dict) or package.get("node_code") != node_code:
+        raise SupervisorHandoffValidationError(
+            "Supervisor Agent input package is unavailable"
+        )
 
 
 def _agent_input(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:

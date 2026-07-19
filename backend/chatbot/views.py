@@ -62,6 +62,10 @@ from app.services.chat_session_followup_service import (
     followup_routing_intent,
     merge_chat_followup_payload,
 )
+from app.services.supervisor_execution_input_service import (
+    build_trusted_worker_execution_payload,
+    sanitize_public_supervisor_request,
+)
 from app.services.google_auth_service import (
     create_google_code_login as _create_google_code_login,
     create_logout as _create_logout,
@@ -805,6 +809,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
             identity_body = protect_chat_input_payload(identity_body)
         except ChatInputRejected as exc:
             return _chat_input_rejected_response(request, exc)
+        identity_body = sanitize_public_supervisor_request(identity_body)
         requested_session_id = str(identity_body.get("session_id") or "")
         if requested_session_id:
             session_access = get_chat_session_access_metadata(requested_session_id)
@@ -970,13 +975,18 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
                 },
                 status=409,
             )
-        node_execution = _queued_node_execution_placeholder(
+        execution_payload = build_trusted_worker_execution_payload(
             identity_body,
+            chat_response=chat_response,
+            public_request=True,
+        )
+        node_execution = _queued_node_execution_placeholder(
+            execution_payload,
             analysis_plan=analysis_plan,
             chat_response=chat_response,
         )
         job_payload = _agent_plan_job_payload(
-            identity_body,
+            execution_payload,
             {
                 "analysis_plan": analysis_plan,
                 "chat_response": chat_response,
@@ -1019,7 +1029,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
                 _refund_usage_safely(usage, reason="analysis_reservation_lost")
                 return _analysis_job_conflict_response(request)
         try:
-            persistence = enqueue_analysis_job_work(identity_body, job_payload)
+            persistence = enqueue_analysis_job_work(execution_payload, job_payload)
         except PermissionError:
             _refund_usage_safely(usage, reason="analysis_queue_access_denied")
             _release_analysis_job_reservation_safely(
@@ -1204,6 +1214,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         identity_body = protect_chat_input_payload(identity_body)
     except ChatInputRejected as exc:
         return _chat_input_rejected_response(request, exc)
+    identity_body = sanitize_public_supervisor_request(identity_body)
     requested_session_id = str(identity_body.get("session_id") or "")
     session_access = None
     if requested_session_id:
@@ -1277,21 +1288,11 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["execution_mode"] = execution_modes[chat_response["status"]]
         return _json_response(request, chat_response)
 
-    execution_payload = {
-        **identity_body,
-        "session_id": chat_response.get("session_id"),
-        "message_id": chat_response.get("message_id"),
-        "attachments": chat_response.get("attachments", []),
-        "execution_mode": "sync",
-        "context": {
-            **(
-                identity_body.get("context")
-                if isinstance(identity_body.get("context"), dict)
-                else {}
-            ),
-            "supervisor_handoff": chat_response.get("supervisor_state", {}),
-        },
-    }
+    execution_payload = build_trusted_worker_execution_payload(
+        identity_body,
+        chat_response=chat_response,
+        public_request=True,
+    )
 
     node_execution = _queued_node_execution_placeholder(
         execution_payload,

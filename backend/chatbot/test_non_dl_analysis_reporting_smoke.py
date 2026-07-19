@@ -12,6 +12,7 @@ from chatbot.management.commands.smoke_non_dl_analysis_reporting_pipeline import
     ANALYSIS_NODE_CODES,
     EXPECTED_ADAPTERS,
     _fine_notice_fixture,
+    _smoke_payloads,
     _verification_result,
 )
 from chatbot.models import (
@@ -65,6 +66,28 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
                 "--fine-notice-fixture-s3-uri",
             ):
                 _fine_notice_fixture(storage_uri)
+
+    def test_smoke_payloads_keep_server_context_out_of_request_payload(self) -> None:
+        fixture = _fine_notice_fixture(
+            "s3://clean-bucket/canonical/acceptance/fine-notice-smoke.png"
+        )
+        payload, job_payload, server_context = _smoke_payloads(
+            {
+                "owner_id": "usr_smoke",
+                "session_id": "ses_smoke",
+                "message_id": "msg_smoke",
+                "job_id": "job_smoke",
+                "plan_id": "plan_smoke",
+            },
+            fine_notice_fixture=fixture,
+        )
+
+        self.assertNotIn("context", payload)
+        self.assertEqual(payload["attachments"], [fixture])
+        self.assertNotIn("attachments", job_payload)
+        self.assertEqual(server_context["query"]["search_query"], payload["user_text"])
+        self.assertEqual(server_context["temporal_basis"], {"mode": "current"})
+        self.assertEqual(server_context["scope"], {"jurisdiction": "KR"})
 
     def test_smoke_contract_covers_every_non_dl_sync_adapter(self) -> None:
         self.assertEqual(

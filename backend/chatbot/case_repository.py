@@ -451,12 +451,6 @@ def start_case_analysis(
             "session_id": session.session_id,
             "case_id": case.case_id,
             "user_text": material_user_facts,
-            "confirmed_facts": fact_version_to_api(fact_version),
-            "case_evidence": case_evidence,
-            "context": {
-                "user_facts": material_user_facts,
-                "case_evidence": case_evidence,
-            },
         }
         job_payload = {
             "job_id": job_id,
@@ -478,7 +472,14 @@ def start_case_analysis(
             },
             "node_execution": {},
         }
-        queue = enqueue_analysis_job_work(request_payload, job_payload)
+        queue = enqueue_analysis_job_work(
+            request_payload,
+            job_payload,
+            server_execution_context={
+                "user_facts": material_user_facts,
+                "case_evidence": case_evidence,
+            },
+        )
         job = AnalysisJob.objects.get(job_id=queue["job_id"])
         job.case = case
         job.metadata = {

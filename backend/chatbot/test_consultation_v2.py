@@ -351,17 +351,22 @@ class ConsultationCaseApiTests(TestCase):
         self.assertEqual(analysis_job.case.case_id, created["case_id"])
         self.assertEqual(analysis_job.owner_id, self.owner_id)
         self.assertEqual(analysis_job.work_items.get().work_item_id, body["work_item"]["work_item_id"])
+        work_item_payload = analysis_job.work_items.get().payload
+        execution_payload = work_item_payload["execution_payload"]
+        server_context = work_item_payload["server_execution_context"]["context"]
         self.assertIn(
             '"road_layout":"four_way_intersection"',
-            analysis_job.work_items.get().payload["execution_payload"]["context"]["user_facts"],
+            server_context["user_facts"],
         )
-        execution_payload = analysis_job.work_items.get().payload["execution_payload"]
-        self.assertEqual(execution_payload["case_evidence"]["schema_version"], "case_evidence.v1")
+        self.assertEqual(server_context["case_evidence"]["schema_version"], "case_evidence.v1")
         self.assertEqual(
-            execution_payload["context"]["case_evidence"]["facts"]["road_layout"]["value"],
+            server_context["case_evidence"]["facts"]["road_layout"]["value"],
             "four_way_intersection",
         )
-        self.assertEqual(execution_payload["case_evidence"]["claims"], {})
+        self.assertEqual(server_context["case_evidence"]["claims"], {})
+        self.assertNotIn("case_evidence", execution_payload)
+        self.assertNotIn("user_facts", execution_payload.get("context", {}))
+        self.assertNotIn("case_evidence", execution_payload.get("context", {}))
         self.assertEqual(
             analysis_job.metadata["analysis_plan"]["steps"][0]["required_inputs"],
             ["confirmed_facts.v1", "case_evidence.v1"],

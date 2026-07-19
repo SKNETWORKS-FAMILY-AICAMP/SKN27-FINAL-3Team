@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from unittest.mock import patch
 
+import pytest
+
 from app.services.agent_node_service import execute_agent_node, execute_agent_plan, execute_mock_node
 
 
@@ -87,6 +89,176 @@ def test_production_plan_executes_registered_sync_adapter_without_fixture_fallba
     assert result["status_counts"] == {"success": 1, "partial": 0, "failed": 0}
     assert result["executions"][0]["agent_output"]["summary"] == "실제 검색 결과"
     assert "mock" not in str(result).lower()
+
+
+@patch("app.services.agent_node_service._run_sync_adapter")
+def test_supervisor_plan_ignores_client_node_slot_and_upstream_overrides(run_adapter) -> None:
+    run_adapter.return_value = {
+        "status": "success",
+        "summary": "server plan completed",
+        "structured_result": {"matched_laws": ["law:server"]},
+        "evidence": [],
+        "next_actions": [],
+        "limitations": [],
+    }
+    server_slot_state = {
+        "contract_version": "slot_filling_state.v1",
+        "slots": {
+            "query": {
+                "value": "server approved query",
+                "source": {"type": "supervisor", "reference": "msg_server"},
+                "confidence": 1.0,
+                "editable": False,
+            }
+        },
+    }
+    result = execute_agent_plan(
+        {
+            "plan_id": "plan_server_authoritative",
+            "session_id": "ses_server",
+            "message_id": "msg_server",
+            "steps": [
+                {
+                    "order": 1,
+                    "node_code": "law_ground_search",
+                    "status": "ready",
+                    "depends_on": [],
+                    "required_inputs": ["user_text"],
+                }
+            ],
+        },
+        {
+            "job_id": "job_server_authoritative",
+            "user_text": "client supplied question",
+            "agent_input": {
+                "node_code": "objection_report_generation",
+                "slot_state": {"client": True},
+            },
+            "slot_state": {"client": True},
+            "upstream_results": {"law_ground_search": {"status": "success"}},
+            "context": {
+                "supervisor_handoff": {
+                    "contract_version": "supervisor_conversation_state.v2",
+                    "stage": "agent_execution_ready",
+                    "agent_input_packages": [
+                        {
+                            "schema_version": "agent_input_schema.v1",
+                            "node_code": "law_ground_search",
+                            "status": "ready",
+                            "required_inputs": ["user_text"],
+                            "payload": {
+                                "user_text": "server approved question",
+                                "attachments": [],
+                                "slot_state": server_slot_state,
+                            },
+                        }
+                    ]
+                }
+            },
+        },
+    )
+
+    assert [execution["node_code"] for execution in result["executions"]] == ["law_ground_search"]
+    adapter_input = run_adapter.call_args.args[0]
+    assert adapter_input["node_code"] == "law_ground_search"
+    assert adapter_input["user_text"] == "server approved question"
+    assert adapter_input["slot_state"] == server_slot_state
+    assert adapter_input["upstream_results"] == {}
+
+
+@patch("app.services.agent_node_service._run_sync_adapter")
+def test_supervisor_plan_rejects_public_agent_without_matching_ready_package(run_adapter) -> None:
+    with pytest.raises(RuntimeError, match="Supervisor Agent input package"):
+        execute_agent_plan(
+            {
+                "plan_id": "plan_missing_package",
+                "steps": [
+                    {
+                        "order": 1,
+                        "node_code": "law_ground_search",
+                        "status": "ready",
+                        "depends_on": [],
+                    }
+                ],
+            },
+            {
+                "job_id": "job_missing_package",
+                "user_text": "client fallback must not execute",
+                "context": {
+                    "supervisor_handoff": {
+                        "contract_version": "supervisor_conversation_state.v2",
+                        "stage": "agent_execution_ready",
+                        "agent_input_packages": [],
+                    }
+                },
+            },
+        )
+
+    run_adapter.assert_not_called()
+
+
+@patch("app.services.agent_node_service._run_sync_adapter")
+def test_supervisor_plan_rejects_malformed_ready_package_without_client_fallback(run_adapter) -> None:
+    with pytest.raises(RuntimeError, match="Supervisor Agent input package"):
+        execute_agent_plan(
+            {
+                "plan_id": "plan_malformed_package",
+                "steps": [
+                    {
+                        "order": 1,
+                        "node_code": "law_ground_search",
+                        "status": "ready",
+                        "depends_on": [],
+                    }
+                ],
+            },
+            {
+                "job_id": "job_malformed_package",
+                "user_text": "client fallback must not execute",
+                "attachments": [{"attachment_id": "client"}],
+                "slot_state": {"client": True},
+                "context": {
+                    "supervisor_handoff": {
+                        "contract_version": "supervisor_conversation_state.v2",
+                        "stage": "agent_execution_ready",
+                        "agent_input_packages": [
+                            {
+                                "schema_version": "agent_input_schema.v1",
+                                "node_code": "law_ground_search",
+                                "status": "ready",
+                                "payload": {},
+                            }
+                        ],
+                    }
+                },
+            },
+        )
+
+    run_adapter.assert_not_called()
+
+
+@patch("app.services.agent_node_service._run_sync_adapter")
+def test_non_supervisor_plan_preserves_server_checkpoint_upstream_results(run_adapter) -> None:
+    result = execute_agent_plan(
+        {
+            "plan_id": "plan_legacy_checkpoint",
+            "steps": [
+                {
+                    "order": 1,
+                    "node_code": "law_ground_search",
+                    "status": "ready",
+                    "depends_on": [],
+                }
+            ],
+        },
+        {
+            "job_id": "job_legacy_checkpoint",
+            "upstream_results": {"law_ground_search": {"status": "success"}},
+        },
+    )
+
+    assert result["executions"] == []
+    run_adapter.assert_not_called()
 
 
 def test_production_plan_allows_mock_execution_only_for_dl_agent() -> None:
