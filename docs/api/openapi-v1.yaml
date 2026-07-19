@@ -1034,7 +1034,7 @@ paths:
     get:
       tags:
       - Reports
-      summary: Download an authorized report as a PDF document
+      summary: Download an authorized report as a DOCX document
       operationId: downloadReportDocument
       security:
       - bearerAuth: []
@@ -1045,7 +1045,7 @@ paths:
         '200':
           description: Successful response
           content:
-            application/pdf:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
               schema:
                 type: string
                 format: binary
@@ -3667,6 +3667,21 @@ components:
       - error
       title: ReportApiErrorResponse
       type: object
+    ReportAppealGate:
+      additionalProperties: false
+      properties:
+        blocked:
+          default: false
+          title: Blocked
+          type: boolean
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Reason
+      title: ReportAppealGate
+      type: object
     ReportContent:
       additionalProperties: false
       properties:
@@ -3776,6 +3791,60 @@ components:
       - metadata
       title: ReportDetail
       type: object
+    ReportDocumentReadiness:
+      additionalProperties: false
+      properties:
+        ready_for_docx:
+          default: false
+          title: Ready For Docx
+          type: boolean
+        missing_field_details:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          title: Missing Field Details
+          type: array
+        next_questions:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          title: Next Questions
+          type: array
+      title: ReportDocumentReadiness
+      type: object
+    ReportDownloadAction:
+      additionalProperties: false
+      properties:
+        type:
+          maxLength: 64
+          minLength: 1
+          title: Type
+          type: string
+        label:
+          maxLength: 160
+          minLength: 1
+          title: Label
+          type: string
+        document_type:
+          maxLength: 64
+          minLength: 1
+          title: Document Type
+          type: string
+        document_format:
+          anyOf:
+          - const: docx
+            type: string
+          - type: 'null'
+          default: null
+          title: Document Format
+      required:
+      - type
+      - label
+      - document_type
+      title: ReportDownloadAction
+      type: object
     ReportMetadata:
       additionalProperties: false
       properties:
@@ -3864,6 +3933,27 @@ components:
           - type: 'null'
           default: null
           title: Summary
+        document_variant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Document Variant
+        document_readiness:
+          anyOf:
+          - $ref: '#/components/schemas/ReportDocumentReadiness'
+          - type: 'null'
+          default: null
+        report_actions:
+          items:
+            $ref: '#/components/schemas/ReportDownloadAction'
+          title: Report Actions
+          type: array
+        appeal_gate:
+          anyOf:
+          - $ref: '#/components/schemas/ReportAppealGate'
+          - type: 'null'
+          default: null
         sections:
           items:
             $ref: '#/components/schemas/ReportSection'

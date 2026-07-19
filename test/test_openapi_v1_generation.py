@@ -323,7 +323,7 @@ def test_analysis_job_routes_document_async_owner_scoped_contract() -> None:
     assert result["responses"]["404"]["x-error-codes"] == ["analysis_result_not_found"]
 
 
-def test_report_download_openapi_uses_binary_pdf_and_public_attachment_headers() -> None:
+def test_report_download_openapi_uses_binary_docx_and_public_attachment_headers() -> None:
     generator = importlib.import_module("app.contracts.openapi_v1")
     paths = generator.build_openapi_document()["paths"]
 
@@ -342,7 +342,9 @@ def test_report_download_openapi_uses_binary_pdf_and_public_attachment_headers()
     download = paths["/api/reports/{report_id}/download/"]["get"]
     response = download["responses"]["200"]
     assert response["content"] == {
-        "application/pdf": {"schema": {"type": "string", "format": "binary"}}
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+            "schema": {"type": "string", "format": "binary"}
+        }
     }
     assert response["headers"]["Content-Disposition"] == {
         "description": "Attachment filename for the rendered report document.",

@@ -48,6 +48,20 @@ def _report_record(report_id: str = "rep_123") -> dict[str, object]:
                 "stage": "agent_execution_ready",
                 "title": "Owner report",
                 "summary": "Safe summary",
+                "document_variant": "traffic_accident",
+                "document_readiness": {
+                    "ready_for_docx": True,
+                    "missing_field_details": [],
+                },
+                "report_actions": [
+                    {
+                        "type": "download_objection",
+                        "label": "교통사고 이의신청서 DOCX 다운로드",
+                        "document_type": "traffic_accident_objection_docx",
+                        "document_format": "docx",
+                    }
+                ],
+                "appeal_gate": {"blocked": False, "reason": ""},
                 "sections": [
                     {
                         "title": "Facts",
@@ -109,6 +123,10 @@ def test_detail_projection_preserves_display_fields_and_drops_internal_fields() 
         "stage",
         "title",
         "summary",
+        "document_variant",
+        "document_readiness",
+        "report_actions",
+        "appeal_gate",
         "sections",
     }
     assert set(report["metadata"]["report_quality"]) == {
@@ -180,6 +198,10 @@ def test_detail_projection_uses_safe_defaults_for_missing_nested_values() -> Non
             "stage": None,
             "title": None,
             "summary": None,
+            "document_variant": None,
+            "document_readiness": None,
+            "report_actions": [],
+            "appeal_gate": None,
             "sections": [],
         },
     }

@@ -18,6 +18,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
+from ai.agents.objection_report_generation import render_report_docx
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
@@ -117,7 +118,7 @@ from chatbot.repositories import (
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
-    build_report_download_pdf_body,
+    REPORT_DOCX_CONTENT_TYPE,
     build_history_after_service_summary,
     conversation_save_state_from_payload,
     get_analysis_job_access_metadata,
@@ -1866,6 +1867,18 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
                 },
                 status=409,
             )
+        if access_metadata.get("download_blocked") is True:
+            return _report_error_response(
+                request,
+                {
+                    "contract_version": "report_download.v1",
+                    "code": "report_not_ready",
+                    "message": "Appeal eligibility must be confirmed before this document can be downloaded.",
+                    "report_id": report_id,
+                    "reason": "appeal_gate_blocked",
+                },
+                status=409,
+            )
         document_type = request.GET.get("document_type")
         download = get_report_download_metadata(report_id, document_type=document_type)
         if download is not None:
@@ -1893,14 +1906,17 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
         )
 
     response = HttpResponse(
-        build_report_download_pdf_body(
-            report_id=report_id,
+        render_report_docx(
+            document_variant="general",
             title="Mock report download",
-            body_text=f"Mock report download for {report_id}\n",
+            form_data={},
+            sections=[{"title": "Report", "body": f"Mock report download for {report_id}"}],
+            petition_purpose="",
+            petition_reason="",
         ),
-        content_type="application/pdf",
+        content_type=REPORT_DOCX_CONTENT_TYPE,
     )
-    response["Content-Disposition"] = f'attachment; filename="{report_id}.pdf"'
+    response["Content-Disposition"] = f'attachment; filename="{report_id}.docx"'
     if _is_canonical_mock_request(request):
         response["X-API-Surface"] = "canonical_mock"
         response["X-Execution-Mode"] = "mock"
