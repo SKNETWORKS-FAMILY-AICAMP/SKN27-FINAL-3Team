@@ -1,10 +1,7 @@
-"""Sync adapter for fine-notice objection form generation."""
+"""Sync adapter for objection form and report-action generation."""
 
 from __future__ import annotations
 
-import json
-import logging
-import os
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
@@ -104,17 +101,22 @@ def run_objection_report_generation(
             limitations=["Reporting did not run without a valid persisted Supervisor handoff."],
         )
     notice_output = _upstream_output(agent_input, "fine_notice_analysis")
+    text_ml_output = _upstream_output(agent_input, "text_ml_case_search")
     law_output = _upstream_output(agent_input, "law_ground_search")
     appeal_output = _upstream_output(agent_input, "appeal_decision_flow")
     notice_result = _structured_result(notice_output)
+    text_ml_result = _structured_result(text_ml_output)
     law_result = _structured_result(law_output)
     appeal_result = _structured_result(appeal_output)
     user_facts = _user_facts(agent_input)
+    document_variant = _document_variant(notice_result, text_ml_result)
 
     missing_fields = _missing_fields(
         notice_result=notice_result,
+        text_ml_result=text_ml_result,
         law_result=law_result,
         user_facts=user_facts,
+        document_variant=document_variant,
     )
     legal_grounds = _legal_grounds(law_result)
     recipient_agency = _recipient_agency(agent_input, notice_result, document_variant)
@@ -198,26 +200,40 @@ def run_objection_report_generation(
             petition_purpose = petition["petition_purpose"]
             petition_reason = petition["petition_reason"]
 
+    limitations_extra: list[str] = []
+    if appeal_gate["reason"]:
+        limitations_extra.append(appeal_gate["reason"])
+    if appeal_decision.get("risk_judgment_failed"):
+        limitations_extra.append(
+            "appeal_decision_flow의 위험도 판정이 기술 오류로 완료되지 못해 안전 기본값으로 처리되었습니다."
+        )
+    if appeal_decision.get("merit_judgment_failed"):
+        limitations_extra.append(
+            "appeal_decision_flow의 이의제기 실익 판정이 기술 오류로 완료되지 못했습니다."
+        )
+    if drafting_source == "rule_based_fallback":
+        limitations_extra.append("LLM 초안 생성에 실패하여 규칙 기반 문장으로 대체했습니다.")
+
     structured_result = {
         "document_type": "objection_form",
-        "document_title": "이의신청서 초안",
+        "document_variant": document_variant,
+        "document_title": _document_title(document_variant),
         "recipient_agency": recipient_agency,
-        "applicant_info": applicant_info,
-        "disposition_details": disposition_details,
-        "petition_purpose": petition_purpose,
-        "petition_reasons": petition_reason,
+        "case_summary": case_summary,
+        "requested_action": requested_action,
+        "objection_reasons": objection_reasons,
         "legal_grounds": legal_grounds,
         "required_attachments": required_attachments,
         "form_data": form_data,
         "document_readiness": document_readiness,
         "form_sections": _form_sections(
             recipient_agency=recipient_agency,
-            applicant_info=applicant_info,
-            disposition_details=disposition_details,
-            petition_purpose=petition_purpose,
-            petition_reason=petition_reason,
+            case_summary=case_summary,
+            requested_action=requested_action,
+            objection_reasons=objection_reasons,
             legal_grounds=legal_grounds,
             required_attachments=required_attachments,
+            document_variant=document_variant,
         ),
         "report_actions": _report_actions(
             document_variant=document_variant,
@@ -237,7 +253,6 @@ def run_objection_report_generation(
             "review_reason": appeal_gate["reason"]
             or "제출 전 사실관계, 관할 기관, 기한, 증빙자료를 사용자가 최종 확인해야 합니다.",
         },
-        "drafting_source": drafting_source,
     }
 
     handoff = _supervisor_handoff(agent_input)
@@ -262,6 +277,7 @@ def run_objection_report_generation(
         evidence=_evidence(
             agent_input,
             notice_output,
+            text_ml_output,
             law_output,
             appeal_output,
             user_facts,
@@ -269,7 +285,7 @@ def run_objection_report_generation(
         next_actions=_next_actions(combined_missing_fields, appeal_blocked=appeal_gate["blocked"]),
         limitations=_limitations(
             combined_missing_fields,
-            extra=[appeal_gate["reason"]] if appeal_gate["reason"] else None,
+            extra=limitations_extra or None,
         ),
     )
 
@@ -374,41 +390,78 @@ def _slot_facts(slot_state: dict[str, Any]) -> str:
     return " / ".join(values)
 
 
-def _slot_value(slot_state: dict[str, Any], key: str) -> str:
-    slots = slot_state.get("slots")
-    if not isinstance(slots, dict):
-        return ""
-    value = slots.get(key)
-    if isinstance(value, dict):
-        value = value.get("value") or value.get("text") or value.get("summary")
-    return _text(value)
+def _document_variant(notice_result: dict[str, Any], text_ml_result: dict[str, Any]) -> str:
+    if text_ml_result and not notice_result:
+        return "traffic_accident"
+    return "fine_notice"
 
 
-def _first_present(*values: Any) -> str:
+def _document_title(document_variant: str) -> str:
+    if document_variant == "traffic_accident":
+        return "교통사고 이의신청서 초안"
+    return "이의신청서 초안"
+
+
+def _requested_action(document_variant: str) -> str:
+    if document_variant == "traffic_accident":
+        return "사고 사실관계 재검토 및 과실비율 조정 검토"
+    return "처분 취소 또는 감경 검토"
+
+
+def _text_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    items = []
     for value in values:
         text = _text(value)
         if text:
-            return text
-    return ""
+            items.append(text)
+    return items
+
+
+def _similar_cases(text_ml_result: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_cases = text_ml_result.get("similar_cases") or text_ml_result.get("top_cases")
+    if not isinstance(raw_cases, list):
+        return []
+    return [deepcopy(item) for item in raw_cases if isinstance(item, dict)]
+
+
+def _accident_query_text(text_ml_result: dict[str, Any], user_facts: str) -> str:
+    return (
+        _text(text_ml_result.get("query_text"))
+        or _text(text_ml_result.get("normalized_description"))
+        or _text(user_facts)
+    )
 
 
 def _missing_fields(
     *,
     notice_result: dict[str, Any],
+    text_ml_result: dict[str, Any],
     law_result: dict[str, Any],
     user_facts: str,
+    document_variant: str,
 ) -> list[str]:
     missing_fields = []
-    if not notice_result:
+    if document_variant == "traffic_accident":
+        if not text_ml_result:
+            missing_fields.append("text_ml_case_result")
+        if not user_facts and not _accident_query_text(text_ml_result, user_facts):
+            missing_fields.append("user_facts")
+    elif not notice_result:
         missing_fields.append("notice_analysis_result")
     if not law_result:
         missing_fields.append("law_ground_result")
-    if not user_facts:
+    if document_variant != "traffic_accident" and not user_facts:
         missing_fields.append("user_facts")
     return missing_fields
 
 
-def _recipient_agency(agent_input: dict[str, Any], notice_result: dict[str, Any]) -> str:
+def _recipient_agency(
+    agent_input: dict[str, Any],
+    notice_result: dict[str, Any],
+    document_variant: str,
+) -> str:
     context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
     notice_fields = _notice_fields(notice_result)
     recipient = (
@@ -417,52 +470,55 @@ def _recipient_agency(agent_input: dict[str, Any], notice_result: dict[str, Any]
         or _text(notice_fields.get("issuing_authority"))
         or _text(notice_result.get("issuing_authority"))
     )
-    return recipient or "관할 행정청"
+    if recipient:
+        return recipient
+    if document_variant == "traffic_accident":
+        return "관할 경찰서 또는 분쟁조정 기관"
+    return "관할 행정청"
 
 
-def _disposition_details(agent_input: dict[str, Any], notice_result: dict[str, Any]) -> dict[str, str]:
-    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
+def _case_summary(
+    *,
+    notice_result: dict[str, Any],
+    text_ml_result: dict[str, Any],
+    user_facts: str,
+    document_variant: str,
+) -> str:
+    if document_variant == "traffic_accident":
+        query_text = _accident_query_text(text_ml_result, user_facts)
+        issue_tags = _text_list(text_ml_result.get("issue_tags"))
+        accident_types = _text_list(text_ml_result.get("accident_type_candidates"))
+        similar_cases = _similar_cases(text_ml_result)
+        recommended_evidence = _text_list(text_ml_result.get("recommended_evidence"))
+
+        parts = [f"대상 건은 {query_text or '교통사고 사실관계 확인이 필요한 사고'}에 관한 이의신청 초안입니다."]
+        if accident_types:
+            parts.append(f"사고 유형 후보는 {', '.join(accident_types[:2])}로 분류되었습니다.")
+        if issue_tags:
+            parts.append(f"주요 쟁점은 {', '.join(issue_tags[:4])}입니다.")
+        if similar_cases:
+            lead_case = _text(similar_cases[0].get('title')) or _text(similar_cases[0].get('summary'))
+            if lead_case:
+                parts.append(f"유사 사례 후보로는 {lead_case}가 우선 참고되었습니다.")
+        if recommended_evidence:
+            parts.append(f"추가 검토 자료로는 {', '.join(recommended_evidence[:3])}가 권장됩니다.")
+        if user_facts and user_facts != query_text:
+            parts.append(f"사용자 진술 요지: {_shorten(user_facts, 180)}")
+        return " ".join(parts)
+
     notice_fields = _notice_fields(notice_result)
-    return {
-        "violation_text": _first_present(notice_fields.get("violation_text"), notice_result.get("violation_text")),
-        "violation_datetime": _first_present(
-            notice_fields.get("violation_datetime"), notice_result.get("violation_datetime")
-        ),
-        "violation_location": _first_present(
-            notice_fields.get("violation_location"), notice_result.get("violation_location")
-        ),
-        "fine_amount": _first_present(notice_fields.get("fine_amount"), notice_result.get("fine_amount")),
-        "payment_deadline": _first_present(
-            notice_fields.get("payment_deadline"),
-            notice_result.get("opinion_deadline"),
-            notice_result.get("payment_deadline"),
-        ),
-        "case_number": _first_present(
-            notice_fields.get("case_number"),
-            notice_result.get("charge_number"),
-            notice_result.get("case_number"),
-        ),
-        # OCR extracts no notice-received-date field (see appeal_decision_flow/state.py's
-        # notice_received_date comment) — Supervisor supplies it the same way, when known.
-        "notice_received_date": _text(context.get("notice_received_date")),
-    }
-
-
-def _applicant_info(agent_input: dict[str, Any], notice_result: dict[str, Any]) -> dict[str, str]:
-    context = agent_input.get("context") if isinstance(agent_input.get("context"), dict) else {}
-    applicant = context.get("applicant") if isinstance(context.get("applicant"), dict) else {}
-    slot_state = agent_input.get("slot_state") if isinstance(agent_input.get("slot_state"), dict) else {}
-    notice_fields = _notice_fields(notice_result)
-
-    name = _first_present(applicant.get("name"), _slot_value(slot_state, "applicant_name"))
-    contact = _first_present(
-        applicant.get("contact"),
-        applicant.get("phone"),
-        _slot_value(slot_state, "applicant_contact"),
-        _slot_value(slot_state, "applicant_phone"),
+    violation = (
+        _text(notice_fields.get("violation_text"))
+        or _text(notice_result.get("violation_text"))
+        or "고지서 기재 위반 사실"
     )
-    address = _first_present(applicant.get("address"), _slot_value(slot_state, "applicant_address"))
-    vehicle_number = _first_present(notice_fields.get("vehicle_number"), notice_result.get("vehicle_number"))
+    location = _text(notice_fields.get("violation_location")) or _text(notice_result.get("violation_location"))
+    violation_at = _text(notice_fields.get("violation_datetime")) or _text(notice_result.get("violation_datetime"))
+    deadline = (
+        _text(notice_fields.get("payment_deadline"))
+        or _text(notice_result.get("opinion_deadline"))
+        or _text(notice_result.get("payment_deadline"))
+    )
 
     parts = [f"대상 처분은 {violation}에 관한 건입니다."]
     if violation_at:
@@ -721,11 +777,23 @@ def _required_attachments(
     *,
     agent_input: dict[str, Any],
     notice_result: dict[str, Any],
+    text_ml_result: dict[str, Any],
+    document_variant: str,
 ) -> list[str]:
-    attachments = ["고지서 원본", "이의신청 사유서", "관련 증빙자료"]
-    required_documents = notice_result.get("required_documents")
-    if isinstance(required_documents, list):
-        attachments.extend(_text(item) for item in required_documents)
+    if document_variant == "traffic_accident":
+        attachments = [
+            "사고 접수 서류",
+            "블랙박스 원본 또는 영상 캡처",
+            "현장 사진",
+            "보험사 접수 내역",
+            "상대방 진술 또는 목격자 진술",
+        ]
+        attachments.extend(_text_list(text_ml_result.get("recommended_evidence")))
+    else:
+        attachments = ["고지서 원본", "이의신청 사유서", "관련 증빙자료"]
+        required_documents = notice_result.get("required_documents")
+        if isinstance(required_documents, list):
+            attachments.extend(_text(item) for item in required_documents)
     attachment_candidates = agent_input.get("attachments") or []
     if _handoff_required(agent_input):
         handoff = _supervisor_handoff(agent_input)
@@ -936,47 +1004,45 @@ def _form_value_present(value: Any) -> bool:
 def _form_sections(
     *,
     recipient_agency: str,
-    applicant_info: dict[str, str],
-    disposition_details: dict[str, str],
-    petition_purpose: str,
-    petition_reason: str,
+    case_summary: str,
+    requested_action: str,
+    objection_reasons: list[str],
     legal_grounds: list[dict[str, Any]],
     required_attachments: list[str],
+    document_variant: str,
 ) -> list[dict[str, str]]:
-    applicant_body = "\n".join(
-        [
-            f"- 수신: {recipient_agency}",
-            f"- 성명: {applicant_info['name']}",
-            f"- 연락처: {applicant_info['contact']}",
-            f"- 주소: {applicant_info['address']}",
-            f"- 차량번호: {applicant_info['vehicle_number']}",
-        ]
-    )
-    disposition_body = "\n".join(
-        f"- {label}: {value or '확인 필요'}"
-        for label, value in (
-            ("위반 사실", disposition_details.get("violation_text")),
-            ("위반 일시", disposition_details.get("violation_datetime")),
-            ("위반 장소", disposition_details.get("violation_location")),
-            ("고지 금액", disposition_details.get("fine_amount")),
-            ("고지받은일자", disposition_details.get("notice_received_date")),
-            ("납부/의견제출 기한", disposition_details.get("payment_deadline")),
-            ("사건/고지 번호", disposition_details.get("case_number")),
-        )
-    )
     legal_text = "\n".join(
         f"- {item['law_name']} {item.get('article') or ''}: {item['summary']}".strip()
         for item in legal_grounds
     ) or "- 관련 법령 및 판례는 추가 확인이 필요합니다."
-    reason_body = f"{petition_reason}\n\n[관련 법령 및 근거]\n{legal_text}"
-    attachments_body = "\n".join(f"- {item}" for item in required_attachments)
-
+    request_purpose = "사고 사실관계와 책임 판단 근거를 재검토해 달라는 취지입니다."
+    if document_variant != "traffic_accident":
+        request_purpose = "위 처분에 대하여 사실관계 및 법률 적용을 재검토해 처분 취소 또는 감경을 요청합니다."
     return [
-        {"title": "신청인 정보", "body": applicant_body},
-        {"title": "대상처분 내역", "body": disposition_body},
-        {"title": "신청취지", "body": petition_purpose},
-        {"title": "신청이유", "body": reason_body},
-        {"title": "첨부 서류", "body": attachments_body},
+        {
+            "title": "수신",
+            "body": recipient_agency,
+        },
+        {
+            "title": "1. 이의신청 취지",
+            "body": f"{requested_action}. {request_purpose}",
+        },
+        {
+            "title": "2. 사실관계",
+            "body": case_summary,
+        },
+        {
+            "title": "3. 이의신청 사유",
+            "body": "\n".join(f"- {item}" for item in objection_reasons),
+        },
+        {
+            "title": "4. 관련 법령 및 근거",
+            "body": legal_text,
+        },
+        {
+            "title": "5. 첨부자료",
+            "body": "\n".join(f"- {item}" for item in required_attachments),
+        },
     ]
 
 
@@ -1033,12 +1099,14 @@ def _report_actions(
 def _evidence(
     agent_input: dict[str, Any],
     notice_output: dict[str, Any],
+    text_ml_output: dict[str, Any],
     law_output: dict[str, Any],
     appeal_output: dict[str, Any],
     user_facts: str,
 ) -> list[dict[str, Any]]:
     evidence = []
     evidence.extend(_output_evidence(notice_output))
+    evidence.extend(_output_evidence(text_ml_output))
     evidence.extend(_output_evidence(law_output))
     evidence.extend(_output_evidence(appeal_output))
     if user_facts:
@@ -1108,9 +1176,9 @@ def _appeal_decision(appeal_result: dict[str, Any]) -> dict[str, Any]:
         "merit_basis",
         "merit_judgment_failed",
         "merit_relief_type",
-        "relief_type_judgment_failed",
         "risk_flag",
         "risk_basis",
+        "risk_judgment_failed",
         "deadline_passed",
         "guide",
     )
@@ -1184,6 +1252,8 @@ def _summary(
     next_questions: list[dict[str, str]] | None = None,
 ) -> str:
     if status == "success":
+        if document_variant == "traffic_accident":
+            return f"{recipient_agency} 제출용 교통사고 이의신청서 초안과 리포트 다운로드 action을 생성했습니다."
         return f"{recipient_agency} 제출용 이의신청서 초안과 리포트 다운로드 action을 생성했습니다."
     question_text = " ".join(
         str(item.get("question") or "").strip()

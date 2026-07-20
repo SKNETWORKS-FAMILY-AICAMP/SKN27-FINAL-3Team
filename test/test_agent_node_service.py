@@ -1214,15 +1214,14 @@ def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(
     assert output["evidence"][0]["source_type"] == "user_uploaded_file"
     assert output["evidence"][-1]["source_type"] == "user_statement"
     assert structured_result["drafting_source"] == "llm"
-    assert structured_result["applicant_info"]["name"] == "본인 입력 필요"
-    assert structured_result["disposition_details"]["violation_text"] == "어린이보호구역 정차 위반"
     assert structured_result["petition_purpose"] == "처분의 취소 또는 감경을 요청합니다."
     assert [section["title"] for section in structured_result["form_sections"]] == [
-        "신청인 정보",
-        "대상처분 내역",
-        "신청취지",
-        "신청이유",
-        "첨부 서류",
+        "수신",
+        "1. 이의신청 취지",
+        "2. 사실관계",
+        "3. 이의신청 사유",
+        "4. 관련 법령 및 근거",
+        "5. 첨부자료",
     ]
     assert validate_agent_output_envelope(output, expected_node_code="objection_report_generation")["valid"]
 
@@ -1616,12 +1615,8 @@ def test_objection_report_generation_uses_supervisor_supplied_notice_received_da
     payload["context"]["notice_received_date"] = "2026.06.05"
 
     execution = execute_mock_node(payload)
-    disposition_details = execution["agent_output"]["structured_result"]["disposition_details"]
-    assert disposition_details["notice_received_date"] == "2026.06.05"
-    assert any(
-        section["title"] == "대상처분 내역" and "고지받은일자: 2026.06.05" in section["body"]
-        for section in execution["agent_output"]["structured_result"]["form_sections"]
-    )
+    form_data = execution["agent_output"]["structured_result"]["form_data"]
+    assert form_data["notice_received_date"] == "2026.06.05"
 
 
 def test_law_ground_sync_adapter_can_feed_sync_objection_when_sync_requested(monkeypatch):
