@@ -2152,12 +2152,11 @@ function isSubmissionDocumentSection(section) {
 
 function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportingPayload, reportActionStatus }) {
   const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;
-  const confirmationRequired = ["fine_notice", "traffic_accident"].includes(reportingPayload?.document_variant);
   const confirmationReady = reportingPayload?.document_confirmation?.confirmed === true;
   const hasOfficialDocument =
     reportingPayload?.document_confirmation?.required === true ||
-    confirmationRequired ||
-    reportingPayload?.report_actions?.some((item) => item?.type === "download_objection");
+    ["fine_notice", "traffic_accident"].includes(reportingPayload?.document_variant) ||
+    ["fine_notice_objection", "fault_ratio_analysis"].includes(reportingPayload?.report_type);
   return (
     <section className="report-ready-strip" aria-label="리포트 준비 완료">
       <div>
@@ -2173,7 +2172,7 @@ function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction
             className="button primary"
             type="button"
             onClick={() => onRunReportAction("download_objection")}
-            disabled={appealDownloadBlocked || (confirmationRequired && !confirmationReady)}
+            disabled={appealDownloadBlocked || !confirmationReady}
           >
             {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 DOCX"}
           </button>
@@ -2244,7 +2243,7 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
   const hasOfficialDocument =
     documentConfirmation?.required === true ||
     ["fine_notice", "traffic_accident"].includes(activeReportingPayload?.document_variant) ||
-    activeReportingPayload?.report_actions?.some((item) => item?.type === "download_objection");
+    ["fine_notice_objection", "fault_ratio_analysis"].includes(activeReportingPayload?.report_type);
   const confirmation = {
     required: hasOfficialDocument,
     confirmed: documentConfirmation?.confirmed === true,
@@ -2795,7 +2794,7 @@ function ReportingScreen({
   const hasOfficialDocument =
     documentConfirmation?.required === true ||
     ["fine_notice", "traffic_accident"].includes(activeReportingPayload?.document_variant) ||
-    activeReportingPayload?.report_actions?.some((item) => item?.type === "download_objection");
+    ["fine_notice_objection", "fault_ratio_analysis"].includes(activeReportingPayload?.report_type);
   const confirmation = {
     required: hasOfficialDocument,
     confirmed: documentConfirmation?.confirmed === true,

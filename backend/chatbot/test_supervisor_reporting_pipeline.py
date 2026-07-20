@@ -26,6 +26,7 @@ from chatbot.models import (
     ConfirmedFactVersion,
     Report,
     ReportStatus,
+    ReportType,
     RetrievalEvent,
     UploadedFile,
     UploadedFileStatus,
@@ -2064,6 +2065,113 @@ class DocumentConfirmationRepositoryTests(TestCase):
 
         self.assertEqual(confirmed_response.status_code, 200)
         self.assertTrue(confirmed_response.content.startswith(b"PK"))
+
+    def test_download_metadata_rejects_general_report_even_as_objection_form(self) -> None:
+        general_report = Report.objects.create(
+            report_id="rep_general_document_download",
+            owner_id=self.report.owner_id,
+            report_type=ReportType.GENERAL,
+            status=ReportStatus.READY,
+            title="General analysis report",
+            content={
+                "reporting_payload": {
+                    "document_variant": "general",
+                    "sections": [{"title": "Analysis", "body": "View-only analysis."}],
+                }
+            },
+            metadata={"source": "analysis_worker_reporting"},
+        )
+
+        download = get_report_download_metadata(
+            general_report.report_id,
+            document_type="objection_form",
+        )
+
+        self.assertIsNone(download)
+
+    def test_download_rechecks_confirmation_after_document_input_changes(self) -> None:
+        from chatbot.views import download_report
+
+        repository_module.confirm_report_document(
+            self.report.report_id,
+            owner_id=self.report.owner_id,
+        )
+        identity = {
+            "auth_context": {
+                "user_id": self.report.owner_id,
+                "subject_type": "user",
+            }
+        }
+        original_download_metadata = repository_module.get_report_download_metadata
+
+        def change_document_then_render(*args, **kwargs):
+            current = Report.objects.get(report_id=self.report.report_id)
+            payload = dict(current.content["reporting_payload"])
+            payload["petition_reason"] = "Changed after final confirmation."
+            current.content = {"reporting_payload": payload}
+            current.save(update_fields=["content", "updated_at"])
+            return original_download_metadata(*args, **kwargs)
+
+        with (
+            patch("chatbot.views._request_access_payload", return_value=identity),
+            patch(
+                "chatbot.views.get_report_download_metadata",
+                side_effect=change_document_then_render,
+            ),
+        ):
+            response = download_report(
+                RequestFactory().get(
+                    f"/api/reports/{self.report.report_id}/download/?document_type=objection_form"
+                ),
+                self.report.report_id,
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn(b'"code": "document_confirmation_required"', response.content)
+        self.assertIn(b'"reason": "document_confirmation_stale"', response.content)
+
+    def test_download_rechecks_appeal_gate_after_eligibility_changes(self) -> None:
+        from chatbot.views import download_report
+
+        repository_module.confirm_report_document(
+            self.report.report_id,
+            owner_id=self.report.owner_id,
+        )
+        identity = {
+            "auth_context": {
+                "user_id": self.report.owner_id,
+                "subject_type": "user",
+            }
+        }
+        original_download_metadata = repository_module.get_report_download_metadata
+
+        def block_appeal_then_render(*args, **kwargs):
+            current = Report.objects.get(report_id=self.report.report_id)
+            payload = dict(current.content["reporting_payload"])
+            payload["appeal_gate"] = {
+                "blocked": True,
+                "reason": "Appeal deadline passed.",
+            }
+            current.content = {"reporting_payload": payload}
+            current.save(update_fields=["content", "updated_at"])
+            return original_download_metadata(*args, **kwargs)
+
+        with (
+            patch("chatbot.views._request_access_payload", return_value=identity),
+            patch(
+                "chatbot.views.get_report_download_metadata",
+                side_effect=block_appeal_then_render,
+            ),
+        ):
+            response = download_report(
+                RequestFactory().get(
+                    f"/api/reports/{self.report.report_id}/download/?document_type=objection_form"
+                ),
+                self.report.report_id,
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn(b'"code": "appeal_gate_blocked"', response.content)
 
     def test_confirmation_api_rejects_blocked_appeal_before_writing(self) -> None:
         from chatbot.views import report_document_confirmation

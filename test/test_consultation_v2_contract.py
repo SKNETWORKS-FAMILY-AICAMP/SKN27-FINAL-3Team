@@ -132,6 +132,8 @@ def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() ->
     ready_notice = shell[ready_notice_start:ready_notice_end]
     assert "const hasOfficialDocument =" in ready_notice
     assert "{hasOfficialDocument && (" in ready_notice
+    assert 'report_actions?.some((item) => item?.type === "download_objection")' not in ready_notice
+    assert '["fine_notice_objection", "fault_ratio_analysis"].includes(reportingPayload?.report_type)' in ready_notice
     assert "const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;" in shell
     assert "const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;" in shell
     assert "appealDownloadBlocked || !confirmation.confirmed" in shell
@@ -140,6 +142,7 @@ def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() ->
     assert "이의신청서 PDF" not in shell
     assert "confirmReportDocument" in api_client
     assert 'const filename = file.filename || `${reportId}.docx`;' in shell
+    assert shell.count('report_actions?.some((item) => item?.type === "download_objection")') == 0
 
 
 def test_download_report_never_returns_pdf_for_the_legacy_non_api_path() -> None:

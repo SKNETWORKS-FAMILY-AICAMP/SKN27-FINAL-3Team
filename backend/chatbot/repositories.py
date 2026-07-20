@@ -4104,7 +4104,28 @@ def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
     }
 
 
-def get_report_download_metadata(report_id: str, *, document_type: str | None = None) -> dict[str, Any] | None:
+def get_report_download_metadata(
+    report_id: str,
+    *,
+    document_type: str | None = None,
+    require_current_confirmation: bool = False,
+) -> dict[str, Any] | None:
+    if require_current_confirmation:
+        with transaction.atomic():
+            report = (
+                Report.objects.select_for_update()
+                .select_related("session", "job", "display_result")
+                .filter(report_id=report_id)
+                .first()
+            )
+            if report is None:
+                return None
+            return _report_download_metadata_for_report(
+                report,
+                document_type=document_type,
+                require_current_confirmation=True,
+            )
+
     report = (
         Report.objects.select_related("session", "job", "display_result")
         .filter(report_id=report_id)
@@ -4112,15 +4133,37 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
     )
     if report is None:
         return None
+    return _report_download_metadata_for_report(
+        report,
+        document_type=document_type,
+        require_current_confirmation=False,
+    )
 
+
+def _report_download_metadata_for_report(
+    report: Report,
+    *,
+    document_type: str | None,
+    require_current_confirmation: bool,
+) -> dict[str, Any] | None:
     normalized_document_type = normalize_report_download_document_type(document_type)
     if normalized_document_type != REPORT_DOWNLOAD_TYPE_OBJECTION_FORM:
+        return None
+
+    reporting_payload = _reporting_payload_for_download(report)
+    if not _report_document_confirmation_is_required(report, reporting_payload):
+        return None
+    if require_current_confirmation and _appeal_download_is_blocked(reporting_payload):
+        return None
+    if (
+        require_current_confirmation
+        and get_report_document_confirmation_state(report).get("confirmed") is not True
+    ):
         return None
 
     object_storage = _report_object_storage(report)
     storage_uri = object_storage["storage_uri"]
     storage_backend = object_storage["backend"]
-    reporting_payload = _reporting_payload_for_download(report)
     text_body = _report_objection_form_body(report)
     document_variant = _report_document_variant(report, reporting_payload)
     title = "과태료 부과 처분 이의신청서" if document_variant == "fine_notice" else report.title

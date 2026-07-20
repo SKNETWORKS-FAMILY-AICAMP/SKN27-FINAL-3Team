@@ -1988,6 +1988,17 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
                 status=409,
             )
         confirmation = access_metadata.get("document_confirmation") or {}
+        if confirmation.get("required") is not True:
+            return _report_error_response(
+                request,
+                {
+                    "contract_version": "report_download.v1",
+                    "code": "document_download_not_available",
+                    "message": "Only official objection DOCX documents are downloadable.",
+                    "report_id": report_id,
+                },
+                status=409,
+            )
         if confirmation.get("confirmed") is not True:
             return _report_error_response(
                 request,
@@ -2002,7 +2013,11 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
                 },
                 status=409,
             )
-        download = get_report_download_metadata(report_id, document_type=document_type)
+        download = get_report_download_metadata(
+            report_id,
+            document_type=document_type,
+            require_current_confirmation=True,
+        )
         if download is not None:
             response = HttpResponse(
                 download["body"],
@@ -2018,6 +2033,46 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             )
             response["X-Report-Document-Type"] = download.get("document_type", "")
             return response
+        current_access_metadata = get_report_access_metadata(report_id)
+        if current_access_metadata is not None:
+            current_confirmation = current_access_metadata.get("document_confirmation") or {}
+            if current_access_metadata.get("download_blocked") is True:
+                return _report_error_response(
+                    request,
+                    {
+                        "contract_version": "report_download.v1",
+                        "code": "appeal_gate_blocked",
+                        "message": "Appeal eligibility must be confirmed before this document can be downloaded.",
+                        "report_id": report_id,
+                        "reason": "appeal_gate_blocked",
+                    },
+                    status=409,
+                )
+            if current_confirmation.get("required") is not True:
+                return _report_error_response(
+                    request,
+                    {
+                        "contract_version": "report_download.v1",
+                        "code": "document_download_not_available",
+                        "message": "Only official objection DOCX documents are downloadable.",
+                        "report_id": report_id,
+                    },
+                    status=409,
+                )
+            if current_confirmation.get("confirmed") is not True:
+                return _report_error_response(
+                    request,
+                    {
+                        "contract_version": "report_download.v1",
+                        "code": "document_confirmation_required",
+                        "message": "Final confirmation is required before this document can be downloaded.",
+                        "report_id": report_id,
+                        "reason": "document_confirmation_stale"
+                        if current_confirmation.get("stale") is True
+                        else "document_confirmation_required",
+                    },
+                    status=409,
+                )
         return _report_error_response(
             request,
             {
