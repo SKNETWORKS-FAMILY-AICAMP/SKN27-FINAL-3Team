@@ -76,7 +76,6 @@
   },
   "report_policy": {
     "supported_intent": "fine_notice_analysis",
-    "insert_before": "final_response_merge",
     "node_code": "objection_report_generation",
     "document_terms": ["신청서", "의견서", "보고서", "리포트", "문서"],
     "action_terms": ["작성", "만들", "생성", "초안", "다운로드"]
