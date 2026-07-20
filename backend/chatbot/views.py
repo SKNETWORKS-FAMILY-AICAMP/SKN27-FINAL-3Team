@@ -29,6 +29,10 @@ from app.contracts.consultation_case import (
     StartCaseAnalysisRequest,
     StartCaseAnalysisResponse,
 )
+from app.contracts.analysis_job import (
+    ConfirmFineNoticeFieldsRequest,
+    ConfirmFineNoticeFieldsResponse,
+)
 from app.contracts.report import (
     ConfirmReportDocumentRequest,
     ConfirmReportDocumentResponse,
@@ -114,6 +118,7 @@ from chatbot.request_parsing import (
 )
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
+    AnalysisJobReferenceError,
     AuthSessionStateError,
     ReportReferenceError,
     SessionBindingError,
@@ -124,6 +129,7 @@ from chatbot.repositories import (
     authorize_report_download_metadata,
     build_history_after_service_summary,
     conversation_save_state_from_payload,
+    confirm_fine_notice_fields,
     confirm_report_document,
     get_analysis_job_access_metadata,
     get_analysis_job_record,
@@ -1905,6 +1911,95 @@ def report_document_confirmation(request: HttpRequest, report_id: str) -> JsonRe
         {
             "contract_version": "document_confirmation.v1",
             "document_confirmation": confirmation,
+        },
+    )
+    return _json_response(request, response_payload, status=201)
+
+
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def analysis_job_fine_notice_confirmation(request: HttpRequest, job_id: str) -> JsonResponse:
+    body = _json_body(request)
+    identity_payload = _request_access_payload(request)
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    guest_violation = _guest_identity_policy_violation(subject)
+    if guest_violation:
+        return _guest_identity_policy_response(request, guest_violation)
+    if subject.get("subject_type") != "user":
+        return _login_required_response(
+            request,
+            action="analysis_job_fine_notice_confirmation",
+            reason="fine_notice_confirmation_requires_authenticated_user",
+            message="로그인 후 OCR 추출 정보의 최종 확인을 저장할 수 있습니다.",
+            policy_version="analysis_job_action_policy.v1",
+            subject=subject,
+        )
+    access_metadata = get_analysis_job_access_metadata(job_id)
+    if access_metadata is None:
+        return _json_response(
+            request,
+            {
+                "error": {
+                    "code": "analysis_job_not_found",
+                    "message": "Requested analysis job was not found.",
+                }
+            },
+            status=404,
+        )
+    access = authorize_resource_access(access_metadata, identity_payload)
+    if not access["allowed"]:
+        return _object_access_denied_response(request, access)
+    validated, validation_response = _validate_request_dto(
+        request,
+        ConfirmFineNoticeFieldsRequest,
+        body,
+    )
+    if validation_response is not None:
+        return validation_response
+    try:
+        confirmation = confirm_fine_notice_fields(
+            job_id,
+            owner_id=str(subject.get("user_id") or ""),
+            corrected_fields=validated.get("corrected_fields") or {},
+        )
+    except AnalysisJobReferenceError as exc:
+        if exc.reason == "fine_notice_confirmation_not_available":
+            return _json_response(
+                request,
+                {
+                    "contract_version": "fine_notice_confirmation.v1",
+                    "error": {
+                        "code": "fine_notice_confirmation_not_available",
+                        "message": "Only fine-notice analysis jobs can be confirmed.",
+                        "job_id": job_id,
+                    },
+                },
+                status=409,
+            )
+        if exc.reason == "object_access_denied":
+            return _object_access_denied_response(
+                request,
+                {
+                    "allowed": False,
+                    "decision": "owner_mismatch",
+                    "policy_version": "analysis_job_action_policy.v1",
+                },
+            )
+        return _json_response(
+            request,
+            {
+                "error": {
+                    "code": "analysis_job_not_found",
+                    "message": "Requested analysis job was not found.",
+                }
+            },
+            status=404,
+        )
+    response_payload = _serialize_response_dto(
+        ConfirmFineNoticeFieldsResponse,
+        {
+            "contract_version": "fine_notice_confirmation.v1",
+            "fine_notice_confirmation": confirmation,
         },
     )
     return _json_response(request, response_payload, status=201)

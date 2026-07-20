@@ -236,11 +236,22 @@ def _merit_risk_tone(state: AppealJudgmentState) -> str | None:
 
 
 def _disclaimer_text(state: AppealJudgmentState) -> str:
+    verified_at = state.get("law_reference_verified_at")
+    if verified_at:
+        staleness_notice = (
+            f"⚠️ 본 판정에 인용된 법령 자료는 {verified_at} 기준으로 수집되었으며, "
+            "이후 개정 사항이 미반영되었을 수 있습니다."
+        )
+    else:
+        staleness_notice = (
+            "⚠️ 본 판정에 인용된 법령 자료의 수집 기준일을 확인하지 못했습니다 — "
+            "최신 개정 사항이 미반영되었을 수 있습니다."
+        )
     parts = [
         "본 판단은 법률자문이 아니며 참고용입니다. 절차의 세부 운영(특히 온라인 접수 "
         "가능 여부)은 지자체·관할 기관마다 다를 수 있어, 최종 확인은 관할 기관에 "
         "하시기 바랍니다.",
-        "⚠️ 본 판정은 과거(2026년) 기준 법령 및 판례를 바탕으로 작성되었으며, 최신 개정 사항이 미반영되었을 수 있습니다.",
+        staleness_notice,
         _RESIDUAL_RISK_NOTICE,
     ]
 
@@ -263,6 +274,19 @@ def _disclaimer_text(state: AppealJudgmentState) -> str:
             )
     elif state.get("law_code_verified") is True:
         parts.append("이의신청서에 인용될 법조항은 법령DB로 확인됐습니다.")
+
+    if state.get("requires_confirmation"):
+        unconfirmed = state.get("unconfirmed_fields") or []
+        if unconfirmed:
+            parts.append(
+                "⚠️ 금액·기한 등 일부 정보가 아직 사용자 확인을 거치지 않았습니다 — "
+                f"{', '.join(unconfirmed)} 항목을 원본 고지서와 대조해 확인하세요."
+            )
+        else:
+            parts.append(
+                "⚠️ 이 판단은 사용자 확인을 거치지 않은 OCR 추출 정보를 기반으로 합니다 — "
+                "원본 고지서와 대조해 확인하세요."
+            )
 
     if state.get("reason_quality_insufficient"):
         parts.append(_REASON_QUALITY_NOTICE)
@@ -294,8 +318,11 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "computed_deadline":     state.get("computed_deadline"),
         "deadline_passed":       state.get("deadline_passed"),
         "law_code_verified":     state.get("law_code_verified"),
+        "law_reference_verified_at": state.get("law_reference_verified_at"),
         "reason_quality_insufficient": state.get("reason_quality_insufficient"),
         "schema_fields_unrecognized": _unrecognized_schema_fields(state),
+        "requires_confirmation": state.get("requires_confirmation"),
+        "unconfirmed_fields":    state.get("unconfirmed_fields") or [],
         "guide":                 guide,
     }
 
@@ -337,6 +364,17 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
         # fine_type·notice_stage가 알려진 값 밖이면 판정은 그대로(기본 분기로) 진행했지만,
         # Supervisor가 OCR 결과를 재확인하도록 명시적으로 알려준다.
         next_actions.append("고지서 정보 인식 오류: OCR 결과를 다시 확인하거나 수정해주세요")
+    if state.get("requires_confirmation"):
+        # fine_notice_analysis가 확인을 요구했지만(D-1) 아직 사용자 확인이 이뤄지지
+        # 않은 채로 이 판정에 도달한 상태 — 판정 자체는 막지 않되, 사용자가 원본과
+        # 대조해야 한다는 것을 다음 행동으로 명시한다.
+        unconfirmed = state.get("unconfirmed_fields") or []
+        if unconfirmed:
+            next_actions.append(
+                f"OCR 추출 정보 확인 필요: {', '.join(unconfirmed)} 항목을 원본 고지서와 대조해주세요"
+            )
+        else:
+            next_actions.append("OCR 추출 정보 확인 필요: 원본 고지서와 대조해주세요")
     fine_type_label = state.get("fine_type") or "미확인"
     notice_stage_label = state.get("notice_stage") or "미확인"
     summary = f"{fine_type_label} {notice_stage_label} — {judgment_status}"

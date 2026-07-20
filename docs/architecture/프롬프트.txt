@@ -1,0 +1,104 @@
+SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team PR #244 관련 작업을 분리한다.
+
+내 담당은 “확정 사실관계 확인 전에는 사건 분석의 법령 검색과 이의신청서 생성을 진행하지 못하게 하는 서버 측 게이트”다.
+
+당신의 담당은 법령 검색 Agent와 이의신청 생성 Agent의 내부 구현·입출력 품질이다. 서버 게이트, 케이스 분석 시작 API, 큐잉 권한은 건드리지 말아야 한다.
+
+## 절대 수정하지 않을 파일·영역
+
+다음은 내 담당이다. 수정하지 말고, 수정이 필요해 보이면 먼저 이유와 영향만 보고해라.
+
+- `backend/chatbot/case_repository.py`
+  - `start_case_analysis()`
+  - `ConfirmedFactsRequired`
+  - `FactReadinessNotMet`
+  - 확정 사실관계 확인, 필수 필드, 충돌 검증
+  - 분석 계획의 실행 가능 여부 및 큐 생성
+
+- `backend/chatbot/views.py`
+  - 케이스 분석 시작 API
+  - 직접 Agent 실행/계획 실행 경로의 게이트
+  - HTTP 오류 응답 및 권한 처리
+
+- 사실 확정 API, `ConfirmedFactVersion`, 케이스 상태 전이, 분석 작업 생성·큐잉·소유권 검증
+
+- `app/config/supervisor_routing_policy.v1.json`
+  - 이 파일 변경이 꼭 필요하면 직접 수정하지 말고 변경 제안만 남겨라. 라우팅 정책은 공동 충돌 가능성이 높다.
+
+## 당신이 맡을 파일·영역
+
+주로 아래 범위만 다룬다.
+
+- `ai/agents/law_ground_search/**`
+- `ai/agents/objection_report_generation/**`
+- 위 Agent에 직접 대응하는 단위 테스트
+- 필요하다면 Agent 입력/출력 어댑터 테스트
+
+## 구현 목표
+
+A. 법령 검색 Agent
+
+- Supervisor가 전달한 준비된 입력 패키지로만 검색한다.
+- 사건 분석용 입력에 필요한 질의·위반 내용·사실관계가 부족하면, 근거를 지어내거나 빈 성공 결과를 만들지 않는다.
+- 기존 Agent Adapter 계약을 유지한다.
+  - `status`
+  - `structured_result`
+  - `missing_fields`
+  - `next_actions`
+  - `limitations`
+- 입력이 부족한 경우에는 현재 프로젝트의 상태 규칙에 맞춰 `input_required`, `partial`, 또는 `failed` 중 적절한 비성공 상태를 사용한다.
+- 일반 상담의 단순 법령 안내 흐름을 무조건 막지 않는다.
+  - “확정 사실관계 게이트”는 `case_id` 기반 사건 분석에 적용하는 서버 정책이다.
+  - Agent 내부에서 모든 법령 검색을 일괄 차단하면 안 된다.
+- 검색 실패·근거 부족·최신성 한계는 사용자에게 성공처럼 보이지 않게 제한사항으로 남긴다.
+
+B. 이의신청 생성 Agent
+
+- 확정된 사실관계, 상위 분석 결과, 법령 검색 결과가 충분할 때만 초안을 만든다.
+- 부족한 입력이나 상위 결과가 있으면 제출 가능한 이의신청서처럼 꾸며서 생성하지 않는다.
+- 이 경우 필요한 입력을 `missing_fields`, `next_actions`, `limitations`에 명확히 넣는다.
+- 기존 `document_variant`, `form_data`, `form_sections`, `document_readiness`, `appeal_gate`, `report_actions` 계약을 깨지 않는다.
+- 일반 분석 리포트 다운로드, PDF 경로, 새 DOCX 다운로드 기능을 추가하거나 되살리지 않는다.
+- 공식 이의신청서 DOCX의 최종 확인 및 appeal gate 정책을 변경하지 않는다.
+
+## 충돌 방지 원칙
+
+- 서버 게이트를 Agent 내부 로직으로 대체하지 않는다.
+- `backend/chatbot/case_repository.py`의 분석 노드 목록이나 계획 생성 로직은 수정하지 않는다.
+- `law_ground_search`와 `objection_report_generation`을 직접 실행할 수 있도록 새 우회 경로를 만들지 않는다.
+- Mock 성공 결과, 하드코딩된 법령 근거, 제출 가능성 보장 문구를 추가하지 않는다.
+- 개인정보 원문을 새 로그·응답·LLM 입력에 복제하지 않는다.
+
+## 테스트 완료 기준
+
+다음 테스트를 추가하거나 보강해라.
+
+1. 법령 검색 Agent
+   - 유효한 입력 패키지에서는 기존 형식의 검색 결과를 반환한다.
+   - 질의 또는 필수 사실관계가 부족하면 성공 결과가 아니라 부족 입력 상태를 반환한다.
+   - 근거가 없거나 검색이 실패했을 때 허위 법령 근거를 만들지 않는다.
+
+2. 이의신청 생성 Agent
+   - 충분한 사실관계·법령 근거·첨부 정보가 있으면 기존 계약의 초안을 생성한다.
+   - 사실관계 또는 법령 근거가 부족하면 초안 생성 성공으로 처리하지 않는다.
+   - `missing_fields`, `next_actions`, `limitations`이 사용자 후속 행동에 맞게 나온다.
+
+3. 회귀 확인
+   - 기존 Agent Adapter envelope를 깨지 않는다.
+   - 일반 법령 상담 흐름을 전부 막지 않는다.
+   - 공식 DOCX 최종 확인·다운로드 계약을 변경하지 않는다.
+
+## 최종 보고 형식
+
+코드 작업 전:
+- 수정 예정 파일 목록
+- 서버 게이트 담당 영역과 겹치는 부분이 없는지
+- 정책 변경이 필요한지 여부
+
+코드 작업 후:
+- 변경 파일별 목적
+- 테스트 명령과 결과
+- 내 서버 게이트 작업에 필요한 입력 계약 또는 주의사항
+- 남은 위험 요소
+
+서버 게이트 파일을 수정해야 한다고 판단되면 구현하지 말고 먼저 멈춰서 파일·함수·이유를 보고해라.

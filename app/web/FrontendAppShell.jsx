@@ -605,6 +605,27 @@ export default function FrontendAppShell({
     }
   }
 
+  async function confirmCurrentFineNoticeFields({ jobId: targetJobId, correctedFields = {} } = {}) {
+    if (!targetJobId) {
+      throw new Error("확인을 저장할 분석 작업을 찾지 못했습니다.");
+    }
+    let nextIdentity = identity;
+    if (!authSessionId) {
+      setPendingAuthAction({ type: "fine_notice_confirmation", jobId: targetJobId });
+      const loginState = await loginAndBindCurrentSession({
+        source: "fine_notice_confirmation",
+        nextRoute: activeRoute,
+      });
+      nextIdentity = loginState.identity;
+      setPendingAuthAction(null);
+    }
+    await api.confirmFineNoticeFields({
+      jobId: targetJobId,
+      identity: nextIdentity,
+      correctedFields,
+    });
+  }
+
   async function triggerReportDownload({ reportId, sessionId: activeSessionId, requestIdentity, documentType = "objection_form" }) {
     const file = await api.downloadReport({
       reportId,
@@ -1189,11 +1210,13 @@ export default function FrontendAppShell({
               currentReport={currentReport}
               deadlineGuidance={deadlineGuidance}
               isAuthenticated={Boolean(authSessionId)}
+              jobId={currentReport?.job_id || analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || ""}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenReport={() => setActiveRoute("reporting")}
               onPrepareDraftRegeneration={prepareDraftRegeneration}
               onPrepareMissingEvidence={prepareMissingEvidenceUpload}
               onConfirmDocument={confirmCurrentReportDocument}
+              onConfirmFineNoticeFields={confirmCurrentFineNoticeFields}
               onRunReportAction={runCurrentReportAction}
               registeredAttachments={registeredAttachments}
               reportingPayload={reportingPayload}
@@ -2101,6 +2124,77 @@ function LawGroundInsightPanel({ node, compact = false }) {
   );
 }
 
+const FINE_NOTICE_CONFIRMATION_FIELDS = [
+  { key: "fine_amount", label: "금액" },
+  { key: "opinion_deadline", label: "기한" },
+  { key: "charge_number", label: "처분번호" },
+  { key: "violation_text", label: "위반 내용" },
+  { key: "notice_stage", label: "고지 단계" },
+];
+
+function FineNoticeConfirmationPanel({ node, jobId, onConfirm, compact = false }) {
+  const structuredResult = node?.structured_result || {};
+  const unconfirmedFields = Array.isArray(structuredResult.unconfirmed_fields)
+    ? structuredResult.unconfirmed_fields
+    : [];
+  const [editedFields, setEditedFields] = useState({});
+  const [status, setStatus] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!node || node.node_code !== "fine_notice_analysis" || !structuredResult.requires_confirmation) {
+    return null;
+  }
+
+  async function handleConfirm() {
+    if (!jobId) {
+      setStatus("확인을 저장할 분석 작업을 찾지 못했습니다.");
+      return;
+    }
+    setIsSubmitting(true);
+    setStatus("");
+    try {
+      await onConfirm({ jobId, correctedFields: editedFields });
+      setStatus("확인 내용이 저장되었습니다.");
+    } catch (error) {
+      setStatus(`확인 저장에 실패했습니다. ${error?.message || ""}`.trim());
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <article className={compact ? "agent-insight-panel compact" : "agent-insight-panel"}>
+      <div className="agent-insight-head">
+        <span className="tag amber">확인 필요</span>
+        <strong>OCR 추출 정보 확인</strong>
+      </div>
+      <div className="agent-insight-section fine-notice-confirmation-fields">
+        {FINE_NOTICE_CONFIRMATION_FIELDS.map(({ key, label }) => {
+          const isUnconfirmed = unconfirmedFields.includes(key);
+          return (
+            <label key={key} className={isUnconfirmed ? "fine-notice-field fine-notice-field--unconfirmed" : "fine-notice-field"}>
+              <span>{label}{isUnconfirmed && " ⚠️"}</span>
+              <input
+                type="text"
+                defaultValue={compactValue(structuredResult[key] ?? "")}
+                onChange={(event) =>
+                  setEditedFields((previous) => ({ ...previous, [key]: event.target.value }))
+                }
+              />
+            </label>
+          );
+        })}
+      </div>
+      <div className="agent-insight-section">
+        <button className="button primary" type="button" onClick={handleConfirm} disabled={isSubmitting}>
+          {isSubmitting ? "저장 중..." : "확인했습니다"}
+        </button>
+        {status && <p>{status}</p>}
+      </div>
+    </article>
+  );
+}
+
 function ReportingPreviewPanel({ reportingPayload }) {
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
   const documentSections = sections.filter(isSubmissionDocumentSection);
@@ -2559,6 +2653,8 @@ function CaseResultScreen({
   currentReport = null,
   deadlineGuidance = null,
   isAuthenticated = false,
+  jobId = "",
+  onConfirmFineNoticeFields,
   onOpenChat,
   onOpenReport,
   onPrepareDraftRegeneration,
@@ -2574,6 +2670,7 @@ function CaseResultScreen({
   const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
+  const fineNoticeNode = nodeResults.find((node) => node?.node_code === "fine_notice_analysis");
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
   const lawGroundNode = nodeResults.find((node) => node?.node_code === "law_ground_search");
   const reportStatus = reportingPayload?.stage || currentReport?.status || "draft";
@@ -2656,6 +2753,13 @@ function CaseResultScreen({
                 </div>
               )}
               {lawGroundNode && <LawGroundInsightPanel node={lawGroundNode} />}
+              {!isFault && fineNoticeNode && (
+                <FineNoticeConfirmationPanel
+                  node={fineNoticeNode}
+                  jobId={jobId}
+                  onConfirm={onConfirmFineNoticeFields}
+                />
+              )}
 
               {analysisCards.length > 0 && (
                 <div className="case-result-card-list">

@@ -112,15 +112,20 @@ class TestLawCodeCheckNode:
         assert result == {"law_code_verified": False}
 
     def test_DB에_존재하면_True(self):
-        with patch("etl.legal.search.law_code_exists", return_value=True) as mock_exists:
+        with patch("etl.legal.search.law_code_exists", return_value=True) as mock_exists, patch(
+            "etl.legal.search.law_code_last_verified", return_value="2026-07-01"
+        ) as mock_last_verified:
             result = law_code_check_node({"law_code": "도로교통법 제17조 제1항"})
         mock_exists.assert_called_once_with("도로교통법 제17조 제1항")
-        assert result == {"law_code_verified": True}
+        mock_last_verified.assert_called_once_with("도로교통법 제17조 제1항")
+        assert result == {"law_code_verified": True, "law_reference_verified_at": "2026-07-01"}
 
     def test_DB에_없거나_조회_실패시_False(self):
-        with patch("etl.legal.search.law_code_exists", return_value=False):
+        with patch("etl.legal.search.law_code_exists", return_value=False), patch(
+            "etl.legal.search.law_code_last_verified", return_value=None
+        ):
             result = law_code_check_node({"law_code": "존재하지 않는 법 제999조"})
-        assert result == {"law_code_verified": False}
+        assert result == {"law_code_verified": False, "law_reference_verified_at": None}
 
 
 # ── reason_intake_node (ARCH-001 §9-7) ──────────────────────────────────────
@@ -816,6 +821,43 @@ class TestGuideGenerationNode:
         result = guide_generation_node(state)
         assert "법령DB" not in result["guide"]["disclaimer"]
         assert "확인되지 않았습니다" not in result["guide"]["disclaimer"]
+
+    def test_disclaimer_법령기준일_있으면_수집일_노출(self):
+        state = {
+            "law_reference_verified_at": "2026-06-15", "judgment_status": "success",
+            "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "2026-06-15" in result["guide"]["disclaimer"]
+        assert "2026년) 기준" not in result["guide"]["disclaimer"]
+
+    def test_disclaimer_법령기준일_없으면_일반문구(self):
+        state = {
+            "law_reference_verified_at": None, "judgment_status": "success",
+            "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "수집 기준일을 확인하지 못했습니다" in result["guide"]["disclaimer"]
+
+    def test_disclaimer_requires_confirmation_미확인필드_나열(self):
+        state = {
+            "requires_confirmation": True, "unconfirmed_fields": ["fine_amount", "opinion_deadline"],
+            "judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "fine_amount, opinion_deadline" in result["guide"]["disclaimer"]
+        next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
+        assert any("OCR 추출 정보 확인 필요" in action for action in next_actions)
+
+    def test_disclaimer_requires_confirmation_없으면_경고없음(self):
+        state = {
+            "requires_confirmation": False, "judgment_status": "success",
+            "fine_type": "과태료", "notice_stage": "사전통지",
+        }
+        result = guide_generation_node(state)
+        assert "사용자 확인을 거치지 않은" not in result["guide"]["disclaimer"]
+        next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
+        assert not any("OCR 추출 정보 확인 필요" in action for action in next_actions)
 
     def test_disclaimer_사유_부실하면_보강안내_포함(self):
         state = {

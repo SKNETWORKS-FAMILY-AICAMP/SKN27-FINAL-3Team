@@ -153,3 +153,22 @@ class TestConfidenceVerificationNode:
         assert "next_actions" in env
         assert "structured_result" in env
         assert isinstance(env["missing_fields"], list)
+
+    def test_structured_result_carries_confirmation_fields(self):
+        # requires_confirmation/unconfirmed_fields는 Supervisor 경계를 넘는
+        # structured_result(envelope)에도 실려야 한다 — top-level 반환값에만
+        # 남으면 appeal_decision_flow 등 다른 에이전트가 이 값을 못 받는다.
+        state = _make_state(fine_type="과태료", notice_stage="1차 고지서", ocr_status="success")
+        result = confidence_verification_node(state)
+        structured = result["agent_results"]["fine_notice_analysis"]["structured_result"]
+        assert structured["requires_confirmation"] == result["requires_confirmation"]
+        assert structured["unconfirmed_fields"] == result["unconfirmed_fields"]
+
+    def test_unconfirmed_fields_lists_missing_critical_fields(self):
+        state = _make_state(
+            ocr_status="degraded",
+            missing_fields=["fine_amount", "opinion_deadline"],
+        )
+        result = confidence_verification_node(state)
+        assert result["unconfirmed_fields"] == ["fine_amount", "opinion_deadline"]
+        assert result["requires_confirmation"] is True

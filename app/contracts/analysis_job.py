@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.contracts.consultation_case import StrictRequest, StrictResponse
 
 
 class AnalysisJobContractModel(BaseModel):
@@ -64,3 +67,24 @@ class AnalysisJobError(AnalysisJobContractModel):
 
 class AnalysisJobErrorResponse(AnalysisJobContractModel):
     error: AnalysisJobError
+
+
+class AnalysisJobApiContractModel(StrictResponse):
+    """Reject fields that are not part of the public analysis-job confirmation contract."""
+
+
+class FineNoticeConfirmation(AnalysisJobApiContractModel):
+    required: bool = False
+    confirmed: bool = False
+    stale: bool = False
+    confirmed_at: datetime | None = None
+    unconfirmed_fields: list[str] = Field(default_factory=list)
+
+
+class ConfirmFineNoticeFieldsRequest(StrictRequest):
+    corrected_fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConfirmFineNoticeFieldsResponse(AnalysisJobApiContractModel):
+    contract_version: Literal["fine_notice_confirmation.v1"]
+    fine_notice_confirmation: FineNoticeConfirmation

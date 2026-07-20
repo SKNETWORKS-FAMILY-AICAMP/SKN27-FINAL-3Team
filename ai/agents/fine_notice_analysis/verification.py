@@ -14,7 +14,13 @@ VALID_COMBINATIONS: set[tuple[str, str]] = {
 _LAW_CODE_RE = re.compile(r".+(법|규칙|령|조례|규정).+제\d+조")
 
 
-def _structured_from_state(state: FineNoticeState, ocr_status: str) -> dict:
+def _structured_from_state(
+    state: FineNoticeState,
+    ocr_status: str,
+    *,
+    requires_confirmation: bool = False,
+    unconfirmed_fields: Optional[list] = None,
+) -> dict:
     return {
         "ocr_status":                 ocr_status,
         "ocr_error":                  state.get("ocr_error"),
@@ -36,6 +42,8 @@ def _structured_from_state(state: FineNoticeState, ocr_status: str) -> dict:
         "charge_number":              state.get("charge_number"),
         "court_venue":                state.get("court_venue"),
         "missing_fields":             state.get("missing_fields") or [],
+        "requires_confirmation":      requires_confirmation,
+        "unconfirmed_fields":         unconfirmed_fields or [],
     }
 
 
@@ -101,7 +109,12 @@ def confidence_verification_node(state: FineNoticeState) -> dict:
     violation_text = state.get("violation_text") or ""
     summary = f"{fine_type} {violation_text[:20] or '내용 미확인'} — {notice_stage} OCR {ocr_status}"
 
-    structured = _structured_from_state(state, ocr_status)
+    structured = _structured_from_state(
+        state,
+        ocr_status,
+        requires_confirmation=requires_confirmation,
+        unconfirmed_fields=unconfirmed_fields,
+    )
     env = make_envelope(ocr_status, structured, missing, next_actions, summary, limitations=format_errors)
 
     return {

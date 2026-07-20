@@ -1201,6 +1201,34 @@ button.report-list-card.active {
   padding-left: 18px;
 }
 
+.fine-notice-confirmation-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.fine-notice-field {
+  display: grid;
+  gap: 4px;
+}
+
+.fine-notice-field span {
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.fine-notice-field input {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.fine-notice-field--unconfirmed input {
+  border-color: #c9820f;
+  background: #fff8ec;
+}
+
 .report-section-list {
   display: grid;
   gap: 10px;
