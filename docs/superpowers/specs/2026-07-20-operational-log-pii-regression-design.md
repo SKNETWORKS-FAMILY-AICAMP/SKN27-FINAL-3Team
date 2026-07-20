@@ -26,6 +26,8 @@
 
 허용되는 관측 값은 오류 클래스, 고정 오류 코드, 마스킹 토큰, 개인정보 범주·개수, 비식별 작업 ID와 상태뿐이다.
 
+Supervisor 런타임 스모크의 `llm.reason`은 예외 원문을 전달하지 않는 공개 안전 코드여야 한다. 허용 코드는 `ok`, `disabled`, `missing_config`, `provider_unavailable`, `invalid_contract`이며, 그 밖의 값은 `unspecified`으로 정규화한다.
+
 ## 구성과 데이터 흐름
 
 ### 채팅·큐 로그
@@ -46,7 +48,7 @@ Worker 실행 파이프라인에서 민감 원문을 가진 예외를 발생시�
 
 ### Supervisor 런타임 스모크 출력
 
-기존 `supervisor_conversation_runtime_smoke.v1` 출력은 상태·비식별 ID·검사 결과만 포함한다. 안전 출력 회귀 테스트는 사용자 입력, storage URI, provider/model 식별자, secret이 결과에 포함되지 않음을 확인한다.
+기존 `supervisor_conversation_runtime_smoke.v1` 출력은 상태·비식별 ID·검사 결과만 포함한다. `_safe_llm`은 상태와 허용된 `reason` 코드만 반환하고, 원본 `reason` 문자열은 전달하지 않는다. 안전 출력 회귀 테스트는 사용자 입력, storage URI, provider/model 식별자, secret 또는 허용되지 않은 `reason` 원문이 결과에 포함되지 않음을 확인한다.
 
 ## 테스트 전략
 
@@ -54,6 +56,7 @@ Worker 실행 파이프라인에서 민감 원문을 가진 예외를 발생시�
 - 외부 LLM, S3, 실제 파일 스캐너 호출은 모두 fake/patch로 대체한다.
 - 정상 경로와 실패 경로를 함께 확인하되, 테스트가 검증하는 것은 관측 출력의 비식별성이다.
 - 금지 문자열은 원문 그대로 assertion하고, 오류 클래스·고정 코드가 남는지도 함께 assertion해 운영 진단성을 보장한다.
+- Supervisor 스모크에는 PII·파일 경로·storage URI·secret·model 문자열을 포함한 `reason`을 주입하고, 출력이 `unspecified`으로 정규화되는지 확인한다.
 
 ## 제외 범위
 
@@ -66,5 +69,6 @@ Worker 실행 파이프라인에서 민감 원문을 가진 예외를 발생시�
 
 - 채팅·큐, 파일/OCR, 문서 생성, Worker 실패, Supervisor 런타임 스모크 출력의 회귀 테스트가 통과한다.
 - 금지 문자열이 각 캡처 로그와 Worker 운영 결과에 없음을 확인한다.
+- Supervisor 스모크의 허용되지 않은 `reason` 원문이 `unspecified`으로 정규화됨을 확인한다.
 - 기존 입력 개인정보·Supervisor 런타임 스모크 테스트가 함께 통과한다.
 - `project-readiness-master-checklist.md`의 운영 로그 개인정보 노출 회귀 테스트 상태를 구현 결과에 따라 갱신한다.
