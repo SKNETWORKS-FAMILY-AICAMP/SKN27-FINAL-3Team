@@ -226,6 +226,7 @@ def test_report_get_routes_are_modeled_while_report_post_remains_deferred() -> N
         ("GET", "/api/reports/"),
         ("GET", "/api/reports/{report_id}/"),
         ("GET", "/api/reports/{report_id}/download/"),
+        ("POST", "/api/reports/{report_id}/document-confirmation/"),
     }
     assert modeled[("GET", "/api/reports/")].response_model is (
         report_contracts.ReportListResponse
@@ -262,6 +263,24 @@ def test_report_get_routes_are_modeled_while_report_post_remains_deferred() -> N
         "X-Report-Document-Type",
     ]
     assert all(header.required is True for header in download.success_headers)
+    confirmation = modeled[("POST", "/api/reports/{report_id}/document-confirmation/")]
+    assert confirmation.request_model is report_contracts.ConfirmReportDocumentRequest
+    assert confirmation.response_model is report_contracts.ConfirmReportDocumentResponse
+    assert confirmation.success_status == 201
+    assert {
+        error.status: error.codes for error in confirmation.errors
+    } == {
+        401: (
+            "auth_required",
+            "token_invalid",
+            "token_expired",
+            "guest_session_invalid",
+        ),
+        403: ("login_required", "object_access_denied"),
+        404: ("report_not_found",),
+        409: ("appeal_gate_blocked",),
+        422: ("validation_error",),
+    }
     for spec in modeled.values():
         unauthorized = next(error for error in spec.errors if error.status == 401)
         assert unauthorized.codes == (
@@ -278,6 +297,30 @@ def test_report_get_routes_are_modeled_while_report_post_remains_deferred() -> N
     assert ("GET", "/api/reports/{report_id}/") not in deferred
     assert ("GET", "/api/reports/{report_id}/download/") not in deferred
 
+
+def test_report_document_confirmation_contract_requires_all_final_checks() -> None:
+    report_contracts = importlib.import_module("app.contracts.report")
+
+    request = report_contracts.ConfirmReportDocumentRequest.model_validate(
+        {
+            "facts_confirmed": True,
+            "agency_confirmed": True,
+            "deadline_confirmed": True,
+            "attachments_confirmed": True,
+        }
+    )
+
+    assert request.facts_confirmed is True
+    assert "document_confirmation" in report_contracts.ReportReportingPayload.model_fields
+    with pytest.raises(ValidationError):
+        report_contracts.ConfirmReportDocumentRequest.model_validate(
+            {
+                "facts_confirmed": True,
+                "agency_confirmed": False,
+                "deadline_confirmed": True,
+                "attachments_confirmed": True,
+            }
+        )
 
 def test_success_content_and_header_specs_reject_ambiguous_contracts() -> None:
     contracts = importlib.import_module("app.contracts.consultation_case")

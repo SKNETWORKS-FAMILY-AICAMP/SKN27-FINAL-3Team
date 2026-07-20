@@ -450,7 +450,7 @@ def _verification_result(
         "report_ready": bool(
             report is not None and report.status == ReportStatus.READY.value
         ),
-        "download_metadata_available": _download_metadata_available(report),
+        "general_report_download_unavailable": _general_report_download_unavailable(report),
         "analysis_display_persisted": display_count == 1,
         "paid_phase_guards_unique": (
             paid_guard_count_before_retry == len(PAID_GUARD_NODE_CODES)
@@ -488,7 +488,7 @@ def _verification_result(
             {
                 "report_persisted",
                 "report_ready",
-                "download_metadata_available",
+                "general_report_download_unavailable",
                 "analysis_display_persisted",
             }
         )
@@ -562,24 +562,14 @@ def _real_analysis_results(results: list[AgentResult]) -> bool:
     return True
 
 
-def _download_metadata_available(report: Report | None) -> bool:
+def _general_report_download_unavailable(report: Report | None) -> bool:
     if report is None or report.status != ReportStatus.READY.value:
         return False
     try:
         metadata = repositories.get_report_download_metadata(report.report_id)
     except Exception:
         return False
-    if not isinstance(metadata, dict):
-        return False
-    body = metadata.get("body")
-    return bool(
-        metadata.get("report_id") == report.report_id
-        and metadata.get("status") == ReportStatus.READY.value
-        and metadata.get("filename")
-        and metadata.get("content_type")
-        and isinstance(body, (bytes, bytearray))
-        and body
-    )
+    return metadata is None
 
 
 def _paid_guard_count(job: AnalysisJob) -> int:

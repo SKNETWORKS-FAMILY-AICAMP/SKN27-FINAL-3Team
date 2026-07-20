@@ -127,6 +127,7 @@ def test_detail_projection_preserves_display_fields_and_drops_internal_fields() 
         "document_readiness",
         "report_actions",
         "appeal_gate",
+        "document_confirmation",
         "sections",
     }
     assert set(report["metadata"]["report_quality"]) == {
@@ -202,6 +203,7 @@ def test_detail_projection_uses_safe_defaults_for_missing_nested_values() -> Non
             "document_readiness": None,
             "report_actions": [],
             "appeal_gate": None,
+            "document_confirmation": None,
             "sections": [],
         },
     }

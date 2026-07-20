@@ -39,6 +39,7 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/reports/",
         "/api/reports/{report_id}/",
         "/api/reports/{report_id}/download/",
+        "/api/reports/{report_id}/document-confirmation/",
     }
 
     case_collection = document["paths"]["/api/cases/"]
@@ -128,6 +129,8 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "ReportListResponse",
         "ReportDetailResponse",
         "ReportApiErrorResponse",
+        "ConfirmReportDocumentRequest",
+        "ConfirmReportDocumentResponse",
     ):
         assert schema_name in schemas
 
@@ -352,7 +355,12 @@ def test_report_download_openapi_uses_binary_docx_and_public_attachment_headers(
         "schema": {"type": "string"},
     }
     assert "X-Report-Storage-URI" not in response["headers"]
-    assert download["responses"]["409"]["x-error-codes"] == ["report_not_ready"]
+    assert download["responses"]["409"]["x-error-codes"] == [
+        "report_not_ready",
+        "document_download_not_available",
+        "document_confirmation_required",
+        "appeal_gate_blocked",
+    ]
 
 
 def test_openapi_v1_yaml_rendering_is_deterministic_and_parseable() -> None:

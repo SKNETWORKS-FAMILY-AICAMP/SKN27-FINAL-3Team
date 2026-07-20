@@ -322,7 +322,7 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
         self.assertTrue(result["checks"]["job_success"])
         self.assertTrue(result["checks"]["all_agent_results_success"])
         self.assertTrue(result["checks"]["report_ready"])
-        self.assertTrue(result["checks"]["download_metadata_available"])
+        self.assertTrue(result["checks"]["general_report_download_unavailable"])
         self.assertTrue(result["checks"]["safe_retry_no_new_paid_invocation"])
         self.assertEqual(result["paid_phase_guard_count_before_retry"], 2)
         self.assertEqual(result["paid_phase_guard_count_after_retry"], 2)
@@ -365,6 +365,6 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
             "all_agent_results_success",
             "real_agent_results",
             "report_ready",
-            "download_metadata_available",
+            "general_report_download_unavailable",
         ):
             self.assertIn(failed_check, degraded["failed_checks"])

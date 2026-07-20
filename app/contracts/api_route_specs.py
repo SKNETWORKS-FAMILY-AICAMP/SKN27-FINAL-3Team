@@ -59,6 +59,8 @@ from app.contracts.file_attachment import (
     FileUploadValidationErrorResponse,
 )
 from app.contracts.report import (
+    ConfirmReportDocumentRequest,
+    ConfirmReportDocumentResponse,
     ReportApiErrorResponse,
     ReportDetailResponse,
     ReportListResponse,
@@ -783,7 +785,7 @@ REPORT_DOWNLOAD_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
     RequestParameterSpec(
         name="document_type",
         location="query",
-        description="Optional normalized report document type for PDF rendering.",
+        description="Official document type. Only the objection-form DOCX is downloadable.",
     ),
 )
 
@@ -808,7 +810,7 @@ REPORT_DOCUMENT_SUCCESS_HEADERS: tuple[ResponseHeaderSpec, ...] = (
     ),
     ResponseHeaderSpec(
         name="X-Report-Document-Type",
-        description="Normalized document type rendered into the PDF.",
+        description="Normalized document type rendered into the DOCX.",
         schema={"type": "string"},
         required=True,
     ),
@@ -892,7 +894,15 @@ REPORT_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
             ),
             (403, ("login_required", "object_access_denied")),
             (404, ("report_not_found",)),
-            (409, ("report_not_ready",)),
+            (
+                409,
+                (
+                    "report_not_ready",
+                    "document_download_not_available",
+                    "document_confirmation_required",
+                    "appeal_gate_blocked",
+                ),
+            ),
         ),
         auth_required=True,
         contract_status="shadow",
@@ -907,6 +917,37 @@ REPORT_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
             ),
         ),
         success_headers=REPORT_DOCUMENT_SUCCESS_HEADERS,
+    ),
+    RouteSpec(
+        operation_id="confirmReportDocument",
+        method="POST",
+        path="/api/reports/{report_id}/document-confirmation/",
+        route_name="canonical-report-document-confirmation",
+        view_name="report_document_confirmation",
+        request_model=ConfirmReportDocumentRequest,
+        response_model=ConfirmReportDocumentResponse,
+        success_status=201,
+        errors=_report_errors(
+            (
+                401,
+                (
+                    "auth_required",
+                    "token_invalid",
+                    "token_expired",
+                    "guest_session_invalid",
+                ),
+            ),
+            (403, ("login_required", "object_access_denied")),
+            (404, ("report_not_found",)),
+            (409, ("appeal_gate_blocked",)),
+            (422, ("validation_error",)),
+        ),
+        auth_required=True,
+        contract_status="shadow",
+        tags=("Reports",),
+        summary="Record the owner's final confirmation before official DOCX download",
+        path_parameters=(REPORT_ID_PATH_PARAMETER,),
+        request_parameters=REPORT_DETAIL_REQUEST_PARAMETERS,
     ),
 )
 

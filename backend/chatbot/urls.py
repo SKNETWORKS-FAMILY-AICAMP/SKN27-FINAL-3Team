@@ -45,6 +45,11 @@ urlpatterns = [
     path("agents/nodes/", views.agent_nodes, name="canonical-agent-nodes"),
     path("reports/", views.report_action, name="canonical-report-action"),
     path("reports/<str:report_id>/", views.report_detail, name="canonical-report-detail"),
+    path(
+        "reports/<str:report_id>/document-confirmation/",
+        views.report_document_confirmation,
+        name="canonical-report-document-confirmation",
+    ),
     path("reports/<str:report_id>/download/", views.download_report, name="canonical-download-report"),
 ]
 
