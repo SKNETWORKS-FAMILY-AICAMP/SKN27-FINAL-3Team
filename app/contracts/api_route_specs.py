@@ -897,12 +897,12 @@ REPORT_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         auth_required=True,
         contract_status="shadow",
         tags=("Reports",),
-        summary="Download an authorized report as a PDF document",
+        summary="Download an authorized report as a DOCX document",
         path_parameters=(REPORT_ID_PATH_PARAMETER,),
         request_parameters=REPORT_DOWNLOAD_REQUEST_PARAMETERS,
         success_content=(
             ResponseContentSpec(
-                media_type="application/pdf",
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 schema={"type": "string", "format": "binary"},
             ),
         ),

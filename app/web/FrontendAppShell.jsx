@@ -88,8 +88,6 @@ export default function FrontendAppShell({
   const [reportList, setReportList] = useState([]);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
-  const [pendingReportScreenDownload, setPendingReportScreenDownload] = useState(null);
-  const reportWorkbenchRef = useRef(null);
   const authRefreshContextRef = useRef({ guestId, sessionId });
   authRefreshContextRef.current = { guestId, sessionId };
 
@@ -209,25 +207,6 @@ export default function FrontendAppShell({
       cleanupRefreshTimer();
     };
   }, [api, activeAuthToken, authSessionId]);
-
-  useEffect(() => {
-    if (!pendingReportScreenDownload || activeRoute !== "reporting" || !reportWorkbenchRef.current) {
-      return undefined;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      try {
-        openReportScreenPrintWindow(reportWorkbenchRef.current, pendingReportScreenDownload);
-        setReportActionStatus("리포트 화면 PDF 저장 창을 열었습니다. 브라우저 인쇄 창에서 PDF로 저장해 주세요.");
-      } catch (error) {
-        setReportActionStatus(`리포트 화면 PDF 저장을 시작하지 못했습니다. ${error?.message || ""}`.trim());
-      } finally {
-        setPendingReportScreenDownload(null);
-      }
-    }, 80);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [activeRoute, pendingReportScreenDownload]);
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
     setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 준비하고 있습니다.");
@@ -438,27 +417,25 @@ export default function FrontendAppShell({
 
   async function runCurrentReportAction(action = "download_report") {
     const jobId = currentReport?.job_id || analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || "";
-    const documentType = action === "download_objection" ? "objection_form" : "report";
+    let documentType = action === "download_objection" ? "objection_form" : "report";
     const reportAction = action === "save" ? "save" : "download";
     const activeReportingPayload = currentReport?.content?.reporting_payload || visibleReportingPayload;
-    const persistedReportId = persistedAnalysisReportId(analysisResponse, currentReport);
-    if (action === "download_report") {
-      if (!currentReport && !activeReportingPayload) {
-        setReportActionStatus("PDF로 저장할 리포트 화면이 아직 없습니다.");
+    const appealGate = activeReportingPayload?.appeal_gate || null;
+    const actionDefinition = Array.isArray(activeReportingPayload?.report_actions)
+      ? activeReportingPayload.report_actions.find((item) => item?.type === action)
+      : null;
+    documentType = actionDefinition?.document_type || documentType;
+    if (reportAction === "download") {
+      if (appealGate?.blocked === true) {
+        setReportActionStatus(appealGate.reason || "이의신청 가능 여부를 확인한 뒤 문서를 다운로드할 수 있습니다.");
         return;
       }
-      setPendingReportScreenDownload({
-        title: activeReportingPayload?.title || currentReport?.title || "상담 분석 리포트",
-        filenameBase:
-          currentReport?.report_id ||
-          activeReportingPayload?.screen_id ||
-          jobId ||
-          "report-screen",
-      });
-      setActiveRoute("reporting");
-      setReportActionStatus("리포트 화면 PDF 저장 창을 준비하고 있습니다.");
-      return;
+      if (actionDefinition && actionDefinition.document_format !== "docx") {
+        setReportActionStatus("DOCX 형식으로 준비된 문서만 다운로드할 수 있습니다.");
+        return;
+      }
     }
+    const persistedReportId = persistedAnalysisReportId(analysisResponse, currentReport);
     if ((!analysisResponse || !jobId) && currentReport?.report_id && reportAction === "download") {
       try {
         let nextIdentity = identity;
@@ -507,8 +484,8 @@ export default function FrontendAppShell({
     setReportActionStatus(
       reportAction === "download"
         ? documentType === "objection_form"
-          ? "이의신청서 PDF를 준비하고 있습니다."
-          : "분석 리포트 PDF를 준비하고 있습니다."
+          ? "이의신청서 DOCX를 준비하고 있습니다."
+          : "분석 리포트 DOCX를 준비하고 있습니다."
         : "리포트를 저장하고 있습니다."
     );
     try {
@@ -1200,7 +1177,6 @@ export default function FrontendAppShell({
               reportActionStatus={reportActionStatus}
               reportList={reportList}
               reportingPayload={visibleReportingPayload}
-              reportWorkbenchRef={reportWorkbenchRef}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
             />
@@ -1854,6 +1830,7 @@ function ChatScreenV2({
                                 currentReport={currentReport}
                                 isAuthenticated={Boolean(authSessionId)}
                                 onRunReportAction={onRunReportAction}
+                                reportingPayload={visibleReportingPayload}
                                 reportActionStatus={reportActionStatus}
                               />
                             )}
@@ -1862,6 +1839,7 @@ function ChatScreenV2({
                                 isAuthenticated={Boolean(authSessionId)}
                                 onOpenReporting={onOpenReporting}
                                 onRunReportAction={onRunReportAction}
+                                reportingPayload={visibleReportingPayload}
                                 reportActionStatus={reportActionStatus}
                               />
                             )}
@@ -2180,7 +2158,8 @@ function isSubmissionDocumentSection(section) {
   return /이의신청서|의견제출서|제출 가이드라인|제출 가이드|초안/.test(title);
 }
 
-function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportActionStatus }) {
+function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportingPayload, reportActionStatus }) {
+  const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;
   return (
     <section className="report-ready-strip" aria-label="리포트 준비 완료">
       <div>
@@ -2191,15 +2170,22 @@ function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction
         <button className="button" type="button" onClick={onOpenReporting}>
           작업대
         </button>
-        <button className="button primary" type="button" onClick={() => onRunReportAction("download_objection")}>
-          {isAuthenticated ? "이의신청서 PDF" : "로그인 후 PDF"}
+        <button
+          className="button primary"
+          type="button"
+          onClick={() => onRunReportAction("download_objection")}
+          disabled={appealDownloadBlocked}
+        >
+          {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 DOCX"}
         </button>
       </div>
     </section>
   );
 }
 
-function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, reportActionStatus }) {
+function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, reportingPayload, reportActionStatus }) {
+  const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
+  const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
   const reportQuality =
     currentReport?.persistence?.report_quality ||
     currentReport?.report_quality ||
@@ -2209,8 +2195,8 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
   const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
   const reportQualityTitle = reportQuality?.partial_report ? "일부 자료가 부족한 리포트" : "검토 준비가 완료된 리포트";
   const helperText = isAuthenticated
-    ? reportActionStatus || "상담 결과를 저장하거나 제출 문서와 화면 PDF를 준비할 수 있습니다."
-    : reportActionStatus || "화면 PDF 저장은 바로 가능하고, 리포트 저장과 제출 문서 PDF는 Google 로그인 후 사용할 수 있습니다.";
+    ? reportActionStatus || activeReportingPayload?.appeal_gate?.reason || "상담 결과를 저장하거나 제출 문서와 분석 리포트 DOCX를 준비할 수 있습니다."
+    : reportActionStatus || "리포트 저장과 DOCX 다운로드는 Google 로그인 후 사용할 수 있습니다.";
 
   return (
     <section className="report-action-panel" aria-label="리포트 저장과 다운로드">
@@ -2243,11 +2229,21 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
         <button className="button" type="button" onClick={() => onRunReportAction("save")}>
           {isAuthenticated ? "저장" : "로그인 후 저장"}
         </button>
-        <button className="button" type="button" onClick={() => onRunReportAction("download_report")}>
-          화면 PDF 저장
+        <button
+          className="button"
+          type="button"
+          onClick={() => onRunReportAction("download_report")}
+          disabled={appealDownloadBlocked}
+        >
+          분석 리포트 DOCX
         </button>
-        <button className="button primary" type="button" onClick={() => onRunReportAction("download_objection")}>
-          {isAuthenticated ? "이의신청서 PDF" : "로그인 후 이의신청서 PDF"}
+        <button
+          className="button primary"
+          type="button"
+          onClick={() => onRunReportAction("download_objection")}
+          disabled={appealDownloadBlocked}
+        >
+          {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 이의신청서 DOCX"}
         </button>
       </div>
     </section>
@@ -2286,7 +2282,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
         <div className="summary-grid">
           <MetricCard label="등록 사건" value={`${activeCases}건`} detail="최근 30일 기준" />
           <MetricCard label="기한 임박" value="1건" detail="의견제출 D-3" />
-          <MetricCard label="저장 리포트" value={`${savedReports}건`} detail="PDF 생성 가능" />
+          <MetricCard label="저장 리포트" value={`${savedReports}건`} detail="DOCX 다운로드 가능" />
           <MetricCard label="최근 분석" value={`${recentCount}건`} detail="상담/리포트 포함" />
         </div>
 
@@ -2511,6 +2507,7 @@ function CaseResultScreen({
   supervisorState = null,
 }) {
   const isFault = caseType === "fault";
+  const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;
   const sections = Array.isArray(reportingPayload?.sections) ? reportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
@@ -2627,7 +2624,12 @@ function CaseResultScreen({
               <div className="case-result-cta">
                 <button className="button primary full" type="button" onClick={onPrepareMissingEvidence}>자료 추가하기</button>
                 <button className="button full" type="button" onClick={onPrepareDraftRegeneration}>초안 다시 만들기</button>
-                <button className="button full" type="button" onClick={() => onRunReportAction?.("download")} disabled={!currentReport && !reportingPayload}>
+                <button
+                  className="button full"
+                  type="button"
+                  onClick={() => onRunReportAction?.("download")}
+                  disabled={(!currentReport && !reportingPayload) || appealDownloadBlocked}
+                >
                   {isAuthenticated ? "리포트 다운로드" : "로그인 후 다운로드"}
                 </button>
               </div>
@@ -2724,13 +2726,13 @@ function ReportingScreen({
   onRunReportAction,
   reportActionStatus = "",
   reportList = [],
-  reportWorkbenchRef = null,
   reportingPayload = null,
   supervisorExecution = null,
   supervisorState = null,
 }) {
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
   const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
+  const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
   const hasReport = Boolean(activeReportingPayload || analysisCards.length || supervisorExecution || currentReport || hasSavedReports);
   const sections = Array.isArray(activeReportingPayload?.sections) ? activeReportingPayload.sections : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
@@ -2772,7 +2774,7 @@ function ReportingScreen({
         </div>
       </div>
 
-      <div className="report-workbench" ref={reportWorkbenchRef}>
+      <div className="report-workbench">
         <aside className="report-list" aria-label="리포트 목록">
           <div className="panel-head compact">
             <strong>리포트 목록</strong>
@@ -2944,17 +2946,17 @@ function ReportingScreen({
                   className="button"
                   type="button"
                   onClick={() => onRunReportAction?.("download_report")}
-                  disabled={!hasReport}
+                  disabled={!hasReport || appealDownloadBlocked}
                 >
-                  화면 PDF 저장
+                  분석 리포트 DOCX
                 </button>
                 <button
                   className="button"
                   type="button"
                   onClick={() => onRunReportAction?.("download_objection")}
-                  disabled={!hasReport}
+                  disabled={!hasReport || appealDownloadBlocked}
                 >
-                  {isAuthenticated ? "이의신청서 PDF" : "로그인 후 이의신청서 PDF"}
+                  {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 이의신청서 DOCX"}
                 </button>
                 <button
                   className="button"
@@ -3282,118 +3284,6 @@ function hasReportGenerationNode(supervisorState) {
     ? supervisorState.agent_input_packages
     : [];
   return packages.some((item) => item?.node_code === "objection_report_generation");
-}
-
-function openReportScreenPrintWindow(container, { filenameBase, title } = {}) {
-  if (!container || typeof window === "undefined" || typeof document === "undefined") {
-    throw new Error("현재 화면을 인쇄할 수 없습니다.");
-  }
-
-  const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1440,height=960");
-  if (!printWindow) {
-    throw new Error("브라우저 팝업이 차단되어 인쇄 창을 열지 못했습니다.");
-  }
-
-  const stylesheetMarkup = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
-    .map((node) => node.outerHTML)
-    .join("\n");
-  const documentTitle = escapePrintHtml(title || "상담 분석 리포트");
-  const printFilename = safePrintFilename(filenameBase || "report-screen");
-  const printMarkup = `
-    <!doctype html>
-    <html lang="ko">
-      <head>
-        <meta charset="utf-8" />
-        <title>${documentTitle}</title>
-        ${stylesheetMarkup}
-        <style>
-          :root {
-            color-scheme: light;
-          }
-          body {
-            margin: 0;
-            background: #ffffff;
-            color: #182432;
-          }
-          .report-print-shell {
-            padding: 10mm;
-            background: #ffffff;
-          }
-          .report-workbench {
-            min-height: auto !important;
-            grid-template-columns: 260px minmax(0, 1.2fr) minmax(320px, 0.92fr) !important;
-            grid-template-rows: auto !important;
-            background: #ffffff !important;
-          }
-          .report-list,
-          .report-canvas,
-          .report-inspector {
-            background: #ffffff !important;
-          }
-          .report-inspector {
-            border-left: 1px solid #d5dbe5 !important;
-            border-top: 0 !important;
-          }
-          .report-canvas {
-            border-right: 1px solid #d5dbe5;
-          }
-          .report-page {
-            width: 100% !important;
-            max-width: none !important;
-            min-height: auto !important;
-            box-shadow: none !important;
-          }
-          .inspector-actions,
-          .report-list button,
-          button {
-            display: none !important;
-          }
-          @page {
-            size: A4 landscape;
-            margin: 10mm;
-          }
-        </style>
-      </head>
-      <body>
-        <main class="report-print-shell" data-print-filename="${printFilename}">
-          ${container.outerHTML}
-        </main>
-      </body>
-    </html>
-  `;
-
-  printWindow.document.open();
-  printWindow.document.write(printMarkup);
-  printWindow.document.close();
-  printWindow.document.title = printFilename;
-
-  const launchPrint = () => {
-    printWindow.focus();
-    printWindow.print();
-  };
-
-  printWindow.addEventListener(
-    "load",
-    () => {
-      window.setTimeout(launchPrint, 180);
-    },
-    { once: true }
-  );
-}
-
-function safePrintFilename(value) {
-  const text = String(value || "report-screen").trim();
-  const normalized = text.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return normalized || "report-screen";
-}
-
-function escapePrintHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }
 
 function latestMessageIndex(messages, role) {

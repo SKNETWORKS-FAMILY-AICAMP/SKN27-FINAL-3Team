@@ -28,6 +28,10 @@ PUBLIC_REPORTING_PAYLOAD_KEYS = (
     "stage",
     "title",
     "summary",
+    "document_variant",
+    "document_readiness",
+    "report_actions",
+    "appeal_gate",
     "sections",
 )
 PUBLIC_REPORT_QUALITY_KEYS = (
@@ -168,9 +172,72 @@ def _public_reporting_payload(value: object) -> dict[str, Any]:
     for key in PUBLIC_REPORTING_PAYLOAD_KEYS:
         if key == "sections":
             public[key] = _public_sections(payload.get(key))
+        elif key == "document_readiness":
+            readiness = _mapping(payload.get(key))
+            if readiness:
+                public[key] = {
+                    "ready_for_docx": bool(readiness.get("ready_for_docx")),
+                    "missing_field_details": _public_document_fields(
+                        readiness.get("missing_field_details")
+                    ),
+                    "next_questions": _public_document_fields(readiness.get("next_questions")),
+                }
+        elif key == "report_actions":
+            public[key] = _public_report_actions(payload.get(key))
+        elif key == "appeal_gate":
+            appeal_gate = _mapping(payload.get(key))
+            if appeal_gate:
+                public[key] = {
+                    "blocked": bool(appeal_gate.get("blocked")),
+                    "reason": _optional_text(appeal_gate.get("reason")),
+                }
         elif key in payload:
             public[key] = deepcopy(payload[key])
     return public
+
+
+def _public_document_fields(value: object) -> list[dict[str, str]]:
+    fields: list[dict[str, str]] = []
+    for item in _sequence(value):
+        source = _mapping(item)
+        field = _optional_text(source.get("field"))
+        label = _optional_text(source.get("label"))
+        question = _optional_text(source.get("question"))
+        if not any((field, label, question)):
+            continue
+        fields.append(
+            {
+                key: item_value
+                for key, item_value in (
+                    ("field", field),
+                    ("label", label),
+                    ("question", question),
+                )
+                if item_value is not None
+            }
+        )
+    return fields
+
+
+def _public_report_actions(value: object) -> list[dict[str, str]]:
+    actions: list[dict[str, str]] = []
+    for item in _sequence(value):
+        source = _mapping(item)
+        action_type = _optional_text(source.get("type"))
+        label = _optional_text(source.get("label"))
+        document_type = _optional_text(source.get("document_type"))
+        document_format = _optional_text(source.get("document_format"))
+        if not all((action_type, label, document_type)):
+            continue
+        action = {
+            "type": action_type,
+            "label": label,
+            "document_type": document_type,
+        }
+        if document_format == "docx":
+            action["document_format"] = document_format
+        actions.append(action)
+    return actions
 
 
 def _public_report_quality(value: object) -> dict[str, Any]:
@@ -226,6 +293,10 @@ def _public_error_access(access: Mapping[str, Any]) -> dict[str, Any]:
 
 def _mapping(value: object) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _sequence(value: object) -> list[object]:
+    return value if isinstance(value, list) else []
 
 
 def _public_sections(value: object) -> list[ReportSection]:

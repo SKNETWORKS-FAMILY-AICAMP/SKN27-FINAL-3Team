@@ -24,6 +24,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from ai.agents.objection_report_generation import render_report_docx
 from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
@@ -104,7 +105,7 @@ from chatbot.progress_cache import (
 from chatbot.retention_policy import upload_retention_expires_at
 
 USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
-REPORT_PDF_CONTENT_TYPE = "application/pdf"
+REPORT_DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 REPORT_DOWNLOAD_TYPE_REPORT = "report"
 REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
@@ -3257,6 +3258,7 @@ def _worker_reporting_payload(
         "source": "supervisor_agent_result_aggregation",
         "source_node_codes": _list_or_empty(handoff.get("source_node_codes")),
         "report_type": _dict_or_empty(handoff.get("target")).get("report_type"),
+        "document_variant": _sanitize_report_text(structured.get("document_variant")),
         "stage": (
             "agent_execution_ready"
             if report_status == ReportStatus.READY.value
@@ -3268,6 +3270,16 @@ def _worker_reporting_payload(
         "sections": _normalize_worker_reporting_sections(
             _list_or_empty(structured.get("form_sections"))
         ),
+        "form_data": _sanitize_report_value(_dict_or_empty(structured.get("form_data"))),
+        "document_readiness": _sanitize_report_value(
+            _dict_or_empty(structured.get("document_readiness"))
+        ),
+        "report_actions": _sanitize_report_value(_list_or_empty(structured.get("report_actions"))),
+        "appeal_decision": _sanitize_report_value(_dict_or_empty(structured.get("appeal_decision"))),
+        "appeal_gate": _sanitize_report_value(_dict_or_empty(structured.get("appeal_gate"))),
+        "petition_purpose": _sanitize_report_text(structured.get("petition_purpose")),
+        "petition_reason": _sanitize_report_text(structured.get("petition_reason")),
+        "drafting_source": _sanitize_report_text(structured.get("drafting_source")),
         "data": structured,
         "evidence": _sanitize_report_value(_list_or_empty(reporting_result.evidence)),
         "next_actions": _sanitize_report_value(
@@ -4073,6 +4085,7 @@ def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
     if report is None:
         return None
     metadata = _dict_or_empty(report.metadata)
+    reporting_payload = _reporting_payload_for_download(report)
     owner_id = _text(report.owner_id or (report.session.owner_id if report.session_id else ""))
     guest_id = _normalize_guest_id(metadata.get("guest_id"))
     if not guest_id and report.session_id:
@@ -4084,6 +4097,7 @@ def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
         "session_id": report.session.session_id if report.session_id else None,
         "status": report.status,
         "source": _text(metadata.get("source")),
+        "download_blocked": _appeal_download_is_blocked(reporting_payload),
     }
 
 
@@ -4100,15 +4114,12 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
     storage_uri = object_storage["storage_uri"]
     storage_backend = object_storage["backend"]
     normalized_document_type = _report_download_document_type(document_type)
+    reporting_payload = _reporting_payload_for_download(report)
     if normalized_document_type == REPORT_DOWNLOAD_TYPE_OBJECTION_FORM:
         text_body = _report_objection_form_body(report)
-        title = "과태료 부과 처분 이의신청서"
-        filename = f"{report.report_id}-objection-form.pdf"
-        pdf_body = _report_objection_form_pdf_body(
-            report,
-            title=title,
-            text_body=text_body,
-        )
+        document_variant = _report_document_variant(report, reporting_payload)
+        title = "과태료 부과 처분 이의신청서" if document_variant == "fine_notice" else report.title
+        filename = f"{report.report_id}-objection-form.docx"
     else:
         text_body = _report_download_body(
             report,
@@ -4116,12 +4127,16 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
             object_storage=object_storage,
         )
         title = report.title or report.report_id
-        filename = f"{report.report_id}.pdf"
-        pdf_body = build_report_download_pdf_body(
-            report_id=report.report_id,
-            title=title,
-            body_text=text_body,
-        )
+        document_variant = "general"
+        filename = f"{report.report_id}.docx"
+    docx_body = render_report_docx(
+        document_variant=document_variant,
+        title=title,
+        form_data=_dict_or_empty(reporting_payload.get("form_data")),
+        sections=_list_or_empty(reporting_payload.get("sections")),
+        petition_purpose=_text(reporting_payload.get("petition_purpose")),
+        petition_reason=_text(reporting_payload.get("petition_reason")),
+    )
     return {
         "report_id": report.report_id,
         "document_type": normalized_document_type,
@@ -4133,15 +4148,42 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
         "filename": filename,
-        "content_type": REPORT_PDF_CONTENT_TYPE,
+        "content_type": REPORT_DOCX_CONTENT_TYPE,
         "storage_uri": storage_uri,
         "storage_backend": storage_backend,
         "object_storage": object_storage,
         "object_key": object_storage.get("key", ""),
         "status": report.status,
-        "body": pdf_body,
+        "body": docx_body,
         "text_body": text_body,
     }
+
+
+def _reporting_payload_for_download(report: Report) -> dict[str, Any]:
+    content = _dict_or_empty(report.content)
+    return _dict_or_empty(content.get("reporting_payload"))
+
+
+def _report_document_variant(report: Report, reporting_payload: dict[str, Any]) -> str:
+    document_variant = _text(reporting_payload.get("document_variant"))
+    if document_variant in {"fine_notice", "traffic_accident"}:
+        return document_variant
+    if report.report_type == ReportType.FAULT_RATIO_ANALYSIS.value:
+        return "traffic_accident"
+    if report.report_type == ReportType.FINE_NOTICE_OBJECTION.value:
+        return "fine_notice"
+    return "general"
+
+
+def _appeal_download_is_blocked(reporting_payload: dict[str, Any]) -> bool:
+    appeal_gate = _dict_or_empty(reporting_payload.get("appeal_gate"))
+    if appeal_gate.get("blocked") is True:
+        return True
+    appeal_decision = _dict_or_empty(reporting_payload.get("appeal_decision"))
+    return (
+        _text(appeal_decision.get("judgment_status")) in {"denied", "not_applicable"}
+        or appeal_decision.get("deadline_passed") is True
+    )
 
 
 def list_report_records(
@@ -8125,8 +8167,8 @@ def _report_object_storage(report: Report) -> dict[str, Any]:
             "storage_uri": "",
             "resource_type": "report",
             "resource_id": report.report_id,
-            "filename": f"{report.report_id}.pdf",
-            "content_type": REPORT_PDF_CONTENT_TYPE,
+            "filename": f"{report.report_id}.docx",
+            "content_type": REPORT_DOCX_CONTENT_TYPE,
             "size_bytes": 0,
             "status": "generated_on_demand",
             "source_uri": "",
@@ -8497,7 +8539,14 @@ def _pdf_utf16be_hex(value: Any) -> str:
 
 def _report_download_document_type(value: str | None) -> str:
     normalized = _text(value).lower()
-    if normalized in {"objection", "objection_form", "objection-draft", "application", "form"}:
+    if normalized in {
+        "objection",
+        "objection_form",
+        "objection-draft",
+        "application",
+        "form",
+        "traffic_accident_objection_docx",
+    }:
         return REPORT_DOWNLOAD_TYPE_OBJECTION_FORM
     return REPORT_DOWNLOAD_TYPE_REPORT
 
