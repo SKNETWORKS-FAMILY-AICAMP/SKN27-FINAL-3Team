@@ -2214,3 +2214,4 @@ class DocumentConfirmationRepositoryTests(TestCase):
         self.assertIn(b'"code": "appeal_gate_blocked"', response.content)
         self.report.refresh_from_db()
         self.assertNotIn("document_confirmation", self.report.metadata)
+

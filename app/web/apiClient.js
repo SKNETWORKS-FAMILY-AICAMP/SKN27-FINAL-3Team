@@ -41,10 +41,6 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     getAnalysisResult({ jobId, identity } = {}) {
       return getJson(joinApiPath(apiBase, `analysis/results/${encodeURIComponent(jobId || "")}/`), identity);
     },
-    confirmFineNoticeFields({ jobId, identity, correctedFields = {} } = {}) {
-      const url = joinApiPath(apiBase, `analysis/jobs/${encodeURIComponent(jobId || "")}/fine-notice-confirmation/`);
-      return postJson(url, { corrected_fields: correctedFields }, identity);
-    },
     registerFileMetadata(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "files/"), payload, identity);
     },

@@ -42,11 +42,6 @@ urlpatterns = [
     path("analysis/jobs/", views.analysis_jobs, name="canonical-analysis-jobs"),
     path("analysis/jobs/<str:job_id>/", views.analysis_job_detail, name="canonical-analysis-job-detail"),
     path("analysis/results/<str:job_id>/", views.analysis_result, name="canonical-analysis-result"),
-    path(
-        "analysis/jobs/<str:job_id>/fine-notice-confirmation/",
-        views.analysis_job_fine_notice_confirmation,
-        name="canonical-analysis-job-fine-notice-confirmation",
-    ),
     path("agents/nodes/", views.agent_nodes, name="canonical-agent-nodes"),
     path("reports/", views.report_action, name="canonical-report-action"),
     path("reports/<str:report_id>/", views.report_detail, name="canonical-report-detail"),

@@ -113,7 +113,6 @@ REPORT_DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordpr
 REPORT_DOWNLOAD_TYPE_REPORT = "report"
 REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
 DOCUMENT_CONFIRMATION_SCHEMA_VERSION = "document_confirmation.v1"
-FINE_NOTICE_CONFIRMATION_SCHEMA_VERSION = "fine_notice_confirmation.v1"
 OFFICIAL_OBJECTION_DOCUMENT_VARIANTS = {"fine_notice", "traffic_accident"}
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
 ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
@@ -4295,120 +4294,6 @@ def get_report_document_confirmation_state(report: Report) -> dict[str, Any]:
         "confirmed": confirmed,
         "stale": bool(confirmation) and not confirmed,
         "confirmed_at": _text(confirmation.get("confirmed_at")) if confirmed else None,
-    }
-
-
-class AnalysisJobReferenceError(ValueError):
-    """Stable analysis-job-reference error whose internal detail is log-only."""
-
-    def __init__(self, reason: str, internal_message: str) -> None:
-        super().__init__(internal_message)
-        self.reason = reason
-
-
-def _fine_notice_analysis_result(job: AnalysisJob) -> AgentResult | None:
-    return (
-        job.agent_results.filter(node_code="fine_notice_analysis")
-        .order_by("-created_at")
-        .first()
-    )
-
-
-def _fine_notice_confirmation_fingerprint(unconfirmed_fields: list[Any]) -> str:
-    canonical = json.dumps(
-        sorted(str(field) for field in unconfirmed_fields),
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def confirm_fine_notice_fields(
-    job_id: str,
-    *,
-    owner_id: str,
-    corrected_fields: dict[str, Any],
-) -> dict[str, Any]:
-    """Record an owner's confirmation/correction of OCR-extracted fine-notice fields."""
-
-    with transaction.atomic():
-        job = (
-            AnalysisJob.objects.select_for_update()
-            .select_related("session")
-            .filter(job_id=_text(job_id))
-            .first()
-        )
-        if job is None:
-            raise AnalysisJobReferenceError(
-                "analysis_job_not_found", "analysis job was not found"
-            )
-        job_owner_id = _text(job.owner_id or (job.session.owner_id if job.session_id else ""))
-        if not owner_id or job_owner_id != owner_id:
-            raise AnalysisJobReferenceError(
-                "object_access_denied",
-                "fine-notice confirmation requires analysis job ownership",
-            )
-        fine_notice_result = _fine_notice_analysis_result(job)
-        if fine_notice_result is None:
-            raise AnalysisJobReferenceError(
-                "fine_notice_confirmation_not_available",
-                "only fine-notice analysis jobs can be confirmed",
-            )
-        structured_result = _dict_or_empty(fine_notice_result.structured_result)
-        unconfirmed_fields = _list_or_empty(structured_result.get("unconfirmed_fields"))
-        fingerprint = _fine_notice_confirmation_fingerprint(unconfirmed_fields)
-
-        metadata = deepcopy(_dict_or_empty(job.metadata))
-        metadata["fine_notice_confirmation"] = {
-            "schema_version": FINE_NOTICE_CONFIRMATION_SCHEMA_VERSION,
-            "input_fingerprint": fingerprint,
-            "unconfirmed_fields_at_confirmation": unconfirmed_fields,
-            "corrected_fields": corrected_fields,
-            "confirmed_at": timezone.now().isoformat(),
-            "confirmed_by_user_id": owner_id,
-        }
-        job.metadata = metadata
-        job.save(update_fields=["metadata", "updated_at"])
-        return get_fine_notice_confirmation_state(job, fine_notice_result=fine_notice_result)
-
-
-def get_fine_notice_confirmation_state(
-    job: AnalysisJob,
-    *,
-    fine_notice_result: AgentResult | None = None,
-) -> dict[str, Any]:
-    """Return only the safe, current confirmation status for an analysis job."""
-
-    result = (
-        fine_notice_result
-        if fine_notice_result is not None
-        else _fine_notice_analysis_result(job)
-    )
-    empty_state = {
-        "required": False,
-        "confirmed": False,
-        "stale": False,
-        "confirmed_at": None,
-        "unconfirmed_fields": [],
-    }
-    if result is None:
-        return empty_state
-
-    structured_result = _dict_or_empty(result.structured_result)
-    if not structured_result.get("requires_confirmation"):
-        return empty_state
-
-    unconfirmed_fields = _list_or_empty(structured_result.get("unconfirmed_fields"))
-    confirmation = _dict_or_empty(_dict_or_empty(job.metadata).get("fine_notice_confirmation"))
-    stored_fingerprint = _text(confirmation.get("input_fingerprint"))
-    current_fingerprint = _fine_notice_confirmation_fingerprint(unconfirmed_fields)
-    confirmed = bool(stored_fingerprint) and stored_fingerprint == current_fingerprint
-    return {
-        "required": True,
-        "confirmed": confirmed,
-        "stale": bool(confirmation) and not confirmed,
-        "confirmed_at": _text(confirmation.get("confirmed_at")) if confirmed else None,
-        "unconfirmed_fields": unconfirmed_fields,
     }
 
 
