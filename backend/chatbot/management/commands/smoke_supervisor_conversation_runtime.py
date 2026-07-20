@@ -120,7 +120,7 @@ def _run_smoke(fixture: dict) -> dict:
         "checks": {},
     }
     if chat_response.status_code != 202 or chat.get("status") != "queued":
-        result["checks"] = _no_followup_checks()
+        result["checks"] = _no_followup_checks(session)
         return result
     work_item_id = str((chat.get("work_item") or {}).get("work_item_id") or "")
     job_id = str((chat.get("work_item") or {}).get("job_id") or "")
@@ -155,11 +155,13 @@ def _safe_llm(supervisor_state) -> dict:
     return {key: llm.get(key) for key in ("status", "reason", "provider", "model")}
 
 
-def _no_followup_checks() -> dict:
+def _no_followup_checks(session: ChatSession) -> dict:
     return {
-        "planning_failure_has_no_followup_rows": not AnalysisJob.objects.exists()
-        and not AgentWorkItem.objects.exists()
-        and not Report.objects.exists(),
+        "planning_failure_has_no_followup_rows": not AnalysisJob.objects.filter(
+            session=session
+        ).exists()
+        and not AgentWorkItem.objects.filter(job__session=session).exists()
+        and not Report.objects.filter(job__session=session).exists(),
     }
 
 
