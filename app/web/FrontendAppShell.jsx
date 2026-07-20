@@ -1032,9 +1032,11 @@ export default function FrontendAppShell({
     setActiveRoute("reporting");
   }
 
+  const showSidebar = activeRoute !== "entry" && activeRoute !== "mypage" && activeRoute !== "reporting";
+
   return (
     <div className="app-shell" data-auth-state={authContext.auth_state}>
-      <header className={activeRoute === "entry" ? "topbar" : "topbar topbar-with-mobile-nav"}>
+      <header className={showSidebar ? "topbar topbar-with-mobile-nav" : "topbar"}>
         <div className="topbar-inner">
           <button
             className="brand"
@@ -1046,29 +1048,25 @@ export default function FrontendAppShell({
             <span>교통분쟁 AI</span>
           </button>
           <nav className="top-actions" aria-label="주요 메뉴">
-            {TAB_ROUTES.map((route) => (
-              <button
-                className={activeRoute === route.id ? "button active" : "button ghost"}
-                aria-current={activeRoute === route.id ? "page" : undefined}
-                key={route.id}
-                onClick={() => setActiveRoute(route.id)}
-                type="button"
-              >
-                {route.label}
-              </button>
-            ))}
-            {activeRoute === "entry" && (
-              <button className="button primary" onClick={() => setActiveRoute("chatbot")} type="button">
-                상담 시작
-              </button>
-            )}
+            {activeRoute !== "entry" &&
+              TAB_ROUTES.map((route) => (
+                <button
+                  className={activeRoute === route.id ? "button active" : "button ghost"}
+                  aria-current={activeRoute === route.id ? "page" : undefined}
+                  key={route.id}
+                  onClick={() => setActiveRoute(route.id)}
+                  type="button"
+                >
+                  {route.label}
+                </button>
+              ))}
             {authSessionId ? (
               <button className="button ghost" type="button" onClick={logoutAndResetSession}>
                 로그아웃
               </button>
             ) : (
               <button
-                className="button primary"
+                className={activeRoute === "entry" ? "button ghost" : "button primary"}
                 type="button"
                 onClick={saveConversationAfterLogin}
                 disabled={isSavingConversation}
@@ -1080,8 +1078,8 @@ export default function FrontendAppShell({
         </div>
       </header>
 
-      <div className={activeRoute === "entry" ? "layout is-entry" : "layout"}>
-        {activeRoute !== "entry" && (
+      <div className={showSidebar ? "layout" : "layout is-entry"}>
+        {showSidebar && (
           <ConversationSidebar
             activeRoute={activeRoute}
             cases={cases}
@@ -1444,32 +1442,39 @@ function EntryScreenV2({ onGuestStart, onOpenChat }) {
         </p>
       </div>
 
-      <div className="entry-panel">
-        <div className="panel-topline">
-          <span>상담 흐름</span>
-          <strong>Chat first</strong>
+      <div className="entry-steps">
+        <div className="entry-steps__head">
+          <span className="eyebrow">상담 흐름</span>
+          <h2>3단계면 충분합니다</h2>
         </div>
-        <div className="flow-stack">
-          <div className="flow-step active">
-            <span>1</span>
-            <div>
-              <strong>질문부터 시작</strong>
-              <p>로그인 화면으로 막지 않고 비회원 상담을 먼저 엽니다.</p>
+        <div className="entry-steps__grid">
+          <div className="entry-step active">
+            <div className="entry-step__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 5h16v11H8l-4 4V5z" />
+                <path d="M9 9h6M9 12.5h4" />
+              </svg>
             </div>
+            <strong>질문부터 시작</strong>
+            <p>로그인 화면으로 막지 않고 비회원 상담을 먼저 엽니다.</p>
           </div>
-          <div className="flow-step">
-            <span>2</span>
-            <div>
-              <strong>상담 진행</strong>
-              <p>상황 정리, 필요한 자료, 다음 행동을 먼저 안내합니다.</p>
+          <div className="entry-step">
+            <div className="entry-step__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 7h4M11 7h9M4 12h4M11 12h9M4 17h4M11 17h9" />
+              </svg>
             </div>
+            <strong>상담 진행</strong>
+            <p>상황 정리, 필요한 자료, 다음 행동을 먼저 안내합니다.</p>
           </div>
-          <div className="flow-step">
-            <span>3</span>
-            <div>
-              <strong>저장 여부 선택</strong>
-              <p>로그인 후 저장하면 마이페이지 이력으로 연결하고, 아니면 임시로 둡니다.</p>
+          <div className="entry-step">
+            <div className="entry-step__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 4h12v16l-6-4-6 4V4z" />
+              </svg>
             </div>
+            <strong>저장 여부 선택</strong>
+            <p>로그인 후 저장하면 마이페이지 이력으로 연결하고, 아니면 임시로 둡니다.</p>
           </div>
         </div>
       </div>
