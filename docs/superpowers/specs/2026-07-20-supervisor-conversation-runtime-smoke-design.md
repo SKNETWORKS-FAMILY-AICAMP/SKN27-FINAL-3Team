@@ -69,6 +69,10 @@ CI는 외부 provider·실제 S3·유료 adapter 없이 Django test client, fake
 
 실제 LLM·운영 S3 strict 실행은 운영 비용과 clean fixture가 준비된 뒤 사용자가 명시적으로 승인할 때만 수행한다.
 
+## 일반 리포트 후속 행동 정리
+
+기존 `_next_actions`의 일반 `download_report` 문자열은 공개 결과와 사건 요약까지 전달될 수 있다. 이를 `review_report_screen`으로 바꾸고, 일반 리포트의 공개 `next_actions`와 `report_actions` 어디에도 `download_report`가 남지 않는지 회귀 테스트한다. 이는 #238·#241·#245에서 확정한 일반 리포트 화면 열람 정책을 일관되게 적용하는 최소 수정이다.
+
 ## 관련 파일 예상 범위
 
 - `backend/chatbot/management/commands/smoke_supervisor_conversation_runtime.py`
