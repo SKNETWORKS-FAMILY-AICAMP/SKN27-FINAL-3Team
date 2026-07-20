@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import heroCarImage from "./assets/hero-car.png";
 import { createFrontendApi } from "./apiClient.js";
 import {
   buildAuthContext,
@@ -1422,24 +1423,31 @@ function ChatScreen({
 function EntryScreenV2({ onGuestStart, onOpenChat }) {
   return (
     <section className="entry-screen">
-      <div className="entry-copy">
-        <span className="eyebrow">로그인 없이 먼저 상담</span>
-        <h1>당황한 순간에는 가입보다 질문이 먼저입니다.</h1>
-        <p className="lead">
-          사고 상황, 과태료 고지서, 보험사 설명을 바로 적어 주세요. 대화가 충분히 진행된 뒤
-          이력 저장이나 추가 자료 분석이 필요할 때 Google 로그인을 안내합니다.
-        </p>
-        <div className="hero-actions">
-          <button className="button primary large" type="button" onClick={onOpenChat}>
-            바로 상담 시작
-          </button>
-          <button className="button large" type="button" onClick={onGuestStart}>
-            비회원으로 상담 시작
-          </button>
+      <div className="home-hero">
+        <div className="home-hero__copy">
+          <span className="eyebrow">로그인 없이 먼저 상담</span>
+          <h1>당황한 순간에는 가입보다 질문이 먼저입니다.</h1>
+          <p className="lead">
+            사고 상황, 과태료 고지서, 보험사 설명을 바로 적어 주세요. 대화가 충분히 진행된 뒤
+            이력 저장이나 추가 자료 분석이 필요할 때 Google 로그인을 안내합니다.
+          </p>
+          <div className="hero-actions hero-actions--start">
+            <button className="button primary large" type="button" onClick={onOpenChat}>
+              바로 상담 시작
+            </button>
+            <button className="button large" type="button" onClick={onGuestStart}>
+              비회원으로 상담 시작
+            </button>
+          </div>
         </div>
-        <p className="entry-note">
-          저장을 선택하지 않으면 현재 상담은 임시로만 유지하고, 마이페이지 이력으로 넘기지 않습니다.
-        </p>
+        <div className="home-hero__visual">
+          <img
+            className="home-hero__car"
+            src={heroCarImage}
+            alt="접촉 사고로 앞범퍼와 보닛이 파손된 차량"
+            loading="lazy"
+          />
+        </div>
       </div>
 
       <div className="entry-steps">
@@ -1477,6 +1485,60 @@ function EntryScreenV2({ onGuestStart, onOpenChat }) {
             <p>로그인 후 저장하면 마이페이지 이력으로 연결하고, 아니면 임시로 둡니다.</p>
           </div>
         </div>
+      </div>
+
+      <div className="feature-section">
+        <div className="entry-steps__head">
+          <span className="eyebrow">우리가 도와드리는 것</span>
+          <h2>사고와 고지서, 두 가지 상황을 모두 다룹니다</h2>
+        </div>
+        <div className="feature-grid">
+          <div className="feature-card">
+            <div className="feature-card__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 4v16M6 4h12M4 20h16M6 4l-3 7a3 3 0 0 0 6 0L6 4ZM18 4l-3 7a3 3 0 0 0 6 0L18 4Z" />
+              </svg>
+            </div>
+            <strong>사고 과실비율 분석</strong>
+            <p>사고 개요와 제출 자료를 바탕으로 예상 과실비율, 판단 근거, 유사 판례를 리포트로 정리합니다.</p>
+          </div>
+          <div className="feature-card">
+            <div className="feature-card__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+                <path d="M14 3v5h5" />
+                <path d="M8.5 13.5l2 2 4-4.5" />
+              </svg>
+            </div>
+            <strong>과태료·범칙금 대응</strong>
+            <p>고지서를 분석해 이의제기 가능성과 필요한 증거, 이의신청서 초안까지 준비합니다.</p>
+          </div>
+          <div className="feature-card">
+            <div className="feature-card__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H19a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6.5A2.5 2.5 0 0 0 4 22" />
+                <path d="M4 5.5V19.5" />
+                <circle cx="10.5" cy="10.5" r="2.5" />
+                <path d="M12.3 12.3L14 14" />
+              </svg>
+            </div>
+            <strong>법령·판례 근거 검색</strong>
+            <p>관련 법령, 시행규칙, 판례를 근거로 함께 보여줘 참고용 분석의 출처를 확인할 수 있습니다.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="reassurance-strip">
+        <h2>상담부터 리포트까지 계속 알려드립니다</h2>
+        <p>진행 상황은 상담 화면과 마이페이지 이력에서 언제든 다시 확인할 수 있습니다.</p>
+      </div>
+
+      <div className="closing-cta">
+        <h2>지금 상황을 먼저 적어보세요</h2>
+        <p>가입 없이 바로 시작하고, 필요할 때만 로그인해서 저장하면 됩니다.</p>
+        <button className="button primary large" type="button" onClick={onOpenChat}>
+          바로 상담 시작
+        </button>
       </div>
     </section>
   );

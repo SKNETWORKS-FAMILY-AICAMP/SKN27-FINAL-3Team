@@ -391,16 +391,39 @@ p {
   min-height: calc(100vh - 62px);
 }
 
-.entry-copy {
-  max-width: 720px;
+.home-hero {
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 104px 24px 72px;
+  padding: 88px 24px 64px;
+  display: grid;
+  grid-template-columns: minmax(0, 560px) minmax(0, 460px);
+  align-items: center;
+  gap: 48px;
+  background: radial-gradient(60% 55% at 15% 0%, rgba(217, 72, 15, 0.08), transparent 70%);
+}
+
+.home-hero__copy {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 22px;
-  text-align: center;
-  background: radial-gradient(60% 55% at 50% 0%, rgba(217, 72, 15, 0.09), transparent 70%);
+  text-align: left;
+}
+
+.home-hero__visual {
+  display: flex;
+  justify-content: center;
+}
+
+.home-hero__car {
+  width: 100%;
+  max-width: 480px;
+  height: auto;
+  filter: drop-shadow(0 24px 32px rgba(32, 36, 43, 0.16));
+}
+
+.hero-actions--start {
+  justify-content: flex-start;
 }
 
 .eyebrow {
@@ -416,29 +439,18 @@ p {
   font-weight: 900;
 }
 
-.entry-copy h1 {
-  max-width: 680px;
-  font-size: 58px;
+.home-hero__copy h1 {
+  max-width: 560px;
+  font-size: 52px;
   font-weight: 900;
-  line-height: 1.08;
+  line-height: 1.1;
   letter-spacing: -0.01em;
 }
 
-.entry-copy .lead {
-  max-width: 620px;
+.home-hero__copy .lead {
+  max-width: 520px;
   color: var(--muted);
   font-size: 17px;
-}
-
-.entry-note {
-  max-width: 560px;
-  padding: 14px 16px;
-  border: 0;
-  border-radius: 14px;
-  color: var(--brand-dark);
-  background: var(--brand-soft);
-  font-weight: 800;
-  text-align: left;
 }
 
 .entry-steps {
@@ -512,6 +524,92 @@ p {
 
 .entry-step p {
   font-size: 13px;
+}
+
+.feature-section {
+  padding: 64px 24px 88px;
+  border-top: 1px solid var(--line);
+}
+
+.feature-grid {
+  max-width: 1040px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.feature-card {
+  padding: 30px 24px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+}
+
+.feature-card__icon {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--brand-dark);
+  background: var(--soft);
+}
+
+.feature-card__icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.feature-card strong {
+  font-size: 16px;
+}
+
+.feature-card p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.reassurance-strip {
+  padding: 56px 24px;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  text-align: center;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--soft);
+}
+
+.reassurance-strip h2 {
+  max-width: 640px;
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.reassurance-strip p {
+  max-width: 520px;
+  font-size: 14px;
+}
+
+.closing-cta {
+  padding: 72px 24px 96px;
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.closing-cta h2 {
+  font-size: 28px;
+  font-weight: 900;
+}
+
+.closing-cta p {
+  max-width: 480px;
+  font-size: 15px;
 }
 
 .trust-row {
@@ -2359,8 +2457,32 @@ button.report-list-card.active {
     grid-template-columns: 1fr;
   }
 
-  .entry-steps__grid {
+  .entry-steps__grid,
+  .feature-grid {
     grid-template-columns: 1fr;
+  }
+
+  .home-hero {
+    grid-template-columns: 1fr;
+    padding-top: 64px;
+    text-align: center;
+  }
+
+  .home-hero__copy {
+    align-items: center;
+    text-align: center;
+  }
+
+  .home-hero__visual {
+    order: -1;
+  }
+
+  .home-hero__car {
+    max-width: 320px;
+  }
+
+  .hero-actions--start {
+    justify-content: center;
   }
 
   .case-result-grid {
@@ -2468,20 +2590,30 @@ button.report-list-card.active {
     flex-direction: column;
   }
 
-  .entry-copy {
-    padding: 56px 20px 40px;
+  .home-hero {
+    padding: 48px 20px 32px;
+    gap: 32px;
   }
 
   .entry-preview {
     padding: 24px;
   }
 
-  .entry-copy h1 {
+  .home-hero__copy h1 {
     font-size: 32px;
   }
 
-  .entry-steps {
+  .home-hero__car {
+    max-width: 260px;
+  }
+
+  .entry-steps,
+  .feature-section {
     padding: 40px 20px 56px;
+  }
+
+  .closing-cta {
+    padding: 48px 20px 64px;
   }
 
   .trust-row,
