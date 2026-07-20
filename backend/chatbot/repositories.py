@@ -4100,6 +4100,7 @@ def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
         "status": report.status,
         "source": _text(metadata.get("source")),
         "download_blocked": _appeal_download_is_blocked(reporting_payload),
+        "document_confirmation": get_report_document_confirmation_state(report),
     }
 
 
@@ -4112,25 +4113,18 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
     if report is None:
         return None
 
+    normalized_document_type = normalize_report_download_document_type(document_type)
+    if normalized_document_type != REPORT_DOWNLOAD_TYPE_OBJECTION_FORM:
+        return None
+
     object_storage = _report_object_storage(report)
     storage_uri = object_storage["storage_uri"]
     storage_backend = object_storage["backend"]
-    normalized_document_type = _report_download_document_type(document_type)
     reporting_payload = _reporting_payload_for_download(report)
-    if normalized_document_type == REPORT_DOWNLOAD_TYPE_OBJECTION_FORM:
-        text_body = _report_objection_form_body(report)
-        document_variant = _report_document_variant(report, reporting_payload)
-        title = "과태료 부과 처분 이의신청서" if document_variant == "fine_notice" else report.title
-        filename = f"{report.report_id}-objection-form.docx"
-    else:
-        text_body = _report_download_body(
-            report,
-            storage_backend=storage_backend,
-            object_storage=object_storage,
-        )
-        title = report.title or report.report_id
-        document_variant = "general"
-        filename = f"{report.report_id}.docx"
+    text_body = _report_objection_form_body(report)
+    document_variant = _report_document_variant(report, reporting_payload)
+    title = "과태료 부과 처분 이의신청서" if document_variant == "fine_notice" else report.title
+    filename = f"{report.report_id}-objection-form.docx"
     docx_body = render_report_docx(
         document_variant=document_variant,
         title=title,
@@ -4357,10 +4351,6 @@ def _report_record_summary(report: Report) -> dict[str, Any]:
     content = _dict_or_empty(report.content)
     reporting_payload = _dict_or_empty(content.get("reporting_payload"))
     report_quality = _dict_or_empty(metadata.get("report_quality"))
-    is_worker_draft = (
-        metadata.get("source") == "analysis_worker_reporting"
-        and report.status != ReportStatus.READY.value
-    )
     return {
         "report_id": report.report_id,
         "source": _text(metadata.get("source")),
@@ -4371,11 +4361,7 @@ def _report_record_summary(report: Report) -> dict[str, Any]:
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
         "summary": report.content_summary,
-        "download_url": (
-            None
-            if is_worker_draft
-            else f"/api/reports/{report.report_id}/download/"
-        ),
+        "download_url": None,
         "partial_report": bool(report_quality.get("partial_report")),
         "created_at": report.created_at.isoformat(),
         "updated_at": report.updated_at.isoformat(),
@@ -8648,7 +8634,7 @@ def _pdf_utf16be_hex(value: Any) -> str:
     return str(value or "").encode("utf-16-be", errors="replace").hex().upper()
 
 
-def _report_download_document_type(value: str | None) -> str:
+def normalize_report_download_document_type(value: str | None) -> str | None:
     normalized = _text(value).lower()
     if normalized in {
         "objection",
@@ -8659,7 +8645,7 @@ def _report_download_document_type(value: str | None) -> str:
         "traffic_accident_objection_docx",
     }:
         return REPORT_DOWNLOAD_TYPE_OBJECTION_FORM
-    return REPORT_DOWNLOAD_TYPE_REPORT
+    return None
 
 
 def _report_objection_form_body(report: Report) -> str:

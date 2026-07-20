@@ -18,7 +18,6 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
-from ai.agents.objection_report_generation import render_report_docx
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
@@ -29,6 +28,10 @@ from app.contracts.consultation_case import (
     CreateConsultationCaseResponse,
     StartCaseAnalysisRequest,
     StartCaseAnalysisResponse,
+)
+from app.contracts.report import (
+    ConfirmReportDocumentRequest,
+    ConfirmReportDocumentResponse,
 )
 from app.services.agent_node_service import (
     executable_analysis_plan_steps,
@@ -112,15 +115,16 @@ from chatbot.request_parsing import (
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
     AuthSessionStateError,
+    ReportReferenceError,
     SessionBindingError,
     UploadStorageUnavailableError,
     UploadValidationError,
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
-    REPORT_DOCX_CONTENT_TYPE,
     build_history_after_service_summary,
     conversation_save_state_from_payload,
+    confirm_report_document,
     get_analysis_job_access_metadata,
     get_analysis_job_record,
     get_chat_session_access_metadata,
@@ -136,6 +140,7 @@ from chatbot.repositories import (
     list_report_records,
     list_uploaded_files,
     mark_conversation_save_state,
+    normalize_report_download_document_type,
     load_chat_followup_state,
     enqueue_analysis_job_work,
     process_agent_work_items,
@@ -1816,6 +1821,95 @@ def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
     )
 
 
+@csrf_exempt
+@require_http_methods(["POST", "OPTIONS"])
+def report_document_confirmation(request: HttpRequest, report_id: str) -> JsonResponse:
+    body = _json_body(request)
+    auth_response = _report_auth_error_response(
+        request,
+        session_id=request.GET.get("session_id"),
+    )
+    if auth_response is not None:
+        return auth_response
+    identity_payload = _request_access_payload(
+        request,
+        session_id=request.GET.get("session_id"),
+    )
+    subject = access_subject_from_payload(identity_payload)["subject"]
+    guest_violation = _guest_identity_policy_violation(subject)
+    if guest_violation:
+        return _guest_identity_policy_response(request, guest_violation)
+    if subject.get("subject_type") != "user":
+        return _login_required_response(
+            request,
+            action="report_document_confirmation",
+            reason="report_document_confirmation_requires_authenticated_user",
+            message="로그인 후 이의신청서의 최종 확인을 저장할 수 있습니다.",
+            policy_version="report_action_policy.v1",
+            subject=subject,
+        )
+    access_metadata = get_report_access_metadata(report_id)
+    if access_metadata is None:
+        return _report_error_response(
+            request,
+            {"code": "report_not_found", "message": "Requested report was not found."},
+            status=404,
+        )
+    access = authorize_report_download_metadata(access_metadata, identity_payload)
+    if not access["allowed"]:
+        return _report_object_access_denied_response(request, access)
+    validated, validation_response = _validate_request_dto(
+        request,
+        ConfirmReportDocumentRequest,
+        body,
+    )
+    if validation_response is not None:
+        return validation_response
+    try:
+        confirmation = confirm_report_document(
+            report_id,
+            owner_id=str(subject.get("user_id") or ""),
+        )
+    except ReportReferenceError as exc:
+        if exc.reason == "appeal_gate_blocked":
+            return _report_error_response(
+                request,
+                {
+                    "contract_version": "document_confirmation.v1",
+                    "code": "appeal_gate_blocked",
+                    "message": "Appeal eligibility blocks document confirmation.",
+                    "report_id": report_id,
+                    "reason": exc.reason,
+                },
+                status=409,
+            )
+        if exc.reason == "document_download_not_available":
+            return _report_error_response(
+                request,
+                {
+                    "contract_version": "document_confirmation.v1",
+                    "code": "document_download_not_available",
+                    "message": "Only official objection documents can be confirmed.",
+                    "report_id": report_id,
+                    "reason": exc.reason,
+                },
+                status=409,
+            )
+        return _report_error_response(
+            request,
+            {"code": "report_not_found", "message": "Requested report was not found."},
+            status=404,
+        )
+    response_payload = _serialize_response_dto(
+        ConfirmReportDocumentResponse,
+        {
+            "contract_version": "document_confirmation.v1",
+            "document_confirmation": confirmation,
+        },
+    )
+    return _json_response(request, response_payload, status=201)
+
+
 @require_http_methods(["GET", "OPTIONS"])
 def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
     if _is_canonical_mock_request(request):
@@ -1852,6 +1946,20 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
         access = authorize_report_download_metadata(access_metadata, identity_payload)
         if not access["allowed"]:
             return _report_object_access_denied_response(request, access)
+        document_type = normalize_report_download_document_type(
+            request.GET.get("document_type")
+        )
+        if document_type is None:
+            return _report_error_response(
+                request,
+                {
+                    "contract_version": "report_download.v1",
+                    "code": "document_download_not_available",
+                    "message": "Only official objection DOCX documents are downloadable.",
+                    "report_id": report_id,
+                },
+                status=409,
+            )
         if (
             access_metadata.get("source") == WORKER_REPORT_SOURCE
             and access_metadata.get("status") != "ready"
@@ -1872,14 +1980,28 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
                 request,
                 {
                     "contract_version": "report_download.v1",
-                    "code": "report_not_ready",
+                    "code": "appeal_gate_blocked",
                     "message": "Appeal eligibility must be confirmed before this document can be downloaded.",
                     "report_id": report_id,
                     "reason": "appeal_gate_blocked",
                 },
                 status=409,
             )
-        document_type = request.GET.get("document_type")
+        confirmation = access_metadata.get("document_confirmation") or {}
+        if confirmation.get("confirmed") is not True:
+            return _report_error_response(
+                request,
+                {
+                    "contract_version": "report_download.v1",
+                    "code": "document_confirmation_required",
+                    "message": "Final confirmation is required before this document can be downloaded.",
+                    "report_id": report_id,
+                    "reason": "document_confirmation_stale"
+                    if confirmation.get("stale") is True
+                    else "document_confirmation_required",
+                },
+                status=409,
+            )
         download = get_report_download_metadata(report_id, document_type=document_type)
         if download is not None:
             response = HttpResponse(
@@ -1905,22 +2027,16 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
             status=404,
         )
 
-    response = HttpResponse(
-        render_report_docx(
-            document_variant="general",
-            title="Mock report download",
-            form_data={},
-            sections=[{"title": "Report", "body": f"Mock report download for {report_id}"}],
-            petition_purpose="",
-            petition_reason="",
-        ),
-        content_type=REPORT_DOCX_CONTENT_TYPE,
+    return _report_error_response(
+        request,
+        {
+            "contract_version": "report_download.v1",
+            "code": "document_download_not_available",
+            "message": "Only official objection DOCX documents are downloadable.",
+            "report_id": report_id,
+        },
+        status=409,
     )
-    response["Content-Disposition"] = f'attachment; filename="{report_id}.docx"'
-    if _is_canonical_mock_request(request):
-        response["X-API-Surface"] = "canonical_mock"
-        response["X-Execution-Mode"] = "mock"
-    return response
 
 
 def _report_auth_error_response(
