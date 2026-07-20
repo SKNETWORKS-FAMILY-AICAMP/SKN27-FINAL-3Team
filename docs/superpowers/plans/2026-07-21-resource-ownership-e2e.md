@@ -17,6 +17,7 @@
 - 테스트는 실제 JWT 인증, URL 라우팅, view authorization, repository persistence, `process_agent_work_item(work_item_id)`를 사용한다. deterministic patch 대상은 `chatbot.views.submit_message`와 각 Agent adapter뿐이다.
 - 외부 LLM, OCR, S3, 실제 별도 Worker 프로세스, 인증 provider 변경, DB 스키마/RLS 변경은 범위 밖이다.
 - 테스트가 기존 권한 결함을 재현할 때만 `backend/chatbot/views.py` 또는 `backend/chatbot/repositories.py`를 최소 변경한다. 테스트를 맞추기 위한 계약 완화는 금지한다.
+- 루트 `pytest.ini`은 `backend/chatbot/test*.py`를 수집 제외하므로, 이 파일과 기존 Django chatbot 회귀는 `backend/manage.py test`로 실행한다. 루트 `pytest`는 Django 외 CI 회귀를 검증한다.
 - 체크리스트는 별도 PR을 만들지 않는다. 구현 PR 링크와 CI 성공 결과를 받은 뒤, 같은 구현 브랜치에서만 `project-readiness-master-checklist.md`를 갱신한다.
 
 ---
@@ -119,9 +120,9 @@ def _assert_object_access_denied(
 
 - [ ] **Step 2: 기반 파일이 초기에는 없어야 하므로 test discovery가 실패함을 확인한다.**
 
-Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30 backend/chatbot/test_resource_ownership_e2e.py`
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot.test_resource_ownership_e2e -v 1`
 
-Expected: test file not found 또는 수집할 테스트가 없다는 실패. 이 실패는 새 회귀 범위가 아직 구현되지 않았음을 뜻한다.
+Expected: `chatbot.test_resource_ownership_e2e`를 import할 수 없다는 실패. 이 실패는 새 회귀 범위가 아직 구현되지 않았음을 뜻한다.
 
 - [ ] **Step 3: 공통 fixture가 비밀값을 포함하지 않는지 확인한다.**
 
@@ -145,7 +146,7 @@ The fixture values intentionally make accidental leakage observable; no actual c
 
 - [ ] **Step 4: 공통 helper가 있는 상태로 module collection을 통과시킨다.**
 
-Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30 backend/chatbot/test_resource_ownership_e2e.py`
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot.test_resource_ownership_e2e -v 1`
 
 Expected: collection succeeds; the fixture-only file reports no failing tests.
 
@@ -204,7 +205,7 @@ def test_owner_can_complete_bound_resource_lifecycle_and_download_docx(self) -> 
 
 - [ ] **Step 2: 위 테스트를 실행해 report-ready deterministic fixture가 아직 없어 실패하는지 확인한다.**
 
-Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30 backend/chatbot/test_resource_ownership_e2e.py::ResourceOwnershipE2ETests::test_owner_can_complete_bound_resource_lifecycle_and_download_docx`
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot.test_resource_ownership_e2e.ResourceOwnershipE2ETests.test_owner_can_complete_bound_resource_lifecycle_and_download_docx -v 1`
 
 Expected: FAIL because `_patched_report_ready_agents()` and the canonical report-ready response are not yet defined, or because no Report has been persisted.
 
@@ -337,7 +338,7 @@ self.assertTrue(download.content.startswith(b"PK"))
 
 - [ ] **Step 5: owner lifecycle 테스트를 통과시키고 임시 mock 호출을 점검한다.**
 
-Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30 backend/chatbot/test_resource_ownership_e2e.py::ResourceOwnershipE2ETests::test_owner_can_complete_bound_resource_lifecycle_and_download_docx`
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot.test_resource_ownership_e2e.ResourceOwnershipE2ETests.test_owner_can_complete_bound_resource_lifecycle_and_download_docx -v 1`
 
 Expected: PASS. 실제 외부 URL, S3 client, OCR, LLM provider 호출은 없어야 한다.
 
@@ -380,7 +381,7 @@ for name, request in requests:
 
 - [ ] **Step 2: 테스트를 실행해 누락된 경계 또는 기존 response contract 차이를 확인한다.**
 
-Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30 backend/chatbot/test_resource_ownership_e2e.py::ResourceOwnershipE2ETests::test_attacker_cannot_access_or_mutate_any_owner_bound_resource`
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot.test_resource_ownership_e2e.ResourceOwnershipE2ETests.test_attacker_cannot_access_or_mutate_any_owner_bound_resource -v 1`
 
 Expected: 최초 실행은 아직 download assertion과 report fixture 연결이 없어 FAIL할 수 있다. 각 실패는 URL·status·`error.code`를 확인해 권한 결함과 fixture 결함을 구분한다.
 
@@ -413,7 +414,7 @@ Apply this only in the exact `views.py` boundary whose failing test proves it la
 
 - [ ] **Step 5: attacker matrix와 owner test를 함께 통과시킨다.**
 
-Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30 backend/chatbot/test_resource_ownership_e2e.py`
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot.test_resource_ownership_e2e -v 1`
 
 Expected: PASS. 모든 attacker subtest는 `403 object_access_denied`; owner test만 `200/201/202` 및 DOCX attachment response를 허용한다.
 
@@ -440,11 +441,15 @@ If neither production file changed, stage only `backend/chatbot/test_resource_ow
 
 - [ ] **Step 1: 집중 회귀 테스트를 실행한다.**
 
-Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30 backend/chatbot/test_resource_ownership_e2e.py backend/chatbot/test_analysis_job_queue.py backend/chatbot/test_report_api_contract.py`
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot.test_resource_ownership_e2e chatbot.test_analysis_job_queue chatbot.test_report_api_contract -v 1`
 
 Expected: PASS. 이 결과는 API 인증, queue/worker persistence, report/document download 계약이 함께 깨지지 않았음을 증명한다.
 
 - [ ] **Step 2: 전체 회귀와 diff hygiene를 확인한다.**
+
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot -v 1`
+
+Expected: PASS with no new Django chatbot failure.
 
 Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30`
 
@@ -460,7 +465,7 @@ Expected: no output and exit code 0.
 ## 검증
 - `backend/chatbot/test_resource_ownership_e2e.py`: owner API → targeted Worker → Report → confirmation → DOCX와 attacker 전 경계 `403 object_access_denied` 통과
 - 집중 회귀: analysis queue 및 report API contract 통과
-- 전체 `pytest -q --timeout=30` 통과
+- 전체 Django chatbot과 루트 `pytest -q --timeout=30` 통과
 - 외부 LLM/OCR/S3/별도 Worker 호출 없음
 ```
 
