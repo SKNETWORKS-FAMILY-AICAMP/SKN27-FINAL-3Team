@@ -37,6 +37,10 @@ from app.services.chat_session_followup_service import (
     CHAT_SESSION_FOLLOWUP_STATE_VERSION,
     build_chat_followup_snapshot,
 )
+from app.services.report_document_card_service import (
+    build_report_document_cards,
+    filter_report_actions_for_view,
+)
 from app.services.supervisor_reporting_handoff_service import (
     build_supervisor_reporting_handoff,
     sanitize_sensitive_text,
@@ -3255,12 +3259,20 @@ def _worker_reporting_payload(
         _dict_or_empty(reporting_result.structured_result)
     )
     safe_summary = _sanitize_report_text(reporting_result.summary)
+    document_variant = _sanitize_report_text(structured.get("document_variant"))
+    sections = _normalize_worker_reporting_sections(
+        _list_or_empty(structured.get("form_sections"))
+    )
+    document_readiness = _sanitize_report_value(
+        _dict_or_empty(structured.get("document_readiness"))
+    )
+    appeal_gate = _sanitize_report_value(_dict_or_empty(structured.get("appeal_gate")))
     return {
         "contract_version": "reporting_payload.v2",
         "source": "supervisor_agent_result_aggregation",
         "source_node_codes": _list_or_empty(handoff.get("source_node_codes")),
         "report_type": _dict_or_empty(handoff.get("target")).get("report_type"),
-        "document_variant": _sanitize_report_text(structured.get("document_variant")),
+        "document_variant": document_variant,
         "stage": (
             "agent_execution_ready"
             if report_status == ReportStatus.READY.value
@@ -3269,16 +3281,20 @@ def _worker_reporting_payload(
         "title": _sanitize_report_text(structured.get("document_title"))
         or "Analysis report",
         "summary": safe_summary,
-        "sections": _normalize_worker_reporting_sections(
-            _list_or_empty(structured.get("form_sections"))
+        "sections": sections,
+        "document_cards": build_report_document_cards(
+            document_variant=document_variant,
+            sections=sections,
+            document_readiness=document_readiness,
+            appeal_gate=appeal_gate,
         ),
         "form_data": _sanitize_report_value(_dict_or_empty(structured.get("form_data"))),
-        "document_readiness": _sanitize_report_value(
-            _dict_or_empty(structured.get("document_readiness"))
+        "document_readiness": document_readiness,
+        "report_actions": filter_report_actions_for_view(
+            _sanitize_report_value(_list_or_empty(structured.get("report_actions")))
         ),
-        "report_actions": _sanitize_report_value(_list_or_empty(structured.get("report_actions"))),
         "appeal_decision": _sanitize_report_value(_dict_or_empty(structured.get("appeal_decision"))),
-        "appeal_gate": _sanitize_report_value(_dict_or_empty(structured.get("appeal_gate"))),
+        "appeal_gate": appeal_gate,
         "petition_purpose": _sanitize_report_text(structured.get("petition_purpose")),
         "petition_reason": _sanitize_report_text(structured.get("petition_reason")),
         "drafting_source": _sanitize_report_text(structured.get("drafting_source")),

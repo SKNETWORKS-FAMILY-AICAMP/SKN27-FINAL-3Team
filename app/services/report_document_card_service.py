@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from typing import Any
 
 
@@ -60,6 +61,17 @@ def build_report_document_cards(
             sections=insurance_sections,
             notice="보험금·합의금·과실 비율을 확정하는 문서가 아닙니다.",
         ),
+    ]
+
+
+def filter_report_actions_for_view(value: object) -> list[dict[str, Any]]:
+    """Keep existing actions except the unavailable generic report download."""
+
+    return [
+        deepcopy(dict(action))
+        for item in _sequence(value)
+        if isinstance(item, Mapping)
+        if _text((action := _mapping(item)).get("type")) != "download_report"
     ]
 
 
