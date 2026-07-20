@@ -17,21 +17,46 @@ from chatbot.models import (
 
 
 class SupervisorConversationRuntimeSmokeTests(TestCase):
-    def test_smoke_output_excludes_provider_and_model_identifiers(self) -> None:
+    def test_smoke_output_normalizes_untrusted_reason_and_excludes_identifiers(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        raw_reason = (
+            "Kim Hye-rim 010-1234-5678 900101-1234567 123 Test-ro "
+            "12A3456 fine-notice.png C:\\private\\fine-notice.png "
+            "s3://private-bucket/fine-notice.png sk-private-token gpt-private"
+        )
+        result = smoke._safe_llm(
+            {
+                "llm": {
+                    "status": "failed",
+                    "reason": raw_reason,
+                    "provider": "provider-private",
+                    "model": "gpt-private",
+                }
+            }
+        )
+
+        self.assertEqual(result, {"status": "failed", "reason": "unspecified"})
+        self.assertNotIn("Kim Hye-rim", repr(result))
+        self.assertNotIn("s3://private-bucket", repr(result))
+        self.assertNotIn("gpt-private", repr(result))
+
+    def test_smoke_output_preserves_allowed_reason_code(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        self.assertEqual(
+            smoke._safe_llm({"llm": {"status": "failed", "reason": "missing_config"}}),
+            {"status": "failed", "reason": "missing_config"},
+        )
+
+    def test_smoke_output_maps_disabled_state_to_disabled_reason(self) -> None:
         from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
 
         self.assertEqual(
             smoke._safe_llm(
-                {
-                    "llm": {
-                        "status": "used",
-                        "reason": None,
-                        "provider": "provider-name",
-                        "model": "model-name",
-                    }
-                }
+                {"llm": {"status": "disabled", "reason": "SUPERVISOR_LLM_ENABLED is off"}}
             ),
-            {"status": "used", "reason": None},
+            {"status": "disabled", "reason": "disabled"},
         )
 
     def test_strict_checks_reject_disabled_llm_and_non_real_agent_results(self) -> None:

@@ -171,10 +171,25 @@ def _run_smoke(fixture: dict) -> dict:
     return result
 
 
+SAFE_LLM_REASON_CODES = frozenset(
+    {"ok", "disabled", "missing_config", "provider_unavailable", "invalid_contract"}
+)
+
+
+def _safe_llm_reason(status: object, reason: object) -> str:
+    if str(status or "").strip().lower() == "disabled":
+        return "disabled"
+    normalized_reason = str(reason or "").strip().lower()
+    if normalized_reason in SAFE_LLM_REASON_CODES:
+        return normalized_reason
+    return "unspecified"
+
+
 def _safe_llm(supervisor_state) -> dict:
     llm = supervisor_state.get("llm") if isinstance(supervisor_state, dict) else {}
     llm = llm if isinstance(llm, dict) else {}
-    return {key: llm.get(key) for key in ("status", "reason")}
+    status = str(llm.get("status") or "")
+    return {"status": status, "reason": _safe_llm_reason(status, llm.get("reason"))}
 
 
 def _no_followup_checks(session: ChatSession) -> dict:
