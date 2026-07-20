@@ -80,6 +80,20 @@ PR #244가 마스터 체크리스트 B/C-2/D-1 항목에 대응하며 `requires_
 - `test/unit/test_fine_notice_evaluator.py` + `test/unit/test_appeal_decision_flow_nodes.py` + `test/test_agent_node_service.py` + `test/integration/test_appeal_decision_flow_graph.py` + `test/test_consultation_v2_contract.py` + `test/test_privacy_boundaries.py` + `test/test_pii_masking.py`: **242 passed**
 - 프런트엔드: `vite build` 성공 (revert 이후 재확인, 병합으로 깨졌던 함수도 함께 해소)
 
+## PR #244 리뷰 코멘트 요구사항 대조
+
+리뷰(hi20260204-maker, 2026-07-20T05:42:04Z, PR #244)가 요구한 5가지 항목을 현재 커밋(`8525619`) 기준으로 대조하면 다음과 같다.
+
+| 리뷰 요구사항 | 현재 상태 |
+|---|---|
+| OCR 결과(금액·기한·처분번호) 확인/수정 UI·API 계약 | ❌ 미반영 — 구현했다가 되돌림. 같은 리뷰어가 작성한 별도 작업분담 문서(`docs/architecture/프롬프트.txt`, 이후 삭제됨)에서 이건 본인("서버 게이트") 담당으로 명시돼 있어 철회함 |
+| 확인 전 법령 검색·이의신청 생성 진행을 막는 서버 측 게이트 | ❌ 미반영 — 애초부터 서버 게이트 담당자 영역으로 범위 제외 |
+| 확인 후에만 재개하는 상태 전이 + E2E 테스트 | ❌ 미반영 — 위 두 항목에 종속, 서버 게이트 없이는 만들 수 없음 |
+| 저신뢰도/누락 필드의 재촬영·직접 입력 흐름 및 테스트 | ❌ 미반영 — 직접 입력 UI는 되돌린 프런트엔드 패널에 있었음 |
+| 법령 최신성을 고정 연도가 아닌 데이터 기준일·마지막 검증일 기반으로 표시 | ✅ 반영됨 — `law_reference_verified_at`(`law_chunks.created_at` 기반)이 disclaimer에 조건부로 노출 |
+
+**결론**: 5개 중 1개(법령 최신성)만 이번 작업으로 실제 반영됐다. 나머지 4개(확인 UI/API/게이트/재개 로직)는 리뷰어 본인이 작성한 작업분담 문서에서 "서버 게이트 담당자(리뷰어 자신) 몫"으로 명시한 항목이라 이번 커밋에는 의도적으로 빠져 있다. 마스터 체크리스트 D-1("중요 필드 사용자 확인 단계")은 여전히 미완료이며, Agent 쪽은 필요한 데이터(`requires_confirmation`/`unconfirmed_fields`)를 정확히 흘려보내고 있으므로 리뷰어가 자기 몫의 API/UI/게이트를 만들 때 위 "서버 게이트 담당자에게 필요한 계약" 절의 값을 바로 소비하면 된다.
+
 ## 체크리스트 반영 제안
 
 `docs/ops/project-readiness-master-checklist.md`의 아래 항목은 **완료(`[x]`)가 아니라 부분 구현(`[~]`)으로 표기**하는 것을 제안한다. 실제 체크리스트 파일 수정은 하지 않았다.
