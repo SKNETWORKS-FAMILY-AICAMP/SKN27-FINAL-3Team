@@ -1,14 +1,8 @@
-"""Render run_objection_report_generation output into the official
-'과태료 처분에 대한 이의신청서' table form (강동구청 양식) as a .docx file.
-
-Resident registration numbers are never auto-filled here (privacy: the cell is
-left blank for the applicant to write by hand), matching the masking policy in
-app/security/pii_masking.py.
-"""
+"""DOCX renderers for user-facing objection forms and analysis reports."""
 
 from __future__ import annotations
 
-from pathlib import Path
+from io import BytesIO
 from typing import Any
 
 from docx import Document
@@ -17,140 +11,187 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
-_CLOSING_TEXT = (
-    "위의 과태료 처분에 대하여 불복하여 이의를 신청하오니 관계 법령에 의하여 "
-    "적절한 조치를 하여 주시기 바랍니다."
-)
+
+OFFICIAL_FINE_NOTICE_TITLE = "과태료 처분에 대한 이의신청서"
 
 
-def render_official_objection_docx(agent_output: dict[str, Any], output_path: Path) -> None:
-    sr = agent_output["structured_result"]
-    applicant = sr["applicant_info"]
-    disposition = sr["disposition_details"]
+def render_report_docx(
+    *,
+    document_variant: str,
+    title: str,
+    form_data: dict[str, Any],
+    sections: list[dict[str, Any]],
+    petition_purpose: str,
+    petition_reason: str,
+) -> bytes:
+    """Render one public document variant into an in-memory DOCX file."""
 
     document = Document()
-    _set_default_font(document, "맑은 고딕")
+    _set_default_font(document)
+    if document_variant == "fine_notice":
+        _render_fine_notice_form(
+            document,
+            form_data=form_data,
+            petition_purpose=petition_purpose,
+            petition_reason=petition_reason,
+        )
+    elif document_variant == "traffic_accident":
+        _render_traffic_accident_form(document, title=title, form_data=form_data)
+    else:
+        _render_general_report(document, title=title, sections=sections)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
 
-    title_table = document.add_table(rows=1, cols=1)
-    title_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_table_borders(title_table)
-    title_cell = title_table.rows[0].cells[0]
-    title_paragraph = title_cell.paragraphs[0]
-    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title_paragraph.add_run("과태료 처분에 대한 이의신청서")
-    title_run.font.size = Pt(18)
-    title_run.font.bold = True
-    title_cell.height = Cm(1.2)
 
-    document.add_paragraph()
-
-    table = document.add_table(rows=6, cols=5)
+def _render_fine_notice_form(
+    document: Document,
+    *,
+    form_data: dict[str, Any],
+    petition_purpose: str,
+    petition_reason: str,
+) -> None:
+    _add_title(document, OFFICIAL_FINE_NOTICE_TITLE)
+    table = document.add_table(rows=6, cols=4)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _set_table_borders(table)
-    for column, width in zip(table.columns, (Cm(2.4), Cm(2.6), Cm(4.0), Cm(2.6), Cm(4.0))):
-        column.width = width
 
-    # row 0-1: applicant block
-    _fill(table, 0, 0, "이 의\n신 청 인", merge_down=1)
-    _fill(table, 0, 1, "성명")
-    _fill(table, 0, 3, "주민(사업자)\n등 록 번 호")
-    _fill(table, 0, 4, "")  # left blank on purpose: never auto-fill a resident ID
-    _fill(table, 1, 1, "주소")
-
-    # row 2-4: disposition block
-    _fill(table, 2, 0, "과태료 처분내역", merge_down=2)
-    _fill(table, 2, 1, "자동차번호")
-    _fill(table, 2, 3, "부과기관")
-    _fill(table, 3, 1, "고지받은일자")
-    _fill(table, 3, 3, "과태료금액")
-    _fill(table, 4, 1, "과태료처분사유")
-    _fill(table, 4, 3, "납부고지서번호")
-
-    # row 5: free-form content block
-    _fill(table, 5, 0, "이의신청내용\n(내용이 많을 때는\n별지로 작성)")
-    _fill(table, 5, 1, "", merge_right=3)
-
-    _fill_value(table, 0, 2, applicant["name"])
-    _fill_value(table, 1, 2, f"{applicant['address']}   (☎ {applicant['contact']})", merge_right=2)
-    _fill_value(table, 2, 2, applicant["vehicle_number"])
-    _fill_value(table, 2, 4, sr["recipient_agency"])
-    _fill_value(table, 3, 2, disposition.get("notice_received_date") or disposition.get("violation_datetime") or "확인 필요")
-    _fill_value(table, 3, 4, disposition.get("fine_amount") or "확인 필요")
-    _fill_value(table, 4, 2, disposition.get("violation_text") or "확인 필요")
-    _fill_value(table, 4, 4, disposition.get("case_number") or "확인 필요")
-
-    content_cell = table.cell(5, 1)
-    content_cell.text = ""
-    content_paragraph = content_cell.paragraphs[0]
-    content_paragraph.add_run(f"{sr['petition_purpose']}\n\n{sr['petition_reasons']}")
-    content_cell.height = Cm(6)
+    _fill_row(table, 0, "이의신청인 성명", _text(form_data.get("applicant_name")), "연락처", _text(form_data.get("contact")))
+    _fill_row(table, 1, "주소", _text(form_data.get("address")), "차량번호", _text(form_data.get("vehicle_number")))
+    _fill_row(table, 2, "수신 기관", _text(form_data.get("recipient")), "고지받은 일자", _text(form_data.get("notice_received_date")))
+    _fill_row(table, 3, "과태료 금액", _text(form_data.get("fine_amount")), "고지서 번호", _text(form_data.get("case_number")))
+    _fill_row(table, 4, "처분 사유", _text(form_data.get("violation_text")), "", "")
+    _fill_row(
+        table,
+        5,
+        "이의신청 내용",
+        "\n\n".join(item for item in (petition_purpose, petition_reason) if item),
+        "",
+        "",
+    )
+    table.cell(5, 1).merge(table.cell(5, 3))
 
     document.add_paragraph()
-    closing = document.add_paragraph()
+    closing = document.add_paragraph("위 과태료 처분에 대하여 이의를 신청하오니 관계 법령에 따라 검토하여 주시기 바랍니다.")
     closing.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    closing.add_run(_CLOSING_TEXT)
-
-    document.add_paragraph()
-    date_line = document.add_paragraph()
+    date_line = document.add_paragraph("년        월        일")
     date_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    date_line.add_run("년        월        일")
-
-    signature_line = document.add_paragraph()
-    signature_line.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    signature_line.add_run(f"신청인:  {applicant['name']}    (서명 또는 인)")
-
-    document.add_paragraph()
-    recipient_line = document.add_paragraph()
-    recipient_line.add_run(f"{sr['recipient_agency']}  귀하")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    document.save(str(output_path))
+    signature = document.add_paragraph(f"신청인: {_text(form_data.get('applicant_name'))} (서명 또는 인)")
+    signature.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    document.add_paragraph(f"{_text(form_data.get('recipient'))} 귀하")
 
 
-def _fill(table, row: int, col: int, text: str, *, merge_down: int = 0, merge_right: int = 0) -> None:
-    cell = table.cell(row, col)
-    cell.text = text
+def _render_traffic_accident_form(document: Document, *, title: str, form_data: dict[str, Any]) -> None:
+    _add_title(document, title or "교통사고 이의신청서")
+    table = document.add_table(rows=6, cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_borders(table)
+    fields = (
+        ("신청인", form_data.get("applicant_name")),
+        ("수신 기관", form_data.get("recipient")),
+        ("사건/접수 번호", form_data.get("case_number")),
+        ("사고 일시·장소", _join_present(form_data.get("incident_at"), form_data.get("location"))),
+        ("기존 조사 결과", form_data.get("investigation_result_summary")),
+        ("이의신청 쟁점", form_data.get("objection_points")),
+    )
+    for row_index, (label, value) in enumerate(fields):
+        _fill_cell(table.cell(row_index, 0), label, bold=True)
+        _fill_cell(table.cell(row_index, 1), _text(value))
+
+    _add_heading_and_body(document, "구체적 요청", _text(form_data.get("specific_request")))
+    _add_heading_and_body(document, "제출 증빙", _text(form_data.get("evidence_summary")))
+
+
+def _render_general_report(document: Document, *, title: str, sections: list[dict[str, Any]]) -> None:
+    _add_title(document, title or "분석 리포트")
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        heading = _text(section.get("title"))
+        body = _text(section.get("body"))
+        items = section.get("items")
+        if heading:
+            _add_heading_and_body(document, heading, body)
+        elif body:
+            document.add_paragraph(body)
+        if isinstance(items, list):
+            for item in items:
+                text = _text(item)
+                if text:
+                    document.add_paragraph(text, style="List Bullet")
+
+
+def _add_title(document: Document, text: str) -> None:
+    paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.add_run(text)
+    run.bold = True
+    run.font.size = Pt(18)
+
+
+def _add_heading_and_body(document: Document, heading: str, body: str) -> None:
+    if heading:
+        paragraph = document.add_paragraph()
+        run = paragraph.add_run(heading)
+        run.bold = True
+        run.font.size = Pt(12)
+    if body:
+        document.add_paragraph(body)
+
+
+def _fill_row(table, row_index: int, first_label: str, first_value: str, second_label: str, second_value: str) -> None:
+    _fill_cell(table.cell(row_index, 0), first_label, bold=True)
+    _fill_cell(table.cell(row_index, 1), first_value)
+    _fill_cell(table.cell(row_index, 2), second_label, bold=True)
+    _fill_cell(table.cell(row_index, 3), second_value)
+
+
+def _fill_cell(cell, value: str, *, bold: bool = False) -> None:
+    cell.text = value
     for paragraph in cell.paragraphs:
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        for run in paragraph.runs:
-            run.font.bold = True
-            run.font.size = Pt(10)
-    if merge_down:
-        cell.merge(table.cell(row + merge_down, col))
-    if merge_right:
-        cell.merge(table.cell(row, col + merge_right))
-
-
-def _fill_value(table, row: int, col: int, text: str, *, merge_right: int = 0) -> None:
-    cell = table.cell(row, col)
-    cell.text = str(text)
-    for paragraph in cell.paragraphs:
         for run in paragraph.runs:
             run.font.size = Pt(10)
-    if merge_right:
-        cell.merge(table.cell(row, col + merge_right))
+            run.bold = bold
 
 
-def _set_default_font(document: Document, font_name: str) -> None:
+def _set_default_font(document: Document) -> None:
     style = document.styles["Normal"]
-    style.font.name = font_name
+    style.font.name = "맑은 고딕"
     style.font.size = Pt(10)
     rpr = style.element.get_or_add_rPr()
-    east_asian_font = rpr.find(qn("w:rFonts"))
-    if east_asian_font is None:
-        east_asian_font = rpr.makeelement(qn("w:rFonts"), {})
-        rpr.append(east_asian_font)
-    east_asian_font.set(qn("w:eastAsia"), font_name)
+    fonts = rpr.rFonts
+    if fonts is None:
+        fonts = rpr.makeelement(qn("w:rFonts"), {})
+        rpr.append(fonts)
+    fonts.set(qn("w:eastAsia"), "맑은 고딕")
 
 
 def _set_table_borders(table) -> None:
+    table.autofit = False
+    for column in table.columns:
+        column.width = Cm(3.6)
     tbl_pr = table._tbl.tblPr
-    borders = tbl_pr.makeelement(qn("w:tblBorders"), {})
+    borders = tbl_pr.first_child_found_in("w:tblBorders")
+    if borders is None:
+        borders = tbl_pr.makeelement(qn("w:tblBorders"), {})
+        tbl_pr.append(borders)
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
-        element = borders.makeelement(qn(f"w:{edge}"), {})
+        element = borders.find(qn(f"w:{edge}"))
+        if element is None:
+            element = borders.makeelement(qn(f"w:{edge}"), {})
+            borders.append(element)
         element.set(qn("w:val"), "single")
         element.set(qn("w:sz"), "6")
-        element.set(qn("w:space"), "0")
         element.set(qn("w:color"), "000000")
-        borders.append(element)
-    tbl_pr.append(borders)
+
+
+def _join_present(*values: Any) -> str:
+    return " / ".join(text for value in values if (text := _text(value)))
+
+
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return " / ".join(_text(item) for item in value if _text(item))
+    return str(value).strip()

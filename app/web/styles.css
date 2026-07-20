@@ -17,6 +17,43 @@
   --shadow: 0 16px 42px rgba(24, 36, 50, 0.12);
 }
 
+.deadline-guidance-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid #d6a24d;
+  border-radius: 16px;
+  background: #fff8e9;
+  color: #47300b;
+}
+
+.deadline-guidance-panel--overdue {
+  border-color: #b84a3e;
+  background: #fff0ee;
+  color: #681d16;
+}
+
+.deadline-guidance-panel__title {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.deadline-guidance-panel strong {
+  font-size: 1.05rem;
+}
+
+.deadline-guidance-panel p,
+.deadline-guidance-panel ul {
+  margin: 0;
+}
+
+.deadline-guidance-panel ul {
+  padding-left: 20px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -704,6 +741,124 @@ p {
   margin-bottom: 5px;
 }
 
+.bubble-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-soft, #555);
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  animation: typing-dot-bounce 1s infinite ease-in-out;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-dot-bounce {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+.missing-fields-prompt {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #bdd4ef;
+  border-radius: 8px;
+  background: var(--blue-soft);
+}
+
+.missing-fields-prompt strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.missing-fields-prompt ul {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.missing-fields-prompt li {
+  margin-bottom: 3px;
+}
+
+.missing-fields-prompt p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-soft, #555);
+}
+
+.follow-up-note {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e9d8b4;
+  border-radius: 8px;
+  background: var(--amber-soft);
+}
+
+.follow-up-note p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--ink-soft, #555);
+}
+
+.follow-up-group {
+  margin-top: 8px;
+}
+
+.follow-up-group-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.follow-up-group-required .follow-up-group-label {
+  color: #b3401f;
+}
+
+.follow-up-group-optional .follow-up-group-label {
+  color: var(--ink-soft, #555);
+}
+
+.follow-up-note ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.follow-up-note li {
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.follow-up-note p:last-child,
+.follow-up-group:last-child {
+  margin-bottom: 0;
+}
+
 .persona-run {
   margin-top: 14px;
   display: grid;
@@ -989,7 +1144,7 @@ button.report-list-card.active {
   letter-spacing: 0;
 }
 
-.fault-ratio-insight-panel {
+.agent-insight-panel {
   padding: 12px;
   display: grid;
   gap: 10px;
@@ -998,25 +1153,25 @@ button.report-list-card.active {
   background: #fff;
 }
 
-.fault-ratio-insight-panel.compact {
+.agent-insight-panel.compact {
   margin: 14px;
 }
 
-.fault-ratio-insight-head,
-.fault-ratio-insight-grid {
+.agent-insight-head,
+.agent-insight-grid {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
 }
 
-.fault-ratio-insight-head strong {
+.agent-insight-head strong {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.fault-ratio-insight-grid p,
-.fault-ratio-insight-section {
+.agent-insight-grid p,
+.agent-insight-section {
   min-width: min(100%, 180px);
   margin: 0;
   padding: 9px;
@@ -1027,21 +1182,21 @@ button.report-list-card.active {
   background: #fbfcfe;
 }
 
-.fault-ratio-insight-grid span,
-.fault-ratio-insight-section > strong {
+.agent-insight-grid span,
+.agent-insight-section > strong {
   color: var(--subtle);
   font-size: 12px;
   font-weight: 900;
 }
 
-.fault-ratio-insight-grid strong,
-.fault-ratio-insight-section p,
-.fault-ratio-insight-section li {
+.agent-insight-grid strong,
+.agent-insight-section p,
+.agent-insight-section li {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.fault-ratio-insight-section ul {
+.agent-insight-section ul {
   margin: 0;
   padding-left: 18px;
 }
@@ -1911,7 +2066,7 @@ button.report-list-card.active {
 
 .report-inspector .panel-head,
 .report-inspector .report-inspector-detail,
-.report-inspector .fault-ratio-insight-panel,
+.report-inspector .agent-insight-panel,
 .report-inspector .inspector-actions {
   grid-column: 1 / -1;
 }
@@ -2188,6 +2343,12 @@ button.report-list-card.active {
   }
 
   .sidebar {
+    display: none;
+  }
+
+  /* mobile-bottom-nav (rendered alongside the sidebar on chatbot/mypage/
+     reporting) already covers navigation at this width — avoid showing both. */
+  .topbar-with-mobile-nav {
     display: none;
   }
 

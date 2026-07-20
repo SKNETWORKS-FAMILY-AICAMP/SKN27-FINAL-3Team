@@ -679,7 +679,12 @@ def _openai_embedding(query: str, *, model_id: str, dimensions: int) -> list[flo
     if dimensions > 0:
         kwargs["dimensions"] = dimensions
     timeout = _int_setting("LEGAL_RAG_QUERY_EMBEDDING_TIMEOUT_SECONDS", 12)
-    response = OpenAI(api_key=api_key, timeout=timeout).embeddings.create(**kwargs)
+    # Force the real OpenAI endpoint regardless of a global OPENAI_BASE_URL override
+    # (e.g. a local-dev redirect to Ollama for chat completions) — the stored
+    # law_embeddings vectors are real OpenAI text-embedding-3-large space, and
+    # query embeddings must come from the same space or search silently breaks.
+    client = OpenAI(api_key=api_key, timeout=timeout, base_url="https://api.openai.com/v1")
+    response = client.embeddings.create(**kwargs)
     return _normalize_l2([float(item) for item in response.data[0].embedding])
 
 

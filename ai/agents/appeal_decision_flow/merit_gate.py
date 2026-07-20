@@ -101,13 +101,13 @@ def merit_classification_node(state: AppealJudgmentState) -> dict:
         law_context = get_merit_context(notice_stage)
     except LegalProvisionEvidenceUnavailable as exc:
         return {
-            "merit": "보류",
-            "merit_basis": "Required legal provision evidence is unavailable.",
-            "merit_judgment_failed": True,
-            "merit_relief_type": None,
+            "merit":                       "보류",
+            "merit_basis":                 "Required legal provision evidence is unavailable.",
+            "merit_judgment_failed":       True,
+            "merit_relief_type":           None,
             "relief_type_judgment_failed": None,
-            "legal_evidence_status": "unavailable",
-            "legal_evidence_reason": exc.reason_code,
+            "legal_evidence_status":       "unavailable",
+            "legal_evidence_reason":       exc.reason_code,
         }
 
     try:

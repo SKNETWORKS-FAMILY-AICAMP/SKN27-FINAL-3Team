@@ -93,6 +93,43 @@ def _chat_response(*, session_id: str, message_id: str, plan_id: str) -> dict:
     }
 
 
+def _server_authoritative_chat_response(*, session_id: str, message_id: str, plan_id: str) -> dict:
+    slot_state = {
+        "contract_version": "slot_filling_state.v1",
+        "slots": {
+            "query": {
+                "value": "server approved query",
+                "source": {"type": "supervisor", "reference": message_id},
+                "confidence": 1.0,
+                "editable": False,
+            }
+        },
+    }
+    response = _chat_response(session_id=session_id, message_id=message_id, plan_id=plan_id)
+    response["analysis_plan"]["steps"][0].update(
+        {"status": "ready", "depends_on": [], "required_inputs": ["user_text"]}
+    )
+    response["supervisor_state"] = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "agent_execution_ready",
+        "slot_state": slot_state,
+        "agent_input_packages": [
+            {
+                "schema_version": "agent_input_schema.v1",
+                "node_code": "law_ground_search",
+                "status": "ready",
+                "required_inputs": ["user_text"],
+                "payload": {
+                    "user_text": "server approved question",
+                    "attachments": [],
+                    "slot_state": slot_state,
+                },
+            }
+        ],
+    }
+    return response
+
+
 def _queue_payload(*, owner_id: str, session_id: str, job_id: str) -> tuple[dict, dict]:
     plan_id = f"plan_{job_id}"
     request_payload = {
@@ -391,6 +428,165 @@ class AnalysisJobQueueTests(TestCase):
         self.assertFalse(AgentResult.objects.filter(job=job).exists())
         self.assertFalse(AgentInvocation.objects.filter(job=job).exists())
 
+    def test_public_chat_queue_worker_result_uses_server_supervisor_handoff(self) -> None:
+        owner_id = "usr_public_server_handoff"
+        session_id = "ses_public_server_handoff"
+        client = _authenticated_client(owner_id)
+        ChatSession.objects.create(
+            session_id=session_id,
+            owner_id=owner_id,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        chat_response = _server_authoritative_chat_response(
+            session_id=session_id,
+            message_id="msg_public_server_handoff",
+            plan_id="plan_public_server_handoff",
+        )
+
+        with patch("chatbot.views.submit_message", return_value=chat_response):
+            accepted = client.post(
+                "/api/chat/messages/",
+                data={
+                    "session_id": session_id,
+                    "user_text": "client supplied question",
+                    "agent_input": {"node_code": "objection_report_generation"},
+                    "node_code": "objection_report_generation",
+                    "slot_state": {"client": True},
+                    "upstream_results": {"law_ground_search": {"status": "success"}},
+                    "search_query": "client search override",
+                    "context": {
+                        "query": {"search_query": "client context query"},
+                        "supervisor_handoff": {"client": True},
+                    },
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(accepted.status_code, 202)
+        job_id = accepted.json()["work_item"]["job_id"]
+        work_item = AgentWorkItem.objects.get(job__job_id=job_id)
+        persisted_payload = work_item.payload["execution_payload"]
+        self.assertEqual(persisted_payload["upstream_results"], {})
+        self.assertEqual(
+            persisted_payload["context"]["supervisor_handoff"],
+            chat_response["supervisor_state"],
+        )
+        for field in ("agent_input", "node_code", "slot_state"):
+            self.assertNotIn(field, persisted_payload)
+
+        adapter_output = {
+            "status": "success",
+            "summary": "server plan completed",
+            "structured_result": {"matched_laws": ["law:server"]},
+            "evidence": [],
+            "next_actions": [],
+            "limitations": [],
+        }
+        with patch(
+            "app.services.agent_node_service._run_sync_adapter",
+            return_value=adapter_output,
+        ) as run_adapter:
+            processed = process_agent_work_item(work_item.work_item_id)
+
+        self.assertEqual(processed["status"], AgentWorkItemStatus.SUCCESS)
+        adapter_input = run_adapter.call_args.args[0]
+        self.assertEqual(adapter_input["node_code"], "law_ground_search")
+        self.assertEqual(adapter_input["user_text"], "server approved question")
+        self.assertEqual(
+            adapter_input["slot_state"],
+            chat_response["supervisor_state"]["slot_state"],
+        )
+        self.assertEqual(adapter_input["upstream_results"], {})
+        self.assertEqual(
+            adapter_input["context"]["query"]["search_query"],
+            "server approved question",
+        )
+
+        result_response = client.get(f"/api/analysis/results/{job_id}/")
+
+        self.assertEqual(result_response.status_code, 200)
+        self.assertEqual(result_response.json()["result"]["status"], "success")
+
+    def test_public_analysis_queue_worker_result_uses_server_supervisor_handoff(self) -> None:
+        owner_id = "usr_public_analysis_server_handoff"
+        session_id = "ses_public_analysis_server_handoff"
+        client = _authenticated_client(owner_id)
+        ChatSession.objects.create(
+            session_id=session_id,
+            owner_id=owner_id,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        chat_response = _server_authoritative_chat_response(
+            session_id=session_id,
+            message_id="msg_public_analysis_server_handoff",
+            plan_id="plan_public_analysis_server_handoff",
+        )
+
+        with patch("chatbot.views.submit_message", return_value=chat_response):
+            accepted = client.post(
+                "/api/analysis/jobs/",
+                data={
+                    "session_id": session_id,
+                    "user_text": "client supplied question",
+                    "agent_input": {"node_code": "objection_report_generation"},
+                    "node_code": "objection_report_generation",
+                    "slot_state": {"client": True},
+                    "upstream_results": {"law_ground_search": {"status": "success"}},
+                    "search_query": "client search override",
+                    "context": {
+                        "query": {"search_query": "client context query"},
+                        "law_graph": {"enabled": True},
+                        "supervisor_handoff": {"client": True},
+                    },
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(accepted.status_code, 202)
+        job_id = accepted.json()["job"]["job_id"]
+        work_item = AgentWorkItem.objects.get(job__job_id=job_id)
+        persisted_payload = work_item.payload["execution_payload"]
+        self.assertEqual(persisted_payload["upstream_results"], {})
+        self.assertEqual(
+            persisted_payload["context"]["supervisor_handoff"],
+            chat_response["supervisor_state"],
+        )
+        self.assertNotIn("search_query", persisted_payload)
+        self.assertNotIn("query", persisted_payload["context"])
+        self.assertNotIn("law_graph", persisted_payload["context"])
+
+        adapter_output = {
+            "status": "success",
+            "summary": "server plan completed",
+            "structured_result": {"matched_laws": ["law:server"]},
+            "evidence": [],
+            "next_actions": [],
+            "limitations": [],
+        }
+        with patch(
+            "app.services.agent_node_service._run_sync_adapter",
+            return_value=adapter_output,
+        ) as run_adapter:
+            processed = process_agent_work_item(work_item.work_item_id)
+
+        self.assertEqual(processed["status"], AgentWorkItemStatus.SUCCESS)
+        adapter_input = run_adapter.call_args.args[0]
+        self.assertEqual(adapter_input["node_code"], "law_ground_search")
+        self.assertEqual(adapter_input["user_text"], "server approved question")
+        self.assertEqual(
+            adapter_input["slot_state"],
+            chat_response["supervisor_state"]["slot_state"],
+        )
+        self.assertEqual(
+            adapter_input["context"]["query"]["search_query"],
+            "server approved question",
+        )
+
+        result_response = client.get(f"/api/analysis/results/{job_id}/")
+
+        self.assertEqual(result_response.status_code, 200)
+        self.assertEqual(result_response.json()["result"]["status"], "success")
+
     def test_reenqueue_preserves_terminal_job_and_work_item(self) -> None:
         payload, job_payload = _queue_payload(
             owner_id="usr_queue_idempotent",
@@ -535,6 +731,244 @@ class AnalysisJobQueueTests(TestCase):
         self.assertEqual(
             AgentInvocation.objects.filter(job__job_id=queued["job_id"]).count(),
             invocation_count,
+        )
+
+    def test_worker_restoration_discards_legacy_public_execution_controls(self) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_restored_public_input",
+            session_id="ses_restored_public_input",
+            job_id="job_restored_public_input",
+        )
+        payload.update(
+            {
+                "agent_input": {"node_code": "objection_report_generation"},
+                "node_code": "objection_report_generation",
+                "slot_state": {"client": True},
+                "upstream_results": {"law_ground_search": {"status": "success"}},
+                "context": {"supervisor_handoff": {"client": True}},
+            }
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
+
+        restored = repository_module._resolved_agent_work_item_execution_payload(work_item)
+
+        self.assertEqual(restored["upstream_results"], {})
+        self.assertNotIn("supervisor_handoff", restored["context"])
+        for field in ("agent_input", "node_code", "slot_state"):
+            self.assertNotIn(field, restored)
+
+    def test_worker_restoration_uses_enqueued_server_execution_context_not_payload_field(self) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_server_execution_context",
+            session_id="ses_server_execution_context",
+            job_id="job_server_execution_context",
+        )
+        payload["context"] = {
+            "user_facts": "payload-controlled facts",
+            "case_evidence": {"source": "payload"},
+        }
+        payload["server_execution_context"] = {
+            "contract_version": "server_execution_context.v1",
+            "context": {"user_facts": "forged payload facts"},
+        }
+        trusted_context = {
+            "user_facts": "server-confirmed facts",
+            "case_evidence": {"source": "server"},
+        }
+        queued = enqueue_analysis_job_work(
+            payload,
+            job_payload,
+            server_execution_context=trusted_context,
+        )
+        work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
+
+        self.assertEqual(
+            work_item.payload["server_execution_context"],
+            {
+                "contract_version": "server_execution_context.v1",
+                "context": trusted_context,
+            },
+        )
+        self.assertNotIn(
+            "server_execution_context",
+            work_item.payload["execution_payload"],
+        )
+        self.assertNotIn(
+            "server_execution_context",
+            work_item.payload["request_payload"],
+        )
+
+        restored = repository_module._resolved_agent_work_item_execution_payload(work_item)
+
+        self.assertEqual(restored["context"]["user_facts"], "server-confirmed facts")
+        self.assertEqual(restored["context"]["case_evidence"], {"source": "server"})
+
+    def test_worker_restoration_rebuilds_non_supervisor_checkpoint_from_persisted_results(self) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_restored_server_checkpoint",
+            session_id="ses_restored_server_checkpoint",
+            job_id="job_restored_server_checkpoint",
+        )
+        payload["upstream_results"] = {"law_ground_search": {"status": "client"}}
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
+        AgentResult.objects.create(
+            result_id="res_restored_server_checkpoint",
+            job=work_item.job,
+            node_code="law_ground_search",
+            status="success",
+            summary="persisted server checkpoint",
+            structured_result={"matched_laws": ["law:server"]},
+        )
+
+        restored = repository_module._resolved_agent_work_item_execution_payload(work_item)
+
+        self.assertEqual(
+            restored["upstream_results"],
+            {
+                "law_ground_search": {
+                    "result_id": "res_restored_server_checkpoint",
+                    "node_code": "law_ground_search",
+                    "status": "success",
+                    "summary": "persisted server checkpoint",
+                    "structured_result": {"matched_laws": ["law:server"]},
+                    "evidence": [],
+                    "next_actions": [],
+                    "limitations": [],
+                }
+            },
+        )
+
+    def test_non_supervisor_worker_resumes_from_persisted_results_only(self) -> None:
+        payload, job_payload = _queue_payload(
+            owner_id="usr_worker_server_checkpoint",
+            session_id="ses_worker_server_checkpoint",
+            job_id="job_worker_server_checkpoint",
+        )
+        payload["upstream_results"] = {"law_ground_search": {"status": "client"}}
+        job_payload["analysis_plan"]["steps"].append(
+            {
+                "order": 2,
+                "node_code": "appeal_decision_flow",
+                "status": "ready",
+                "depends_on": ["law_ground_search"],
+                "required_inputs": [],
+            }
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        work_item = AgentWorkItem.objects.get(work_item_id=queued["work_item_id"])
+        AgentResult.objects.create(
+            result_id="res_worker_server_checkpoint",
+            job=work_item.job,
+            node_code="law_ground_search",
+            status="success",
+            summary="persisted server checkpoint",
+        )
+
+        with patch(
+            "app.services.agent_node_service._run_sync_adapter",
+            return_value={
+                "status": "success",
+                "summary": "resumed server step",
+                "structured_result": {},
+                "evidence": [],
+                "next_actions": [],
+                "limitations": [],
+            },
+        ) as run_adapter:
+            processed = process_agent_work_item(work_item.work_item_id)
+
+        self.assertEqual(processed["status"], AgentWorkItemStatus.SUCCESS)
+        self.assertEqual(run_adapter.call_count, 1)
+        resumed_input = run_adapter.call_args.args[0]
+        self.assertEqual(resumed_input["node_code"], "appeal_decision_flow")
+        self.assertEqual(
+            resumed_input["upstream_results"]["law_ground_search"]["status"],
+            "success",
+        )
+
+    def test_worker_blocks_public_plan_without_supervisor_handoff_before_adapter_call(self) -> None:
+        owner_id = "usr_missing_supervisor_handoff"
+        session_id = "ses_missing_supervisor_handoff"
+        client = _authenticated_client(owner_id)
+        ChatSession.objects.create(
+            session_id=session_id,
+            owner_id=owner_id,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        chat_response = _chat_response(
+            session_id=session_id,
+            message_id="msg_missing_supervisor_handoff",
+            plan_id="plan_missing_supervisor_handoff",
+        )
+        chat_response["analysis_plan"]["steps"][0].update(
+            {"status": "ready", "depends_on": [], "required_inputs": ["user_text"]}
+        )
+
+        with patch("chatbot.views.submit_message", return_value=chat_response):
+            accepted = client.post(
+                "/api/chat/messages/",
+                data={"session_id": session_id, "user_text": "client text"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(accepted.status_code, 202)
+        work_item = AgentWorkItem.objects.get(
+            job__job_id=accepted.json()["work_item"]["job_id"]
+        )
+        self.assertTrue(
+            work_item.payload["execution_payload"]["requires_supervisor_handoff"]
+        )
+        with patch("app.services.agent_node_service._run_sync_adapter") as run_adapter:
+            processed = process_agent_work_item(work_item.work_item_id)
+
+        run_adapter.assert_not_called()
+        self.assertEqual(processed["error_code"], "supervisor_handoff_invalid")
+        self.assertFalse(
+            AgentInvocation.objects.filter(
+                job=work_item.job,
+                node_code="__paid_analysis_phase__",
+            ).exists()
+        )
+
+    def test_worker_blocks_malformed_supervisor_package_before_adapter_call(self) -> None:
+        owner_id = "usr_malformed_supervisor_package"
+        session_id = "ses_malformed_supervisor_package"
+        client = _authenticated_client(owner_id)
+        ChatSession.objects.create(
+            session_id=session_id,
+            owner_id=owner_id,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        chat_response = _server_authoritative_chat_response(
+            session_id=session_id,
+            message_id="msg_malformed_supervisor_package",
+            plan_id="plan_malformed_supervisor_package",
+        )
+        chat_response["supervisor_state"]["agent_input_packages"][0]["payload"] = {}
+
+        with patch("chatbot.views.submit_message", return_value=chat_response):
+            accepted = client.post(
+                "/api/chat/messages/",
+                data={"session_id": session_id, "user_text": "client text"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(accepted.status_code, 202)
+        work_item = AgentWorkItem.objects.get(
+            job__job_id=accepted.json()["work_item"]["job_id"]
+        )
+        with patch("app.services.agent_node_service._run_sync_adapter") as run_adapter:
+            processed = process_agent_work_item(work_item.work_item_id)
+
+        run_adapter.assert_not_called()
+        self.assertEqual(processed["error_code"], "supervisor_handoff_invalid")
+        self.assertFalse(
+            AgentInvocation.objects.filter(
+                job=work_item.job,
+                node_code="__paid_analysis_phase__",
+            ).exists()
         )
 
     def test_enqueue_uses_the_sessions_authoritative_case_binding(self) -> None:
@@ -991,6 +1425,59 @@ class AnalysisJobQueueTests(TestCase):
         self.assertEqual(work_item.status, AgentWorkItemStatus.RUNNING)
         self.assertEqual(work_item.attempt_no, 2)
         persist.assert_not_called()
+
+    def test_completed_job_surfaces_pending_questions_from_input_required_agent_output(self) -> None:
+        """A node that finishes with status=input_required (e.g. appeal_decision_flow
+        asking for the missing user_appeal_reason) must reach the user as a pending
+        question on the completed job. Today nothing recomputes pending_questions from
+        the finished node_execution -- _completed_job_payload_for_work_item only carries
+        forward the pre-execution chat_response, which is always empty at queue time.
+        """
+        payload, job_payload = _queue_payload(
+            owner_id="usr_worker_input_required",
+            session_id="ses_worker_input_required",
+            job_id="job_worker_input_required",
+        )
+        queued = enqueue_analysis_job_work(payload, job_payload)
+        node_execution = {
+            "job_id": queued["job_id"],
+            "executions": [
+                {
+                    "node_code": "appeal_decision_flow",
+                    "agent_output": {
+                        "node_code": "appeal_decision_flow",
+                        "status": "partial",
+                        "execution_status": "input_required",
+                        "summary": "이의신청 사유 정보 필요",
+                        "structured_result": {
+                            "judgment_status": "input_required",
+                            "missing_fields": ["user_appeal_reason"],
+                        },
+                        "evidence": [],
+                        "next_actions": [
+                            "Supervisor가 사용자에게 이의신청 사유 질문 후 재호출"
+                        ],
+                        "limitations": [],
+                    },
+                }
+            ],
+            "status_counts": {"partial": 1},
+            "completed_node_codes": ["appeal_decision_flow"],
+        }
+
+        with patch(
+            "chatbot.repositories._execute_agent_work_item_plan",
+            return_value=node_execution,
+        ):
+            result = process_agent_work_item(queued["work_item_id"])
+
+        self.assertEqual(result["status"], AgentWorkItemStatus.SUCCESS)
+        job = AnalysisJob.objects.get(job_id=queued["job_id"])
+        pending_questions = job.metadata.get("pending_questions") or []
+        self.assertTrue(
+            any(q.get("field") == "user_appeal_reason" for q in pending_questions),
+            f"expected a pending question for user_appeal_reason, got {pending_questions!r}",
+        )
 
     def test_worker_failure_persists_only_stable_error_metadata(self) -> None:
         payload, job_payload = _queue_payload(

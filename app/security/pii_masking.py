@@ -95,7 +95,7 @@ _RESIDENT_ID_PATTERN = re.compile(r"\b\d{6}\s*-\s*[1-8]\d{6}\b")
 _DRIVER_LICENSE_PATTERN = re.compile(
     r"\b(?:[가-힣]{2}\s*)?\d{2}\s*[- ]?\s*\d{2}\s*[- ]?\s*\d{6}\s*[- ]?\s*\d{2}\b"
 )
-_MOBILE_PHONE_PATTERN = re.compile(r"\b01[016789]\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}\b")
+_MOBILE_PHONE_PATTERN = re.compile(r"(?<!\d)01[016789]\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}(?!\d)")
 _LANDLINE_PHONE_PATTERN = re.compile(r"\b0\d{1,2}\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}\b")
 _VEHICLE_NUMBER_PATTERN = re.compile(
     r"\b(?:[가-힣]{2}\s*)?\d{2,3}\s*[가-힣]\s*\d{3,4}\b"
@@ -119,6 +119,17 @@ _SECRET_PATTERNS = (
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
 )
+
+TEXT_CATEGORY_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
+    "secret": _SECRET_PATTERNS,
+    "resident_id": (_RESIDENT_ID_PATTERN,),
+    "driver_license": (_DRIVER_LICENSE_PATTERN,),
+    "phone": (_MOBILE_PHONE_PATTERN, _LANDLINE_PHONE_PATTERN),
+    "vehicle_number": (_VEHICLE_NUMBER_PATTERN, _DIPLOMATIC_VEHICLE_PATTERN),
+    "email": (_EMAIL_PATTERN,),
+    "name": (_NAME_LABEL_PATTERN,),
+    "address": (_ADDRESS_LABEL_PATTERN,),
+}
 
 
 def mask_name(value: str | None) -> str | None:
@@ -167,6 +178,21 @@ def mask_text(value: str) -> str:
         masked,
     )
     return masked
+
+
+def detect_text_categories(value: str) -> dict[str, int]:
+    """Return only sensitivity category counts, never matched source values."""
+
+    counts: dict[str, int] = {}
+    for category, patterns in TEXT_CATEGORY_PATTERNS.items():
+        matched_spans = {
+            match.span()
+            for pattern in patterns
+            for match in pattern.finditer(value)
+        }
+        if matched_spans:
+            counts[category] = len(matched_spans)
+    return counts
 
 
 def sanitize_pii(value: Any) -> Any:

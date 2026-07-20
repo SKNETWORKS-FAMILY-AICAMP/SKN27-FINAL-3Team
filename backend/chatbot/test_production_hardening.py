@@ -17,8 +17,62 @@ from chatbot.views import (
     agent_nodes,
     analysis_jobs,
     analysis_result,
+    run_agent_plan,
     submit_chat_message,
 )
+
+
+def _ready_supervisor_state() -> dict:
+    slot_state = {
+        "contract_version": "slot_filling_state.v1",
+        "slots": {"query": {"value": "server query", "status": "filled"}},
+    }
+    return {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "agent_execution_ready",
+        "slot_state": slot_state,
+        "agent_input_packages": [
+            {
+                "schema_version": "agent_input_schema.v1",
+                "node_code": "law_ground_search",
+                "status": "ready",
+                "required_inputs": ["user_text"],
+                "payload": {
+                    "user_text": "server approved question",
+                    "attachments": [],
+                    "slot_state": slot_state,
+                },
+            }
+        ],
+    }
+
+
+def _queued_supervisor_chat_response() -> dict:
+    return {
+        "contract_version": "chat_message_accepted.v2",
+        "session_id": "ses_server",
+        "message_id": "msg_server",
+        "routing_intent": "traffic_law_search",
+        "status": "queued",
+        "progress": {"status": "queued", "active_node": "law_ground_search", "message": "Queued."},
+        "assistant_message": {"answer": "Queued.", "summary": "Queued."},
+        "analysis_plan": {
+            "plan_id": "plan_server",
+            "routing_intent": "traffic_law_search",
+            "steps": [
+                {
+                    "order": 1,
+                    "node_code": "law_ground_search",
+                    "status": "ready",
+                    "depends_on": [],
+                }
+            ],
+        },
+        "supervisor_state": _ready_supervisor_state(),
+        "attachments": [],
+        "blocked_attachments": [],
+        "limitations": [],
+    }
 
 
 class ProductionApiContractTests(SimpleTestCase):
@@ -102,6 +156,7 @@ class ProductionApiContractTests(SimpleTestCase):
                 "law_ground_search",
                 "objection_report_generation",
                 "text_ml_case_search",
+                "traffic_accident_confirmation_ocr",
             },
         )
         self.assertNotIn("vision_media_analysis", str(body))
@@ -172,8 +227,125 @@ class ProductionApiContractTests(SimpleTestCase):
         queued_payload = enqueue.call_args.args[1]
         self.assertEqual(
             [step["node_code"] for step in queued_payload["analysis_plan"]["steps"]],
-            ["law_ground_search"],
+            [
+                "input_context_validation",
+                "law_ground_search",
+                "agent_result_validation",
+                "final_response_merge",
+            ],
         )
+
+    def test_chat_queue_payload_discards_client_execution_controls(self) -> None:
+        queue_result = {"job_id": "job_1", "work_item_id": "work_1", "work_item_status": "queued"}
+        request = RequestFactory().post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_client",
+                "user_text": "check this law",
+                "agent_input": {"node_code": "objection_report_generation"},
+                "node_code": "objection_report_generation",
+                "slot_state": {"client": True},
+                "upstream_results": {"law_ground_search": {"status": "success"}},
+                "execution_status": "blocked",
+                "mock_status": "failed",
+                "context": {
+                    "notice_image": "unscanned-client-image",
+                    "notice_mime_type": "image/png",
+                    "vision_evidence": [{"source": "client"}],
+                    "case_evidence": {"recipient": "client"},
+                    "fine_type": "client-controlled",
+                    "supervisor_handoff": {"client": True},
+                },
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None),
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch("chatbot.views.record_usage_event", return_value={"allowed": True}),
+            patch("chatbot.views.submit_message", return_value=_queued_supervisor_chat_response()),
+            patch("chatbot.views.enqueue_analysis_job_work", return_value=queue_result) as enqueue,
+            patch("chatbot.views._record_history_safely"),
+        ):
+            response = submit_chat_message(request)
+
+        self.assertEqual(response.status_code, 202)
+        execution_payload = enqueue.call_args.args[0]
+        self.assertEqual(execution_payload["session_id"], "ses_server")
+        self.assertEqual(execution_payload["message_id"], "msg_server")
+        self.assertEqual(execution_payload["upstream_results"], {})
+        self.assertEqual(
+            execution_payload["context"]["supervisor_handoff"],
+            _ready_supervisor_state(),
+        )
+        self.assertEqual(
+            execution_payload["context"],
+            {"supervisor_handoff": _ready_supervisor_state()},
+        )
+        self.assertTrue(execution_payload["requires_supervisor_handoff"])
+        for field in ("agent_input", "node_code", "slot_state", "execution_status", "mock_status"):
+            self.assertNotIn(field, execution_payload)
+
+    def test_analysis_queue_payload_discards_client_execution_controls(self) -> None:
+        queue_result = {
+            "backend": "postgresql",
+            "status": "queued",
+            "execution_mode": "async_worker",
+            "job_id": "job_1",
+            "work_item_id": "work_1",
+            "work_item_status": "queued",
+        }
+        request = RequestFactory().post(
+            "/api/analysis/jobs/",
+            data={
+                "session_id": "ses_client",
+                "user_text": "check this law",
+                "agent_input": {"node_code": "objection_report_generation"},
+                "node_code": "objection_report_generation",
+                "slot_state": {"client": True},
+                "upstream_results": {"law_ground_search": {"status": "success"}},
+                "execution_status": "blocked",
+                "mock_status": "failed",
+                "context": {
+                    "notice_image": "unscanned-client-image",
+                    "notice_mime_type": "image/png",
+                    "vision_evidence": [{"source": "client"}],
+                    "case_evidence": {"recipient": "client"},
+                    "fine_type": "client-controlled",
+                    "supervisor_handoff": {"client": True},
+                },
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch("chatbot.views.record_usage_event", return_value={"allowed": True}),
+            patch("chatbot.views.submit_message", return_value=_queued_supervisor_chat_response()),
+            patch("chatbot.views.enqueue_analysis_job_work", return_value=queue_result) as enqueue,
+            patch("chatbot.views._record_history_safely"),
+        ):
+            response = analysis_jobs(request)
+
+        self.assertEqual(response.status_code, 202)
+        execution_payload = enqueue.call_args.args[0]
+        self.assertEqual(execution_payload["session_id"], "ses_server")
+        self.assertEqual(execution_payload["message_id"], "msg_server")
+        self.assertEqual(execution_payload["upstream_results"], {})
+        self.assertEqual(
+            execution_payload["context"]["supervisor_handoff"],
+            _ready_supervisor_state(),
+        )
+        self.assertEqual(
+            execution_payload["context"],
+            {"supervisor_handoff": _ready_supervisor_state()},
+        )
+        self.assertTrue(execution_payload["requires_supervisor_handoff"])
+        for field in ("agent_input", "node_code", "slot_state", "execution_status", "mock_status"):
+            self.assertNotIn(field, execution_payload)
 
     def test_supervisor_unavailable_chat_response_is_not_enqueued(self) -> None:
         blocked_response = {
@@ -272,6 +444,14 @@ class ProductionApiContractTests(SimpleTestCase):
             patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
             patch("chatbot.views.record_usage_event", return_value={"allowed": True}),
             patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch(
+                "chatbot.views.persist_chat_followup_state",
+                return_value={
+                    "session_id": "ses_need_more_input",
+                    "message_id": "msg_followup_saved",
+                    "followup_state_version": "chat_session_followup_state.v1",
+                },
+            ) as persist_followup,
         ):
             response = submit_chat_message(request)
 
@@ -283,6 +463,7 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertIsNone(body["reporting_payload"])
         self.assertEqual(body["report_links"], [])
         enqueue.assert_not_called()
+        persist_followup.assert_called_once()
 
     def test_scan_blocked_chat_message_does_not_consume_usage_quota(self) -> None:
         request = RequestFactory().post(
@@ -333,6 +514,171 @@ class ProductionApiContractTests(SimpleTestCase):
         submit_message.assert_not_called()
         record_usage.assert_not_called()
         enqueue.assert_not_called()
+
+    def test_analysis_job_rejects_blocked_input_before_reservation_or_usage(self) -> None:
+        blocked_credential = "sk-synthetic123456789"
+        request = RequestFactory().post(
+            "/api/analysis/jobs/",
+            data={
+                "session_id": "ses_privacy_rejected",
+                "job_id": "job_privacy_rejected",
+                "user_text": f"API key is {blocked_credential}",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.reserve_analysis_job_request") as reserve,
+            patch("chatbot.views.record_usage_event") as record_usage,
+            patch("chatbot.views.submit_message") as submit_message,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+        ):
+            response = analysis_jobs(request)
+
+        self.assertEqual(response.status_code, 400)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "chat_input_rejected")
+        self.assertEqual(body["error"]["required_action"], "remove_sensitive_input")
+        self.assertNotIn(blocked_credential, str(body))
+        reserve.assert_not_called()
+        record_usage.assert_not_called()
+        submit_message.assert_not_called()
+        enqueue.assert_not_called()
+
+    def test_chat_message_rejects_blocked_input_before_usage_or_queueing(self) -> None:
+        blocked_credential = "sk-synthetic123456789"
+        request = RequestFactory().post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_chat_privacy_rejected",
+                "user_text": f"API key is {blocked_credential}",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None),
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.record_usage_event", return_value={"allowed": True}) as record_usage,
+            patch("chatbot.views.submit_message", side_effect=AssertionError("planner must not run")) as submit,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+        ):
+            response = submit_chat_message(request)
+
+        self.assertEqual(response.status_code, 400)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "chat_input_rejected")
+        self.assertEqual(body["error"]["required_action"], "remove_sensitive_input")
+        self.assertNotIn(blocked_credential, str(body))
+        record_usage.assert_not_called()
+        submit.assert_not_called()
+        enqueue.assert_not_called()
+
+    def test_agent_plan_rejects_blocked_input_before_planning_or_execution(self) -> None:
+        blocked_credential = "sk-synthetic123456789"
+        request = RequestFactory().post(
+            "/api/agent-plan/",
+            data={
+                "session_id": "ses_agent_plan_privacy_rejected",
+                "user_text": f"API key is {blocked_credential}",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch("chatbot.views.submit_message", side_effect=AssertionError("planner must not run")) as submit,
+            patch("chatbot.views.execute_agent_plan") as execute,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch("chatbot.views.persist_analysis_job_execution") as persist,
+        ):
+            response = run_agent_plan(request)
+
+        self.assertEqual(response.status_code, 400)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "chat_input_rejected")
+        self.assertEqual(body["error"]["required_action"], "remove_sensitive_input")
+        self.assertNotIn(blocked_credential, str(body))
+        submit.assert_not_called()
+        execute.assert_not_called()
+        enqueue.assert_not_called()
+        persist.assert_not_called()
+
+    def test_agent_plan_returns_scope_guidance_without_execution(self) -> None:
+        request = RequestFactory().post(
+            "/api/agent-plan/",
+            data={
+                "session_id": "ses_scope_guidance",
+                "user_text": "차가 보행자와 충돌한 사고의 과실을 확정해 주세요.",
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch(
+                "chatbot.views.execute_agent_plan",
+                return_value={"executions": [], "status_counts": {}},
+            ) as execute,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch(
+                "chatbot.views.persist_analysis_job_execution",
+                return_value={"backend": "postgresql", "status": "saved"},
+            ) as persist,
+            patch("chatbot.views._record_agent_events_safely") as record_events,
+        ):
+            response = run_agent_plan(request)
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body["execution_mode"], "scope_guidance")
+        self.assertEqual(body["chat_response"]["status"], "scope_guidance")
+        self.assertEqual(body["analysis_plan"]["steps"], [])
+        execute.assert_not_called()
+        enqueue.assert_not_called()
+        persist.assert_not_called()
+        record_events.assert_not_called()
+
+    def test_agent_plan_rejects_out_of_scope_input_when_plan_is_supplied(self) -> None:
+        request = RequestFactory().post(
+            "/api/agent-plan/",
+            data={
+                "session_id": "ses_scope_prebuilt_plan",
+                "user_text": "차가 보행자와 충돌한 사고의 과실을 확정해 주세요.",
+                "analysis_plan": {
+                    "plan_id": "plan_scope_prebuilt",
+                    "routing_intent": "accident_initial_consultation",
+                    "steps": [{"order": 1, "node_code": "law_ground_search"}],
+                },
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views.apply_attachment_scan_gate", side_effect=lambda payload: payload),
+            patch(
+                "chatbot.views.execute_agent_plan",
+                return_value={"executions": [], "status_counts": {}},
+            ) as execute,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+            patch(
+                "chatbot.views.persist_analysis_job_execution",
+                return_value={"backend": "postgresql", "status": "saved"},
+            ) as persist,
+            patch("chatbot.views._record_agent_events_safely") as record_events,
+        ):
+            response = run_agent_plan(request)
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body["execution_mode"], "scope_guidance")
+        self.assertEqual(body["chat_response"]["status"], "scope_guidance")
+        self.assertEqual(body["analysis_plan"]["steps"], [])
+        execute.assert_not_called()
+        enqueue.assert_not_called()
+        persist.assert_not_called()
+        record_events.assert_not_called()
 
     def test_analysis_job_post_queues_plan_without_inline_agent_execution(self) -> None:
         chat_response = {

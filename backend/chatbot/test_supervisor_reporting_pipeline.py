@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from chatbot import repositories as repository_module
 from django.db import connection
@@ -24,6 +26,9 @@ from chatbot.models import (
     ConfirmedFactVersion,
     Report,
     ReportStatus,
+    RetrievalEvent,
+    UploadedFile,
+    UploadedFileStatus,
 )
 from chatbot.repositories import (
     authorize_report_download_metadata,
@@ -117,7 +122,14 @@ def _agent_output(node_code: str, *, status: str = "success") -> dict:
                     "summary": "persisted legal ground",
                     "source_reference": "law:1",
                 }
-            ]
+            ],
+            "retrieval": {
+                "contract_version": "law_retrieval.v1",
+                "status": "ready",
+                "backend": "django_rag_tables",
+                "attempted_backends": ["postgres_lexical", "django_rag_tables"],
+            },
+            "retrieval_quality": "django_rag_tables",
         },
         "text_ml_case_search": {
             "query_text": "confirmed intersection collision facts",
@@ -141,6 +153,7 @@ def _agent_output(node_code: str, *, status: str = "success") -> dict:
         },
         "objection_report_generation": {
             "document_type": "objection_form",
+            "document_variant": "fine_notice",
             "document_title": "Objection draft",
             "recipient_agency": "Persisted Traffic Agency",
             "case_summary": "Canonical persisted report summary",
@@ -149,7 +162,21 @@ def _agent_output(node_code: str, *, status: str = "success") -> dict:
             "legal_grounds": [{"source_reference": "law:1"}],
             "required_attachments": ["notice"],
             "form_sections": [{"title": "Facts", "body": "Persisted facts"}],
-            "report_actions": [],
+            "form_data": {"recipient": "Persisted Traffic Agency"},
+            "document_readiness": {"ready_for_docx": True, "missing_field_details": []},
+            "report_actions": [
+                {
+                    "type": "download_objection",
+                    "label": "Objection DOCX download",
+                    "document_type": "objection_form",
+                    "document_format": "docx",
+                }
+            ],
+            "appeal_decision": {"judgment_status": "success"},
+            "appeal_gate": {"blocked": False, "reason": ""},
+            "petition_purpose": "Review the disposition",
+            "petition_reason": "Persisted reason",
+            "drafting_source": "rule_based_fallback",
             "missing_fields": [],
             "readiness": {"ready_for_download": status == "success"},
             "oauth": {"access_token": "report-token-must-not-persist"},
@@ -239,6 +266,30 @@ def _reporting_handoff_from_payload(payload: dict) -> dict | None:
     return handoff if isinstance(handoff, dict) else None
 
 
+def _ready_case_evidence_source(
+    *,
+    case: Case,
+    owner_id: str,
+    session: ChatSession,
+    suffix: str,
+) -> list[dict[str, str]]:
+    attachment_id = f"att_reporting_evidence_{suffix}"
+    UploadedFile.objects.create(
+        attachment_id=attachment_id,
+        owner_id=owner_id,
+        session=session,
+        case=case,
+        purpose="supporting_evidence",
+        file_type="pdf",
+        original_filename=f"{attachment_id}.pdf",
+        content_type="application/pdf",
+        storage_uri=f"mock://reporting-evidence/{attachment_id}",
+        status=UploadedFileStatus.READY.value,
+        scan_status="passed",
+    )
+    return [{"source_type": "official_document", "source_ref": attachment_id}]
+
+
 class SupervisorReportingPipelineTests(TestCase):
     def test_confirmed_case_worker_uses_real_reporting_adapter_and_creates_report(self) -> None:
         from app.services.agent_node_service import execute_agent_plan as real_execute_plan
@@ -250,7 +301,7 @@ class SupervisorReportingPipelineTests(TestCase):
             title="Confirmed case Reporting",
             current_fact_version=1,
         )
-        ChatSession.objects.create(
+        session = ChatSession.objects.create(
             session_id="ses_reporting_confirmed_case",
             owner_id=owner_id,
             case=case,
@@ -267,6 +318,12 @@ class SupervisorReportingPipelineTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
+            sources=_ready_case_evidence_source(
+                case=case,
+                owner_id=owner_id,
+                session=session,
+                suffix="confirmed_case",
+            ),
             conflicts=[],
             confirmed_by=owner_id,
             confirmed_at=timezone.now(),
@@ -320,7 +377,7 @@ class SupervisorReportingPipelineTests(TestCase):
             owner_id=owner_id,
             title="Superseded case analysis",
         )
-        ChatSession.objects.create(
+        session = ChatSession.objects.create(
             session_id="ses_reporting_superseded_case",
             owner_id=owner_id,
             case=case,
@@ -333,6 +390,12 @@ class SupervisorReportingPipelineTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
+            "sources": _ready_case_evidence_source(
+                case=case,
+                owner_id=owner_id,
+                session=session,
+                suffix="queued_superseded",
+            ),
             "conflicts": [],
         }
         first_fact = confirm_case_facts(
@@ -386,7 +449,7 @@ class SupervisorReportingPipelineTests(TestCase):
             owner_id=owner_id,
             title="Predispatch superseded case analysis",
         )
-        ChatSession.objects.create(
+        session = ChatSession.objects.create(
             session_id="ses_reporting_predispatch_superseded",
             owner_id=owner_id,
             case=case,
@@ -399,6 +462,12 @@ class SupervisorReportingPipelineTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
+            "sources": _ready_case_evidence_source(
+                case=case,
+                owner_id=owner_id,
+                session=session,
+                suffix="predispatch_superseded",
+            ),
             "conflicts": [],
         }
         first_fact = confirm_case_facts(
@@ -457,7 +526,7 @@ class SupervisorReportingPipelineTests(TestCase):
             owner_id=owner_id,
             title="Mid-run superseded case analysis",
         )
-        ChatSession.objects.create(
+        session = ChatSession.objects.create(
             session_id="ses_reporting_midrun_superseded",
             owner_id=owner_id,
             case=case,
@@ -470,6 +539,12 @@ class SupervisorReportingPipelineTests(TestCase):
                 "signal_priority": "ego_green",
                 "collision_location": "front_left",
             },
+            "sources": _ready_case_evidence_source(
+                case=case,
+                owner_id=owner_id,
+                session=session,
+                suffix="midrun_superseded",
+            ),
             "conflicts": [],
         }
         first_fact = confirm_case_facts(
@@ -707,6 +782,42 @@ class SupervisorReportingPipelineTests(TestCase):
             job.metadata["supervisor_reporting_handoff"]["handoff_id"],
         )
         self.assertEqual(job_detail["latest_report_id"], report.report_id)
+        law_result = AgentResult.objects.get(job=job, node_code="law_ground_search")
+        self.assertEqual(
+            law_result.structured_result["retrieval"]["attempted_backends"],
+            ["postgres_lexical", "django_rag_tables"],
+        )
+        law_api_result = next(
+            item
+            for item in job_detail["agent_results"]
+            if item["node_code"] == "law_ground_search"
+        )
+        self.assertEqual(
+            law_api_result["structured_result"]["retrieval"],
+            law_result.structured_result["retrieval"],
+        )
+        law_supervisor_result = next(
+            item
+            for item in job_detail["supervisor_execution"]["node_results"]
+            if item["node_code"] == "law_ground_search"
+        )
+        self.assertEqual(
+            law_supervisor_result["structured_result"]["matched_laws"][0][
+                "source_reference"
+            ],
+            "law:1",
+        )
+        retrieval_event = RetrievalEvent.objects.get(
+            invocation__job=job,
+            invocation__node_code="law_ground_search",
+        )
+        self.assertEqual(retrieval_event.source_refs, ["law:1"])
+        self.assertEqual(retrieval_event.metadata["retrieval_status"], "ready")
+        self.assertEqual(retrieval_event.metadata["retrieval_backend"], "django_rag_tables")
+        self.assertEqual(
+            retrieval_event.metadata["attempted_backends"],
+            ["postgres_lexical", "django_rag_tables"],
+        )
         self.assertEqual(job_detail["report_links"][0]["report_id"], report.report_id)
         report_detail = get_report_record_detail(report.report_id)
         self.assertEqual(report_detail["content"]["contract_version"], "analysis_report.v1")
@@ -714,11 +825,33 @@ class SupervisorReportingPipelineTests(TestCase):
             report_detail["content"]["source"]["reporting_result_id"],
             reporting_result.result_id,
         )
+        self.assertEqual(
+            report_detail["content"]["reporting_payload"].get("document_variant"),
+            "fine_notice",
+        )
+        self.assertEqual(
+            report_detail["content"]["reporting_payload"]["appeal_gate"],
+            {"blocked": False, "reason": ""},
+        )
+        self.assertEqual(
+            report_detail["content"]["reporting_payload"]["report_actions"][0]["document_format"],
+            "docx",
+        )
         download = get_report_download_metadata(report.report_id)
         self.assertEqual(download["storage_backend"], "database")
         self.assertEqual(download["object_storage"]["status"], "generated_on_demand")
+        self.assertEqual(download["object_storage"]["filename"], f"{report.report_id}.docx")
+        self.assertEqual(
+            download["object_storage"]["content_type"],
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
         self.assertEqual(download["storage_uri"], "")
-        self.assertTrue(download["body"].startswith(b"%PDF"))
+        self.assertEqual(
+            download["content_type"],
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        self.assertTrue(download["filename"].endswith(".docx"))
+        self.assertTrue(download["body"].startswith(b"PK"))
         self.assertNotIn("mock://", repr(download))
         from chatbot.views import download_report, report_detail
 
@@ -742,6 +875,73 @@ class SupervisorReportingPipelineTests(TestCase):
         self.assertEqual(detail_body["execution_mode"], "async_worker")
         self.assertEqual(download_response["X-API-Surface"], "canonical")
         self.assertEqual(download_response["X-Execution-Mode"], "async_worker")
+        self.assertTrue(
+            download_response["Content-Type"].startswith(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+        )
+
+    def test_download_metadata_renders_docx_for_fine_traffic_and_general_variants(self) -> None:
+        variants = (
+            (
+                "rep_docx_fine",
+                "fine_notice_objection",
+                "objection_form",
+                {
+                    "document_variant": "fine_notice",
+                    "form_data": {"recipient": "강남구청", "applicant_name": "홍길동"},
+                    "petition_purpose": "처분의 재검토를 요청합니다.",
+                    "petition_reason": "사실관계 확인이 필요합니다.",
+                },
+                "과태료 처분에 대한 이의신청서",
+            ),
+            (
+                "rep_docx_traffic",
+                "fault_ratio_analysis",
+                "objection_form",
+                {
+                    "document_variant": "traffic_accident",
+                    "form_data": {
+                        "applicant_name": "김운전자",
+                        "recipient": "서초경찰서",
+                        "objection_points": "블랙박스 영상 재검토",
+                    },
+                },
+                "블랙박스 영상 재검토",
+            ),
+            (
+                "rep_docx_general",
+                "fine_notice_objection",
+                "report",
+                {
+                    "sections": [{"title": "핵심 분석", "items": ["분석 리포트 본문"]}],
+                },
+                "분석 리포트 본문",
+            ),
+        )
+
+        for report_id, report_type, document_type, reporting_payload, expected_text in variants:
+            report = Report.objects.create(
+                report_id=report_id,
+                owner_id="usr_docx_variants",
+                report_type=report_type,
+                status=ReportStatus.READY,
+                title="DOCX variant report",
+                content={"reporting_payload": reporting_payload},
+            )
+
+            download = get_report_download_metadata(report.report_id, document_type=document_type)
+
+            self.assertIsNotNone(download)
+            self.assertEqual(
+                download["content_type"],
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+            self.assertTrue(download["filename"].endswith(".docx"))
+            self.assertTrue(download["body"].startswith(b"PK"))
+            with ZipFile(BytesIO(download["body"])) as docx_archive:
+                document_xml = docx_archive.read("word/document.xml").decode("utf-8")
+            self.assertIn(expected_text, document_xml)
 
     def test_partial_required_analysis_does_not_dispatch_reporting(self) -> None:
         queued, _payload = _queued_work(suffix="partial")
@@ -1625,6 +1825,33 @@ class SupervisorReportingPipelineTests(TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertIn(b'"code": "report_not_ready"', response.content)
+
+    def test_download_blocks_denied_not_applicable_and_deadline_passed_appeals(self) -> None:
+        from chatbot.views import download_report
+
+        decisions = (
+            {"judgment_status": "denied"},
+            {"judgment_status": "not_applicable"},
+            {"judgment_status": "success", "deadline_passed": True},
+        )
+        identity = {"auth_context": {"user_id": "usr_appeal_gate", "subject_type": "user"}}
+
+        for index, appeal_decision in enumerate(decisions, start=1):
+            report = Report.objects.create(
+                report_id=f"rep_appeal_gate_{index}",
+                owner_id="usr_appeal_gate",
+                status=ReportStatus.READY,
+                title="Appeal gate report",
+                content={"reporting_payload": {"appeal_decision": appeal_decision}},
+                metadata={"source": "analysis_worker_reporting"},
+            )
+            request = RequestFactory().get(f"/api/reports/{report.report_id}/download/")
+            with patch("chatbot.views._request_access_payload", return_value=identity):
+                response = download_report(request, report.report_id)
+
+            self.assertEqual(response.status_code, 409)
+            self.assertIn(b'"code": "report_not_ready"', response.content)
+            self.assertIn(b'"reason": "appeal_gate_blocked"', response.content)
 
     def test_unauthorized_report_request_is_rejected_before_pdf_rendering(self) -> None:
         session = ChatSession.objects.create(

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.security.chat_input_privacy import protect_chat_input_payload
 from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.persona_catalog_service import (
     DEFAULT_PERSONA_ID,
@@ -285,6 +286,7 @@ def create_session(user_id: str | None = None) -> dict[str, Any]:
 
 
 def submit_message(payload: dict[str, Any]) -> dict[str, Any]:
+    payload = protect_chat_input_payload(payload)
     payload = resolve_attachment_references(payload)
     persona_run = _persona_run_for_payload(payload)
     scenario = payload.get("mock_scenario") or (

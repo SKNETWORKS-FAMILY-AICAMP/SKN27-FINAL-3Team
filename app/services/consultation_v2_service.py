@@ -36,7 +36,7 @@ def build_consultation_state_v2(
     normalized_facts = _dict(facts)
     normalized_sources = _dict_list(sources)
     normalized_conflicts = _dict_list(conflicts)
-    high_risk = _is_high_risk(user_text)
+    high_risk = is_high_risk_consultation(user_text)
     missing_fields = [
         field
         for field, _question in CORE_FACT_QUESTIONS
@@ -132,7 +132,7 @@ def _fact_cards(
     return cards
 
 
-def _is_high_risk(user_text: str) -> bool:
+def is_high_risk_consultation(user_text: str) -> bool:
     normalized = _text(user_text).lower()
     return any(marker in normalized for marker in HIGH_RISK_MARKERS)
 

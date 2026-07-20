@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -56,14 +57,19 @@ def test_frontend_uses_canonical_capability_and_async_result_contracts() -> None
 def test_chat_report_ready_notice_uses_a_locally_declared_gated_payload() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     chat_start = shell.index("function ChatScreenV2(")
-    chat_end = shell.index("function AnalysisProgressPanel", chat_start)
+    next_component = re.search(r"\nfunction [A-Za-z0-9_]+\(", shell[chat_start + 1 :])
+    assert next_component is not None
+    chat_end = chat_start + 1 + next_component.start()
     chat_screen = shell[chat_start:chat_end]
 
     assert (
         "const visibleReportingPayload = "
         "isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;"
     ) in chat_screen
-    assert "{visibleReportingPayload && (" in chat_screen
+    assert re.search(
+        r"\{(?:canGenerateReport && )?visibleReportingPayload && \(\s*<ReportReadyNotice",
+        chat_screen,
+    )
 
 
 def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_it() -> None:
@@ -103,6 +109,38 @@ def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_i
     assert "setCurrentReport(null);" in shell[submit_start:submit_end]
 
 
+def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    action_start = shell.index("async function runCurrentReportAction")
+    action_end = shell.index("async function triggerReportDownload", action_start)
+    report_action = shell[action_start:action_end]
+
+    assert "setPendingReportScreenDownload" not in shell
+    assert "openReportScreenPrintWindow" not in shell
+    assert "PDF" not in report_action
+    assert 'documentType = action === "download_objection" ? "objection_form" : "report"' in report_action
+    assert "const appealGate = activeReportingPayload?.appeal_gate || null;" in report_action
+    assert "if (appealGate?.blocked === true)" in report_action
+    assert "const actionDefinition =" in report_action
+    assert "const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;" in shell
+    assert "const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;" in shell
+    assert "disabled={appealDownloadBlocked}" in shell
+    assert "DOCX" in shell
+    assert "화면 PDF 저장" not in shell
+    assert "이의신청서 PDF" not in shell
+
+
+def test_download_report_never_returns_pdf_for_the_legacy_non_api_path() -> None:
+    views = read_text(ROOT / "backend" / "chatbot" / "views.py")
+    function_start = views.index("def download_report(")
+    function_end = views.index("def _report_auth_error_response", function_start)
+    download_view = views[function_start:function_end]
+
+    assert "application/pdf" not in download_view
+    assert "render_report_docx(" in download_view
+    assert "REPORT_DOCX_CONTENT_TYPE" in download_view
+
+
 def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 
@@ -110,8 +148,10 @@ def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> No
         'function assistantMessageText(value, fallback = "")',
         'typeof value === "string"',
         "value.answer || value.summary",
-        "const assistantAnswer = assistantMessageText(analysisResponse?.assistant_message);",
-        'content: assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),',
+        "analysisResponse?.assistant_message?.core_answer ||",
+        "assistantMessageText(analysisResponse?.assistant_message);",
+        "workerResult?.assistant_message?.core_answer ||",
+        'assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),',
         "const assistantMessage = assistantMessageText(",
         "assistant_message: assistantMessageText(",
     ):
@@ -140,7 +180,47 @@ def test_repeated_analysis_cards_use_unique_react_keys() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 
     assert "function analysisCardKey(card, index)" in shell
-    assert shell.count("key={analysisCardKey(card, index)}") == 4
+    card_map_pattern = re.compile(
+        r"\{(?:analysisCards(?:\.slice\([^)]*\))?|supportCards)"
+        r"\.map\(\(card, index\) => \("
+    )
+    keyed_card_map_pattern = re.compile(
+        r"\{(?:analysisCards(?:\.slice\([^)]*\))?|supportCards)"
+        r"\.map\(\(card, index\) => \(\s*<[^>]+"
+        r"key=\{analysisCardKey\(card, index\)\}"
+    )
+
+    card_maps = card_map_pattern.findall(shell)
+    keyed_card_maps = keyed_card_map_pattern.findall(shell)
+    assert card_maps
+    assert len(keyed_card_maps) == len(card_maps)
+
+
+def test_frontend_renders_canonical_law_ground_results_and_retrieval_status() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    styles = read_text(ROOT / "app" / "web" / "styles.css")
+
+    for token in (
+        "function LawGroundInsightPanel",
+        'node?.node_code !== "law_ground_search"',
+        "structuredResult.matched_laws",
+        "item.source_reference",
+        "retrieval.backend",
+        "retrieval.status",
+        "retrieval.attempted_backends",
+    ):
+        assert token in shell
+    assert shell.count("<LawGroundInsightPanel") == 2
+    for class_name in (
+        "agent-insight-panel",
+        "agent-insight-head",
+        "agent-insight-grid",
+        "agent-insight-section",
+    ):
+        assert class_name in shell
+        assert f".{class_name}" in styles
+    assert "fault-ratio-insight-" not in shell
+    assert "fault-ratio-insight-" not in styles
 
 
 def test_deferred_vision_and_aws_ops_are_not_runtime_modules() -> None:

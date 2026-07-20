@@ -282,6 +282,8 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "merit_judgment_failed": state.get("merit_judgment_failed"),
         "merit_relief_type":     state.get("merit_relief_type"),
         "relief_type_judgment_failed": state.get("relief_type_judgment_failed"),
+        "legal_evidence_status": state.get("legal_evidence_status"),
+        "legal_evidence_reason": state.get("legal_evidence_reason"),
         "risk_flag":             state.get("risk_flag"),
         "risk_confidence":       state.get("risk_confidence"),
         "risk_trigger_category": state.get("risk_trigger_category"),
@@ -290,8 +292,6 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "deadline_passed":       state.get("deadline_passed"),
         "law_code_verified":     state.get("law_code_verified"),
         "reason_quality_insufficient": state.get("reason_quality_insufficient"),
-        "legal_evidence_status": state.get("legal_evidence_status"),
-        "legal_evidence_reason": state.get("legal_evidence_reason"),
         "schema_fields_unrecognized": _unrecognized_schema_fields(state),
         "guide":                 guide,
     }
@@ -329,7 +329,7 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
         # 상태 — merit_judgment_failed와 별개 원인이므로 별도 재호출 안내를 남긴다.
         next_actions.append("MG(relief_type) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
     if state.get("legal_evidence_status") == "unavailable":
-        next_actions.append("필수 법령 근거를 확인한 뒤 MG(merit) 판정을 재시도")
+        next_actions.append("필수 법령 근거 조회가 미완료 — 법령DB 복구·검증 후 다시 판정 필요")
     if _unrecognized_schema_fields(state):
         # fine_type·notice_stage가 알려진 값 밖이면 판정은 그대로(기본 분기로) 진행했지만,
         # Supervisor가 OCR 결과를 재확인하도록 명시적으로 알려준다.
@@ -347,10 +347,9 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
 
     env = make_envelope(judgment_status, structured, missing_fields, next_actions, summary)
     if state.get("legal_evidence_status") == "unavailable":
+        reason = state.get("legal_evidence_reason") or "required_legal_evidence_unavailable"
         env["status"] = "partial"
-        env["limitations"] = [
-            str(state.get("legal_evidence_reason") or "legal_provision_unavailable")
-        ]
+        env["limitations"] = [reason]
 
     return {
         "guide":         guide,

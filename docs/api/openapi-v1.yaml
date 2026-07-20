@@ -269,6 +269,871 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/StartCaseAnalysisRequest'
+  /api/auth/guest-session/:
+    post:
+      tags:
+      - Auth
+      summary: Issue or refresh a guest identity
+      operationId: createGuestSession
+      security: []
+      x-contract-status: shadow
+      x-django-route-name: auth-guest-session
+      x-django-view: guest_session
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestSessionResponse'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestSessionRequest'
+  /api/auth/google/code/:
+    post:
+      tags:
+      - Auth
+      summary: Exchange a one-time Google authorization code for an app Bearer token
+      operationId: exchangeGoogleAuthorizationCode
+      security: []
+      x-contract-status: shadow
+      x-django-route-name: auth-google-code
+      x-django-view: auth_google_code
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoogleAuthorizationCodeResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - token_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - forbidden
+        '503':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - provider_unavailable
+        '429':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitErrorResponse'
+          x-error-codes:
+          - rate_limit_exceeded
+      parameters:
+      - name: Origin
+        in: header
+        required: true
+        description: Exact frontend origin configured for Google code exchange.
+        schema:
+          type: string
+          format: uri
+      - name: X-Requested-With
+        in: header
+        required: true
+        description: Browser request marker required before Google provider exchange.
+        schema:
+          type: string
+          enum:
+          - XmlHttpRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleAuthorizationCodeRequest'
+  /api/auth/refresh/:
+    post:
+      tags:
+      - Auth
+      summary: Rotate a valid app Bearer token
+      operationId: refreshAuthToken
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: auth-refresh
+      x-django-view: auth_refresh
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokenRefreshResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthTokenRefreshRequest'
+  /api/auth/logout/:
+    post:
+      tags:
+      - Auth
+      summary: Revoke the current auth session and clear client auth state
+      operationId: logoutAuthSession
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: auth-logout
+      x-django-view: auth_logout
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthLogoutResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLogoutRequest'
+  /api/auth/me/:
+    get:
+      tags:
+      - Auth
+      summary: Inspect current anonymous, guest, or authenticated subject
+      operationId: getCurrentAuthSubject
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: auth-me
+      x-django-view: auth_me
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSubjectResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - token_invalid
+          - token_expired
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      - name: guest_id
+        in: query
+        required: false
+        description: Optional query fallback for the guest identity.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session binding identifier.
+        schema:
+          type: string
+  /api/files/:
+    get:
+      tags:
+      - Files
+      summary: List canonical file attachments visible to the current subject
+      operationId: listFileAttachments
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-files
+      x-django-view: attachments
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachmentListResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileGuestSessionErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileObjectAccessErrorResponse'
+          x-error-codes:
+          - object_access_denied
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to scope file listing.
+        schema:
+          type: string
+    post:
+      tags:
+      - Files
+      summary: Upload or register a file attachment through the quarantine boundary
+      operationId: uploadFileAttachment
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-files
+      x-django-view: attachments
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachmentResponse'
+        '400':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadValidationErrorResponse'
+          x-error-codes:
+          - session_id_required
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileGuestSessionErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileObjectAccessErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '413':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadTooLargeErrorResponse'
+          x-error-codes:
+          - file_too_large
+        '429':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileRateLimitErrorResponse'
+          x-error-codes:
+          - rate_limit_exceeded
+        '503':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadStorageErrorResponse'
+          x-error-codes:
+          - upload_storage_unavailable
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FileUploadRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FileUploadRequest'
+  /api/files/{attachment_id}/:
+    get:
+      tags:
+      - Files
+      summary: Read one canonical file attachment after owner authorization
+      operationId: getFileAttachment
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-file-detail
+      x-django-view: attachment_detail
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachmentDetailResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileGuestSessionErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileObjectAccessErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileAttachmentNotFoundErrorResponse'
+          x-error-codes:
+          - attachment_not_found
+      parameters:
+      - name: attachment_id
+        in: path
+        required: true
+        description: Canonical uploaded-file identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to scope file listing.
+        schema:
+          type: string
+  /api/analysis/jobs/:
+    get:
+      tags:
+      - Analysis
+      summary: List analysis jobs visible to the current subject
+      operationId: listAnalysisJobs
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-analysis-jobs
+      x-django-view: analysis_jobs
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobListResponse'
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - object_access_denied
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to scope analysis job listing.
+        schema:
+          type: string
+    post:
+      tags:
+      - Analysis
+      summary: Queue an owner-scoped Supervisor analysis plan for asynchronous execution
+      operationId: queueAnalysisJob
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-analysis-jobs
+      x-django-view: analysis_jobs
+      responses:
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobAcceptedResponse'
+        '400':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_job_session_required
+          - chat_input_rejected
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '409':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_plan_not_executable
+          - attachment_scan_blocked
+          - analysis_job_id_conflict
+          - analysis_job_reservation_pending
+        '429':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - rate_limit_exceeded
+        '503':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_job_unavailable
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalysisJobRequest'
+  /api/analysis/jobs/{job_id}/:
+    get:
+      tags:
+      - Analysis
+      summary: Read one asynchronous analysis job after owner authorization
+      operationId: getAnalysisJob
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-analysis-job-detail
+      x-django-view: analysis_job_detail
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobDetailResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_job_not_found
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        description: Canonical asynchronous analysis job identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+  /api/analysis/results/{job_id}/:
+    get:
+      tags:
+      - Analysis
+      summary: Read a completed result or pending state for an authorized analysis job
+      operationId: getAnalysisResult
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-analysis-result
+      x-django-view: analysis_result
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResultResponse'
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResultResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - analysis_result_not_found
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        description: Canonical asynchronous analysis job identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header when no Bearer token is supplied.
+        schema:
+          type: string
+  /api/reports/:
+    get:
+      tags:
+      - Reports
+      summary: List reports owned by the authenticated user
+      operationId: listReports
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-report-action
+      x-django-view: report_action
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportListResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - login_required
+      parameters:
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header evaluated before login enforcement. It can return
+          guest_session_invalid for expired or inactive guest sessions but does not authorize report reads.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to filter the report collection.
+        schema:
+          type: string
+  /api/reports/{report_id}/:
+    get:
+      tags:
+      - Reports
+      summary: Read one report owned by the authenticated user
+      operationId: getReportDetail
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-report-detail
+      x-django-view: report_detail
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportDetailResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - login_required
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - report_not_found
+      parameters:
+      - name: report_id
+        in: path
+        required: true
+        description: Canonical report identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header evaluated before login enforcement. It can return
+          guest_session_invalid for expired or inactive guest sessions but does not authorize report reads.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session context associated with this report read.
+        schema:
+          type: string
+  /api/reports/{report_id}/download/:
+    get:
+      tags:
+      - Reports
+      summary: Download an authorized report as a DOCX document
+      operationId: downloadReportDocument
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-download-report
+      x-django-view: download_report
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              description: Attachment filename for the rendered report document.
+              required: true
+              schema:
+                type: string
+            X-API-Surface:
+              description: Public API surface label for the rendered report.
+              required: true
+              schema:
+                type: string
+            X-Execution-Mode:
+              description: Public execution mode label for the rendered report.
+              required: true
+              schema:
+                type: string
+            X-Report-Document-Type:
+              description: Normalized document type rendered into the PDF.
+              required: true
+              schema:
+                type: string
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - login_required
+          - object_access_denied
+        '404':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - report_not_found
+        '409':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportApiErrorResponse'
+          x-error-codes:
+          - report_not_ready
+      parameters:
+      - name: report_id
+        in: path
+        required: true
+        description: Canonical report identifier
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 64
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identity header evaluated before login enforcement. It can return
+          guest_session_invalid for expired or inactive guest sessions but does not authorize report reads.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session context associated with this report read.
+        schema:
+          type: string
+      - name: document_type
+        in: query
+        required: false
+        description: Optional normalized report document type for PDF rendering.
+        schema:
+          type: string
 components:
   securitySchemes:
     bearerAuth:
@@ -276,6 +1141,820 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    AnalysisJobAccepted:
+      additionalProperties: true
+      properties:
+        job_id:
+          maxLength: 128
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        contract_version:
+          maxLength: 64
+          minLength: 1
+          title: Contract Version
+          type: string
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        message_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        execution_mode:
+          maxLength: 64
+          minLength: 1
+          title: Execution Mode
+          type: string
+      required:
+      - job_id
+      - status
+      - contract_version
+      - execution_mode
+      title: AnalysisJobAccepted
+      type: object
+    AnalysisJobAcceptedResponse:
+      additionalProperties: true
+      properties:
+        job:
+          $ref: '#/components/schemas/AnalysisJobAccepted'
+      required:
+      - job
+      title: AnalysisJobAcceptedResponse
+      type: object
+    AnalysisJobSummary:
+      additionalProperties: true
+      properties:
+        job_id:
+          maxLength: 128
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+      required:
+      - job_id
+      - status
+      title: AnalysisJobSummary
+      type: object
+    AnalysisJobDetailResponse:
+      additionalProperties: true
+      properties:
+        job:
+          $ref: '#/components/schemas/AnalysisJobSummary'
+      required:
+      - job
+      title: AnalysisJobDetailResponse
+      type: object
+    AnalysisJobError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Contract Version
+        type:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Type
+        code:
+          maxLength: 120
+          minLength: 1
+          title: Code
+          type: string
+        status:
+          anyOf:
+          - maximum: 599
+            minimum: 400
+            type: integer
+          - type: 'null'
+          default: null
+          title: Status
+        message:
+          minLength: 1
+          title: Message
+          type: string
+      required:
+      - code
+      - message
+      title: AnalysisJobError
+      type: object
+    AnalysisJobErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/AnalysisJobError'
+      required:
+      - error
+      title: AnalysisJobErrorResponse
+      type: object
+    AnalysisJobListResponse:
+      additionalProperties: true
+      properties:
+        jobs:
+          items:
+            $ref: '#/components/schemas/AnalysisJobSummary'
+          title: Jobs
+          type: array
+      required:
+      - jobs
+      title: AnalysisJobListResponse
+      type: object
+    AnalysisJobRequest:
+      additionalProperties: true
+      properties:
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        job_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Job Id
+        message_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        user_text:
+          anyOf:
+          - minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: User Text
+        routing_intent:
+          anyOf:
+          - maxLength: 120
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Routing Intent
+        attachments:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          default: null
+          title: Attachments
+      title: AnalysisJobRequest
+      type: object
+    AnalysisResult:
+      additionalProperties: true
+      properties:
+        job_id:
+          maxLength: 128
+          minLength: 1
+          title: Job Id
+          type: string
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        contract_version:
+          maxLength: 64
+          minLength: 1
+          title: Contract Version
+          type: string
+      required:
+      - job_id
+      - status
+      - contract_version
+      title: AnalysisResult
+      type: object
+    AnalysisResultResponse:
+      additionalProperties: true
+      properties:
+        result:
+          $ref: '#/components/schemas/AnalysisResult'
+      required:
+      - result
+      title: AnalysisResultResponse
+      type: object
+    AuthErrorDetail:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: auth_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: auth
+          title: Type
+          type: string
+        code:
+          enum:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - forbidden
+          - provider_unavailable
+          title: Code
+          type: string
+        message:
+          title: Message
+          type: string
+        status:
+          enum:
+          - 401
+          - 403
+          - 503
+          title: Status
+          type: integer
+        missing_fields:
+          items:
+            type: string
+          title: Missing Fields
+          type: array
+        retryable:
+          title: Retryable
+          type: boolean
+        required_action:
+          title: Required Action
+          type: string
+        auth:
+          additionalProperties:
+            type: string
+          title: Auth
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - message
+      - status
+      - missing_fields
+      - retryable
+      - required_action
+      - auth
+      title: AuthErrorDetail
+      type: object
+    AuthErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/AuthErrorDetail'
+      required:
+      - error
+      title: AuthErrorResponse
+      type: object
+    AuthLogoutRequest:
+      additionalProperties: true
+      properties:
+        guest_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        access_token:
+          anyOf:
+          - maxLength: 8192
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Access Token
+      title: AuthLogoutRequest
+      type: object
+    AuthClientAction:
+      additionalProperties: true
+      properties:
+        clear_access_token:
+          title: Clear Access Token
+          type: boolean
+        clear_google_profile:
+          title: Clear Google Profile
+          type: boolean
+        next_auth_state:
+          enum:
+          - anonymous
+          - guest
+          title: Next Auth State
+          type: string
+      required:
+      - clear_access_token
+      - clear_google_profile
+      - next_auth_state
+      title: AuthClientAction
+      type: object
+    AuthSession:
+      additionalProperties: true
+      properties:
+        auth_session_id:
+          maxLength: 128
+          minLength: 1
+          title: Auth Session Id
+          type: string
+        jwt_jti:
+          maxLength: 128
+          minLength: 1
+          title: Jwt Jti
+          type: string
+        status:
+          enum:
+          - active
+          - revoked
+          - expired
+          title: Status
+          type: string
+        verification:
+          maxLength: 128
+          minLength: 1
+          title: Verification
+          type: string
+        provider:
+          const: google
+          title: Provider
+          type: string
+      required:
+      - auth_session_id
+      - jwt_jti
+      - status
+      - verification
+      - provider
+      title: AuthSession
+      type: object
+    AuthSubject:
+      additionalProperties: true
+      properties:
+        subject_id:
+          maxLength: 256
+          minLength: 1
+          title: Subject Id
+          type: string
+        subject_type:
+          enum:
+          - anonymous
+          - guest
+          - user
+          title: Subject Type
+          type: string
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: User Id
+        guest_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        auth_session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Auth Session Id
+        is_authenticated:
+          title: Is Authenticated
+          type: boolean
+      required:
+      - subject_id
+      - subject_type
+      - is_authenticated
+      title: AuthSubject
+      type: object
+    AuthUser:
+      additionalProperties: true
+      properties:
+        user_id:
+          maxLength: 128
+          minLength: 1
+          title: User Id
+          type: string
+        email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Email
+        display_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Display Name
+        picture:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Picture
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Status
+        auth_provider:
+          const: google
+          title: Auth Provider
+          type: string
+        provider_subject:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Provider Subject
+        policy_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Policy Status
+      required:
+      - user_id
+      - auth_provider
+      title: AuthUser
+      type: object
+    GuestIdentity:
+      additionalProperties: true
+      properties:
+        guest_id:
+          maxLength: 128
+          minLength: 1
+          title: Guest Id
+          type: string
+        status:
+          const: active
+          title: Status
+          type: string
+        issued_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Issued At
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Expires At
+        ttl_seconds:
+          anyOf:
+          - minimum: 1
+            type: integer
+          - type: 'null'
+          default: null
+          title: Ttl Seconds
+        policy_status:
+          title: Policy Status
+          type: string
+      required:
+      - guest_id
+      - status
+      - policy_status
+      title: GuestIdentity
+      type: object
+    SessionBinding:
+      additionalProperties: true
+      properties:
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        can_bind_to_chat_session:
+          title: Can Bind To Chat Session
+          type: boolean
+        binding_policy:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Binding Policy
+      required:
+      - can_bind_to_chat_session
+      title: SessionBinding
+      type: object
+    AuthLogoutResponse:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: auth_logout.v1
+          title: Contract Version
+          type: string
+        auth_state:
+          const: anonymous
+          title: Auth State
+          type: string
+        provider:
+          const: google
+          title: Provider
+          type: string
+        revoked_at:
+          format: date-time
+          title: Revoked At
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        guest:
+          anyOf:
+          - $ref: '#/components/schemas/GuestIdentity'
+          - type: 'null'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        auth_session:
+          $ref: '#/components/schemas/AuthSession'
+        session_binding:
+          $ref: '#/components/schemas/SessionBinding'
+        client_action:
+          $ref: '#/components/schemas/AuthClientAction'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+      required:
+      - contract_version
+      - auth_state
+      - provider
+      - revoked_at
+      - user
+      - guest
+      - subject
+      - auth_session
+      - session_binding
+      - client_action
+      - limitations
+      - persistence
+      title: AuthLogoutResponse
+      type: object
+    MergePolicy:
+      additionalProperties: true
+      properties:
+        guest_to_user_merge:
+          const: user_confirmation_required
+          title: Guest To User Merge
+          type: string
+        auto_merge:
+          title: Auto Merge
+          type: boolean
+        reason:
+          minLength: 1
+          title: Reason
+          type: string
+      required:
+      - guest_to_user_merge
+      - auto_merge
+      - reason
+      title: MergePolicy
+      type: object
+    RateLimitPolicy:
+      additionalProperties: true
+      properties:
+        subject_id:
+          maxLength: 256
+          minLength: 1
+          title: Subject Id
+          type: string
+        policy_status:
+          maxLength: 128
+          minLength: 1
+          title: Policy Status
+          type: string
+        keys:
+          items:
+            type: string
+          title: Keys
+          type: array
+        notes:
+          items:
+            type: string
+          title: Notes
+          type: array
+      required:
+      - subject_id
+      - policy_status
+      - keys
+      - notes
+      title: RateLimitPolicy
+      type: object
+    AuthSubjectResponse:
+      additionalProperties: true
+      properties:
+        auth_state:
+          enum:
+          - anonymous
+          - guest
+          - authenticated
+          title: Auth State
+          type: string
+        user:
+          anyOf:
+          - $ref: '#/components/schemas/AuthUser'
+          - type: 'null'
+        guest:
+          anyOf:
+          - $ref: '#/components/schemas/GuestIdentity'
+          - type: 'null'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        auth_session:
+          anyOf:
+          - $ref: '#/components/schemas/AuthSession'
+          - type: 'null'
+          default: null
+        session_binding:
+          anyOf:
+          - $ref: '#/components/schemas/SessionBinding'
+          - type: 'null'
+          default: null
+        rate_limit:
+          $ref: '#/components/schemas/RateLimitPolicy'
+        merge_policy:
+          $ref: '#/components/schemas/MergePolicy'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+      required:
+      - auth_state
+      - user
+      - guest
+      - subject
+      - rate_limit
+      - merge_policy
+      - limitations
+      - persistence
+      title: AuthSubjectResponse
+      type: object
+    AuthTokenRefreshRequest:
+      additionalProperties: true
+      properties:
+        guest_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        access_token:
+          anyOf:
+          - maxLength: 8192
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Access Token
+      title: AuthTokenRefreshRequest
+      type: object
+    AuthTokenRefreshResponse:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: auth_token_refresh.v1
+          title: Contract Version
+          type: string
+        auth_state:
+          const: authenticated
+          title: Auth State
+          type: string
+        provider:
+          const: google
+          title: Provider
+          type: string
+        access_token:
+          maxLength: 8192
+          minLength: 1
+          title: Access Token
+          type: string
+        token_type:
+          const: Bearer
+          title: Token Type
+          type: string
+        expires_in:
+          minimum: 1
+          title: Expires In
+          type: integer
+        issued_at:
+          format: date-time
+          title: Issued At
+          type: string
+        expires_at:
+          format: date-time
+          title: Expires At
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        guest:
+          anyOf:
+          - $ref: '#/components/schemas/GuestIdentity'
+          - type: 'null'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        auth_session:
+          $ref: '#/components/schemas/AuthSession'
+        session_binding:
+          $ref: '#/components/schemas/SessionBinding'
+        rate_limit:
+          $ref: '#/components/schemas/RateLimitPolicy'
+        merge_policy:
+          $ref: '#/components/schemas/MergePolicy'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+      required:
+      - contract_version
+      - auth_state
+      - provider
+      - access_token
+      - token_type
+      - expires_in
+      - issued_at
+      - expires_at
+      - user
+      - guest
+      - subject
+      - auth_session
+      - session_binding
+      - rate_limit
+      - merge_policy
+      - limitations
+      - persistence
+      title: AuthTokenRefreshResponse
+      type: object
     CaseLoginRequiredError:
       additionalProperties: false
       properties:
@@ -737,6 +2416,10 @@ components:
             $ref: '#/components/schemas/ConfirmedFactRecord'
           title: Confirmed Facts
           type: array
+        case_evidence:
+          additionalProperties: true
+          title: Case Evidence
+          type: object
         analysis_jobs:
           items:
             $ref: '#/components/schemas/CaseWorkspaceAnalysisJob'
@@ -757,6 +2440,7 @@ components:
       - case
       - consultation_state
       - confirmed_facts
+      - case_evidence
       - analysis_jobs
       - reports
       - attachments
@@ -919,6 +2603,1501 @@ components:
       - contract_version
       - case
       title: CreateConsultationCaseResponse
+      type: object
+    FileAttachment:
+      additionalProperties: true
+      properties:
+        attachment_id:
+          maxLength: 128
+          minLength: 1
+          title: Attachment Id
+          type: string
+        session_id:
+          maxLength: 128
+          minLength: 1
+          title: Session Id
+          type: string
+        purpose:
+          maxLength: 64
+          minLength: 1
+          title: Purpose
+          type: string
+        type:
+          maxLength: 64
+          minLength: 1
+          title: Type
+          type: string
+        original_filename:
+          maxLength: 255
+          minLength: 1
+          title: Original Filename
+          type: string
+        filename:
+          maxLength: 255
+          minLength: 1
+          title: Filename
+          type: string
+        content_type:
+          maxLength: 255
+          minLength: 1
+          title: Content Type
+          type: string
+        size_bytes:
+          minimum: 0
+          title: Size Bytes
+          type: integer
+        storage_uri:
+          minLength: 1
+          title: Storage Uri
+          type: string
+        object_storage:
+          additionalProperties: true
+          title: Object Storage
+          type: object
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        scan_status:
+          maxLength: 64
+          minLength: 1
+          title: Scan Status
+          type: string
+        privacy_risk:
+          title: Privacy Risk
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        checks:
+          additionalProperties: true
+          title: Checks
+          type: object
+        agent_handoff:
+          additionalProperties: true
+          title: Agent Handoff
+          type: object
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+        case_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Case Id
+        message_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        retention_expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Retention Expires At
+        deleted_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Deleted At
+        scan_result:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Scan Result
+      required:
+      - attachment_id
+      - session_id
+      - purpose
+      - type
+      - original_filename
+      - filename
+      - content_type
+      - size_bytes
+      - storage_uri
+      - object_storage
+      - status
+      - scan_status
+      - privacy_risk
+      - created_at
+      - checks
+      - agent_handoff
+      - limitations
+      - persistence
+      title: FileAttachment
+      type: object
+    FileAttachmentDetailResponse:
+      additionalProperties: true
+      properties:
+        attachment:
+          $ref: '#/components/schemas/FileAttachment'
+      required:
+      - attachment
+      title: FileAttachmentDetailResponse
+      type: object
+    FileAttachmentListResponse:
+      additionalProperties: true
+      properties:
+        attachments:
+          items:
+            $ref: '#/components/schemas/FileAttachment'
+          title: Attachments
+          type: array
+      required:
+      - attachments
+      title: FileAttachmentListResponse
+      type: object
+    FileAttachmentNotFoundError:
+      additionalProperties: true
+      properties:
+        code:
+          const: attachment_not_found
+          title: Code
+          type: string
+        message:
+          title: Message
+          type: string
+      required:
+      - code
+      - message
+      title: FileAttachmentNotFoundError
+      type: object
+    FileAttachmentNotFoundErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileAttachmentNotFoundError'
+      required:
+      - error
+      title: FileAttachmentNotFoundErrorResponse
+      type: object
+    FileAttachmentResponse:
+      additionalProperties: true
+      properties:
+        attachment:
+          $ref: '#/components/schemas/FileAttachment'
+      required:
+      - attachment
+      title: FileAttachmentResponse
+      type: object
+    FileGuestSessionError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: guest_identity_policy.v1
+          title: Contract Version
+          type: string
+        type:
+          const: authorization
+          title: Type
+          type: string
+        code:
+          const: guest_session_invalid
+          title: Code
+          type: string
+        status:
+          const: 401
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: refresh_guest_session
+          title: Required Action
+          type: string
+        reason:
+          title: Reason
+          type: string
+        guest_id:
+          title: Guest Id
+          type: string
+        guest_status:
+          title: Guest Status
+          type: string
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - reason
+      - guest_id
+      - guest_status
+      title: FileGuestSessionError
+      type: object
+    FileGuestSessionErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileGuestSessionError'
+      required:
+      - error
+      title: FileGuestSessionErrorResponse
+      type: object
+    FileObjectAccessError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: object_access.v1
+          title: Contract Version
+          type: string
+        type:
+          const: object_access
+          title: Type
+          type: string
+        code:
+          const: object_access_denied
+          title: Code
+          type: string
+        status:
+          const: 403
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: login_or_owner_match
+          title: Required Action
+          type: string
+        access:
+          additionalProperties: true
+          title: Access
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - access
+      title: FileObjectAccessError
+      type: object
+    FileObjectAccessErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileObjectAccessError'
+      required:
+      - error
+      title: FileObjectAccessErrorResponse
+      type: object
+    FileRateLimitError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: rate_limit.v1
+          title: Contract Version
+          type: string
+        type:
+          const: rate_limit
+          title: Type
+          type: string
+        code:
+          const: rate_limit_exceeded
+          title: Code
+          type: string
+        status:
+          const: 429
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          title: Required Action
+          type: string
+        usage:
+          additionalProperties: true
+          title: Usage
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - usage
+      title: FileRateLimitError
+      type: object
+    FileRateLimitErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileRateLimitError'
+      required:
+      - error
+      title: FileRateLimitErrorResponse
+      type: object
+    FileUploadRequest:
+      additionalProperties: true
+      properties:
+        session_id:
+          maxLength: 128
+          minLength: 1
+          title: Session Id
+          type: string
+        file:
+          anyOf:
+          - format: binary
+            type: string
+          - type: 'null'
+          default: null
+          title: File
+        case_id:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Case Id
+        message_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        purpose:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Purpose
+        type:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Type
+        filename:
+          anyOf:
+          - maxLength: 255
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Filename
+        original_filename:
+          anyOf:
+          - maxLength: 255
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Original Filename
+        content_type:
+          anyOf:
+          - maxLength: 255
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Content Type
+        size_bytes:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          default: null
+          title: Size Bytes
+      required:
+      - session_id
+      title: FileUploadRequest
+      type: object
+    FileUploadStorageError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: file_upload_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: service_unavailable
+          title: Type
+          type: string
+        code:
+          const: upload_storage_unavailable
+          title: Code
+          type: string
+        status:
+          const: 503
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: retry_upload
+          title: Required Action
+          type: string
+        retryable:
+          const: true
+          title: Retryable
+          type: boolean
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - retryable
+      title: FileUploadStorageError
+      type: object
+    FileUploadStorageErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileUploadStorageError'
+      required:
+      - error
+      title: FileUploadStorageErrorResponse
+      type: object
+    FileUploadTooLargeError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: file_upload_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: validation
+          title: Type
+          type: string
+        code:
+          const: file_too_large
+          title: Code
+          type: string
+        status:
+          const: 413
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        size_bytes:
+          minimum: 0
+          title: Size Bytes
+          type: integer
+        limit_bytes:
+          minimum: 1
+          title: Limit Bytes
+          type: integer
+        required_action:
+          const: select_smaller_file
+          title: Required Action
+          type: string
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - size_bytes
+      - limit_bytes
+      - required_action
+      title: FileUploadTooLargeError
+      type: object
+    FileUploadTooLargeErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileUploadTooLargeError'
+      required:
+      - error
+      title: FileUploadTooLargeErrorResponse
+      type: object
+    FileUploadValidationError:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: file_upload_error.v1
+          title: Contract Version
+          type: string
+        type:
+          const: validation
+          title: Type
+          type: string
+        code:
+          const: session_id_required
+          title: Code
+          type: string
+        status:
+          const: 400
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          const: create_or_select_session
+          title: Required Action
+          type: string
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      title: FileUploadValidationError
+      type: object
+    FileUploadValidationErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileUploadValidationError'
+      required:
+      - error
+      title: FileUploadValidationErrorResponse
+      type: object
+    GoogleAuthorizationCodeRequest:
+      additionalProperties: true
+      properties:
+        auth_flow:
+          const: google_authorization_code_popup
+          default: google_authorization_code_popup
+          title: Auth Flow
+          type: string
+        provider:
+          const: google
+          default: google
+          title: Provider
+          type: string
+        client_id:
+          maxLength: 256
+          minLength: 1
+          title: Client Id
+          type: string
+        code:
+          maxLength: 4096
+          minLength: 1
+          title: Code
+          type: string
+          writeOnly: true
+        purpose:
+          const: LOGIN
+          default: LOGIN
+          title: Purpose
+          type: string
+        scope:
+          anyOf:
+          - maxLength: 512
+            type: string
+          - type: 'null'
+          default: null
+          title: Scope
+        guest_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        redirect_uri:
+          format: uri
+          maxLength: 2048
+          minLength: 1
+          title: Redirect Uri
+          type: string
+      required:
+      - client_id
+      - code
+      - redirect_uri
+      title: GoogleAuthorizationCodeRequest
+      type: object
+    GoogleAuthorizationCodeResponse:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: google_auth_code.v1
+          title: Contract Version
+          type: string
+        auth_state:
+          const: authenticated
+          title: Auth State
+          type: string
+        provider:
+          const: google
+          title: Provider
+          type: string
+        access_token:
+          maxLength: 8192
+          minLength: 1
+          title: Access Token
+          type: string
+        token_type:
+          const: Bearer
+          title: Token Type
+          type: string
+        expires_in:
+          minimum: 1
+          title: Expires In
+          type: integer
+        issued_at:
+          format: date-time
+          title: Issued At
+          type: string
+        expires_at:
+          format: date-time
+          title: Expires At
+          type: string
+        user:
+          $ref: '#/components/schemas/AuthUser'
+        guest:
+          anyOf:
+          - $ref: '#/components/schemas/GuestIdentity'
+          - type: 'null'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        auth_session:
+          $ref: '#/components/schemas/AuthSession'
+        session_binding:
+          $ref: '#/components/schemas/SessionBinding'
+        rate_limit:
+          $ref: '#/components/schemas/RateLimitPolicy'
+        merge_policy:
+          $ref: '#/components/schemas/MergePolicy'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+        auth_mode:
+          const: authorization_code
+          title: Auth Mode
+          type: string
+        google:
+          additionalProperties: true
+          title: Google
+          type: object
+      required:
+      - contract_version
+      - auth_state
+      - provider
+      - access_token
+      - token_type
+      - expires_in
+      - issued_at
+      - expires_at
+      - user
+      - guest
+      - subject
+      - auth_session
+      - session_binding
+      - rate_limit
+      - merge_policy
+      - limitations
+      - persistence
+      - auth_mode
+      - google
+      title: GoogleAuthorizationCodeResponse
+      type: object
+    GuestSessionRequest:
+      additionalProperties: true
+      properties:
+        guest_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+      title: GuestSessionRequest
+      type: object
+    GuestSessionResponse:
+      additionalProperties: true
+      properties:
+        auth_state:
+          const: guest
+          title: Auth State
+          type: string
+        guest:
+          $ref: '#/components/schemas/GuestIdentity'
+        subject:
+          $ref: '#/components/schemas/AuthSubject'
+        session_binding:
+          $ref: '#/components/schemas/SessionBinding'
+        rate_limit:
+          $ref: '#/components/schemas/RateLimitPolicy'
+        merge_policy:
+          $ref: '#/components/schemas/MergePolicy'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        persistence:
+          additionalProperties: true
+          title: Persistence
+          type: object
+      required:
+      - auth_state
+      - guest
+      - subject
+      - session_binding
+      - rate_limit
+      - merge_policy
+      - limitations
+      - persistence
+      title: GuestSessionResponse
+      type: object
+    RateLimitErrorDetail:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: rate_limit.v1
+          title: Contract Version
+          type: string
+        type:
+          const: rate_limit
+          title: Type
+          type: string
+        code:
+          const: rate_limit_exceeded
+          title: Code
+          type: string
+        status:
+          const: 429
+          title: Status
+          type: integer
+        message:
+          title: Message
+          type: string
+        required_action:
+          title: Required Action
+          type: string
+        usage:
+          additionalProperties: true
+          title: Usage
+          type: object
+      required:
+      - contract_version
+      - type
+      - code
+      - status
+      - message
+      - required_action
+      - usage
+      title: RateLimitErrorDetail
+      type: object
+    RateLimitErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/RateLimitErrorDetail'
+      required:
+      - error
+      title: RateLimitErrorResponse
+      type: object
+    ReportApiError:
+      additionalProperties: false
+      description: Strictly modeled public error fields for report endpoint clients.
+      properties:
+        contract_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Contract Version
+        type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Type
+        code:
+          enum:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - guest_session_invalid
+          - login_required
+          - object_access_denied
+          - report_not_found
+          - report_not_ready
+          title: Code
+          type: string
+        status:
+          anyOf:
+          - type: integer
+          - enum:
+            - draft
+            - generating
+            - ready
+            - failed
+            - deleted
+            type: string
+          - type: 'null'
+          default: null
+          title: Status
+        message:
+          minLength: 1
+          title: Message
+          type: string
+        missing_fields:
+          items:
+            type: string
+          title: Missing Fields
+          type: array
+        retryable:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          default: null
+          title: Retryable
+        required_action:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Required Action
+        action:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Action
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Reason
+        policy_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Policy Version
+        report_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Report Id
+        guest_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        guest_status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Guest Status
+        auth:
+          anyOf:
+          - $ref: '#/components/schemas/ReportErrorAuth'
+          - type: 'null'
+          default: null
+        subject:
+          anyOf:
+          - $ref: '#/components/schemas/ReportErrorSubject'
+          - type: 'null'
+          default: null
+        access:
+          anyOf:
+          - $ref: '#/components/schemas/ReportErrorAccess'
+          - type: 'null'
+          default: null
+      required:
+      - code
+      - message
+      title: ReportApiError
+      type: object
+    ReportErrorAccess:
+      additionalProperties: false
+      properties:
+        contract_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Contract Version
+        allowed:
+          default: false
+          title: Allowed
+          type: boolean
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Reason
+        resource:
+          anyOf:
+          - $ref: '#/components/schemas/ReportErrorAccessResource'
+          - type: 'null'
+          default: null
+      title: ReportErrorAccess
+      type: object
+    ReportErrorAccessResource:
+      additionalProperties: false
+      properties:
+        type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Type
+        report_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Report Id
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+      title: ReportErrorAccessResource
+      type: object
+    ReportErrorAuth:
+      additionalProperties: false
+      properties:
+        scheme:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Scheme
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Reason
+      title: ReportErrorAuth
+      type: object
+    ReportErrorSubject:
+      additionalProperties: false
+      properties:
+        subject_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Subject Id
+        subject_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Subject Type
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: User Id
+        guest_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Guest Id
+        auth_session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Auth Session Id
+      title: ReportErrorSubject
+      type: object
+    ReportApiErrorResponse:
+      additionalProperties: false
+      properties:
+        error:
+          $ref: '#/components/schemas/ReportApiError'
+      required:
+      - error
+      title: ReportApiErrorResponse
+      type: object
+    ReportAppealGate:
+      additionalProperties: false
+      properties:
+        blocked:
+          default: false
+          title: Blocked
+          type: boolean
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Reason
+      title: ReportAppealGate
+      type: object
+    ReportContent:
+      additionalProperties: false
+      properties:
+        contract_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Contract Version
+        format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Format
+        action:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Action
+        reporting_payload:
+          $ref: '#/components/schemas/ReportReportingPayload'
+      required:
+      - reporting_payload
+      title: ReportContent
+      type: object
+    ReportDetail:
+      additionalProperties: false
+      properties:
+        report_id:
+          maxLength: 64
+          minLength: 1
+          title: Report Id
+          type: string
+        report_type:
+          enum:
+          - fine_notice_objection
+          - fault_ratio_analysis
+          - general
+          - initial_consultation
+          - expert_handoff
+          title: Report Type
+          type: string
+        screen_id:
+          default: ''
+          title: Screen Id
+          type: string
+        title:
+          default: ''
+          title: Title
+          type: string
+        status:
+          enum:
+          - draft
+          - generating
+          - ready
+          - failed
+          - deleted
+          title: Status
+          type: string
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        job_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Job Id
+        summary:
+          default: ''
+          title: Summary
+          type: string
+        download_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Download Url
+        partial_report:
+          default: false
+          title: Partial Report
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+        content:
+          $ref: '#/components/schemas/ReportContent'
+        metadata:
+          $ref: '#/components/schemas/ReportMetadata'
+      required:
+      - report_id
+      - report_type
+      - status
+      - created_at
+      - updated_at
+      - content
+      - metadata
+      title: ReportDetail
+      type: object
+    ReportDocumentReadiness:
+      additionalProperties: false
+      properties:
+        ready_for_docx:
+          default: false
+          title: Ready For Docx
+          type: boolean
+        missing_field_details:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          title: Missing Field Details
+          type: array
+        next_questions:
+          items:
+            additionalProperties:
+              type: string
+            type: object
+          title: Next Questions
+          type: array
+      title: ReportDocumentReadiness
+      type: object
+    ReportDownloadAction:
+      additionalProperties: false
+      properties:
+        type:
+          maxLength: 64
+          minLength: 1
+          title: Type
+          type: string
+        label:
+          maxLength: 160
+          minLength: 1
+          title: Label
+          type: string
+        document_type:
+          maxLength: 64
+          minLength: 1
+          title: Document Type
+          type: string
+        document_format:
+          anyOf:
+          - const: docx
+            type: string
+          - type: 'null'
+          default: null
+          title: Document Format
+      required:
+      - type
+      - label
+      - document_type
+      title: ReportDownloadAction
+      type: object
+    ReportMetadata:
+      additionalProperties: false
+      properties:
+        report_quality:
+          $ref: '#/components/schemas/ReportQuality'
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+      required:
+      - report_quality
+      title: ReportMetadata
+      type: object
+    ReportQuality:
+      additionalProperties: false
+      properties:
+        contract_version:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Contract Version
+        partial_report:
+          default: false
+          title: Partial Report
+          type: boolean
+        review_required:
+          default: false
+          title: Review Required
+          type: boolean
+        limitation_count:
+          default: 0
+          minimum: 0
+          title: Limitation Count
+          type: integer
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        confidence_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Confidence Label
+      title: ReportQuality
+      type: object
+    ReportReportingPayload:
+      additionalProperties: false
+      properties:
+        report_type:
+          anyOf:
+          - enum:
+            - fine_notice_objection
+            - fault_ratio_analysis
+            - general
+            - initial_consultation
+            - expert_handoff
+            type: string
+          - type: 'null'
+          default: null
+          title: Report Type
+        screen_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Screen Id
+        stage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Stage
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Title
+        summary:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Summary
+        document_variant:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Document Variant
+        document_readiness:
+          anyOf:
+          - $ref: '#/components/schemas/ReportDocumentReadiness'
+          - type: 'null'
+          default: null
+        report_actions:
+          items:
+            $ref: '#/components/schemas/ReportDownloadAction'
+          title: Report Actions
+          type: array
+        appeal_gate:
+          anyOf:
+          - $ref: '#/components/schemas/ReportAppealGate'
+          - type: 'null'
+          default: null
+        sections:
+          items:
+            $ref: '#/components/schemas/ReportSection'
+          title: Sections
+          type: array
+      title: ReportReportingPayload
+      type: object
+    ReportSection:
+      additionalProperties: false
+      description: One explicitly public report section without source provenance.
+      properties:
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Title
+        body:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Body
+        items:
+          items:
+            type: string
+          title: Items
+          type: array
+      title: ReportSection
+      type: object
+    ReportDetailResponse:
+      additionalProperties: false
+      properties:
+        api_surface:
+          maxLength: 32
+          minLength: 1
+          title: Api Surface
+          type: string
+        execution_mode:
+          maxLength: 32
+          minLength: 1
+          title: Execution Mode
+          type: string
+        report:
+          $ref: '#/components/schemas/ReportDetail'
+      required:
+      - api_surface
+      - execution_mode
+      - report
+      title: ReportDetailResponse
+      type: object
+    ReportSummary:
+      additionalProperties: false
+      properties:
+        report_id:
+          maxLength: 64
+          minLength: 1
+          title: Report Id
+          type: string
+        report_type:
+          enum:
+          - fine_notice_objection
+          - fault_ratio_analysis
+          - general
+          - initial_consultation
+          - expert_handoff
+          title: Report Type
+          type: string
+        screen_id:
+          default: ''
+          title: Screen Id
+          type: string
+        title:
+          default: ''
+          title: Title
+          type: string
+        status:
+          enum:
+          - draft
+          - generating
+          - ready
+          - failed
+          - deleted
+          title: Status
+          type: string
+        session_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        job_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Job Id
+        summary:
+          default: ''
+          title: Summary
+          type: string
+        download_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Download Url
+        partial_report:
+          default: false
+          title: Partial Report
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        updated_at:
+          format: date-time
+          title: Updated At
+          type: string
+      required:
+      - report_id
+      - report_type
+      - status
+      - created_at
+      - updated_at
+      title: ReportSummary
+      type: object
+    ReportListResponse:
+      additionalProperties: false
+      properties:
+        api_surface:
+          maxLength: 32
+          minLength: 1
+          title: Api Surface
+          type: string
+        reports:
+          items:
+            $ref: '#/components/schemas/ReportSummary'
+          title: Reports
+          type: array
+      required:
+      - api_surface
+      - reports
+      title: ReportListResponse
       type: object
     StartCaseAnalysisRequest:
       additionalProperties: false

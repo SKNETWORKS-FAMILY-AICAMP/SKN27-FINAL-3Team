@@ -94,7 +94,13 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
 
     actual = {(spec.method, spec.path): spec for spec in route_specs.CASE_API_ROUTE_SPECS}
     assert set(actual) == set(expected)
-    assert route_specs.API_ROUTE_SPECS == route_specs.CASE_API_ROUTE_SPECS
+    assert route_specs.API_ROUTE_SPECS == (
+        route_specs.CASE_API_ROUTE_SPECS
+        + route_specs.AUTH_SESSION_API_ROUTE_SPECS
+        + route_specs.FILE_API_ROUTE_SPECS
+        + route_specs.ANALYSIS_JOB_API_ROUTE_SPECS
+        + route_specs.REPORT_API_ROUTE_SPECS
+    )
 
     for key, expected_spec in expected.items():
         spec = actual[key]
@@ -120,6 +126,216 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
     assert len(operation_ids) == len(set(operation_ids))
 
 
+def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> None:
+    auth_contracts = importlib.import_module("app.contracts.auth_session")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    actual = {
+        (spec.method, spec.path): spec
+        for spec in route_specs.AUTH_SESSION_API_ROUTE_SPECS
+    }
+    assert set(actual) == {
+        ("POST", "/api/auth/guest-session/"),
+        ("POST", "/api/auth/google/code/"),
+        ("POST", "/api/auth/refresh/"),
+        ("POST", "/api/auth/logout/"),
+        ("GET", "/api/auth/me/"),
+    }
+
+    assert actual[("POST", "/api/auth/guest-session/")].response_model is (
+        auth_contracts.GuestSessionResponse
+    )
+    assert actual[("POST", "/api/auth/google/code/")].request_model is (
+        auth_contracts.GoogleAuthorizationCodeRequest
+    )
+    assert actual[("POST", "/api/auth/refresh/")].auth_optional is True
+    assert actual[("POST", "/api/auth/logout/")].auth_optional is True
+    assert actual[("GET", "/api/auth/me/")].auth_optional is True
+    assert all(spec.contract_status == "shadow" for spec in actual.values())
+
+
+def test_file_api_route_specs_promote_existing_django_endpoints() -> None:
+    file_contracts = importlib.import_module("app.contracts.file_attachment")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    actual = {
+        (spec.method, spec.path): spec for spec in route_specs.FILE_API_ROUTE_SPECS
+    }
+    assert set(actual) == {
+        ("GET", "/api/files/"),
+        ("POST", "/api/files/"),
+        ("GET", "/api/files/{attachment_id}/"),
+    }
+    assert actual[("POST", "/api/files/")].request_model is (
+        file_contracts.FileUploadRequest
+    )
+    assert actual[("POST", "/api/files/")].request_media_types == (
+        "application/json",
+        "multipart/form-data",
+    )
+    assert actual[("GET", "/api/files/{attachment_id}/")].path_parameters[0].name == (
+        "attachment_id"
+    )
+    assert all(spec.contract_status == "shadow" for spec in actual.values())
+
+
+def test_analysis_job_api_route_specs_promote_existing_django_endpoints() -> None:
+    analysis_contracts = importlib.import_module("app.contracts.analysis_job")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    actual = {
+        (spec.method, spec.path): spec for spec in route_specs.ANALYSIS_JOB_API_ROUTE_SPECS
+    }
+    assert set(actual) == {
+        ("GET", "/api/analysis/jobs/"),
+        ("POST", "/api/analysis/jobs/"),
+        ("GET", "/api/analysis/jobs/{job_id}/"),
+        ("GET", "/api/analysis/results/{job_id}/"),
+    }
+    assert actual[("POST", "/api/analysis/jobs/")].request_model is (
+        analysis_contracts.AnalysisJobRequest
+    )
+    assert actual[("POST", "/api/analysis/jobs/")].response_model is (
+        analysis_contracts.AnalysisJobAcceptedResponse
+    )
+    assert actual[("GET", "/api/analysis/jobs/")].response_model is (
+        analysis_contracts.AnalysisJobListResponse
+    )
+    assert actual[("GET", "/api/analysis/jobs/{job_id}/")].response_model is (
+        analysis_contracts.AnalysisJobDetailResponse
+    )
+    assert actual[("GET", "/api/analysis/results/{job_id}/")].response_model is (
+        analysis_contracts.AnalysisResultResponse
+    )
+    assert actual[("GET", "/api/analysis/jobs/{job_id}/")].path_parameters[0].name == (
+        "job_id"
+    )
+    assert actual[("GET", "/api/analysis/results/{job_id}/")].success_statuses == (200, 202)
+    assert all(spec.auth_optional is True for spec in actual.values())
+    assert all(spec.contract_status == "shadow" for spec in actual.values())
+
+
+def test_report_get_routes_are_modeled_while_report_post_remains_deferred() -> None:
+    report_contracts = importlib.import_module("app.contracts.report")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    modeled = {
+        (spec.method, spec.path): spec for spec in route_specs.REPORT_API_ROUTE_SPECS
+    }
+    assert set(modeled) == {
+        ("GET", "/api/reports/"),
+        ("GET", "/api/reports/{report_id}/"),
+        ("GET", "/api/reports/{report_id}/download/"),
+    }
+    assert modeled[("GET", "/api/reports/")].response_model is (
+        report_contracts.ReportListResponse
+    )
+    assert modeled[("GET", "/api/reports/{report_id}/")].response_model is (
+        report_contracts.ReportDetailResponse
+    )
+    download = modeled[("GET", "/api/reports/{report_id}/download/")]
+    assert download.response_model is None
+    assert (
+        download.success_content[0].media_type
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert download.success_content[0].schema == {"type": "string", "format": "binary"}
+    assert [
+        (parameter.name, parameter.location)
+        for parameter in modeled[("GET", "/api/reports/")].request_parameters
+    ] == [
+        ("X-Guest-Id", "header"),
+        ("session_id", "query"),
+    ]
+    assert [
+        (parameter.name, parameter.location)
+        for parameter in download.request_parameters
+    ] == [
+        ("X-Guest-Id", "header"),
+        ("session_id", "query"),
+        ("document_type", "query"),
+    ]
+    assert [header.name for header in download.success_headers] == [
+        "Content-Disposition",
+        "X-API-Surface",
+        "X-Execution-Mode",
+        "X-Report-Document-Type",
+    ]
+    assert all(header.required is True for header in download.success_headers)
+    for spec in modeled.values():
+        unauthorized = next(error for error in spec.errors if error.status == 401)
+        assert unauthorized.codes == (
+            "auth_required",
+            "token_invalid",
+            "token_expired",
+            "guest_session_invalid",
+        )
+    assert all(spec.auth_required is True for spec in modeled.values())
+
+    deferred = {(spec.method, spec.path) for spec in route_specs.DEFERRED_ROUTE_SPECS}
+    assert ("POST", "/api/reports/") in deferred
+    assert ("GET", "/api/reports/") not in deferred
+    assert ("GET", "/api/reports/{report_id}/") not in deferred
+    assert ("GET", "/api/reports/{report_id}/download/") not in deferred
+
+
+def test_success_content_and_header_specs_reject_ambiguous_contracts() -> None:
+    contracts = importlib.import_module("app.contracts.consultation_case")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    with pytest.raises(ValueError):
+        route_specs.ResponseContentSpec(
+            media_type="",
+            schema={"type": "string"},
+        )
+    with pytest.raises(ValueError):
+        route_specs.ResponseContentSpec(
+            media_type="application/json",
+            response_model=contracts.ConsultationCaseListResponse,
+            schema={"type": "object"},
+        )
+    with pytest.raises(ValueError):
+        route_specs.ResponseHeaderSpec(
+            name="",
+            description="Invalid header",
+            schema={"type": "string"},
+        )
+    with pytest.raises(ValueError):
+        route_specs.RouteSpec(
+            operation_id="missingSuccessContent",
+            method="GET",
+            path="/api/contracts/probe/",
+            route_name="contract-probe",
+            view_name="probe",
+            request_model=None,
+            response_model=None,
+            success_status=200,
+            errors=(),
+            auth_required=False,
+            contract_status="shadow",
+            tags=("Contracts",),
+            summary="Contract probe",
+        )
+
+
+def test_analysis_job_error_response_accepts_live_not_found_envelopes() -> None:
+    analysis_contracts = importlib.import_module("app.contracts.analysis_job")
+
+    for code in ("analysis_job_not_found", "analysis_result_not_found"):
+        response = analysis_contracts.AnalysisJobErrorResponse.model_validate(
+            {
+                "error": {
+                    "code": code,
+                    "message": "Requested analysis resource was not found.",
+                }
+            }
+        )
+        assert response.error.code == code
+        assert response.error.contract_version is None
+        assert response.error.type is None
+        assert response.error.status is None
+
+
 def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
     route_specs = importlib.import_module("app.contracts.api_route_specs")
 
@@ -132,28 +348,13 @@ def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
         ("GET", "/api/health/live/"),
         ("GET", "/api/health/ready/"),
         ("GET", "/api/capabilities/"),
-        ("POST", "/api/auth/guest-session/"),
-        ("POST", "/api/auth/google/code/"),
-        ("POST", "/api/auth/refresh/"),
-        ("POST", "/api/auth/logout/"),
-        ("GET", "/api/auth/me/"),
         ("GET", "/api/mypage/summary/"),
         ("GET", "/api/history/"),
         ("POST", "/api/chat/sessions/"),
         ("POST", "/api/chat/messages/"),
         ("POST", "/api/chat/save-state/"),
-        ("GET", "/api/files/"),
-        ("POST", "/api/files/"),
-        ("GET", "/api/files/{attachment_id}/"),
-        ("GET", "/api/analysis/jobs/"),
-        ("POST", "/api/analysis/jobs/"),
-        ("GET", "/api/analysis/jobs/{job_id}/"),
-        ("GET", "/api/analysis/results/{job_id}/"),
         ("GET", "/api/agents/nodes/"),
-        ("GET", "/api/reports/"),
         ("POST", "/api/reports/"),
-        ("GET", "/api/reports/{report_id}/"),
-        ("GET", "/api/reports/{report_id}/download/"),
     }
     assert all(spec.reason.strip() for spec in route_specs.DEFERRED_ROUTE_SPECS)
     assert all(spec.contract_status == "deferred" for spec in route_specs.DEFERRED_ROUTE_SPECS)
@@ -231,6 +432,13 @@ def test_case_success_models_reject_nested_contract_drift() -> None:
                 "case": case,
                 "consultation_state": {},
                 "confirmed_facts": [fact_version],
+                "case_evidence": {
+                    "schema_version": "case_evidence.v1",
+                    "facts": {},
+                    "claims": {},
+                    "unknowns": [],
+                    "evidence_source": {},
+                },
                 "analysis_jobs": [
                     {
                         "job_id": "job_123",

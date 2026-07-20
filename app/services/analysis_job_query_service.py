@@ -78,15 +78,21 @@ def load_analysis_result(
             "job_id": job_id,
             "status_counts": deepcopy(job.get("status_counts") or {}),
             "executions": executions,
+            "supervisor_state": deepcopy(job.get("supervisor_state") or {}),
+            "attachments": deepcopy(job.get("attachments") or []),
         }
     )
     # The repository status is the canonical terminal outcome.  Recomputing it
     # from a mixture of successful and failed node rows can incorrectly turn a
     # Supervisor-gated failure into a public "partial" result.
     result["status"] = status
+    cards = _merge_display_cards(
+        composed_cards=result.get("cards"),
+        persisted_cards=job.get("cards"),
+    )
     result.update(
         {
-            "cards": deepcopy(job.get("cards") or []),
+            "cards": cards,
             "pending_questions": deepcopy(job.get("pending_questions") or []),
             "report_links": deepcopy(job.get("report_links") or []),
             "attachments": deepcopy(job.get("attachments") or []),
@@ -102,3 +108,17 @@ def load_analysis_result(
         }
     )
     return AnalysisJobQueryOutcome(kind="completed", payload=result)
+
+
+def _merge_display_cards(
+    *,
+    composed_cards: Any,
+    persisted_cards: Any,
+) -> list[dict[str, Any]]:
+    deadline_cards = [
+        deepcopy(card)
+        for card in composed_cards or []
+        if isinstance(card, dict) and card.get("card_type") == "deadline_guidance"
+    ]
+    stored_cards = [deepcopy(card) for card in persisted_cards or [] if isinstance(card, dict)]
+    return deadline_cards + [card for card in stored_cards if card not in deadline_cards]

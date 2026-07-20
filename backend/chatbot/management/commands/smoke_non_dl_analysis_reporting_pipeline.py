@@ -130,11 +130,16 @@ class Command(BaseCommand):
         timeout_seconds = max(1, min(int(options["timeout_seconds"] or 1), 900))
         poll_interval_seconds = max(0.0, float(options["poll_interval_seconds"] or 0.0))
         identifiers = _unique_identifiers()
-        payload, job_payload = _smoke_payloads(
+        payload, job_payload, server_execution_context = _smoke_payloads(
             identifiers,
             fine_notice_fixture=fine_notice_fixture,
         )
-        queued = repositories.enqueue_analysis_job_work(payload, job_payload, max_attempts=1)
+        queued = repositories.enqueue_analysis_job_work(
+            payload,
+            job_payload,
+            max_attempts=1,
+            server_execution_context=server_execution_context,
+        )
 
         worker_result = repositories.process_agent_work_item(queued["work_item_id"])
         if not AnalysisJob.objects.filter(job_id=queued["job_id"]).exists():
@@ -238,7 +243,7 @@ def _smoke_payloads(
     identifiers: dict[str, str],
     *,
     fine_notice_fixture: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     user_facts = (
         "At a signalized four-way intersection the smoke vehicle proceeded straight "
         "on green while the other vehicle turned left; review signal priority, "
@@ -296,21 +301,22 @@ def _smoke_payloads(
         "message_id": identifiers["message_id"],
         "user_text": user_facts,
         "attachments": [fine_notice_fixture],
-        "context": {
-            "user_facts": user_facts,
-            "raw_user_text": user_facts,
-            "query_text": user_facts,
-            "accident_context": user_facts,
-            "user_appeal_reason": user_facts,
-            "query": {
-                "raw_text": user_facts,
-                "search_query": user_facts,
-            },
-            "temporal_basis": {"mode": "current"},
-            "scope": {"jurisdiction": "KR"},
-            "law_graph": {"enabled": False},
-        },
     }
+    server_execution_context = {
+        "user_facts": user_facts,
+        "raw_user_text": user_facts,
+        "query_text": user_facts,
+        "accident_context": user_facts,
+        "user_appeal_reason": user_facts,
+        "query": {
+            "raw_text": user_facts,
+            "search_query": user_facts,
+        },
+        "temporal_basis": {"mode": "current"},
+        "scope": {"jurisdiction": "KR"},
+        "law_graph": {"enabled": False},
+    }
+
     job_payload = {
         "job_id": identifiers["job_id"],
         "session_id": identifiers["session_id"],
@@ -324,7 +330,7 @@ def _smoke_payloads(
         "chat_response": {},
         "node_execution": {},
     }
-    return payload, job_payload
+    return payload, job_payload, server_execution_context
 
 
 def _poll_terminal_rows(

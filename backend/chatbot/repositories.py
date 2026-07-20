@@ -8,7 +8,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import timedelta, timezone as datetime_timezone
@@ -24,6 +24,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from ai.agents.objection_report_generation import render_report_docx
 from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
@@ -31,6 +32,10 @@ from app.services.history_event_mock_service import (
     SENSITIVE_METADATA_KEYS,
     build_agent_execution_events,
     build_history_event,
+)
+from app.services.chat_session_followup_service import (
+    CHAT_SESSION_FOLLOWUP_STATE_VERSION,
+    build_chat_followup_snapshot,
 )
 from app.services.supervisor_reporting_handoff_service import (
     build_supervisor_reporting_handoff,
@@ -100,7 +105,7 @@ from chatbot.progress_cache import (
 from chatbot.retention_policy import upload_retention_expires_at
 
 USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
-REPORT_PDF_CONTENT_TYPE = "application/pdf"
+REPORT_DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 REPORT_DOWNLOAD_TYPE_REPORT = "report"
 REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
@@ -491,16 +496,16 @@ def _reportlab_pdf_bytes_via_bundled_python(*, report_id: str, title: str, body_
         return None
 USAGE_POLICY_LIMITS = {
     "anonymous": {
-        "chat_message": 2,
-        "file_upload": 1,
-        "agent_run": 1,
-        "report_action": 1,
+        "chat_message": 200,
+        "file_upload": 100,
+        "agent_run": 100,
+        "report_action": 100,
     },
     "guest": {
-        "chat_message": 5,
-        "file_upload": 3,
-        "agent_run": 3,
-        "report_action": 2,
+        "chat_message": 200,
+        "file_upload": 100,
+        "agent_run": 100,
+        "report_action": 100,
         "google_oauth_code_exchange": settings.GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT,
     },
     "free": {
@@ -848,6 +853,81 @@ def get_chat_session_access_metadata(session_id: str | None) -> dict[str, Any] |
         "session_id": session.session_id,
         "owner_id": session.owner_id,
         "guest_id": _chat_session_guest_id(session),
+    }
+
+
+def load_chat_followup_state(session_id: str | None) -> dict[str, Any] | None:
+    """Load a versioned follow-up snapshot after the caller authorizes the session."""
+
+    normalized_session_id = _text(session_id)
+    if not normalized_session_id:
+        return None
+    session = ChatSession.objects.filter(session_id=normalized_session_id).only("metadata").first()
+    if session is None:
+        return None
+    state = _dict_or_empty(session.metadata).get("chat_followup_state")
+    if not isinstance(state, dict):
+        return None
+    if state.get("contract_version") != CHAT_SESSION_FOLLOWUP_STATE_VERSION:
+        return None
+    return deepcopy(state)
+
+
+def persist_chat_followup_state(
+    payload: dict[str, Any],
+    chat_response: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist a user-safe follow-up boundary without creating an analysis job."""
+
+    owner_id = _owner_id(payload)
+    session = _get_or_create_session(
+        chat_response.get("session_id"),
+        owner_id=owner_id,
+        guest_id=_payload_guest_id(payload),
+    )
+    if session is None:
+        raise ValueError("chat_response must include session_id")
+
+    message_id = _text(chat_response.get("message_id"))
+    if not message_id:
+        raise ValueError("chat_response must include message_id")
+    conversation_save_state = conversation_save_state_from_payload(payload)
+    snapshot = build_chat_followup_snapshot(payload, chat_response)
+
+    with transaction.atomic():
+        session = ChatSession.objects.select_for_update().get(pk=session.pk)
+        session.metadata = {
+            **_metadata_with_conversation_save_state(
+                session.metadata,
+                conversation_save_state,
+                raw_payload=payload,
+            ),
+            "chat_followup_state": snapshot,
+        }
+        session.current_intent = _text(chat_response.get("routing_intent"))
+        session.save(update_fields=["metadata", "current_intent", "updated_at"])
+        message, _message_created = ChatMessage.objects.update_or_create(
+            message_id=message_id,
+            defaults={
+                "session": session,
+                "role": MessageRole.USER,
+                "content": _message_content(payload),
+                "routing_intent": _text(chat_response.get("routing_intent")),
+                "metadata": {
+                    "source": "canonical_chat_followup",
+                    "response_status": _text(chat_response.get("status")),
+                    "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+                    "conversation_save_state": conversation_save_state,
+                },
+            },
+        )
+
+    return {
+        "message_id": message.message_id,
+        "session_id": session.session_id,
+        "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
+        "conversation_save_state": conversation_save_state,
+        "followup_state_version": CHAT_SESSION_FOLLOWUP_STATE_VERSION,
     }
 
 
@@ -2018,7 +2098,10 @@ def persist_analysis_job_execution(
                     "assistant_message": chat_response.get("assistant_message"),
                     "case_status": chat_response.get("case_status"),
                     "cards": chat_response.get("cards", []),
-                    "pending_questions": chat_response.get("pending_questions", []),
+                    "pending_questions": (
+                        job_payload.get("pending_questions")
+                        or chat_response.get("pending_questions", [])
+                    ),
                     "report_links": chat_response.get("report_links", []),
                     "supervisor_state": chat_response.get("supervisor_state", {}),
                     "reporting_payload": chat_response.get("reporting_payload", {}),
@@ -2269,9 +2352,20 @@ def enqueue_analysis_job_work(
     job_payload: dict[str, Any],
     *,
     max_attempts: int = 2,
+    server_execution_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Persist a queued worker item without executing the agent plan inline."""
 
+    from app.services.supervisor_execution_input_service import (
+        SERVER_EXECUTION_CONTEXT_FIELD,
+        serialize_server_execution_context,
+    )
+
+    server_execution_context_envelope = serialize_server_execution_context(
+        server_execution_context
+    )
+    persisted_request_payload = dict(payload)
+    persisted_request_payload.pop(SERVER_EXECUTION_CONTEXT_FIELD, None)
     owner_id = _owner_id(payload)
     session = _get_or_create_session(
         job_payload.get("session_id"),
@@ -2283,7 +2377,7 @@ def enqueue_analysis_job_work(
     if owner_id and session.owner_id and session.owner_id != owner_id:
         raise PermissionError("analysis job session belongs to another owner")
 
-    conversation_save_state = conversation_save_state_from_payload(payload)
+    conversation_save_state = conversation_save_state_from_payload(persisted_request_payload)
 
     job_id = _text(job_payload.get("job_id"))
     if not job_id:
@@ -2324,7 +2418,7 @@ def enqueue_analysis_job_work(
         session.metadata = _metadata_with_conversation_save_state(
             session.metadata,
             conversation_save_state,
-            raw_payload=payload,
+            raw_payload=persisted_request_payload,
         )
         session.save(update_fields=["metadata", "updated_at"])
 
@@ -2335,7 +2429,7 @@ def enqueue_analysis_job_work(
                 defaults={
                     "session": session,
                     "role": MessageRole.USER,
-                    "content": _message_content(payload),
+                    "content": _message_content(persisted_request_payload),
                     "routing_intent": _text(job_payload.get("routing_intent")),
                     "metadata": {
                         "source": "canonical_analysis_job_queue",
@@ -2454,6 +2548,35 @@ def enqueue_analysis_job_work(
             ):
                 raise ValueError("terminal analysis job cannot create a new work item")
 
+        work_item_payload: dict[str, Any] = {
+            "contract_version": "agent_worker_queue.v1",
+            "persistence_mode": "analysis_job",
+            "request_payload": _json_compatible(persisted_request_payload),
+            "job_payload": _json_compatible(
+                {
+                    **job_payload,
+                    "status": AnalysisJobStatus.QUEUED.value,
+                    "active_node": active_node,
+                    "progress_message": progress_message,
+                    "node_execution": {},
+                }
+            ),
+            "execution_payload": _json_compatible(
+                {
+                    **persisted_request_payload,
+                    "job_id": job_id,
+                    "session_id": session.session_id,
+                    "message_id": message_id,
+                    "attachments": job_payload.get("attachments", []),
+                }
+            ),
+            "analysis_plan": _json_compatible(analysis_plan),
+        }
+        if server_execution_context_envelope:
+            work_item_payload["server_execution_context"] = _json_compatible(
+                server_execution_context_envelope
+            )
+
         work_item, work_item_created = AgentWorkItem.objects.get_or_create(
             work_item_id=work_item_id,
             defaults={
@@ -2466,30 +2589,7 @@ def enqueue_analysis_job_work(
                 "started_at": None,
                 "completed_at": None,
                 "next_run_at": timezone.now(),
-                "payload": {
-                    "contract_version": "agent_worker_queue.v1",
-                    "persistence_mode": "analysis_job",
-                    "request_payload": _json_compatible(payload),
-                    "job_payload": _json_compatible(
-                        {
-                            **job_payload,
-                            "status": AnalysisJobStatus.QUEUED.value,
-                            "active_node": active_node,
-                            "progress_message": progress_message,
-                            "node_execution": {},
-                        }
-                    ),
-                    "execution_payload": _json_compatible(
-                        {
-                            **payload,
-                            "job_id": job_id,
-                            "session_id": session.session_id,
-                            "message_id": message_id,
-                            "attachments": job_payload.get("attachments", []),
-                        }
-                    ),
-                    "analysis_plan": _json_compatible(analysis_plan),
-                },
+                "payload": work_item_payload,
                 "result": {},
                 "error_code": "",
                 "metadata": {
@@ -3158,6 +3258,7 @@ def _worker_reporting_payload(
         "source": "supervisor_agent_result_aggregation",
         "source_node_codes": _list_or_empty(handoff.get("source_node_codes")),
         "report_type": _dict_or_empty(handoff.get("target")).get("report_type"),
+        "document_variant": _sanitize_report_text(structured.get("document_variant")),
         "stage": (
             "agent_execution_ready"
             if report_status == ReportStatus.READY.value
@@ -3169,6 +3270,16 @@ def _worker_reporting_payload(
         "sections": _normalize_worker_reporting_sections(
             _list_or_empty(structured.get("form_sections"))
         ),
+        "form_data": _sanitize_report_value(_dict_or_empty(structured.get("form_data"))),
+        "document_readiness": _sanitize_report_value(
+            _dict_or_empty(structured.get("document_readiness"))
+        ),
+        "report_actions": _sanitize_report_value(_list_or_empty(structured.get("report_actions"))),
+        "appeal_decision": _sanitize_report_value(_dict_or_empty(structured.get("appeal_decision"))),
+        "appeal_gate": _sanitize_report_value(_dict_or_empty(structured.get("appeal_gate"))),
+        "petition_purpose": _sanitize_report_text(structured.get("petition_purpose")),
+        "petition_reason": _sanitize_report_text(structured.get("petition_reason")),
+        "drafting_source": _sanitize_report_text(structured.get("drafting_source")),
         "data": structured,
         "evidence": _sanitize_report_value(_list_or_empty(reporting_result.evidence)),
         "next_actions": _sanitize_report_value(
@@ -3974,6 +4085,7 @@ def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
     if report is None:
         return None
     metadata = _dict_or_empty(report.metadata)
+    reporting_payload = _reporting_payload_for_download(report)
     owner_id = _text(report.owner_id or (report.session.owner_id if report.session_id else ""))
     guest_id = _normalize_guest_id(metadata.get("guest_id"))
     if not guest_id and report.session_id:
@@ -3985,6 +4097,7 @@ def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
         "session_id": report.session.session_id if report.session_id else None,
         "status": report.status,
         "source": _text(metadata.get("source")),
+        "download_blocked": _appeal_download_is_blocked(reporting_payload),
     }
 
 
@@ -4001,15 +4114,12 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
     storage_uri = object_storage["storage_uri"]
     storage_backend = object_storage["backend"]
     normalized_document_type = _report_download_document_type(document_type)
+    reporting_payload = _reporting_payload_for_download(report)
     if normalized_document_type == REPORT_DOWNLOAD_TYPE_OBJECTION_FORM:
         text_body = _report_objection_form_body(report)
-        title = "과태료 부과 처분 이의신청서"
-        filename = f"{report.report_id}-objection-form.pdf"
-        pdf_body = _report_objection_form_pdf_body(
-            report,
-            title=title,
-            text_body=text_body,
-        )
+        document_variant = _report_document_variant(report, reporting_payload)
+        title = "과태료 부과 처분 이의신청서" if document_variant == "fine_notice" else report.title
+        filename = f"{report.report_id}-objection-form.docx"
     else:
         text_body = _report_download_body(
             report,
@@ -4017,12 +4127,16 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
             object_storage=object_storage,
         )
         title = report.title or report.report_id
-        filename = f"{report.report_id}.pdf"
-        pdf_body = build_report_download_pdf_body(
-            report_id=report.report_id,
-            title=title,
-            body_text=text_body,
-        )
+        document_variant = "general"
+        filename = f"{report.report_id}.docx"
+    docx_body = render_report_docx(
+        document_variant=document_variant,
+        title=title,
+        form_data=_dict_or_empty(reporting_payload.get("form_data")),
+        sections=_list_or_empty(reporting_payload.get("sections")),
+        petition_purpose=_text(reporting_payload.get("petition_purpose")),
+        petition_reason=_text(reporting_payload.get("petition_reason")),
+    )
     return {
         "report_id": report.report_id,
         "document_type": normalized_document_type,
@@ -4034,15 +4148,42 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
         "filename": filename,
-        "content_type": REPORT_PDF_CONTENT_TYPE,
+        "content_type": REPORT_DOCX_CONTENT_TYPE,
         "storage_uri": storage_uri,
         "storage_backend": storage_backend,
         "object_storage": object_storage,
         "object_key": object_storage.get("key", ""),
         "status": report.status,
-        "body": pdf_body,
+        "body": docx_body,
         "text_body": text_body,
     }
+
+
+def _reporting_payload_for_download(report: Report) -> dict[str, Any]:
+    content = _dict_or_empty(report.content)
+    return _dict_or_empty(content.get("reporting_payload"))
+
+
+def _report_document_variant(report: Report, reporting_payload: dict[str, Any]) -> str:
+    document_variant = _text(reporting_payload.get("document_variant"))
+    if document_variant in {"fine_notice", "traffic_accident"}:
+        return document_variant
+    if report.report_type == ReportType.FAULT_RATIO_ANALYSIS.value:
+        return "traffic_accident"
+    if report.report_type == ReportType.FINE_NOTICE_OBJECTION.value:
+        return "fine_notice"
+    return "general"
+
+
+def _appeal_download_is_blocked(reporting_payload: dict[str, Any]) -> bool:
+    appeal_gate = _dict_or_empty(reporting_payload.get("appeal_gate"))
+    if appeal_gate.get("blocked") is True:
+        return True
+    appeal_decision = _dict_or_empty(reporting_payload.get("appeal_decision"))
+    return (
+        _text(appeal_decision.get("judgment_status")) in {"denied", "not_applicable"}
+        or appeal_decision.get("deadline_passed") is True
+    )
 
 
 def list_report_records(
@@ -5789,7 +5930,12 @@ def _execute_cost_guarded_agent_phase(
     closed instead of issuing the same paid call again.
     """
 
-    from app.services.agent_node_service import execute_agent_plan
+    from app.services.agent_node_service import (
+        execute_agent_plan,
+        validate_supervisor_plan_handoff,
+    )
+
+    validate_supervisor_plan_handoff(analysis_plan, execution_payload)
 
     invocation = _reserve_paid_agent_phase_call(
         work_item,
@@ -6330,9 +6476,31 @@ def _annotate_reporting_execution_handoff(
 
 
 def _resolved_agent_work_item_execution_payload(work_item: AgentWorkItem) -> dict[str, Any]:
+    from app.services.supervisor_execution_input_service import (
+        build_trusted_worker_execution_payload,
+        read_server_execution_context,
+        requires_supervisor_handoff,
+    )
+
     queue_payload = _dict_or_empty(work_item.payload)
     job_payload = _dict_or_empty(queue_payload.get("job_payload"))
     execution_payload = dict(_dict_or_empty(queue_payload.get("execution_payload")))
+    chat_response = dict(_dict_or_empty(job_payload.get("chat_response")))
+    chat_response.setdefault("session_id", work_item.job.session.session_id)
+    chat_response.setdefault("message_id", _text(job_payload.get("message_id")))
+    chat_response.setdefault("attachments", execution_payload.get("attachments") or [])
+    execution_payload = build_trusted_worker_execution_payload(
+        execution_payload,
+        chat_response=chat_response,
+        server_execution_context=read_server_execution_context(
+            queue_payload.get("server_execution_context")
+        ),
+        public_request=requires_supervisor_handoff(execution_payload),
+        server_upstream_results=_persisted_work_item_upstream_results(
+            work_item,
+            analysis_plan=_dict_or_empty(queue_payload.get("analysis_plan")),
+        ),
+    )
     execution_payload.setdefault("job_id", work_item.job.job_id)
     execution_payload.setdefault("session_id", work_item.job.session.session_id)
     execution_payload.setdefault("message_id", _text(job_payload.get("message_id")))
@@ -6348,6 +6516,31 @@ def _resolved_agent_work_item_execution_payload(work_item: AgentWorkItem) -> dic
 
         execution_payload = resolve_attachment_references(execution_payload)
     return execution_payload
+
+
+def _persisted_work_item_upstream_results(
+    work_item: AgentWorkItem,
+    *,
+    analysis_plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Rebuild resumable upstream state from rows owned by this job only."""
+
+    planned_node_codes = {
+        _text(step.get("node_code"))
+        for step in _list_or_empty(analysis_plan.get("steps"))
+        if isinstance(step, dict) and _text(step.get("node_code"))
+    }
+    if not planned_node_codes:
+        return {}
+
+    results = AgentResult.objects.filter(
+        job=work_item.job,
+        node_code__in=planned_node_codes,
+    ).order_by("created_at", "result_id")
+    return {
+        result.node_code: _agent_result_handoff_record(result)
+        for result in results
+    }
 
 
 def _partition_reporting_plan(
@@ -6703,6 +6896,7 @@ def _build_reporting_handoff(
             # findings arrive separately through the persisted result rows.
             "user_facts": _text(context.get("user_facts")),
             "attachment_refs": attachments,
+            "case_evidence": _dict_or_empty(context.get("case_evidence")),
         },
         reporting_step_executable=reporting_step_executable,
     )
@@ -6810,6 +7004,32 @@ def _node_execution_envelope(
     }
 
 
+def _pending_questions_from_node_execution(
+    job_payload: dict[str, Any],
+    node_execution: dict[str, Any],
+) -> list[Any]:
+    pending_questions = deepcopy(_list_or_empty(job_payload.get("pending_questions")))
+    known_fields = {
+        _text(question.get("field")).strip()
+        for question in pending_questions
+        if isinstance(question, dict) and _text(question.get("field")).strip()
+    }
+    for execution in _list_or_empty(node_execution.get("executions")):
+        agent_output = _dict_or_empty(_dict_or_empty(execution).get("agent_output"))
+        structured_result = _dict_or_empty(agent_output.get("structured_result"))
+        if (
+            _text(agent_output.get("execution_status")) != "input_required"
+            and _text(structured_result.get("judgment_status")) != "input_required"
+        ):
+            continue
+        for field in _list_or_empty(structured_result.get("missing_fields")):
+            normalized_field = _text(field).strip()
+            if normalized_field and normalized_field not in known_fields:
+                pending_questions.append({"field": normalized_field})
+                known_fields.add(normalized_field)
+    return pending_questions
+
+
 def _completed_job_payload_for_work_item(
     work_item: AgentWorkItem,
     *,
@@ -6831,6 +7051,7 @@ def _completed_job_payload_for_work_item(
         "analysis_plan_id": _text(job_payload.get("analysis_plan_id") or analysis_plan.get("plan_id")),
         "node_execution": node_execution,
         "status_counts": _dict_or_empty(node_execution.get("status_counts")),
+        "pending_questions": _pending_questions_from_node_execution(job_payload, node_execution),
         "work_item_id": work_item.work_item_id,
     }
 
@@ -6961,15 +7182,22 @@ def _fail_agent_work_item(
     *,
     expected_attempt_no: int,
 ) -> dict[str, Any]:
+    from app.services.agent_node_service import SupervisorHandoffValidationError
+
     superseded_case_analysis = isinstance(exc, SupersededCaseAnalysisError)
     case_fact_provenance_required = isinstance(exc, CaseFactProvenanceError)
+    supervisor_handoff_invalid = isinstance(exc, SupervisorHandoffValidationError)
     error_code = (
         "superseded_case_analysis"
         if superseded_case_analysis
         else (
             "case_fact_provenance_required"
             if case_fact_provenance_required
-            else exc.__class__.__name__
+            else (
+                "supervisor_handoff_invalid"
+                if supervisor_handoff_invalid
+                else exc.__class__.__name__
+            )
         )
     )
     binding = AgentWorkItem.objects.filter(work_item_id=work_item_id).values(
@@ -7043,6 +7271,7 @@ def _fail_agent_work_item(
             and not isinstance(exc, PaidAgentCallRetryBlockedError)
             and not superseded_case_analysis
             and not case_fact_provenance_required
+            and not supervisor_handoff_invalid
         )
         if superseded_case_analysis:
             work_item.status = AgentWorkItemStatus.CANCELED.value
@@ -7938,8 +8167,8 @@ def _report_object_storage(report: Report) -> dict[str, Any]:
             "storage_uri": "",
             "resource_type": "report",
             "resource_id": report.report_id,
-            "filename": f"{report.report_id}.pdf",
-            "content_type": REPORT_PDF_CONTENT_TYPE,
+            "filename": f"{report.report_id}.docx",
+            "content_type": REPORT_DOCX_CONTENT_TYPE,
             "size_bytes": 0,
             "status": "generated_on_demand",
             "source_uri": "",
@@ -8310,7 +8539,14 @@ def _pdf_utf16be_hex(value: Any) -> str:
 
 def _report_download_document_type(value: str | None) -> str:
     normalized = _text(value).lower()
-    if normalized in {"objection", "objection_form", "objection-draft", "application", "form"}:
+    if normalized in {
+        "objection",
+        "objection_form",
+        "objection-draft",
+        "application",
+        "form",
+        "traffic_accident_objection_docx",
+    }:
         return REPORT_DOWNLOAD_TYPE_OBJECTION_FORM
     return REPORT_DOWNLOAD_TYPE_REPORT
 

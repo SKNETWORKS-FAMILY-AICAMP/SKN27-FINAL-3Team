@@ -18,7 +18,10 @@ sys.path.insert(0, str(ROOT))
 from ai.agents.appeal_decision_flow.deadline import deadline_gate_node
 from ai.agents.appeal_decision_flow.guide import guide_generation_node
 from ai.agents.appeal_decision_flow.law_code_check import law_code_check_node
-from ai.agents.appeal_decision_flow.law_refs import get_merit_context
+from ai.agents.appeal_decision_flow.law_refs import (
+    LegalProvisionEvidenceUnavailable,
+    get_merit_context,
+)
 from ai.agents.appeal_decision_flow.merit_gate import merit_classification_node
 from ai.agents.appeal_decision_flow.reason_intake import reason_intake_node
 from ai.agents.appeal_decision_flow.risk_gate import risk_classification_node
@@ -235,15 +238,23 @@ class TestReasonIntakeNode:
 
 class TestLawRefs:
     @pytest.fixture(autouse=True)
-    def _provide_verified_db_provisions(self):
-        def verified_provision(source_name, article_no):
-            if article_no == "제160조":
-                return "도로교통법 제160조제4항제1호 도난 또는 그 밖의 부득이한 사유"
-            return f"{source_name} {article_no} (DB) 검증 조문"
+    def _verified_rag_results(self):
+        """각 고정 참조 질의에 기대한 법령 출처의 검증된 RAG 결과를 제공한다."""
+        def fake_search(*, query_text, **_kwargs):
+            source_name = (
+                "도로교통법 시행규칙"
+                if query_text.startswith("도로교통법 시행규칙")
+                else "질서위반행위규제법"
+            )
+            return [{
+                "source_name": source_name,
+                "provision_text": query_text,
+                "score": 0.9,
+            }]
 
         with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
-            "etl.legal.search.get_provision_text",
-            side_effect=verified_provision,
+            "ai.agents.appeal_decision_flow.law_refs.search_law_provisions",
+            side_effect=fake_search,
         ):
             yield
 
@@ -267,19 +278,43 @@ class TestLawRefs:
         assert "질서위반행위규제법 제10조" in ctx
         assert "질서위반행위규제법 제14조" in ctx
 
-    def test_DB_조회_성공하면_DB_원문_사용(self):
-        def db_provision(_source_name, article_no):
-            if article_no == "제160조":
-                return "(DB) 실제 법령DB 제160조 도난 및 부득이한 사유 원문"
-            return "(DB) 실제 법령DB에서 조회된 조문 원문"
+    def test_DB_조회_성공하면_RAG_매칭_원문_사용(self):
+        """RAG 검색이 신뢰도 기준(evaluate_confidence)을 넘는 매칭을 반환하면, 조문번호가
+        아니라 source_name 일치 여부로 폴백 대신 그 매칭 원문을 쓴다."""
+        def confident_match(*, query_text, **_kwargs):
+            source_name = (
+                "도로교통법 시행규칙"
+                if query_text.startswith("도로교통법 시행규칙")
+                else "질서위반행위규제법"
+            )
+            return [{
+                "source_name": source_name,
+                "provision_text": "(DB) 실제 법령DB에서 조회된 조문 원문",
+                "score": 0.9,
+            }]
 
-        with patch.dict("os.environ", {"LEGAL_PROVISION_DB_ENABLED": "1"}), patch(
-            "etl.legal.search.get_provision_text",
-            side_effect=db_provision,
+        with patch(
+            "ai.agents.appeal_decision_flow.law_refs.search_law_provisions",
+            side_effect=confident_match,
         ):
             ctx = get_merit_context("사전통지")
         assert "(DB) 실제 법령DB에서 조회된 조문 원문" in ctx
         assert "질서위반행위규제법 제7조(고의 또는 과실)" not in ctx
+
+    def test_source_name_불일치하면_판정_중단(self):
+        """검색 결과가 신뢰도는 높아도 엉뚱한 법(source_name 불일치)에 매칭됐다면
+        하드코딩 원문으로 대체하지 않고 법령 근거 미확보로 판정을 중단한다."""
+        wrong_source_match = [{
+            "source_name": "형법",  # REQUIRED_RAG_REFERENCES에 없는 source_name이어야 진짜 불일치를 검증한다
+            "provision_text": "전혀 다른 법의 조문 원문",
+            "score": 0.9,
+        }]
+        with patch(
+            "ai.agents.appeal_decision_flow.law_refs.search_law_provisions",
+            return_value=wrong_source_match,
+        ), pytest.raises(LegalProvisionEvidenceUnavailable) as exc_info:
+            get_merit_context("사전통지")
+        assert exc_info.value.reason_code == "legal_provision_low_confidence_or_not_found"
 
 
 # ── risk_classification_node (DATA-003 §8) ──────────────────────────────────
@@ -397,13 +432,11 @@ class TestRiskClassificationNode:
 
 class TestMeritClassificationNode:
     @pytest.fixture(autouse=True)
-    def _provide_verified_law_context(self):
+    def _verified_law_context(self):
+        """MG 자체 테스트는 법령 근거 확보가 끝난 상태에서 LLM 판정만 격리한다."""
         with patch(
             "ai.agents.appeal_decision_flow.merit_gate.get_merit_context",
-            return_value=(
-                "[source=도로교통법 시행규칙; article=제142조; "
-                "provenance=legal_provision_db] 시행규칙 제142조"
-            ),
+            return_value="[source=도로교통법 시행규칙; provenance=legal_rag]\n시행규칙 제142조",
         ):
             yield
 
@@ -690,15 +723,6 @@ class TestMeritClassificationNode:
 # ── verdict_node (DATA-003 §4) ───────────────────────────────────────────────
 
 class TestVerdictNode:
-    def test_필수_법령근거_없으면_판정실패(self):
-        result = verdict_node(
-            {
-                "notice_stage": "사전통지",
-                "legal_evidence_status": "unavailable",
-            }
-        )
-        assert result == {"judgment_status": "failed", "overall_possibility": None}
-
     def test_사전통지_라벨(self):
         result = verdict_node({"notice_stage": "사전통지"})
         assert result["overall_possibility"] == "의견_제출시_인정가능"

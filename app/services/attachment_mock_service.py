@@ -17,6 +17,7 @@ SUPPORTED_PURPOSES = {
     "accident_scene",
     "evidence",
     "accident_statement",
+    "traffic_accident_confirmation",
     "blackbox_video",
     "insurance_record",
     "unknown",
