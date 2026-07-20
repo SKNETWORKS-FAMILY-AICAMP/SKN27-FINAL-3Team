@@ -13,11 +13,13 @@
 
 ## 선택한 접근
 
-새 Django `TestCase` 하나에서 소유자와 비소유자 인증 Client를 생성한다. 소유자의 `ChatSession`, `UploadedFile`, `AnalysisJob`, `Report`를 실제 모델·저장소 계약으로 준비하고, Job의 결과·Report가 같은 `owner_id`와 `session_id`에 연결됐는지 확인한다.
+새 Django `TestCase` 하나에서 소유자와 비소유자 인증 Client를 생성한다. 소유자의 세션은 `POST /api/chat/messages/`로 생성·바인딩하고, 분석 Job은 `POST /api/analysis/jobs/`로 생성한다. 외부 Supervisor·Agent adapter만 결정론적 테스트 대역으로 교체하며, 인증·라우팅·권한·영속화 경로는 실제 코드로 실행한다.
+
+API가 생성한 Job의 queued work item은 `process_agent_work_items(limit=1)`로 같은 프로세스에서 처리한다. 처리 전후의 `AnalysisJob`, work item, Worker 결과 `Report`가 모두 같은 `owner_id`와 `session_id`를 유지하는지 확인한다. Report·첨부의 조회 경계는 실제 API로 확인하되, 첨부 원문 저장은 기존 테스트 DB fixture를 사용해 S3 호출을 막는다.
 
 동일 Client는 각 자원의 정상 API 흐름을 통과해야 한다. 비소유자 Client는 같은 식별자를 사용해도 모든 경계에서 `403 object_access_denied`를 받아야 하며, 응답과 문서 본문에는 소유자 ID, storage URI, 원문 리포트 내용, 파일 경로가 없어야 한다.
 
-외부 LLM, OCR, S3, 실제 백그라운드 프로세스는 사용하지 않는다. Worker 연결은 테스트 DB의 Job·Report 영속 결과와 기존 Worker 저장소 함수를 사용해 검증한다. 따라서 API 권한·저장소 연결을 검증하면서 CI 재현성을 유지한다.
+외부 LLM, OCR, S3, 별도 Worker 프로세스는 사용하지 않는다. 이 방식은 Worker의 실제 DB 처리 함수를 실행하면서도 CI 재현성을 유지한다.
 
 ## 대안과 제외 이유
 
@@ -37,10 +39,11 @@
 
 ### A. 소유자 정상 흐름
 
-- 소유자는 자신이 만든 세션의 분석 Job 목록과 상세·결과를 조회할 수 있다.
+- 소유자는 `POST /api/chat/messages/`로 자신에게 바인딩된 세션을 만든다.
+- 소유자는 `POST /api/analysis/jobs/`로 해당 세션의 분석 Job을 생성하고, Job 목록·상세·결과를 조회할 수 있다.
 - 소유자는 자신의 첨부 메타데이터를 조회할 수 있다.
-- 소유자는 자신의 리포트 상세를 조회하고, 기존 문서 확인·appeal gate 조건을 만족하는 경우에만 DOCX를 다운로드할 수 있다.
-- Worker 결과로 영속된 Job과 Report의 `owner_id`, `session_id`, 연결된 Case 또는 Job 참조는 원래 소유자 세션과 일치한다.
+- Worker가 처리한 Job과 생성 Report의 `owner_id`, `session_id`, 연결된 Case 또는 Job 참조는 원래 소유자 세션과 일치한다.
+- 소유자는 appeal gate가 허용된 Report 상세를 조회하고, 문서 확인 API를 성공시킨 뒤 `GET /api/reports/{report_id}/download/?document_type=objection_form`으로 DOCX를 다운로드할 수 있다. 응답은 DOCX Content-Type과 attachment 응답이어야 한다.
 
 ### B. 비소유자 차단 흐름
 
@@ -49,6 +52,7 @@
 - 분석 Job 목록의 `session_id` 필터, Job 상세와 결과
 - 첨부 메타데이터 상세
 - 리포트 상세와 DOCX 다운로드
+- `POST /api/chat/messages/`에서 소유자 세션 재사용
 - 저장 상태 변경 또는 분석 요청에서 소유자 세션 재사용
 
 각 요청은 `403 object_access_denied`를 반환하며 성공 데이터나 다운로드 응답을 반환하면 안 된다.
@@ -61,6 +65,7 @@
 - `storage_uri`, 버킷 이름, 내부 파일 경로
 - 리포트 `content`, `content_summary`, 문서 바이트
 - Worker 내부 실행 메타데이터와 요청 지문
+- `Content-Disposition` 등 문서 다운로드 헤더와 DOCX 바이트
 
 요청자가 이미 알고 있는 `session_id`, `attachment_id`, `job_id`, `report_id`는 오류 자원 식별자로 표시될 수 있으므로 비노출 검사 대상이 아니다.
 
