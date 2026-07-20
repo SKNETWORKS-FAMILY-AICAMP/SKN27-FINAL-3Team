@@ -1,92 +1,36 @@
-# Operational Log PII Regression Implementation Plan
+# 운영 로그 개인정보 노출 회귀 방지 구현 계획
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**목표:** Supervisor 런타임 스모크 결과, 채팅, 파일 스캔, 이의신청 문서 생성 Agent, Worker 처리 경계에서 개인정보, 스토리지 경로, 비밀값 원문이 운영 로그나 반환 DTO에 남지 않도록 고정한다.
 
-**Goal:** Prevent raw PII, storage locations, and secrets from appearing in the Supervisor runtime-smoke output or the chat, file-scan, document-generation, and Worker operational boundaries.
+**구현 방향:** 기존 Logger와 Worker의 응답 계약은 유지한다. Supervisor 스모크의 `reason`만 허용 목록 기반 코드로 정규화하고, 나머지 경계는 실제 Logger 캡처와 DB에 저장된 Worker 실패 상태를 검사하는 회귀 테스트로 현재의 비노출 동작을 고정한다. 전역 로그 필터, CloudWatch 설정, 외부 Provider 호출은 추가하지 않는다.
 
-**Architecture:** Keep the current logger and Worker contracts. Normalize the Supervisor smoke `reason` with an allowlist, then make current non-disclosure behavior executable through captured logger records and persisted Worker state. Do not add global logging, cloud logging configuration, or external calls.
+**기술 요소:** Python 3.13, Django `TestCase`, 표준 라이브러리 로그 캡처, `unittest.mock`, pytest, Django test runner
 
-**Tech Stack:** Python 3.13, Django `TestCase`, standard-library logging capture, `unittest.mock`, pytest, Django test runner.
+## 공통 제약
 
-## Global Constraints
-
-- Do not modify OCR, law-search, RAG, or other team-owned domain rules.
-- Do not add global `LOGGING`, CloudWatch, retention, object-storage, or provider configuration.
-- Run only fake-client, patched, or test-database paths; no provider, S3, paid-service, or production-data call is permitted.
-- The sentinel exception contains: a person name, phone number, resident-registration number, street address, vehicle number, original filename, Windows path, S3 URI, and secret-like token.
-- Allowed operational outputs are fixed status/reason codes, exception class names, fixed failure messages, category/count metadata, and opaque IDs.
-- Allowed smoke reason codes are exactly `ok`, `disabled`, `missing_config`, `provider_unavailable`, and `invalid_contract`. Any other value becomes `unspecified`.
+- OCR, 법령 검색, RAG 등 다른 담당 영역의 도메인 규칙은 수정하지 않는다.
+- 전역 `LOGGING`, CloudWatch, 보존 정책, 객체 스토리지, Provider 설정을 추가하거나 변경하지 않는다.
+- 테스트는 가짜 클라이언트, 패치, 테스트 DB만 이용하며 Provider, S3, 유료 서비스, 운영 데이터에 연결하지 않는다.
+- 민감 예외에는 이름, 전화번호, 주민등록번호, 주소, 차량번호, 원본 파일명, Windows 경로, S3 URI, 비밀 토큰을 함께 넣는다.
+- 관측 가능한 값은 고정된 상태/사유 코드, 예외 클래스명, 고정 실패 문구, 분류/개수 메타데이터, 불투명 ID로 제한한다.
+- 스모크 `reason` 허용값은 `ok`, `disabled`, `missing_config`, `provider_unavailable`, `invalid_contract`뿐이다. 그 외 값은 모두 `unspecified`으로 변환한다.
 
 ---
 
-### Task 1: Normalize the Supervisor runtime-smoke reason
+## 작업 A: Supervisor 런타임 스모크 사유 코드 정규화
 
-**Files:**
-- Modify: `backend/chatbot/management/commands/smoke_supervisor_conversation_runtime.py:174-177`
-- Modify: `backend/chatbot/test_supervisor_conversation_runtime_smoke.py:18-34`
+**수정 파일**
 
-**Contract:** `supervisor_state["llm"]` may contain `status`, `reason`, `provider`, and `model`; the public `supervisor_conversation_runtime_smoke.v1` envelope exposes only `status` and a safe reason code.
+- `backend/chatbot/management/commands/smoke_supervisor_conversation_runtime.py:174-177`
+- `backend/chatbot/test_supervisor_conversation_runtime_smoke.py:18-34`
 
-- [ ] **Step 1: Add a failing raw-reason regression test before changing production code.**
+**계약**
 
-  Replace the current `_safe_llm` assertion with these three assertions in `SupervisorConversationRuntimeSmokeTests`:
+`supervisor_state["llm"]`에는 `status`, `reason`, `provider`, `model`이 들어올 수 있다. 공개 스모크 DTO에는 `status`와 안전한 사유 코드만 남기고 `provider`, `model`, 임의 원문 사유는 노출하지 않는다.
 
-  ```python
-  def test_smoke_output_normalizes_untrusted_reason_and_excludes_identifiers(self) -> None:
-      from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
-
-      raw_reason = (
-          "Kim Hye-rim 010-1234-5678 900101-1234567 123 Test-ro "
-          "12A3456 fine-notice.png C:\\private\\fine-notice.png "
-          "s3://private-bucket/fine-notice.png sk-private-token gpt-private"
-      )
-
-      result = smoke._safe_llm(
-          {
-              "llm": {
-                  "status": "failed",
-                  "reason": raw_reason,
-                  "provider": "provider-private",
-                  "model": "gpt-private",
-              }
-          }
-      )
-
-      self.assertEqual(result, {"status": "failed", "reason": "unspecified"})
-      self.assertNotIn("Kim Hye-rim", repr(result))
-      self.assertNotIn("s3://private-bucket", repr(result))
-      self.assertNotIn("gpt-private", repr(result))
-
-  def test_smoke_output_preserves_allowed_reason_code(self) -> None:
-      from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
-
-      self.assertEqual(
-          smoke._safe_llm({"llm": {"status": "failed", "reason": "missing_config"}}),
-          {"status": "failed", "reason": "missing_config"},
-      )
-
-  def test_smoke_output_maps_disabled_state_to_disabled_reason(self) -> None:
-      from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
-
-      self.assertEqual(
-          smoke._safe_llm(
-              {"llm": {"status": "disabled", "reason": "SUPERVISOR_LLM_ENABLED is off"}}
-          ),
-          {"status": "disabled", "reason": "disabled"},
-      )
-  ```
-
-  The first test must fail on the current code because it returns `raw_reason` unchanged.
-
-- [ ] **Step 2: Run only the failing test and record the intended failure.**
-
-  ```powershell
-  & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend\manage.py test chatbot.test_supervisor_conversation_runtime_smoke.SupervisorConversationRuntimeSmokeTests.test_smoke_output_normalizes_untrusted_reason_and_excludes_identifiers -v 1
-  ```
-
-- [ ] **Step 3: Add the allowlist and normalize `_safe_llm`.**
-
-  Add directly above `_safe_llm`:
+- [x] A-1. `_safe_llm()`에 원문 민감값이 담긴 `reason`을 전달했을 때 `{"status": "failed", "reason": "unspecified"}`만 반환하는 실패 테스트를 먼저 작성한다.
+- [x] A-2. 그 단일 테스트가 현재 코드에서 원문 `reason`을 반환해 실패하는지 확인한다.
+- [x] A-3. 아래처럼 허용값 집합과 `_safe_llm_reason()`을 추가한다. `status == "disabled"`이면 원본 사유와 무관하게 `disabled`로 반환한다.
 
   ```python
   SAFE_LLM_REASON_CODES = frozenset(
@@ -103,7 +47,7 @@
       return "unspecified"
   ```
 
-  Replace `_safe_llm` with:
+- [x] A-4. `_safe_llm()`은 다음 두 필드만 반환하도록 최소 변경한다.
 
   ```python
   def _safe_llm(supervisor_state) -> dict:
@@ -113,250 +57,80 @@
       return {"status": status, "reason": _safe_llm_reason(status, llm.get("reason"))}
   ```
 
-  This deliberately leaves the envelope shape as two fields and never copies `provider` or `model`.
-
-- [ ] **Step 4: Run the focused test and the complete smoke module.**
+- [x] A-5. 원문 사유 차단, 허용 코드(`missing_config`) 유지, 비활성 상태(`disabled`) 변환을 각각 검사하고 스모크 테스트 모듈 전체를 실행한다.
 
   ```powershell
   & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend\manage.py test chatbot.test_supervisor_conversation_runtime_smoke -v 1
   ```
 
-  Expected: all smoke-output, queue, Worker, and report assertions pass with no provider call.
+- [x] A-6. 테스트와 최소 구현을 `fix: sanitize supervisor smoke reason` 커밋으로 분리한다.
 
-- [ ] **Step 5: Commit the isolated production behavior change.**
+## 작업 B: 운영 출력의 개인정보 비노출 회귀 테스트
 
-  ```powershell
-  git add backend/chatbot/management/commands/smoke_supervisor_conversation_runtime.py backend/chatbot/test_supervisor_conversation_runtime_smoke.py
-  git commit -m "fix: sanitize supervisor smoke reason"
-  ```
+**신규 파일**
 
-### Task 2: Add operational-output PII regression coverage
+- `backend/chatbot/test_operational_log_privacy.py`
 
-**Files:**
-- Create: `backend/chatbot/test_operational_log_privacy.py`
-- Read only: `backend/chatbot/views.py:780-1077`, `backend/chatbot/file_scan_service.py:68-100`, `ai/agents/objection_report_generation/agent.py:645-707`, `backend/chatbot/repositories.py:7335-7520`
+**검증 경계**
 
-**Contract:** Captured logger output and persisted Worker failure data must exclude every sentinel marker. Logs retain only the existing fixed error-class messages; Worker data retains only fixed messages, opaque IDs, and `RuntimeError` as an error code.
+- 채팅 분석 예약 실패: `chatbot.views.analysis_jobs(request)`
+- 첨부파일 스캔 실패: `chatbot.file_scan_service.scan_uploaded_file(uploaded_file)`
+- 이의신청 문서 Agent Provider 실패: `objection_report_generation.agent._draft_petition_text(...)`
+- Worker 실패 영속화: `chatbot.repositories._fail_agent_work_item(...)`
 
-- [ ] **Step 1: Create the test module’s imports, sentinel data, and helper methods.**
+**공통 테스트 값**
 
-  ```python
-  from __future__ import annotations
-
-  import json
-  from types import SimpleNamespace
-  from unittest.mock import patch
-
-  from django.test import RequestFactory, TestCase
-
-  from chatbot.models import (
-      AgentWorkItem,
-      AgentWorkItemStatus,
-      AnalysisJob,
-      AnalysisJobStatus,
-      ChatSession,
-      ChatSessionStatus,
-      UploadedFile,
-      UploadedFileStatus,
-  )
+```python
+SENSITIVE_MARKERS = (
+    "Kim Hye-rim",
+    "010-1234-5678",
+    "900101-1234567",
+    "123 Test-ro",
+    "12A3456",
+    "fine-notice.png",
+    "C:\\private\\fine-notice.png",
+    "s3://private-bucket/fine-notice.png",
+    "sk-private-token",
+)
 
 
-  SENSITIVE_MARKERS = (
-      "Kim Hye-rim",
-      "010-1234-5678",
-      "900101-1234567",
-      "123 Test-ro",
-      "12A3456",
-      "fine-notice.png",
-      "C:\\private\\fine-notice.png",
-      "s3://private-bucket/fine-notice.png",
-      "sk-private-token",
-  )
+def _private_exception() -> RuntimeError:
+    return RuntimeError(" | ".join(SENSITIVE_MARKERS))
+```
 
-
-  def _private_exception() -> RuntimeError:
-      return RuntimeError(" | ".join(SENSITIVE_MARKERS))
-
-
-  class OperationalLogPrivacyTests(TestCase):
-      def assert_no_raw_markers(self, value: object) -> None:
-          serialized = repr(value)
-          for marker in SENSITIVE_MARKERS:
-              self.assertNotIn(marker, serialized)
-
-      def _uploaded_file_for_scan(self) -> UploadedFile:
-          session = ChatSession.objects.create(
-              session_id="ses_operational_scan",
-              owner_id="usr_operational_scan",
-              status=ChatSessionStatus.ACTIVE.value,
-          )
-          return UploadedFile.objects.create(
-              attachment_id="att_operational_scan",
-              owner_id=session.owner_id,
-              session=session,
-              purpose="fine_notice",
-              file_type="image",
-              original_filename=SENSITIVE_MARKERS[5],
-              content_type="image/png",
-              size_bytes=1,
-              storage_uri=SENSITIVE_MARKERS[7],
-              privacy_risk=False,
-              status=UploadedFileStatus.UPLOADED.value,
-              scan_status="not_started",
-          )
-  ```
-
-- [ ] **Step 2: Add the three logger-boundary tests.**
-
-  ```python
-  def test_analysis_job_reservation_failure_logs_only_error_type(self) -> None:
-      from chatbot import views
-
-      request = RequestFactory().post(
-          "/api/analysis/jobs/",
-          data=json.dumps({"session_id": "ses_log", "job_id": "job_log"}),
-          content_type="application/json",
-      )
-      with (
-          patch("chatbot.views._is_canonical_mock_request", return_value=True),
-          patch("chatbot.views.reserve_analysis_job_request", side_effect=_private_exception()),
-          self.assertLogs("chatbot.views", level="WARNING") as captured,
-      ):
-          response = views.analysis_jobs(request)
-
-      self.assertEqual(response.status_code, 503)
-      self.assertIn("analysis job reservation failed error_type=RuntimeError", captured.output[0])
-      self.assert_no_raw_markers(captured.output)
-
-  def test_file_scan_failure_log_excludes_uploaded_file_identifiers(self) -> None:
-      from chatbot import file_scan_service
-
-      uploaded_file = self._uploaded_file_for_scan()
-      with (
-          patch("chatbot.file_scan_service._source_snapshot_for_scan", return_value=b""),
-          patch("chatbot.file_scan_service.build_file_scan_result", side_effect=_private_exception()),
-          self.assertLogs("chatbot.file_scan_service", level="WARNING") as captured,
-      ):
-          file_scan_service.scan_uploaded_file(uploaded_file)
-
-      self.assertIn("file scan failed error_type=RuntimeError", captured.output[0])
-      self.assert_no_raw_markers(captured.output)
-
-  def test_objection_draft_provider_failure_log_excludes_prompt_and_exception_text(self) -> None:
-      from ai.agents.objection_report_generation import agent
-
-      failing_client = SimpleNamespace(
-          chat=SimpleNamespace(
-              completions=SimpleNamespace(
-                  create=lambda **_kwargs: (_ for _ in ()).throw(_private_exception())
-              )
-          )
-      )
-      with (
-          patch.object(agent, "_openai_client", return_value=failing_client),
-          self.assertLogs("ai.agents.objection_report_generation.agent", level="WARNING") as captured,
-      ):
-          result = agent._draft_petition_text(
-              disposition_details={"violation_text": SENSITIVE_MARKERS[0]},
-              legal_grounds=[],
-              user_facts=" ".join(SENSITIVE_MARKERS),
-              missing_fields=[],
-              appeal_decision={},
-          )
-
-      self.assertIsNone(result)
-      self.assertIn("objection petition drafting failed; error_class=RuntimeError", captured.output[0])
-      self.assert_no_raw_markers(captured.output)
-  ```
-
-- [ ] **Step 3: Run the logger tests as characterization coverage.**
+- [x] B-1. `OperationalLogPrivacyTests`에 `assert_no_raw_markers()`를 만들고, 위 민감값을 파일명과 URI로 사용하는 테스트용 `UploadedFile`을 만든다. 파일은 `uploaded`/`not_started` 상태의 테스트 DB 레코드만 사용한다.
+- [x] B-2. 분석 예약에서 `reserve_analysis_job_request`가 민감 예외를 내도록 패치하고 `chatbot.views` Logger를 캡처한다. 응답은 `503`, 로그에는 `analysis job reservation failed error_type=RuntimeError`만 포함되고 모든 민감값은 없어야 한다.
+- [x] B-3. 파일 스캔은 `_source_snapshot_for_scan`을 `b""`으로 패치하고 `build_file_scan_result`에서 민감 예외를 발생시킨다. `chatbot.file_scan_service` Logger에는 `file scan failed error_type=RuntimeError`만 남아야 한다.
+- [x] B-4. 이의신청 문서 Agent의 `_openai_client`를 민감 예외를 내는 가짜 클라이언트로 패치한다. Logger에는 `objection petition drafting failed; error_class=RuntimeError`만 남고 프롬프트/예외 원문은 없어야 한다.
+- [x] B-5. 위 세 테스트를 먼저 실행한다. 이들은 기존 안전 동작을 특성화하는 테스트이므로, 코드 변경 전부터 외부 호출 없이 통과해야 한다.
 
   ```powershell
   & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend\manage.py test chatbot.test_operational_log_privacy.OperationalLogPrivacyTests.test_analysis_job_reservation_failure_logs_only_error_type chatbot.test_operational_log_privacy.OperationalLogPrivacyTests.test_file_scan_failure_log_excludes_uploaded_file_identifiers chatbot.test_operational_log_privacy.OperationalLogPrivacyTests.test_objection_draft_provider_failure_log_excludes_prompt_and_exception_text -v 1
   ```
 
-  Expected: PASS before any logger production change. These tests lock the safe existing behavior and use no network path.
-
-- [ ] **Step 4: Add the persisted Worker failure-state test.**
-
-  ```python
-  def test_worker_failure_persists_only_fixed_operational_values(self) -> None:
-      from chatbot import repositories
-
-      session = ChatSession.objects.create(
-          session_id="ses_worker_log",
-          owner_id="usr_worker_log",
-          status=ChatSessionStatus.ACTIVE.value,
-      )
-      job = AnalysisJob.objects.create(
-          job_id="job_worker_log",
-          session=session,
-          owner_id=session.owner_id,
-          status=AnalysisJobStatus.RUNNING.value,
-      )
-      work_item = AgentWorkItem.objects.create(
-          work_item_id="work_worker_log",
-          job=job,
-          status=AgentWorkItemStatus.RUNNING.value,
-          attempt_no=1,
-          max_attempts=1,
-      )
-      with (
-          patch("chatbot.repositories.write_analysis_job_progress", return_value={}),
-          patch("chatbot.repositories.write_chat_session_state", return_value=None),
-      ):
-          result = repositories._fail_agent_work_item(
-              work_item.work_item_id,
-              _private_exception(),
-              expected_attempt_no=1,
-          )
-
-      work_item.refresh_from_db()
-      job.refresh_from_db()
-      event = job.events.latest("created_at")
-      self.assertEqual(result["error_code"], "RuntimeError")
-      self.assertEqual(work_item.result["message"], "Agent worker execution failed.")
-      self.assertEqual(job.progress_message, "Agent worker item failed.")
-      self.assert_no_raw_markers(
-          {
-              "result": result,
-              "work_item": work_item.result,
-              "job": job.progress_message,
-              "event": event.metadata,
-          }
-      )
-  ```
-
-- [ ] **Step 5: Run the entire new test module and commit it.**
+- [x] B-6. 활성 `ChatSession`, 실행 중인 `AnalysisJob`, 시도 횟수가 제한에 도달한 `AgentWorkItem`을 만든다. `write_analysis_job_progress`와 `write_chat_session_state`만 패치하고 `_fail_agent_work_item()`에 민감 예외를 준다.
+- [x] B-7. 반환값, `work_item.result`, `job.progress_message`, 마지막 `AnalysisJobEvent.metadata`에서 모든 민감값이 없는지 검사한다. `error_code == "RuntimeError"`, Worker 메시지와 진행 메시지는 기존의 고정 문구인지도 함께 검사한다.
+- [x] B-8. 신규 테스트 모듈 전체를 실행하고 `test: cover operational log pii boundaries` 커밋으로 분리한다.
 
   ```powershell
   & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend\manage.py test chatbot.test_operational_log_privacy -v 1
-  git add backend/chatbot/test_operational_log_privacy.py
-  git commit -m "test: cover operational log pii boundaries"
   ```
 
-### Task 3: Record readiness state and run regression verification
+## 작업 C: 체크리스트와 회귀 검증
 
-**Files:**
-- Modify: `docs/ops/project-readiness-master-checklist.md:57`
-- Verify: `backend/chatbot/test_operational_log_privacy.py`, `backend/chatbot/test_supervisor_conversation_runtime_smoke.py`, `test/test_chat_input_privacy.py`, `test/test_ocr_privacy_contract.py`
+**수정 파일**
 
-**Contract:** The checklist uses `[~]` for implementation/PR in progress; it must not claim a merge or CI result before those occur.
+- `docs/ops/project-readiness-master-checklist.md:57`
 
-- [ ] **Step 1: Change only the operational-log row to `[~]` and append `#249`.**
-
-  Preserve the existing Korean row label and its surrounding ordering. Do not mark it `[x]` until the PR is merged into `dev` and required CI succeeds.
-
-- [ ] **Step 2: Run the focused privacy and smoke suites.**
+- [x] C-1. 운영 로그 개인정보 노출 회귀 테스트 행만 `[~]`로 바꾸고 `#249`를 추가한다. PR 병합과 필수 CI 통과 전에는 `[x]`로 바꾸지 않는다.
+- [x] C-2. 개인정보 계약과 Supervisor 스모크를 함께 실행한다.
 
   ```powershell
   & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend\manage.py test chatbot.test_operational_log_privacy chatbot.test_supervisor_conversation_runtime_smoke -v 1
   & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q test/test_chat_input_privacy.py test/test_ocr_privacy_contract.py --timeout=30
   ```
 
-  Expected: PASS with no provider, S3, or paid-service invocation.
-
-- [ ] **Step 3: Run full regression and scope checks.**
+- [x] C-3. 전체 pytest, 공백 오류, 변경 범위를 확인한다. 이 작업으로 Provider, S3, 유료 서비스가 호출되면 안 된다.
 
   ```powershell
   & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest -q --timeout=30
@@ -364,11 +138,4 @@
   git status -sb
   ```
 
-  Expected: full pytest passes, whitespace is clean, and only #249 design/plan/test/smoke-command/checklist files differ from `origin/dev`.
-
-- [ ] **Step 4: Commit the readiness update.**
-
-  ```powershell
-  git add docs/ops/project-readiness-master-checklist.md
-  git commit -m "docs: track operational log pii regression"
-  ```
+- [x] C-4. 체크리스트 변경을 `docs: track operational log pii regression` 커밋으로 분리한다.
