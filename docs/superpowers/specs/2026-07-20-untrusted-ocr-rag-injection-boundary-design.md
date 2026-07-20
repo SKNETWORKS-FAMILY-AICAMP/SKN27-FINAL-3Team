@@ -7,9 +7,10 @@
 ## 현재 확인된 상태
 
 - `app/services/supervisor_llm_service.py`의 시스템 프롬프트는 사용자·대화·첨부·검색 자료를 비신뢰 데이터로 선언하고, 정책·노드 allowlist·도구 권한을 변경할 수 없다고 명시한다.
-- `_untrusted_llm_context()`는 사용자 텍스트와 대화 이력을 `reference_only_not_authoritative` 계약으로 감싸며, 첨부는 `attachment_id`, `purpose`, `scan_status`만 전달한다.
-- 현재 `test/test_supervisor_llm_service.py`는 `_llm_request_payload()`와 `_llm_plan_request_payload()`를 직접 호출해 OCR/RAG 원문, `role`, `node_code`, `tool_call`, storage URI가 공개 LLM 요청 제어 영역에 없음을 검사한다.
-- 현재 단위 테스트만으로는 실제 `build_supervisor_state_with_optional_llm()`와 `build_analysis_plan_with_optional_llm()`이 이 안전한 요청 작성 경계를 계속 통과하는지는 보장하지 못한다.
+- `_untrusted_llm_context()`는 사용자 텍스트와 대화 이력만 `reference_only_not_authoritative` 계약으로 감싼다. 첨부는 `attachment_id`, `purpose`, `scan_status`라는 제한된 설명자만 전달한다.
+- OCR 원문과 RAG 원문은 `reference_only`로 전달하는 것이 아니라 Supervisor/Planner의 LLM 요청에서 **완전히 제외**한다. 이는 이슈의 비신뢰 경계 요구보다 더 좁고 안전한 현행 계약이다.
+- 현재 `test/test_supervisor_llm_service.py`는 `_llm_request_payload()`와 `_llm_plan_request_payload()`를 직접 호출해 OCR/RAG 원문, `role`, `node_code`, `tool_call`, storage URI가 LLM 요청에 없음을 검사한다. 또한 실제 호출 함수에서 unknown Agent와 서버 필수 입력 보호를 각각 검증한다.
+- 다만 현재 테스트는 실제 State/Planner 호출이 안전한 요청 DTO를 계속 사용한다는 점과, 비신뢰 문구가 공개 결과 DTO에 되돌아오지 않는다는 점을 함께 고정하지 않는다.
 
 ## 선택한 접근
 
@@ -17,11 +18,13 @@ Supervisor와 Planner의 실제 호출 함수를 실행하되 `_request_supervis
 
 이 방식은 프롬프트 구성, 후보 응답 정규화, fallback allowlist 검증, fail-closed 처리까지 실제 실행 경로로 검증한다. OCR 정확도, RAG 검색 품질, 새로운 도구나 Provider 구현은 변경하지 않는다.
 
+공개 DTO는 Supervisor 상태와 Planner 계획의 반환 계약으로 한정한다. 이 계약에서는 공격 문자열이 Agent/owner/node/stage/보고서 준비 여부 같은 제어 필드로 반영되면 안 되며, LLM 후보가 입력 공격 문자열을 자유 텍스트에 그대로 재현하는 경우도 안전한 결과가 아니다. 이 경우 후보를 허용하지 않고 fail-closed 반환으로 처리한다. 단순 키워드 차단이 아니라, 이번 요청에 포함된 비신뢰 원문과 후보 결과의 직접 재현 여부를 계약 검증으로 다룬다.
+
 ## 설계 범위
 
 ### A. Supervisor 상태 생성 호출 경계
 
-악성 `user_text`, `conversation_history`, 첨부의 `ocr_text`, `retrieved_evidence`에 다음과 같은 지시를 넣는다.
+악성 `user_text`, `conversation_history`, 첨부의 `ocr_text`, `purpose`, `scan_status`, `retrieved_evidence`에 다음과 같은 지시를 넣는다.
 
 - `role=system` 승격 요구
 - 임의 `unknown_agent` 호출 요구
@@ -31,17 +34,20 @@ Supervisor와 Planner의 실제 호출 함수를 실행하되 `_request_supervis
 `build_supervisor_state_with_optional_llm()`을 호출한 뒤 가짜 Provider가 받은 요청을 검사한다.
 
 - 시스템 프롬프트에는 공격 원문이 없고 비신뢰·참조 전용 규칙이 포함돼야 한다.
-- 사용자·대화 원문은 `untrusted_context` 안에만 존재해야 한다.
-- OCR 원문, RAG 원문, 첨부의 `role`/`node_code`/`tool_call`, storage URI는 LLM 요청의 제어 계약에 없어야 한다.
-- 정상 후보 응답은 기존 fallback의 허용 Agent와 서버 필수 입력 상태를 벗어나지 않아야 한다.
+- 사용자·대화·제한된 첨부 설명자 원문은 `untrusted_context` 안에만 존재해야 하며, 시스템 프롬프트나 fallback 제어 계약으로 승격되면 안 된다.
+- OCR 원문, RAG 원문, 첨부의 `role`/`node_code`/`tool_call`, storage URI는 LLM 요청 전체에 없어야 한다.
+- `purpose`와 `scan_status`에 들어간 공격 문구는 `untrusted_context` 안에만 존재하고, 허용 Agent 목록·실행 단계·도구 관련 제어 영역에 영향을 주지 않아야 한다.
+- 후보가 공격 문자열을 `conversation_summary`, `collected_facts`, 질문, 보고서 제목·요약에 그대로 재현하면 State 결과는 fail-closed여야 하며, 직렬화한 반환 DTO에 공격 문자열이 남아서는 안 된다.
+- 기존 `test_supervisor_llm_does_not_promote_server_required_input_to_ready`는 서버 필수 입력을 LLM이 완료 처리하지 못함을 계속 담당한다. 새 테스트는 이 기존 보장을 복제하지 않는다.
 
 ### B. Planner 호출과 fail-closed 경계
 
-동일한 비신뢰 자료로 `build_analysis_plan_with_optional_llm()`을 호출한다. 가짜 Provider는 fallback에 없는 `unknown_agent`와 임의 Agent 소유자를 포함한 후보 계획을 반환한다.
+동일한 비신뢰 자료로 `build_analysis_plan_with_optional_llm()`을 호출한다. 가짜 Provider는 fallback에 없는 `unknown_agent`, 임의 Agent 소유자, 공격 문자열을 포함한 후보 계획을 반환한다.
 
-- Planner 시스템 프롬프트와 `untrusted_context`의 분리 규칙은 A와 동일해야 한다.
+- Planner 시스템 프롬프트와 `untrusted_context`의 분리 규칙은 A와 동일해야 한다. 현재 시스템에는 LLM function/tool-calling 실행기가 없으므로, 여기서의 도구 호출 보호는 비신뢰 `tool_call` 값이 요청 제어 계약·Agent 계획·실행 단계에 유입되지 않는다는 뜻이다.
 - 후보 계획이 fallback allowlist 밖의 Agent를 요구하면 결과는 `llm_planner.status == "failed"`, `reason == "invalid_contract"`이어야 한다.
 - 실패 결과의 `steps`와 `agent_input_packages`는 비어 있어 실제 Agent 실행이나 보고서 생성으로 이어지지 않아야 한다.
+- 직렬화한 Planner 반환 DTO에는 공격 문자열, `unknown_agent`, 비신뢰 `tool_call` 값이 남아서는 안 된다.
 
 ### C. 체크리스트 상태
 
@@ -57,18 +63,21 @@ PR 병합과 필수 CI 통과 전에는 #251 행을 `[x]`로 바꾸지 않는다
 ## 변경 파일
 
 - 수정: `test/test_supervisor_llm_service.py`
-  - 실제 Supervisor 상태 생성과 Planner 생성 함수를 통과하는 프롬프트 인젝션 회귀 테스트를 추가한다.
+  - 실제 Supervisor 상태 생성 호출에서 캡처한 Provider 요청과 반환 DTO를 함께 검증하는 회귀 테스트를 추가한다.
+  - 기존 unknown Agent Planner fail-closed 테스트를 악성 입력·요청 캡처·반환 DTO 검증까지 확장한다.
+  - 기존 unknown Agent State 테스트와 서버 필수 입력 보호 테스트는 중복 추가하지 않고, 각각의 기존 책임을 유지한다.
 - 수정: `docs/ops/project-readiness-master-checklist.md`
   - #249 완료와 #251 진행 상태를 반영한다.
 
-서비스 코드, 도메인 Agent, OCR/RAG 검색 구현, 외부 Provider 설정은 변경하지 않는다. 새 테스트가 현재 구현의 계약 위반을 재현하는 경우에만 그 최소 경계 코드를 별도 설계 검토 후 수정한다.
+서비스 코드는 첫 단계에서 변경하지 않는다. 다만 공개 DTO의 직접 재현 테스트가 현재 정규화 계약 위반을 재현하면, 이번 설계에서 정한 범위 안에서 후보 응답 검증 또는 반환 DTO 정규화의 최소 코드만 수정한다. 도메인 Agent, OCR/RAG 검색 구현, 외부 Provider 설정은 변경하지 않는다.
 
 ## 테스트와 완료 기준
 
 - 테스트는 `SUPERVISOR_LLM_ENABLED=1` 및 테스트용 API 키 환경에서 실행하되, `_request_supervisor_json()` 패치로 외부 네트워크 호출을 차단한다.
 - `test/test_supervisor_llm_service.py`의 집중 테스트가 통과한다.
 - 전체 `python -m pytest -q --timeout=30`이 통과한다.
-- 공격 문자열이 시스템 프롬프트, 허용 Agent 목록, 도구 호출 조건, 결과 계획의 실행 가능 단계에 반영되지 않는다.
+- 공격 문자열은 시스템 프롬프트, fallback allowlist, Agent/owner/node/stage/보고서 준비 제어 필드, 결과 계획의 실행 가능 단계에 반영되지 않는다.
+- 공격 문자열을 자유 텍스트 결과에 그대로 재현한 LLM 후보도 invalid contract로 처리하고, 직렬화한 State/Planner 반환 DTO에 해당 문자열이 남지 않는다.
 - #251 체크리스트 행은 PR 병합 전까지 `[~]` 상태다.
 
 ## 제외 범위
