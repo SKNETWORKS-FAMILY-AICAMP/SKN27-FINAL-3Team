@@ -1254,6 +1254,54 @@ button.report-list-card.active {
   color: var(--text);
 }
 
+.document-type-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 10px;
+}
+
+.document-type-card {
+  padding: 14px;
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  border: 1px solid #bddbd6;
+  border-radius: 8px;
+  background: var(--green-soft);
+}
+
+.document-type-card[data-status="partial"] {
+  border-color: #e5c36d;
+  background: var(--amber-soft);
+}
+
+.document-type-card[data-status="unavailable"] {
+  border-color: var(--line);
+  background: #f7f8fa;
+}
+
+.document-type-card p,
+.document-type-card-sections p {
+  margin: 0;
+}
+
+.document-type-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.document-type-card-sections {
+  display: grid;
+  gap: 5px;
+}
+
+.document-type-notice {
+  color: var(--subtle);
+  font-size: 13px;
+}
+
 .report-section-list article,
 .report-page {
   padding: 14px;

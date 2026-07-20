@@ -766,6 +766,14 @@ class SupervisorReportingPipelineTests(TestCase):
             ["Persisted facts"],
         )
         self.assertEqual(
+            [card["type"] for card in report.content["reporting_payload"]["document_cards"]],
+            ["objection_draft", "fact_summary", "insurance_submission"],
+        )
+        self.assertNotIn(
+            "download_report",
+            [action["type"] for action in report.content["reporting_payload"]["report_actions"]],
+        )
+        self.assertEqual(
             report.content["reporting_payload"]["source"],
             "supervisor_agent_result_aggregation",
         )

@@ -52,6 +52,16 @@ class ReportDocumentConfirmation(ReportApiContractModel):
     confirmed_at: datetime | None = None
 
 
+class ReportDocumentCard(ReportApiContractModel):
+    type: Literal["objection_draft", "fact_summary", "insurance_submission"]
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=280)
+    status: Literal["ready", "partial", "unavailable"]
+    sections: list[ReportSection] = Field(default_factory=list)
+    copy_text: str | None = None
+    notice: str | None = None
+
+
 class ConfirmReportDocumentRequest(StrictRequest):
     facts_confirmed: Literal[True]
     agency_confirmed: Literal[True]
@@ -75,6 +85,7 @@ class ReportReportingPayload(ReportApiContractModel):
     report_actions: list[ReportDownloadAction] = Field(default_factory=list)
     appeal_gate: ReportAppealGate | None = None
     document_confirmation: ReportDocumentConfirmation | None = None
+    document_cards: list[ReportDocumentCard] = Field(default_factory=list)
     sections: list[ReportSection] = Field(default_factory=list)
 
 

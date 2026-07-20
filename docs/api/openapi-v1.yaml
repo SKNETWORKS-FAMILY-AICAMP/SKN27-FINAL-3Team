@@ -3951,6 +3951,57 @@ components:
       - metadata
       title: ReportDetail
       type: object
+    ReportDocumentCard:
+      additionalProperties: false
+      properties:
+        type:
+          enum:
+          - objection_draft
+          - fact_summary
+          - insurance_submission
+          title: Type
+          type: string
+        title:
+          maxLength: 160
+          minLength: 1
+          title: Title
+          type: string
+        description:
+          maxLength: 280
+          minLength: 1
+          title: Description
+          type: string
+        status:
+          enum:
+          - ready
+          - partial
+          - unavailable
+          title: Status
+          type: string
+        sections:
+          items:
+            $ref: '#/components/schemas/ReportSection'
+          title: Sections
+          type: array
+        copy_text:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Copy Text
+        notice:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Notice
+      required:
+      - type
+      - title
+      - description
+      - status
+      title: ReportDocumentCard
+      type: object
     ReportDocumentReadiness:
       additionalProperties: false
       properties:
@@ -4119,6 +4170,11 @@ components:
           - $ref: '#/components/schemas/ReportDocumentConfirmation'
           - type: 'null'
           default: null
+        document_cards:
+          items:
+            $ref: '#/components/schemas/ReportDocumentCard'
+          title: Document Cards
+          type: array
         sections:
           items:
             $ref: '#/components/schemas/ReportSection'

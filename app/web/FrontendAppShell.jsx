@@ -624,6 +624,21 @@ export default function FrontendAppShell({
       identity: nextIdentity,
       correctedFields,
     });
+  async function copyReportDocumentCard(copyText, title) {
+    if (!copyText) {
+      setReportActionStatus("복사할 문서 내용이 아직 준비되지 않았습니다.");
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setReportActionStatus("이 브라우저에서는 문서 내용을 자동으로 복사할 수 없습니다.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setReportActionStatus(`${title || "문서"} 내용을 클립보드에 복사했습니다.`);
+    } catch (_error) {
+      setReportActionStatus("문서 내용을 복사하지 못했습니다. 다시 시도해 주세요.");
+    }
   }
 
   async function triggerReportDownload({ reportId, sessionId: activeSessionId, requestIdentity, documentType = "objection_form" }) {
@@ -1254,6 +1269,7 @@ export default function FrontendAppShell({
               }}
               onPrepareDraftRegeneration={prepareDraftRegeneration}
               onPrepareMissingEvidence={prepareMissingEvidenceUpload}
+              onCopyDocumentCard={copyReportDocumentCard}
               onRunReportAction={runCurrentReportAction}
               reportActionStatus={reportActionStatus}
               reportList={reportList}
@@ -2874,12 +2890,64 @@ function groupReportSections(sections) {
   return grouped;
 }
 
+function DocumentTypeCards({ cards, onCopy }) {
+  const documentTitles = {
+    objection_draft: "이의신청서 초안",
+    fact_summary: "사실관계 정리",
+    insurance_submission: "보험사 제출용 요약",
+  };
+  if (!Array.isArray(cards) || cards.length === 0) {
+    return null;
+  }
+  return (
+    <section className="document-type-cards" aria-label="문서 유형별 정리">
+      {cards.map((card) => {
+        const sections = Array.isArray(card?.sections) ? card.sections : [];
+        const statusLabel =
+          card?.status === "ready"
+            ? "복사 가능"
+            : card?.status === "partial"
+              ? "자료 보완 필요"
+              : "제출 불가";
+        const canCopy = Boolean(card?.copy_text) && card?.status !== "unavailable";
+        const title = card?.title || documentTitles[card?.type] || "문서 정리";
+        return (
+          <article className="document-type-card" data-status={card?.status || "partial"} key={card?.type || card?.title}>
+            <div className="document-type-card-head">
+              <span className="tag">{statusLabel}</span>
+              <strong>{title}</strong>
+            </div>
+            <p>{card?.description || "리포트 내용을 문서 목적에 맞게 정리합니다."}</p>
+            {sections.length > 0 && (
+              <div className="document-type-card-sections">
+                {sections.slice(0, 2).map((section, index) => (
+                  <p key={`${card?.type || "document"}-${section?.title || index}`}>
+                    <strong>{section?.title || "리포트 항목"}</strong>
+                    {section?.body ? ` · ${compactValue(section.body)}` : ""}
+                  </p>
+                ))}
+              </div>
+            )}
+            {card?.notice && <p className="document-type-notice">{card.notice}</p>}
+            {canCopy && (
+              <button className="button" type="button" onClick={() => onCopy?.(card.copy_text, title)} disabled={!onCopy}>
+                내용 복사
+              </button>
+            )}
+          </article>
+        );
+      })}
+    </section>
+  );
+}
+
 function ReportingScreen({
   analysisCards = [],
   currentReport = null,
   isAuthenticated = false,
   onOpenChat,
   onOpenReport,
+  onCopyDocumentCard,
   onPrepareDraftRegeneration,
   onPrepareMissingEvidence,
   onRefresh,
@@ -2908,6 +2976,9 @@ function ReportingScreen({
   };
   const hasReport = Boolean(activeReportingPayload || analysisCards.length || supervisorExecution || currentReport || hasSavedReports);
   const sections = Array.isArray(activeReportingPayload?.sections) ? activeReportingPayload.sections : [];
+  const documentCards = Array.isArray(activeReportingPayload?.document_cards)
+    ? activeReportingPayload.document_cards
+    : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
   const lawGroundNode = nodeResults.find((node) => node?.node_code === "law_ground_search");
@@ -3018,6 +3089,8 @@ function ReportingScreen({
                 <MetricCard detail="법령·증거·판례 중심" label="근거 묶음" value={`${groundsSections.length}개`} />
                 <MetricCard detail="제출·보완·재생성 중심" label="다음 작업" value={`${actionSections.length}개`} />
               </div>
+
+              <DocumentTypeCards cards={documentCards} onCopy={onCopyDocumentCard} />
 
               <div className="report-story-grid">
                 {overviewSections.map((section) => (
