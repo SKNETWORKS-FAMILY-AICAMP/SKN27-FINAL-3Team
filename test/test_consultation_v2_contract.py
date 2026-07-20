@@ -145,6 +145,35 @@ def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() ->
     assert shell.count('report_actions?.some((item) => item?.type === "download_objection")') == 0
 
 
+def test_frontend_renders_document_cards_as_copy_only_content() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    styles = read_text(ROOT / "app" / "web" / "styles.css")
+
+    assert "function DocumentTypeCards" in shell
+    assert "document_cards" in shell
+    assert "navigator.clipboard.writeText" in shell
+    assert "보험사 제출용 요약" in shell
+    assert 'onRunReportAction?.("download_report")' not in shell
+    for class_name in (
+        "document-type-cards",
+        "document-type-card",
+        "document-type-notice",
+    ):
+        assert class_name in shell
+        assert f".{class_name}" in styles
+
+
+def test_document_cards_do_not_reintroduce_generic_download_ui() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    card_start = shell.index("function DocumentTypeCards")
+    card_end = shell.index("function ReportingScreen", card_start)
+    cards = shell[card_start:card_end]
+
+    assert "downloadReport" not in cards
+    assert "PDF" not in cards
+    assert "내용 복사" in cards
+
+
 def test_download_report_never_returns_pdf_for_the_legacy_non_api_path() -> None:
     views = read_text(ROOT / "backend" / "chatbot" / "views.py")
     function_start = views.index("def download_report(")
