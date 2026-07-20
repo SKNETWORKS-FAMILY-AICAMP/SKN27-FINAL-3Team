@@ -62,6 +62,24 @@ def _report_record(report_id: str = "rep_123") -> dict[str, object]:
                     }
                 ],
                 "appeal_gate": {"blocked": False, "reason": ""},
+                "document_cards": [
+                    {
+                        "type": "fact_summary",
+                        "title": "사실관계 정리",
+                        "description": "공개 사실관계를 정리합니다.",
+                        "status": "ready",
+                        "sections": [
+                            {
+                                "title": "사실관계",
+                                "body": "Known facts",
+                                "storage_uri": "s3://private/card.json",
+                            }
+                        ],
+                        "copy_text": "사실관계 정리\n\nKnown facts",
+                        "notice": "제출 전 확인",
+                        "internal_note": "must-not-leak",
+                    }
+                ],
                 "sections": [
                     {
                         "title": "Facts",
@@ -117,6 +135,23 @@ def test_detail_projection_preserves_display_fields_and_drops_internal_fields() 
             "items": ["Verified"],
         }
     ]
+    assert payload["document_cards"] == [
+        {
+            "type": "fact_summary",
+            "title": "사실관계 정리",
+            "description": "공개 사실관계를 정리합니다.",
+            "status": "ready",
+            "sections": [
+                {
+                    "title": "사실관계",
+                    "body": "Known facts",
+                    "items": [],
+                }
+            ],
+            "copy_text": "사실관계 정리\n\nKnown facts",
+            "notice": "제출 전 확인",
+        }
+    ]
     assert set(payload) == {
         "report_type",
         "screen_id",
@@ -128,6 +163,7 @@ def test_detail_projection_preserves_display_fields_and_drops_internal_fields() 
         "report_actions",
         "appeal_gate",
         "document_confirmation",
+        "document_cards",
         "sections",
     }
     assert set(report["metadata"]["report_quality"]) == {
@@ -204,6 +240,7 @@ def test_detail_projection_uses_safe_defaults_for_missing_nested_values() -> Non
             "report_actions": [],
             "appeal_gate": None,
             "document_confirmation": None,
+            "document_cards": [],
             "sections": [],
         },
     }

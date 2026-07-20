@@ -26,6 +26,10 @@ from app.services.law_ground_contract import (
     normalize_law_evidence,
     normalize_law_structured_result,
 )
+from app.services.report_document_card_service import (
+    build_report_document_cards,
+    filter_report_actions_for_view,
+)
 from app.services.supervisor_control_service import (
     SUPERVISOR_INTERNAL_NODE_CODES,
     run_supervisor_control_node,
@@ -682,23 +686,33 @@ def _build_reporting_payload(
     structured = deepcopy(structured) if isinstance(structured, dict) else {}
     base = deepcopy(base_payload) if isinstance(base_payload, dict) else {}
     source_node_codes = list(supervisor_handoff.get("source_node_codes") or [])
+    document_variant = structured.get("document_variant") or base.get("document_variant")
+    sections = deepcopy(structured.get("form_sections") or [])
+    document_readiness = deepcopy(structured.get("document_readiness") or {})
+    appeal_gate = deepcopy(structured.get("appeal_gate") or {})
     return {
         **base,
         "contract_version": "reporting_payload.v2",
         "source": "supervisor_agent_result_aggregation",
         "stage": "final" if report_output.get("status") == "success" else "partial",
         "report_type": base.get("report_type") or structured.get("document_variant") or "general",
-        "document_variant": structured.get("document_variant") or base.get("document_variant"),
+        "document_variant": document_variant,
         "title": structured.get("document_title") or base.get("title") or "Analysis report",
         "summary": report_output.get("summary") or base.get("summary") or "",
         "generated_from_node_codes": source_node_codes,
-        "sections": deepcopy(structured.get("form_sections") or []),
-        "report_actions": deepcopy(structured.get("report_actions") or []),
+        "sections": sections,
+        "document_cards": build_report_document_cards(
+            document_variant=document_variant,
+            sections=sections,
+            document_readiness=document_readiness,
+            appeal_gate=appeal_gate,
+        ),
+        "report_actions": filter_report_actions_for_view(structured.get("report_actions")),
         "missing_fields": deepcopy(structured.get("missing_fields") or []),
         "form_data": deepcopy(structured.get("form_data") or {}),
-        "document_readiness": deepcopy(structured.get("document_readiness") or {}),
+        "document_readiness": document_readiness,
         "appeal_decision": deepcopy(structured.get("appeal_decision") or {}),
-        "appeal_gate": deepcopy(structured.get("appeal_gate") or {}),
+        "appeal_gate": appeal_gate,
         "petition_purpose": structured.get("petition_purpose") or "",
         "petition_reason": structured.get("petition_reason") or "",
         "drafting_source": structured.get("drafting_source") or "",
