@@ -112,7 +112,7 @@ class TestConfidenceVerificationNode:
         state = _make_state(fine_type="과태료", notice_stage="1차 고지서", ocr_status="success")
         result = confidence_verification_node(state)
         env = result["agent_results"]["fine_notice_analysis"]
-        assert "법률 근거 검색 노드 호출" in env["next_actions"]
+        assert "법률 근거 검색 노드 호출 (승인 후)" in env["next_actions"]
 
     def test_범칙금_success_next_action(self):
         state = _make_state(fine_type="범칙금", notice_stage="사전통지", ocr_status="success")

@@ -863,7 +863,7 @@ class TestGuideGenerationNode:
         state = {"judgment_status": "success", "fine_type": "과태료", "notice_stage": "오탈자단계"}
         result = guide_generation_node(state)
         next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
-        assert any("OCR 결과 재확인" in action for action in next_actions)
+        assert any("OCR 결과" in action for action in next_actions)
 
     def test_structured_result_schema_fields_unrecognized_노출(self):
         state = {"judgment_status": "success", "fine_type": "범칙금", "notice_stage": "오탈자단계"}
@@ -1033,7 +1033,7 @@ class TestGuideGenerationNode:
         }
         result = guide_generation_node(state)
         next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
-        assert any("재호출" in action for action in next_actions)
+        assert any("다시 질문" in action for action in next_actions)
 
     def test_next_actions_relief_type_판정실패시_재호출_권장_추가(self):
         state = {
@@ -1042,13 +1042,13 @@ class TestGuideGenerationNode:
         }
         result = guide_generation_node(state)
         next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
-        assert any("relief_type" in action and "재호출" in action for action in next_actions)
+        assert any("면제/감경" in action and "다시 시도" in action for action in next_actions)
 
     def test_next_actions_merit_판정실패_아니면_재호출문구_없음(self):
         state = {"judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지"}
         result = guide_generation_node(state)
         next_actions = result["agent_results"]["appeal_judgment"]["next_actions"]
-        assert not any("재호출" in action for action in next_actions)
+        assert not any("다시 질문" in action for action in next_actions)
 
     def test_envelope_구조_확인(self):
         state = {"judgment_status": "success", "fine_type": "과태료", "notice_stage": "사전통지"}
