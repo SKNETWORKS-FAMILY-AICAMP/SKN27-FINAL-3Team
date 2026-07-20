@@ -191,7 +191,8 @@ def _assert_captured_request_is_untrusted_only(request_payload: dict, payload: d
         payload["attachments"][0]["ocr_text"],
         payload["attachments"][0]["storage_uri"],
         payload["retrieved_evidence"][0]["content"],
-        '"tool_call": "admin"',
+        json.dumps(payload["attachments"][0]["tool_call"]),
+        json.dumps(payload["retrieved_evidence"][0]["tool_call"]),
     ):
         assert marker not in serialized
     assert '"role": "system"' not in json.dumps(context, ensure_ascii=False)
