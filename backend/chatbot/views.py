@@ -2510,11 +2510,32 @@ def _object_access_denied_response(request: HttpRequest, access: dict[str, objec
                 "status": 403,
                 "message": "요청한 데이터에 접근할 권한이 없습니다.",
                 "required_action": "login_or_owner_match",
-                "access": access,
+                "access": _public_object_access(access),
             }
         },
         status=403,
     )
+
+
+def _public_object_access(access: dict[str, object]) -> dict[str, object]:
+    """Project an internal authorization decision into its safe API form."""
+
+    public: dict[str, object] = {"allowed": bool(access.get("allowed"))}
+    for key in ("contract_version", "reason"):
+        value = access.get(key)
+        if isinstance(value, str) and value:
+            public[key] = value
+
+    resource = access.get("resource")
+    if isinstance(resource, dict):
+        public_resource = {
+            key: value
+            for key in ("type", "report_id", "attachment_id", "job_id")
+            if isinstance((value := resource.get(key)), str) and value
+        }
+        if public_resource:
+            public["resource"] = public_resource
+    return public
 
 
 def _analysis_job_access_response(
