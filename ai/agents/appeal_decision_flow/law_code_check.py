@@ -12,6 +12,9 @@ def law_code_check_node(state: AppealJudgmentState) -> dict:
     if not law_code:
         return {"law_code_verified": False}
 
-    from etl.legal.search import law_code_exists
+    from etl.legal.search import law_code_exists, law_code_last_verified
 
-    return {"law_code_verified": law_code_exists(law_code)}
+    return {
+        "law_code_verified": law_code_exists(law_code),
+        "law_reference_verified_at": law_code_last_verified(law_code),
+    }

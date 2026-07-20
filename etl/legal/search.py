@@ -79,6 +79,39 @@ def law_code_exists(law_code: str) -> bool:
             conn.close()
 
 
+def law_code_last_verified(law_code: str) -> str | None:
+    """law_chunks에서 law_code에 해당하는 조문의 가장 최근 수집일(created_at)을 조회한다.
+
+    재시도 없음. law_code 파싱 실패·DB 연결 오류·해당 조문 없음 등 어떤 이유로든 조회가
+    안 되면 None을 반환한다 — 호출 측(law_code_check_node)은 이 값으로 판정을 막지 않고
+    disclaimer의 법령 기준일 문구만 조건부로 바꾼다.
+    """
+    parsed = parse_law_code(law_code)
+    if not parsed:
+        return None
+    source_name, article_no = parsed
+
+    conn = None
+    try:
+        conn = _connect_law_db()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT created_at FROM law_chunks WHERE source_name = %s AND article_no = %s "
+                "ORDER BY created_at DESC LIMIT 1;",
+                (source_name, article_no),
+            )
+            row = cur.fetchone()
+            if row is None or row[0] is None:
+                return None
+            return row[0].date().isoformat()
+    except Exception as exc:
+        print(f"[Error] law_code_last_verified lookup failed: {exc}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def get_provision_text(source_name: str, article_no: str) -> str | None:
     """law_chunks에서 (source_name, article_no)에 해당하는 조문 원문을 조회한다.
 

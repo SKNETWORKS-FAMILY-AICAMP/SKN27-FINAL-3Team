@@ -1687,6 +1687,8 @@ def _fine_notice_structured_result(result: dict[str, Any]) -> dict[str, Any]:
         "vehicle_number",
         "missing_fields",
         "format_errors",
+        "requires_confirmation",
+        "unconfirmed_fields",
     }
     return {key: result.get(key) for key in allowed if key in result}
 
