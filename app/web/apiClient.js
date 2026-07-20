@@ -95,6 +95,13 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
       });
       return getJson(url, identity);
     },
+    confirmReportDocument({ reportId, sessionId, identity, confirmation } = {}) {
+      const url = withQuery(
+        joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/document-confirmation/`),
+        { session_id: sessionId }
+      );
+      return postJson(url, confirmation, identity);
+    },
     downloadReport({ reportId, sessionId, identity, documentType } = {}) {
       const url = withQuery(joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/download/`), {
         session_id: sessionId,

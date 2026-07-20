@@ -36,6 +36,7 @@ def test_public_v2_case_routes_are_exposed() -> None:
         '"cases/<str:case_id>/facts/confirm/"',
         '"cases/<str:case_id>/analysis/jobs/"',
         '"reports/<str:report_id>/"',
+        '"reports/<str:report_id>/document-confirmation/"',
     ):
         assert token in urls
 
@@ -84,7 +85,7 @@ def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_i
     assert "reportId: persistedReportId" in report_action
     persisted_branch = report_action[report_action.index("if (persistedReportId) {"):]
     save_state_call = persisted_branch.index("api.updateConversationSaveState")
-    save_success = persisted_branch.index("setReportActionStatus")
+    save_success = persisted_branch.index("setReportActionStatus", save_state_call)
     assert save_state_call < save_success
     assert 'conversation_save_state: "saved"' in persisted_branch
     assert 'conversation_save_source: "worker_report_save_action"' in persisted_branch
@@ -111,6 +112,7 @@ def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_i
 
 def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
     action_start = shell.index("async function runCurrentReportAction")
     action_end = shell.index("async function triggerReportDownload", action_start)
     report_action = shell[action_start:action_end]
@@ -118,16 +120,29 @@ def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() ->
     assert "setPendingReportScreenDownload" not in shell
     assert "openReportScreenPrintWindow" not in shell
     assert "PDF" not in report_action
-    assert 'documentType = action === "download_objection" ? "objection_form" : "report"' in report_action
+    assert 'const documentType = "objection_form";' in report_action
     assert "const appealGate = activeReportingPayload?.appeal_gate || null;" in report_action
     assert "if (appealGate?.blocked === true)" in report_action
-    assert "const actionDefinition =" in report_action
+    assert "document_confirmation" in report_action
+    assert "api.confirmReportDocument" in shell
+    assert 'onRunReportAction("download_report")' not in shell
+    assert "분석 리포트 DOCX" not in shell
+    ready_notice_start = shell.index("function ReportReadyNotice")
+    ready_notice_end = shell.index("function DocumentConfirmationPanel", ready_notice_start)
+    ready_notice = shell[ready_notice_start:ready_notice_end]
+    assert "const hasOfficialDocument =" in ready_notice
+    assert "{hasOfficialDocument && (" in ready_notice
+    assert 'report_actions?.some((item) => item?.type === "download_objection")' not in ready_notice
+    assert '["fine_notice_objection", "fault_ratio_analysis"].includes(reportingPayload?.report_type)' in ready_notice
     assert "const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;" in shell
     assert "const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;" in shell
-    assert "disabled={appealDownloadBlocked}" in shell
+    assert "appealDownloadBlocked || !confirmation.confirmed" in shell
     assert "DOCX" in shell
     assert "화면 PDF 저장" not in shell
     assert "이의신청서 PDF" not in shell
+    assert "confirmReportDocument" in api_client
+    assert 'const filename = file.filename || `${reportId}.docx`;' in shell
+    assert shell.count('report_actions?.some((item) => item?.type === "download_objection")') == 0
 
 
 def test_download_report_never_returns_pdf_for_the_legacy_non_api_path() -> None:
@@ -137,8 +152,8 @@ def test_download_report_never_returns_pdf_for_the_legacy_non_api_path() -> None
     download_view = views[function_start:function_end]
 
     assert "application/pdf" not in download_view
-    assert "render_report_docx(" in download_view
-    assert "REPORT_DOCX_CONTENT_TYPE" in download_view
+    assert "document_download_not_available" in download_view
+    assert "render_report_docx(" not in download_view
 
 
 def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> None:

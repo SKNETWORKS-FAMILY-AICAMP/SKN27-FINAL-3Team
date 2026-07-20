@@ -10,6 +10,7 @@ from pydantic import Field
 from app.contracts.consultation_case import (
     ReportStatusValue,
     ReportTypeValue,
+    StrictRequest,
     StrictResponse,
 )
 
@@ -44,6 +45,25 @@ class ReportAppealGate(ReportApiContractModel):
     reason: str | None = None
 
 
+class ReportDocumentConfirmation(ReportApiContractModel):
+    required: bool = False
+    confirmed: bool = False
+    stale: bool = False
+    confirmed_at: datetime | None = None
+
+
+class ConfirmReportDocumentRequest(StrictRequest):
+    facts_confirmed: Literal[True]
+    agency_confirmed: Literal[True]
+    deadline_confirmed: Literal[True]
+    attachments_confirmed: Literal[True]
+
+
+class ConfirmReportDocumentResponse(ReportApiContractModel):
+    contract_version: Literal["document_confirmation.v1"]
+    document_confirmation: ReportDocumentConfirmation
+
+
 class ReportReportingPayload(ReportApiContractModel):
     report_type: ReportTypeValue | None = None
     screen_id: str | None = None
@@ -54,6 +74,7 @@ class ReportReportingPayload(ReportApiContractModel):
     document_readiness: ReportDocumentReadiness | None = None
     report_actions: list[ReportDownloadAction] = Field(default_factory=list)
     appeal_gate: ReportAppealGate | None = None
+    document_confirmation: ReportDocumentConfirmation | None = None
     sections: list[ReportSection] = Field(default_factory=list)
 
 
@@ -149,6 +170,9 @@ class ReportApiError(ReportApiContractModel):
         "object_access_denied",
         "report_not_found",
         "report_not_ready",
+        "document_download_not_available",
+        "document_confirmation_required",
+        "appeal_gate_blocked",
     ]
     status: int | ReportStatusValue | None = None
     message: str = Field(min_length=1)
