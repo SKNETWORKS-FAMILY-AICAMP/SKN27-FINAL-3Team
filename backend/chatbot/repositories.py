@@ -108,6 +108,8 @@ USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
 REPORT_DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 REPORT_DOWNLOAD_TYPE_REPORT = "report"
 REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
+DOCUMENT_CONFIRMATION_SCHEMA_VERSION = "document_confirmation.v1"
+OFFICIAL_OBJECTION_DOCUMENT_VARIANTS = {"fine_notice", "traffic_accident"}
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
 ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
 REPORT_PDF_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_report_renderer.py"
@@ -4164,6 +4166,111 @@ def _reporting_payload_for_download(report: Report) -> dict[str, Any]:
     return _dict_or_empty(content.get("reporting_payload"))
 
 
+def confirm_report_document(report_id: str, *, owner_id: str) -> dict[str, Any]:
+    """Record an owner's final review of the current official document input."""
+
+    with transaction.atomic():
+        report = (
+            Report.objects.select_for_update()
+            .select_related("session")
+            .filter(report_id=report_id)
+            .first()
+        )
+        if report is None:
+            raise ReportReferenceError("report_not_found", "report was not found")
+        report_owner_id = _text(
+            report.owner_id or (report.session.owner_id if report.session_id else "")
+        )
+        if not owner_id or report_owner_id != owner_id:
+            raise ReportReferenceError(
+                "object_access_denied",
+                "document confirmation requires report ownership",
+            )
+        reporting_payload = _reporting_payload_for_download(report)
+        if not _report_document_confirmation_is_required(report, reporting_payload):
+            raise ReportReferenceError(
+                "document_download_not_available",
+                "only official objection documents can be confirmed",
+            )
+        if _appeal_download_is_blocked(reporting_payload):
+            raise ReportReferenceError(
+                "appeal_gate_blocked",
+                "appeal eligibility blocks document confirmation",
+            )
+
+        fingerprint = _report_document_input_fingerprint(report, reporting_payload)
+        metadata = deepcopy(_dict_or_empty(report.metadata))
+        metadata["document_confirmation"] = {
+            "schema_version": DOCUMENT_CONFIRMATION_SCHEMA_VERSION,
+            "document_type": REPORT_DOWNLOAD_TYPE_OBJECTION_FORM,
+            "input_fingerprint": fingerprint,
+            "confirmed_at": timezone.now().isoformat(),
+            "confirmed_by_user_id": owner_id,
+            "items": {
+                "facts_confirmed": True,
+                "agency_confirmed": True,
+                "deadline_confirmed": True,
+                "attachments_confirmed": True,
+            },
+        }
+        report.metadata = metadata
+        report.save(update_fields=["metadata", "updated_at"])
+        return get_report_document_confirmation_state(report)
+
+
+def get_report_document_confirmation_state(report: Report) -> dict[str, Any]:
+    """Return only the safe, current confirmation status for a report detail."""
+
+    reporting_payload = _reporting_payload_for_download(report)
+    if not _report_document_confirmation_is_required(report, reporting_payload):
+        return {
+            "required": False,
+            "confirmed": False,
+            "stale": False,
+            "confirmed_at": None,
+        }
+
+    confirmation = _dict_or_empty(
+        _dict_or_empty(report.metadata).get("document_confirmation")
+    )
+    stored_fingerprint = _text(confirmation.get("input_fingerprint"))
+    current_fingerprint = _report_document_input_fingerprint(report, reporting_payload)
+    confirmed = bool(stored_fingerprint) and stored_fingerprint == current_fingerprint
+    return {
+        "required": True,
+        "confirmed": confirmed,
+        "stale": bool(confirmation) and not confirmed,
+        "confirmed_at": _text(confirmation.get("confirmed_at")) if confirmed else None,
+    }
+
+
+def _report_document_confirmation_is_required(
+    report: Report,
+    reporting_payload: dict[str, Any],
+) -> bool:
+    return _report_document_variant(report, reporting_payload) in OFFICIAL_OBJECTION_DOCUMENT_VARIANTS
+
+
+def _report_document_input_fingerprint(
+    report: Report,
+    reporting_payload: dict[str, Any],
+) -> str:
+    document_input = {
+        "document_variant": _report_document_variant(report, reporting_payload),
+        "form_data": _dict_or_empty(reporting_payload.get("form_data")),
+        "sections": _list_or_empty(reporting_payload.get("sections")),
+        "petition_purpose": _text(reporting_payload.get("petition_purpose")),
+        "petition_reason": _text(reporting_payload.get("petition_reason")),
+    }
+    canonical = json.dumps(
+        document_input,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _report_document_variant(report: Report, reporting_payload: dict[str, Any]) -> str:
     document_variant = _text(reporting_payload.get("document_variant"))
     if document_variant in {"fine_notice", "traffic_accident"}:
@@ -4214,12 +4321,16 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
     content = _dict_or_empty(report.content)
     metadata = _dict_or_empty(report.metadata)
     reporting_payload = _dict_or_empty(content.get("reporting_payload"))
+    public_reporting_payload = {
+        **reporting_payload,
+        "document_confirmation": get_report_document_confirmation_state(report),
+    }
     job = report.job
     return {
         **_report_record_summary(report),
         "content": {
             "contract_version": _text(content.get("contract_version")),
-            "reporting_payload": reporting_payload,
+            "reporting_payload": public_reporting_payload,
             "format": _text(content.get("format")),
             "action": _text(content.get("action")),
             "source": _dict_or_empty(content.get("source")),

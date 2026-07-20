@@ -32,6 +32,7 @@ PUBLIC_REPORTING_PAYLOAD_KEYS = (
     "document_readiness",
     "report_actions",
     "appeal_gate",
+    "document_confirmation",
     "sections",
 )
 PUBLIC_REPORT_QUALITY_KEYS = (

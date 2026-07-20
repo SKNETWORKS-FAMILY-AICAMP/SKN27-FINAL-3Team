@@ -1935,3 +1935,59 @@ class SupervisorReportingCommitOrderingTests(TransactionTestCase):
         self.assertTrue(terminal_observations)
         self.assertTrue(all(not in_atomic for in_atomic, _has_report in terminal_observations))
         self.assertTrue(all(has_report for _in_atomic, has_report in terminal_observations))
+
+
+class DocumentConfirmationRepositoryTests(TestCase):
+    def setUp(self) -> None:
+        self.report = Report.objects.create(
+            report_id="rep_document_confirmation",
+            owner_id="usr_document_confirmation",
+            status=ReportStatus.READY,
+            title="Official objection form",
+            content={
+                "reporting_payload": {
+                    "document_variant": "fine_notice",
+                    "form_data": {"recipient": "Traffic agency", "applicant_name": "Applicant"},
+                    "sections": [{"title": "Facts", "body": "Confirmed facts"}],
+                    "petition_purpose": "Review the disposition",
+                    "petition_reason": "The facts require review.",
+                    "appeal_gate": {"blocked": False, "reason": ""},
+                }
+            },
+            metadata={"source": "analysis_worker_reporting"},
+        )
+
+    def test_confirmation_projects_safe_current_and_stale_states(self) -> None:
+        confirmed = repository_module.confirm_report_document(
+            self.report.report_id,
+            owner_id=self.report.owner_id,
+        )
+
+        self.assertEqual(
+            {key: confirmed[key] for key in ("required", "confirmed", "stale")},
+            {"required": True, "confirmed": True, "stale": False},
+        )
+        self.assertIsNotNone(confirmed["confirmed_at"])
+        self.report.refresh_from_db()
+        self.assertIn("input_fingerprint", self.report.metadata["document_confirmation"])
+
+        current_detail = get_report_record_detail(self.report.report_id)
+        current_state = current_detail["content"]["reporting_payload"][
+            "document_confirmation"
+        ]
+        self.assertEqual(
+            {key: current_state[key] for key in ("required", "confirmed", "stale")},
+            {"required": True, "confirmed": True, "stale": False},
+        )
+        self.assertNotIn("input_fingerprint", json.dumps(current_detail, sort_keys=True))
+
+        payload = dict(self.report.content["reporting_payload"])
+        payload["petition_reason"] = "The reason changed after final confirmation."
+        self.report.content = {"reporting_payload": payload}
+        self.report.save(update_fields=["content", "updated_at"])
+
+        stale_detail = get_report_record_detail(self.report.report_id)
+        self.assertEqual(
+            stale_detail["content"]["reporting_payload"]["document_confirmation"],
+            {"required": True, "confirmed": False, "stale": True, "confirmed_at": None},
+        )
