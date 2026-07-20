@@ -112,10 +112,11 @@ def plan_node_codes(routing_intent: str, *, report_requested: bool) -> tuple[str
         or not report_requested
     ):
         return base
-    insert_before = _text(report_policy.get("insert_before"))
     report_node = _text(report_policy.get("node_code"))
-    report_index = base.index(insert_before)
-    return base[:report_index] + (report_node,) + base[report_index:]
+    # The canonical Worker persists every analysis result before dispatching
+    # Reporting as its own paid phase.  Keep that step last so the queue plan
+    # can be partitioned without dropping a trailing executable node.
+    return (*base, report_node)
 
 
 def routing_policy_metadata() -> dict[str, str]:

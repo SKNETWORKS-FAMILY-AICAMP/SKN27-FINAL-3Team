@@ -141,6 +141,13 @@ def test_objection_agent_stops_emitting_generic_report_download_action():
     assert "download_report" not in [action["type"] for action in actions]
 
 
+def test_objection_agent_next_actions_keep_general_report_view_only():
+    next_actions = objection_agent._next_actions([], appeal_blocked=False)
+
+    assert "review_report_screen" in next_actions
+    assert "download_report" not in next_actions
+
+
 def test_legacy_mock_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypatch):
     calls = []
 

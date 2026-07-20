@@ -1197,7 +1197,7 @@ def _next_actions(missing_fields: list[str], *, appeal_blocked: bool = False) ->
     return [
         "review_objection_draft",
         "download_objection",
-        "download_report",
+        "review_report_screen",
     ]
 
 
