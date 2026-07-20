@@ -17,6 +17,50 @@ from chatbot.models import (
 
 
 class SupervisorConversationRuntimeSmokeTests(TestCase):
+    def test_smoke_output_excludes_provider_and_model_identifiers(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        self.assertEqual(
+            smoke._safe_llm(
+                {
+                    "llm": {
+                        "status": "used",
+                        "reason": None,
+                        "provider": "provider-name",
+                        "model": "model-name",
+                    }
+                }
+            ),
+            {"status": "used", "reason": None},
+        )
+
+    def test_strict_checks_reject_disabled_llm_and_non_real_agent_results(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        failed = smoke._failed_checks(
+            {
+                "chat": {"status": "queued"},
+                "llm": {"status": "disabled"},
+                "checks": {
+                    "job_success": True,
+                    "all_agent_results_success": True,
+                    "real_agent_results": False,
+                    "persisted_handoff_consumed": True,
+                    "report_ready": True,
+                    "analysis_display_persisted": True,
+                    "public_result_loaded": True,
+                },
+            },
+            {
+                "require_llm_used": True,
+                "require_real_agent_results": True,
+                "require_persisted_handoff": True,
+                "require_report": True,
+            },
+        )
+
+        self.assertEqual(failed, ["llm_used", "real_agent_results"])
+
     def test_report_requested_supervisor_plan_keeps_reporting_step_final(self) -> None:
         from app.services.chat_orchestration_service import _analysis_plan
 
@@ -310,6 +354,7 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
         self.assertEqual(result["llm"]["status"], "used")
         self.assertTrue(result["checks"]["job_success"], result)
         self.assertTrue(result["checks"]["all_agent_results_success"])
+        self.assertTrue(result["checks"]["real_agent_results"])
         self.assertTrue(result["checks"]["persisted_handoff_consumed"])
         self.assertTrue(result["checks"]["report_ready"])
         self.assertTrue(result["checks"]["analysis_display_persisted"])

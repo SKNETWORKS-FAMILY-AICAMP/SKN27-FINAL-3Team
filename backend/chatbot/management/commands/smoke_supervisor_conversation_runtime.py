@@ -26,6 +26,16 @@ from chatbot.models import (
 from chatbot.views import analysis_result, submit_chat_message
 
 
+SYNC_AGENT_NODE_CODES = {
+    "appeal_decision_flow",
+    "fine_notice_analysis",
+    "law_ground_search",
+    "objection_report_generation",
+    "text_ml_case_search",
+    "traffic_accident_confirmation_ocr",
+}
+
+
 class Command(BaseCommand):
     help = (
         "Run one public Supervisor conversation through queue, Worker, and Reporting. "
@@ -135,12 +145,24 @@ def _run_smoke(fixture: dict) -> dict:
     report = Report.objects.filter(job=job).first() if job else None
     display = AnalysisDisplayResult.objects.filter(job=job).first() if job else None
     agent_results = list(AgentResult.objects.filter(job=job)) if job else []
+    reporting_result = next(
+        (
+            item
+            for item in agent_results
+            if item.node_code == "objection_report_generation"
+        ),
+        None,
+    )
     handoff = ((job.metadata if job else {}) or {}).get("supervisor_reporting_handoff")
     result["checks"] = {
         "queued": bool(job and work_item),
         "job_success": bool(job and job.status == "success"),
         "all_agent_results_success": bool(agent_results) and all(item.status == "success" for item in agent_results),
-        "persisted_handoff_consumed": bool(handoff and report),
+        "real_agent_results": _real_agent_results(agent_results),
+        "persisted_handoff_consumed": _persisted_handoff_consumed(
+            handoff,
+            reporting_result,
+        ),
         "report_ready": bool(report and report.status == "ready"),
         "analysis_display_persisted": display is not None,
         "public_result_loaded": public_result.status_code == 200,
@@ -152,7 +174,7 @@ def _run_smoke(fixture: dict) -> dict:
 def _safe_llm(supervisor_state) -> dict:
     llm = supervisor_state.get("llm") if isinstance(supervisor_state, dict) else {}
     llm = llm if isinstance(llm, dict) else {}
-    return {key: llm.get(key) for key in ("status", "reason", "provider", "model")}
+    return {key: llm.get(key) for key in ("status", "reason")}
 
 
 def _no_followup_checks(session: ChatSession) -> dict:
@@ -165,6 +187,65 @@ def _no_followup_checks(session: ChatSession) -> dict:
     }
 
 
+def _real_agent_results(agent_results: list[AgentResult]) -> bool:
+    sync_results = [
+        result for result in agent_results if result.node_code in SYNC_AGENT_NODE_CODES
+    ]
+    if not sync_results:
+        return False
+    for result in sync_results:
+        raw_output = result.raw_output if isinstance(result.raw_output, dict) else {}
+        structured = (
+            result.structured_result
+            if isinstance(result.structured_result, dict)
+            else {}
+        )
+        adapter_trace = structured.get("adapter_trace")
+        adapter_trace = adapter_trace if isinstance(adapter_trace, dict) else {}
+        adapter = str(adapter_trace.get("adapter") or "")
+        retrieval = structured.get("retrieval")
+        retrieval = retrieval if isinstance(retrieval, dict) else {}
+        if (
+            result.status != "success"
+            or raw_output.get("execution_mode") != "sync"
+            or adapter_trace.get("execution_mode") != "sync"
+            or not adapter
+            or "mock" in adapter.lower()
+            or retrieval.get("fallback_used") is True
+        ):
+            return False
+    return True
+
+
+def _persisted_handoff_consumed(handoff, reporting_result: AgentResult | None) -> bool:
+    handoff = handoff if isinstance(handoff, dict) else {}
+    source = handoff.get("source")
+    source = source if isinstance(source, dict) else {}
+    gate = handoff.get("gate")
+    gate = gate if isinstance(gate, dict) else {}
+    structured = (
+        reporting_result.structured_result
+        if reporting_result is not None and isinstance(reporting_result.structured_result, dict)
+        else {}
+    )
+    trace = structured.get("supervisor_handoff")
+    trace = trace if isinstance(trace, dict) else {}
+    return bool(
+        handoff.get("contract_version") == "supervisor_reporting_handoff.v1"
+        and source.get("persistence") == "agent_results"
+        and source.get("persisted") is True
+        and gate.get("status") == "ready"
+        and reporting_result is not None
+        and reporting_result.status == "success"
+        and trace
+        and trace.get("contract_version") == handoff.get("contract_version")
+        and trace.get("handoff_id") == handoff.get("handoff_id")
+        and trace.get("gate_status") == gate.get("status")
+        and trace.get("source_fingerprint") == source.get("fingerprint")
+        and trace.get("source_result_ids") == source.get("result_ids")
+    )
+
+
 def _failed_checks(result: dict, options: dict) -> list[str]:
     checks = result["checks"]
     failed = []
@@ -173,7 +254,11 @@ def _failed_checks(result: dict, options: dict) -> list[str]:
     if options["require_llm_used"] and result["llm"].get("status") != "used":
         failed.append("llm_used")
     requirement_checks = {
-        "require_real_agent_results": ("job_success", "all_agent_results_success"),
+        "require_real_agent_results": (
+            "job_success",
+            "all_agent_results_success",
+            "real_agent_results",
+        ),
         "require_persisted_handoff": ("persisted_handoff_consumed",),
         "require_report": ("report_ready", "analysis_display_persisted", "public_result_loaded"),
     }

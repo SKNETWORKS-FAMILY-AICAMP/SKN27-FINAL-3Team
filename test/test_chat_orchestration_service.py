@@ -165,8 +165,11 @@ def test_report_node_is_planned_only_when_document_generation_is_explicitly_requ
         "law_ground_search",
         "appeal_decision_flow",
         "agent_result_validation",
-        "objection_report_generation",
         "final_response_merge",
+        "objection_report_generation",
+    ]
+    assert response["analysis_plan"]["steps"][-1]["depends_on"] == [
+        "final_response_merge"
     ]
 
 
