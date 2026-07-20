@@ -18,7 +18,7 @@ Supervisor와 Planner의 실제 호출 함수를 실행하되 `_request_supervis
 
 이 방식은 프롬프트 구성, 후보 응답 정규화, fallback allowlist 검증, fail-closed 처리까지 실제 실행 경로로 검증한다. OCR 정확도, RAG 검색 품질, 새로운 도구나 Provider 구현은 변경하지 않는다.
 
-공개 DTO는 Supervisor 상태와 Planner 계획의 반환 계약으로 한정한다. 이 계약에서는 공격 문자열이 Agent/owner/node/stage/보고서 준비 여부 같은 제어 필드로 반영되면 안 되며, LLM 후보가 입력 공격 문자열을 자유 텍스트에 그대로 재현하는 경우도 안전한 결과가 아니다. 이 경우 후보를 허용하지 않고 fail-closed 반환으로 처리한다. 단순 키워드 차단이 아니라, 이번 요청에 포함된 비신뢰 원문과 후보 결과의 직접 재현 여부를 계약 검증으로 다룬다.
+공개 DTO는 Supervisor 상태와 Planner 계획의 반환 계약으로 한정한다. 이 계약에서는 비신뢰 입력이 Agent/owner/node/stage/보고서 준비 여부·도구 관련 제어 필드로 반영되면 안 된다. 사용자 사실관계가 요약·질문·설명 같은 자유 텍스트에 인용될 수는 있으나 실행 권한이 아니며, 다음 LLM 호출에서는 다시 `untrusted_context`로만 전달된다. 원문 문자열의 부분 일치 차단은 정상 `fine_notice` 같은 서버 허용 식별자까지 막으므로 사용하지 않는다.
 
 ## 설계 범위
 
@@ -37,7 +37,7 @@ Supervisor와 Planner의 실제 호출 함수를 실행하되 `_request_supervis
 - 사용자·대화·제한된 첨부 설명자 원문은 `untrusted_context` 안에만 존재해야 하며, 시스템 프롬프트나 fallback 제어 계약으로 승격되면 안 된다.
 - OCR 원문, RAG 원문, 첨부의 `role`/`node_code`/`tool_call`, storage URI는 LLM 요청 전체에 없어야 한다.
 - `purpose`와 `scan_status`에 들어간 공격 문구는 `untrusted_context` 안에만 존재하고, 허용 Agent 목록·실행 단계·도구 관련 제어 영역에 영향을 주지 않아야 한다.
-- 후보가 공격 문자열을 `conversation_summary`, `collected_facts`, 질문, 보고서 제목·요약에 그대로 재현하면 State 결과는 fail-closed여야 하며, 직렬화한 반환 DTO에 공격 문자열이 남아서는 안 된다.
+- 자유 텍스트가 공격 원문을 인용하더라도 Agent/owner/node/stage/보고서 준비 상태를 바꾸지 않아야 한다. fallback의 필수 입력이 남아 있으면 State는 `need_more_input`과 서버가 정한 패키지 상태를 유지해야 한다.
 - 기존 `test_supervisor_llm_does_not_promote_server_required_input_to_ready`는 서버 필수 입력을 LLM이 완료 처리하지 못함을 계속 담당한다. 새 테스트는 이 기존 보장을 복제하지 않는다.
 
 ### B. Planner 호출과 fail-closed 경계
@@ -47,7 +47,7 @@ Supervisor와 Planner의 실제 호출 함수를 실행하되 `_request_supervis
 - Planner 시스템 프롬프트와 `untrusted_context`의 분리 규칙은 A와 동일해야 한다. 현재 시스템에는 LLM function/tool-calling 실행기가 없으므로, 여기서의 도구 호출 보호는 비신뢰 `tool_call` 값이 요청 제어 계약·Agent 계획·실행 단계에 유입되지 않는다는 뜻이다.
 - 후보 계획이 fallback allowlist 밖의 Agent를 요구하면 결과는 `llm_planner.status == "failed"`, `reason == "invalid_contract"`이어야 한다.
 - 실패 결과의 `steps`와 `agent_input_packages`는 비어 있어 실제 Agent 실행이나 보고서 생성으로 이어지지 않아야 한다.
-- 직렬화한 Planner 반환 DTO에는 공격 문자열, `unknown_agent`, 비신뢰 `tool_call` 값이 남아서는 안 된다.
+- Planner의 `input_summary` 등 설명 필드는 비신뢰 문구를 포함할 수 있으나, fallback 밖의 Agent·step·owner·실행 상태를 추가하거나 바꾸지 않아야 한다.
 
 ### C. 체크리스트 상태
 
@@ -69,7 +69,7 @@ PR 병합과 필수 CI 통과 전에는 #251 행을 `[x]`로 바꾸지 않는다
 - 수정: `docs/ops/project-readiness-master-checklist.md`
   - #249 완료와 #251 진행 상태를 반영한다.
 
-서비스 코드는 첫 단계에서 변경하지 않는다. 다만 공개 DTO의 직접 재현 테스트가 현재 정규화 계약 위반을 재현하면, 이번 설계에서 정한 범위 안에서 후보 응답 검증 또는 반환 DTO 정규화의 최소 코드만 수정한다. 도메인 Agent, OCR/RAG 검색 구현, 외부 Provider 설정은 변경하지 않는다.
+현재 State/Planner 정규화가 이 제어 계약을 이미 보장하는지 먼저 회귀 테스트로 고정한다. 원문 부분 일치 차단은 정상 서버 식별자를 과차단하므로 서비스 코드에 추가하지 않는다. 새 테스트가 실제 제어 계약 위반을 재현하는 경우에만 그 최소 경계 코드를 수정하며, 도메인 Agent, OCR/RAG 검색 구현, 외부 Provider 설정은 변경하지 않는다.
 
 ## 테스트와 완료 기준
 
@@ -77,7 +77,7 @@ PR 병합과 필수 CI 통과 전에는 #251 행을 `[x]`로 바꾸지 않는다
 - `test/test_supervisor_llm_service.py`의 집중 테스트가 통과한다.
 - 전체 `python -m pytest -q --timeout=30`이 통과한다.
 - 공격 문자열은 시스템 프롬프트, fallback allowlist, Agent/owner/node/stage/보고서 준비 제어 필드, 결과 계획의 실행 가능 단계에 반영되지 않는다.
-- 공격 문자열을 자유 텍스트 결과에 그대로 재현한 LLM 후보도 invalid contract로 처리하고, 직렬화한 State/Planner 반환 DTO에 해당 문자열이 남지 않는다.
+- 자유 텍스트에서의 사실관계 인용은 허용하되, 다음 호출에서도 `untrusted_context`로만 취급되고 실행 제어로 승격되지 않는다.
 - #251 체크리스트 행은 PR 병합 전까지 `[~]` 상태다.
 
 ## 제외 범위
