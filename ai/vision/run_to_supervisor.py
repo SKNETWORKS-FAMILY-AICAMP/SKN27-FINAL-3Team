@@ -68,7 +68,12 @@ def _json_object(text: str) -> dict[str, Any]:
 
 def analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, device_name: str) -> dict[str, Any]:
     if not frame_paths:
-        return {"valid": False, "error": "No key frames available"}
+        return {
+            "valid": False,
+            "error": "No key frames available",
+            "requires_review": True,
+            "limitations": ["Qwen analysis was not available because no key frames were extracted."],
+        }
     import torch
     from qwen_vl_utils import process_vision_info
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
@@ -102,6 +107,39 @@ def analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, devic
     return result
 
 
+def select_yolo_model(
+    videomae: dict[str, Any], override: str | None = None, min_confidence: float = 0.5
+) -> tuple[dict[str, Any], str]:
+    from ai.vision.category_vlm_config import BEST_YOLO_MODELS
+
+    try:
+        prediction = videomae["clips"][0]["top_predictions"][0]
+        label = str(prediction["label"])
+        score = float(prediction["score"])
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise ValueError("VideoMAE did not return a valid top prediction") from exc
+    if label not in BEST_YOLO_MODELS:
+        raise ValueError(f"Unsupported VideoMAE accident category: {label}")
+    if not 0 <= score <= 1:
+        raise ValueError(f"Invalid VideoMAE confidence: {score}")
+    if not 0 <= min_confidence <= 1:
+        raise ValueError("min_confidence must be in [0, 1]")
+    prediction = {**prediction, "requires_review": score < min_confidence}
+    return prediction, override or BEST_YOLO_MODELS[label]
+
+
+def safe_analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, device_name: str) -> dict[str, Any]:
+    try:
+        return analyze_qwen(frame_paths, model_name, max_frames, device_name)
+    except Exception as exc:
+        return {
+            "valid": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "requires_review": True,
+            "limitations": ["Qwen analysis failed; VideoMAE and YOLO results remain available."],
+        }
+
+
 def _frame_paths(agent_output: dict[str, Any]) -> list[str]:
     agent = agent_output.get("agent_output", agent_output)
     frames = agent.get("structured_result", {}).get("key_frames", [])
@@ -114,12 +152,13 @@ def run(
     checkpoint: Path,
     frame_count: int = 8,
     videomae_frame_count: int = 16,
-    yolo_model: str = "yolov8n.pt",
+    yolo_model: str | None = None,
     confidence: float = 0.25,
     qwen_model: str = "Qwen/Qwen2.5-VL-3B-Instruct",
     qwen_frame_count: int = 4,
     device: str = "auto",
     skip_qwen: bool = False,
+    min_category_confidence: float = 0.5,
 ) -> Path:
     if not input_path.is_file():
         raise FileNotFoundError(f"Input video not found: {input_path}")
@@ -135,20 +174,30 @@ def run(
     from ai.vision.pipeline import extract_keyframes
     from ai.vision.schemas import convert_detection_to_agent_output
 
-    keyframe_path, _ = extract_keyframes(input_path, frame_count)
-    detection_path, _ = detect_keyframes(keyframe_path, yolo_model, confidence)
-    agent_path, agent_output = convert_detection_to_agent_output(detection_path)
     videomae = infer_videomae(input_path, checkpoint, videomae_frame_count, device)
-    qwen = {"valid": False, "skipped": True} if skip_qwen else analyze_qwen(
+    prediction, selected_yolo_model = select_yolo_model(videomae, yolo_model, min_category_confidence)
+    keyframe_path, _ = extract_keyframes(input_path, frame_count)
+    detection_path, _ = detect_keyframes(keyframe_path, selected_yolo_model, confidence)
+    agent_path, agent_output = convert_detection_to_agent_output(detection_path)
+    qwen = {"valid": False, "skipped": True, "requires_review": True} if skip_qwen else safe_analyze_qwen(
         _frame_paths(agent_output), qwen_model, qwen_frame_count, device
     )
 
     agent = agent_output.get("agent_output", agent_output)
     structured = agent.setdefault("structured_result", {})
-    structured["trained_model_prediction"] = videomae["clips"][0]["top_predictions"][0]
+    structured["trained_model_prediction"] = prediction
+    structured["selected_yolo_model"] = selected_yolo_model
     structured["qwen_analysis"] = qwen
     if qwen.get("summary"):
         agent["summary"] = qwen["summary"]
+    if not qwen.get("valid"):
+        agent["status"] = "partial"
+        structured.setdefault("limitations", []).extend(qwen.get("limitations", []))
+    if prediction["requires_review"]:
+        agent["status"] = "partial"
+        structured.setdefault("limitations", []).append(
+            f"VideoMAE confidence is below the review threshold ({min_category_confidence:.2f})."
+        )
 
     final_path = FINAL_OUTPUT_DIR / output_name(agent_path)
     final_path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,12 +213,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--frame-count", type=int, default=8)
     parser.add_argument("--videomae-frame-count", type=int, default=16)
-    parser.add_argument("--yolo-model", default="yolov8n.pt")
+    parser.add_argument("--yolo-model", default=None, help="Optional explicit override for category-selected YOLO")
     parser.add_argument("--confidence", type=float, default=0.25)
     parser.add_argument("--qwen-model", default="Qwen/Qwen2.5-VL-3B-Instruct")
     parser.add_argument("--qwen-frame-count", type=int, default=4)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--skip-qwen", action="store_true", help="Troubleshooting only")
+    parser.add_argument("--min-category-confidence", type=float, default=0.5)
     return parser.parse_args()
 
 
@@ -178,7 +228,8 @@ def main() -> None:
     output = run(args.input, checkpoint=args.checkpoint, frame_count=args.frame_count,
                  videomae_frame_count=args.videomae_frame_count, yolo_model=args.yolo_model,
                  confidence=args.confidence, qwen_model=args.qwen_model,
-                 qwen_frame_count=args.qwen_frame_count, device=args.device, skip_qwen=args.skip_qwen)
+                 qwen_frame_count=args.qwen_frame_count, device=args.device, skip_qwen=args.skip_qwen,
+                 min_category_confidence=args.min_category_confidence)
     print(f"supervisor_handoff_path: {output}")
 
 

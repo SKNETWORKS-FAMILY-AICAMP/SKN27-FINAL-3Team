@@ -111,6 +111,7 @@ def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
     video_understanding = final_analysis.get("video_understanding", {})
 
     detected_objects = structured.get("detected_objects", [])
+    qwen = structured.get("qwen_analysis", {})
     handoff = {
         "vision_supervisor_handoff": {
             "schema_version": SCHEMA_VERSION,
@@ -134,6 +135,22 @@ def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
                 "detected_object_summary": count_detected_objects(detected_objects),
             },
             "video_understanding_hint": top_video_hint(video_understanding),
+            "model_analysis": {
+                "trained_accident_prediction": structured.get("trained_model_prediction"),
+                "selected_yolo_model": structured.get("selected_yolo_model"),
+                "qwen": {
+                    "valid": qwen.get("valid", False),
+                    "summary": qwen.get("summary"),
+                    "predicted_accident_target": qwen.get("predicted_accident_target"),
+                    "accident_target_evidence": qwen.get("accident_target_evidence"),
+                    "collision_moment_visible": qwen.get("collision_moment_visible"),
+                    "accident_situation": qwen.get("accident_situation"),
+                    "scene_conditions": qwen.get("scene_conditions"),
+                    "uncertainties": qwen.get("uncertainties", []),
+                    "requires_review": qwen.get("requires_review", not qwen.get("valid", False)),
+                    "error": qwen.get("error"),
+                },
+            },
             "not_determined_by_vision": NOT_DETERMINED_BY_VISION,
             "routing_recommendation": {
                 "next_agents": ["legal_rag_agent", "precedent_agent", "report_agent"],

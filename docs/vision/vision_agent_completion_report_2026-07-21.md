@@ -1,4 +1,4 @@
-# Vision 사고 유형 분류 및 에이전트 완성 보고서
+# Vision 사고 유형 분류 및 에이전트 진행 보고서
 
 작성일: 2026-07-21
 대상: 차대차, 차대보행자, 차대이륜차, 차대자전거
@@ -41,7 +41,7 @@
 | 차대이륜차 | `yolov8m.pt` |
 | 차대자전거 | `yolo11s.pt` |
 
-## 4. 완료 상태
+## 4. 진행 상태
 
 ### 데이터와 YOLO
 
@@ -80,11 +80,13 @@
 - `ai/vision/train_videomae_classifier.py`: VideoMAE 학습
 - `ai/vision/trained_category_classifier.py`: 학습 체크포인트 탐색 및 추론
 - `ai/vision/category_vlm_config.py`: 카테고리와 선정 YOLO 설정
-- `ai/vision/run_to_supervisor.py`: 기존 통합 실행 파일이며 Supervisor 담당자와 협의 없이 수정하지 않는다.
-- `ai/vision/build_supervisor_handoff.py`: Supervisor 담당 영역이므로 Vision 팀에서 수정하지 않는다.
+- `ai/vision/run_to_supervisor.py`: Vision CLI 진입점. VideoMAE 분류 후 선정 YOLO와 Qwen을 실행한다.
+- `ai/vision/build_supervisor_handoff.py`: Vision 결과를 전달용 JSON으로 축약한다. 실제 Supervisor 서비스 연결은 담당 범위 밖이다.
 - `ai/vision/audit_category_results.py`: 카테고리별 100개 완료 상태 검사
 
 Vision 팀은 자동 사고 유형 분류 결과, 선정 YOLO, Qwen 분석 결과를 명확한 Python 반환값 또는 JSON으로 제공한다. Supervisor 연결 변경은 담당 팀원에게 인터페이스와 예시 데이터만 전달한다.
+
+현재 구현은 CLI에서 handoff JSON을 생성하는 단계이며 Django/Worker/Supervisor가 이 결과를 소비하도록 연결된 상태는 아니다. 따라서 서비스 에이전트 연결 완료로 판정하지 않는다.
 
 ## 6. 다음 실행 순서
 
