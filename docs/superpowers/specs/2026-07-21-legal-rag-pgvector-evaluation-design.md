@@ -95,4 +95,4 @@ pgvector 후보는 다음을 모두 만족할 때만 별도 전환 이슈의 후
 - 평가 입력·후보·metric 계산은 외부 DB와 API 없이 fixture로 단위 테스트한다.
 - 실제 PostgreSQL lexical/pgvector 비교와 RAGAS 파일럿은 명시적 실행 명령으로만 수행한다.
 - 결과 파일은 Git에 넣지 않는다. 실행 시 생성되는 로컬 artifact에는 입력 snapshot hash와 집계 결과만 남긴다.
-- 완료 시 법령 RAG 기술 검증 리포트에 기술 선택 이유, 데이터 흐름, A/B 지표, RAGAS 결과, 비용·지연시간, 전환 결론과 한계를 기록한다.
+- 완료 시 `docs/tech-validation-reports/legal-rag/`의 별도 Markdown 리포트에 기술 선택 이유, 데이터 흐름, A/B 지표, RAGAS 결과, 비용·지연시간, 전환 결론과 한계를 기록한다.
