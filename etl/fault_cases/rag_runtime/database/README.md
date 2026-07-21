@@ -1,27 +1,29 @@
 # 운영 DB 전용 영역
 
-이 경로에는 후속 단계에서만 새 운영 DB의 마이그레이션·적재·검증 코드를 둔다.
+이 디렉터리는 운영 DB의 export, import, validation 절차를 보관한다.
 
-- `migrations/`: 새 운영 스키마만 생성한다.
-- `loaders/`: 기존 원본·청크를 새 운영 DB로 적재한다.
-- `validation/`: 행 수·차원·해시·검색 스모크 검증을 수행한다.
+- `migrations/`: 운영 스키마 생성 스크립트
+- `loaders/`: 검증된 원본 데이터를 운영 DB에 적재하는 도구
+- `validation/`: 적재 결과의 구조·수량·관계·provenance 검증기
 
-기존 `skn27-postgres`, `skn27-neo4j`, 실험 DB 컨테이너의 스키마·테이블을 직접 변경하는 코드는 이곳에 두지 않는다.
+## 인정기준 Neo4j 운영 전환
 
-## 인정기준 Neo4j 이관
-
-운영 그래프 이관은 V7 이력 보관과 V9-only 운영 그래프 재생성을 분리한다.
+운영 그래프는 V7 이력 그래프와 분리된 V9-only `FaultStandardOperational` 그래프다.
+비밀번호는 로컬의 무시 대상 `.env` 또는 비밀 저장소에서 주입한다. 문서나 명령줄에 실제 비밀번호를 기록하지 않는다.
 
 ```powershell
-$env:FAULT_STANDARD_NEO4J_PASSWORD = '<운영 Neo4j 비밀번호>'
 python -B -m etl.fault_cases.rag_runtime.database.graph_export `
   --label Complete30V7 `
   --output-dir C:/dev/project/SKN27-RAG-rescue/etl/fault_cases/HISTORY_LOCAL/neo4j_archives/complete30_v7
+
 python -B -m etl.fault_cases.rag_runtime.database.graph_export `
   --label Complete30V9 `
   --output-dir C:/dev/project/SKN27-RAG-rescue/etl/fault_cases/HISTORY_LOCAL/neo4j_archives/complete30_v9_source
 ```
 
-V9 원본 export는 새 임시 Neo4j에 `import_fault_standard_operational_graph`로 적재한다. 적재 후 `validate_fault_standard_operational_graph`가 `7,815` 노드와 `13,196` 관계, `FaultStandardOperational` 라벨, 필수 Rule 관계, provenance, 고립 노드, 역할·관계별 기대 수를 모두 확인해야 한다.
+V9 export는 `import_fault_standard_operational_graph`로 새 운영 볼륨에 적재한다. 이후
+`validate_fault_standard_operational_graph`가 노드·관계 수, 운영 라벨, provenance, Rule 관계,
+고립 노드, 필수 속성, 제약조건을 검증한다.
 
-검증 통과 뒤에만 운영 서비스명 `fault-standard-neo4j`로 전환한다. 기존 컨테이너와 볼륨은 롤백 기간 동안 보관하고, 별도 승인 없이 삭제하지 않는다. Compose는 `FAULT_STANDARD_NEO4J_DATA_VOLUME` 및 `FAULT_STANDARD_NEO4J_LOG_VOLUME`으로 이관 볼륨을 명시할 수 있으며, 기본값은 운영 이관 볼륨이다.
+검증이 PASS한 뒤 서비스 컨테이너를 `fault-standard-neo4j`로 전환한다. 기존 컨테이너와
+볼륨은 롤백 기간 동안 보관하며, 별도 승인 없이는 삭제하지 않는다.

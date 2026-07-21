@@ -3,3 +3,7 @@ pytest==9.1.1
 pytest-timeout==2.4.0
 ruff==0.14.14
 
+# Dependencies imported while collecting the offline RAG contract/evaluation tests.
+# Keep these aligned with the Qwen operational ETL environment.
+pyarrow>=20.0.0,<22.0.0
+psycopg[binary]>=3.2,<4
