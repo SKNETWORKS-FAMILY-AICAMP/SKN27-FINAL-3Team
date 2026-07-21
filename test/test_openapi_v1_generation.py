@@ -30,6 +30,7 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/chat/sessions/",
         "/api/chat/messages/",
         "/api/chat/save-state/",
+        "/api/mypage/summary/",
         "/api/files/",
         "/api/files/{attachment_id}/",
         "/api/analysis/jobs/",

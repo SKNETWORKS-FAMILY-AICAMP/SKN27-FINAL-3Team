@@ -67,6 +67,7 @@ from app.contracts.file_attachment import (
     FileUploadTooLargeErrorResponse,
     FileUploadValidationErrorResponse,
 )
+from app.contracts.mypage import MyPageSummaryResponse
 from app.contracts.report import (
     ConfirmReportDocumentRequest,
     ConfirmReportDocumentResponse,
@@ -440,6 +441,30 @@ CHAT_SESSION_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 )
 
 
+MYPAGE_SUMMARY_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    RequestParameterSpec(
+        name="session_id",
+        location="query",
+        description="Optional chat session identifier used to scope the summary and session cache.",
+    ),
+    RequestParameterSpec(
+        name="owner_id",
+        location="query",
+        description="Optional owner identifier. When supplied, it takes precedence over user_id.",
+    ),
+    RequestParameterSpec(
+        name="user_id",
+        location="query",
+        description="Legacy owner alias used only when owner_id is absent.",
+    ),
+    RequestParameterSpec(
+        name="limit",
+        location="query",
+        description="Optional positive integer with a default of 10; invalid values fall back to that default.",
+    ),
+)
+
+
 def _chat_errors(*entries: tuple[int, tuple[str, ...]]) -> tuple[RouteErrorSpec, ...]:
     return tuple(
         RouteErrorSpec(
@@ -673,6 +698,29 @@ CHAT_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         tags=("Chat",),
         summary="Update a conversation save preference; an unknown session returns 200 with skipped state",
         request_parameters=CHAT_SESSION_REQUEST_PARAMETERS,
+    ),
+)
+
+
+MYPAGE_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="getMyPageSummary",
+        method="GET",
+        path="/api/mypage/summary/",
+        route_name="canonical-mypage-summary",
+        view_name="mypage_summary",
+        request_model=None,
+        response_model=MyPageSummaryResponse,
+        success_status=200,
+        errors=_auth_errors(
+            (401, ("auth_required", "token_invalid", "token_expired")),
+            (403, ("object_access_denied",)),
+        ),
+        auth_required=True,
+        contract_status="shadow",
+        tags=("MyPage",),
+        summary="Read the authenticated user's summary after owner or session authorization",
+        request_parameters=MYPAGE_SUMMARY_REQUEST_PARAMETERS,
     ),
 )
 
@@ -1061,6 +1109,7 @@ API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
     CASE_API_ROUTE_SPECS
     + AUTH_SESSION_API_ROUTE_SPECS
     + CHAT_SESSION_API_ROUTE_SPECS
+    + MYPAGE_API_ROUTE_SPECS
     + FILE_API_ROUTE_SPECS
     + ANALYSIS_JOB_API_ROUTE_SPECS
     + REPORT_API_ROUTE_SPECS
@@ -1095,13 +1144,6 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         route_name="capabilities",
         view_name="capabilities",
         reason="Capability DTO exists in runtime data but is not registered as a route contract.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/mypage/summary/",
-        route_name="canonical-mypage-summary",
-        view_name="mypage_summary",
-        reason="Response DTO and application query service are not yet extracted.",
     ),
     DeferredRouteSpec(
         method="GET",
