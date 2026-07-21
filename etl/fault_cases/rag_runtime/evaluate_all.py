@@ -7,8 +7,26 @@ from etl.fault_cases.rag_runtime.fault_standard.service import handle_request as
 from etl.fault_cases.rag_runtime.precedent.service import handle_request as pr_handle
 from etl.fault_cases.rag_runtime.review_case.service import handle_request as rc_handle
 
+
+def default_dataset_path() -> Path:
+    return (
+        Path(__file__).resolve().parent
+        / "evaluation/fault_standard/complete30_v9/v1/complete30_consumer_questions_v1.jsonl"
+    )
+
+
+def request_from_question(question: dict) -> RagRequest:
+    return {
+        "contract_version": "v1",
+        "message_id": question["case_id"],
+        "evaluation_query_id": question["case_id"],
+        "query_text": question["query_text"],
+        "accident_facts": {"structured_facts": question["structured_facts"]},
+    }
+
+
 def main():
-    dataset_path = Path("C:/dev/project/SKN27-FINAL-3Team/etl/fault_cases/evaluation/fault_standard/complete30_v9/v1/complete30_consumer_questions_v1.jsonl")
+    dataset_path = default_dataset_path()
     if not dataset_path.exists():
         print(f"데이터셋을 찾을 수 없습니다: {dataset_path}")
         return
@@ -28,13 +46,7 @@ def main():
     b4_fired_count = 0
 
     for q in questions:
-        req: RagRequest = {
-            "contract_version": "v1",
-            "message_id": q["case_id"],
-            "evaluation_query_id": q["case_id"],
-            "query_text": q["query_text"],
-            "structured_facts": q["structured_facts"]
-        }
+        req = request_from_question(q)
 
         fs_res = fs_handle(req)
         calc = fs_res.get("calculation_result") or {}
