@@ -33,6 +33,8 @@ const ATTACHMENT_PURPOSE_LABELS = {
   fine_notice: "고지서",
   supporting_evidence: "보조 자료",
 };
+const DEADLINE_GUIDANCE_STATUSES = new Set(["overdue", "due_soon", "normal", "needs_confirmation"]);
+const SERVICE_INFORMATION_NOTICE = "이 서비스는 법률 자문이나 개별 사건의 확정 판단을 대신하지 않으며, 확인할 사실과 근거를 정리합니다.";
 
 function waitForWorkerPoll() {
   return new Promise((resolve) => window.setTimeout(resolve, WORKER_POLL_INTERVAL_MS));
@@ -46,6 +48,42 @@ function assistantMessageText(value, fallback = "") {
     return String(value.answer || value.summary || "").trim() || fallback;
   }
   return fallback;
+}
+
+function stringList(value) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+}
+
+function isDeadlineGuidance(value) {
+  return Boolean(
+    value &&
+      value.contract_version === "deadline_guidance.v1" &&
+      DEADLINE_GUIDANCE_STATUSES.has(value.status)
+  );
+}
+
+function buildSafetyGuidance({ serviceScope = null, limitations = [], nextActions = [] } = {}) {
+  if (serviceScope) {
+    return {
+      title: serviceScope.decision === "expert_handoff" ? "전문가 확인이 필요한 요청입니다" : "서비스 범위 안내",
+      reason: String(serviceScope.reason || "").trim(),
+      limitations: stringList(serviceScope.limitations),
+      nextActions: stringList(serviceScope.next_actions),
+    };
+  }
+  const safeLimitations = stringList(limitations);
+  const safeNextActions = stringList(nextActions);
+  if (!safeLimitations.length && !safeNextActions.length) {
+    return null;
+  }
+  return {
+    title: "추가 확인이 필요한 안내",
+    reason: "현재 결과의 한계와 다음 확인 사항을 함께 검토해 주세요.",
+    limitations: safeLimitations,
+    nextActions: safeNextActions,
+  };
 }
 
 function analysisCardKey(card, index) {
@@ -118,7 +156,20 @@ export default function FrontendAppShell({
     analysisResponse?.assistant_message?.core_answer ||
     assistantMessageText(analysisResponse?.assistant_message);
   const assistantFollowUp = analysisResponse?.assistant_message?.follow_up || null;
-  const deadlineGuidance = analysisResponse?.deadline_guidance || null;
+  const serviceScope = analysisResponse?.service_scope || null;
+  const responseLimitations = stringList(analysisResponse?.limitations);
+  const responseNextActions = stringList(analysisResponse?.next_actions);
+  const chatSafetyGuidance = buildSafetyGuidance({
+    serviceScope,
+    limitations: responseLimitations,
+    nextActions: responseNextActions,
+  });
+  const resultSafetyGuidance = serviceScope
+    ? null
+    : buildSafetyGuidance({ limitations: responseLimitations, nextActions: responseNextActions });
+  const deadlineGuidance = isDeadlineGuidance(analysisResponse?.deadline_guidance)
+    ? analysisResponse.deadline_guidance
+    : null;
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -1343,6 +1394,7 @@ export default function FrontendAppShell({
               attachmentPurposes={attachmentPurposes}
               assistantAnswer={assistantAnswer}
               assistantFollowUp={assistantFollowUp}
+              chatSafetyGuidance={chatSafetyGuidance}
               authSessionId={authSessionId}
               chatMessages={chatMessages}
               currentReport={currentReport}
@@ -1384,6 +1436,7 @@ export default function FrontendAppShell({
               caseType={activeRoute === "faultResult" ? "fault" : caseType}
               currentReport={currentReport}
               deadlineGuidance={deadlineGuidance}
+              resultSafetyGuidance={resultSafetyGuidance}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenReport={() => setActiveRoute("reporting")}
@@ -1974,6 +2027,7 @@ function ChatScreenV2({
   assistantAnswer,
   assistantFollowUp,
   capabilityError,
+  chatSafetyGuidance,
   authSessionId,
   chatMessages,
   currentReport,
@@ -2154,6 +2208,7 @@ function ChatScreenV2({
                         {!isUser && message.followUp && <FollowUpNote followUp={message.followUp} />}
                         {!isUser && isLatestAssistant && (
                           <>
+                            {chatSafetyGuidance && <SafetyGuidancePanel guidance={chatSafetyGuidance} />}
                             <MissingFieldsPrompt supervisorState={supervisorState} />
                             {canGenerateReport && (reportingPayload || analysisCards.length > 0) && (
                               <ReportActionPanel
@@ -2829,21 +2884,50 @@ function historyEventMatchesFilter(event, activeFilter) {
 }
 
 function DeadlineGuidancePanel({ guidance }) {
-  const nextActions = Array.isArray(guidance?.next_actions) ? guidance.next_actions : [];
-  const limitations = Array.isArray(guidance?.limitations) ? guidance.limitations : [];
+  const nextActions = stringList(guidance?.next_actions);
+  const limitations = stringList(guidance?.limitations);
 
   return (
-    <aside className={`deadline-guidance-panel deadline-guidance-panel--${guidance.status}`} role="alert">
+    <aside
+      className={`deadline-guidance-panel deadline-guidance-panel--${guidance.status}`}
+      role={guidance.status === "normal" ? "status" : "alert"}
+    >
       <span className="deadline-guidance-panel__title">{guidance.card_title}</span>
       <strong>{guidance.reason}</strong>
       {limitations[0] && <p>{limitations[0]}</p>}
       {nextActions.length > 0 && (
         <ul>
-          {nextActions.map((action) => <li key={action}>{action}</li>)}
+          {nextActions.map((action, index) => <li key={`deadline-action-${index}`}>{action}</li>)}
         </ul>
       )}
     </aside>
   );
+}
+
+function SafetyGuidancePanel({ guidance }) {
+  const limitations = stringList(guidance?.limitations);
+  const nextActions = stringList(guidance?.nextActions);
+
+  return (
+    <aside className="safety-guidance-panel" role="note">
+      <span className="safety-guidance-panel__title">{guidance.title}</span>
+      {guidance.reason && <strong>{guidance.reason}</strong>}
+      {limitations.length > 0 && (
+        <ul aria-label="확인할 한계">
+          {limitations.map((item, index) => <li key={`safety-limitation-${index}`}>{item}</li>)}
+        </ul>
+      )}
+      {nextActions.length > 0 && (
+        <ul aria-label="다음 행동">
+          {nextActions.map((item, index) => <li key={`safety-action-${index}`}>{item}</li>)}
+        </ul>
+      )}
+    </aside>
+  );
+}
+
+function ServiceInformationNotice() {
+  return <aside className="service-information-notice" role="note">{SERVICE_INFORMATION_NOTICE}</aside>;
 }
 
 
@@ -2852,6 +2936,7 @@ function CaseResultScreen({
   caseType = "fine",
   currentReport = null,
   deadlineGuidance = null,
+  resultSafetyGuidance = null,
   isAuthenticated = false,
   onOpenChat,
   onOpenReport,
@@ -2882,7 +2967,11 @@ function CaseResultScreen({
       ]
     : [
         { label: "처분 유형", value: findReportText(sections, /처분 유형|과태료|범칙금/, "과태료·범칙금"), detail: "고지서 분석 기준" },
-        { label: "의견제출 기한", value: findReportText(sections, /제출 기한|의견제출|마감|D-/, "기한 확인 필요"), detail: "고지서 원문 확인 필요" },
+        {
+          label: "의견제출 기한",
+          value: deadlineGuidance?.deadline || findReportText(sections, /제출 기한|의견제출|마감|D-/, "기한 확인 필요"),
+          detail: deadlineGuidance?.deadline ? "확인된 기한 기준" : "고지서 원문 확인 필요",
+        },
         { label: "검토 상태", value: reportStatusText, detail: "확인된 사실과 누락 자료" },
         { label: "필요 자료", value: facts.length > 0 ? `${facts.length}건 확인` : "추가 확인", detail: "현장 사진·정차 사유" },
       ];
@@ -2912,7 +3001,9 @@ function CaseResultScreen({
       </div>
 
       <div className="dashboard case-result-dashboard">
-        {deadlineGuidance && deadlineGuidance.status !== "normal" && (
+        <ServiceInformationNotice />
+        {resultSafetyGuidance && <SafetyGuidancePanel guidance={resultSafetyGuidance} />}
+        {deadlineGuidance && (
           <DeadlineGuidancePanel guidance={deadlineGuidance} />
         )}
         <div className="summary-grid">
@@ -3205,6 +3296,7 @@ function ReportingScreen({
         </div>
       </div>
 
+      <ServiceInformationNotice />
       <div className="report-workbench">
         <aside className="report-list" aria-label="리포트 목록">
           <div className="panel-head compact">
