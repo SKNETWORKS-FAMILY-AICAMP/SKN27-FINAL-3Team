@@ -191,7 +191,15 @@ def test_chat_session_api_route_specs_promote_existing_django_endpoints() -> Non
     assert actual[("POST", "/api/chat/messages/")].response_model is (
         contracts.ChatMessageResponse
     )
-    assert actual[("POST", "/api/chat/messages/")].success_statuses == (200, 202, 503)
+    chat_message = actual[("POST", "/api/chat/messages/")]
+    assert chat_message.success_statuses == (200, 202)
+    assert [
+        (outcome.status, outcome.semantic, outcome.response_model)
+        for outcome in chat_message.outcome_responses
+    ] == [
+        (409, "partial_result", contracts.ChatMessageResponse),
+        (503, "service_unavailable", contracts.ChatMessageResponse),
+    ]
     assert {
         error.status: error.codes
         for error in actual[("POST", "/api/chat/messages/")].errors
@@ -282,7 +290,13 @@ def test_analysis_job_api_route_specs_promote_existing_django_endpoints() -> Non
     assert actual[("GET", "/api/analysis/jobs/{job_id}/")].path_parameters[0].name == (
         "job_id"
     )
-    assert actual[("GET", "/api/analysis/results/{job_id}/")].success_statuses == (200, 202)
+    analysis_result = actual[("GET", "/api/analysis/results/{job_id}/")]
+    assert analysis_result.success_statuses == (200,)
+    assert [
+        (outcome.status, outcome.semantic, outcome.response_model)
+        for outcome in analysis_result.outcome_responses
+    ] == [(202, "pending", analysis_contracts.AnalysisResultResponse)]
+    assert actual[("POST", "/api/analysis/jobs/")].outcome_responses == ()
     expected_identity_errors = (
         "auth_required",
         "token_invalid",
@@ -457,6 +471,37 @@ def test_success_content_and_header_specs_reject_ambiguous_contracts() -> None:
             contract_status="shadow",
             tags=("Contracts",),
             summary="Contract probe",
+        )
+
+
+def test_route_spec_rejects_outcome_status_that_overlaps_a_success_status() -> None:
+    contracts = importlib.import_module("app.contracts.consultation_case")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    with pytest.raises(ValueError, match="outcome status codes must be unique and disjoint"):
+        route_specs.RouteSpec(
+            operation_id="duplicateOutcome",
+            method="GET",
+            path="/api/contracts/probe/",
+            route_name="contract-probe",
+            view_name="probe",
+            request_model=None,
+            response_model=contracts.ConsultationCaseListResponse,
+            success_status=200,
+            success_statuses=(200,),
+            errors=(),
+            auth_required=False,
+            contract_status="shadow",
+            tags=("Contracts",),
+            summary="Contract probe",
+            outcome_responses=(
+                route_specs.OutcomeResponseSpec(
+                    status=200,
+                    semantic="pending",
+                    description="Still pending",
+                    response_model=contracts.ConsultationCaseListResponse,
+                ),
+            ),
         )
 
 

@@ -82,6 +82,7 @@ HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 ContractStatus = Literal["shadow", "generated"]
 RequestMediaType = Literal["application/json", "multipart/form-data"]
 SecurityRequirement = dict[str, tuple[str, ...]]
+OutcomeSemantic = Literal["partial_result", "pending", "service_unavailable"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +102,18 @@ class RouteErrorSpec:
     status: int
     codes: tuple[str, ...]
     response_model: type[BaseModel]
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeResponseSpec:
+    status: int
+    semantic: OutcomeSemantic
+    description: str
+    response_model: type[BaseModel]
+
+    def __post_init__(self) -> None:
+        if not 100 <= self.status <= 599 or not self.description.strip():
+            raise ValueError("outcome status and description are required")
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +166,7 @@ class RouteSpec:
     request_media_types: tuple[RequestMediaType, ...] = ("application/json",)
     auth_optional: bool = False
     success_statuses: tuple[int, ...] = ()
+    outcome_responses: tuple[OutcomeResponseSpec, ...] = ()
     success_content: tuple[ResponseContentSpec, ...] = ()
     success_headers: tuple[ResponseHeaderSpec, ...] = ()
     security_requirements: tuple[SecurityRequirement, ...] = ()
@@ -192,6 +206,13 @@ class RouteSpec:
             or len(set(self.success_statuses)) != len(self.success_statuses)
         ):
             raise ValueError("success status codes must include the primary status and be unique")
+        outcome_statuses = {outcome.status for outcome in self.outcome_responses}
+        success_statuses = set(self.success_statuses or (self.success_status,))
+        error_statuses = {error.status for error in self.errors}
+        if len(outcome_statuses) != len(self.outcome_responses) or outcome_statuses & (
+            success_statuses | error_statuses
+        ):
+            raise ValueError("outcome status codes must be unique and disjoint")
 
 
 @dataclass(frozen=True, slots=True)
@@ -716,7 +737,21 @@ CHAT_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         request_model=ChatMessageRequest,
         response_model=ChatMessageResponse,
         success_status=200,
-        success_statuses=(200, 202, 503),
+        success_statuses=(200, 202),
+        outcome_responses=(
+            OutcomeResponseSpec(
+                status=409,
+                semantic="partial_result",
+                description="Attachment scan blocked; safe partial guidance is available.",
+                response_model=ChatMessageResponse,
+            ),
+            OutcomeResponseSpec(
+                status=503,
+                semantic="service_unavailable",
+                description="Supervisor planning is temporarily unavailable.",
+                response_model=ChatMessageResponse,
+            ),
+        ),
         errors=_chat_errors(
             (400, ("chat_input_rejected",)),
             (401, ("auth_required", "token_invalid", "token_expired", "guest_session_invalid")),
@@ -967,7 +1002,15 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         request_model=None,
         response_model=AnalysisResultResponse,
         success_status=200,
-        success_statuses=(200, 202),
+        success_statuses=(200,),
+        outcome_responses=(
+            OutcomeResponseSpec(
+                status=202,
+                semantic="pending",
+                description="Analysis result is not ready; continue polling the result endpoint.",
+                response_model=AnalysisResultResponse,
+            ),
+        ),
         errors=_analysis_job_errors(
             (401, ANALYSIS_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
