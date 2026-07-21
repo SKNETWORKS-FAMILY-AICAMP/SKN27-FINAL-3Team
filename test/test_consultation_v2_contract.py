@@ -36,6 +36,7 @@ def test_public_v2_case_routes_are_exposed() -> None:
         '"cases/<str:case_id>/facts/confirm/"',
         '"cases/<str:case_id>/analysis/jobs/"',
         '"reports/<str:report_id>/"',
+        '"reports/<str:report_id>/document-confirmation/"',
     ):
         assert token in urls
 
@@ -84,7 +85,7 @@ def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_i
     assert "reportId: persistedReportId" in report_action
     persisted_branch = report_action[report_action.index("if (persistedReportId) {"):]
     save_state_call = persisted_branch.index("api.updateConversationSaveState")
-    save_success = persisted_branch.index("setReportActionStatus")
+    save_success = persisted_branch.index("setReportActionStatus", save_state_call)
     assert save_state_call < save_success
     assert 'conversation_save_state: "saved"' in persisted_branch
     assert 'conversation_save_source: "worker_report_save_action"' in persisted_branch
@@ -109,6 +110,81 @@ def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_i
     assert "setCurrentReport(null);" in shell[submit_start:submit_end]
 
 
+def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+    action_start = shell.index("async function runCurrentReportAction")
+    action_end = shell.index("async function triggerReportDownload", action_start)
+    report_action = shell[action_start:action_end]
+
+    assert "setPendingReportScreenDownload" not in shell
+    assert "openReportScreenPrintWindow" not in shell
+    assert "PDF" not in report_action
+    assert 'const documentType = "objection_form";' in report_action
+    assert "const appealGate = activeReportingPayload?.appeal_gate || null;" in report_action
+    assert "if (appealGate?.blocked === true)" in report_action
+    assert "document_confirmation" in report_action
+    assert "api.confirmReportDocument" in shell
+    assert 'onRunReportAction("download_report")' not in shell
+    assert "분석 리포트 DOCX" not in shell
+    ready_notice_start = shell.index("function ReportReadyNotice")
+    ready_notice_end = shell.index("function DocumentConfirmationPanel", ready_notice_start)
+    ready_notice = shell[ready_notice_start:ready_notice_end]
+    assert "const hasOfficialDocument =" in ready_notice
+    assert "{hasOfficialDocument && (" in ready_notice
+    assert 'report_actions?.some((item) => item?.type === "download_objection")' not in ready_notice
+    assert '["fine_notice_objection", "fault_ratio_analysis"].includes(reportingPayload?.report_type)' in ready_notice
+    assert "const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;" in shell
+    assert "const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;" in shell
+    assert "appealDownloadBlocked || !confirmation.confirmed" in shell
+    assert "DOCX" in shell
+    assert "화면 PDF 저장" not in shell
+    assert "이의신청서 PDF" not in shell
+    assert "confirmReportDocument" in api_client
+    assert 'const filename = file.filename || `${reportId}.docx`;' in shell
+    assert shell.count('report_actions?.some((item) => item?.type === "download_objection")') == 0
+
+
+def test_frontend_renders_document_cards_as_copy_only_content() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    styles = read_text(ROOT / "app" / "web" / "styles.css")
+
+    assert "function DocumentTypeCards" in shell
+    assert "document_cards" in shell
+    assert "navigator.clipboard.writeText" in shell
+    assert "보험사 제출용 요약" in shell
+    assert 'onRunReportAction?.("download_report")' not in shell
+    for class_name in (
+        "document-type-cards",
+        "document-type-card",
+        "document-type-notice",
+    ):
+        assert class_name in shell
+        assert f".{class_name}" in styles
+
+
+def test_document_cards_do_not_reintroduce_generic_download_ui() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    card_start = shell.index("function DocumentTypeCards")
+    card_end = shell.index("function ReportingScreen", card_start)
+    cards = shell[card_start:card_end]
+
+    assert "downloadReport" not in cards
+    assert "PDF" not in cards
+    assert "내용 복사" in cards
+
+
+def test_download_report_never_returns_pdf_for_the_legacy_non_api_path() -> None:
+    views = read_text(ROOT / "backend" / "chatbot" / "views.py")
+    function_start = views.index("def download_report(")
+    function_end = views.index("def _report_auth_error_response", function_start)
+    download_view = views[function_start:function_end]
+
+    assert "application/pdf" not in download_view
+    assert "document_download_not_available" in download_view
+    assert "render_report_docx(" not in download_view
+
+
 def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 
@@ -116,8 +192,10 @@ def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> No
         'function assistantMessageText(value, fallback = "")',
         'typeof value === "string"',
         "value.answer || value.summary",
-        "const assistantAnswer = assistantMessageText(analysisResponse?.assistant_message);",
-        'content: assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),',
+        "analysisResponse?.assistant_message?.core_answer ||",
+        "assistantMessageText(analysisResponse?.assistant_message);",
+        "workerResult?.assistant_message?.core_answer ||",
+        'assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),',
         "const assistantMessage = assistantMessageText(",
         "assistant_message: assistantMessageText(",
     ):

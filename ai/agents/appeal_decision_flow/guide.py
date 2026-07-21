@@ -95,6 +95,8 @@ def _timeline_text(state: AppealJudgmentState) -> str:
     notice_stage = state.get("notice_stage")
     opinion_deadline = state.get("opinion_deadline")
 
+    prefix = "🚨 [주의: 제출 기한 엄수] "
+
     if fine_type == "과태료" and notice_stage == "1차 고지서":
         computed_deadline = state.get("computed_deadline")
         if computed_deadline is None:
@@ -102,7 +104,7 @@ def _timeline_text(state: AppealJudgmentState) -> str:
             # 이의제기 마감은 계산할 수 없다 — "승산만 궁금한" 사용자를 막지 않는
             # 대신 여기서 명확하게 경고한다.
             return (
-                "⚠️ 고지서 수령일을 알려주지 않아 법정 이의제기 마감(수령일+60일, "
+                f"{prefix}⚠️ 고지서 수령일을 알려주지 않아 법정 이의제기 마감(수령일+60일, "
                 "질서위반행위규제법 제20조)을 계산할 수 없습니다. 고지서에 인쇄된 "
                 f"납부기한({opinion_deadline or '확인 불가'})은 법정 이의제기 마감과 "
                 "다른 값입니다 — 수령일을 모른 채 이의제기를 진행하면 법정 기한을 "
@@ -110,7 +112,7 @@ def _timeline_text(state: AppealJudgmentState) -> str:
                 "알려주세요."
             )
         return (
-            f"법정 이의제기 마감(수령일+60일, 질서위반행위규제법 제20조): "
+            f"{prefix}법정 이의제기 마감(수령일+60일, 질서위반행위규제법 제20조): "
             f"{computed_deadline}. 고지서에 인쇄된 납부기한"
             f"({opinion_deadline or '확인 불가'})과는 다른 값이니 혼동하지 마세요 — "
             "두 날짜 모두 지키지 못하면 각각 다른 불이익(납부기한 초과 시 가산금, "
@@ -118,18 +120,18 @@ def _timeline_text(state: AppealJudgmentState) -> str:
         )
     if fine_type == "과태료":  # 사전통지
         return (
-            f"의견제출기한: {opinion_deadline or '확인 불가'} "
+            f"{prefix}의견제출기한: {opinion_deadline or '확인 불가'} "
             "(10일 이상, 지자체별 15~20일도 있음)"
         )
     if notice_stage == "즉결심판":
         return (
-            f"출석 예정일시: {opinion_deadline or '확인 불가'}. "
+            f"{prefix}출석 예정일시: {opinion_deadline or '확인 불가'}. "
             "선고 전까지 범칙금의 1.5배를 납부하면 청구가 취소될 수 있습니다."
         )
     # 범칙금 사전통지(통고서)
     payment_2nd = state.get("payment_deadline_2nd")
     return (
-        f"1차 납부기한: {opinion_deadline or '확인 불가'} "
+        f"{prefix}1차 납부기한: {opinion_deadline or '확인 불가'} "
         f"(미납 시 2차 납부기한 {payment_2nd or '확인 불가'}, 20% 가산)"
     )
 
@@ -234,10 +236,22 @@ def _merit_risk_tone(state: AppealJudgmentState) -> str | None:
 
 
 def _disclaimer_text(state: AppealJudgmentState) -> str:
+    verified_at = state.get("law_reference_verified_at")
+    if verified_at:
+        staleness_notice = (
+            f"⚠️ 본 판정에 인용된 법령 자료는 {verified_at} 기준으로 수집되었으며, "
+            "이후 개정 사항이 미반영되었을 수 있습니다."
+        )
+    else:
+        staleness_notice = (
+            "⚠️ 본 판정에 인용된 법령 자료의 수집 기준일을 확인하지 못했습니다 — "
+            "최신 개정 사항이 미반영되었을 수 있습니다."
+        )
     parts = [
         "본 판단은 법률자문이 아니며 참고용입니다. 절차의 세부 운영(특히 온라인 접수 "
         "가능 여부)은 지자체·관할 기관마다 다를 수 있어, 최종 확인은 관할 기관에 "
         "하시기 바랍니다.",
+        staleness_notice,
         _RESIDUAL_RISK_NOTICE,
     ]
 
@@ -260,6 +274,19 @@ def _disclaimer_text(state: AppealJudgmentState) -> str:
             )
     elif state.get("law_code_verified") is True:
         parts.append("이의신청서에 인용될 법조항은 법령DB로 확인됐습니다.")
+
+    if state.get("requires_confirmation"):
+        unconfirmed = state.get("unconfirmed_fields") or []
+        if unconfirmed:
+            parts.append(
+                "⚠️ 금액·기한 등 일부 정보가 아직 사용자 확인을 거치지 않았습니다 — "
+                f"{', '.join(unconfirmed)} 항목을 원본 고지서와 대조해 확인하세요."
+            )
+        else:
+            parts.append(
+                "⚠️ 이 판단은 사용자 확인을 거치지 않은 OCR 추출 정보를 기반으로 합니다 — "
+                "원본 고지서와 대조해 확인하세요."
+            )
 
     if state.get("reason_quality_insufficient"):
         parts.append(_REASON_QUALITY_NOTICE)
@@ -291,8 +318,11 @@ def _structured_result(state: AppealJudgmentState, guide: dict) -> dict:
         "computed_deadline":     state.get("computed_deadline"),
         "deadline_passed":       state.get("deadline_passed"),
         "law_code_verified":     state.get("law_code_verified"),
+        "law_reference_verified_at": state.get("law_reference_verified_at"),
         "reason_quality_insufficient": state.get("reason_quality_insufficient"),
         "schema_fields_unrecognized": _unrecognized_schema_fields(state),
+        "requires_confirmation": state.get("requires_confirmation"),
+        "unconfirmed_fields":    state.get("unconfirmed_fields") or [],
         "guide":                 guide,
     }
 
@@ -319,21 +349,32 @@ def guide_generation_node(state: AppealJudgmentState) -> dict:
     if state.get("risk_judgment_failed"):
         # risk 판정이 기술적 실패로 안전 기본값(risk_flag=true)에 머문 상태 — Supervisor가
         # 이걸 "실제 위험 감지"로 오인하지 않고 재호출을 시도할 수 있게 명시적으로 알려준다.
-        next_actions.append("RG(risk) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
+        next_actions.append("일시적 시스템 오류(위험도 판정 실패): 잠시 후 다시 시도해주세요")
     if state.get("merit_judgment_failed"):
         # merit 판정이 기술적 실패로 "보류"에 머문 상태 — Supervisor가 이걸 "판정
         # 완료"로 오인하지 않고 재호출을 시도할 수 있게 명시적으로 알려준다.
-        next_actions.append("MG(merit) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
+        next_actions.append("일시적 시스템 오류 또는 정보 부족: 구체적인 정황(경위 등)을 보강하여 다시 질문해주세요")
     if state.get("relief_type_judgment_failed"):
         # merit="강함"까지는 정상 판단됐지만 면제/감경 2차 구분만 기술적으로 실패한
         # 상태 — merit_judgment_failed와 별개 원인이므로 별도 재호출 안내를 남긴다.
-        next_actions.append("MG(relief_type) 판정이 기술 오류로 미완료 — 재호출 시 정확한 판정 가능")
+        next_actions.append("일시적 시스템 오류(면제/감경 구분 실패): 잠시 후 다시 시도해주세요")
     if state.get("legal_evidence_status") == "unavailable":
-        next_actions.append("필수 법령 근거 조회가 미완료 — 법령DB 복구·검증 후 다시 판정 필요")
+        next_actions.append("필수 법령 근거 조회 실패: 시스템 복구 후 다시 시도해주세요")
     if _unrecognized_schema_fields(state):
         # fine_type·notice_stage가 알려진 값 밖이면 판정은 그대로(기본 분기로) 진행했지만,
         # Supervisor가 OCR 결과를 재확인하도록 명시적으로 알려준다.
-        next_actions.append("fine_type/notice_stage 값이 예상 밖 — OCR 결과 재확인 필요")
+        next_actions.append("고지서 정보 인식 오류: OCR 결과를 다시 확인하거나 수정해주세요")
+    if state.get("requires_confirmation"):
+        # fine_notice_analysis가 확인을 요구했지만(D-1) 아직 사용자 확인이 이뤄지지
+        # 않은 채로 이 판정에 도달한 상태 — 판정 자체는 막지 않되, 사용자가 원본과
+        # 대조해야 한다는 것을 다음 행동으로 명시한다.
+        unconfirmed = state.get("unconfirmed_fields") or []
+        if unconfirmed:
+            next_actions.append(
+                f"OCR 추출 정보 확인 필요: {', '.join(unconfirmed)} 항목을 원본 고지서와 대조해주세요"
+            )
+        else:
+            next_actions.append("OCR 추출 정보 확인 필요: 원본 고지서와 대조해주세요")
     fine_type_label = state.get("fine_type") or "미확인"
     notice_stage_label = state.get("notice_stage") or "미확인"
     summary = f"{fine_type_label} {notice_stage_label} — {judgment_status}"

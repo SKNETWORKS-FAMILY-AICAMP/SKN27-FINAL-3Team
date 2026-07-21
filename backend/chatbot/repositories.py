@@ -24,6 +24,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from ai.agents.objection_report_generation import render_report_docx
 from app.services.attachment_mock_service import (
     register_attachment as register_mock_attachment,
 )
@@ -35,6 +36,10 @@ from app.services.history_event_mock_service import (
 from app.services.chat_session_followup_service import (
     CHAT_SESSION_FOLLOWUP_STATE_VERSION,
     build_chat_followup_snapshot,
+)
+from app.services.report_document_card_service import (
+    build_report_document_cards,
+    filter_report_actions_for_view,
 )
 from app.services.supervisor_reporting_handoff_service import (
     build_supervisor_reporting_handoff,
@@ -104,9 +109,11 @@ from chatbot.progress_cache import (
 from chatbot.retention_policy import upload_retention_expires_at
 
 USAGE_POLICY_GROUP_CODE = "usage_quota_policy"
-REPORT_PDF_CONTENT_TYPE = "application/pdf"
+REPORT_DOCX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 REPORT_DOWNLOAD_TYPE_REPORT = "report"
 REPORT_DOWNLOAD_TYPE_OBJECTION_FORM = "objection_form"
+DOCUMENT_CONFIRMATION_SCHEMA_VERSION = "document_confirmation.v1"
+OFFICIAL_OBJECTION_DOCUMENT_VARIANTS = {"fine_notice", "traffic_accident"}
 ACCIDENT_OBJECTION_TEMPLATE_PATH = Path(__file__).resolve().parent / "traffic_objection_form_template.pdf"
 ACCIDENT_OBJECTION_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_template_renderer.py"
 REPORT_PDF_RENDERER_PATH = Path(__file__).resolve().parent / "pdf_report_renderer.py"
@@ -495,16 +502,16 @@ def _reportlab_pdf_bytes_via_bundled_python(*, report_id: str, title: str, body_
         return None
 USAGE_POLICY_LIMITS = {
     "anonymous": {
-        "chat_message": 2,
-        "file_upload": 1,
-        "agent_run": 1,
-        "report_action": 1,
+        "chat_message": 200,
+        "file_upload": 100,
+        "agent_run": 100,
+        "report_action": 100,
     },
     "guest": {
-        "chat_message": 5,
-        "file_upload": 3,
-        "agent_run": 3,
-        "report_action": 2,
+        "chat_message": 200,
+        "file_upload": 100,
+        "agent_run": 100,
+        "report_action": 100,
         "google_oauth_code_exchange": settings.GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT,
     },
     "free": {
@@ -3252,11 +3259,20 @@ def _worker_reporting_payload(
         _dict_or_empty(reporting_result.structured_result)
     )
     safe_summary = _sanitize_report_text(reporting_result.summary)
+    document_variant = _sanitize_report_text(structured.get("document_variant"))
+    sections = _normalize_worker_reporting_sections(
+        _list_or_empty(structured.get("form_sections"))
+    )
+    document_readiness = _sanitize_report_value(
+        _dict_or_empty(structured.get("document_readiness"))
+    )
+    appeal_gate = _sanitize_report_value(_dict_or_empty(structured.get("appeal_gate")))
     return {
         "contract_version": "reporting_payload.v2",
         "source": "supervisor_agent_result_aggregation",
         "source_node_codes": _list_or_empty(handoff.get("source_node_codes")),
         "report_type": _dict_or_empty(handoff.get("target")).get("report_type"),
+        "document_variant": document_variant,
         "stage": (
             "agent_execution_ready"
             if report_status == ReportStatus.READY.value
@@ -3265,9 +3281,23 @@ def _worker_reporting_payload(
         "title": _sanitize_report_text(structured.get("document_title"))
         or "Analysis report",
         "summary": safe_summary,
-        "sections": _normalize_worker_reporting_sections(
-            _list_or_empty(structured.get("form_sections"))
+        "sections": sections,
+        "document_cards": build_report_document_cards(
+            document_variant=document_variant,
+            sections=sections,
+            document_readiness=document_readiness,
+            appeal_gate=appeal_gate,
         ),
+        "form_data": _sanitize_report_value(_dict_or_empty(structured.get("form_data"))),
+        "document_readiness": document_readiness,
+        "report_actions": filter_report_actions_for_view(
+            _sanitize_report_value(_list_or_empty(structured.get("report_actions")))
+        ),
+        "appeal_decision": _sanitize_report_value(_dict_or_empty(structured.get("appeal_decision"))),
+        "appeal_gate": appeal_gate,
+        "petition_purpose": _sanitize_report_text(structured.get("petition_purpose")),
+        "petition_reason": _sanitize_report_text(structured.get("petition_reason")),
+        "drafting_source": _sanitize_report_text(structured.get("drafting_source")),
         "data": structured,
         "evidence": _sanitize_report_value(_list_or_empty(reporting_result.evidence)),
         "next_actions": _sanitize_report_value(
@@ -4073,6 +4103,7 @@ def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
     if report is None:
         return None
     metadata = _dict_or_empty(report.metadata)
+    reporting_payload = _reporting_payload_for_download(report)
     owner_id = _text(report.owner_id or (report.session.owner_id if report.session_id else ""))
     guest_id = _normalize_guest_id(metadata.get("guest_id"))
     if not guest_id and report.session_id:
@@ -4084,10 +4115,33 @@ def get_report_access_metadata(report_id: str) -> dict[str, Any] | None:
         "session_id": report.session.session_id if report.session_id else None,
         "status": report.status,
         "source": _text(metadata.get("source")),
+        "download_blocked": _appeal_download_is_blocked(reporting_payload),
+        "document_confirmation": get_report_document_confirmation_state(report),
     }
 
 
-def get_report_download_metadata(report_id: str, *, document_type: str | None = None) -> dict[str, Any] | None:
+def get_report_download_metadata(
+    report_id: str,
+    *,
+    document_type: str | None = None,
+    require_current_confirmation: bool = False,
+) -> dict[str, Any] | None:
+    if require_current_confirmation:
+        with transaction.atomic():
+            report = (
+                Report.objects.select_for_update()
+                .select_related("session", "job", "display_result")
+                .filter(report_id=report_id)
+                .first()
+            )
+            if report is None:
+                return None
+            return _report_download_metadata_for_report(
+                report,
+                document_type=document_type,
+                require_current_confirmation=True,
+            )
+
     report = (
         Report.objects.select_related("session", "job", "display_result")
         .filter(report_id=report_id)
@@ -4095,33 +4149,49 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
     )
     if report is None:
         return None
+    return _report_download_metadata_for_report(
+        report,
+        document_type=document_type,
+        require_current_confirmation=False,
+    )
+
+
+def _report_download_metadata_for_report(
+    report: Report,
+    *,
+    document_type: str | None,
+    require_current_confirmation: bool,
+) -> dict[str, Any] | None:
+    normalized_document_type = normalize_report_download_document_type(document_type)
+    if normalized_document_type != REPORT_DOWNLOAD_TYPE_OBJECTION_FORM:
+        return None
+
+    reporting_payload = _reporting_payload_for_download(report)
+    if not _report_document_confirmation_is_required(report, reporting_payload):
+        return None
+    if require_current_confirmation and _appeal_download_is_blocked(reporting_payload):
+        return None
+    if (
+        require_current_confirmation
+        and get_report_document_confirmation_state(report).get("confirmed") is not True
+    ):
+        return None
 
     object_storage = _report_object_storage(report)
     storage_uri = object_storage["storage_uri"]
     storage_backend = object_storage["backend"]
-    normalized_document_type = _report_download_document_type(document_type)
-    if normalized_document_type == REPORT_DOWNLOAD_TYPE_OBJECTION_FORM:
-        text_body = _report_objection_form_body(report)
-        title = "과태료 부과 처분 이의신청서"
-        filename = f"{report.report_id}-objection-form.pdf"
-        pdf_body = _report_objection_form_pdf_body(
-            report,
-            title=title,
-            text_body=text_body,
-        )
-    else:
-        text_body = _report_download_body(
-            report,
-            storage_backend=storage_backend,
-            object_storage=object_storage,
-        )
-        title = report.title or report.report_id
-        filename = f"{report.report_id}.pdf"
-        pdf_body = build_report_download_pdf_body(
-            report_id=report.report_id,
-            title=title,
-            body_text=text_body,
-        )
+    text_body = _report_objection_form_body(report)
+    document_variant = _report_document_variant(report, reporting_payload)
+    title = "과태료 부과 처분 이의신청서" if document_variant == "fine_notice" else report.title
+    filename = f"{report.report_id}-objection-form.docx"
+    docx_body = render_report_docx(
+        document_variant=document_variant,
+        title=title,
+        form_data=_dict_or_empty(reporting_payload.get("form_data")),
+        sections=_list_or_empty(reporting_payload.get("sections")),
+        petition_purpose=_text(reporting_payload.get("petition_purpose")),
+        petition_reason=_text(reporting_payload.get("petition_reason")),
+    )
     return {
         "report_id": report.report_id,
         "document_type": normalized_document_type,
@@ -4133,15 +4203,147 @@ def get_report_download_metadata(report_id: str, *, document_type: str | None = 
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
         "filename": filename,
-        "content_type": REPORT_PDF_CONTENT_TYPE,
+        "content_type": REPORT_DOCX_CONTENT_TYPE,
         "storage_uri": storage_uri,
         "storage_backend": storage_backend,
         "object_storage": object_storage,
         "object_key": object_storage.get("key", ""),
         "status": report.status,
-        "body": pdf_body,
+        "body": docx_body,
         "text_body": text_body,
     }
+
+
+def _reporting_payload_for_download(report: Report) -> dict[str, Any]:
+    content = _dict_or_empty(report.content)
+    return _dict_or_empty(content.get("reporting_payload"))
+
+
+def confirm_report_document(report_id: str, *, owner_id: str) -> dict[str, Any]:
+    """Record an owner's final review of the current official document input."""
+
+    with transaction.atomic():
+        report = (
+            Report.objects.select_for_update()
+            .select_related("session")
+            .filter(report_id=report_id)
+            .first()
+        )
+        if report is None:
+            raise ReportReferenceError("report_not_found", "report was not found")
+        report_owner_id = _text(
+            report.owner_id or (report.session.owner_id if report.session_id else "")
+        )
+        if not owner_id or report_owner_id != owner_id:
+            raise ReportReferenceError(
+                "object_access_denied",
+                "document confirmation requires report ownership",
+            )
+        reporting_payload = _reporting_payload_for_download(report)
+        if not _report_document_confirmation_is_required(report, reporting_payload):
+            raise ReportReferenceError(
+                "document_download_not_available",
+                "only official objection documents can be confirmed",
+            )
+        if _appeal_download_is_blocked(reporting_payload):
+            raise ReportReferenceError(
+                "appeal_gate_blocked",
+                "appeal eligibility blocks document confirmation",
+            )
+
+        fingerprint = _report_document_input_fingerprint(report, reporting_payload)
+        metadata = deepcopy(_dict_or_empty(report.metadata))
+        metadata["document_confirmation"] = {
+            "schema_version": DOCUMENT_CONFIRMATION_SCHEMA_VERSION,
+            "document_type": REPORT_DOWNLOAD_TYPE_OBJECTION_FORM,
+            "input_fingerprint": fingerprint,
+            "confirmed_at": timezone.now().isoformat(),
+            "confirmed_by_user_id": owner_id,
+            "items": {
+                "facts_confirmed": True,
+                "agency_confirmed": True,
+                "deadline_confirmed": True,
+                "attachments_confirmed": True,
+            },
+        }
+        report.metadata = metadata
+        report.save(update_fields=["metadata", "updated_at"])
+        return get_report_document_confirmation_state(report)
+
+
+def get_report_document_confirmation_state(report: Report) -> dict[str, Any]:
+    """Return only the safe, current confirmation status for a report detail."""
+
+    reporting_payload = _reporting_payload_for_download(report)
+    if not _report_document_confirmation_is_required(report, reporting_payload):
+        return {
+            "required": False,
+            "confirmed": False,
+            "stale": False,
+            "confirmed_at": None,
+        }
+
+    confirmation = _dict_or_empty(
+        _dict_or_empty(report.metadata).get("document_confirmation")
+    )
+    stored_fingerprint = _text(confirmation.get("input_fingerprint"))
+    current_fingerprint = _report_document_input_fingerprint(report, reporting_payload)
+    confirmed = bool(stored_fingerprint) and stored_fingerprint == current_fingerprint
+    return {
+        "required": True,
+        "confirmed": confirmed,
+        "stale": bool(confirmation) and not confirmed,
+        "confirmed_at": _text(confirmation.get("confirmed_at")) if confirmed else None,
+    }
+
+
+def _report_document_confirmation_is_required(
+    report: Report,
+    reporting_payload: dict[str, Any],
+) -> bool:
+    return _report_document_variant(report, reporting_payload) in OFFICIAL_OBJECTION_DOCUMENT_VARIANTS
+
+
+def _report_document_input_fingerprint(
+    report: Report,
+    reporting_payload: dict[str, Any],
+) -> str:
+    document_input = {
+        "document_variant": _report_document_variant(report, reporting_payload),
+        "form_data": _dict_or_empty(reporting_payload.get("form_data")),
+        "sections": _list_or_empty(reporting_payload.get("sections")),
+        "petition_purpose": _text(reporting_payload.get("petition_purpose")),
+        "petition_reason": _text(reporting_payload.get("petition_reason")),
+    }
+    canonical = json.dumps(
+        document_input,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _report_document_variant(report: Report, reporting_payload: dict[str, Any]) -> str:
+    document_variant = _text(reporting_payload.get("document_variant"))
+    if document_variant in {"fine_notice", "traffic_accident"}:
+        return document_variant
+    if report.report_type == ReportType.FAULT_RATIO_ANALYSIS.value:
+        return "traffic_accident"
+    if report.report_type == ReportType.FINE_NOTICE_OBJECTION.value:
+        return "fine_notice"
+    return "general"
+
+
+def _appeal_download_is_blocked(reporting_payload: dict[str, Any]) -> bool:
+    appeal_gate = _dict_or_empty(reporting_payload.get("appeal_gate"))
+    if appeal_gate.get("blocked") is True:
+        return True
+    appeal_decision = _dict_or_empty(reporting_payload.get("appeal_decision"))
+    return (
+        _text(appeal_decision.get("judgment_status")) in {"denied", "not_applicable"}
+        or appeal_decision.get("deadline_passed") is True
+    )
 
 
 def list_report_records(
@@ -4172,12 +4374,16 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
     content = _dict_or_empty(report.content)
     metadata = _dict_or_empty(report.metadata)
     reporting_payload = _dict_or_empty(content.get("reporting_payload"))
+    public_reporting_payload = {
+        **reporting_payload,
+        "document_confirmation": get_report_document_confirmation_state(report),
+    }
     job = report.job
     return {
         **_report_record_summary(report),
         "content": {
             "contract_version": _text(content.get("contract_version")),
-            "reporting_payload": reporting_payload,
+            "reporting_payload": public_reporting_payload,
             "format": _text(content.get("format")),
             "action": _text(content.get("action")),
             "source": _dict_or_empty(content.get("source")),
@@ -4204,10 +4410,6 @@ def _report_record_summary(report: Report) -> dict[str, Any]:
     content = _dict_or_empty(report.content)
     reporting_payload = _dict_or_empty(content.get("reporting_payload"))
     report_quality = _dict_or_empty(metadata.get("report_quality"))
-    is_worker_draft = (
-        metadata.get("source") == "analysis_worker_reporting"
-        and report.status != ReportStatus.READY.value
-    )
     return {
         "report_id": report.report_id,
         "source": _text(metadata.get("source")),
@@ -4218,11 +4420,7 @@ def _report_record_summary(report: Report) -> dict[str, Any]:
         "session_id": report.session.session_id if report.session_id else None,
         "job_id": report.job.job_id if report.job_id else None,
         "summary": report.content_summary,
-        "download_url": (
-            None
-            if is_worker_draft
-            else f"/api/reports/{report.report_id}/download/"
-        ),
+        "download_url": None,
         "partial_report": bool(report_quality.get("partial_report")),
         "created_at": report.created_at.isoformat(),
         "updated_at": report.updated_at.isoformat(),
@@ -8125,8 +8323,8 @@ def _report_object_storage(report: Report) -> dict[str, Any]:
             "storage_uri": "",
             "resource_type": "report",
             "resource_id": report.report_id,
-            "filename": f"{report.report_id}.pdf",
-            "content_type": REPORT_PDF_CONTENT_TYPE,
+            "filename": f"{report.report_id}.docx",
+            "content_type": REPORT_DOCX_CONTENT_TYPE,
             "size_bytes": 0,
             "status": "generated_on_demand",
             "source_uri": "",
@@ -8495,11 +8693,18 @@ def _pdf_utf16be_hex(value: Any) -> str:
     return str(value or "").encode("utf-16-be", errors="replace").hex().upper()
 
 
-def _report_download_document_type(value: str | None) -> str:
+def normalize_report_download_document_type(value: str | None) -> str | None:
     normalized = _text(value).lower()
-    if normalized in {"objection", "objection_form", "objection-draft", "application", "form"}:
+    if normalized in {
+        "objection",
+        "objection_form",
+        "objection-draft",
+        "application",
+        "form",
+        "traffic_accident_objection_docx",
+    }:
         return REPORT_DOWNLOAD_TYPE_OBJECTION_FORM
-    return REPORT_DOWNLOAD_TYPE_REPORT
+    return None
 
 
 def _report_objection_form_body(report: Report) -> str:

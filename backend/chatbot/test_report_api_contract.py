@@ -208,12 +208,28 @@ class ReportApiContractTests(TestCase):
         self.assertEqual(error["reason"], "guest_expired")
 
     def test_owner_download_exposes_only_public_document_headers(self) -> None:
+        confirmation = self.owner_client.post(
+            f"/api/reports/{self.report.report_id}/document-confirmation/",
+            data=json.dumps(
+                {
+                    "facts_confirmed": True,
+                    "agency_confirmed": True,
+                    "deadline_confirmed": True,
+                    "attachments_confirmed": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(confirmation.status_code, 201)
         response = self.owner_client.get(
-            f"/api/reports/{self.report.report_id}/download/"
+            f"/api/reports/{self.report.report_id}/download/?document_type=objection_form"
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
         self.assertEqual(response["X-API-Surface"], "canonical")
         self.assertEqual(response["X-Execution-Mode"], "async_worker")
         self.assertIn("X-Report-Document-Type", response)
@@ -228,6 +244,19 @@ class ReportApiContractTests(TestCase):
             self.assertNotIn(header, response)
 
     def test_owner_download_does_not_return_a_mock_document_after_metadata_disappears(self) -> None:
+        confirmation = self.owner_client.post(
+            f"/api/reports/{self.report.report_id}/document-confirmation/",
+            data=json.dumps(
+                {
+                    "facts_confirmed": True,
+                    "agency_confirmed": True,
+                    "deadline_confirmed": True,
+                    "attachments_confirmed": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(confirmation.status_code, 201)
         with patch(
             "chatbot.views.get_report_download_metadata",
             return_value=None,

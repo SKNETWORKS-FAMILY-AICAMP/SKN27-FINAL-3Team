@@ -10,6 +10,7 @@ from pydantic import Field
 from app.contracts.consultation_case import (
     ReportStatusValue,
     ReportTypeValue,
+    StrictRequest,
     StrictResponse,
 )
 
@@ -26,12 +27,65 @@ class ReportSection(ReportApiContractModel):
     items: list[str] = Field(default_factory=list)
 
 
+class ReportDocumentReadiness(ReportApiContractModel):
+    ready_for_docx: bool = False
+    missing_field_details: list[dict[str, str]] = Field(default_factory=list)
+    next_questions: list[dict[str, str]] = Field(default_factory=list)
+
+
+class ReportDownloadAction(ReportApiContractModel):
+    type: str = Field(min_length=1, max_length=64)
+    label: str = Field(min_length=1, max_length=160)
+    document_type: str = Field(min_length=1, max_length=64)
+    document_format: Literal["docx"] | None = None
+
+
+class ReportAppealGate(ReportApiContractModel):
+    blocked: bool = False
+    reason: str | None = None
+
+
+class ReportDocumentConfirmation(ReportApiContractModel):
+    required: bool = False
+    confirmed: bool = False
+    stale: bool = False
+    confirmed_at: datetime | None = None
+
+
+class ReportDocumentCard(ReportApiContractModel):
+    type: Literal["objection_draft", "fact_summary", "insurance_submission"]
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=280)
+    status: Literal["ready", "partial", "unavailable"]
+    sections: list[ReportSection] = Field(default_factory=list)
+    copy_text: str | None = None
+    notice: str | None = None
+
+
+class ConfirmReportDocumentRequest(StrictRequest):
+    facts_confirmed: Literal[True]
+    agency_confirmed: Literal[True]
+    deadline_confirmed: Literal[True]
+    attachments_confirmed: Literal[True]
+
+
+class ConfirmReportDocumentResponse(ReportApiContractModel):
+    contract_version: Literal["document_confirmation.v1"]
+    document_confirmation: ReportDocumentConfirmation
+
+
 class ReportReportingPayload(ReportApiContractModel):
     report_type: ReportTypeValue | None = None
     screen_id: str | None = None
     stage: str | None = None
     title: str | None = None
     summary: str | None = None
+    document_variant: str | None = None
+    document_readiness: ReportDocumentReadiness | None = None
+    report_actions: list[ReportDownloadAction] = Field(default_factory=list)
+    appeal_gate: ReportAppealGate | None = None
+    document_confirmation: ReportDocumentConfirmation | None = None
+    document_cards: list[ReportDocumentCard] = Field(default_factory=list)
     sections: list[ReportSection] = Field(default_factory=list)
 
 
@@ -127,6 +181,9 @@ class ReportApiError(ReportApiContractModel):
         "object_access_denied",
         "report_not_found",
         "report_not_ready",
+        "document_download_not_available",
+        "document_confirmation_required",
+        "appeal_gate_blocked",
     ]
     status: int | ReportStatusValue | None = None
     message: str = Field(min_length=1)

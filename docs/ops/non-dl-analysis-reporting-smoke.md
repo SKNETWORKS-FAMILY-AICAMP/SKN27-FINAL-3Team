@@ -56,7 +56,7 @@ environment before running it.
 - the Reporting row contains the same handoff ID, source fingerprint, gate status,
   and result IDs;
 - exactly one `Report` and one `AnalysisDisplayResult` exist for the smoke job,
-  the report is `ready`, and its PDF download metadata/body can be generated;
+  the report is `ready`, and general-analysis download metadata is unavailable;
 - the analysis and Reporting paid-phase guards are unique, and calling the
   terminal work item again is skipped without creating another guard.
 
@@ -74,9 +74,9 @@ not print prompts, provider responses, report bodies, or credentials.
 - `analysis_persisted_before_reporting`, `persisted_handoff`, or
   `persisted_handoff_consumed`: do not publish the report pipeline; investigate the
   canonical worker checkpoints and handoff provenance.
-- `report_persisted`, `report_ready`, `download_metadata_available`, or
-  `analysis_display_persisted`: Reporting returned but the final ready/downloadable
-  bundle did not complete.
+- `report_persisted`, `report_ready`, `general_report_download_unavailable`, or
+  `analysis_display_persisted`: Reporting returned but the final ready bundle did
+  not complete, or a general analysis report exposed a download path.
 - `safe_retry_no_new_paid_invocation`: stop automatic retries and inspect the
   paid-call guard rows.
 

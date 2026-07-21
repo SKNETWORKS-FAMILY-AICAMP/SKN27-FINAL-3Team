@@ -10,6 +10,7 @@ redis==8.0.1
 google-auth==2.55.1
 langgraph
 PyMuPDF
+python-docx>=1.1,<2
 python-dotenv
 typing_extensions
 gunicorn>=23,<24

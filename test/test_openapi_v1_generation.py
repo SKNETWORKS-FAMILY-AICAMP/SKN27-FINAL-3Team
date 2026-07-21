@@ -39,6 +39,7 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/reports/",
         "/api/reports/{report_id}/",
         "/api/reports/{report_id}/download/",
+        "/api/reports/{report_id}/document-confirmation/",
     }
 
     case_collection = document["paths"]["/api/cases/"]
@@ -128,6 +129,8 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "ReportListResponse",
         "ReportDetailResponse",
         "ReportApiErrorResponse",
+        "ConfirmReportDocumentRequest",
+        "ConfirmReportDocumentResponse",
     ):
         assert schema_name in schemas
 
@@ -323,7 +326,7 @@ def test_analysis_job_routes_document_async_owner_scoped_contract() -> None:
     assert result["responses"]["404"]["x-error-codes"] == ["analysis_result_not_found"]
 
 
-def test_report_download_openapi_uses_binary_pdf_and_public_attachment_headers() -> None:
+def test_report_download_openapi_uses_binary_docx_and_public_attachment_headers() -> None:
     generator = importlib.import_module("app.contracts.openapi_v1")
     paths = generator.build_openapi_document()["paths"]
 
@@ -342,7 +345,9 @@ def test_report_download_openapi_uses_binary_pdf_and_public_attachment_headers()
     download = paths["/api/reports/{report_id}/download/"]["get"]
     response = download["responses"]["200"]
     assert response["content"] == {
-        "application/pdf": {"schema": {"type": "string", "format": "binary"}}
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+            "schema": {"type": "string", "format": "binary"}
+        }
     }
     assert response["headers"]["Content-Disposition"] == {
         "description": "Attachment filename for the rendered report document.",
@@ -350,7 +355,12 @@ def test_report_download_openapi_uses_binary_pdf_and_public_attachment_headers()
         "schema": {"type": "string"},
     }
     assert "X-Report-Storage-URI" not in response["headers"]
-    assert download["responses"]["409"]["x-error-codes"] == ["report_not_ready"]
+    assert download["responses"]["409"]["x-error-codes"] == [
+        "report_not_ready",
+        "document_download_not_available",
+        "document_confirmation_required",
+        "appeal_gate_blocked",
+    ]
 
 
 def test_openapi_v1_yaml_rendering_is_deterministic_and_parseable() -> None:

@@ -23,6 +23,13 @@ class AppealJudgmentState(TypedDict, total=False):
     law_code:                 Optional[str]    # (v3.12) 용도 1가지 — LDB_CHECK 경량 검증 → ⑥
                                                 # disclaimer 조건부 문구. MG는 더 이상 이 값으로
                                                 # 위반유형을 판별·라우팅하지 않는다 (DATA-003 §5)
+    requires_confirmation:    Optional[bool]   # fine_notice_analysis에서 넘어옴 — 금액·기한·
+                                                # 처분번호 등 핵심 필드가 사용자 확인을 거치지
+                                                # 않았다는 신호. guide_generation_node가 disclaimer/
+                                                # next_actions에 경고를 덧붙이는 용도로만 쓰고,
+                                                # 판정 자체를 막지는 않는다.
+    unconfirmed_fields:       Optional[list]   # requires_confirmation=True일 때 구체적으로 어떤
+                                                # 필드가 미확인 상태인지(예: ["fine_amount"])
 
     # ── Supervisor 공급 (OCR 결과에 없는 값) ─────────────────────────
     user_appeal_reason:       Optional[str]
@@ -41,6 +48,9 @@ class AppealJudgmentState(TypedDict, total=False):
 
     # ── law_code_check_node (LDB_CHECK) 출력 ─────────────────────────
     law_code_verified:        Optional[bool]   # 실패해도 파이프라인은 계속 진행
+    law_reference_verified_at: Optional[str]   # law_chunks.created_at 기반 YYYY-MM-DD.
+                                                # 조회 실패 시 None — ⑥ disclaimer가 이 값이
+                                                # 있으면 실제 수집일을, 없으면 일반 문구를 쓴다.
 
     # ── deadline_gate_node 출력 ───────────────────────────────────────
     computed_deadline:        Optional[str]    # notice_stage별 계산된 실제 기한

@@ -1,3 +1,6 @@
+from types import SimpleNamespace
+
+from ai.agents.objection_report_generation import agent as objection_agent
 from app.services import agent_node_service
 from app.services.agent_adapter_contract import (
     ADAPTER_CONTRACT_VERSION,
@@ -92,6 +95,57 @@ def test_public_agent_registry_includes_every_non_dl_runtime_agent():
         "objection_report_generation",
     }
     assert "vision_media_analysis" not in public_codes
+
+
+def test_sync_reporting_payload_exposes_document_cards_without_generic_download_action():
+    payload = agent_node_service._build_reporting_payload(
+        {},
+        upstream_results={
+            "objection_report_generation": {
+                "status": "success",
+                "summary": "문서 초안을 만들었습니다.",
+                "structured_result": {
+                    "document_variant": "fine_notice",
+                    "document_title": "과태료 이의신청서",
+                    "form_sections": [
+                        {"title": "1. 이의신청 취지", "body": "처분 재검토 요청"},
+                        {"title": "2. 사실관계", "body": "확인된 사실"},
+                        {"title": "4. 관련 법령 및 근거", "body": "관련 근거"},
+                    ],
+                    "document_readiness": {"ready_for_docx": True},
+                    "appeal_gate": {"blocked": False},
+                    "report_actions": [
+                        {"type": "download_objection", "document_type": "objection_form"},
+                        {"type": "download_report", "document_type": "report"},
+                    ],
+                },
+            }
+        },
+        supervisor_handoff={"source_node_codes": ["objection_report_generation"]},
+    )
+
+    assert [card["type"] for card in payload["document_cards"]] == [
+        "objection_draft",
+        "fact_summary",
+        "insurance_submission",
+    ]
+    assert "download_report" not in [action["type"] for action in payload["report_actions"]]
+
+
+def test_objection_agent_stops_emitting_generic_report_download_action():
+    actions = objection_agent._report_actions(
+        document_variant="fine_notice",
+        ready_for_docx=True,
+    )
+
+    assert "download_report" not in [action["type"] for action in actions]
+
+
+def test_objection_agent_next_actions_keep_general_report_view_only():
+    next_actions = objection_agent._next_actions([], appeal_blocked=False)
+
+    assert "review_report_screen" in next_actions
+    assert "download_report" not in next_actions
 
 
 def test_legacy_mock_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypatch):
@@ -1183,8 +1237,20 @@ def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(
     assert output["status"] == "success"
     assert structured_result["document_type"] == "objection_form"
     assert structured_result["recipient_agency"] == "강남구청 교통과"
+    assert structured_result["form_data"]["recipient"] == "강남구청 교통과"
+    assert structured_result["form_data"]["violation_text"] == "어린이보호구역 정차 위반"
+    assert structured_result["form_data"]["notice_received_date"] == "2026.06.10 13:33"
+    assert structured_result["form_data"]["payment_deadline"] == "2026.07.02"
     assert structured_result["readiness"]["ready_for_download"] is True
-    assert {"download_objection", "download_report"} <= action_types
+    assert "download_objection" in action_types
+    assert "download_report" not in action_types
+    download_actions = [
+        action
+        for action in structured_result["report_actions"]
+        if action["type"] in {"download_objection", "download_report"}
+    ]
+    assert {action["document_format"] for action in download_actions} == {"docx"}
+    assert all("PDF" not in action["label"] for action in download_actions)
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"
     assert output["evidence"][0]["source_type"] == "user_uploaded_file"
     assert output["evidence"][-1]["source_type"] == "user_statement"
@@ -1230,6 +1296,197 @@ def test_reporting_agent_consumes_appeal_decision_from_supervisor_upstream_resul
     assert structured["appeal_decision"]["judgment_status"] == "success"
     assert any("review_recommended" in reason for reason in structured["objection_reasons"])
     assert any(item.get("source_reference") == "appeal:1" for item in execution["agent_output"]["evidence"])
+
+
+def test_reporting_agent_blocks_download_actions_when_appeal_deadline_has_passed():
+    execution = execute_mock_node(
+        {
+            "node_code": "objection_report_generation",
+            "session_id": "ses_report_deadline_passed",
+            "message_id": "msg_report_deadline_passed",
+            "user_text": "고지서에 적힌 사실관계가 실제와 달라 이의를 제기하고 싶습니다.",
+            "upstream_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "structured_result": {
+                        "notice_fields": {"agency": "강남구청", "violation_text": "신호 위반"},
+                    },
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {"matched_laws": []},
+                },
+                "appeal_decision_flow": {
+                    "status": "success",
+                    "structured_result": {
+                        "judgment_status": "success",
+                        "deadline_passed": True,
+                    },
+                },
+            },
+        }
+    )
+
+    structured = execution["agent_output"]["structured_result"]
+
+    assert structured["appeal_decision"]["deadline_passed"] is True
+    assert structured["readiness"]["ready_for_download"] is False
+    assert structured["report_actions"] == []
+    assert "download_objection" not in execution["agent_output"]["next_actions"]
+    assert "download_report" not in execution["agent_output"]["next_actions"]
+
+
+def test_reporting_payload_preserves_docx_variant_actions_and_appeal_gate():
+    payload = agent_node_service._build_reporting_payload(
+        {},
+        upstream_results={
+            "objection_report_generation": {
+                "status": "partial",
+                "summary": "기한 확인이 필요합니다.",
+                "structured_result": {
+                    "document_variant": "fine_notice",
+                    "document_title": "이의신청서 초안",
+                    "form_sections": [],
+                    "form_data": {"recipient": "강남구청"},
+                    "document_readiness": {"ready_for_docx": True},
+                    "report_actions": [],
+                    "appeal_gate": {"blocked": True, "reason": "기한 경과"},
+                    "petition_purpose": "처분의 취소를 요청합니다.",
+                    "petition_reason": "기한을 다시 확인해야 합니다.",
+                    "drafting_source": "rule_based_fallback",
+                },
+            }
+        },
+        supervisor_handoff={"source_node_codes": ["fine_notice_analysis"]},
+    )
+
+    assert payload["document_variant"] == "fine_notice"
+    assert payload["appeal_gate"] == {"blocked": True, "reason": "기한 경과"}
+    assert payload["petition_purpose"] == "처분의 취소를 요청합니다."
+    assert payload["petition_reason"] == "기한을 다시 확인해야 합니다."
+    assert payload["drafting_source"] == "rule_based_fallback"
+
+
+def test_fine_notice_llm_draft_masks_pii_before_requesting_a_petition(monkeypatch):
+    captured_prompts: list[str] = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured_prompts.append(kwargs["messages"][1]["content"])
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                '{"petition_purpose":"처분의 재검토를 요청합니다.",'
+                                '"petition_reason":"제공된 사실관계를 기준으로 재검토가 필요합니다."}'
+                            )
+                        )
+                    )
+                ]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    monkeypatch.setattr(objection_agent, "_openai_client", lambda: fake_client, raising=False)
+
+    output = objection_agent.run_objection_report_generation(
+        {
+            "session_id": "ses_fine_notice_llm",
+            "message_id": "msg_fine_notice_llm",
+            "user_text": "성명: 홍길동, 연락처: 010-1234-5678, 주민등록번호: 900101-1234567",
+            "context": {
+                "user_facts": "연락처 010-1234-5678의 신청인은 고지서의 위반 장소가 실제와 다르다고 진술합니다.",
+            },
+            "upstream_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "structured_result": {
+                        "notice_fields": {
+                            "agency": "강남구청",
+                            "violation_text": "신호 위반",
+                            "violation_datetime": "2026-06-10 13:33",
+                            "violation_location": "서울시 강남구",
+                            "payment_deadline": "2026-07-02",
+                        },
+                    },
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {
+                        "matched_laws": [
+                            {
+                                "law_name": "도로교통법",
+                                "article": "제5조",
+                                "summary": "신호 준수 의무",
+                            }
+                        ],
+                    },
+                },
+                "appeal_decision_flow": {
+                    "status": "success",
+                    "structured_result": {"judgment_status": "success"},
+                },
+            },
+        },
+        {"node": {"node_code": "objection_report_generation"}},
+    )
+
+    structured = output["structured_result"]
+
+    assert structured["drafting_source"] == "llm"
+    assert structured["petition_purpose"] == "처분의 재검토를 요청합니다."
+    assert structured["petition_reason"] == "제공된 사실관계를 기준으로 재검토가 필요합니다."
+    assert captured_prompts
+    assert "010-1234-5678" not in captured_prompts[0]
+    assert "900101-1234567" not in captured_prompts[0]
+    assert "서울시 강남구" not in captured_prompts[0]
+
+
+def test_fine_notice_uses_rule_based_petition_when_llm_is_unavailable(monkeypatch):
+    monkeypatch.setattr(objection_agent, "_openai_client", lambda: None)
+
+    output = objection_agent.run_objection_report_generation(
+        {
+            "session_id": "ses_fine_notice_fallback",
+            "message_id": "msg_fine_notice_fallback",
+            "user_text": "표지판이 가려져 실제 사실관계와 고지서 내용이 다릅니다.",
+            "upstream_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "structured_result": {
+                        "notice_fields": {
+                            "agency": "강남구청",
+                            "violation_text": "신호 위반",
+                            "violation_datetime": "2026-06-10 13:33",
+                        },
+                    },
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {
+                        "matched_laws": [
+                            {
+                                "law_name": "도로교통법",
+                                "article": "제5조",
+                                "summary": "신호 준수 의무",
+                            }
+                        ],
+                    },
+                },
+                "appeal_decision_flow": {
+                    "status": "success",
+                    "structured_result": {"judgment_status": "success", "merit_relief_type": "감경"},
+                },
+            },
+        },
+        {"node": {"node_code": "objection_report_generation"}},
+    )
+
+    structured = output["structured_result"]
+
+    assert structured["drafting_source"] == "rule_based_fallback"
+    assert "감경" in structured["petition_purpose"]
+    assert "사실관계" in structured["petition_reason"]
 
 
 def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_inputs():

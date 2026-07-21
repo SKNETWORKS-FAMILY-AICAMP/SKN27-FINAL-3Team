@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -28,6 +29,32 @@ from app.services.supervisor_routing_service import (
 
 # Compatibility export for callers that inspect the declarative policy.
 NODE_PLANS = BASE_NODE_PLANS
+
+
+NO_MATCH_REPHRASE_PROMPT = (
+    "말씀해주신 내용으로 확인했지만 이번엔 일치하는 결과를 찾지 못했어요. "
+    "표현을 조금 바꿔서 다시 설명해주시면 이어서 확인해드릴게요."
+)
+
+_VIOLATION_TYPE_KEYWORDS = (
+    "신호위반", "속도위반", "과속", "불법유턴", "불법주정차", "불법주차", "무단횡단",
+    "음주운전", "안전거리", "진로변경", "앞지르기", "정지선", "횡단보도", "중앙선",
+    "보호구역", "과태료", "범칙금", "딱지", "사고", "충돌", "접촉", "과실",
+)
+_DATETIME_PATTERN = re.compile(r"\d+\s*(월|일|시|분)")
+_RELATIVE_DATE_KEYWORDS = ("어제", "오늘", "그제", "지난주", "지난달", "방금", "아까")
+_LOCATION_KEYWORDS = (
+    "교차로", "사거리", "골목", "주차장", "학교", "근처", "구간", "앞", "도로변", "인근",
+)
+_NOTICE_KEYWORDS = ("고지서", "통지서", "위반고지", "과태료", "범칙금", "딱지", "통지")
+
+
+def _has_datetime_or_location(user_text: str) -> bool:
+    if _DATETIME_PATTERN.search(user_text):
+        return True
+    return any(
+        keyword in user_text for keyword in _RELATIVE_DATE_KEYWORDS + _LOCATION_KEYWORDS
+    )
 
 
 def create_session(user_id: str | None = None) -> dict[str, Any]:
@@ -316,21 +343,92 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
         limitations.extend(str(item) for item in output.get("limitations", []) if str(item).strip())
 
     status = _combined_status(statuses)
-    answer = "\n\n".join(_dedupe(summaries))
+    core_answer = "\n\n".join(_dedupe(summaries))
+    answer = core_answer
+    follow_up: dict[str, Any] | None = None
     if not answer:
         answer = "분석 결과를 생성하지 못했습니다. 잠시 후 다시 시도해 주세요."
+        core_answer = answer
+    elif not any(item == "success" for item in statuses):
+        # Not "no evidence" — a node can gather evidence (e.g. law_ground_search
+        # finding provisions) but still flag low confidence via a non-success
+        # status. Gate on whether *any* node fully succeeded, not on whether
+        # evidence happens to be non-empty.
+        follow_up = _needs_more_info_follow_up(node_execution)
+        answer = f"{answer}\n\n{_follow_up_flat_text(follow_up)}"
 
     return {
         "contract_version": "analysis_result.v2",
         "job_id": node_execution.get("job_id"),
         "status": status,
-        "assistant_message": {"answer": answer, "summary": answer},
+        "assistant_message": {
+            "answer": answer,
+            "summary": answer,
+            # Same text minus any appended follow-up prompt, so a UI that renders
+            # `follow_up` separately doesn't have to duplicate it inside the bubble.
+            "core_answer": core_answer,
+            "follow_up": follow_up,
+        },
         "structured_results": structured_results,
         "evidence": _dedupe_dicts(evidence, key="source_reference"),
         "limitations": _dedupe(limitations),
         "supervisor_handoff": dict(node_execution.get("supervisor_handoff") or {}),
         "reporting_payload": dict(node_execution.get("reporting_payload") or {}),
     }
+
+
+def _needs_more_info_follow_up(node_execution: dict[str, Any]) -> dict[str, Any]:
+    user_text = _user_text_from_supervisor_state(node_execution.get("supervisor_state"))
+    attachments = [
+        item for item in node_execution.get("attachments", []) if isinstance(item, dict)
+    ]
+    missing_categories = _missing_info_categories(user_text, attachments)
+    if not missing_categories:
+        return {"message": NO_MATCH_REPHRASE_PROMPT, "items": []}
+    return {
+        "message": "조금 더 구체적으로 알려주시면 이어서 확인해드릴게요.",
+        "items": missing_categories,
+    }
+
+
+def _follow_up_flat_text(follow_up: dict[str, Any]) -> str:
+    """Single-string fallback for consumers that only read assistant_message.answer/summary."""
+    items = follow_up["items"]
+    if not items:
+        return follow_up["message"]
+    required = [item["label"] for item in items if item["required"]]
+    optional = [item["label"] for item in items if not item["required"]]
+    parts = [follow_up["message"]]
+    if required:
+        parts.append(f"꼭 필요해요: {', '.join(required)}.")
+    if optional:
+        parts.append(f"알려주시면 더 좋아요: {', '.join(optional)}.")
+    return " ".join(parts)
+
+
+def _user_text_from_supervisor_state(supervisor_state: Any) -> str:
+    if not isinstance(supervisor_state, dict):
+        return ""
+    for fact in supervisor_state.get("collected_facts") or []:
+        if isinstance(fact, dict) and fact.get("field") == "user_text":
+            return str(fact.get("value") or "")
+    return ""
+
+
+def _missing_info_categories(user_text: str, attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    has_notice_attachment = any(item.get("purpose") == "fine_notice" for item in attachments)
+    missing: list[dict[str, Any]] = []
+    if not any(keyword in user_text for keyword in _VIOLATION_TYPE_KEYWORDS):
+        # Required: law_ground_search can't search meaningfully without knowing
+        # what kind of violation/dispute this is.
+        missing.append({"label": "정확한 위반·분쟁 유형", "required": True})
+    if not _has_datetime_or_location(user_text):
+        # Optional: narrows/improves the search (e.g. school-zone timing) but
+        # a search can still run without it.
+        missing.append({"label": "발생 일시와 장소", "required": False})
+    if not has_notice_attachment and not any(keyword in user_text for keyword in _NOTICE_KEYWORDS):
+        missing.append({"label": "받으신 고지서나 통지 내용", "required": False})
+    return missing
 
 
 def _needs_input_response(*, session_id: str, message_id: str) -> dict[str, Any]:
