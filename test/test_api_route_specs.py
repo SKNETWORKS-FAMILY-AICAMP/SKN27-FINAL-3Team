@@ -297,15 +297,25 @@ def test_analysis_job_api_route_specs_promote_existing_django_endpoints() -> Non
         for outcome in analysis_result.outcome_responses
     ] == [(202, "pending", analysis_contracts.AnalysisResultResponse)]
     assert actual[("POST", "/api/analysis/jobs/")].outcome_responses == ()
-    expected_identity_errors = (
+    expected_transport_identity_errors = (
         "auth_required",
         "token_invalid",
         "token_expired",
+    )
+    expected_resource_identity_errors = (
+        *expected_transport_identity_errors,
         "guest_session_invalid",
     )
     for route_key in (
         ("GET", "/api/analysis/jobs/"),
         ("POST", "/api/analysis/jobs/"),
+    ):
+        errors = {
+            error.status: error.codes
+            for error in actual[route_key].errors
+        }
+        assert errors[401] == expected_transport_identity_errors
+    for route_key in (
         ("GET", "/api/analysis/jobs/{job_id}/"),
         ("GET", "/api/analysis/results/{job_id}/"),
     ):
@@ -313,7 +323,7 @@ def test_analysis_job_api_route_specs_promote_existing_django_endpoints() -> Non
             error.status: error.codes
             for error in actual[route_key].errors
         }
-        assert errors[401] == expected_identity_errors
+        assert errors[401] == expected_resource_identity_errors
     for spec in actual.values():
         assert [
             (parameter.name, parameter.location)
@@ -502,6 +512,19 @@ def test_route_spec_rejects_outcome_status_that_overlaps_a_success_status() -> N
                     response_model=contracts.ConsultationCaseListResponse,
                 ),
             ),
+        )
+
+
+def test_outcome_response_spec_rejects_unknown_semantic() -> None:
+    contracts = importlib.import_module("app.contracts.consultation_case")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    with pytest.raises(ValueError, match="unknown outcome semantic"):
+        route_specs.OutcomeResponseSpec(
+            status=202,
+            semantic="unknown",
+            description="Unknown outcome",
+            response_model=contracts.ConsultationCaseListResponse,
         )
 
 

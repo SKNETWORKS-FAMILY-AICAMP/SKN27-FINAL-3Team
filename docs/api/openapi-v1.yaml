@@ -1116,7 +1116,6 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
-          - guest_session_invalid
           x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
@@ -1183,7 +1182,6 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
-          - guest_session_invalid
           x-response-semantics: authentication_failure
         '403':
           description: Typed API error response

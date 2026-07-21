@@ -114,6 +114,12 @@ class OutcomeResponseSpec:
     def __post_init__(self) -> None:
         if not 100 <= self.status <= 599 or not self.description.strip():
             raise ValueError("outcome status and description are required")
+        if self.semantic not in {
+            "partial_result",
+            "pending",
+            "service_unavailable",
+        }:
+            raise ValueError("unknown outcome semantic")
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,10 +290,15 @@ def _analysis_job_errors(
     )
 
 
-ANALYSIS_IDENTITY_ERROR_CODES = (
+ANALYSIS_TRANSPORT_IDENTITY_ERROR_CODES = (
     "auth_required",
     "token_invalid",
     "token_expired",
+)
+
+
+ANALYSIS_RESOURCE_IDENTITY_ERROR_CODES = (
+    *ANALYSIS_TRANSPORT_IDENTITY_ERROR_CODES,
     "guest_session_invalid",
 )
 
@@ -928,7 +939,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         response_model=AnalysisJobListResponse,
         success_status=200,
         errors=_analysis_job_errors(
-            (401, ANALYSIS_IDENTITY_ERROR_CODES),
+            (401, ANALYSIS_TRANSPORT_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
         ),
         auth_required=False,
@@ -949,7 +960,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         success_status=202,
         errors=_analysis_job_errors(
             (400, ("analysis_job_session_required", "chat_input_rejected")),
-            (401, ANALYSIS_IDENTITY_ERROR_CODES),
+            (401, ANALYSIS_TRANSPORT_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (
                 409,
@@ -981,7 +992,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         response_model=AnalysisJobDetailResponse,
         success_status=200,
         errors=_analysis_job_errors(
-            (401, ANALYSIS_IDENTITY_ERROR_CODES),
+            (401, ANALYSIS_RESOURCE_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (404, ("analysis_job_not_found",)),
         ),
@@ -1012,7 +1023,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
             ),
         ),
         errors=_analysis_job_errors(
-            (401, ANALYSIS_IDENTITY_ERROR_CODES),
+            (401, ANALYSIS_RESOURCE_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (404, ("analysis_result_not_found",)),
         ),
