@@ -10,7 +10,11 @@ ARTIFACT_ROOT = PROJECT_ROOT / "etl" / "fault_cases" / "artifacts" / "traffic_pr
 SCHEMA_PATH = PROJECT_ROOT / "storage" / "schemas" / "precedent_db_schema.sql"
 
 TRAFFIC_JSONL = ARTIFACT_ROOT / "traffic_prec_reclass_verified" / "01_confirmed_traffic_cases.jsonl"
-FAULT_RATIO_JSONL = ARTIFACT_ROOT / "traffic_prec_fault_ratio_verified" / "01_fault_ratio_confirmed_cases.jsonl"
+FAULT_RATIO_JSONL = (
+    ARTIFACT_ROOT
+    / "traffic_prec_fault_ratio_rag_verified"
+    / "01_fault_ratio_rag_ready_cases.jsonl"
+)
 POSTGRES_EXPORT_ROOT = ARTIFACT_ROOT / "postgres_exports"
 
 

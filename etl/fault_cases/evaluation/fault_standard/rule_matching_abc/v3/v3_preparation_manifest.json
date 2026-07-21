@@ -1,0 +1,7 @@
+{
+  "answer_key_template_version": "fault_standard_v3_calculation_v1",
+  "case_count": 50,
+  "request_set_version": "fault_standard_v3_supplement_v1",
+  "uses_v1_qrels_to_generate_answer_template": false,
+  "uses_v1_qrels_to_generate_requests": false
+}

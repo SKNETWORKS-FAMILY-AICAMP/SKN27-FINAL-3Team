@@ -1,0 +1,18 @@
+{
+  "approval_scope": "direct Core party fields with PDF page linkage only",
+  "condition_count": 1065,
+  "covered_rule_count": 277,
+  "not_included": [
+    "query facts",
+    "qrels",
+    "answer ratios",
+    "vector scores",
+    "search weights",
+    "unreviewed inferred variants",
+    "unreviewed inferred adjustments"
+  ],
+  "queue_rule_count": 0,
+  "runtime_use": "B/C structural hard filtering; exact one match only; no score or tie-break",
+  "selection_scope": "all Core Rules",
+  "version": "v3_pdf_linked_approved_conditions_v1"
+}

@@ -60,6 +60,10 @@ def extract_parties(text: str, rule_id: str) -> List[Dict[str, Any]]:
             }
         )
 
+    # 표 상단의 짧은 action에는 방향이나 차로변경 목적지가 생략되고, 사고 상황 본문에만
+    # 명시되는 경우가 있습니다. rule 번호별 예외 없이 제목/사고상황의 명시 표현으로 보강합니다.
+    enrich_parties_from_section_context(parties, text, rule_title)
+
     # 당사자 목록을 반환합니다.
     return parties
 
@@ -70,6 +74,17 @@ def parse_party_action(action: str, rule_title: str) -> Dict[str, Any]:
     role_info = infer_role_info(action, rule_title)
     entry_direction_info = extract_direction_info(action, "entry")
     exit_direction_info = extract_direction_info(action, "exit")
+
+    # 회전교차로 도표 제목의 ``3시/12시/9시 진출부 사고``는 해당 도표의 명시적
+    # 진출 방향입니다. action에 진출 동작은 있지만 방향이 생략된 경우에만 사용합니다.
+    if "진출" in action and not exit_direction_info.get("value"):
+        title_exit_direction = extract_exit_direction_from_title(rule_title)
+        if title_exit_direction:
+            exit_direction_info = {
+                "value": title_exit_direction,
+                "source": "rule_title_exit_direction",
+                "confidence": 0.98,
+            }
 
     return {
         "role_in_rule": role_info["value"],
@@ -87,6 +102,73 @@ def parse_party_action(action: str, rule_title: str) -> Dict[str, Any]:
         "lane_change_from": extract_lane_change_from(action),
         "lane_change_to": extract_lane_change_to(action),
     }
+
+
+def enrich_parties_from_section_context(
+    parties: List[Dict[str, Any]],
+    text: str,
+    rule_title: str,
+) -> None:
+    """표 상단 action에서 생략된 값을 같은 도표의 명시적 본문으로 보강합니다.
+
+    회전번호나 차량 색상을 기준으로 값을 넣지 않습니다. 제목에 명시된 진출 방향과
+    ``사고 상황``에 명시된 ``X차로에서 Y차로로 변경`` 문법만 사용합니다.
+    """
+
+    accident_context = extract_between(text, "사고 상황", "기본 과실비율") or ""
+    title_exit_direction = extract_exit_direction_from_title(rule_title)
+
+    for party in parties:
+        if party.get("is_exiting") and not party.get("exit_direction") and title_exit_direction:
+            party["exit_direction"] = title_exit_direction
+            party["exit_direction_source"] = "rule_title_exit_direction"
+            party["exit_direction_confidence"] = 0.98
+
+        if not party.get("is_lane_changing"):
+            continue
+
+        source_lane = party.get("lane_change_from") or party.get("circulation_lane")
+        if source_lane and not party.get("lane_change_from"):
+            party["lane_change_from"] = source_lane
+            party["lane_change_from_source"] = "party_circulation_lane"
+            party["lane_change_from_confidence"] = 0.9
+
+        if party.get("lane_change_to"):
+            continue
+
+        target_lane = extract_lane_change_target_from_context(accident_context, source_lane)
+        if target_lane:
+            party["lane_change_to"] = target_lane
+            party["lane_change_to_source"] = "explicit_accident_context"
+            party["lane_change_to_confidence"] = 0.95
+
+
+def extract_exit_direction_from_title(title: str) -> Optional[str]:
+    """도표 제목의 명시적 진출부 방향을 반환합니다."""
+
+    match = re.search(r"(?P<direction>(?:3시|6시|9시|12시))\s*(?:방향\s*)?진출부\s*사고", normalize_spaces(title))
+    return f"{match.group('direction')} 방향" if match else None
+
+
+def extract_lane_change_target_from_context(text: str, source_lane: Optional[str]) -> Optional[str]:
+    """사고상황의 명시적인 차로변경 목적지를 추출합니다."""
+
+    normalized = normalize_spaces(text)
+    if not normalized:
+        return None
+
+    target_pattern = r"(?P<to>(?:회전|진출)[12]차로)(?:로)?\s*(?:차로|진로)(?:를\s*)?변경"
+    if source_lane:
+        match = re.search(
+            rf"{re.escape(source_lane)}(?:에|에서|로)?(?:(?!충돌).){{0,160}}?{target_pattern}",
+            normalized,
+        )
+        if match and match.group("to") != source_lane:
+            return match.group("to")
+
+    # 출발 차로를 action에서 알 수 없을 때는 본문 전체에서 목적지가 하나로만 명시된 경우만 사용합니다.
+    targets = {match.group("to") for match in re.finditer(target_pattern, normalized)}
+    return next(iter(targets)) if len(targets) == 1 else None
 
 
 def normalize_party_action(action: str) -> str:
@@ -577,7 +659,7 @@ def extract_lane_steps(party: Dict[str, Any]) -> List[Dict[str, Any]]:
     action = party.get("action_summary", "")
     ordered = extract_ordered_lane_steps_from_action(action)
     if ordered:
-        return ordered
+        return merge_parsed_lane_change_steps(ordered, party)
 
     result: List[Dict[str, Any]] = []
 
@@ -611,6 +693,49 @@ def extract_lane_steps(party: Dict[str, Any]) -> List[Dict[str, Any]]:
             add_step("방향언급", None, direction, source="direction_only")
 
     return result
+
+
+def merge_parsed_lane_change_steps(rows: List[Dict[str, Any]], party: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """action 순서 스캔 결과에 본문에서 확인된 차로변경 목적지를 결합합니다."""
+
+    if not party.get("is_lane_changing"):
+        return rows
+
+    source_lane = party.get("lane_change_from")
+    target_lane = party.get("lane_change_to")
+    enriched = [dict(row) for row in rows]
+
+    if source_lane and not any(row.get("lane") == source_lane for row in enriched):
+        enriched.append({
+            "seq": 0,
+            "movement": "차로변경_전",
+            "lane": source_lane,
+            "direction": None,
+            "source": party.get("lane_change_from_source") or "parsed_lane_change",
+            "source_text": party.get("action_summary"),
+            "confidence": party.get("lane_change_from_confidence", 0.85),
+        })
+
+    if target_lane and not any(
+        str(row.get("movement") or "").startswith("차로변경") and row.get("lane") == target_lane
+        for row in enriched
+    ):
+        target_row = {
+            "seq": 0,
+            "movement": "차로변경_후",
+            "lane": target_lane,
+            "direction": None,
+            "source": party.get("lane_change_to_source") or "parsed_lane_change",
+            "source_text": party.get("action_summary"),
+            "confidence": party.get("lane_change_to_confidence", 0.85),
+        }
+        # 진출 step이 있으면 그 직전에, 아니면 경로의 끝에 변경 후 차로를 둡니다.
+        exit_idx = next((idx for idx, row in enumerate(enriched) if row.get("movement") == "진출"), len(enriched))
+        enriched.insert(exit_idx, target_row)
+
+    for idx, row in enumerate(enriched, start=1):
+        row["seq"] = idx
+    return enriched
 
 
 def extract_ordered_lane_steps_from_action(action: str) -> List[Dict[str, Any]]:
@@ -1014,6 +1139,10 @@ def infer_conflict_direction(parties: List[Dict[str, Any]], text: str, round_no:
     제목/충돌/진출 문맥에 명시된 방향만 사용하고, 전체 텍스트 첫/마지막 방향을 확정값처럼 사용하지 않습니다.
     """
 
+    title_direction = extract_exit_direction_from_title(extract_rule_title_from_text(text))
+    if title_direction:
+        return title_direction
+
     conflict_context = extract_conflict_context(text)
     directions = re.findall(r"(?:3시|6시|9시|12시)\s*방향", conflict_context)
     if directions:
@@ -1028,6 +1157,10 @@ def infer_conflict_direction(parties: List[Dict[str, Any]], text: str, round_no:
 
 def infer_conflict_direction_info(parties: List[Dict[str, Any]], text: str) -> Dict[str, Any]:
     """충돌 방향 값과 source/confidence를 함께 추정합니다."""
+
+    title_direction = extract_exit_direction_from_title(extract_rule_title_from_text(text))
+    if title_direction:
+        return {"value": title_direction, "source": "explicit_rule_title", "confidence": 0.98, "confirmed": True}
 
     conflict_context = extract_conflict_context(text)
     explicit = re.findall(r"(?:3시|6시|9시|12시)\s*방향", conflict_context)
@@ -1174,10 +1307,6 @@ def get_context(text: str, start: int, end: int, window: int = 140) -> str:
     right = min(len(text), end + window)
 
     return normalize_spaces(text[left:right])
-
-
-
-
 
 
 

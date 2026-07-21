@@ -1,0 +1,50 @@
+{
+  "pilot_version": "qrels_review_cases_pilot_v1",
+  "status": "draft",
+  "approved": false,
+  "selection_rule": "one query per accident_group with mixed difficulty",
+  "query_file": "../../../../common/embedding_ab/v1/common_fault_queries_v1.jsonl",
+  "query_set_version": "fault_common_queries_v1",
+  "query_sha256": "a50921b0ea409ebfdd46d50c8ef632fb1fdac7c53b80ebb95fbb353c4ea02102",
+  "corpus_documents_file": "../../../../../artifacts/review_case_output/preprocessed/review_case_documents.jsonl",
+  "corpus_documents_sha256": "447a69bb0495aa27f94421744bd83e5a8910781f14907c8621dd7328c448756e",
+  "corpus_chunks_file": "../../../../../artifacts/review_case_output/preprocessed/review_case_chunks.jsonl",
+  "corpus_chunks_sha256": "09d81dd61ef48d91ac885f53af3af45e18b7068a8c9670863e4ac4d12e06fa70",
+  "qrels_file": "qrels_review_cases_pilot_v1.jsonl",
+  "qrels_sha256": "65252a411b5600412f988abe8aa9ad5adb90b31dd80a58883eca89f3a02612fc",
+  "selected_query_count": 10,
+  "selected_query_ids": [
+    "fault_common_q01",
+    "fault_common_q11",
+    "fault_common_q17",
+    "fault_common_q25",
+    "fault_common_q30",
+    "fault_common_q34",
+    "fault_common_q38",
+    "fault_common_q43",
+    "fault_common_q46",
+    "fault_common_q50"
+  ],
+  "difficulty_distribution": {
+    "easy": 4,
+    "medium": 2,
+    "hard": 4
+  },
+  "query_status_counts": {
+    "has_relevant_document": 8,
+    "no_relevant_document": 2
+  },
+  "positive_judgment_row_count": 18,
+  "qrels_row_count": 20,
+  "relevance_counts": {
+    "3": 10,
+    "2": 6,
+    "1": 2
+  },
+  "reviewed_by": [],
+  "notes": [
+    "Candidate pooling used structured fields and character n-gram lexical similarity only as recall aids.",
+    "Final draft labels were assigned from accident_content, main_issue, decision_basis, and decision_reason.",
+    "This pilot covers 10 of the 50-query Ground Truth and remains draft until second review."
+  ]
+}

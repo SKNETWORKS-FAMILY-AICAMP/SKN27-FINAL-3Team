@@ -1,0 +1,21 @@
+{
+  "case_count": 50,
+  "errors": [],
+  "fact_key_frequency": {
+    "environment.entry_order": 44,
+    "event_sequence": 12,
+    "opponent.entry_lane": 20,
+    "opponent.movement": 8,
+    "opponent.road_position": 33,
+    "opponent.signal_state": 42,
+    "opponent.violation_type": 47,
+    "pedestrian.signal_state": 3,
+    "user.entry_lane": 20,
+    "user.movement": 13,
+    "user.road_position": 37,
+    "user.signal_state": 41,
+    "user.violation_type": 50
+  },
+  "request_count": 370,
+  "valid": true
+}

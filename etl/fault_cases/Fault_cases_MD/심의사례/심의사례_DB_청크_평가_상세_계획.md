@@ -251,7 +251,8 @@ toc_item_count = 226
 toc_case_link_count = 226
 valid_document_count = 226
 fatal_flag_counts = {}
-warning_flag_counts = {"header_road_context_missing": 116}
+warning_flag_counts = {}
+header_road_context_null_count = 116  # 원문에 명시적 ` - ` 맥락 구간이 없는 정상 선택값
 ```
 
 ---
@@ -546,7 +547,8 @@ CREATE TABLE review_case_quality_reports (
 row 수 = 226
 parse_status = valid 226건
 fatal = 0건
-warning = header_road_context_missing 116건
+warning = 0건
+header_road_context null = 116건(정상 선택값)
 ```
 
 ---

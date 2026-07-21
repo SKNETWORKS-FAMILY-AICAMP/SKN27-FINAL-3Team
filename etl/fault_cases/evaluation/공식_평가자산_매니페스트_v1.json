@@ -1,0 +1,79 @@
+{
+  "manifest_version": "v1",
+  "generated_at_utc": "2026-07-20T15:06:04.544779+00:00",
+  "safety_note": "기존 평가 원본은 유지하고, Complete30 승인본은 해시 대조된 복제본만 공식 경로로 사용합니다.",
+  "assets": [
+    {
+      "relative_path": "evaluation/common/embedding_ab/v1/common_fault_queries_v1.jsonl",
+      "asset_type": "공통_질문지",
+      "sha256": "a50921b0ea409ebfdd46d50c8ef632fb1fdac7c53b80ebb95fbb353c4ea02102",
+      "size_bytes": 33289,
+      "row_count": 50
+    },
+    {
+      "relative_path": "evaluation/common/embedding_ab/v1/query_manifest.json",
+      "asset_type": "공통_질문지_매니페스트",
+      "sha256": "e42742a73704b2a14e99e7f9c94cd9b563d4122db2ff89286190d839ecf98bbf",
+      "size_bytes": 3954
+    },
+    {
+      "relative_path": "evaluation/fault_standard/embedding_ab/v1/ground_truth/fault_standard_qrels_v1.2.jsonl",
+      "asset_type": "인정기준_qrels",
+      "sha256": "0eb20fd6666fcba8d8e10d071f459877a65dd4802dbd2e164208cfc261ff9343",
+      "size_bytes": 93608,
+      "row_count": 111
+    },
+    {
+      "relative_path": "evaluation/fault_standard/embedding_ab/v1/ground_truth/ground_truth_manifest_v1.2.json",
+      "asset_type": "인정기준_qrels_매니페스트",
+      "sha256": "b36198912f0fc23c24907b64ef58087d902d71e0fb0bfc66f28ba0419bca2a64",
+      "size_bytes": 2226
+    },
+    {
+      "relative_path": "evaluation/review_case/embedding_ab/v1/ground_truth/review_case_qrels_v1.jsonl",
+      "asset_type": "심의사례_qrels",
+      "sha256": "093f70b78484c8d9b4989801debca52e1aae5debbfa9e1788285bd8cae0c6c1f",
+      "size_bytes": 51175,
+      "row_count": 89
+    },
+    {
+      "relative_path": "evaluation/review_case/embedding_ab/v1/ground_truth/ground_truth_manifest.json",
+      "asset_type": "심의사례_qrels_매니페스트",
+      "sha256": "06db59b8dc3e0326807bdfc4eb762d519664fef03fbee775e8f68d5c57c6d889",
+      "size_bytes": 4909
+    },
+    {
+      "relative_path": "evaluation/precedent/embedding_ab/v1/ground_truth/precedent_qrels_v1.jsonl",
+      "asset_type": "판례_qrels",
+      "sha256": "c44a6d8f17fcb7316f4ebbffb032cdf564769a2cf83f749f8a45c17e509a7f85",
+      "size_bytes": 44226,
+      "row_count": 58
+    },
+    {
+      "relative_path": "evaluation/precedent/embedding_ab/v1/ground_truth/ground_truth_manifest.json",
+      "asset_type": "판례_qrels_매니페스트",
+      "sha256": "43ca5e6e8da6edd04e2e1ccb79bd3f58baee51b0e6be4bc5b13bf045278f4c56",
+      "size_bytes": 3539
+    },
+    {
+      "relative_path": "evaluation/fault_standard/complete30_v9/v1/complete30_consumer_questions_v1.jsonl",
+      "asset_type": "Complete30_질문지",
+      "sha256": "8bc649f5f38a07c893bcce4a5aa397c540b926d544cd60b3d40fc7a3cf876889",
+      "size_bytes": 45062,
+      "row_count": 30
+    },
+    {
+      "relative_path": "evaluation/fault_standard/complete30_v9/v1/complete30_answer_key_with_explanations_v1.jsonl",
+      "asset_type": "Complete30_정답지",
+      "sha256": "47c21dedb248aa9138609925c24801b3e6fb1443949aefa29125388110062128",
+      "size_bytes": 69020,
+      "row_count": 30
+    },
+    {
+      "relative_path": "evaluation/fault_standard/complete30_v9/v1/complete30_manifest_v1.1.json",
+      "asset_type": "Complete30_매니페스트",
+      "sha256": "324b589b0fe2273d802cb440f10feee683696f1cf410688b87fc8544db610145",
+      "size_bytes": 2518
+    }
+  ]
+}

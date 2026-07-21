@@ -1,0 +1,55 @@
+{
+  "pilot_version": "qrels_precedents_pilot_v1",
+  "status": "draft",
+  "approved": false,
+  "selection_rule": "same one-per-accident-group pilot query IDs as review-case pilot; precedent judgments independent",
+  "query_file": "../../../../common/embedding_ab/v1/common_fault_queries_v1.jsonl",
+  "query_set_version": "fault_common_queries_v1",
+  "query_sha256": "a50921b0ea409ebfdd46d50c8ef632fb1fdac7c53b80ebb95fbb353c4ea02102",
+  "corpus_cases_file": "../../../../../artifacts/traffic_precedents_output/traffic_prec_fault_ratio_rag_verified/01_fault_ratio_rag_ready_cases.jsonl",
+  "corpus_cases_sha256": "7e24b6e80d9cad1aacb7a85ab992ede84ccd6ddaf2fc04012f061db3eac91a84",
+  "corpus_case_count": 987,
+  "corpus_chunks_file": "../../../../../artifacts/traffic_precedents_output/precedent_chunking_v2/fault_ratio_precedent_chunks_v2.jsonl",
+  "corpus_chunks_sha256": "0d741a2d7447fe543b46cff4bc1efba45c80d7f47d99d5a3d88693d3259ddcce",
+  "corpus_chunk_count": 8334,
+  "qrels_file": "qrels_precedents_pilot_v1.jsonl",
+  "qrels_sha256": "54db34a99a7e35f6a5006b417906a13a8783ea835fbdc68ad5c9ba6598c06f54",
+  "report_file": "pilot_labeling_report.md",
+  "report_sha256": "01a411c38ab3322a97a7e1a77ab9c0d7835338fc6b1c53fb73ccb4e3ce7bca35",
+  "selected_query_count": 10,
+  "selected_query_ids": [
+    "fault_common_q01",
+    "fault_common_q11",
+    "fault_common_q17",
+    "fault_common_q25",
+    "fault_common_q30",
+    "fault_common_q34",
+    "fault_common_q38",
+    "fault_common_q43",
+    "fault_common_q46",
+    "fault_common_q50"
+  ],
+  "difficulty_distribution": {
+    "easy": 4,
+    "medium": 2,
+    "hard": 4
+  },
+  "query_status_counts": {
+    "has_relevant_document": 6,
+    "no_relevant_document": 4
+  },
+  "positive_threshold": 2,
+  "positive_judgment_row_count": 8,
+  "qrels_row_count": 12,
+  "relevance_counts": {
+    "3": 3,
+    "2": 5
+  },
+  "reviewed_by": [],
+  "notes": [
+    "Candidate pooling used structured fields and character n-gram lexical similarity only as recall aids.",
+    "Final draft labels were assigned after reading precedent facts and reasoning chunks.",
+    "No embedding model output was used to select or label Ground Truth.",
+    "This pilot covers 10 of the 50-query Ground Truth and remains draft until second review."
+  ]
+}

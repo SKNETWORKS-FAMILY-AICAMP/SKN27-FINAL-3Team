@@ -1,0 +1,7 @@
+{
+  "fact_set_version": "accident_facts_v2_deterministic_v1",
+  "label_data_used": false,
+  "query_count": 50,
+  "source": "common_fault_queries_v1.jsonl",
+  "unknown_party_field_count": 271
+}
