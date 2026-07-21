@@ -38,7 +38,8 @@ output/erd/
 outputs/
 etl/fault_cases/artifacts/OCR_output/
 project-progress-report-*.html
-yolov8*.pt
+# Downloaded/trained model weights are artifacts, not source.
+*.pt
 
 # Vision data/model outputs
 storage/vision/raw/
