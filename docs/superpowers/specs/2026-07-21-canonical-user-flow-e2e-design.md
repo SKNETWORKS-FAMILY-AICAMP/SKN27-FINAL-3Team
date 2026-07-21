@@ -2,7 +2,7 @@
 
 **이슈:** #279  
 **기준:** PR #278 병합 뒤 `origin/dev` (`cb80779`)  
-**상태:** 설계 검토 대기
+**상태:** 구현 계획 확정
 
 ## 1. 목표와 범위
 
@@ -71,7 +71,7 @@ Worker 완료 뒤에는 다음을 검증한다.
 
 - 분석 결과는 공개 DTO이며 내부 `execution_payload`, Worker 원문, Agent raw output, 저장 URI를 노출하지 않는다.
 - `supervisor_state.collected_facts`의 확인된 사실과 top-level `user_claims`의 사용자 주장은 별도 배열로 제공한다.
-- `user_claims` 항목은 공개에 필요한 `field`, `value`, 출처 구분과 신뢰도만 포함하며, 내부 식별자·원본 채팅 전문·Agent 입력 패키지는 포함하지 않는다.
+- `user_claims` 항목은 공개에 필요한 `field`, `value`, 출처 구분만 포함하며, 내부 식별자·원본 채팅 전문·Agent 입력 패키지는 포함하지 않는다.
 - 공개 DTO는 근거, 한계, 다음 행동을 제공한다.
 - 리포트는 Worker가 생성한 `ready` 상태이며, 문서 확인 전에는 다운로드가 차단된다.
 - 문서 확인 후 `objection_form` 다운로드는 DOCX MIME 타입, attachment 헤더, `PK` 본문을 반환한다.
