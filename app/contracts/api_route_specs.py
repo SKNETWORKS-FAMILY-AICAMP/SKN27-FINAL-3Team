@@ -68,6 +68,7 @@ from app.contracts.file_attachment import (
     FileUploadValidationErrorResponse,
 )
 from app.contracts.mypage import MyPageSummaryResponse
+from app.contracts.history import HistoryApiErrorResponse, HistoryListResponse
 from app.contracts.report import (
     ConfirmReportDocumentRequest,
     ConfirmReportDocumentResponse,
@@ -80,6 +81,7 @@ from app.contracts.report import (
 HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 ContractStatus = Literal["shadow", "generated"]
 RequestMediaType = Literal["application/json", "multipart/form-data"]
+SecurityRequirement = dict[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +155,7 @@ class RouteSpec:
     success_statuses: tuple[int, ...] = ()
     success_content: tuple[ResponseContentSpec, ...] = ()
     success_headers: tuple[ResponseHeaderSpec, ...] = ()
+    security_requirements: tuple[SecurityRequirement, ...] = ()
 
     def __post_init__(self) -> None:
         placeholders = tuple(re.findall(r"\{([^{}]+)\}", self.path))
@@ -164,6 +167,10 @@ class RouteSpec:
             )
         if self.auth_required and self.auth_optional:
             raise ValueError("a route cannot require and optionally accept Bearer auth")
+        if self.security_requirements and (self.auth_required or self.auth_optional):
+            raise ValueError("explicit security cannot combine with legacy auth flags")
+        if any(not requirement for requirement in self.security_requirements):
+            raise ValueError("explicit security requirements cannot be anonymous")
         if self.response_model is None and not self.success_content:
             raise ValueError("route requires a JSON response model or explicit success content")
         if self.response_model is not None and self.success_content:
@@ -465,6 +472,42 @@ MYPAGE_SUMMARY_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 )
 
 
+HISTORY_API_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    GUEST_CREDENTIAL_HEADER_PARAMETER,
+    GUEST_ID_HEADER_PARAMETER,
+    RequestParameterSpec(
+        name="session_id",
+        location="query",
+        description="Optional chat session identifier; the server verifies session ownership.",
+    ),
+    RequestParameterSpec(
+        name="user_id",
+        location="query",
+        description="Optional user identifier; the server verifies owner access.",
+    ),
+    RequestParameterSpec(
+        name="guest_id",
+        location="query",
+        description="Optional guest identifier; the server verifies guest access.",
+    ),
+    RequestParameterSpec(
+        name="job_id",
+        location="query",
+        description="Optional analysis job identifier; the server verifies its session owner.",
+    ),
+    RequestParameterSpec(
+        name="event_type",
+        location="query",
+        description="Optional history event type filter.",
+    ),
+    RequestParameterSpec(
+        name="limit",
+        location="query",
+        description="Optional positive integer; invalid or non-positive values fall back and the default is 100.",
+    ),
+)
+
+
 def _chat_errors(*entries: tuple[int, tuple[str, ...]]) -> tuple[RouteErrorSpec, ...]:
     return tuple(
         RouteErrorSpec(
@@ -721,6 +764,41 @@ MYPAGE_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         tags=("MyPage",),
         summary="Read the authenticated user's summary after owner or session authorization",
         request_parameters=MYPAGE_SUMMARY_REQUEST_PARAMETERS,
+    ),
+)
+
+
+HISTORY_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="listHistoryEvents",
+        method="GET",
+        path="/api/history/",
+        route_name="canonical-history-events",
+        view_name="history_events",
+        request_model=None,
+        response_model=HistoryListResponse,
+        success_status=200,
+        errors=(
+            RouteErrorSpec(
+                status=401,
+                codes=("auth_required", "token_invalid", "token_expired"),
+                response_model=HistoryApiErrorResponse,
+            ),
+            RouteErrorSpec(
+                status=403,
+                codes=("object_access_denied",),
+                response_model=HistoryApiErrorResponse,
+            ),
+        ),
+        auth_required=False,
+        contract_status="shadow",
+        tags=("History",),
+        summary="List the current subject's standard-light history events with owner-scoped filters",
+        request_parameters=HISTORY_API_REQUEST_PARAMETERS,
+        security_requirements=(
+            {"bearerAuth": ()},
+            {"guestCredentialAuth": ()},
+        ),
     ),
 )
 
@@ -1110,6 +1188,7 @@ API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
     + AUTH_SESSION_API_ROUTE_SPECS
     + CHAT_SESSION_API_ROUTE_SPECS
     + MYPAGE_API_ROUTE_SPECS
+    + HISTORY_API_ROUTE_SPECS
     + FILE_API_ROUTE_SPECS
     + ANALYSIS_JOB_API_ROUTE_SPECS
     + REPORT_API_ROUTE_SPECS
@@ -1144,13 +1223,6 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         route_name="capabilities",
         view_name="capabilities",
         reason="Capability DTO exists in runtime data but is not registered as a route contract.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/history/",
-        route_name="canonical-history-events",
-        view_name="history_events",
-        reason="History filters and response DTO remain coupled to the Django view.",
     ),
     DeferredRouteSpec(
         method="GET",

@@ -42,7 +42,7 @@
 - Consumes: `get_analysis_job_access_metadata(job_id)`, `_authorize_session_query(session_id, payload, resource_type=...)`, and `_object_access_denied_response(request, access)`.
 - Produces: `GET /api/history/?job_id=<foreign>` returns the existing `object_access_denied` 403 envelope before history filtering.
 
-- [ ] **Step 1: Write the failing foreign-job test.**
+- [x] **Step 1: Write the failing foreign-job test.**
 
 ```python
 def test_other_users_job_history_is_denied(self) -> None:
@@ -54,7 +54,7 @@ def test_other_users_job_history_is_denied(self) -> None:
 
 Create an owner `ChatSession` and `AnalysisJob(job_id="job_history_owner")` in `setUp`; issue App JWTs with the established `issue_access_token()` and `AuthSession` pattern from `backend/chatbot/test_mypage_api_contract.py`.
 
-- [ ] **Step 2: Run test to verify the current failure.**
+- [x] **Step 2: Run test to verify the current failure.**
 
 ```powershell
 python backend/manage.py test chatbot.test_history_api_contract.HistoryApiContractTests.test_other_users_job_history_is_denied -v 1
@@ -62,7 +62,7 @@ python backend/manage.py test chatbot.test_history_api_contract.HistoryApiContra
 
 Expected: 200 because `job_id` is currently only a repository filter.
 
-- [ ] **Step 3: Write the minimum runtime guard.**
+- [x] **Step 3: Write the minimum runtime guard.**
 
 Before `_authorize_history_query()`, read `request.GET.get("job_id")`. For an existing job, use its existing session metadata and return `_object_access_denied_response()` when `_authorize_session_query(..., resource_type="history")` is denied. A missing job remains on the current empty-list path.
 
@@ -80,7 +80,7 @@ if job_id:
             return _object_access_denied_response(request, access)
 ```
 
-- [ ] **Step 4: Add owner-job and other-session cases.**
+- [x] **Step 4: Add owner-job and other-session cases.**
 
 ```python
 def test_owner_job_history_is_allowed(self) -> None:
@@ -91,7 +91,7 @@ def test_other_session_is_denied(self) -> None:
     self.assertEqual(response.status_code, 403, response.content)
 ```
 
-- [ ] **Step 5: Run the runtime module.**
+- [x] **Step 5: Run the runtime module.**
 
 ```powershell
 python backend/manage.py test chatbot.test_history_api_contract chatbot.test_guest_credential_boundary -v 1
@@ -111,7 +111,7 @@ Expected: selected tests pass; raw guest ID remains 401 and header-proved guest 
 - Consumes: current JSON keys emitted by `history_events()`.
 - Produces: `HISTORY_API_ROUTE_SPECS`, `HistoryListResponse`, and an `API_ROUTE_SPECS` entry for `GET /api/history/`.
 
-- [ ] **Step 1: Write failing static contract tests.**
+- [x] **Step 1: Write failing static contract tests.**
 
 ```python
 assert spec.response_model is contracts.HistoryListResponse
@@ -124,7 +124,7 @@ assert set(parameters) == {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails.**
+- [x] **Step 2: Run test to verify it fails.**
 
 ```powershell
 python -m pytest -q test/test_history_api_contract.py
@@ -132,11 +132,11 @@ python -m pytest -q test/test_history_api_contract.py
 
 Expected: `HISTORY_API_ROUTE_SPECS` and `app.contracts.history` are absent and history remains deferred.
 
-- [ ] **Step 3: Write the minimum DTO and route implementation.**
+- [x] **Step 3: Write the minimum DTO and route implementation.**
 
 Define `HistoryPublicModel` with `ConfigDict(extra="allow")`. Require stable event/list fields only and type nested runtime data as `dict[str, Any]`. Add `security_requirements: tuple[dict[str, tuple[str, ...]], ...] = ()` to `RouteSpec`; reject combining it with `auth_required` or `auth_optional`. Register history with `auth_required=False`, `auth_optional=False`, and `({"bearerAuth": ()}, {"guestCredentialAuth": ()})`.
 
-- [ ] **Step 4: Run route tests.**
+- [x] **Step 4: Run route tests.**
 
 ```powershell
 python -m pytest -q test/test_history_api_contract.py test/test_api_route_specs.py
@@ -155,7 +155,7 @@ Expected: all selected tests pass.
 - Consumes: `RouteSpec.security_requirements`.
 - Produces: `security: [{bearerAuth: []}, {guestCredentialAuth: []}]` and a header `apiKey` `guestCredentialAuth` scheme.
 
-- [ ] **Step 1: Add a failing OpenAPI assertion.**
+- [x] **Step 1: Add a failing OpenAPI assertion.**
 
 ```python
 history = document["paths"]["/api/history/"]["get"]
@@ -165,7 +165,7 @@ assert document["components"]["securitySchemes"]["guestCredentialAuth"] == {
 }
 ```
 
-- [ ] **Step 2: Run it and verify failure.**
+- [x] **Step 2: Run it and verify failure.**
 
 ```powershell
 python -m pytest -q test/test_openapi_v1_generation.py -k history
@@ -173,11 +173,11 @@ python -m pytest -q test/test_openapi_v1_generation.py -k history
 
 Expected: `/api/history/` is absent from OpenAPI v1.
 
-- [ ] **Step 3: Render explicit security without changing legacy output.**
+- [x] **Step 3: Render explicit security without changing legacy output.**
 
 Update `_security_requirements()` to return `spec.security_requirements` before falling back to `auth_required` or `auth_optional`. Add `guestCredentialAuth` beside `bearerAuth`. Update the general OpenAPI security loop so history has the OR assertion while all existing path families retain their expectations.
 
-- [ ] **Step 4: Regenerate and validate the artifact.**
+- [x] **Step 4: Regenerate and validate the artifact.**
 
 ```powershell
 python scripts/generate_openapi_v1.py
@@ -197,11 +197,11 @@ Expected: `OpenAPI v1 is current` and all OpenAPI tests pass.
 - Consumes: verified PR #275 RAG isolation evidence and #274 test results.
 - Produces: retained C-1 evidence and completed H history API contract item.
 
-- [ ] **Step 1: Update only approved checklist rows.**
+- [x] **Step 1: Update only approved checklist rows.**
 
 Keep the PR #275 RAG failed/partial regression row already added. Replace `- [ ] 히스토리 API 계약` with a completed #274 entry describing shadow OpenAPI, App JWT/guest credential boundary, and owner/session/job regression coverage. Do not edit C-2, H common errors, or I items.
 
-- [ ] **Step 2: Run focused checks.**
+- [x] **Step 2: Run focused checks.**
 
 ```powershell
 python -m pytest -q test/test_history_api_contract.py test/test_api_route_specs.py test/test_openapi_v1_generation.py

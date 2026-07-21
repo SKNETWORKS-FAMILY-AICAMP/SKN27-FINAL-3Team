@@ -99,6 +99,7 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
         + route_specs.AUTH_SESSION_API_ROUTE_SPECS
         + route_specs.CHAT_SESSION_API_ROUTE_SPECS
         + route_specs.MYPAGE_API_ROUTE_SPECS
+        + route_specs.HISTORY_API_ROUTE_SPECS
         + route_specs.FILE_API_ROUTE_SPECS
         + route_specs.ANALYSIS_JOB_API_ROUTE_SPECS
         + route_specs.REPORT_API_ROUTE_SPECS
@@ -472,7 +473,6 @@ def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
         ("GET", "/api/health/live/"),
         ("GET", "/api/health/ready/"),
         ("GET", "/api/capabilities/"),
-        ("GET", "/api/history/"),
         ("GET", "/api/agents/nodes/"),
         ("POST", "/api/reports/"),
     }

@@ -139,6 +139,11 @@ def _content_schema(content: Any) -> dict[str, Any]:
 
 
 def _security_requirements(spec: RouteSpec) -> list[dict[str, list[str]]]:
+    if spec.security_requirements:
+        return [
+            {scheme: list(scopes) for scheme, scopes in requirement.items()}
+            for requirement in spec.security_requirements
+        ]
     if spec.auth_required:
         return [{"bearerAuth": []}]
     if spec.auth_optional:
@@ -188,7 +193,13 @@ def build_openapi_document(
                     "type": "http",
                     "scheme": "bearer",
                     "bearerFormat": "JWT",
-                }
+                },
+                "guestCredentialAuth": {
+                    "type": "apiKey",
+                    "in": "header",
+                    "name": "X-Guest-Credential",
+                    "description": "Server-verified guest credential for protected guest routes.",
+                },
             },
             "schemas": _component_schemas(route_specs),
         },
