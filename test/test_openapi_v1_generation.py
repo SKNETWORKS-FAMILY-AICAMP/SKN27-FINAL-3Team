@@ -278,11 +278,15 @@ def test_chat_routes_document_runtime_identity_and_status_boundaries() -> None:
     message = paths["/api/chat/messages/"]["post"]
     save_state = paths["/api/chat/save-state/"]["post"]
 
-    assert set(message["responses"]) >= {"200", "202", "503"}
-    for status in ("200", "202", "503"):
+    assert set(message["responses"]) >= {"200", "202", "409", "503"}
+    for status in ("200", "202", "409", "503"):
         assert message["responses"][status]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/ChatMessageResponse"
         }
+    assert message["responses"]["409"]["x-response-semantics"] == "partial_result"
+    assert message["responses"]["503"]["x-response-semantics"] == "service_unavailable"
+    assert message["responses"]["401"]["x-response-semantics"] == "authentication_failure"
+    assert message["responses"]["403"]["x-response-semantics"] == "authorization_denied"
     assert message["security"] == [{}, {"bearerAuth": []}]
     assert [parameter["name"] for parameter in message["parameters"][:2]] == [
         "X-Guest-Credential",
@@ -363,6 +367,8 @@ def test_analysis_job_routes_document_async_owner_scoped_contract() -> None:
         "analysis_job_id_conflict",
         "analysis_job_reservation_pending",
     ]
+    assert "x-response-semantics" not in jobs["post"]["responses"]["202"]
+    assert "x-response-semantics" not in jobs["post"]["responses"]["409"]
 
     detail = paths["/api/analysis/jobs/{job_id}/"]["get"]
     assert detail["parameters"][0]["name"] == "job_id"
@@ -372,7 +378,10 @@ def test_analysis_job_routes_document_async_owner_scoped_contract() -> None:
     assert result["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AnalysisResultResponse"
     }
-    assert result["responses"]["202"]["description"] == "Successful response"
+    assert result["responses"]["202"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/AnalysisResultResponse"
+    }
+    assert result["responses"]["202"]["x-response-semantics"] == "pending"
     assert result["responses"]["404"]["x-error-codes"] == ["analysis_result_not_found"]
 
 
