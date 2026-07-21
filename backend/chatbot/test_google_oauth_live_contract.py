@@ -13,6 +13,7 @@ from django.core.management.base import CommandError
 from django.db import DatabaseError
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 
+from app.services.guest_credential_service import issue_guest_credential
 from chatbot.models import (
     AuthEvent,
     AuthSession,
@@ -352,6 +353,7 @@ class GoogleOAuthRateLimitBoundaryTests(SimpleTestCase):
             "REMOTE_ADDR": remote_addr,
             "HTTP_X_REQUESTED_WITH": "XmlHttpRequest",
             "HTTP_ORIGIN": "https://app.example.test",
+            "HTTP_X_GUEST_CREDENTIAL": issue_guest_credential(guest_id)[0],
         }
         if forwarded_for:
             headers["HTTP_X_FORWARDED_FOR"] = forwarded_for
@@ -522,6 +524,13 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
             "redirect_uri": "https://app.example.test",
         }
 
+    @staticmethod
+    def _guest_credential_header(payload: dict) -> dict[str, str]:
+        guest_id = str(payload.get("guest_id") or "").strip()
+        if not guest_id:
+            return {}
+        return {"HTTP_X_GUEST_CREDENTIAL": issue_guest_credential(guest_id)[0]}
+
     def _successful_google_exchange(self, request, timeout=0):
         self.assertEqual(timeout, 10)
         if request.full_url == "https://oauth2.googleapis.com/token":
@@ -574,6 +583,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                     REMOTE_ADDR="198.51.100.50",
                     HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                     HTTP_ORIGIN="https://app.example.test",
+                    HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_google_live_contract")[0],
                 )
                 for _index in range(4)
             ]
@@ -618,6 +628,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                 REMOTE_ADDR="198.51.100.54",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                **self._guest_credential_header(self._request_payload()),
             )
 
         self.assertEqual(response.status_code, 503)
@@ -654,6 +665,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                 REMOTE_ADDR="198.51.100.52",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                **self._guest_credential_header(self._request_payload()),
             )
 
         self.assertEqual(response.status_code, 403)
@@ -688,6 +700,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                 REMOTE_ADDR="198.51.100.53",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                **self._guest_credential_header(self._request_payload()),
             )
 
         self.assertEqual(response.status_code, 503)
@@ -708,6 +721,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                 content_type="application/json",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                **self._guest_credential_header(self._request_payload()),
             )
 
         self.assertEqual(response.status_code, 200)
@@ -822,6 +836,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                 content_type="application/json",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                **self._guest_credential_header(self._request_payload()),
             )
 
         self.assertEqual(response.status_code, 503)
@@ -899,6 +914,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                 "session_id": "ses_google_binding_guard",
             },
             content_type="application/json",
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_original_browser")[0],
         )
         self.assertEqual(guest_response.status_code, 200)
         payload = self._request_payload()
@@ -919,6 +935,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                 content_type="application/json",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                **self._guest_credential_header(payload),
             )
 
         self.assertEqual(response.status_code, 403)
@@ -958,6 +975,7 @@ class GoogleOAuthCodeEndpointIntegrationTests(TestCase):
                 content_type="application/json",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                **self._guest_credential_header(payload),
             )
 
         self.assertEqual(response.status_code, 403)

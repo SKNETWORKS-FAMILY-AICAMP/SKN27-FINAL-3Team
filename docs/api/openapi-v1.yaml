@@ -286,6 +286,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GuestSessionResponse'
+      parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       requestBody:
         required: false
         content:
@@ -357,6 +364,12 @@ paths:
           type: string
           enum:
           - XmlHttpRequest
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       requestBody:
         required: true
         content:
@@ -462,10 +475,16 @@ paths:
           - token_invalid
           - token_expired
       parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header when no Bearer token is supplied.
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
         schema:
           type: string
       - name: guest_id
@@ -516,10 +535,16 @@ paths:
           x-error-codes:
           - object_access_denied
       parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header when no Bearer token is supplied.
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
         schema:
           type: string
       - name: session_id
@@ -595,10 +620,16 @@ paths:
           x-error-codes:
           - upload_storage_unavailable
       parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header when no Bearer token is supplied.
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
         schema:
           type: string
       requestBody:
@@ -662,10 +693,16 @@ paths:
           type: string
           minLength: 1
           maxLength: 128
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header when no Bearer token is supplied.
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
         schema:
           type: string
       - name: session_id
@@ -702,10 +739,16 @@ paths:
           x-error-codes:
           - object_access_denied
       parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header when no Bearer token is supplied.
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
         schema:
           type: string
       - name: session_id
@@ -777,10 +820,16 @@ paths:
           x-error-codes:
           - analysis_job_unavailable
       parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header when no Bearer token is supplied.
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
         schema:
           type: string
       requestBody:
@@ -841,10 +890,16 @@ paths:
           type: string
           minLength: 1
           maxLength: 128
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header when no Bearer token is supplied.
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
         schema:
           type: string
   /api/analysis/results/{job_id}/:
@@ -905,10 +960,16 @@ paths:
           type: string
           minLength: 1
           maxLength: 128
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header when no Bearer token is supplied.
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
         schema:
           type: string
   /api/reports/:
@@ -949,11 +1010,17 @@ paths:
           x-error-codes:
           - login_required
       parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header evaluated before login enforcement. It can return
-          guest_session_invalid for expired or inactive guest sessions but does not authorize report reads.
+        description: Optional guest identifier. It is not identity proof without X-Guest-Credential and
+          does not authorize report reads.
         schema:
           type: string
       - name: session_id
@@ -1017,11 +1084,17 @@ paths:
           type: string
           minLength: 1
           maxLength: 64
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header evaluated before login enforcement. It can return
-          guest_session_invalid for expired or inactive guest sessions but does not authorize report reads.
+        description: Optional guest identifier. It is not identity proof without X-Guest-Credential and
+          does not authorize report reads.
         schema:
           type: string
       - name: session_id
@@ -1118,11 +1191,17 @@ paths:
           type: string
           minLength: 1
           maxLength: 64
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header evaluated before login enforcement. It can return
-          guest_session_invalid for expired or inactive guest sessions but does not authorize report reads.
+        description: Optional guest identifier. It is not identity proof without X-Guest-Credential and
+          does not authorize report reads.
         schema:
           type: string
       - name: session_id
@@ -1208,11 +1287,17 @@ paths:
           type: string
           minLength: 1
           maxLength: 64
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
       - name: X-Guest-Id
         in: header
         required: false
-        description: Optional guest identity header evaluated before login enforcement. It can return
-          guest_session_invalid for expired or inactive guest sessions but does not authorize report reads.
+        description: Optional guest identifier. It is not identity proof without X-Guest-Credential and
+          does not authorize report reads.
         schema:
           type: string
       - name: session_id
@@ -3524,6 +3609,11 @@ components:
           $ref: '#/components/schemas/AuthSubject'
         session_binding:
           $ref: '#/components/schemas/SessionBinding'
+        guest_credential:
+          maxLength: 8192
+          minLength: 1
+          title: Guest Credential
+          type: string
         rate_limit:
           $ref: '#/components/schemas/RateLimitPolicy'
         merge_policy:
@@ -3542,6 +3632,7 @@ components:
       - guest
       - subject
       - session_binding
+      - guest_credential
       - rate_limit
       - merge_policy
       - limitations

@@ -59,6 +59,18 @@ def test_frontend_uses_only_the_canonical_auth_and_job_contracts() -> None:
         assert removed not in content
 
 
+def test_guest_credential_is_persisted_and_sent_only_in_a_header() -> None:
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+    auth_session = read_text(ROOT / "app" / "web" / "authSession.js")
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    assert '"X-Guest-Credential": guestCredential' in api_client
+    assert '"guest_credential"' not in api_client
+    assert "guestCredential" in auth_session
+    assert "guestCredential" in shell
+    assert "guest_credential" in auth_session
+
+
 def test_frontend_catalog_drives_supported_attachments_without_demo_personas() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 

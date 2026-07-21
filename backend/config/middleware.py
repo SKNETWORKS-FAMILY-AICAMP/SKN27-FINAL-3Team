@@ -10,6 +10,7 @@ from app.services.auth_error_contract import (
     build_auth_error,
     build_www_authenticate_header,
 )
+from app.services.guest_credential_service import decode_guest_credential
 from app.services.google_auth_service import decode_access_token
 from chatbot.auth_session_policy import validate_persisted_auth_session
 
@@ -31,6 +32,8 @@ GUEST_ALLOWED_PATHS = (
     "/api/files/",
     "/api/reports/",
     "/api/auth/me/",
+    "/api/history/",
+    "/api/analysis/jobs/",
 )
 
 PROTECTED_PREFIXES = (
@@ -166,7 +169,8 @@ class SameOriginCorsMiddleware:
             response["Vary"] = "Origin"
             response["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
             response["Access-Control-Allow-Headers"] = (
-                "Content-Type, Authorization, X-Guest-Id, X-Auth-Session-Id, X-Requested-With"
+                "Content-Type, Authorization, X-Guest-Id, X-Guest-Credential, "
+                "X-Auth-Session-Id, X-Requested-With"
             )
         return response
 
@@ -201,8 +205,11 @@ def _requires_auth(request: HttpRequest) -> bool:
 
 def _is_valid_api_auth(request: HttpRequest) -> tuple[bool, dict | None]:
     authorization_header = request.headers.get("Authorization")
-    if _is_guest_allowed_request(request, authorization_header):
+    guest_allowed, guest_error = _is_guest_allowed_request(request, authorization_header)
+    if guest_allowed:
         return True, None
+    if guest_error is not None:
+        return False, guest_error
 
     token = _bearer_token_from_header(authorization_header)
     if token:
@@ -224,16 +231,50 @@ def _is_valid_api_auth(request: HttpRequest) -> tuple[bool, dict | None]:
     return False, build_auth_error("auth_required")
 
 
-def _is_guest_allowed_request(request: HttpRequest, authorization_header: str | None) -> bool:
+def _is_guest_allowed_request(
+    request: HttpRequest,
+    authorization_header: str | None,
+) -> tuple[bool, dict | None]:
     if authorization_header:
-        return False
-    if not request.headers.get("X-Guest-Id"):
-        return False
-    if request.path in GUEST_ALLOWED_PATHS:
+        return False, None
+    if not _is_guest_credential_path(request.path):
+        return False, None
+
+    requested_guest_id = _normalize_guest_id(request.headers.get("X-Guest-Id"))
+    guest_credential = request.headers.get("X-Guest-Credential")
+    if not requested_guest_id and not guest_credential:
+        return False, None
+
+    credential_valid, credential_claims = decode_guest_credential(guest_credential)
+    if not credential_valid:
+        reason = str(credential_claims.get("reason") or "invalid_guest_credential")
+        code = "token_expired" if reason == "expired_guest_credential" else "token_invalid"
+        return False, build_auth_error(code, reason=reason)
+
+    credential_guest_id = _normalize_guest_id(credential_claims.get("sub"))
+    if requested_guest_id and credential_guest_id != requested_guest_id:
+        return False, build_auth_error(
+            "token_invalid",
+            reason="guest_credential_guest_mismatch",
+        )
+    return True, None
+
+
+def _is_guest_credential_path(path: str) -> bool:
+    if path in GUEST_ALLOWED_PATHS:
         return True
-    if request.path.startswith("/api/analysis/results/"):
+    if path.startswith("/api/files/"):
         return True
-    return request.path.startswith("/api/reports/") and request.path.endswith("/download/")
+    if path.startswith("/api/analysis/jobs/") or path.startswith("/api/analysis/results/"):
+        return True
+    return path.startswith("/api/reports/")
+
+
+def _normalize_guest_id(value: object) -> str:
+    guest_id = str(value or "").strip()
+    if not guest_id:
+        return ""
+    return guest_id if guest_id.startswith("gst_") else f"gst_{guest_id}"
 
 
 def _bearer_token_from_header(header_value: str | None) -> str:

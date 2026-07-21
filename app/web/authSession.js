@@ -253,9 +253,11 @@ export function readStoredAuthSession() {
     removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
     writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
       guest_id: storedSession.guest_id || null,
+      guest_credential: storedSession.guest_credential || null,
     });
     return {
       guest_id: storedSession.guest_id || null,
+      guest_credential: storedSession.guest_credential || null,
     };
   }
   return storedSession;
@@ -265,10 +267,11 @@ export function readStoredGoogleProfile() {
   return readStoredJson(GOOGLE_PROFILE_STORAGE_KEY);
 }
 
-export function persistAuthSession({ guestId }) {
+export function persistAuthSession({ guestId, guestCredential }) {
   removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
   writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
     guest_id: guestId || null,
+    guest_credential: guestCredential || null,
   });
 }
 

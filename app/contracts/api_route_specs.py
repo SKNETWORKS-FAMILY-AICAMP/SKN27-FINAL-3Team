@@ -420,6 +420,7 @@ GUEST_CREDENTIAL_HEADER_PARAMETER = RequestParameterSpec(
 
 
 GUEST_FILE_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    GUEST_CREDENTIAL_HEADER_PARAMETER,
     GUEST_ID_HEADER_PARAMETER,
 )
 
@@ -449,6 +450,7 @@ ANALYSIS_JOB_ID_PATH_PARAMETER = PathParameterSpec(
 
 
 ANALYSIS_JOB_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    GUEST_CREDENTIAL_HEADER_PARAMETER,
     GUEST_ID_HEADER_PARAMETER,
 )
 
@@ -763,14 +765,14 @@ REPORT_GUEST_ID_HEADER_PARAMETER = RequestParameterSpec(
     name="X-Guest-Id",
     location="header",
     description=(
-        "Optional guest identity header evaluated before login enforcement. "
-        "It can return guest_session_invalid for expired or inactive guest "
-        "sessions but does not authorize report reads."
+        "Optional guest identifier. It is not identity proof without "
+        "X-Guest-Credential and does not authorize report reads."
     ),
 )
 
 
 REPORT_LIST_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    GUEST_CREDENTIAL_HEADER_PARAMETER,
     REPORT_GUEST_ID_HEADER_PARAMETER,
     RequestParameterSpec(
         name="session_id",
@@ -781,6 +783,7 @@ REPORT_LIST_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 
 
 REPORT_DETAIL_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    GUEST_CREDENTIAL_HEADER_PARAMETER,
     REPORT_GUEST_ID_HEADER_PARAMETER,
     RequestParameterSpec(
         name="session_id",

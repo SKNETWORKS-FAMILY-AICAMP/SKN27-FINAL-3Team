@@ -185,6 +185,14 @@ def test_file_api_route_specs_promote_existing_django_endpoints() -> None:
     assert actual[("GET", "/api/files/{attachment_id}/")].path_parameters[0].name == (
         "attachment_id"
     )
+    for spec in actual.values():
+        assert [
+            (parameter.name, parameter.location)
+            for parameter in spec.request_parameters
+        ][:2] == [
+            ("X-Guest-Credential", "header"),
+            ("X-Guest-Id", "header"),
+        ]
     assert all(spec.contract_status == "shadow" for spec in actual.values())
 
 
@@ -220,6 +228,14 @@ def test_analysis_job_api_route_specs_promote_existing_django_endpoints() -> Non
         "job_id"
     )
     assert actual[("GET", "/api/analysis/results/{job_id}/")].success_statuses == (200, 202)
+    for spec in actual.values():
+        assert [
+            (parameter.name, parameter.location)
+            for parameter in spec.request_parameters
+        ][:2] == [
+            ("X-Guest-Credential", "header"),
+            ("X-Guest-Id", "header"),
+        ]
     assert all(spec.auth_optional is True for spec in actual.values())
     assert all(spec.contract_status == "shadow" for spec in actual.values())
 
@@ -254,6 +270,7 @@ def test_report_get_routes_are_modeled_while_report_post_remains_deferred() -> N
         (parameter.name, parameter.location)
         for parameter in modeled[("GET", "/api/reports/")].request_parameters
     ] == [
+        ("X-Guest-Credential", "header"),
         ("X-Guest-Id", "header"),
         ("session_id", "query"),
     ]
@@ -261,6 +278,7 @@ def test_report_get_routes_are_modeled_while_report_post_remains_deferred() -> N
         (parameter.name, parameter.location)
         for parameter in download.request_parameters
     ] == [
+        ("X-Guest-Credential", "header"),
         ("X-Guest-Id", "header"),
         ("session_id", "query"),
         ("document_type", "query"),

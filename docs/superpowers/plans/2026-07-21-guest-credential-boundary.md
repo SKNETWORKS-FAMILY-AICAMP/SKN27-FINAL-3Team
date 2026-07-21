@@ -305,7 +305,7 @@ git commit -m "feat: send guest credential from web client"
 
 ```python
 def test_guest_credential_is_masked_for_canonical_and_wsgi_header_keys():
-    token = "eyJhbGciOiJIUzI1NiJ9.payload.signature"
+    credential = "<signed guest credential>"
     masked = sanitize_pii({"guest_credential": token, "HTTP_X_GUEST_CREDENTIAL": token})
     assert masked == {"guest_credential": MASK_TOKEN, "HTTP_X_GUEST_CREDENTIAL": MASK_TOKEN}
 ```
