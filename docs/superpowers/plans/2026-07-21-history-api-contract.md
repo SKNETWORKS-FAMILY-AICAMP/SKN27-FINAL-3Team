@@ -220,7 +220,9 @@ git status -sb
 
 Expected: full suite passes, whitespace check is clean, and the diff is limited to planned files plus generated OpenAPI and checklist rows.
 
-- [ ] **Step 4: Commit and push implementation.**
+로컬 Python 3.14에서는 `pyarrow` 호환 휠이 없어 ETL 테스트 수집이 완료되지 않았다. 이슈 관련 정적 계약 27건, Django `chatbot` 345건, OpenAPI 최신성, Ruff, 공백 검사는 통과했으며 전체 pytest는 CI의 Python 3.13 환경에서 확인한다.
+
+- [x] **Step 4: Commit and push implementation.**
 
 ```powershell
 git add app/contracts/history.py app/contracts/api_route_specs.py app/contracts/openapi_v1.py backend/chatbot/views.py backend/chatbot/test_history_api_contract.py test/test_history_api_contract.py test/test_api_route_specs.py test/test_openapi_v1_generation.py docs/api/openapi-v1.yaml docs/ops/project-readiness-master-checklist.md docs/superpowers/plans/2026-07-21-history-api-contract.md
