@@ -8,13 +8,15 @@
 
 현재 서비스의 대표 사용자 흐름을 외부 OCR·RAG·LLM 제공자 없이 재현 가능한 Django E2E 테스트로 고정한다. 이 테스트는 실제 공개 API, 저장소, Worker 처리, 공개 DTO, 공식 문서 다운로드 경계를 연결해 검증한다.
 
+현재 공개 분석 결과에 사용자 주장 전용 필드가 없으므로, 기존 응답에 영향을 주지 않는 `user_claims`를 추가한다. 이 필드는 확인된 사실과 별도이며, 사용자 또는 증거 출처가 구분된 정제된 주장만 담는다. 기존 소비자는 새 필드를 무시할 수 있으므로 응답 계약은 호환성을 유지한다.
+
 성공 흐름은 다음 순서를 따른다.
 
 1. 유효한 App JWT 사용자로 세션을 생성한다.
 2. 과태료 고지서 용도 자료를 업로드하고 스캔 Worker가 `clean` 상태로 완료한 것을 확인한다.
 3. 채팅 요청이 Supervisor 계획과 비동기 Worker 작업을 큐잉하는지 확인한다.
 4. 테스트 전용의 결정적 Agent 결과로 Worker를 처리한다.
-5. 분석 결과와 리포트 상세의 공개 DTO에서 확인된 사실, 사용자 주장, 근거, 한계, 다음 행동을 확인한다.
+5. 분석 결과와 리포트 상세의 공개 DTO에서 확인된 사실, `user_claims`, 근거, 한계, 다음 행동을 확인한다.
 6. 문서 확인 API를 거친 뒤 공식 이의신청서 DOCX를 다운로드한다.
 
 동일한 테스트 묶음에서 다음 비정상 경로도 확인한다.
@@ -31,7 +33,7 @@
 
 `backend/chatbot/tests.py`의 `RemovedChatbotMockApiContract`에는 PDF를 검증하는 과거 목 시나리오가 남아 있다. 이 테스트는 이력 참조용이며 #279의 canonical 완료 근거로 사용하지 않는다. 이번 작업은 이를 삭제·변환·복구하지 않고, 새 테스트가 PDF를 요청하거나 PDF 응답을 기대하지 않도록 명확히 분리한다.
 
-기존 `test_resource_ownership_e2e.py`는 리소스 소유권과 DOCX 다운로드를, `test_supervisor_reporting_pipeline.py`는 Worker 보고서 생성과 DOCX 렌더링을 각각 검증한다. #279는 이들을 대체하지 않고, 사용자 요청부터 공개 결과와 문서 다운로드까지를 한 경로로 연결하는 회귀 테스트를 추가한다.
+기존 `test_resource_ownership_e2e.py`는 리소스 소유권과 DOCX 다운로드를, `test_supervisor_reporting_pipeline.py`는 Worker 보고서 생성과 DOCX 렌더링을 각각 검증한다. #279는 이들을 대체하지 않고, 사용자 요청부터 공개 결과와 문서 다운로드까지를 한 경로로 연결하는 회귀 테스트와 `user_claims`의 최소 공개 DTO 확장을 추가한다.
 
 ## 3. 대안과 선택
 
@@ -68,7 +70,9 @@
 Worker 완료 뒤에는 다음을 검증한다.
 
 - 분석 결과는 공개 DTO이며 내부 `execution_payload`, Worker 원문, Agent raw output, 저장 URI를 노출하지 않는다.
-- 공개 DTO는 확인된 사실, 사용자 주장, 근거, 한계, 다음 행동을 제공한다.
+- `supervisor_state.collected_facts`의 확인된 사실과 top-level `user_claims`의 사용자 주장은 별도 배열로 제공한다.
+- `user_claims` 항목은 공개에 필요한 `field`, `value`, 출처 구분과 신뢰도만 포함하며, 내부 식별자·원본 채팅 전문·Agent 입력 패키지는 포함하지 않는다.
+- 공개 DTO는 근거, 한계, 다음 행동을 제공한다.
 - 리포트는 Worker가 생성한 `ready` 상태이며, 문서 확인 전에는 다운로드가 차단된다.
 - 문서 확인 후 `objection_form` 다운로드는 DOCX MIME 타입, attachment 헤더, `PK` 본문을 반환한다.
 - PDF MIME 타입·`.pdf` 파일명·PDF 본문은 성공 조건에 포함하지 않는다.
@@ -87,7 +91,8 @@ Worker 완료 뒤에는 다음을 검증한다.
 
 ## 5. 호환성·리스크 관리
 
-- 제품 코드, API schema, DB migration, 프런트 UI를 변경하지 않는다. 테스트와 체크리스트만 변경한다.
+- 제품 코드에서는 분석 결과 공개 투영과 DTO에 `user_claims`만 호환성 있게 추가한다. 기존 필드·HTTP 상태·인증·DB schema·프런트 UI는 변경하지 않는다.
+- `user_claims`는 이미 영속·정제된 사용자 주장/증거 경계에서만 만들며, 요청 원문이나 내부 Worker·Agent 데이터를 새로 공개하지 않는다.
 - Agent fixture는 실제 제공자 호출을 대체하지만, Worker 큐잉·처리·보고서 영속화 경계를 우회하지 않는다.
 - App JWT를 대표 인증 수단으로 선택한다. Guest credential의 수명·전환 경로는 이미 별도 E2E로 검증되므로 이슈 #279의 대표 경로에 중복 포함하지 않는다.
 - 이력 PDF 목 테스트는 건드리지 않는다. 새 E2E가 DOCX 전용 정책의 현재 근거가 된다.
@@ -97,9 +102,10 @@ Worker 완료 뒤에는 다음을 검증한다.
 
 구현 후 다음을 실행한다.
 
-1. 새 canonical E2E 테스트 단독 실행
-2. 관련 소유권·게스트 로그인·Supervisor 보고서·API 응답 계약 테스트 실행
-3. 전체 Python 테스트 실행
+1. `user_claims`가 확인된 사실과 별도로 투영되고 내부 필드를 노출하지 않는 단위·계약 테스트 실행
+2. 새 canonical E2E 테스트 단독 실행
+3. 관련 소유권·게스트 로그인·Supervisor 보고서·API 응답 계약 테스트 실행
+4. 전체 Python 테스트 실행
 
 모든 검증이 통과하면 `docs/ops/project-readiness-master-checklist.md`의 I 항목 중 아래 한 줄만 완료 처리한다.
 
