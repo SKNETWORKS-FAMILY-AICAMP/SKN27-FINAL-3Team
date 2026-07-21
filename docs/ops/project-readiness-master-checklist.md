@@ -93,6 +93,7 @@
 - [x] 법령 근거 검색 계약 및 흐름 보완 — #208
 - [x] RAG, pgvector, Neo4j 기반 검색 구조
 - [x] 검색 결과 부족 시 partial/failed 처리 기반
+- [x] 선택된 RAG 도메인의 런타임 예외를 개별 `failed` 결과로 격리하고, 정상 도메인 결과는 `partial`로 유지하는 회귀 테스트 — PR #275
 - [?] Elasticsearch의 역할과 pgvector/Neo4j/Elasticsearch 선택 조건 문서화
 - [ ] 대표 사고 시나리오별 검색 정확도 평가 세트
 - [ ] 검색 결과의 근거 출처·검색 시점·한계 표시
@@ -172,7 +173,7 @@
 - [x] 리포트 조회·다운로드 API 계약 — #226 / PR #228 (생성 POST는 deferred 유지)
 - [x] 채팅 세션·메시지·저장 API 계약 — #270: shadow OpenAPI, 200/202/503 채팅 응답, guest credential·소유권 회귀 검증
 - [x] 마이페이지 API 계약 — #272: shadow OpenAPI, owner/session 소유권·raw guest ID 차단·limit 기본값 폴백 회귀 검증
-- [ ] 히스토리 API 계약
+- [x] 히스토리 API 계약 — #274: shadow OpenAPI, App JWT·guest credential 경계와 owner/session/job 소유권 회귀 검증
 - [x] 에이전트 노드 API 계약 — #268: 공개 분석 결과 DTO의 Worker/Supervisor 내부 필드 차단 및 API·소유권 회귀 검증
 - [ ] 전체 오류·권한 오류·부분 결과 응답 공통 계약 정리
 

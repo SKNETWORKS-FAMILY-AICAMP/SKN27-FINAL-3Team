@@ -615,6 +615,17 @@ def history_events(request: HttpRequest) -> JsonResponse:
     if identity_error is not None:
         return identity_error
     if _is_canonical_mock_request(request):
+        job_id = request.GET.get("job_id")
+        if job_id:
+            metadata = get_analysis_job_access_metadata(job_id)
+            if metadata is not None:
+                access = _authorize_session_query(
+                    str(metadata.get("session_id") or ""),
+                    identity_payload,
+                    resource_type="history",
+                )
+                if not access["allowed"]:
+                    return _object_access_denied_response(request, access)
         access = _authorize_history_query(request, identity_payload)
         if not access["allowed"]:
             return _object_access_denied_response(request, access)

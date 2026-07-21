@@ -31,6 +31,7 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/chat/messages/",
         "/api/chat/save-state/",
         "/api/mypage/summary/",
+        "/api/history/",
         "/api/files/",
         "/api/files/{attachment_id}/",
         "/api/analysis/jobs/",
@@ -89,11 +90,12 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         for operation in path_item.values():
             assert operation["x-contract-status"] == "shadow"
             assert operation["x-django-route-name"].startswith("canonical-")
-            expected_security = (
-                [{}, {"bearerAuth": []}]
-                if path.startswith(("/api/chat/", "/api/files/", "/api/analysis/"))
-                else [{"bearerAuth": []}]
-            )
+            if path == "/api/history/":
+                expected_security = [{"bearerAuth": []}, {"guestCredentialAuth": []}]
+            elif path.startswith(("/api/chat/", "/api/files/", "/api/analysis/")):
+                expected_security = [{}, {"bearerAuth": []}]
+            else:
+                expected_security = [{"bearerAuth": []}]
             assert operation["security"] == expected_security
 
     schemas = document["components"]["schemas"]
@@ -118,6 +120,8 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "AuthSubjectResponse",
         "AuthErrorResponse",
         "RateLimitErrorResponse",
+        "HistoryListResponse",
+        "HistoryApiErrorResponse",
         "FileUploadRequest",
         "FileAttachmentResponse",
         "FileAttachmentListResponse",
