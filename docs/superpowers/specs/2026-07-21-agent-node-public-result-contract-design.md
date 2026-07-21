@@ -92,7 +92,7 @@ adapter 설정·모드, plan step, 원본 Agent 입력과 같은 Worker 운영 �
 
 - `analysis_plan`, `node_execution`, `chat_response`
 - `supervisor_reporting_handoff`, `reporting_pipeline`, `supervisor_handoff`
-- 상위 `structured_results`
+- 상위 `structured_results`, `agent_results`
 - `supervisor_state`의 입력 payload 및 `reporting_payload.form_data`
 - Worker의 원본 실행 식별자·계획·adapter 설정·입력 데이터
 
@@ -134,6 +134,8 @@ adapter 설정·모드, plan step, 원본 Agent 입력과 같은 Worker 운영 �
    `GET /api/analysis/results/{job_id}/` 경로 검증을 추가하거나 보강한다.
    - 소유권·인증 경계를 우회하지 않는다.
    - 결과 응답에서 금지 필드가 없고 필요한 노드 표시 결과가 남는지 확인한다.
+   - mock 결과 테스트에 남아 있는 상위 `agent_results` 기대값은 화면 DTO 계약에 맞게
+     제거하고, 동일한 표시 정보는 `supervisor_execution.node_results`로 검증한다.
 3. 관련 Python 계약·큐·소유권 테스트와 `app/web`의 `npm run build`를 실행한다.
 
 로컬 가상환경에 `python-docx`가 없으면 Agent 노드 전체 테스트 수집이 실패할 수 있다.
