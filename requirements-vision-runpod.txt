@@ -1,0 +1,11 @@
+﻿numpy
+opencv-python-headless
+Pillow
+transformers==4.51.3
+tqdm
+ultralytics
+lap
+accelerate
+qwen-vl-utils[decord]
+gdown
+imageio-ffmpeg
