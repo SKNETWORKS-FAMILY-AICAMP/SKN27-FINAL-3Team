@@ -449,3 +449,21 @@
 - 실제 Google 로그인, Agent, RAG, API endpoint, 모델 선택은 구현하지 않는다.
 - 팀원 schema 없이 `#22`, `#27`, `#29`, `#40`, `#41`을 완료 처리하지 않는다.
 - close 가능성은 검증 결과와 사용자 승인 후에만 판정한다.
+
+## 2026-07-21 프론트 컬러 팔레트 (Dynamic Black / Honey Beige / Egg Liqueur / Apocalyptic Orange)
+
+- `app/web/styles.css`의 `:root`에 적용된 전체 앱 컬러 팔레트. 새 화면/컴포넌트 작업 시 하드코딩 hex 대신 이 변수를 참조한다.
+- 핵심 4색:
+  - Dynamic Black → `--ink: #161415`
+  - Honey Beige → `--soft` / `--page-bg: #efe0c2`
+  - Egg Liqueur → `--line: #d6ce9e`
+  - Apocalyptic Orange → `--brand: #f76a21` (RGB 247, 106, 33)
+- 파생/보조 톤:
+  - `--brand-dark: #c54607`, `--brand-soft: #feede4`, `--brand-soft-border: #fdd2bc`
+  - `--surface: #ffffff`, `--ink-soft: #4a4643`, `--muted: #6b665f`, `--subtle: #948d7f`
+  - `--info: #285f9f` / `--info-soft: #e9f0fa`
+  - `--green: #1f7a6d` / `--green-soft: #e7f4f1`
+  - `--amber: #a15c00` / `--amber-soft: #fff4df`
+  - `--red: #b42318` / `--red-soft: #fff0ed`
+- radius 스케일: `--radius-sm: 8px`, `--radius-md: 12px`(기본 카드/버튼), `--radius-lg: 16px`, `--radius-pill: 999px`.
+- 주의: 예전 홈 히어로 디자인 때 쓰던 `.insurance-layout`/`.layout.is-entry .workspace` 중복 선언이 이 팔레트를 조용히 덮어쓴 적이 있었음(거의 흰색 `#fffdfb`/`#fffdfa`로 override) — 배경 관련 새 규칙 추가 시 파일 뒤쪽에 동일 셀렉터 중복 선언이 없는지 먼저 grep으로 확인할 것.
