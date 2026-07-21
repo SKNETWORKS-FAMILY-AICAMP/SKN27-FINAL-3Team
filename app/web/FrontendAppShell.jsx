@@ -462,7 +462,6 @@ export default function FrontendAppShell({
     setReportList([]);
     setPendingAuthAction(null);
     setReportActionStatus("");
-    setWorkerActionStatus("");
     setSavePromptVisible(false);
     setSaveDecision("undecided");
     setGuestDetailedReportUsed(false);
@@ -3050,6 +3049,9 @@ function ReportActionAlert({ status }) {
     <div className={`report-action-alert ${tone}`} role="status">
       {text}
     </div>
+  );
+}
+
 function DocumentTypeCards({ cards, onCopy }) {
   const documentTitles = {
     objection_draft: "이의신청서 초안",
