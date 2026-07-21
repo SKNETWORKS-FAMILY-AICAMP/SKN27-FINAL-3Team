@@ -33,6 +33,7 @@ paths:
                 $ref: '#/components/schemas/CaseApiErrorResponse'
           x-error-codes:
           - login_required
+          x-response-semantics: authorization_denied
     post:
       tags:
       - Cases
@@ -59,6 +60,7 @@ paths:
           x-error-codes:
           - login_required
           - case_owner_mismatch
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -116,6 +118,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -161,6 +164,7 @@ paths:
           - login_required
           - object_access_denied
           - case_owner_mismatch
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -228,6 +232,7 @@ paths:
           - login_required
           - object_access_denied
           - case_owner_mismatch
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -324,6 +329,7 @@ paths:
                 $ref: '#/components/schemas/AuthErrorResponse'
           x-error-codes:
           - token_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -332,6 +338,7 @@ paths:
                 $ref: '#/components/schemas/AuthErrorResponse'
           x-error-codes:
           - forbidden
+          x-response-semantics: authorization_denied
         '503':
           description: Typed API error response
           content:
@@ -405,6 +412,7 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
+          x-response-semantics: authentication_failure
       requestBody:
         required: false
         content:
@@ -440,6 +448,7 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
+          x-response-semantics: authentication_failure
       requestBody:
         required: false
         content:
@@ -474,6 +483,7 @@ paths:
           x-error-codes:
           - token_invalid
           - token_expired
+          x-response-semantics: authentication_failure
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -530,6 +540,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -575,12 +586,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatMessageResponse'
-        '503':
-          description: Successful response
+        '409':
+          description: Attachment scan blocked; safe partial guidance is available.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatMessageResponse'
+          x-response-semantics: partial_result
+        '503':
+          description: Supervisor planning is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessageResponse'
+          x-response-semantics: service_unavailable
         '400':
           description: Typed API error response
           content:
@@ -600,6 +619,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -608,6 +628,7 @@ paths:
                 $ref: '#/components/schemas/ChatApiErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '429':
           description: Typed API error response
           content:
@@ -665,6 +686,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -674,6 +696,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -721,6 +744,7 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -729,6 +753,7 @@ paths:
                 $ref: '#/components/schemas/AuthErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
       parameters:
       - name: session_id
         in: query
@@ -784,6 +809,7 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -792,6 +818,7 @@ paths:
                 $ref: '#/components/schemas/HistoryApiErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -869,6 +896,7 @@ paths:
                 $ref: '#/components/schemas/FileGuestSessionErrorResponse'
           x-error-codes:
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -877,6 +905,7 @@ paths:
                 $ref: '#/components/schemas/FileObjectAccessErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -930,6 +959,7 @@ paths:
                 $ref: '#/components/schemas/FileGuestSessionErrorResponse'
           x-error-codes:
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -938,6 +968,7 @@ paths:
                 $ref: '#/components/schemas/FileObjectAccessErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '413':
           description: Typed API error response
           content:
@@ -1011,6 +1042,7 @@ paths:
                 $ref: '#/components/schemas/FileGuestSessionErrorResponse'
           x-error-codes:
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1019,6 +1051,7 @@ paths:
                 $ref: '#/components/schemas/FileObjectAccessErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1073,6 +1106,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnalysisJobListResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1081,6 +1125,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -1127,6 +1172,17 @@ paths:
           x-error-codes:
           - analysis_job_session_required
           - chat_input_rejected
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1135,6 +1191,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '409':
           description: Typed API error response
           content:
@@ -1207,7 +1264,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1216,6 +1277,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1265,11 +1327,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnalysisResultResponse'
         '202':
-          description: Successful response
+          description: Analysis result is not ready; continue polling the result endpoint.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnalysisResultResponse'
+          x-response-semantics: pending
         '401':
           description: Typed API error response
           content:
@@ -1277,7 +1340,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1286,6 +1353,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1344,6 +1412,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1352,6 +1421,7 @@ paths:
                 $ref: '#/components/schemas/ReportApiErrorResponse'
           x-error-codes:
           - login_required
+          x-response-semantics: authorization_denied
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -1401,6 +1471,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1410,6 +1481,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1497,6 +1569,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1506,6 +1579,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1588,6 +1662,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1597,6 +1672,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:

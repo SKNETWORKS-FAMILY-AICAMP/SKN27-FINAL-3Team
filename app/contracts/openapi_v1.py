@@ -10,9 +10,16 @@ from pydantic import BaseModel
 
 from app.contracts.api_route_specs import (
     API_ROUTE_SPECS,
+    OutcomeResponseSpec,
     RequestParameterSpec,
     RouteSpec,
 )
+
+
+ERROR_RESPONSE_SEMANTICS = {
+    401: "authentication_failure",
+    403: "authorization_denied",
+}
 
 
 def _schema_ref(model: type[BaseModel]) -> dict[str, str]:
@@ -29,6 +36,8 @@ def _component_schemas(specs: Iterable[RouteSpec]) -> dict[str, dict[str, Any]]:
         for content in spec.success_content:
             if content.response_model is not None:
                 models[content.response_model.__name__] = content.response_model
+        for outcome in spec.outcome_responses:
+            models[outcome.response_model.__name__] = outcome.response_model
         for error in spec.errors:
             models[error.response_model.__name__] = error.response_model
 
@@ -45,6 +54,22 @@ def _component_schemas(specs: Iterable[RouteSpec]) -> dict[str, dict[str, Any]]:
 
 
 def _operation(spec: RouteSpec) -> dict[str, Any]:
+    responses = {
+        str(status): _success_response(spec)
+        for status in (spec.success_statuses or (spec.success_status,))
+    }
+    responses.update(
+        {
+            str(outcome.status): _outcome_response(outcome)
+            for outcome in spec.outcome_responses
+        }
+    )
+    responses.update(
+        {
+            str(error.status): _error_response(error)
+            for error in spec.errors
+        }
+    )
     operation: dict[str, Any] = {
         "tags": list(spec.tags),
         "summary": spec.summary,
@@ -53,24 +78,7 @@ def _operation(spec: RouteSpec) -> dict[str, Any]:
         "x-contract-status": spec.contract_status,
         "x-django-route-name": spec.route_name,
         "x-django-view": spec.view_name,
-        "responses": {
-            str(status): _success_response(spec)
-            for status in (spec.success_statuses or (spec.success_status,))
-        }
-        | {
-            **{
-                str(error.status): {
-                    "description": "Typed API error response",
-                    "content": {
-                        "application/json": {
-                            "schema": _schema_ref(error.response_model),
-                        }
-                    },
-                    "x-error-codes": list(error.codes),
-                }
-                for error in spec.errors
-            },
-        },
+        "responses": responses,
     }
     parameters = [
         {
@@ -118,6 +126,34 @@ def _success_response(spec: RouteSpec) -> dict[str, Any]:
             }
             for header in spec.success_headers
         }
+    return response
+
+
+def _outcome_response(outcome: OutcomeResponseSpec) -> dict[str, Any]:
+    return {
+        "description": outcome.description,
+        "content": {
+            "application/json": {
+                "schema": _schema_ref(outcome.response_model),
+            }
+        },
+        "x-response-semantics": outcome.semantic,
+    }
+
+
+def _error_response(error: Any) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "description": "Typed API error response",
+        "content": {
+            "application/json": {
+                "schema": _schema_ref(error.response_model),
+            }
+        },
+        "x-error-codes": list(error.codes),
+    }
+    semantic = ERROR_RESPONSE_SEMANTICS.get(error.status)
+    if semantic is not None:
+        response["x-response-semantics"] = semantic
     return response
 
 
