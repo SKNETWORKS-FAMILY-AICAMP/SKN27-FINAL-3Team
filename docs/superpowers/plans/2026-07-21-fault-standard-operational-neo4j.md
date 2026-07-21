@@ -63,7 +63,7 @@
 
 - [ ] **Step 1:** Write failing tests for V9 label transformation, removal of `Complete30V9`/`V9Import`, metadata insertion, and preservation of role labels/properties.
 - [ ] **Step 2:** Run the focused tests and confirm the intended failures.
-- [ ] **Step 3:** Implement fresh-graph import with a `FaultStandardOperational` uniqueness constraint on `source_legacy_element_id`, a `Rule.rule_id` uniqueness constraint, and relationship MERGE by source relationship ID.
+- [ ] **Step 3:** Implement fresh-graph import with a `FaultStandardOperational` uniqueness constraint on `source_legacy_element_id`, validator-enforced uniqueness for `Rule.rule_id` (Neo4j Community does not accept a multi-label uniqueness constraint), and relationship MERGE by source relationship ID.
 - [ ] **Step 4:** Run focused tests and confirm all pass.
 - [ ] **Step 5:** Commit `feat: add fault standard operational graph importer`.
 

@@ -5,8 +5,16 @@ from etl.fault_cases.rag_runtime.database.validation.validate_fault_standard_ope
     EXPECTED_RELATIONSHIP_COUNTS,
     EXPECTED_RELATIONSHIP_COUNT,
     EXPECTED_ROLE_COUNTS,
+    required_relationship_query,
     validate_report,
 )
+
+
+def test_required_relationship_query_does_not_double_wrap_node_pattern() -> None:
+    query = required_relationship_query("HAS_BASE_FAULT", "BaseFault")
+
+    assert "->((" not in query
+    assert "->(:FaultStandardOperational:BaseFault)" in query
 
 
 class PassSession:
@@ -19,8 +27,8 @@ class PassSession:
             return [{"count": EXPECTED_NODE_COUNT}]
         if "count(r) AS count" in query and "relationship_type" not in query:
             return [{"count": EXPECTED_RELATIONSHIP_COUNT}]
-        if "OR n:Complete30V9" in query:
-            return [{"count": 0}]
+        if "forbidden_labels" in query:
+            return [{"labels": []}]
         if "source_legacy_element_id IS NULL" in query:
             return [{"count": 0}]
         if "source_snapshot_id IS NULL" in query or "schema_version" in query:
@@ -28,7 +36,7 @@ class PassSession:
         if "DISTINCT n.rule_id" in query:
             return [{"count": 277, "distinct_count": 277, "invalid_count": 0}]
         if "collect(name)" in query:
-            return [{"names": ["fault_standard_operational_source_id_unique", "fault_standard_operational_rule_id_unique"]}]
+            return [{"names": ["fault_standard_operational_source_id_unique"]}]
         if "role_count" in query:
             for role, count in EXPECTED_ROLE_COUNTS.items():
                 if f":{role})" in query:

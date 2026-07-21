@@ -58,3 +58,17 @@ def test_import_graph_rejects_non_v9_snapshot(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Complete30V9"):
         import_graph(FakeSession(), tmp_path, "snapshot-1", 9)
+
+
+def test_import_graph_uses_single_label_source_constraint(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"namespace_label": "Complete30V9"}), encoding="utf-8"
+    )
+    (tmp_path / "nodes.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / "relationships.jsonl").write_text("", encoding="utf-8")
+    session = FakeSession()
+
+    import_graph(session, tmp_path, "snapshot-1", 9)
+
+    assert any("fault_standard_operational_source_id_unique" in query for query, _ in session.queries)
+    assert not any("&Rule" in query for query, _ in session.queries)

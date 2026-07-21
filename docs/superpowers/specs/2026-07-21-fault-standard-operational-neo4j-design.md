@@ -59,6 +59,8 @@
 6. 원본 V9의 라벨별·관계별 기대 수와 새 그래프의 역할별·관계별 수를 대조한다.
 7. Runtime이 새 라벨로 후보 Rule과 관계 profile을 읽는지 테스트한다.
 
+Neo4j 5 Community에서는 다중 라벨(`FaultStandardOperational` + `Rule`) 유니크 제약조건을 만들 수 없으므로, `source_legacy_element_id`만 DB 제약조건으로 고정하고 `Rule.rule_id` 고유성은 운영 검증기의 중복 검사로 보장한다.
+
 ## Scope Boundaries
 
 - `evaluation/fault_standard/complete30_v9/`의 이름·데이터는 역사적 평가 계약이므로 변경하지 않는다.

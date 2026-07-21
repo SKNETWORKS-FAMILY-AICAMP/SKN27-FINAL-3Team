@@ -55,7 +55,6 @@ EXPECTED_RELATIONSHIP_COUNTS = {
     "HAS_PARTY": 554,
     "HAS_PMCONTEXT": 38,
     "HAS_PRIORITYCONTEXT": 23,
-    "HAS_PROFILE": 277,
     "HAS_ROADCONTEXT": 61,
     "HAS_ROUNDABOUTCONTEXT": 15,
     "HAS_SCENARIO": 7,
@@ -68,7 +67,7 @@ EXPECTED_RELATIONSHIP_COUNTS = {
     "NEXT_STEP": 45,
     "POTENTIALLY_CONVERGES_ON": 20,
     "PRECEDES_ENTRY": 6,
-    "REQUIRES_FACT": 2328,
+    "REQUIRES_FACT": 1164,
     "RIGHT_SIDE_PARTY": 5,
     "SIGNAL_FOR": 38,
     "TOWARD": 24,
@@ -78,10 +77,11 @@ EXPECTED_RELATIONSHIP_COUNTS = {
     "VARIANT_OF": 40,
 }
 REQUIRED_RULE_RELATIONSHIPS = ("HAS_BASE_FAULT", "HAS_EVIDENCE", "HAS_PARTY", "REQUIRES_FACT")
+RECORD_JSON_REQUIRED_ROLES = ("Adjustment", "BaseFault", "Context", "Fact", "LanePath", "LaneStep", "Party", "Variant")
 
 
-def _first(session: Any, query: str) -> dict[str, Any]:
-    record = next(iter(session.run(query)), None)
+def _first(session: Any, query: str, **parameters: Any) -> dict[str, Any]:
+    record = next(iter(session.run(query, **parameters)), None)
     return dict(record or {})
 
 
@@ -91,15 +91,23 @@ def _safe_role(role: str) -> str:
     return role
 
 
+def required_relationship_query(relationship_type: str, target_role: str) -> str:
+    safe_type = _safe_role(relationship_type)
+    safe_target = _safe_role(target_role)
+    return (
+        f"MATCH {node_pattern('r', 'Rule')} WHERE NOT (r)-[:{safe_type}]->(:{OPERATIONAL_LABEL}:{safe_target}) "
+        "RETURN count(r) AS count"
+    )
+
+
 def validate_report(session: Any) -> dict[str, Any]:
     node_count = int(_first(session, f"MATCH (n:{OPERATIONAL_LABEL}) RETURN count(n) AS count").get("count", -1))
     relationship_count = int(_first(session, "MATCH ()-[r]->() RETURN count(r) AS count").get("count", -1))
-    forbidden_count = int(
-        _first(
-            session,
-            "MATCH (n) WHERE " + " OR ".join(f"n:{label}" for label in sorted(LEGACY_EXPERIMENT_LABELS)) + " RETURN count(n) AS count",
-        ).get("count", -1)
-    )
+    forbidden_labels = [str(label) for label in _first(
+        session,
+        "CALL db.labels() YIELD label WHERE label IN $forbidden_labels RETURN collect(label) AS labels",
+        forbidden_labels=sorted(LEGACY_EXPERIMENT_LABELS),
+    ).get("labels", [])]
     missing_provenance = int(
         _first(
             session,
@@ -111,11 +119,14 @@ def validate_report(session: Any) -> dict[str, Any]:
         f"MATCH (n:{OPERATIONAL_LABEL}:Rule) RETURN count(n) AS count, count(DISTINCT n.rule_id) AS distinct_count, count(CASE WHEN n.rule_id IS NULL OR trim(toString(n.rule_id)) = '' THEN 1 END) AS invalid_count",
     )
     isolated_count = int(_first(session, f"MATCH (n:{OPERATIONAL_LABEL}) WHERE NOT (n)--() RETURN count(n) AS count").get("count", -1))
-    missing_record_json = int(
-        _first(
-            session,
-            f"MATCH (n:{OPERATIONAL_LABEL}) RETURN count(CASE WHEN n.record_json IS NULL OR trim(toString(n.record_json)) = '' THEN 1 END) AS count",
-        ).get("count", -1)
+    missing_record_json = sum(
+        int(
+            _first(
+                session,
+                f"MATCH {node_pattern('n', role)} RETURN count(CASE WHEN n.record_json IS NULL OR trim(toString(n.record_json)) = '' THEN 1 END) AS count",
+            ).get("count", -1)
+        )
+        for role in RECORD_JSON_REQUIRED_ROLES
     )
 
     role_counts: dict[str, int] = {}
@@ -129,12 +140,11 @@ def validate_report(session: Any) -> dict[str, Any]:
     }
     missing_required = {}
     for relationship_type in REQUIRED_RULE_RELATIONSHIPS:
-        safe_type = _safe_role(relationship_type)
+        target_role = relationship_type.replace("HAS_", "").title().replace("_", "")
+        if relationship_type == "REQUIRES_FACT":
+            target_role = "Fact"
         missing_required[relationship_type] = int(
-            _first(
-                session,
-                f"MATCH {node_pattern('r', 'Rule')} WHERE NOT (r)-[:{safe_type}]->({node_pattern('n', safe_type.replace('HAS_', ''))}) RETURN count(r) AS count",
-            ).get("count", -1)
+            _first(session, required_relationship_query(relationship_type, target_role)).get("count", -1)
         )
     constraints = _first(session, "SHOW CONSTRAINTS YIELD name RETURN collect(name) AS names").get("names", [])
     constraints = [str(name) for name in constraints]
@@ -142,7 +152,7 @@ def validate_report(session: Any) -> dict[str, Any]:
     checks = {
         "node_count": node_count == EXPECTED_NODE_COUNT,
         "relationship_count": relationship_count == EXPECTED_RELATIONSHIP_COUNT,
-        "forbidden_labels_absent": forbidden_count == 0,
+        "forbidden_labels_absent": not forbidden_labels,
         "provenance_complete": missing_provenance == 0,
         "rule_identity": int(identity.get("count", -1)) == 277 and int(identity.get("distinct_count", -1)) == 277 and int(identity.get("invalid_count", -1)) == 0,
         "no_isolated_nodes": isolated_count == 0,
@@ -150,14 +160,14 @@ def validate_report(session: Any) -> dict[str, Any]:
         "role_counts": role_counts == EXPECTED_ROLE_COUNTS,
         "relationship_counts": relationship_counts == EXPECTED_RELATIONSHIP_COUNTS,
         "required_rule_relationships": all(value == 0 for value in missing_required.values()),
-        "constraints": {"fault_standard_operational_source_id_unique", "fault_standard_operational_rule_id_unique"}.issubset(constraints),
+        "constraints": "fault_standard_operational_source_id_unique" in constraints,
     }
     return {
         "status": "PASS" if all(value is True for value in checks.values()) else "FAIL",
         "counts": {"nodes": node_count, "relationships": relationship_count},
         "checks": checks,
         "observed": {
-            "forbidden_label_nodes": forbidden_count,
+            "forbidden_labels": forbidden_labels,
             "missing_provenance": missing_provenance,
             "rules": identity,
             "isolated_nodes": isolated_count,

@@ -113,10 +113,6 @@ def _create_constraints(session: Any) -> None:
         "CREATE CONSTRAINT fault_standard_operational_source_id_unique IF NOT EXISTS "
         f"FOR (node:{OPERATIONAL_LABEL}) REQUIRE node.source_legacy_element_id IS UNIQUE"
     ).consume()
-    session.run(
-        "CREATE CONSTRAINT fault_standard_operational_rule_id_unique IF NOT EXISTS "
-        f"FOR (node:{OPERATIONAL_LABEL}:Rule) REQUIRE node.rule_id IS UNIQUE"
-    ).consume()
 
 
 def import_graph(session: Any, backup_dir: Path, snapshot_id: str, schema_version: int) -> dict[str, Any]:
