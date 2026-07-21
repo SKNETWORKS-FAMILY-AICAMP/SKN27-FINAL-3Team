@@ -82,6 +82,15 @@ class GuestCredentialBoundaryTests(TestCase):
         self.assertEqual(response.status_code, 401, response.content)
         self.assertEqual(response.json()["error"]["auth"]["reason"], "missing_guest_credential")
 
+    def test_raw_guest_id_cannot_read_mypage_summary(self) -> None:
+        response = Client(HTTP_X_GUEST_ID="gst_owner").get(
+            "/api/mypage/summary/?session_id=ses_credential_owner"
+        )
+
+        self.assertEqual(response.status_code, 401, response.content)
+        self.assertEqual(response.json()["error"]["code"], "auth_required")
+        self.assertEqual(response.json()["error"]["auth"]["reason"], "missing_token")
+
     def test_header_proved_guest_can_read_history_and_analysis_jobs(self) -> None:
         credential, _claims = issue_guest_credential("owner")
         client = Client(

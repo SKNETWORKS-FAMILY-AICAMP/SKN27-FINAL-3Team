@@ -693,6 +693,82 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ChatSaveStateRequest'
+  /api/mypage/summary/:
+    get:
+      tags:
+      - MyPage
+      summary: Read the current subject's summary after owner or session authorization
+      operationId: getMyPageSummary
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-mypage-summary
+      x-django-view: mypage_summary
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyPageSummaryResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - guest_session_invalid
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - object_access_denied
+      parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to scope the summary and session cache.
+        schema:
+          type: string
+      - name: owner_id
+        in: query
+        required: false
+        description: Optional owner identifier. When supplied, it takes precedence over user_id.
+        schema:
+          type: string
+      - name: user_id
+        in: query
+        required: false
+        description: Legacy owner alias used only when owner_id is absent.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        description: Optional positive integer with a default of 10; invalid values fall back to that
+          default.
+        schema:
+          type: string
   /api/files/:
     get:
       tags:
@@ -4108,6 +4184,80 @@ components:
       - limitations
       - persistence
       title: GuestSessionResponse
+      type: object
+    MyPageCaseSummary:
+      additionalProperties: true
+      description: Stable case identity fields; runtime may expose additional case metadata.
+      properties:
+        job_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Job Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        status:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Status
+      title: MyPageCaseSummary
+      type: object
+    MyPageSummaryResponse:
+      additionalProperties: true
+      description: Compatibility-preserving summary returned by ``GET /api/mypage/summary/``.
+      properties:
+        active_cases:
+          minimum: 0
+          title: Active Cases
+          type: integer
+        due_soon_cases:
+          minimum: 0
+          title: Due Soon Cases
+          type: integer
+        saved_reports:
+          minimum: 0
+          title: Saved Reports
+          type: integer
+        recent_analysis_count:
+          minimum: 0
+          title: Recent Analysis Count
+          type: integer
+        cases:
+          items:
+            $ref: '#/components/schemas/MyPageCaseSummary'
+          title: Cases
+          type: array
+        conversation_save_policy:
+          additionalProperties: true
+          title: Conversation Save Policy
+          type: object
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+      required:
+      - active_cases
+      - due_soon_cases
+      - saved_reports
+      - recent_analysis_count
+      - cases
+      - conversation_save_policy
+      - limitations
+      title: MyPageSummaryResponse
       type: object
     RateLimitErrorDetail:
       additionalProperties: true

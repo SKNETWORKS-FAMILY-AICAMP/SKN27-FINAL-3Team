@@ -171,7 +171,7 @@
 - [x] 분석 입력 프라이버시 거부 응답 — #217
 - [x] 리포트 조회·다운로드 API 계약 — #226 / PR #228 (생성 POST는 deferred 유지)
 - [x] 채팅 세션·메시지·저장 API 계약 — #270: shadow OpenAPI, 200/202/503 채팅 응답, guest credential·소유권 회귀 검증
-- [ ] 마이페이지 API 계약
+- [x] 마이페이지 API 계약 — #272: shadow OpenAPI, owner/session 소유권·raw guest ID 차단·limit 기본값 폴백 회귀 검증
 - [ ] 히스토리 API 계약
 - [x] 에이전트 노드 API 계약 — #268: 공개 분석 결과 DTO의 Worker/Supervisor 내부 필드 차단 및 API·소유권 회귀 검증
 - [ ] 전체 오류·권한 오류·부분 결과 응답 공통 계약 정리
