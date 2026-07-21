@@ -41,7 +41,7 @@ OpenAPI generator는 기존 `RouteErrorSpec`을 유지한 채 다음 확장 필�
 
 이는 `auth_required`, `token_invalid`, `guest_session_invalid`, `login_required`, `object_access_denied` 같은 기존 endpoint별 코드 목록을 대체하지 않는다. 클라이언트는 세부 처리를 `x-error-codes`로, 공통 분류를 `x-response-semantics`로 해석한다.
 
-`auth_optional=True`는 익명 또는 guest 접근 가능성을 뜻할 수 있으므로, 401이 없는 route에 401 계약을 새로 만들지 않는다.
+`auth_optional=True`는 익명 또는 guest 접근 가능성을 뜻할 수 있으므로, 401이 없는 route에 401 계약을 새로 만들지 않는다. 다만 view가 이미 401을 반환하는데 RouteSpec에 누락된 경우에는, 먼저 Django 회귀 테스트로 실제 status·오류 code·body 모델을 고정하고 그 **기존 동작**만 RouteSpec/OpenAPI에 추가한다. 최초 점검 대상은 `GET`·`POST /api/analysis/jobs/`이며, 상세·결과 조회도 guest credential 누락·만료·잘못된 credential 조합을 같은 기준으로 확인한다.
 
 ### 3.2 명시적 outcome 응답
 
@@ -68,6 +68,10 @@ OpenAPI generator는 outcome을 원래 HTTP status의 response로 생성하고 `
 
 채팅의 503과 분석 결과의 202는 더 이상 일반 성공 응답 목록에 두지 않고, 같은 schema를 가진 outcome response로 문서화한다. 이 변경은 OpenAPI 설명과 확장 메타데이터만 바꾸며 runtime status·body는 바꾸지 않는다.
 
+HTTP 상태 코드만으로 outcome을 일반화하지 않는다. `POST /api/analysis/jobs/`의 409는 `AnalysisJobErrorResponse` error envelope이며 내부 `analysis.status`가 `partial`일 수 있어도 `partial_result` outcome으로 등록하지 않는다. 반대로 채팅 scan gate의 409만 `ChatMessageResponse`를 반환하는 명시적 partial outcome이다.
+
+또한 `POST /api/analysis/jobs/`의 202는 Worker 큐 접수(`AnalysisJobAcceptedResponse`)이므로 기존 성공 응답으로 유지한다. `pending` outcome은 결과가 아직 준비되지 않은 `GET /api/analysis/results/{job_id}/`의 202에만 적용한다.
+
 ## 4. 호환성·보안 경계
 
 - endpoint별 오류 DTO와 `x-error-codes`는 유지한다.
@@ -78,11 +82,12 @@ OpenAPI generator는 outcome을 원래 HTTP status의 response로 생성하고 `
 
 ## 5. 검증 계획
 
-1. 정적 계약 테스트에서 outcome status 중복 거부와 401/403 의미 생성 규칙을 확인한다.
-2. OpenAPI 생성 테스트에서 채팅 409 partial, 채팅 503 unavailable, 분석 결과 202 pending의 schema·의미를 확인한다.
-3. Django 런타임 테스트에서 무인증 401, 타인 소유권 403, scan gate partial, 분석 결과 pending을 확인한다.
-4. 기존 route별 API 계약·OpenAPI 생성·Django chatbot 회귀를 실행한다.
-5. 생성 YAML을 갱신하고 H의 `전체 오류·권한 오류·부분 결과 응답 공통 계약 정리` 항목만 완료 표시한다.
+1. Django 회귀 테스트에서 `GET`·`POST /api/analysis/jobs/`와 job 상세·결과 조회의 guest credential 누락·만료·잘못된 credential 조합을 실행해, 실제 401 status·오류 code·body 모델을 고정한다. RouteSpec에는 이 결과로 확인된 기존 401만 추가한다.
+2. 정적 계약 테스트에서 outcome status 중복 거부와 401/403 의미 생성 규칙을 확인한다.
+3. OpenAPI 생성 테스트에서 채팅 409 partial, 채팅 503 unavailable, 분석 결과 202 pending의 schema·의미를 확인한다. 분석 작업 큐의 409 error envelope와 202 accepted가 outcome으로 바뀌지 않는 것도 함께 확인한다.
+4. Django 런타임 테스트에서 무인증 401, 타인 소유권 403, scan gate partial, 분석 결과 pending을 확인한다.
+5. 기존 route별 API 계약·OpenAPI 생성·Django chatbot 회귀를 실행한다.
+6. 생성 YAML을 갱신하고 H의 `전체 오류·권한 오류·부분 결과 응답 공통 계약 정리` 항목만 완료 표시한다.
 
 ## 6. 비목표와 후속 작업
 
