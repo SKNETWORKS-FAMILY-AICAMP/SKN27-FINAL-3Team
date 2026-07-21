@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "common_fault_query_schema_v1",
+  "title": "Common traffic accident embedding evaluation query",
+  "description": "심의사례, 인정기준, 판례에 공통으로 사용하는 사용자 사고 query 레코드",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "query_id",
+    "raw_user_text",
+    "query_text",
+    "accident_group",
+    "participants",
+    "issue_tags",
+    "difficulty",
+    "split",
+    "retrieval_targets",
+    "annotation_status",
+    "eval_set_version"
+  ],
+  "properties": {
+    "query_id": {
+      "type": "string",
+      "pattern": "^fault_common_q[0-9]{2}$"
+    },
+    "raw_user_text": {
+      "type": "string",
+      "minLength": 10
+    },
+    "query_text": {
+      "type": "string",
+      "minLength": 10
+    },
+    "accident_group": {
+      "type": "string",
+      "enum": [
+        "signalized_intersection",
+        "unsignalized_intersection",
+        "turn_and_lane_rule",
+        "lane_change_and_rear_end",
+        "road_entry_and_parking",
+        "roundabout",
+        "highway",
+        "vehicle_motorcycle",
+        "vehicle_pedestrian",
+        "vehicle_bicycle_pm"
+      ]
+    },
+    "participants": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "string",
+        "enum": [
+          "car",
+          "motorcycle",
+          "pedestrian",
+          "bicycle",
+          "personal_mobility"
+        ]
+      }
+    },
+    "issue_tags": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": ["easy", "medium", "hard"]
+    },
+    "split": {
+      "type": "string",
+      "const": "test"
+    },
+    "retrieval_targets": {
+      "const": ["review_case", "fault_standard", "precedent"]
+    },
+    "annotation_status": {
+      "type": "string",
+      "enum": ["draft", "reviewed", "approved"]
+    },
+    "eval_set_version": {
+      "type": "string",
+      "const": "fault_common_queries_v1"
+    }
+  }
+}

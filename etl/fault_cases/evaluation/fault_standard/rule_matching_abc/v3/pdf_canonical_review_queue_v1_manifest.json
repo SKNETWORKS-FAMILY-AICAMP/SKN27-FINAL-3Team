@@ -1,0 +1,6 @@
+{
+  "case_reference_count": 53,
+  "qrels_used_only_for_review_page_queue": true,
+  "review_status": "pending_pdf_rule_condition_review",
+  "unique_rule_count": 39
+}

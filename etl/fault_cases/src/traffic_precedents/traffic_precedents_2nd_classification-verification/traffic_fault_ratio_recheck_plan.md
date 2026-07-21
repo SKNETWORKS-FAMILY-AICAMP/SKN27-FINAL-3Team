@@ -1,5 +1,39 @@
 # 2차 분류 검증 및 재정리 계획
 
+## 0. 실행 결과 (2026-07-15)
+
+이 계획은 구현과 전체 재검증까지 완료했다. 2차 과실비율 증거 검증을 통과한
+1,006건은 recall-first 기본 코퍼스로 유지하고, 사건명 자체가 명백한 비교통 사건인
+경우만 제외했다.
+
+| 분기 | 건수 | 후속 처리 |
+|---|---:|---|
+| `fault_ratio_confirmed` / `rag_eligibility=ready` | 987 | 청킹·임베딩 입력 |
+| `rag_review_flags` 보유 | 779 | ready 987건에 포함된 검토 메타데이터 |
+| `fault_ratio_rag_excluded` | 19 | 사건명으로 확정된 비교통 오탐 |
+| 합계 | 1,006 | 2차 과실비율 증거 검증 통과 집합 |
+
+`rag_review_flags` 779건은 별도 탈락 집합이 아니라 ready 987건의 부분집합이다.
+전체 입력 3,632건 기준으로는 987건 ready, 과실비율 증거 부족 2,626건과 명백한
+비교통 사건 19건이 excluded다.
+최종 RAG 입력은 아래 파일 하나뿐이다.
+
+```text
+etl/fault_cases/artifacts/traffic_precedents_output/
+  traffic_prec_fault_ratio_rag_verified/
+    01_fault_ratio_rag_ready_cases.jsonl
+```
+
+검증 코드와 상세 리포트:
+
+```text
+rag_eligibility.py
+traffic_fault_ratio_recheck.py
+traffic_prec_fault_ratio_rag_verified/00_fault_ratio_rag_verification_report.json
+```
+
+---
+
 ## 1. 문서 목적
 
 이 문서는 2차 과실비율 분류가 끝난 뒤 수행할 **과실비율 관련성 검증 및 재정리 단계**의 계획서입니다.
@@ -24,13 +58,14 @@ traffic_but_no_fault_ratio
 
 ## 2. 현재 2차 분류 결과
 
-현재 `database/traffic_prec_fault_ratio/00_fault_ratio_classification_report.json` 기준 결과는 다음과 같습니다.
+현재 재검증 입력 기준 결과는 다음과 같습니다.
 
 ```text
-총 처리 대상: 3,562건
-fault_ratio_confirmed: 1,151건
-fault_ratio_possible_review: 980건
-traffic_but_no_fault_ratio: 1,431건
+총 처리 대상: 3,632건
+fault_ratio_confirmed 입력: 1,191건
+fault_ratio_possible_review 입력: 998건
+traffic_but_no_fault_ratio 입력: 1,443건
+과실비율 증거 검증 통과: 1,006건
 ```
 
 현재 의미는 다음과 같습니다.
@@ -71,11 +106,15 @@ traffic_but_no_fault_ratio: 1,431건
 피해자 과실, 운전자 과실, 보험자 구상 범위를 구체적으로 판단한 판례
 ```
 
-따라서 2차 검증 단계에서는 `fault_ratio_possible_review`라는 중간 라벨을 없애고, 최종적으로 다음 두 묶음만 남깁니다.
+따라서 2차 검증 단계에서는 `fault_ratio_possible_review`를 최종 RAG 라벨로 남기지
+않고 아래처럼 정리합니다. 애매한 사건은 코퍼스에서 삭제하지 않고 검토 플래그를
+붙입니다.
 
 ```text
 fault_ratio_confirmed
+fault_ratio_rag_excluded
 traffic_but_no_fault_ratio
+rag_review_flags (ready 내부 메타데이터)
 ```
 
 ---
@@ -99,7 +138,7 @@ python traffic_fault_ratio_recheck.py --fresh
 ```bash
 python traffic_fault_ratio_recheck.py \
   --fault-ratio-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio \
-  --out-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_verified \
+  --out-dir etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_rag_verified \
   --fresh
 ```
 
@@ -134,49 +173,53 @@ etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio/
 기본 출력 폴더:
 
 ```text
-etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_verified/
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_rag_verified/
 ```
 
 출력 파일:
 
 ```text
-00_fault_ratio_verification_report.json
-01_fault_ratio_confirmed_cases.jsonl
-02_traffic_but_no_fault_ratio_cases.jsonl
-03_fault_ratio_verified_all.jsonl
-04_demoted_from_fault_confirmed_to_no_fault_ratio.jsonl
-05_promoted_from_possible_to_fault_confirmed.jsonl
-06_possible_to_no_fault_ratio.jsonl
+00_fault_ratio_rag_verification_report.json
+01_fault_ratio_rag_ready_cases.jsonl
+02_fault_ratio_rag_excluded_cases.jsonl
+03_fault_ratio_review_flagged_cases.jsonl
+04_fault_ratio_rag_verified_all.jsonl
+05_demoted_from_confirmed.jsonl
+06_promoted_from_possible.jsonl
+07_possible_excluded.jsonl
+08_rag_gate_rejected.jsonl
 ```
 
 | 파일 | 의미 | 사용처 |
 |---|---|---|
-| `00_fault_ratio_verification_report.json` | 검증/재정리 통계와 기준 요약 | 통계 확인 |
-| `01_fault_ratio_confirmed_cases.jsonl` | 최종 과실비율 판단용 판례 | RAG DB 적재 후보 |
-| `02_traffic_but_no_fault_ratio_cases.jsonl` | 최종 비과실비율 판례 | RAG 제외 또는 별도 보관 |
-| `03_fault_ratio_verified_all.jsonl` | 전체 row에 최종 라벨을 붙인 감사 파일 | 추적/디버깅 |
-| `04_demoted_from_fault_confirmed_to_no_fault_ratio.jsonl` | confirmed에서 비과실로 내려간 row | 수동 검토 |
-| `05_promoted_from_possible_to_fault_confirmed.jsonl` | possible에서 confirmed로 올라간 row | 수동 검토 |
-| `06_possible_to_no_fault_ratio.jsonl` | possible에서 비과실로 간 row | 보관 |
+| `00_fault_ratio_rag_verification_report.json` | 검증 통계와 기준 요약 | 통계 확인 |
+| `01_fault_ratio_rag_ready_cases.jsonl` | 과실 증거 검증을 통과하고 명백한 비교통 제목이 없는 판례 | RAG DB 적재 입력 |
+| `02_fault_ratio_rag_excluded_cases.jsonl` | 비과실 또는 RAG 부적합 판례 | 제외 보관 |
+| `03_fault_ratio_review_flagged_cases.jsonl` | 약한 근거나 부수 쟁점이 있는 ready 판례의 부분집합 | QA·오류 분석 |
+| `04_fault_ratio_rag_verified_all.jsonl` | 전체 row 감사 파일 | 추적/디버깅 |
+| `08_rag_gate_rejected.jsonl` | 과실 증거는 통과했지만 RAG 게이트에서 제외된 판례 | 오탐 분석 |
 
 최종 RAG 데이터베이스 적재 후보는 다음 파일 하나입니다.
 
 ```text
-etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_verified/01_fault_ratio_confirmed_cases.jsonl
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_rag_verified/01_fault_ratio_rag_ready_cases.jsonl
 ```
 
-`03_fault_ratio_verified_all.jsonl`은 전체 추적용이지 RAG 적재 입력이 아닙니다.
+`03_fault_ratio_review_flagged_cases.jsonl`은 `01_fault_ratio_rag_ready_cases.jsonl`에
+이미 포함된 부분집합이므로 별도로 합치지 않습니다.
 
 ---
 
 ## 7. 최종 라벨 구조
 
-검증 후에는 `fault_ratio_possible_review`를 남기지 않습니다.
+검증 후에는 `fault_ratio_possible_review`를 RAG 입력 라벨로 남기지 않습니다.
 
-최종 라벨은 다음 두 개입니다.
+최종 라벨은 다음 세 개입니다. 검토 필요 여부는 라벨이 아니라
+`rag_review_flags` 배열로 저장합니다.
 
 ```text
 fault_ratio_confirmed
+fault_ratio_rag_excluded
 traffic_but_no_fault_ratio
 ```
 
@@ -184,10 +227,10 @@ traffic_but_no_fault_ratio
 
 | 원본 라벨 | 조건 | 최종 라벨 |
 |---|---|---|
-| `fault_ratio_confirmed` | 과실비율 판단용 근거가 충분함 | `fault_ratio_confirmed` |
-| `fault_ratio_confirmed` | 과실비율 판단용 근거가 약함 | `traffic_but_no_fault_ratio` |
-| `fault_ratio_possible_review` | 과실비율 판단용 근거가 충분함 | `fault_ratio_confirmed` |
-| `fault_ratio_possible_review` | confirmed로 올릴 만큼 강하지 않음 | `traffic_but_no_fault_ratio` |
+| 증거 검증 통과 | 사건명에 명백한 비교통 사건 유형이 없음 | `fault_ratio_confirmed` |
+| 증거 검증 통과 | 부수 쟁점, 약한 교통 표현, 과실 문장 연결성 부족 | `fault_ratio_confirmed` + `rag_review_flags` |
+| 증거 검증 통과 | 사건명 자체가 명백한 비교통 사건 | `fault_ratio_rag_excluded` |
+| 증거 검증 실패 | 과실비율 판단용 근거 부족 | `traffic_but_no_fault_ratio` |
 | `traffic_but_no_fault_ratio` | 별도 재검토 없음 | `traffic_but_no_fault_ratio` |
 
 ---
@@ -391,26 +434,22 @@ damage_or_insurance_context
 
 ---
 
-## 18. 예상 통계 항목
+## 18. 실행 통계
 
 검증 리포트에는 다음 통계를 넣습니다.
 
 ```json
 {
-  "fault_confirmed_input_rows": 1151,
-  "fault_confirmed_verified_rows": 0,
-  "fault_confirmed_demoted_to_no_fault_rows": 0,
-  "possible_input_rows": 980,
-  "possible_promoted_to_fault_confirmed_rows": 0,
-  "possible_to_no_fault_rows": 0,
-  "no_fault_input_rows": 1431,
-  "final_fault_ratio_confirmed_rows": 0,
-  "final_no_fault_ratio_rows": 0,
-  "final_all_rows": 3562
+  "fault_confirmed_input_rows": 1191,
+  "possible_input_rows": 998,
+  "no_fault_input_rows": 1443,
+  "base_fault_ratio_confirmed_rows": 1006,
+  "base_confirmed_rag_ready_rows": 987,
+  "base_confirmed_review_flagged_rows": 779,
+  "base_confirmed_rag_excluded_rows": 19,
+  "final_all_rows": 3632
 }
 ```
-
-실제 값은 검증 코드 실행 후 채워집니다.
 
 ---
 
@@ -423,12 +462,13 @@ etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio/
   02_fault_ratio_possible_review.jsonl
   03_traffic_but_no_fault_ratio_cases.jsonl
 ↓
-2차 검증 및 재정리
-etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_verified/
-  01_fault_ratio_confirmed_cases.jsonl
-  02_traffic_but_no_fault_ratio_cases.jsonl
+2차 과실 증거 검증 + recall-first RAG 적합성 판정
+etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_rag_verified/
+  01_fault_ratio_rag_ready_cases.jsonl       # 987, 청킹·임베딩 입력
+  03_fault_ratio_review_flagged_cases.jsonl  # 779, ready 내부 QA 부분집합
+  08_rag_gate_rejected.jsonl                 # 19, 명백한 비교통 제목
 ↓
-최종 fault_ratio_confirmed만 RAG DB 적재 후보
+rag_eligibility=ready만 RAG DB 적재
 ```
 
 ---

@@ -17,6 +17,11 @@ SECTION_ALIASES = {
     "reason": ["결정 이유", "결정이유"],
 }
 
+PARTY_PREFIX_RE = re.compile(r"(차대차|차대인|차대이륜차|차대이륜|이륜차|보행자)\s*(.*)")
+CHAPTER_HEADING_RE = re.compile(r"^\d+\.\s+.+사고(?:\s*\.*\s*\d+)?$")
+PAGE_NUMBER_RE = re.compile(r"^\d{1,4}$")
+HEADER_SEPARATOR_RE = re.compile(r"\s+-\s+")
+
 
 @dataclass
 class HeaderResult:
@@ -68,21 +73,48 @@ def _remove_navigation_tail(value: str) -> str:
     return value[:cut_at].strip()
 
 
+def _structural_header_title(candidates: list[str]) -> str | None:
+    """Find the top classification line from its position after a chapter heading."""
+
+    chapter_index = next(
+        (index for index, line in enumerate(candidates) if CHAPTER_HEADING_RE.fullmatch(line)),
+        None,
+    )
+    if chapter_index is None:
+        return None
+
+    for line in candidates[chapter_index + 1:]:
+        if PAGE_NUMBER_RE.fullmatch(line):
+            continue
+        if line.startswith("(") or line in {"참고기준", "참고 기준", "사례 개요", "사례개요"}:
+            continue
+        return line
+    return None
+
+
 def parse_header(text: str) -> HeaderResult:
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
     review_index = next((index for index, line in enumerate(lines) if "심의번호" in line), min(len(lines), 8))
     candidates = lines[:review_index]
-    title = next((line for line in candidates if line.startswith(("차대차", "차대인", "차대이륜", "차대이륜차", "이륜차", "보행자"))), None)
+    title = next((line for line in candidates if PARTY_PREFIX_RE.match(line)), None)
+    parse_source = "party_prefix"
+    if not title:
+        title = _structural_header_title(candidates)
+        parse_source = "chapter_anchor"
     if not title:
         return HeaderResult(None, None, None, None, None)
 
-    party_match = re.match(r"(차대차|차대인|차대이륜차|차대이륜|이륜차|보행자)\s*(.*)", title)
+    party_match = PARTY_PREFIX_RE.match(title)
     party = party_match.group(1) if party_match else None
     rest = party_match.group(2).strip() if party_match else title
-    if " - " in rest or "-" in rest:
-        left, right = re.split(r"\s*-\s*", rest, maxsplit=1)
-        return HeaderResult(party, title, _squash(left), _squash(right), "hyphen_split")
-    return HeaderResult(party, title, _squash(rest), None, "single_group")
+    separator = HEADER_SEPARATOR_RE.search(rest)
+    if separator:
+        left = rest[:separator.start()]
+        right = rest[separator.end():]
+        method = "hyphen_split" if parse_source == "party_prefix" else "chapter_anchor_hyphen_split"
+        return HeaderResult(party, title, _squash(left), _squash(right), method)
+    method = "single_group" if parse_source == "party_prefix" else "chapter_anchor_single_group"
+    return HeaderResult(party, title, _squash(rest), None, method)
 
 
 def _find_label_positions(text: str) -> list[tuple[int, str, str]]:

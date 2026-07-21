@@ -1,0 +1,9 @@
+{
+  "case_count": 50,
+  "invalid_for_abc_comparison": true,
+  "invalid_reason": "This is a source-verified simulation seed, not an independently PDF-reviewed 50-case answer key.",
+  "not_a_production_answer_key": true,
+  "pending_pdf_fact_review_cases": 30,
+  "simulation_only": true,
+  "source_verified_calculable_cases": 20
+}

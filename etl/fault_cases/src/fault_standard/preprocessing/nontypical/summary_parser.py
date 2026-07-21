@@ -118,7 +118,9 @@ def should_use_detail_title(summary_title: str, detail_title: str) -> bool:
         return True
 
     if normalized_summary == normalized_detail:
-        return False
+        # 의미가 같아도 요약표 PDF 추출에는 ``차량과 사고`` 같은 조사 오탈자가 남을 수
+        # 있습니다. 상세 도표 제목을 정본으로 사용해 두 소스의 표시 제목도 일치시킵니다.
+        return normalize_summary_title(summary_title) != normalize_summary_title(detail_title)
 
     if normalized_detail in normalized_summary:
         return True

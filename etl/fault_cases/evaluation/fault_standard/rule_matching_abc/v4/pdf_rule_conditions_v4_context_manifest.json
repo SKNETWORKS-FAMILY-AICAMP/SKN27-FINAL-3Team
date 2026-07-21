@@ -1,0 +1,8 @@
+{
+  "addition_count": 15,
+  "base_count": 1072,
+  "condition": "environment.accident_group=roundabout",
+  "qrels_used": false,
+  "source_review": "2025 rulebook title and table taxonomy",
+  "version": "v4_pdf_context_conditions_v1"
+}

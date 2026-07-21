@@ -10,12 +10,14 @@ from ..models import ReviewCaseChunk, ReviewCaseDocument, ReviewCaseQualityRow
 
 
 WARNING_FIELDS = {
-    "header_road_context": "header_road_context_missing",
     "road_feature": "road_situation_missing",
     "reference_standard_text": "reference_standard_text_missing",
     "final_ratio_text": "final_ratio_text_missing",
     "toc_item_id": "toc_link_uncertain",
 }
+
+INFORMATIONAL_OPTIONAL_FIELDS = ("header_road_context",)
+HEADER_SEPARATOR_RE = re.compile(r"\s+-\s+")
 
 TEXT_SECTION_FIELDS = [
     "claimant_argument",
@@ -30,6 +32,17 @@ TEXT_SECTION_FIELDS = [
 
 def _missing(value: object) -> bool:
     return value is None or value == "" or value == []
+
+
+def _header_warning_flags(doc: ReviewCaseDocument) -> list[str]:
+    if any(
+        _missing(value)
+        for value in (doc.header_title_raw, doc.header_accident_group, doc.header_parse_method)
+    ):
+        return ["header_parse_failed"]
+    if HEADER_SEPARATOR_RE.search(doc.header_title_raw or "") and _missing(doc.header_road_context):
+        return ["header_road_context_missing"]
+    return []
 
 
 def validate_document(doc: ReviewCaseDocument, chunks: list[ReviewCaseChunk], config: PipelineConfig) -> ReviewCaseQualityRow:
@@ -64,7 +77,7 @@ def validate_document(doc: ReviewCaseDocument, chunks: list[ReviewCaseChunk], co
     ):
         fatal_flags.append("navigation_text_leaked")
 
-    warning_flags = [
+    warning_flags = _header_warning_flags(doc) + [
         flag for field_name, flag in WARNING_FIELDS.items() if _missing(getattr(doc, field_name, None))
     ]
     if doc.reference_standard_text and len(doc.reference_standard_text) < 20:
@@ -99,6 +112,10 @@ def build_summary(
 ) -> dict[str, object]:
     fatal_counter = Counter(flag for row in quality_rows for flag in row.fatal_flags)
     warning_counter = Counter(flag for row in quality_rows for flag in row.warning_flags)
+    optional_null_counts = {
+        field_name: sum(_missing(getattr(doc, field_name, None)) for doc in documents)
+        for field_name in INFORMATIONAL_OPTIONAL_FIELDS
+    }
     valid_count = sum(1 for doc in documents if doc.parse_status == "valid")
     return {
         "document_count": len(documents),
@@ -111,4 +128,5 @@ def build_summary(
         "review_required_document_count": len(documents) - valid_count,
         "fatal_flag_counts": dict(sorted(fatal_counter.items())),
         "warning_flag_counts": dict(sorted(warning_counter.items())),
+        "optional_field_null_counts": optional_null_counts,
     }

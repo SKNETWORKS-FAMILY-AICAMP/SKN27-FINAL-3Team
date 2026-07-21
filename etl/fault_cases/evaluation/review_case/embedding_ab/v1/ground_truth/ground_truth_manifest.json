@@ -1,0 +1,114 @@
+{
+  "qrels_version": "review_case_qrels_v1",
+  "status": "approved",
+  "created_at": "2026-07-15",
+  "updated_at": "2026-07-16",
+  "query_set_version": "fault_common_queries_v1",
+  "query_file": "../../../../common/embedding_ab/v1/common_fault_queries_v1.jsonl",
+  "query_sha256": "a50921b0ea409ebfdd46d50c8ef632fb1fdac7c53b80ebb95fbb353c4ea02102",
+  "corpus_documents_file": "../../../../../artifacts/review_case_output/preprocessed/review_case_documents.jsonl",
+  "corpus_documents_sha256": "447a69bb0495aa27f94421744bd83e5a8910781f14907c8621dd7328c448756e",
+  "corpus_document_count": 226,
+  "corpus_chunks_file": "../../../../../artifacts/review_case_output/preprocessed/review_case_chunks.jsonl",
+  "corpus_chunks_sha256": "09d81dd61ef48d91ac885f53af3af45e18b7068a8c9670863e4ac4d12e06fa70",
+  "corpus_chunk_count": 904,
+  "qrels_file": "review_case_qrels_v1.jsonl",
+  "qrels_row_count": 89,
+  "qrels_sha256": "093f70b78484c8d9b4989801debca52e1aae5debbfa9e1788285bd8cae0c6c1f",
+  "explanation_file": "qrels_explanation.md",
+  "explanation_sha256": "5d0a0c72ab5a6c7644d3ed38c5df145c042a511cb6a569c075764eb20db84572",
+  "query_coverage_count": 50,
+  "query_coverage_rate": 1.0,
+  "query_judgment_status_counts": {
+    "has_relevant_document": 41,
+    "no_relevant_document": 9
+  },
+  "qrels_row_status_counts": {
+    "has_relevant_document": 80,
+    "no_relevant_document": 9
+  },
+  "answerable_coverage": 0.82,
+  "relevance_counts": {
+    "1": 21,
+    "2": 19,
+    "3": 40
+  },
+  "relevant_judgment_count": 80,
+  "distinct_relevant_review_case_count": 71,
+  "max_queries_per_review_case": 2,
+  "adjudication_status_counts": {
+    "approved": 89
+  },
+  "label_source_counts": {
+    "pilot_draft_promoted": 19,
+    "full_corpus_structured_review_draft": 61,
+    "second_pass_corpus_review_draft": 8,
+    "third_pass_source_review_draft": 1
+  },
+  "second_pass_change_counts": {
+    "added_judgments": 8,
+    "removed_judgments": 1,
+    "regraded_judgments": 9,
+    "reason_rewrites": 2,
+    "multi_chunk_type_rows_narrowed": 17
+  },
+  "pilot_query_count": 10,
+  "pilot_source_version": "qrels_review_cases_pilot_v1",
+  "no_relevant_query_ids": [
+    "fault_common_q07",
+    "fault_common_q15",
+    "fault_common_q31",
+    "fault_common_q32",
+    "fault_common_q46",
+    "fault_common_q47",
+    "fault_common_q48",
+    "fault_common_q49",
+    "fault_common_q50"
+  ],
+  "validation": {
+    "query_coverage": "passed_50_of_50",
+    "document_id_references": "passed_80_of_80",
+    "chunk_id_references": "passed_80_of_80",
+    "pilot_query_coverage": "passed_10_of_10",
+    "pilot_judgments_superseded_by_source_review": 1,
+    "duplicate_qrels_judgments": 0,
+    "single_expected_chunk_type": "passed_80_of_80",
+    "explanation_query_sections": "passed_50_of_50",
+    "adjudication_status": "passed_approved_89_of_89"
+  },
+  "review_required": false,
+  "approved_at": "2026-07-16",
+  "approval_basis": "final adjudication review accepted by dataset owner",
+  "review_policy": "relevance 3과 2만 Recall/MRR 정답으로 사용하고 relevance 1은 nDCG의 낮은 gain과 오차 분석에만 사용한다. 방향, 행동, 당사자 유형이 명시적으로 반대인 사례는 hard negative로 제외한다.",
+  "notes": [
+    "review_case_qrels_v1.jsonl은 심의사례 Ground Truth의 유일한 원본이며 판정별 한 줄로 저장한다.",
+    "2026-07-16 3차 원문 검수에서 q12의 직접 사례 2019-034337을 복구하고 방향이 반대인 q01 및 q20 판정 2건을 제외했다.",
+    "같은 검수에서 q05 3건, q10 1건, q14 1건, q21 1건의 relevance를 재조정하고 q03 판정 근거를 보강했다.",
+    "파일럿은 판정 이력으로 보존하며, q01의 2018-051544 판정 1건은 전체 원문 검수 결과가 우선한다.",
+    "최종 판정 검수 결과를 데이터 소유자가 수용하여 2026-07-16 approved로 동결했다.",
+    "qrels_explanation.md는 1번부터 50번까지 문제, 정답, 원문 근거, 등급 이유와 오답 포인트를 풀이한 사람 검수용 해설집이며 정답 원본은 아니다.",
+    "no_relevant_document는 0점 정답이 아니라 심의사례 코퍼스에 유효한 정답이 없다는 판정이다."
+  ],
+  "third_pass_change_counts": {
+    "recovered_direct_match_queries": 1,
+    "removed_opposite_direction_judgments": 2,
+    "regraded_judgments": 6,
+    "reason_rewrites": 1
+  },
+  "graded_answerable_query_count": 41,
+  "graded_answerable_coverage": 0.82,
+  "binary_relevant_threshold": 2,
+  "binary_answerable_query_count": 32,
+  "binary_answerable_coverage": 0.64,
+  "r1_only_query_ids": [
+    "fault_common_q03",
+    "fault_common_q04",
+    "fault_common_q05",
+    "fault_common_q06",
+    "fault_common_q16",
+    "fault_common_q18",
+    "fault_common_q23",
+    "fault_common_q24",
+    "fault_common_q26"
+  ]
+}

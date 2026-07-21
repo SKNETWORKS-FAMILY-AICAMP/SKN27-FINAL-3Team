@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .chunker import build_chunks
-from .classifiers import build_priority_context, build_road_context, classify_accident
+from .classifiers import build_priority_context, build_road_context, classify_accident, is_non_intersection_title
 from .config import (
     DOCUMENT_TITLE,
     PUBLISHED_DATE,
@@ -27,6 +27,7 @@ from .extractors import (
     split_rule_blocks,
 )
 from .file_utils import safe_filename
+from .summary_parser import normalize_title_for_compare
 
 
 def build_rule_package(
@@ -220,7 +221,11 @@ def build_parse_quality(
     if summary_row:
         summary_title = summary_row.get("summary_title") or ""
         detail_title = section.get("rule_title") or ""
-        if summary_title and detail_title and summary_title != detail_title:
+        if (
+            summary_title
+            and detail_title
+            and normalize_title_for_compare(summary_title) != normalize_title_for_compare(detail_title)
+        ):
             reasons.append("summary_title_mismatch")
 
     suspicious_road_area = detect_suspicious_road_context(section.get("rule_title", ""), road_context)
@@ -268,7 +273,7 @@ def detect_suspicious_road_context(title: str, road_context: Dict[str, Any]) -> 
 
     road_area = road_context.get("road_area")
 
-    if ("점멸" in title or "교차로" in title) and road_area != "교차로":
+    if ("점멸" in title or ("교차로" in title and not is_non_intersection_title(title))) and road_area != "교차로":
         return "expected_intersection"
 
     if ("진로변경" in title or "동일차로" in title or "끼어들기" in title or "급진입" in title) and road_area not in {"동일차로", "추월"}:

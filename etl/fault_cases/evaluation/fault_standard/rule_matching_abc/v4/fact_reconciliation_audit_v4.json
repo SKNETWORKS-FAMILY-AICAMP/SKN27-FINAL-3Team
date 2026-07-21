@@ -1,0 +1,113 @@
+{
+  "case_count": 50,
+  "changed_case_count": 10,
+  "changes": [
+    {
+      "case_id": "fault_common_q11",
+      "changes": [
+        {
+          "after": "straight",
+          "before": "enter",
+          "fact_key": "opponent.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q16",
+      "changes": [
+        {
+          "after": "straight",
+          "before": "u_turn",
+          "fact_key": "opponent.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q17",
+      "changes": [
+        {
+          "after": "u_turn",
+          "before": "right_turn",
+          "fact_key": "opponent.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q18",
+      "changes": [
+        {
+          "after": "straight",
+          "before": "left_turn",
+          "fact_key": "user.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q21",
+      "changes": [
+        {
+          "after": "straight",
+          "before": "lane_change",
+          "fact_key": "user.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q32",
+      "changes": [
+        {
+          "after": "overtake",
+          "before": "straight",
+          "fact_key": "user.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q35",
+      "changes": [
+        {
+          "after": "reverse",
+          "before": "enter",
+          "fact_key": "opponent.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q37",
+      "changes": [
+        {
+          "after": "lane_change",
+          "before": "straight",
+          "fact_key": "user.movement"
+        },
+        {
+          "after": "overtake",
+          "before": "straight",
+          "fact_key": "opponent.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q44",
+      "changes": [
+        {
+          "after": "overtake",
+          "before": "right_turn",
+          "fact_key": "user.movement"
+        }
+      ]
+    },
+    {
+      "case_id": "fault_common_q49",
+      "changes": [
+        {
+          "after": "lane_change",
+          "before": "straight",
+          "fact_key": "user.movement"
+        }
+      ]
+    }
+  ],
+  "contains_rule_or_ratio": false,
+  "uses_qrels": false
+}
