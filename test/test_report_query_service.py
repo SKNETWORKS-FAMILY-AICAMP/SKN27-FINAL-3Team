@@ -325,8 +325,8 @@ def test_error_projection_drops_raw_authorization_and_storage_metadata() -> None
         "reason": "owner_mismatch",
         "resource": {
             "type": "report",
-            "report_id": "rep_123",
-            "session_id": "ses_123",
+            "report_id": None,
+            "session_id": None,
         },
     }
 

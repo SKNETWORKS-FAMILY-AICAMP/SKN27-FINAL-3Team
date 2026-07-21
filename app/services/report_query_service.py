@@ -318,12 +318,9 @@ def _public_error_access(access: Mapping[str, Any]) -> dict[str, Any]:
         if value is not None:
             public[key] = value
     resource = _mapping(access.get("resource"))
-    if resource:
-        public["resource"] = {
-            key: _optional_text(resource.get(key))
-            for key in ("type", "report_id", "session_id")
-            if _optional_text(resource.get(key)) is not None
-        }
+    resource_type = _optional_text(resource.get("type"))
+    if resource_type is not None:
+        public["resource"] = {"type": resource_type}
     return public
 
 
