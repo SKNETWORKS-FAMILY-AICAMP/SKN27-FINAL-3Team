@@ -13,6 +13,8 @@ from typing import Any
 
 from neo4j import GraphDatabase
 
+from .graph_schema import node_pattern
+
 
 def _config() -> tuple[str, str, str, str]:
     """인정기준 전용 Neo4j 접속 정보만 환경변수에서 읽는다."""
@@ -51,16 +53,16 @@ def graph_data(rule_ids: list[str]) -> dict[str, dict[str, Any]]:
         with driver.session(database=database) as session:
             # 각 관계는 source-record JSON을 그대로 반환해 계산기 입력을 임의 재구성하지 않는다.
             queries = (
-                ("MATCH (r:Complete30V9:Rule)-[:REQUIRES_FACT]->(n:Complete30V9:Fact) WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "conditions"),
-                ("MATCH (r:Complete30V9:Rule)-[:HAS_PARTY]->(n:Complete30V9:Party) WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "parties"),
-                ("MATCH (r:Complete30V9:Rule)-[:HAS_BASE_FAULT]->(n:Complete30V9:BaseFault) WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "bases"),
-                ("MATCH (r:Complete30V9:Rule)-[:HAS_ADJUSTMENT]->(n:Complete30V9:Adjustment) WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "adjustments"),
-                ("MATCH (r:Complete30V9:Rule)-[:HAS_VARIANT]->(n:Complete30V9:Variant) WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "variants"),
-                ("MATCH (r:Complete30V9:Rule)-[:HAS_CONTEXT]->(n:Complete30V9:Context) WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "contexts"),
-                ("MATCH (g:Complete30V9:RuleGroup)-[:CONTAINS_RULE]->(r:Complete30V9:Rule) WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,g.group_name AS group_name", "groups"),
-                ("MATCH (p:Complete30V9:Party)-[:PRECEDES_ENTRY]->(q:Complete30V9:Party) WHERE p.rule_id IN $ids RETURN p.rule_id AS rid,p.party_key AS first,q.party_key AS late", "precedence"),
-                ("MATCH (p:Complete30V9:Party)-[:FOLLOWS_PATH]->(x:Complete30V9:LanePath)-[:HAS_STEP]->(s:Complete30V9:LaneStep) WHERE p.rule_id IN $ids RETURN p.rule_id AS rid,p.party_key AS party,x.record_json AS path,s.record_json AS step", "paths_steps"),
-                ("MATCH (s:Complete30V9:LaneStep)-[:POTENTIALLY_CONVERGES_ON]->(z:Complete30V9:PotentialConflictZone) WHERE s.rule_id IN $ids RETURN s.rule_id AS rid,s.party_key AS party,z.lane AS lane", "potential_conflicts"),
+                (f"MATCH {node_pattern('r', 'Rule')}-[:REQUIRES_FACT]->{node_pattern('n', 'Fact')} WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "conditions"),
+                (f"MATCH {node_pattern('r', 'Rule')}-[:HAS_PARTY]->{node_pattern('n', 'Party')} WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "parties"),
+                (f"MATCH {node_pattern('r', 'Rule')}-[:HAS_BASE_FAULT]->{node_pattern('n', 'BaseFault')} WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "bases"),
+                (f"MATCH {node_pattern('r', 'Rule')}-[:HAS_ADJUSTMENT]->{node_pattern('n', 'Adjustment')} WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "adjustments"),
+                (f"MATCH {node_pattern('r', 'Rule')}-[:HAS_VARIANT]->{node_pattern('n', 'Variant')} WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "variants"),
+                (f"MATCH {node_pattern('r', 'Rule')}-[:HAS_CONTEXT]->{node_pattern('n', 'Context')} WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,n.record_json AS raw", "contexts"),
+                (f"MATCH {node_pattern('g', 'RuleGroup')}-[:CONTAINS_RULE]->{node_pattern('r', 'Rule')} WHERE r.rule_id IN $ids RETURN r.rule_id AS rid,g.group_name AS group_name", "groups"),
+                (f"MATCH {node_pattern('p', 'Party')}-[:PRECEDES_ENTRY]->{node_pattern('q', 'Party')} WHERE p.rule_id IN $ids RETURN p.rule_id AS rid,p.party_key AS first,q.party_key AS late", "precedence"),
+                (f"MATCH {node_pattern('p', 'Party')}-[:FOLLOWS_PATH]->{node_pattern('x', 'LanePath')}-[:HAS_STEP]->{node_pattern('s', 'LaneStep')} WHERE p.rule_id IN $ids RETURN p.rule_id AS rid,p.party_key AS party,x.record_json AS path,s.record_json AS step", "paths_steps"),
+                (f"MATCH {node_pattern('s', 'LaneStep')}-[:POTENTIALLY_CONVERGES_ON]->{node_pattern('z', 'PotentialConflictZone')} WHERE s.rule_id IN $ids RETURN s.rule_id AS rid,s.party_key AS party,z.lane AS lane", "potential_conflicts"),
             )
             for cypher, kind in queries:
                 for row in session.run(cypher, ids=rule_ids):

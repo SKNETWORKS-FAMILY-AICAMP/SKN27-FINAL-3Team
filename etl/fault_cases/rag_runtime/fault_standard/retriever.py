@@ -15,6 +15,7 @@ from neo4j import GraphDatabase
 
 from .utils import flat_facts as _flat_facts
 from .calculator import calculate_fault_ratio
+from .graph_schema import node_pattern
 from .neo4j_reranker import (
     calculator_profiles as c2b_calculator_profiles,
     select as c2b_select,
@@ -79,7 +80,7 @@ def _graph_profiles(rule_ids: list[str]) -> tuple[dict[str, list[dict[str, Any]]
             )
             for relation, destination, label in queries:
                 cypher = (
-                    f"MATCH (r:Complete30V9:Rule)-[:{relation}]->(n:Complete30V9:{label}) "
+                    f"MATCH {node_pattern('r', 'Rule')}-[:{relation}]->{node_pattern('n', label)} "
                     "WHERE r.rule_id IN $rule_ids "
                     "RETURN r.rule_id AS rule_id, n.record_json AS record_json"
                 )
