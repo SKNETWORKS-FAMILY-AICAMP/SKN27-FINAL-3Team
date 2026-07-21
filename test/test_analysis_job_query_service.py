@@ -59,11 +59,10 @@ def test_pending_result_uses_the_v2_contract_without_calling_composer() -> None:
         "job_id": "job_queued",
         "status": "queued",
         "assistant_message": None,
-        "structured_results": {},
         "evidence": [],
         "limitations": [],
-        "work_item": {"id": "work_1", "state": "queued"},
-        "progress_state": {"current": 1, "total": 3},
+        "work_item": {},
+        "progress_state": {},
     }
     assert composer_calls == []
 
@@ -94,7 +93,9 @@ def test_completed_result_normalizes_only_dict_agent_outputs_for_composer() -> N
     )
 
     assert outcome.kind == "completed"
-    assert outcome.payload is expected
+    assert outcome.payload["contract_version"] == "analysis_result.v2"
+    assert outcome.payload["status"] == "partial"
+    assert expected == {"contract_version": "analysis_result.v2", "status": "partial"}
     assert captured == [
         {
             "job_id": "job_done",
@@ -145,10 +146,185 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
         "attachments": [{"attachment_id": "attachment_1"}],
         "reporting_payload": {"report_id": "report_1"},
         "supervisor_state": {"stage": "finalize"},
-        "supervisor_execution": {"status": "success"},
-        "work_item": {"id": "work_1", "state": "done"},
-        "progress_state": {"current": 3, "total": 3},
+        "supervisor_execution": {"status": "success", "node_results": []},
+        "work_item": {},
+        "progress_state": {},
     }
+
+
+def test_completed_result_projects_only_public_agent_display_fields() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    stored = {
+        "job_id": "job_public_contract",
+        "status": "success",
+        "agent_results": [
+            {
+                "node_code": "law_ground_search",
+                "status": "success",
+                "summary": "관련 법령을 찾았습니다.",
+                "structured_result": {"matched_laws": [{"title": "도로교통법"}]},
+                "evidence": [{"source_reference": "law:1"}],
+                "next_actions": ["근거를 확인해 주세요."],
+                "limitations": ["개별 판단은 확인이 필요합니다."],
+            }
+        ],
+        "reporting_payload": {
+            "contract_version": "reporting_payload.v2",
+            "title": "이의신청 초안",
+            "sections": [{"title": "신청 이유", "content": "표시용 내용"}],
+            "form_data": {"applicant_name": "internal-only"},
+            "appeal_decision": {"internal": True},
+        },
+        "supervisor_state": {
+            "stage": "agent_execution_ready",
+            "conversation_summary": "신청 사유를 확인했습니다.",
+            "agent_input_packages": [
+                {
+                    "node_code": "objection_report_generation",
+                    "payload": {"secret": "hidden"},
+                }
+            ],
+            "raw_supervisor_input": {"secret": "hidden"},
+        },
+        "supervisor_execution": {
+            "contract_version": "supervisor_execution.v1",
+            "execution_mode": "async_worker",
+            "job_id": "job_public_contract",
+            "plan_id": "plan_internal",
+            "session_id": "ses_internal",
+            "node_results": [
+                {
+                    "node_code": "law_ground_search",
+                    "status": "success",
+                    "summary": "관련 법령을 찾았습니다.",
+                    "structured_result": {"matched_laws": [{"title": "도로교통법"}]},
+                    "agent_input": {"secret": "hidden"},
+                }
+            ],
+        },
+        "work_item": {
+            "contract_version": "agent_worker_queue.v1",
+            "work_item_id": "work_public_contract",
+            "job_id": "job_public_contract",
+            "status": "success",
+            "worker_payload": {"secret": "hidden"},
+        },
+        "progress_state": {
+            "contract_version": "agent_worker_progress.v1",
+            "state": "success",
+            "job_status": "success",
+            "worker_payload": {"secret": "hidden"},
+        },
+        "supervisor_reporting_handoff": {"secret": "hidden"},
+        "reporting_pipeline": {"secret": "hidden"},
+    }
+    original = deepcopy(stored)
+
+    outcome = load_analysis_result(
+        "job_public_contract",
+        load_job=lambda _job_id: stored,
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "status": "partial",
+            "assistant_message": {"answer": "분석 결과"},
+            "structured_results": {"law_ground_search": {"internal": True}},
+            "agent_results": [{"internal": True}],
+            "evidence": [{"source_reference": "law:1"}],
+            "limitations": ["개별 판단은 확인이 필요합니다."],
+            "next_actions": ["근거를 확인해 주세요."],
+            "deadline_guidance": {"contract_version": "deadline_guidance.v1"},
+        },
+    )
+
+    assert outcome.kind == "completed"
+    assert outcome.payload["assistant_message"] == {"answer": "분석 결과"}
+    assert outcome.payload["limitations"] == ["개별 판단은 확인이 필요합니다."]
+    assert outcome.payload["next_actions"] == ["근거를 확인해 주세요."]
+    assert outcome.payload["deadline_guidance"] == {"contract_version": "deadline_guidance.v1"}
+    assert outcome.payload["reporting_payload"] == {
+        "contract_version": "reporting_payload.v2",
+        "title": "이의신청 초안",
+        "sections": [{"title": "신청 이유", "content": "표시용 내용"}],
+    }
+    assert outcome.payload["supervisor_state"] == {
+        "stage": "agent_execution_ready",
+        "conversation_summary": "신청 사유를 확인했습니다.",
+        "agent_input_packages": [{"node_code": "objection_report_generation"}],
+    }
+    assert outcome.payload["supervisor_execution"] == {
+        "contract_version": "supervisor_execution.v1",
+        "execution_mode": "async_worker",
+        "job_id": "job_public_contract",
+        "node_results": [
+            {
+                "node_code": "law_ground_search",
+                "status": "success",
+                "summary": "관련 법령을 찾았습니다.",
+                "structured_result": {"matched_laws": [{"title": "도로교통법"}]},
+            }
+        ],
+    }
+    assert outcome.payload["work_item"] == {
+        "contract_version": "agent_worker_queue.v1",
+        "work_item_id": "work_public_contract",
+        "job_id": "job_public_contract",
+        "status": "success",
+    }
+    assert outcome.payload["progress_state"] == {
+        "contract_version": "agent_worker_progress.v1",
+        "state": "success",
+        "job_status": "success",
+    }
+    for field in (
+        "structured_results",
+        "agent_results",
+        "supervisor_reporting_handoff",
+        "reporting_pipeline",
+        "supervisor_handoff",
+    ):
+        assert field not in outcome.payload
+    assert stored == original
+
+
+def test_pending_result_projects_only_worker_polling_fields() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_queued",
+        load_job=lambda _job_id: {
+            "job_id": "job_queued",
+            "status": "queued",
+            "work_item": {
+                "contract_version": "agent_worker_queue.v1",
+                "work_item_id": "work_1",
+                "job_id": "job_queued",
+                "status": "queued",
+                "worker_payload": {"secret": "hidden"},
+            },
+            "progress_state": {
+                "contract_version": "agent_worker_progress.v1",
+                "state": "queued",
+                "job_status": "queued",
+                "worker_payload": {"secret": "hidden"},
+            },
+        },
+        compose_response=lambda _payload: AssertionError("pending results do not compose"),
+    )
+
+    assert outcome.kind == "pending"
+    assert outcome.payload["work_item"] == {
+        "contract_version": "agent_worker_queue.v1",
+        "work_item_id": "work_1",
+        "job_id": "job_queued",
+        "status": "queued",
+    }
+    assert outcome.payload["progress_state"] == {
+        "contract_version": "agent_worker_progress.v1",
+        "state": "queued",
+        "job_status": "queued",
+    }
+    assert "structured_results" not in outcome.payload
 
 
 def test_completed_result_prepends_composed_deadline_card_to_persisted_cards() -> None:
