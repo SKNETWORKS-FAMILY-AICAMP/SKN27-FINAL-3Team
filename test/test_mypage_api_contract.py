@@ -18,21 +18,18 @@ def test_mypage_summary_has_a_compatibility_preserving_shadow_contract() -> None
     assert spec.request_model is None
     assert spec.response_model is contracts.MyPageSummaryResponse
     assert spec.success_status == 200
-    assert spec.auth_required is False
-    assert spec.auth_optional is True
+    assert spec.auth_required is True
+    assert spec.auth_optional is False
     assert spec.contract_status == "shadow"
     assert spec.tags == ("MyPage",)
 
     parameters = {(item.name, item.location): item for item in spec.request_parameters}
     assert set(parameters) == {
-        ("X-Guest-Credential", "header"),
-        ("X-Guest-Id", "header"),
         ("session_id", "query"),
         ("owner_id", "query"),
         ("user_id", "query"),
         ("limit", "query"),
     }
-    assert "not valid identity proof" in parameters[("X-Guest-Id", "header")].description
     assert "takes precedence" in parameters[("owner_id", "query")].description
     assert "only when owner_id is absent" in parameters[("user_id", "query")].description
     assert "default of 10" in parameters[("limit", "query")].description
@@ -54,18 +51,16 @@ def test_mypage_summary_has_a_compatibility_preserving_shadow_contract() -> None
     assert ("GET", "/api/mypage/summary/") not in deferred
 
 
-def test_openapi_documents_mypage_summary_query_and_guest_boundaries() -> None:
+def test_openapi_documents_mypage_summary_as_an_app_jwt_protected_route() -> None:
     generator = importlib.import_module("app.contracts.openapi_v1")
     operation = generator.build_openapi_document()["paths"]["/api/mypage/summary/"]["get"]
 
     assert operation["operationId"] == "getMyPageSummary"
-    assert operation["security"] == [{}, {"bearerAuth": []}]
+    assert operation["security"] == [{"bearerAuth": []}]
     assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/MyPageSummaryResponse"
     }
     assert [parameter["name"] for parameter in operation["parameters"]] == [
-        "X-Guest-Credential",
-        "X-Guest-Id",
         "session_id",
         "owner_id",
         "user_id",

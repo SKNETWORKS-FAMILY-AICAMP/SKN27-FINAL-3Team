@@ -442,8 +442,6 @@ CHAT_SESSION_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 
 
 MYPAGE_SUMMARY_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
-    GUEST_CREDENTIAL_HEADER_PARAMETER,
-    GUEST_ID_HEADER_PARAMETER,
     RequestParameterSpec(
         name="session_id",
         location="query",
@@ -715,14 +713,13 @@ MYPAGE_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         response_model=MyPageSummaryResponse,
         success_status=200,
         errors=_auth_errors(
-            (401, ("auth_required", "token_invalid", "token_expired", "guest_session_invalid")),
+            (401, ("auth_required", "token_invalid", "token_expired")),
             (403, ("object_access_denied",)),
         ),
-        auth_required=False,
-        auth_optional=True,
+        auth_required=True,
         contract_status="shadow",
         tags=("MyPage",),
-        summary="Read the current subject's summary after owner or session authorization",
+        summary="Read the authenticated user's summary after owner or session authorization",
         request_parameters=MYPAGE_SUMMARY_REQUEST_PARAMETERS,
     ),
 )

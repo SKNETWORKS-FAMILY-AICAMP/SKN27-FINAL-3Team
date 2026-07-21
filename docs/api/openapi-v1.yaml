@@ -697,10 +697,9 @@ paths:
     get:
       tags:
       - MyPage
-      summary: Read the current subject's summary after owner or session authorization
+      summary: Read the authenticated user's summary after owner or session authorization
       operationId: getMyPageSummary
       security:
-      - {}
       - bearerAuth: []
       x-contract-status: shadow
       x-django-route-name: canonical-mypage-summary
@@ -722,7 +721,6 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
-          - guest_session_invalid
         '403':
           description: Typed API error response
           content:
@@ -732,18 +730,6 @@ paths:
           x-error-codes:
           - object_access_denied
       parameters:
-      - name: X-Guest-Credential
-        in: header
-        required: false
-        description: Signed guest credential required to prove a supplied guest identity.
-        schema:
-          type: string
-      - name: X-Guest-Id
-        in: header
-        required: false
-        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
-        schema:
-          type: string
       - name: session_id
         in: query
         required: false

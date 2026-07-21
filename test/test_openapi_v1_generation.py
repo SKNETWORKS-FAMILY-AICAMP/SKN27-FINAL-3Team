@@ -91,7 +91,7 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
             assert operation["x-django-route-name"].startswith("canonical-")
             expected_security = (
                 [{}, {"bearerAuth": []}]
-                    if path.startswith(("/api/chat/", "/api/mypage/", "/api/files/", "/api/analysis/"))
+                if path.startswith(("/api/chat/", "/api/files/", "/api/analysis/"))
                 else [{"bearerAuth": []}]
             )
             assert operation["security"] == expected_security

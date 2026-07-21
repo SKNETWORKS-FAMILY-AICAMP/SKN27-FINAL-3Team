@@ -11,7 +11,7 @@ Issue #272의 `GET /api/mypage/summary/`를 현재 동작을 바꾸지 않는 sh
 - 프런트엔드는 `app/web/apiClient.js`에서 `session_id`만 query로 보내며, 화면은 응답의 `cases`를 사용한다. 호출 URL·UI·상태 처리는 바꾸지 않는다.
 - 서버는 `owner_id`를 우선하고, 없을 때 레거시 `user_id`, 그 다음 인증 subject의 `user_id`를 사용한다. 이 우선순위는 문서화만 하고 변경하지 않는다.
 - `limit`은 양의 정수이며 기본값은 10이다. 누락·0·음수·정수가 아닌 값은 현재처럼 400이 아니라 기본값으로 처리한다.
-- App JWT 또는 검증된 guest credential을 사용할 수 있다. `X-Guest-Id`는 식별 보조값일 뿐이고, 보호된 guest 요청의 권한 증명은 `X-Guest-Credential`이다.
+- 마이페이지 요약은 App JWT가 필요한 보호 API다. 검증된 guest credential과 `X-Guest-Id`는 이 경로의 권한 증명이 아니며, 둘 다 App JWT를 대체하지 않는다.
 
 ## 결정
 
@@ -37,9 +37,7 @@ DTO와 RouteSpec은 OpenAPI 및 정적 계약 테스트의 기준이다. Django 
 - `user_id`: `owner_id`가 없을 때만 쓰는 호환용 별칭
 - `limit`: 양의 정수, 기본값 10, 잘못된 값은 기본값 처리
 
-`X-Guest-Credential`, `X-Guest-Id` header도 기존 공통 parameter를 재사용해 문서화한다. 이 route는 App JWT와 guest credential 경로를 모두 허용하므로 `auth_optional=True`로 등록한다. 단, 이는 무인증 허용을 뜻하지 않으며 실제 권한 판정은 현행 `mypage_summary`의 access payload 및 owner/session 인가 로직이 수행한다.
-
-credential은 header로만 다루며 query, response DTO, 로그용 DTO에 추가하지 않는다.
+이 route는 `auth_required=True`로 등록한다. guest credential header는 이 API의 공개 입력 parameter로 등록하지 않는다. raw guest ID와 유효한 guest credential 모두 App JWT가 없는 마이페이지 접근 권한을 만들지 못하며, 기존 401 응답을 유지한다.
 
 ### C. Deferred 해제는 계약 등록만 의미한다
 
@@ -51,7 +49,7 @@ credential은 header로만 다루며 query, response DTO, 로그용 DTO에 추�
 
 - route가 공식 registry에 있고 Deferred 목록에는 없음
 - `owner_id`/`user_id`의 설명과 우선순위, `limit`의 기본값 폴백
-- `auth_optional=True`, guest credential/ID header의 역할
+- App JWT 보호 경계와 guest credential이 마이페이지 권한을 대체하지 않는다는 점
 - OpenAPI의 GET operation, 200 응답 DTO 및 query/header parameter
 - 안정 필드 타입화와 상위 응답의 확장 허용
 
@@ -59,8 +57,7 @@ Django 통합 테스트는 다음을 고정한다.
 
 - 본인 owner 또는 본인 세션 요청은 200
 - 다른 owner 요청과 다른 세션 요청은 403
-- `X-Guest-Id`만 보낸 protected guest 요청은 credential 누락으로 거부
-- 유효한 guest credential 요청은 기존 정책 범위에서만 허용
+- `X-Guest-Id`만 보낸 요청과 유효 guest credential 요청 모두 App JWT 없이 401로 거부
 - `limit`의 유효·무효 입력이 기존 기본값 폴백을 유지
 
 ## 비범위

@@ -18,7 +18,7 @@
 - `session_id`, `owner_id`, `user_id`, `limit` query와 두 guest header가 문서화될 것
 - `owner_id` 우선, `user_id` 호환 별칭, limit 기본값 폴백이 설명에 포함될 것
 - 응답 안정 필드와 확장 허용 정책이 OpenAPI에 반영될 것
-- `auth_optional=True`이지만 guest credential 검증은 여전히 필요함을 설명할 것
+- App JWT 보호 경계와 guest credential이 마이페이지 권한을 대체하지 않는다는 점을 설명할 것
 
 먼저 아래 테스트가 실패하는지 확인한다.
 
@@ -39,7 +39,7 @@
 - `MyPageSummaryResponse` 상위 DTO는 `extra="allow"`로 둔다.
 - 안정 화면용 요약 및 case/policy 필드만 타입화한다.
 - route는 `GET /api/mypage/summary/`, `canonical-mypage-summary`, `mypage_summary`와 정확히 연결한다.
-- `auth_required=False`, `auth_optional=True`로 등록하되, 무인증 허용이라는 의미로 쓰지 않는다.
+- `auth_required=True`로 등록하고, guest credential header를 공개 입력 parameter로 등록하지 않는다.
 - 이 route만 `DEFERRED_ROUTE_SPECS`에서 제거한다.
 - view, repository, URL, 프런트 코드는 수정하지 않는다.
 
@@ -55,7 +55,7 @@
 - 인증 주체 자신의 owner·session 요청이 200인지 확인한다.
 - 타 owner와 타 session 요청이 403인지 확인한다.
 - `X-Guest-Id` 단독 요청은 기존처럼 401 `auth_required`/`missing_token`으로 거부되는지 확인한다. 즉 raw guest ID는 단독 권한 증명이 아니다.
-- 유효 credential guest 요청은 기존 정책을 유지하는지 확인한다.
+- 유효 credential guest 요청도 App JWT 없이 401로 거부되는지 확인한다.
 - 무효 `limit`이 새 오류가 아니라 현행 기본값 동작을 유지하는지 확인한다.
 
 실제 외부 provider는 호출하지 않고 기존 mock/auth helper만 사용한다.
