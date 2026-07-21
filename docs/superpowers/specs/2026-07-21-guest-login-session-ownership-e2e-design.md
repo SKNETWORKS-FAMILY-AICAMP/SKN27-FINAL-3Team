@@ -15,9 +15,11 @@
 
 ## 선택한 접근
 
-단일 Django API E2E 테스트에서 두 guest와 두 로그인 사용자를 만든다. 소유 guest는 실제 guest-session·채팅·분석 Job·첨부 메타데이터 경로로 세션 자료를 준비하고, 결정론적 Google code 대역으로 로그인한다. 로그인 성공 뒤에는 소유 사용자가 동일 세션을 사용해 사건 생성 API를 호출하고, `ChatSession`, `AnalysisJob`, `UploadedFile`, `Report`, `Case`의 소유자 및 연결이 모두 일치하는지 확인한다.
+단일 Django API E2E 테스트에서 두 guest와 두 로그인 사용자를 만든다. 소유 guest는 실제 `POST /api/auth/guest-session/`, 채팅, 분석 Job, 첨부 메타데이터 경로로 세션 자료를 준비한다. Agent adapter만 결정론적 대역으로 교체하고 실제 `process_agent_work_item()`을 같은 프로세스에서 호출해 Report를 영속화한다. 이 방식은 외부 Worker·LLM을 호출하지 않으면서 실제 Job→Report 영속화 경로를 검증한다. 결정론적 Google code 대역으로 로그인한 뒤, 소유 사용자는 실제 `POST /api/cases/`로 사건을 생성한다. 그 뒤 `ChatSession`, `AnalysisJob`, `UploadedFile`, `Report`, `Case`의 소유자 및 연결이 모두 일치하는지 확인한다.
 
-다른 guest는 자신의 `guest_id`와 소유자의 `session_id`를 넣어 Google 로그인을 시도한다. 이 요청은 provider 호출, AuthSession 생성, 세션·자원 소유권 변경 없이 기존 `403 google_guest_session_mismatch` 계약으로 끝나야 한다. 이미 소유된 세션에 대한 재로그인도 같은 무변경 원칙으로 `403 google_session_already_owned`를 반환해야 한다. 전환 완료 뒤 다른 인증 사용자의 조회·사건 생성 요청도 `403 object_access_denied`로 차단하고, 오류 본문에 owner ID·guest ID·첨부 경로·Report 내용이 없는지 확인한다.
+로그인 직후 소유 사용자는 실제 Job 상세·결과, 첨부파일 상세, Report 상세를 조회하고 저장 상태 변경을 수행한다. 사건 생성 뒤에는 Case workspace도 조회한다. 다른 guest는 자신의 `guest_id`와 소유자의 `session_id`를 넣어 Google 로그인을 시도한다. 이 요청은 provider 호출, AuthSession 생성, 세션·자원 소유권 변경 없이 기존 `403 google_guest_session_mismatch` 계약으로 끝나야 한다. 이미 소유된 세션에 대한 재로그인도 같은 무변경 원칙으로 `403 google_session_already_owned`를 반환해야 한다.
+
+전환 완료 뒤 다른 인증 사용자는 `GET /api/analysis/jobs/{job_id}/`, `GET /api/analysis/results/{job_id}/`, `GET /api/files/{attachment_id}/`, `GET /api/reports/{report_id}/`, `GET /api/cases/{case_id}/workspace/`, `POST /api/chat/save-state/`, `POST /api/cases/`를 요청한다. 조회·저장 상태 변경은 `403 object_access_denied`, Case 생성은 기존 `403 case_owner_mismatch` 계약으로 차단되어야 한다. 각 거부 JSON·헤더·본문에는 소유 사용자·guest 식별자, 첨부 경로, Report 내용, 문서 바이트가 없어야 한다.
 
 외부 Google OAuth, LLM, OCR, S3, 별도 Worker는 호출하지 않는다. Google code 대역과 Django Test DB만 사용하며, 인증·세션 바인딩·권한·Case 영속화는 실제 코드로 실행한다.
 
@@ -39,16 +41,16 @@
 
 ### A. 정상 전환과 명시적 귀속
 
-- 소유 guest가 자신의 `guest_id`로 세션·Job·첨부파일·Report를 만든다.
+- 소유 guest가 자신의 `guest_id`로 세션·Job·첨부파일을 만들고, 결정론적 Agent 대역과 in-process Worker로 Report를 생성한다.
 - 동일 `guest_id`를 포함한 Google 로그인은 세션을 로그인 사용자에게 연결한다.
 - 로그인 사용자의 사건 생성 뒤 `ChatSession`, `AnalysisJob`, `UploadedFile`, `Report`, `Case`는 같은 `owner_id`와 Case 연결을 가진다.
-- 소유 사용자는 전환된 세션과 Case를 조회할 수 있다.
+- 소유 사용자는 전환된 Job 상세·결과, 첨부파일, Report, Case workspace를 조회하고 `POST /api/chat/save-state/`로 상태를 변경할 수 있다.
 
 ### B. 다른 guest와 다른 사용자의 차단
 
-- 다른 guest ID로 소유 세션에 Google 로그인을 시도하면 `403 google_guest_session_mismatch`가 반환되고 provider·DB 상태가 변하지 않는다.
-- 이미 소유된 세션의 재로그인은 `403 google_session_already_owned`가 반환되고 provider·DB 상태가 변하지 않는다.
-- 다른 인증 사용자의 세션·Case 조회 또는 사건 생성은 `403 object_access_denied`이며 성공 데이터와 민감한 내부 필드를 반환하지 않는다.
+- 다른 guest ID로 소유 세션에 Google 로그인을 시도하면 `403 google_guest_session_mismatch`가 반환된다. provider는 호출되지 않고, 새 `AuthSession`은 생기지 않으며 기존 `ChatSession`, `AnalysisJob`, `UploadedFile`, `Report`, `Case`의 수·`owner_id`·연결이 변하지 않는다.
+- 이미 소유된 세션의 재로그인은 `403 google_session_already_owned`가 반환된다. provider는 호출되지 않고, 새 `AuthSession` 및 기존 자원 상태가 변하지 않는다.
+- 다른 인증 사용자의 Job 상세·결과, 첨부파일, Report, Case workspace, 저장 상태 변경은 `403 object_access_denied`다. 같은 사용자의 Case 생성은 `403 case_owner_mismatch`다. 어떤 거부도 성공 데이터나 민감한 내부 필드를 반환하지 않는다.
 
 ### C. 명시적 제한사항
 
@@ -64,8 +66,8 @@
 
 ## 완료 기준
 
-- 정상 전환과 사건 생성 뒤 모든 대상 레코드의 소유권·Case 연결이 일관된다.
-- guest mismatch, 이미 소유된 세션 재로그인, 다른 인증 사용자의 접근은 기존 403 계약과 무변경을 유지한다.
+- 정상 전환 뒤 소유 사용자의 Job 상세·결과, 첨부파일, Report 조회와 저장 상태 변경이 통과한다. 사건 생성 뒤 Case workspace 조회가 통과하고 모든 대상 레코드의 소유권·Case 연결이 일관된다.
+- guest mismatch와 이미 소유된 세션 재로그인은 provider 미호출 및 모든 대상 모델의 무변경을 유지한다. 다른 인증 사용자의 조회·변경·사건 생성은 각 기존 403 계약을 유지한다.
 - 오류 응답에 다른 사용자의 식별자, 첨부 경로, Report 원문, 문서 바이트가 없다.
 - 대상 Django 테스트, chatbot 전체 테스트, 루트 pytest, 린트가 통과한다.
 
