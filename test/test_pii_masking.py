@@ -162,6 +162,22 @@ def test_camel_kebab_and_header_aliases_cannot_bypass_key_masking() -> None:
     assert set(sanitized.values()) == {MASK_TOKEN}
 
 
+def test_guest_credential_is_masked_for_canonical_and_wsgi_header_keys() -> None:
+    credential = "eyJhbGciOiJIUzI1NiJ9.guest-credential.signature"
+
+    sanitized = sanitize_pii(
+        {
+            "guest_credential": credential,
+            "HTTP_X_GUEST_CREDENTIAL": credential,
+        }
+    )
+
+    assert sanitized == {
+        "guest_credential": MASK_TOKEN,
+        "HTTP_X_GUEST_CREDENTIAL": MASK_TOKEN,
+    }
+
+
 def test_root_scalar_masking_reports_a_changed_path() -> None:
     masked, masked_paths = traffic_confirmation_masking.mask_sensitive_fields(
         RAW_PII["phone"]

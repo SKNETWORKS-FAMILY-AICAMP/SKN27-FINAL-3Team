@@ -8,6 +8,7 @@ from uuid import uuid4
 from django.core.management.base import BaseCommand, CommandError
 from django.test import RequestFactory
 
+from app.services.guest_credential_service import issue_guest_credential
 from chatbot.management.commands.smoke_non_dl_analysis_reporting_pipeline import (
     _fine_notice_fixture,
 )
@@ -83,6 +84,7 @@ class Command(BaseCommand):
 def _run_smoke(fixture: dict) -> dict:
     suffix = uuid4().hex[:12]
     guest_id = f"gst_supervisor_smoke_{suffix}"
+    guest_credential, _guest_credential_claims = issue_guest_credential(guest_id)
     session_id = f"ses_supervisor_smoke_{suffix}"
     attachment_id = f"att_supervisor_smoke_{suffix}"
     session = ChatSession.objects.create(
@@ -115,6 +117,7 @@ def _run_smoke(fixture: dict) -> dict:
         ),
         content_type="application/json",
         HTTP_X_GUEST_ID=guest_id,
+        HTTP_X_GUEST_CREDENTIAL=guest_credential,
     )
     chat_response = submit_chat_message(request)
     chat = json.loads(chat_response.content)
@@ -137,7 +140,9 @@ def _run_smoke(fixture: dict) -> dict:
     result["identifiers"] = {"job_id": job_id, "work_item_id": work_item_id}
     worker_result = repositories.process_agent_work_item(work_item_id)
     result_request = RequestFactory().get(
-        f"/api/analysis/results/{job_id}/", HTTP_X_GUEST_ID=guest_id
+        f"/api/analysis/results/{job_id}/",
+        HTTP_X_GUEST_ID=guest_id,
+        HTTP_X_GUEST_CREDENTIAL=guest_credential,
     )
     public_result = analysis_result(result_request, job_id)
     job = AnalysisJob.objects.filter(job_id=job_id).first()

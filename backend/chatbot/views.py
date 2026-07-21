@@ -192,7 +192,10 @@ def capabilities(_request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def guest_session(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    payload = _create_guest_session(body)
+    payload = _create_guest_session(
+        body,
+        guest_credential=request.headers.get("X-Guest-Credential"),
+    )
     payload["persistence"] = persist_guest_session_identity(payload, raw_payload=body)
     _record_history_safely(
         request,
@@ -218,6 +221,9 @@ def guest_session(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def auth_google_code(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
+    body, guest_identity_error = _google_code_body_with_verified_guest_identity(request, body)
+    if guest_identity_error is not None:
+        return guest_identity_error
     request_error = _validate_google_code_request_boundary(
         body,
         request_headers=dict(request.headers.items()),
@@ -568,6 +574,7 @@ def auth_me(request: HttpRequest) -> JsonResponse:
     status, payload = _get_current_auth_subject(
         authorization_header=request.headers.get("Authorization"),
         guest_id=request.headers.get("X-Guest-Id") or request.GET.get("guest_id"),
+        guest_credential=request.headers.get("X-Guest-Credential"),
         session_id=request.GET.get("session_id"),
     )
     if status < 400:
@@ -604,6 +611,9 @@ def auth_me(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "OPTIONS"])
 def history_events(request: HttpRequest) -> JsonResponse:
     identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+    identity_error = _request_identity_error_response(request, identity_payload)
+    if identity_error is not None:
+        return identity_error
     if _is_canonical_mock_request(request):
         access = _authorize_history_query(request, identity_payload)
         if not access["allowed"]:
@@ -781,6 +791,9 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
         session_id = request.GET.get("session_id")
         identity_payload = _request_access_payload(request, session_id=session_id)
+        identity_error = _request_identity_error_response(request, identity_payload)
+        if identity_error is not None:
+            return identity_error
         subject = access_subject_from_payload(identity_payload)["subject"]
         if session_id:
             session_access = get_chat_session_access_metadata(session_id)
@@ -811,6 +824,9 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
     usage = None
     if _is_canonical_mock_request(request):
+        identity_error = _request_identity_error_response(request, identity_body)
+        if identity_error is not None:
+            return identity_error
         try:
             identity_body = protect_chat_input_payload(identity_body)
         except ChatInputRejected as exc:
@@ -1194,14 +1210,19 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def create_chat_session(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    payload = create_session(user_id=body.get("user_id"))
+    identity_body = _payload_with_request_identity(request, body)
+    identity_error = _request_identity_error_response(request, identity_body)
+    if identity_error is not None:
+        return identity_error
+    subject = access_subject_from_payload(identity_body)["subject"]
+    payload = create_session(user_id=subject.get("user_id"))
     _record_history_safely(
         request,
         event_type="chat_session_created",
         status="success",
         summary="?? session? mock ??????.",
-        actor=_history_actor(request, body),
-        subject=subject_from_payload(body, session_id=payload.get("session_id")),
+        actor=_history_actor(request, identity_body),
+        subject=subject_from_payload(identity_body, session_id=payload.get("session_id")),
         source=_history_source(request),
         metadata={"session_status": payload.get("status")},
     )
@@ -1213,6 +1234,9 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
 def submit_chat_message(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
     identity_body = _payload_with_request_identity(request, body)
+    identity_error = _request_identity_error_response(request, identity_body)
+    if identity_error is not None:
+        return identity_error
     policy_response = _canonical_guest_identity_policy_response(request, identity_body)
     if policy_response is not None:
         return policy_response
@@ -2104,6 +2128,7 @@ def _report_auth_error_response(
     status, payload = _get_current_auth_subject(
         authorization_header=request.headers.get("Authorization"),
         guest_id=request.headers.get("X-Guest-Id") or request.GET.get("guest_id"),
+        guest_credential=request.headers.get("X-Guest-Credential"),
         session_id=session_id,
     )
     if status < 400:
@@ -2196,6 +2221,7 @@ def _payload_with_request_identity(
             or untrusted_auth_context.get("guest_id")
             or payload.get("guest_id")
         ),
+        guest_credential=request.headers.get("X-Guest-Credential"),
         session_id=(
             enriched.get("session_id")
             or untrusted_auth_context.get("session_id")
@@ -2216,15 +2242,66 @@ def _payload_with_request_identity(
                 auth_context["auth_session_id"] = subject["auth_session_id"]
             enriched["owner_id"] = authenticated_user_id
             enriched["user_id"] = authenticated_user_id
-    elif request.headers.get("X-Guest-Id"):
-        auth_context["subject_id"] = f"guest:{request.headers['X-Guest-Id']}"
-        auth_context["subject_type"] = "guest"
-        auth_context["guest_id"] = request.headers["X-Guest-Id"]
+    else:
+        enriched["_request_identity_error"] = auth_payload
     if auth_context:
         enriched["auth_context"] = auth_context
     else:
         enriched.pop("auth_context", None)
     return enriched
+
+
+def _request_identity_error_response(
+    request: HttpRequest,
+    payload: dict[str, object],
+) -> JsonResponse | None:
+    error_payload = payload.get("_request_identity_error")
+    if not isinstance(error_payload, dict):
+        return None
+    error = error_payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    status = int(error.get("status") or 401)
+    response = _json_response(request, error_payload, status=status)
+    if status in {401, 403}:
+        response["WWW-Authenticate"] = build_www_authenticate_header(error_payload)
+    return response
+
+
+def _google_code_body_with_verified_guest_identity(
+    request: HttpRequest,
+    body: dict,
+) -> tuple[dict, JsonResponse | None]:
+    """Require a guest credential before a Google request can bind guest state."""
+
+    session_id = str(body.get("session_id") or "").strip()
+    requested_guest_id = str(body.get("guest_id") or "").strip()
+    if not requested_guest_id and session_id:
+        session_access = get_chat_session_access_metadata(session_id)
+        requested_guest_id = str((session_access or {}).get("guest_id") or "").strip()
+    if not requested_guest_id:
+        return body, None
+
+    status, payload = _get_current_auth_subject(
+        authorization_header=None,
+        guest_id=requested_guest_id,
+        guest_credential=request.headers.get("X-Guest-Credential"),
+        session_id=session_id or None,
+    )
+    if status >= 400:
+        response = _json_response(request, payload, status=status)
+        response["WWW-Authenticate"] = build_www_authenticate_header(payload)
+        return body, response
+
+    subject = payload.get("subject") if isinstance(payload.get("subject"), dict) else {}
+    verified_guest_id = str(subject.get("guest_id") or "").strip()
+    if not verified_guest_id:
+        return body, _json_response(
+            request,
+            build_auth_error("token_invalid", reason="invalid_guest_credential"),
+            status=401,
+        )
+    return {**body, "guest_id": verified_guest_id}, None
 
 
 def _request_access_payload(
@@ -2482,6 +2559,9 @@ def _canonical_guest_identity_policy_response(
     request: HttpRequest,
     payload: dict[str, object],
 ) -> JsonResponse | None:
+    identity_error = _request_identity_error_response(request, payload)
+    if identity_error is not None:
+        return identity_error
     if not _is_canonical_mock_request(request):
         return None
     subject = access_subject_from_payload(payload)["subject"]

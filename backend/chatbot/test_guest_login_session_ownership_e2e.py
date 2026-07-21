@@ -11,6 +11,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from app.services.chat_orchestration_service import _analysis_plan
+from app.services.guest_credential_service import issue_guest_credential
 from app.services.google_auth_service import issue_access_token
 from chatbot.models import (
     AgentWorkItem,
@@ -339,6 +340,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
         self,
         *,
         guest_id: str,
+        guest_credential: str,
         session_id: str,
         code_suffix: str,
     ) -> tuple[Client, str, str]:
@@ -356,6 +358,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
                 content_type="application/json",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                HTTP_X_GUEST_CREDENTIAL=guest_credential,
             )
         self.assertEqual(urlopen.call_count, 2)
         self.assertEqual(response.status_code, 200, response.content)
@@ -366,6 +369,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
             Client(
                 HTTP_AUTHORIZATION=f"Bearer {body['access_token']}",
                 HTTP_X_GUEST_ID=guest_id,
+                HTTP_X_GUEST_CREDENTIAL=guest_credential,
                 HTTP_X_AUTH_SESSION_ID=auth_session_id,
             ),
             owner_id,
@@ -373,18 +377,29 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
         )
 
     def _create_guest_resources(self) -> dict[str, str]:
-        guest_id = "gst_guest_ownership_owner"
         session_id = "ses_guest_ownership_owner"
 
-        guest_session = Client().post(
+        initial_guest_session = Client().post(
+            "/api/auth/guest-session/",
+            data={},
+            content_type="application/json",
+        )
+        self.assertEqual(initial_guest_session.status_code, 200, initial_guest_session.content)
+        guest_id = initial_guest_session.json()["guest"]["guest_id"]
+        guest_credential = initial_guest_session.json()["guest_credential"]
+        guest_session = Client(HTTP_X_GUEST_CREDENTIAL=guest_credential).post(
             "/api/auth/guest-session/",
             data={"guest_id": guest_id, "session_id": session_id},
             content_type="application/json",
         )
         self.assertEqual(guest_session.status_code, 200, guest_session.content)
         self.assertEqual(guest_session.json()["guest"]["guest_id"], guest_id)
+        guest_credential = guest_session.json()["guest_credential"]
 
-        guest_client = Client(HTTP_X_GUEST_ID=guest_id)
+        guest_client = Client(
+            HTTP_X_GUEST_ID=guest_id,
+            HTTP_X_GUEST_CREDENTIAL=guest_credential,
+        )
         upload = guest_client.post(
             "/api/files/",
             data={
@@ -428,6 +443,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
         self.assertEqual(session.metadata["auth_context"]["guest_id"], guest_id)
         return {
             "guest_id": guest_id,
+            "guest_credential": guest_credential,
             "session_id": session_id,
             "job_id": job_id,
             "attachment_id": attachment_id,
@@ -546,6 +562,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
 
         owner_client, owner_id, _auth_session_id = self._google_login(
             guest_id=resources["guest_id"],
+            guest_credential=resources["guest_credential"],
             session_id=resources["session_id"],
             code_suffix="guest-ownership-owner",
         )
@@ -617,6 +634,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
                 content_type="application/json",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_guest_ownership_other")[0],
             )
         self._assert_safe_denial(mismatch, code="forbidden", forbidden=forbidden)
         self.assertEqual(
@@ -628,6 +646,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
 
         _owner_client, owner_id, _auth_session_id = self._google_login(
             guest_id=resources["guest_id"],
+            guest_credential=resources["guest_credential"],
             session_id=resources["session_id"],
             code_suffix="guest-ownership-owner",
         )
@@ -646,6 +665,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
                 content_type="application/json",
                 HTTP_X_REQUESTED_WITH="XmlHttpRequest",
                 HTTP_ORIGIN="https://app.example.test",
+                HTTP_X_GUEST_CREDENTIAL=resources["guest_credential"],
             )
         self._assert_safe_denial(
             relogin,
@@ -663,6 +683,7 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
         resources = self._create_guest_resources()
         owner_client, owner_id, _auth_session_id = self._google_login(
             guest_id=resources["guest_id"],
+            guest_credential=resources["guest_credential"],
             session_id=resources["session_id"],
             code_suffix="guest-ownership-owner",
         )

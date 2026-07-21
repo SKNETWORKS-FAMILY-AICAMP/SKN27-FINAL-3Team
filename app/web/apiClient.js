@@ -6,17 +6,17 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
   return {
     authApiBase,
     apiBase,
-    createGuestSession(payload = {}) {
-      return postJson(joinApiPath(authApiBase, "auth/guest-session/"), payload);
+    createGuestSession(payload = {}, identity = {}) {
+      return postJson(joinApiPath(authApiBase, "auth/guest-session/"), payload, identity);
     },
-    loginWithGoogleCode(payload = {}) {
+    loginWithGoogleCode(payload = {}, identity = {}) {
       return postJson(
         joinApiPath(authApiBase, "auth/google/code/"),
         {
           provider: "google",
           ...payload,
         },
-        {},
+        identity,
         { extraHeaders: { "X-Requested-With": "XmlHttpRequest" } }
       );
     },
@@ -197,13 +197,14 @@ export async function getBlob(url, identity = {}) {
 }
 
 export function buildRequestHeaders(
-  { authToken, guestId, authSessionId } = {},
+  { authToken, guestId, guestCredential, authSessionId } = {},
   { includeContentType = false } = {}
 ) {
   return {
     ...(includeContentType ? { "Content-Type": "application/json" } : {}),
     ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
     ...(guestId ? { "X-Guest-Id": guestId } : {}),
+    ...(guestCredential ? { "X-Guest-Credential": guestCredential } : {}),
     ...(authSessionId ? { "X-Auth-Session-Id": authSessionId } : {}),
   };
 }
