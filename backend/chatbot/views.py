@@ -2528,13 +2528,9 @@ def _public_object_access(access: dict[str, object]) -> dict[str, object]:
 
     resource = access.get("resource")
     if isinstance(resource, dict):
-        public_resource = {
-            key: value
-            for key in ("type", "report_id", "attachment_id", "job_id")
-            if isinstance((value := resource.get(key)), str) and value
-        }
-        if public_resource:
-            public["resource"] = public_resource
+        resource_type = resource.get("type")
+        if isinstance(resource_type, str) and resource_type:
+            public["resource"] = {"type": resource_type}
     return public
 
 
