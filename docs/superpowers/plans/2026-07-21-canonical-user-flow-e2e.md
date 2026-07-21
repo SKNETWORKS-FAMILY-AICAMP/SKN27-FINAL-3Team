@@ -33,7 +33,7 @@
 - Consumes: `job["supervisor_state"]["case_evidence"]["claims"]`, where every claim record is `{ "value": str, "evidence_source": {"source_type": str, ...} }`.
 - Produces: `AnalysisResult.user_claims: list[AnalysisUserClaim]` and `load_analysis_result(...).payload["user_claims"]`.
 
-- [ ] **Step 1: Write failing projection tests**
+- [x] **Step 1: Write failing projection tests**
 
 Add one focused test to `test/test_analysis_job_query_service.py`. It supplies both a public claim and private provenance, then asserts the exact public projection.
 
@@ -95,7 +95,7 @@ def test_analysis_result_schema_exposes_optional_sanitized_user_claims() -> None
     assert "user_claims" not in result.get("required", [])
 ```
 
-- [ ] **Step 2: Run the focused test and verify it fails**
+- [x] **Step 2: Run the focused test and verify it fails**
 
 Run:
 
@@ -106,7 +106,7 @@ python -m pytest -q --timeout=30 test/test_openapi_v1_generation.py -k user_clai
 
 Expected: FAIL because `user_claims` and `AnalysisUserClaim` are absent.
 
-- [ ] **Step 3: Add the additive DTO and projection helper**
+- [x] **Step 3: Add the additive DTO and projection helper**
 
 In `app/contracts/analysis_job.py`, insert the model before `AnalysisResult` and add the defaulted field.
 
@@ -159,7 +159,7 @@ def _project_user_claims(supervisor_state: Any) -> list[dict[str, str | None]]:
 
 Add `"user_claims": _project_user_claims(job.get("supervisor_state"))` to the completed-result `result.update(...)` block. Do not add it to the pending payload because no terminal Supervisor state is ready.
 
-- [ ] **Step 4: Run projection and existing query-service tests**
+- [x] **Step 4: Run projection and existing query-service tests**
 
 Run:
 
@@ -169,7 +169,7 @@ python -m pytest -q --timeout=30 test/test_analysis_job_query_service.py test/te
 
 Expected: PASS. The complete result includes a sorted, provenance-sanitized claim list; pending output and its existing 202 OpenAPI semantic metadata remain unchanged.
 
-- [ ] **Step 5: Commit the contract boundary**
+- [x] **Step 5: Commit the contract boundary**
 
 ```powershell
 git add app/contracts/analysis_job.py app/services/analysis_job_query_service.py test/test_analysis_job_query_service.py test/test_openapi_v1_generation.py
@@ -190,7 +190,7 @@ git commit -m "feat: expose sanitized analysis user claims"
 - Consumes: `/api/chat/sessions/`, `/api/files/`, `/api/chat/messages/`, `/api/analysis/results/{job_id}/`, `/api/reports/{report_id}/document-confirmation/`, `/api/reports/{report_id}/download/`.
 - Produces: four deterministic tests: successful DOCX lifecycle, pending result, partial result, and foreign-owner denial.
 
-- [ ] **Step 1: Write the four failing E2E test methods**
+- [x] **Step 1: Write the four failing E2E test methods**
 
 Create a `CanonicalUserFlowE2ETests(TestCase)` class under `@override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)`. Its test names and required assertions are:
 
@@ -242,7 +242,7 @@ def test_other_owner_cannot_read_result_report_or_docx(self) -> None:
         assert "Content-Disposition" not in response.headers
 ```
 
-- [ ] **Step 2: Run the new module and verify it fails**
+- [x] **Step 2: Run the new module and verify it fails**
 
 Run:
 
@@ -252,7 +252,7 @@ python backend/manage.py test chatbot.test_canonical_user_flow_e2e
 
 Expected: FAIL because the module, fixture helpers, and `user_claims` projection do not yet exist.
 
-- [ ] **Step 3: Add deterministic, real-boundary test helpers**
+- [x] **Step 3: Add deterministic, real-boundary test helpers**
 
 Implement four private helpers in the new test module.
 
@@ -279,7 +279,7 @@ def _process_ready_worker(self, work_item_id: str) -> None:
 
 For the partial helper, retain the required fine-notice and appeal fixture outputs, but make the selected legal-search result a safe `partial` result with a user-facing limitation and next action. A `failed` required legal-search node is intentionally not used here because the current Worker contract maps it to a terminal `failed` job. Assert the current Reporting gate leaves `report_links` empty; do not create a report or DOCX for this branch.
 
-- [ ] **Step 4: Run the module, then the directly related Django regression modules**
+- [x] **Step 4: Run the module, then the directly related Django regression modules**
 
 Run:
 
@@ -289,7 +289,7 @@ python backend/manage.py test chatbot.test_canonical_user_flow_e2e chatbot.test_
 
 Expected: PASS. The success path returns DOCX only; pending, partial, and ownership denial retain their existing semantics.
 
-- [ ] **Step 5: Commit the canonical journey coverage**
+- [x] **Step 5: Commit the canonical journey coverage**
 
 ```powershell
 git add backend/chatbot/test_canonical_user_flow_e2e.py
@@ -309,7 +309,7 @@ git commit -m "test: cover canonical user flow e2e"
 - Consumes: passing unit, schema, and Django E2E tests from Tasks 1–3.
 - Produces: one evidence-backed I checklist completion line with `#279`; all other I entries remain unchanged.
 
-- [ ] **Step 1: Update only the justified checklist entry**
+- [x] **Step 1: Update only the justified checklist entry**
 
 Replace the existing unchecked I line with:
 
@@ -319,7 +319,7 @@ Replace the existing unchecked I line with:
 
 Change the design-document status to `구현 완료 — 검증 대기` before final tests, then to `구현·검증 완료` only after every listed command passes. Do not change the OCR/검색 품질 또는 운영 관측 항목.
 
-- [ ] **Step 2: Run the focused full regression set**
+- [x] **Step 2: Run the focused full regression set**
 
 Run:
 
