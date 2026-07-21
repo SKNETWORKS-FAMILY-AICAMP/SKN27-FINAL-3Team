@@ -65,7 +65,12 @@ Issue #258의 목표는 `guest_id`와 별도의 서명된 guest credential을 �
 - 위 새 시작 경로에서는 요청의 기존 `session_id`도 신뢰하거나 결합하지 않는다.
   프런트엔드는 저장된 `session_id`와 guest 상태를 폐기하고 새 신원으로 시작한다.
 - 유효 credential인 경우에만 그 credential claim의 guest와 `session_id` 결합을
-  허용하며, 기존 세션의 소유자/guest 상태 검사는 현행 정책을 유지한다.
+  허용한다. 아직 저장되지 않은 새 `session_id` 또는 같은 guest에 이미 결합된
+  세션만 결합할 수 있다.
+- 이미 존재하지만 guest가 없는 세션, 다른 guest에 결합된 세션, 로그인 사용자에게
+  소유된 세션은 guest-session endpoint가 claim하거나 덮어쓰지 않는다. 기존
+  `_bind_chat_session_auth_context()`를 호출하기 전에 이 조건을 판정하고, 실패하면
+  세부 리소스 정보를 노출하지 않는 결합 거부 응답을 반환한다.
 
 ### D. 보호 API와 오류 계약
 
