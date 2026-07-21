@@ -17,3 +17,11 @@ Make the published Fault RAG runtime independent of `legacy_runnable`, preserve 
 - Add unit tests for the evaluator's official input path and the Agent contract behavior.
 - Run the new tests, all `etl/fault_cases/src` tests, and Python compilation for `rag_runtime` and `src`.
 - Do not claim GitHub Actions diagnosis until an authenticated `gh` session can retrieve check logs.
+
+## Verification Record (2026-07-21)
+
+- `python -m pytest etl/fault_cases/rag_runtime/agent_runtime/tests/test_agent_contract.py etl/fault_cases/rag_runtime/evaluation/tests/test_complete30_paths.py -q` exited 0: 6 passed in 1.05s.
+- `python -m pytest etl/fault_cases/src -q` exited 0: 37 passed in 1.03s (one existing Python 3.14/Pydantic V1 compatibility warning from `langchain_core`).
+- `python -m compileall etl/fault_cases/rag_runtime etl/fault_cases/src` exited 0.
+- `rg -n --glob '*.py' 'legacy_runnable|NEW_ABC_TEST' etl/fault_cases/rag_runtime etl/fault_cases/src` exited 1 with no matches, confirming neither identifier is actively referenced by Python code in the runtime or ETL source trees.
+- GitHub Actions log verification remains blocked: `gh auth status` could not run because `gh` is not installed or available on `PATH` (PowerShell command-not-found; exit 1). Install GitHub CLI and authenticate with repository/workflow scopes before diagnosing CI logs.
