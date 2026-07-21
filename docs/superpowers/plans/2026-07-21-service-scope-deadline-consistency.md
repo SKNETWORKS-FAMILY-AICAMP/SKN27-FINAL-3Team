@@ -294,3 +294,25 @@ git commit -m "docs: record service scope safety verification"
 ```
 
 The final review must verify that only the planned policy, orchestration, frontend, test, design/plan, and checklist files changed.
+
+## Task 4: 사용자 표시용 다음 행동 정규화
+
+**Files:**
+- Modify: `app/web/FrontendAppShell.jsx`
+- Modify: `test/test_service_scope_frontend_contract.py`
+
+**Interfaces:**
+- Consumes: 분석 결과의 호환성 유지 `next_actions: list[str]`.
+- Produces: 화면에 표시 가능한 한국어 다음 행동 목록. API 원본 값과 deadline·service scope 정책 값은 변경하지 않는다.
+
+- [x] **Step 1: 내부 식별자가 사용자 화면에 노출되지 않는 정적 회귀 테스트를 추가하고 실패를 확인한다.**
+
+테스트는 `answer_pending_question`, `review_verified_results`의 한국어 표시 문구와 알 수 없는 내부 식별자의 필터링 규칙을 확인한다.
+
+- [x] **Step 2: `FrontendAppShell.jsx`에서 표시 전용 정규화 함수를 추가한다.**
+
+두 기본 내부 식별자만 한국어 문구로 변환하고, 이미 사용자 문장인 한국어 값은 보존한다. 그 외 내부 식별자는 화면에서 제외한다.
+
+- [x] **Step 3: 대상 회귀 테스트와 기존 #264 회귀 테스트, `app/web` 프로덕션 빌드를 실행한다.**
+
+API·Agent 계약, deadline 패널, service scope 정책이 변경되지 않았음을 함께 확인한다.

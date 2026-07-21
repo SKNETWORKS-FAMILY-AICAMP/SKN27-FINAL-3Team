@@ -35,6 +35,10 @@ const ATTACHMENT_PURPOSE_LABELS = {
 };
 const DEADLINE_GUIDANCE_STATUSES = new Set(["overdue", "due_soon", "normal", "needs_confirmation"]);
 const SERVICE_INFORMATION_NOTICE = "이 서비스는 법률 자문이나 개별 사건의 확정 판단을 대신하지 않으며, 확인할 사실과 근거를 정리합니다.";
+const USER_FACING_NEXT_ACTION_LABELS = {
+  answer_pending_question: "추가 질문에 답변해 주세요.",
+  review_verified_results: "확인된 결과와 근거를 검토해 주세요.",
+};
 
 function waitForWorkerPoll() {
   return new Promise((resolve) => window.setTimeout(resolve, WORKER_POLL_INTERVAL_MS));
@@ -56,6 +60,16 @@ function stringList(value) {
     : [];
 }
 
+function userFacingNextActions(value) {
+  return stringList(value).flatMap((action) => {
+    const mappedAction = USER_FACING_NEXT_ACTION_LABELS[action];
+    if (mappedAction) {
+      return [mappedAction];
+    }
+    return /^[a-z][a-z0-9_]*$/i.test(action) ? [] : [action];
+  });
+}
+
 function isDeadlineGuidance(value) {
   return Boolean(
     value &&
@@ -74,7 +88,7 @@ function buildSafetyGuidance({ serviceScope = null, limitations = [], nextAction
     };
   }
   const safeLimitations = stringList(limitations);
-  const safeNextActions = stringList(nextActions);
+  const safeNextActions = userFacingNextActions(nextActions);
   if (!safeLimitations.length && !safeNextActions.length) {
     return null;
   }
