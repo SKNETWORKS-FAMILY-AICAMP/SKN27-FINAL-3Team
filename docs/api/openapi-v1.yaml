@@ -1958,11 +1958,43 @@ components:
           minLength: 1
           title: Contract Version
           type: string
+        user_claims:
+          items:
+            $ref: '#/components/schemas/AnalysisUserClaim'
+          title: User Claims
+          type: array
       required:
       - job_id
       - status
       - contract_version
       title: AnalysisResult
+      type: object
+    AnalysisUserClaim:
+      additionalProperties: true
+      description: A user-provided statement kept separate from confirmed facts.
+      properties:
+        field:
+          maxLength: 120
+          minLength: 1
+          title: Field
+          type: string
+        value:
+          maxLength: 2000
+          minLength: 1
+          title: Value
+          type: string
+        source_type:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Source Type
+      required:
+      - field
+      - value
+      title: AnalysisUserClaim
       type: object
     AnalysisResultResponse:
       additionalProperties: true

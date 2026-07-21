@@ -277,7 +277,7 @@ def _process_ready_worker(self, work_item_id: str) -> None:
     # Use process_agent_work_item(work_item_id) inside _patched_ready_agents().
 ```
 
-For the partial helper, retain the required fine-notice and appeal fixture outputs, but make the selected legal-search result a safe `failed` result with a user-facing limitation and next action. Assert the current Reporting gate leaves `report_links` empty; do not create a report or DOCX for this branch.
+For the partial helper, retain the required fine-notice and appeal fixture outputs, but make the selected legal-search result a safe `partial` result with a user-facing limitation and next action. A `failed` required legal-search node is intentionally not used here because the current Worker contract maps it to a terminal `failed` job. Assert the current Reporting gate leaves `report_links` empty; do not create a report or DOCX for this branch.
 
 - [ ] **Step 4: Run the module, then the directly related Django regression modules**
 
