@@ -18,7 +18,7 @@ from etl.fault_cases.rag_runtime.fault_standard.retriever import search_fault_st
 
 
 ROOT = Path(__file__).resolve().parents[2]
-COMPLETE30_ROOT = ROOT / "NEW_ABC_TEST_V6/artifacts/v7_complete30_abc/01_common_candidates"
+COMPLETE30_ROOT = ROOT / "evaluation/fault_standard/complete30_v9/v1"
 EVAL_ROOT = ROOT / "evaluation/fault_standard/complete30_v9/v1"
 
 
@@ -107,7 +107,7 @@ def main() -> None:
         "inputs": {
             "questions_sha256": sha256(questions_path),
             "answers_sha256": sha256(answers_path),
-            "query_embedding_manifest": json.loads((COMPLETE30_ROOT / "runpod_all_embeddings_manifest.json").read_text(encoding="utf-8")),
+            "query_embeddings_sha256": sha256(COMPLETE30_ROOT / "query_embeddings.parquet"),
         },
         "details": details,
     }
