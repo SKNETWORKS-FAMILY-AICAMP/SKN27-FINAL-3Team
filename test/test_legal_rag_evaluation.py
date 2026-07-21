@@ -50,3 +50,99 @@ def test_load_public_law_queries_reads_valid_fixture(tmp_path: Path) -> None:
 
     assert len(loaded) == 20
     assert loaded[0]["query_id"] == "law-q001"
+
+
+def test_normalize_backend_response_removes_raw_text_and_keeps_ranked_metadata() -> None:
+    normalized = evaluation.normalize_backend_response(
+        "law-q001",
+        {
+            "backend": "postgres_lexical",
+            "status": "ready",
+            "latency_ms": 12,
+            "error_code": "",
+            "results": [
+                {
+                    "source_reference": "volatile-chunk-id",
+                    "source_name": "도로교통법",
+                    "article": "제5조",
+                    "source_type": "law",
+                    "source_url": "https://law.go.kr/example",
+                    "effective_date": "2026-01-01",
+                    "expire_date": None,
+                    "score": 0.9,
+                    "summary": "원문 요약은 결과 파일에 저장하지 않는다.",
+                    "provision_text": "원문은 평가 artifact에 저장하지 않는다.",
+                }
+            ],
+        },
+    )
+
+    assert normalized["query_id"] == "law-q001"
+    assert normalized["results"][0]["rank"] == 1
+    assert normalized["results"][0]["source_reference"] == "volatile-chunk-id"
+    assert "summary" not in normalized["results"][0]
+    assert "provision_text" not in normalized["results"][0]
+
+
+def test_summary_calculates_recall_mrr_ndcg_latency_and_metadata() -> None:
+    queries = [
+        {"query_id": "law-q001", "expected_source_references": ["도로교통법|제5조"]},
+        {"query_id": "law-q002", "expected_source_references": ["도로교통법|제32조"]},
+    ]
+    runs = [
+        {
+            "query_id": "law-q001",
+            "backend": "postgres_lexical",
+            "status": "ready",
+            "latency_ms": 10,
+            "results": [
+                {
+                    "rank": 1,
+                    "source_reference": "chunk-1",
+                    "source_name": "도로교통법",
+                    "article": "제5조",
+                    "source_url": "https://law.go.kr/1",
+                    "effective_date": "2026-01-01",
+                    "expire_date": None,
+                }
+            ],
+        },
+        {
+            "query_id": "law-q002",
+            "backend": "postgres_lexical",
+            "status": "ready",
+            "latency_ms": 30,
+            "results": [
+                {
+                    "rank": 1,
+                    "source_reference": "chunk-2",
+                    "source_name": "도로교통법",
+                    "article": "제13조",
+                    "source_url": "https://law.go.kr/2",
+                    "effective_date": "2026-01-01",
+                    "expire_date": None,
+                },
+                {
+                    "rank": 2,
+                    "source_reference": "chunk-3",
+                    "source_name": "도로교통법",
+                    "article": "제32조",
+                    "source_url": "https://law.go.kr/3",
+                    "effective_date": "2026-01-01",
+                    "expire_date": None,
+                },
+            ],
+        },
+    ]
+
+    summary = evaluation.summarize_backend_runs(runs, queries)
+
+    lexical = summary["postgres_lexical"]
+    assert lexical["recall_at_1"] == 0.5
+    assert lexical["recall_at_3"] == 1.0
+    assert lexical["recall_at_5"] == 1.0
+    assert lexical["mrr"] == 0.75
+    assert lexical["ndcg_at_5"] == pytest.approx(0.815465, abs=0.000001)
+    assert lexical["p50_latency_ms"] == 10
+    assert lexical["p95_latency_ms"] == 30
+    assert lexical["metadata_complete_rate"] == 1.0

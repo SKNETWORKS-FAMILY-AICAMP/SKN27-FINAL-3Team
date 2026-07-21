@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 MINIMUM_PUBLIC_LAW_QUERY_COUNT = 20
@@ -86,3 +87,190 @@ def _required_text(row: Mapping[str, object], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{key} must be a non-empty string")
     return value.strip()
+
+
+def normalize_backend_response(
+    query_id: str,
+    response: Mapping[str, object],
+) -> dict[str, Any]:
+    """Keep only reproducible, non-sensitive candidate metadata for one backend."""
+
+    raw_results = response.get("results")
+    results = raw_results if isinstance(raw_results, list) else []
+    normalized_results = [
+        _normalize_candidate(result, rank)
+        for rank, result in enumerate(results, start=1)
+        if isinstance(result, Mapping)
+    ]
+    return {
+        "query_id": query_id,
+        "backend": _text(response.get("backend")),
+        "status": _text(response.get("status")),
+        "latency_ms": _nonnegative_int(response.get("latency_ms")),
+        "error_code": _text(response.get("error_code")),
+        "result_count": len(normalized_results),
+        "results": normalized_results,
+    }
+
+
+def summarize_backend_runs(
+    runs: Sequence[Mapping[str, object]],
+    queries: Sequence[Mapping[str, object]],
+) -> dict[str, dict[str, Any]]:
+    """Calculate deterministic retrieval metrics by backend without raw law text."""
+
+    expected_by_query = {
+        _text(query.get("query_id")): {
+            item.strip()
+            for item in query.get("expected_source_references", [])
+            if isinstance(item, str) and item.strip()
+        }
+        for query in queries
+        if _text(query.get("query_id"))
+    }
+    by_backend: dict[str, list[Mapping[str, object]]] = {}
+    for run in runs:
+        backend = _text(run.get("backend"))
+        query_id = _text(run.get("query_id"))
+        if backend and query_id in expected_by_query:
+            by_backend.setdefault(backend, []).append(run)
+
+    return {
+        backend: _summarize_single_backend(backend_runs, expected_by_query)
+        for backend, backend_runs in sorted(by_backend.items())
+    }
+
+
+def candidate_reference(result: Mapping[str, object]) -> str:
+    """Return a stable citation identity instead of the mutable ingestion chunk id."""
+
+    return f"{_text(result.get('source_name'))}|{_text(result.get('article'))}"
+
+
+def _normalize_candidate(result: Mapping[str, object], rank: int) -> dict[str, Any]:
+    return {
+        "rank": rank,
+        "source_reference": _text(result.get("source_reference")),
+        "source_name": _text(result.get("source_name")),
+        "article": _text(result.get("article")),
+        "source_type": _text(result.get("source_type")),
+        "source_url": _text(result.get("source_url")),
+        "effective_date": _optional_text(result.get("effective_date")),
+        "expire_date": _optional_text(result.get("expire_date")),
+        "score": _number_or_none(result.get("score")),
+    }
+
+
+def _summarize_single_backend(
+    runs: Sequence[Mapping[str, object]],
+    expected_by_query: Mapping[str, set[str]],
+) -> dict[str, Any]:
+    run_by_query = {_text(run.get("query_id")): run for run in runs}
+    recall_at: dict[int, list[float]] = {1: [], 3: [], 5: []}
+    reciprocal_ranks: list[float] = []
+    ndcg_scores: list[float] = []
+    latencies: list[int] = []
+    empty_count = 0
+    unavailable_count = 0
+    candidate_count = 0
+    complete_metadata_count = 0
+
+    for query_id, expected in expected_by_query.items():
+        run = run_by_query.get(query_id, {})
+        status = _text(run.get("status"))
+        results = run.get("results") if isinstance(run.get("results"), list) else []
+        if status == "unavailable":
+            unavailable_count += 1
+        if not results:
+            empty_count += 1
+        if run:
+            latencies.append(_nonnegative_int(run.get("latency_ms")))
+
+        ranked_relevance = [
+            candidate_reference(result) in expected
+            for result in results
+            if isinstance(result, Mapping)
+        ]
+        for top_k in recall_at:
+            recall_at[top_k].append(float(any(ranked_relevance[:top_k])))
+        reciprocal_ranks.append(_reciprocal_rank(ranked_relevance))
+        ndcg_scores.append(_binary_ndcg_at_five(ranked_relevance))
+        for result in results:
+            if isinstance(result, Mapping):
+                candidate_count += 1
+                complete_metadata_count += int(_has_complete_metadata(result))
+
+    total_queries = len(expected_by_query)
+    return {
+        "query_count": total_queries,
+        "completed_run_count": len(run_by_query),
+        "recall_at_1": _mean(recall_at[1]),
+        "recall_at_3": _mean(recall_at[3]),
+        "recall_at_5": _mean(recall_at[5]),
+        "mrr": _mean(reciprocal_ranks),
+        "ndcg_at_5": _mean(ndcg_scores),
+        "no_result_rate": _ratio(empty_count, total_queries),
+        "unavailable_rate": _ratio(unavailable_count, total_queries),
+        "p50_latency_ms": _percentile(latencies, 0.50),
+        "p95_latency_ms": _percentile(latencies, 0.95),
+        "metadata_complete_rate": _ratio(complete_metadata_count, candidate_count),
+    }
+
+
+def _reciprocal_rank(ranked_relevance: Sequence[bool]) -> float:
+    for rank, relevant in enumerate(ranked_relevance, start=1):
+        if relevant:
+            return 1.0 / rank
+    return 0.0
+
+
+def _binary_ndcg_at_five(ranked_relevance: Sequence[bool]) -> float:
+    for rank, relevant in enumerate(ranked_relevance[:5], start=1):
+        if relevant:
+            return 1.0 / math.log2(rank + 1)
+    return 0.0
+
+
+def _has_complete_metadata(result: Mapping[str, object]) -> bool:
+    return all(
+        _text(result.get(key))
+        for key in ("source_reference", "source_name", "article", "source_url", "effective_date")
+    )
+
+
+def _percentile(values: Sequence[int], fraction: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    return ordered[math.ceil(len(ordered) * fraction) - 1]
+
+
+def _mean(values: Sequence[float]) -> float:
+    return round(sum(values) / len(values), 6) if values else 0.0
+
+
+def _ratio(numerator: int, denominator: int) -> float:
+    return round(numerator / denominator, 6) if denominator else 0.0
+
+
+def _text(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _optional_text(value: object) -> str | None:
+    text = _text(value)
+    return text or None
+
+
+def _nonnegative_int(value: object) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _number_or_none(value: object) -> float | None:
+    try:
+        return round(float(value), 6)
+    except (TypeError, ValueError):
+        return None
