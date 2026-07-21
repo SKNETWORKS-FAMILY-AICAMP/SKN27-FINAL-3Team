@@ -661,7 +661,12 @@ def remove_page_markers(text: str) -> str:
 def finalize_rule_section(header: Dict[str, Any], block_text: str) -> Dict[str, Any]:
     """rule section의 raw/clean/structured 텍스트를 완성합니다."""
 
-    # page marker로 페이지 범위를 추정합니다.
+    # 다음 rule code가 나오지 않는 장의 마지막 도표는 다음 장 본문까지 포함될 수 있습니다.
+    # 페이지 수 제한 전에 문서의 장 표지 문법으로 실제 경계를 먼저 확정합니다.
+    _, header_slice_page_end = extract_page_range(block_text)
+    block_text, chapter_boundary_truncated = truncate_at_next_chapter_boundary(block_text, header["rule_prefix"])
+
+    # 구조 경계를 적용한 뒤 page marker로 실제 도표 페이지 범위를 추정합니다.
     page_start, original_page_end = extract_page_range(block_text)
 
     # 비정상적으로 긴 rule section은 우선 합리적 페이지 범위 안쪽으로 제한합니다.
@@ -704,10 +709,56 @@ def finalize_rule_section(header: Dict[str, Any], block_text: str) -> Dict[str, 
             "page_span_limited": bool(original_page_end and page_end and original_page_end > page_end),
             "original_page_end": original_page_end,
             "limited_page_end": page_end,
-            "spillover_truncated": len(raw_text) < len(before_spillover.strip()),
+            "header_slice_page_end": header_slice_page_end,
+            "chapter_boundary_truncated": chapter_boundary_truncated,
+            "spillover_truncated": chapter_boundary_truncated or len(raw_text) < len(before_spillover.strip()),
         },
         "file_title": safe_filename(f"{header['rule_code']}_{header.get('rule_title') or header['rule_code']}"),
     }
+
+
+def truncate_at_next_chapter_boundary(block_text: str, rule_prefix: str) -> tuple[str, bool]:
+    """현재 도표 뒤에 이어진 다른 사고 주체 장의 본문을 제거합니다.
+
+    특정 rule code나 페이지 번호를 사용하지 않고, PDF에 반복되는
+    ``과실비율 적용기준(사고유형별) / 제N장 / 1. 적용 범위`` 장 표지를 인식합니다.
+    같은 장의 반복 머리말은 보존하고 현재 prefix와 다른 장 표지만 경계로 사용합니다.
+    """
+
+    chapter_prefix_by_no = {"1": "보", "2": "차", "3": "거"}
+    lines = block_text.splitlines()
+
+    for idx, raw_line in enumerate(lines):
+        chapter_match = re.fullmatch(r"제\s*([123])\s*장\.?(?:\s*.*)?", raw_line.strip())
+        if not chapter_match:
+            continue
+
+        window_start = max(0, idx - 6)
+        window_end = min(len(lines), idx + 6)
+        window = " ".join(line.strip() for line in lines[window_start:window_end] if line.strip())
+        compact_window = re.sub(r"\s+", "", window)
+        if "과실비율적용기준(사고유형별)" not in compact_window or "1.적용범위" not in compact_window:
+            continue
+
+        next_prefix = chapter_prefix_by_no.get(chapter_match.group(1))
+        if not next_prefix or next_prefix == rule_prefix:
+            continue
+
+        # 장 번호 앞의 분할 표지(예: 자동차 / (이륜차 포함)의 / 과실비율...)까지 함께 제거합니다.
+        boundary_idx = idx
+        for back_idx in range(idx - 1, window_start - 1, -1):
+            stripped = lines[back_idx].strip()
+            if re.fullmatch(r"__PAGE_START__\s+\d+", stripped):
+                boundary_idx = back_idx
+                break
+            if not stripped:
+                boundary_idx = back_idx + 1
+                break
+            boundary_idx = back_idx
+
+        return "\n".join(lines[:boundary_idx]).strip(), True
+
+    return block_text, False
 
 
 def limit_block_page_span(block_text: str, page_start: int, max_span: int) -> str:

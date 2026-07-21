@@ -27,6 +27,11 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/auth/refresh/",
         "/api/auth/logout/",
         "/api/auth/me/",
+        "/api/chat/sessions/",
+        "/api/chat/messages/",
+        "/api/chat/save-state/",
+        "/api/mypage/summary/",
+        "/api/history/",
         "/api/files/",
         "/api/files/{attachment_id}/",
         "/api/analysis/jobs/",
@@ -85,11 +90,12 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         for operation in path_item.values():
             assert operation["x-contract-status"] == "shadow"
             assert operation["x-django-route-name"].startswith("canonical-")
-            expected_security = (
-                [{}, {"bearerAuth": []}]
-                if path.startswith(("/api/files/", "/api/analysis/"))
-                else [{"bearerAuth": []}]
-            )
+            if path == "/api/history/":
+                expected_security = [{"bearerAuth": []}, {"guestCredentialAuth": []}]
+            elif path.startswith(("/api/chat/", "/api/files/", "/api/analysis/")):
+                expected_security = [{}, {"bearerAuth": []}]
+            else:
+                expected_security = [{"bearerAuth": []}]
             assert operation["security"] == expected_security
 
     schemas = document["components"]["schemas"]
@@ -114,6 +120,8 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "AuthSubjectResponse",
         "AuthErrorResponse",
         "RateLimitErrorResponse",
+        "HistoryListResponse",
+        "HistoryApiErrorResponse",
         "FileUploadRequest",
         "FileAttachmentResponse",
         "FileAttachmentListResponse",
@@ -259,6 +267,34 @@ def test_auth_session_routes_document_runtime_auth_boundary() -> None:
         "token_invalid",
         "token_expired",
     ]
+
+
+def test_chat_routes_document_runtime_identity_and_status_boundaries() -> None:
+    generator = importlib.import_module("app.contracts.openapi_v1")
+    document = generator.build_openapi_document()
+    paths = document["paths"]
+
+    session = paths["/api/chat/sessions/"]["post"]
+    message = paths["/api/chat/messages/"]["post"]
+    save_state = paths["/api/chat/save-state/"]["post"]
+
+    assert set(message["responses"]) >= {"200", "202", "503"}
+    for status in ("200", "202", "503"):
+        assert message["responses"][status]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ChatMessageResponse"
+        }
+    assert message["security"] == [{}, {"bearerAuth": []}]
+    assert [parameter["name"] for parameter in message["parameters"][:2]] == [
+        "X-Guest-Credential",
+        "X-Guest-Id",
+    ]
+    assert "not valid identity proof" in message["parameters"][1]["description"]
+
+    schemas = document["components"]["schemas"]
+    assert "user_id" not in schemas["ChatSessionCreateRequest"].get("properties", {})
+    assert "guest_credential" not in schemas["ChatSaveStateRequest"].get("properties", {})
+    assert session["requestBody"]["required"] is False
+    assert save_state["security"] == [{}, {"bearerAuth": []}]
 
 
 def test_file_routes_document_canonical_upload_and_owner_boundary() -> None:

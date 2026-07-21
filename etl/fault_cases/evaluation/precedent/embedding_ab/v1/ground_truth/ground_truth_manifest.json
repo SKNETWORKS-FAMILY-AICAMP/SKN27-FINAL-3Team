@@ -1,0 +1,87 @@
+{
+  "ground_truth_version": "precedent_qrels_v1",
+  "status": "approved",
+  "frozen_for_embedding_ab": true,
+  "approved_at": "2026-07-16",
+  "approval_basis": "판례 정답지 58행과 공통 Query 50개 검수 완료 후 데이터 소유자가 최종 판정본으로 수용",
+  "created_at": "2026-07-15",
+  "updated_at": "2026-07-16",
+  "scope": "traffic_precedent_pgvector_embedding_ab",
+  "query_set": {
+    "path": "etl/fault_cases/evaluation/common/embedding_ab/v1/common_fault_queries_v1.jsonl",
+    "version": "fault_common_queries_v1",
+    "row_count": 50,
+    "sha256": "a50921b0ea409ebfdd46d50c8ef632fb1fdac7c53b80ebb95fbb353c4ea02102"
+  },
+  "corpus": {
+    "path": "etl/fault_cases/artifacts/traffic_precedents_output/traffic_prec_fault_ratio_rag_verified/01_fault_ratio_rag_ready_cases.jsonl",
+    "case_count": 987,
+    "sha256": "7e24b6e80d9cad1aacb7a85ab992ede84ccd6ddaf2fc04012f061db3eac91a84"
+  },
+  "chunks": {
+    "path": "etl/fault_cases/artifacts/traffic_precedents_output/precedent_chunking_v2/fault_ratio_precedent_chunks_v2.jsonl",
+    "chunk_count": 8334,
+    "sha256": "0d741a2d7447fe543b46cff4bc1efba45c80d7f47d99d5a3d88693d3259ddcce"
+  },
+  "qrels": {
+    "path": "etl/fault_cases/evaluation/precedent/embedding_ab/v1/ground_truth/precedent_qrels_v1.jsonl",
+    "schema": "one_judgment_per_row_flat_qrels",
+    "qrels_row_count": 58,
+    "unique_query_count": 50,
+    "relevant_query_count": 34,
+    "strict_relevant_query_count": 21,
+    "weak_only_query_count": 13,
+    "no_relevant_query_count": 16,
+    "judgment_count": 42,
+    "unique_relevant_case_count": 31,
+    "relevance_3_count": 14,
+    "relevance_2_count": 13,
+    "relevance_1_count": 15,
+    "sha256": "c44a6d8f17fcb7316f4ebbffb032cdf564769a2cf83f749f8a45c17e509a7f85"
+  },
+  "labeling": {
+    "candidate_method": "character_ngram_tfidf_plus_keyword_rule_search",
+    "candidate_method_detail": "char_wb TF-IDF ngram 2-5, issue_tags weighted, top-30 cases per query, followed by keyword searches and precedent/chunk text review",
+    "embedding_model_outputs_used": false,
+    "hybrid_or_graph_outputs_used": false,
+    "hit_mrr_positive_threshold": 2,
+    "ndcg_relevance_grades": [0, 1, 2, 3],
+    "negative_policy": "No relevance-1-or-higher precedent retained after neutral candidate, rule search, and source-text review"
+  },
+  "evaluation": {
+    "primary_unit": "case_id",
+    "hit_mrr_query_count": 21,
+    "hit_mrr_positive_threshold": 2,
+    "ndcg_query_count": 34,
+    "ndcg_gain": "2^relevance-1",
+    "ndcg_discount": "1/log2(rank+1)",
+    "unjudged_relevance": 0,
+    "case_deduplication": "keep_highest_ranked_chunk_per_case_id",
+    "weak_only_query_count": 13,
+    "negative_query_count": 16,
+    "negative_diagnostics": [
+      "top1_similarity_distribution",
+      "strict_positive_vs_negative_auroc",
+      "strict_positive_vs_negative_auprc"
+    ],
+    "chunk_metrics_role": "diagnostic_until_all_relevant_chunks_are_labeled"
+  },
+  "pilot_merge": {
+    "pilot_query_count": 10,
+    "pilot_queries_included": true,
+    "q11_chunk_corrections_applied": [
+      "117988:fault_ratio_precedent_v2:reasoning:a369532e26b4",
+      "200812:fault_ratio_precedent_v2:reasoning:0e6f1fea9e03",
+      "112180:fault_ratio_precedent_v2:reasoning:49fdd8caf0dc"
+    ],
+    "q46_resolution": "relevance_1_after_signal_fact_review"
+  },
+  "validation": {
+    "json_parse_errors": 0,
+    "missing_query_ids": 0,
+    "extra_query_ids": 0,
+    "duplicate_query_case_chunk_rows": 0,
+    "missing_case_ids": 0,
+    "missing_chunk_ids": 0
+  }
+}

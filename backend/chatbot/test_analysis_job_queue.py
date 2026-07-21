@@ -505,7 +505,33 @@ class AnalysisJobQueueTests(TestCase):
         result_response = client.get(f"/api/analysis/results/{job_id}/")
 
         self.assertEqual(result_response.status_code, 200)
-        self.assertEqual(result_response.json()["result"]["status"], "success")
+        result = result_response.json()["result"]
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(
+            result["supervisor_state"]["agent_input_packages"],
+            [{"node_code": "law_ground_search"}],
+        )
+        self.assertNotIn("slot_state", result["supervisor_state"])
+        execution = result["supervisor_execution"]
+        self.assertEqual(execution["job_id"], job_id)
+        self.assertNotIn("plan_id", execution)
+        self.assertTrue(execution["node_results"])
+        self.assertEqual(execution["node_results"][0]["node_code"], "law_ground_search")
+        self.assertEqual(execution["node_results"][0]["status"], "success")
+        self.assertEqual(
+            execution["node_results"][0]["structured_result"],
+            {"matched_laws": ["law:server"]},
+        )
+        for field in (
+            "analysis_plan",
+            "node_execution",
+            "chat_response",
+            "agent_results",
+            "structured_results",
+            "supervisor_reporting_handoff",
+            "reporting_pipeline",
+        ):
+            self.assertNotIn(field, result)
 
     def test_public_analysis_queue_worker_result_uses_server_supervisor_handoff(self) -> None:
         owner_id = "usr_public_analysis_server_handoff"

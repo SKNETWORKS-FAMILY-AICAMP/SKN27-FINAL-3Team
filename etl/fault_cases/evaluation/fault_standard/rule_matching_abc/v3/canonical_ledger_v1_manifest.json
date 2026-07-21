@@ -1,0 +1,22 @@
+{
+  "by_owner_kind": {
+    "adjustment": 0,
+    "lane_step": 0,
+    "rule": 1065,
+    "shared_group": 0,
+    "variant": 6
+  },
+  "condition_count": 1071,
+  "excluded_inputs": [
+    "query",
+    "qrels",
+    "answer ratios",
+    "embedding scores",
+    "weights"
+  ],
+  "input_sha256": {
+    "direct": "6a8189d3994df0e33fd533dbe0b5e71952fa06ea7bd504abe8977df68221d2d9",
+    "variant": "79049a5d7f0f9dd350aa7743df9eaf209933fd3633fbcca605da4626afa7493a"
+  },
+  "version": "v3_canonical_ledger_v1"
+}

@@ -1,0 +1,993 @@
+{
+  "audit_version": "v3_candidate_source_audit_v1",
+  "rows": [
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A0:B100",
+      "candidate_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "case_id": "fault_common_q01",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차1-1",
+      "source_base_ratio": "A0:B100",
+      "source_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "case_id": "fault_common_q02",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차1-3",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A90:B10",
+      "candidate_final_ratio": {
+        "opponent": 90,
+        "user": 10
+      },
+      "case_id": "fault_common_q03",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차2-6",
+      "source_base_ratio": "A90:B10",
+      "source_final_ratio": {
+        "opponent": 90,
+        "user": 10
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A90:B10",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q04",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차2-6",
+      "source_base_ratio": "A90:B10",
+      "source_final_ratio": {
+        "opponent": 10,
+        "user": 90
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "case_id": "fault_common_q05",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차3-3",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A70:B30",
+      "candidate_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "case_id": "fault_common_q06",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "nontypical_2020_no_02",
+      "source_base_ratio": "A70:B30",
+      "source_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A70:B30",
+      "candidate_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "case_id": "fault_common_q06",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차1-5",
+      "source_base_ratio": "A70:B30",
+      "source_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q07",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "nontypical_2020_no_01",
+      "source_base_ratio": "A100:B0",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A20:B80",
+      "candidate_final_ratio": {
+        "opponent": 80,
+        "user": 20
+      },
+      "case_id": "fault_common_q08",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차4-1",
+      "source_base_ratio": "A20:B80",
+      "source_final_ratio": {
+        "opponent": 80,
+        "user": 20
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q09",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차12-1",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "case_id": "fault_common_q10",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차12-2",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q11",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차12-2",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q12",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차15-1",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A20:B80",
+      "candidate_final_ratio": {
+        "opponent": 10,
+        "user": 90
+      },
+      "case_id": "fault_common_q13",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차16-3",
+      "source_base_ratio": "A20:B80",
+      "source_final_ratio": {
+        "opponent": 10,
+        "user": 90
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A20:B80",
+      "candidate_final_ratio": {
+        "opponent": 80,
+        "user": 20
+      },
+      "case_id": "fault_common_q14",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차7-2",
+      "source_base_ratio": "A20:B80",
+      "source_final_ratio": {
+        "opponent": 80,
+        "user": 20
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q15",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차12-1",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q15",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차12-2",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A0:B100",
+      "candidate_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "case_id": "fault_common_q16",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차31-3",
+      "source_base_ratio": "A0:B100",
+      "source_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q17",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차33-2",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q18",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차11-1",
+      "source_base_ratio": "A100:B0",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A40:B60",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q19",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차21-1",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A0:B100",
+      "candidate_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "case_id": "fault_common_q20",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차31-3",
+      "source_base_ratio": "A0:B100",
+      "source_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "case_id": "fault_common_q21",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차43-2",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A50:B50",
+      "candidate_final_ratio": {
+        "opponent": 50,
+        "user": 50
+      },
+      "case_id": "fault_common_q22",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": true,
+      "rule_id": "official_2023_차43-3",
+      "source_base_ratio": "A50:B50",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q23",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "nontypical_2020_no_14",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q23",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차47-3",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A40:B60",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q24",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차43-1",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A100:B0",
+      "candidate_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "case_id": "fault_common_q25",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차41-1",
+      "source_base_ratio": "A100:B0",
+      "source_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A100:B0",
+      "candidate_final_ratio": {
+        "opponent": 0,
+        "user": 100
+      },
+      "case_id": "fault_common_q26",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차41-1",
+      "source_base_ratio": "A100:B0",
+      "source_final_ratio": {
+        "opponent": 0,
+        "user": 100
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": "A80:B20",
+      "candidate_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "case_id": "fault_common_q27",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": true,
+      "rule_id": "official_2023_차42-1",
+      "source_base_ratio": null,
+      "source_final_ratio": null,
+      "source_found_in_lab_core": false
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q27",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차41-1",
+      "source_base_ratio": "A100:B0",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A80:B20",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q28",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차42-1",
+      "source_base_ratio": "A80:B20",
+      "source_final_ratio": {
+        "opponent": 80,
+        "user": 20
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q29",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차31-2",
+      "source_base_ratio": "A0:B100",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q29",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차44-1",
+      "source_base_ratio": "A20:B80",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "case_id": "fault_common_q30",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차51-1",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A40:B60",
+      "candidate_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "case_id": "fault_common_q32",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "nontypical_2020_no_18",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A40:B60",
+      "candidate_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "case_id": "fault_common_q32",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차51-2",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A20:B80",
+      "candidate_final_ratio": {
+        "opponent": 80,
+        "user": 20
+      },
+      "case_id": "fault_common_q33",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차54-1",
+      "source_base_ratio": "A20:B80",
+      "source_final_ratio": {
+        "opponent": 80,
+        "user": 20
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A60:B40",
+      "candidate_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "case_id": "fault_common_q34",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차54-4",
+      "source_base_ratio": "A60:B40",
+      "source_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q34",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "roundabout_2025_회전-12",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q34",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "roundabout_2025_회전-15",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q35",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차54-1",
+      "source_base_ratio": "A20:B80",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q35",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차54-3",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q35",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "roundabout_2025_회전-10",
+      "source_base_ratio": "A20:B80",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A40:B60",
+      "candidate_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "case_id": "fault_common_q36",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차43-1",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q37",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차43-2",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 20,
+        "user": 80
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A80:B20",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q38",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차42-1",
+      "source_base_ratio": "A80:B20",
+      "source_final_ratio": {
+        "opponent": 60,
+        "user": 40
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A100:B0",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q39",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차42-3",
+      "source_base_ratio": "A100:B0",
+      "source_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A0:B100",
+      "candidate_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "case_id": "fault_common_q40",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차1-1",
+      "source_base_ratio": "A0:B100",
+      "source_final_ratio": {
+        "opponent": 100,
+        "user": 0
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q41",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차12-1",
+      "source_base_ratio": "A40:B60",
+      "source_final_ratio": {
+        "opponent": 40,
+        "user": 60
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A90:B10",
+      "candidate_final_ratio": {
+        "opponent": 10,
+        "user": 90
+      },
+      "case_id": "fault_common_q42",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차2-6",
+      "source_base_ratio": "A90:B10",
+      "source_final_ratio": {
+        "opponent": 10,
+        "user": 90
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q43",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "nontypical_2020_no_21",
+      "source_base_ratio": "A20:B80",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q43",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "nontypical_2020_no_22",
+      "source_base_ratio": "A90:B10",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q43",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차14-1",
+      "source_base_ratio": "A70:B30",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q43",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차45-2",
+      "source_base_ratio": "A90:B10",
+      "source_final_ratio": null,
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A90:B10",
+      "candidate_final_ratio": {
+        "opponent": 90,
+        "user": 10
+      },
+      "case_id": "fault_common_q44",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "nontypical_2020_no_22",
+      "source_base_ratio": "A90:B10",
+      "source_final_ratio": {
+        "opponent": 90,
+        "user": 10
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A90:B10",
+      "candidate_final_ratio": {
+        "opponent": 90,
+        "user": 10
+      },
+      "case_id": "fault_common_q44",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차45-2",
+      "source_base_ratio": "A90:B10",
+      "source_final_ratio": {
+        "opponent": 90,
+        "user": 10
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A30:B70",
+      "candidate_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "case_id": "fault_common_q45",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_차43-2",
+      "source_base_ratio": "A30:B70",
+      "source_final_ratio": {
+        "opponent": 30,
+        "user": 70
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q46",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": true,
+      "rule_id": "official_2023_보10",
+      "source_base_ratio": null,
+      "source_final_ratio": null,
+      "source_found_in_lab_core": false
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q46",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": true,
+      "rule_id": "official_2023_보17",
+      "source_base_ratio": null,
+      "source_final_ratio": null,
+      "source_found_in_lab_core": false
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q47",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": true,
+      "rule_id": "official_2023_보11",
+      "source_base_ratio": null,
+      "source_final_ratio": null,
+      "source_found_in_lab_core": false
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q48",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": true,
+      "rule_id": "official_2023_보20",
+      "source_base_ratio": null,
+      "source_final_ratio": null,
+      "source_found_in_lab_core": false
+    },
+    {
+      "base_ratio_matches_source": false,
+      "candidate_base_ratio": null,
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q48",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": true,
+      "rule_id": "official_2023_보22",
+      "source_base_ratio": null,
+      "source_final_ratio": null,
+      "source_found_in_lab_core": false
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A0:B100",
+      "candidate_final_ratio": {
+        "opponent": 0,
+        "user": 100
+      },
+      "case_id": "fault_common_q49",
+      "final_ratio_matches_source": true,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "official_2023_거43-2",
+      "source_base_ratio": "A0:B100",
+      "source_final_ratio": {
+        "opponent": 0,
+        "user": 100
+      },
+      "source_found_in_lab_core": true
+    },
+    {
+      "base_ratio_matches_source": true,
+      "candidate_base_ratio": "A70:B30",
+      "candidate_final_ratio": null,
+      "case_id": "fault_common_q50",
+      "final_ratio_matches_source": false,
+      "requires_pdf_or_fact_review": false,
+      "rule_id": "pm_auto_2021_도표30",
+      "source_base_ratio": "A70:B30",
+      "source_final_ratio": {
+        "opponent": 70,
+        "user": 30
+      },
+      "source_found_in_lab_core": true
+    }
+  ],
+  "summary": {
+    "base_ratio_matches_source": 38,
+    "candidate_count": 65,
+    "final_ratio_matches_source": 27,
+    "needs_pdf_or_fact_review": 7,
+    "source_found": 59
+  }
+}

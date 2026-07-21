@@ -75,6 +75,11 @@ services:
       NEO4J_USER: "${NEO4J_USER:-neo4j}"
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-change-me}
       NEO4J_DATABASE: "${NEO4J_DATABASE:-neo4j}"
+      # 인정기준 운영 Neo4j입니다. 기존 법률 Neo4j 환경변수와 분리합니다.
+      FAULT_STANDARD_NEO4J_URI: "bolt://fault-standard-neo4j:7687"
+      FAULT_STANDARD_NEO4J_USER: "${FAULT_STANDARD_NEO4J_USER:-neo4j}"
+      FAULT_STANDARD_NEO4J_PASSWORD: ${FAULT_STANDARD_NEO4J_PASSWORD:-fault-standard-local-change-before-deploy}
+      FAULT_STANDARD_NEO4J_DATABASE: "${FAULT_STANDARD_NEO4J_DATABASE:-neo4j}"
     ports:
       - "8000:8000"
     volumes:
@@ -230,6 +235,77 @@ services:
       timeout: 5s
       retries: 5
 
+  # 인정기준 운영 관계 그래프입니다. 실험 버전 라벨은 운영 DB에 적재하지 않습니다.
+  # profiles를 명시해야만 실행되므로 기존 법률 Neo4j에는 영향을 주지 않습니다.
+  fault-standard-neo4j:
+    image: ${FAULT_STANDARD_NEO4J_IMAGE:-neo4j:5-community}
+    container_name: fault-standard-neo4j
+    profiles: ["fault-standard-rag"]
+    restart: unless-stopped
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    environment:
+      NEO4J_AUTH: neo4j/${FAULT_STANDARD_NEO4J_PASSWORD:-fault-standard-local-change-before-deploy}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512m
+    volumes:
+      - fault_standard_neo4j_operational_next_data:/data
+      - fault_standard_neo4j_operational_next_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${FAULT_STANDARD_NEO4J_PASSWORD:-fault-standard-local-change-before-deploy} 'RETURN 1'"]
+      interval: 10s
+      # 초기 그래프 생성 직후 cypher-shell 준비 시간이 필요해 기존 법률 서비스보다 여유를 둔다.
+      timeout: 20s
+      retries: 10
+      start_period: 60s
+
+  # Optional precedent RAG Elasticsearch service retained for the existing
+  # root-compose development and infrastructure contract.
+  elasticsearch:
+    build:
+      context: ./infra/elasticsearch
+      dockerfile: Dockerfile
+      args:
+        ELASTICSEARCH_VERSION: ${ELASTICSEARCH_VERSION:-8.12.1}
+    image: skn27-elasticsearch-nori:${ELASTICSEARCH_VERSION:-8.12.1}
+    container_name: skn27-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-change-me}
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -u elastic:${ELASTIC_PASSWORD:-change-me} -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.1
+    container_name: skn27-kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-change-me}
+      - SERVER_HOST=0.0.0.0
+      - I18N_LOCALE=ko-KR
+    ports:
+      - "${KIBANA_PORT:-5601}:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
   data-seed:
     # Explicit/manual legacy ETL job. Production uses the verified manifest loader.
     profiles: ["seed"]
@@ -261,70 +337,7 @@ services:
         condition: service_healthy
     restart: "no"
 
-  # ---------------------------------------------------------------------------
-  # [PRECEDENT RAG - OPTIONAL / DISABLED]
-  #
-  # 아래 블록은 판례 RAG A/B 테스트용 Elasticsearch/Kibana 추가 후보입니다.
-  # 현재 프로젝트의 기준 저장소는 PostgreSQL(pgvector)입니다.
-  #
-  # 최종 흐름:
-  #   1. PostgreSQL에 판례 원본 저장
-  #   2. PostgreSQL 기준 chunk 생성
-  #   3. PostgreSQL pgvector에 embedding 저장
-  #   4. Elasticsearch BM25 실험: chunk_text만 색인
-  #   5. Elasticsearch vector/hybrid 실험: chunk_text + embedding_vector 색인
-  #
-  # 주의:
-  #   - 기존 서비스는 충돌 방지를 위해 수정하지 않습니다.
-  #   - Elasticsearch 내부 data volume은 artifacts/traffic_precedents_output과
-  #     절대 섞지 않습니다.
-  #   - 실제 활성화 시 아래 주석을 풀고 .env에 비밀번호를 분리하세요.
-  #   - 참고 계획:
-  #     etl/fault_cases/MD/판례/과실비율 판례 RAG 파이프라인 통합 최종 계획.md
-  #
-  elasticsearch:
-    build:
-      context: ./infra/elasticsearch
-      dockerfile: Dockerfile
-      args:
-        ELASTICSEARCH_VERSION: ${ELASTICSEARCH_VERSION:-8.12.1}
-    image: skn27-elasticsearch-nori:${ELASTICSEARCH_VERSION:-8.12.1}
-    container_name: skn27-elasticsearch
-    restart: unless-stopped
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=true
-      - xpack.security.http.ssl.enabled=false
-      - xpack.security.transport.ssl.enabled=false
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-change-me}
-      - ES_JAVA_OPTS=-Xms1g -Xmx1g
-    ports:
-      - "${ELASTICSEARCH_PORT:-9200}:9200"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -u elastic:${ELASTIC_PASSWORD:-change-me} -f http://localhost:9200/_cluster/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
-  
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.12.1
-    container_name: skn27-kibana
-    restart: unless-stopped
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=kibana_system
-      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-change-me}
-      - SERVER_HOST=0.0.0.0
-      - I18N_LOCALE=ko-KR
-    ports:
-      - "${KIBANA_PORT:-5601}:5601"
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-  # ---------------------------------------------------------------------------
+
 
 volumes:
   frontend_node_modules:
@@ -333,7 +346,12 @@ volumes:
   object_storage_data:
   neo4j_data:
   neo4j_logs:
+  # 운영 이관 전후 모두 기존 법률 Neo4j 볼륨과 절대 공유하지 않습니다.
+  fault_standard_neo4j_data:
+  fault_standard_neo4j_logs:
+  fault_standard_neo4j_operational_next_data:
+    name: ${FAULT_STANDARD_NEO4J_DATA_VOLUME:-fault_standard_neo4j_operational_next_data}
+  fault_standard_neo4j_operational_next_logs:
+    name: ${FAULT_STANDARD_NEO4J_LOG_VOLUME:-fault_standard_neo4j_operational_next_logs}
   redis_data:
-  # [PRECEDENT RAG - OPTIONAL / DISABLED]
-  # Elasticsearch/Kibana 실험을 활성화할 때만 아래 volume 주석을 해제합니다.
   elasticsearch_data:

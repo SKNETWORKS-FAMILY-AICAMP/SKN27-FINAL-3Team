@@ -1,0 +1,81 @@
+{
+  "archive_sha256": "20ac68074d9cb7755ac7a8f75cbb8d8c4116f26d2769e400d008d572fbdcc456",
+  "backup_schema": "rag_qwen4_prev_perational20260721v2_20ac6807",
+  "generated_at": "2026-07-21T01:24:01+00:00",
+  "run_id": "qwen4_operational_20260721_v2",
+  "smoke_results": [
+    {
+      "database": "fault_standard_db",
+      "result_count": 10,
+      "top1_cosine": 0.6572701147472768,
+      "top1_target_id": "official_2023_차1-2"
+    },
+    {
+      "database": "review_case_db",
+      "result_count": 10,
+      "top1_cosine": 0.8215727008515632,
+      "top1_target_id": "review_case_2019_008384_case_overview"
+    },
+    {
+      "database": "precedent_db",
+      "result_count": 10,
+      "top1_cosine": 0.7171560614426958,
+      "top1_target_id": "117997:fault_ratio_precedent_v2:reasoning:ff374ed1050a"
+    }
+  ],
+  "stage_results": [
+    {
+      "database": "fault_standard_db",
+      "validation": {
+        "chunk_input_hash_mismatches": 0,
+        "chunks": 0,
+        "database": "fault_standard_db",
+        "document_input_hash_mismatches": 0,
+        "documents": 277,
+        "embeddings": 277,
+        "invalid_dimensions": 0,
+        "invalid_model_contract": 0,
+        "orphan_chunks": 0,
+        "orphan_documents": 0,
+        "schema": "rag_qwen4_stage_perational20260721v2_20ac6807",
+        "status": "PASS"
+      }
+    },
+    {
+      "database": "review_case_db",
+      "validation": {
+        "chunk_input_hash_mismatches": 0,
+        "chunks": 904,
+        "database": "review_case_db",
+        "document_input_hash_mismatches": 0,
+        "documents": 226,
+        "embeddings": 904,
+        "invalid_dimensions": 0,
+        "invalid_model_contract": 0,
+        "orphan_chunks": 0,
+        "orphan_documents": 0,
+        "schema": "rag_qwen4_stage_perational20260721v2_20ac6807",
+        "status": "PASS"
+      }
+    },
+    {
+      "database": "precedent_db",
+      "validation": {
+        "chunk_input_hash_mismatches": 0,
+        "chunks": 8334,
+        "database": "precedent_db",
+        "document_input_hash_mismatches": 0,
+        "documents": 987,
+        "embeddings": 8334,
+        "invalid_dimensions": 0,
+        "invalid_model_contract": 0,
+        "orphan_chunks": 0,
+        "orphan_documents": 0,
+        "schema": "rag_qwen4_stage_perational20260721v2_20ac6807",
+        "status": "PASS"
+      }
+    }
+  ],
+  "staging_schema": "rag_qwen4_stage_perational20260721v2_20ac6807",
+  "status": "PROMOTED"
+}

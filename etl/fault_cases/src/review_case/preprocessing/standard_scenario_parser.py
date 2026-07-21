@@ -61,7 +61,7 @@ def _extract_reference(lines: list[str]) -> tuple[str | None, str | None, str | 
     return (f"{no}-{sub}" if sub else no), no, sub
 
 
-def parse_standard_scenario(text: str) -> StandardScenarioResult:
+def parse_standard_scenario(text: str, header_title_raw: str | None = None) -> StandardScenarioResult:
     lines = [normalize_keyword(line) for line in (text or "").splitlines() if normalize_keyword(line)]
     reference_key, reference_no, reference_sub_no = _extract_reference(lines)
 
@@ -72,6 +72,8 @@ def parse_standard_scenario(text: str) -> StandardScenarioResult:
     if ref_index > 0:
         title_parts: list[str] = []
         for line in reversed(lines[:ref_index]):
+            if header_title_raw and line == normalize_keyword(header_title_raw):
+                break
             if line.startswith(("차대차", "차대인", "차대이륜차", "차대이륜", "보행자")):
                 break
             if re.match(r"^\d+\.\s", line):

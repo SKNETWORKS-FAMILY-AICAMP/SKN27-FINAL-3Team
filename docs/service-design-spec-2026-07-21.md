@@ -65,7 +65,7 @@
   - AI 응답 말풍선은 고정 안내 문구 없이 **실제 답변 내용**을 바로 보여준다.
   - AI가 답변을 생성하는 동안에는 점 3개가 튀는 로딩 인디케이터("AI가 답변을 정리하고 있어요")를 표시한다.
   - 응답에 아직 채워지지 않은 필드가 있으면 `MissingFieldsPrompt` 컴포넌트가 "지금 분석에 필요한 정보예요" 박스로 구체적 질문 목록을 보여준다.
-  - 하단에는 리포트 액션(로그인 후 저장 / 화면 PDF 저장 / 로그인 후 이의신청서 PDF) 패널이 붙는다.
+  - 하단에는 리포트 액션(로그인 후 저장, 일반 분석 리포트 DOCX 다운로드, 교통사고 문서 DOCX 다운로드, 과태료 이의신청서 DOCX 다운로드) 패널이 붙는다. 모든 제공 다운로드 문서는 DOCX 전용이며 PDF 다운로드는 제공하지 않는다. 공식 문서는 기존 확인 게이트를 통과한 뒤 내려받는다.
 - 하단 입력창 + 자료 첨부(고지서, 보조 자료) + 빠른 질문 버튼.
 - 개발 모드에서만 보이는 "UI 미리보기(로그인 상태로 보기)" 버튼: 백엔드 호출 없이 화면만 로그인 상태로 전환해 확인할 수 있다(`previewLoggedInUi`).
 
@@ -88,13 +88,14 @@
 세 가지 신원 상태를 구분한다.
 
 1. **anonymous(비로그인, 게스트ID도 없음)** — 극히 제한된 quota.
-2. **guest(게스트 세션)** — `X-Guest-Id` 헤더로 식별. `Authorization` 헤더가 없어야 게스트 허용 경로(`GUEST_ALLOWED_PATHS`)에 접근 가능.
+2. **guest(게스트 세션)** — `X-Guest-Id`는 선택적 식별 보조값이며 단독으로는 권한 증명이 아니다. 보호된 guest 경로는 서명된 `X-Guest-Credential`을 요청 header로 전달하고 서버 검증을 통과해야 한다. credential은 request body, query string, `auth_context`에 넣지 않는다.
 3. **authenticated** — Google OAuth 로그인 후 발급된 App JWT(`Authorization: Bearer ...`)로 식별.
 
 인증 흐름:
 - Google OAuth Authorization Code 팝업 플로우 (`app/web/authSession.js`) → 백엔드 `/api/auth/google/code/`에서 코드 교환 → App JWT 발급.
 - 서버 측 검증은 `app/services/google_auth_service.py`의 `_validate_google_code_request`/`normalize_google_web_origin`에서 처리하며, `client_id`, `redirect_uri`, 브라우저 `Origin` 헤더가 정확히 일치해야 한다(호스트가 `127.0.0.1`이냐 `localhost`냐까지 구분).
 - `backend/config/middleware.py`의 `JwtAuthMiddleware`가 모든 보호 경로(`PROTECTED_PREFIXES`)에 대해 게스트 허용 여부 또는 JWT 유효성을 검사한다. `Authorization` 헤더가 존재하는 순간 게스트 우회 경로는 무조건 비활성화된다.
+- App JWT는 로그인 사용자의 권한을, guest credential은 비회원 guest 세션의 권한을 증명한다. 두 credential은 서로 대체할 수 없다.
 
 ---
 

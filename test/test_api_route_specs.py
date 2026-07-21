@@ -97,6 +97,9 @@ def test_case_api_route_specs_shadow_current_django_contract() -> None:
     assert route_specs.API_ROUTE_SPECS == (
         route_specs.CASE_API_ROUTE_SPECS
         + route_specs.AUTH_SESSION_API_ROUTE_SPECS
+        + route_specs.CHAT_SESSION_API_ROUTE_SPECS
+        + route_specs.MYPAGE_API_ROUTE_SPECS
+        + route_specs.HISTORY_API_ROUTE_SPECS
         + route_specs.FILE_API_ROUTE_SPECS
         + route_specs.ANALYSIS_JOB_API_ROUTE_SPECS
         + route_specs.REPORT_API_ROUTE_SPECS
@@ -161,6 +164,58 @@ def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> Non
     assert actual[("POST", "/api/auth/logout/")].auth_optional is True
     assert actual[("GET", "/api/auth/me/")].auth_optional is True
     assert all(spec.contract_status == "shadow" for spec in actual.values())
+
+
+def test_chat_session_api_route_specs_promote_existing_django_endpoints() -> None:
+    contracts = importlib.import_module("app.contracts.chat_session")
+    route_specs = importlib.import_module("app.contracts.api_route_specs")
+
+    actual = {
+        (spec.method, spec.path): spec
+        for spec in route_specs.CHAT_SESSION_API_ROUTE_SPECS
+    }
+    assert set(actual) == {
+        ("POST", "/api/chat/sessions/"),
+        ("POST", "/api/chat/messages/"),
+        ("POST", "/api/chat/save-state/"),
+    }
+    assert actual[("POST", "/api/chat/sessions/")].request_model is (
+        contracts.ChatSessionCreateRequest
+    )
+    assert actual[("POST", "/api/chat/sessions/")].response_model is (
+        contracts.ChatSessionCreateResponse
+    )
+    assert actual[("POST", "/api/chat/messages/")].request_model is (
+        contracts.ChatMessageRequest
+    )
+    assert actual[("POST", "/api/chat/messages/")].response_model is (
+        contracts.ChatMessageResponse
+    )
+    assert actual[("POST", "/api/chat/messages/")].success_statuses == (200, 202, 503)
+    assert {
+        error.status: error.codes
+        for error in actual[("POST", "/api/chat/messages/")].errors
+    } == {
+        400: ("chat_input_rejected",),
+        401: ("auth_required", "token_invalid", "token_expired", "guest_session_invalid"),
+        403: ("object_access_denied",),
+        429: ("rate_limit_exceeded",),
+    }
+    assert actual[("POST", "/api/chat/save-state/")].response_model is (
+        contracts.ChatSaveStateResponse
+    )
+    for spec in actual.values():
+        assert spec.auth_optional is True
+        assert [
+            (parameter.name, parameter.location)
+            for parameter in spec.request_parameters
+        ][:2] == [
+            ("X-Guest-Credential", "header"),
+            ("X-Guest-Id", "header"),
+        ]
+
+    deferred = {(spec.method, spec.path) for spec in route_specs.DEFERRED_ROUTE_SPECS}
+    assert not deferred.intersection(actual)
 
 
 def test_file_api_route_specs_promote_existing_django_endpoints() -> None:
@@ -418,11 +473,6 @@ def test_modeled_and_deferred_routes_are_complete_and_disjoint() -> None:
         ("GET", "/api/health/live/"),
         ("GET", "/api/health/ready/"),
         ("GET", "/api/capabilities/"),
-        ("GET", "/api/mypage/summary/"),
-        ("GET", "/api/history/"),
-        ("POST", "/api/chat/sessions/"),
-        ("POST", "/api/chat/messages/"),
-        ("POST", "/api/chat/save-state/"),
         ("GET", "/api/agents/nodes/"),
         ("POST", "/api/reports/"),
     }
