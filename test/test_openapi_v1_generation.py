@@ -64,6 +64,7 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
             }
         },
         "x-error-codes": ["login_required", "case_owner_mismatch"],
+        "x-response-semantics": "authorization_denied",
     }
     assert case_collection["post"]["responses"]["404"]["x-error-codes"] == [
         "case_not_found"
