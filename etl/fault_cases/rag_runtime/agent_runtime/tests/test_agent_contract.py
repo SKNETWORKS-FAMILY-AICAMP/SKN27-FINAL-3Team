@@ -86,6 +86,32 @@ def test_invoke_agent_returns_partial_for_mixed_selected_domain_results(
     assert set(output["domains"]) == {"fault_standard", "precedent"}
 
 
+def test_invoke_agent_isolates_handler_exception_as_sanitized_partial_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing_precedent_handler(_: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("postgres password=secret unavailable")
+
+    monkeypatch.setattr(agent, "fs_handle", lambda _: _result("fault_standard", "success"))
+    monkeypatch.setattr(agent, "pr_handle", failing_precedent_handler)
+
+    output = agent.invoke_agent(
+        {
+            "message_id": "message-handler-error",
+            "query_text": "mixed execution",
+            "required_domains": ["fault_standard", "precedent"],
+        }
+    )
+
+    assert output["status"] == "partial"
+    assert output["domains"]["fault_standard"] == _result("fault_standard", "success")
+    failed = output["domains"]["precedent"]
+    assert failed["domain"] == "precedent"
+    assert failed["status"] == "failed"
+    assert failed["evidence"] == []
+    assert "secret" not in " ".join(failed["limitations"])
+
+
 def test_invoke_agent_returns_failed_when_all_selected_domains_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
