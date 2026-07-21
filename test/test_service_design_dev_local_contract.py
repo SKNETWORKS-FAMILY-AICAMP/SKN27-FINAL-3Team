@@ -34,6 +34,8 @@ def test_dev_local_preserves_explicit_database_engine_and_gate_builds_frontend()
     assert "if ([string]::IsNullOrWhiteSpace($env:DJANGO_DATABASE_ENGINE))" in launcher
     assert '$env:DJANGO_DATABASE_ENGINE = "sqlite"' in launcher
     assert "`$env:DJANGO_DATABASE_ENGINE='sqlite';" not in launcher
-    assert "working-directory: app/web" in workflow
-    assert "npm ci" in workflow
-    assert "npm run build" in workflow
+
+    frontend_build = workflow[workflow.index("name: Frontend production build") :]
+    assert "working-directory: app/web" in frontend_build
+    assert "npm ci" in frontend_build
+    assert "npm run build" in frontend_build
