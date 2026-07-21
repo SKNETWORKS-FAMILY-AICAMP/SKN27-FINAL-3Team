@@ -411,7 +411,7 @@ class TestSuccessBranch:
         assert "기술 오류로 완료되지 못해" in sr["guide"]["disclaimer"]
 
         next_actions = _envelope(result)["next_actions"]
-        assert any("재호출" in action for action in next_actions)
+        assert any("일시적 시스템 오류" in action for action in next_actions)
 
 
 # ── RG ∥ MG 병렬 분기의 실행 순서·독립성 확인 ────────────────────────────────

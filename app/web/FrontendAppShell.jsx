@@ -544,16 +544,15 @@ export default function FrontendAppShell({
     }
   }
 
-  async function runCurrentReportAction(action = "download_report") {
+  async function runCurrentReportAction(action = "download_objection") {
     const jobId = currentReport?.job_id || analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || "";
-    let documentType = action === "download_objection" ? "objection_form" : "report";
+    const documentType = "objection_form";
     const reportAction = action === "save" ? "save" : "download";
     const activeReportingPayload = currentReport?.content?.reporting_payload || visibleReportingPayload;
     const appealGate = activeReportingPayload?.appeal_gate || null;
     const actionDefinition = Array.isArray(activeReportingPayload?.report_actions)
       ? activeReportingPayload.report_actions.find((item) => item?.type === action)
       : null;
-    documentType = actionDefinition?.document_type || documentType;
     if (reportAction === "download") {
       if (appealGate?.blocked === true) {
         setReportActionStatus(appealGate.reason || "이의신청 가능 여부를 확인한 뒤 문서를 다운로드할 수 있습니다.");
@@ -561,6 +560,17 @@ export default function FrontendAppShell({
       }
       if (actionDefinition && actionDefinition.document_format !== "docx") {
         setReportActionStatus("DOCX 형식으로 준비된 문서만 다운로드할 수 있습니다.");
+        return;
+      }
+      if (
+        activeReportingPayload?.document_confirmation?.required === true &&
+        activeReportingPayload.document_confirmation.confirmed !== true
+      ) {
+        setReportActionStatus(
+          activeReportingPayload.document_confirmation.stale
+            ? "문서 내용이 바뀌었습니다. 네 가지 항목을 다시 확인해 주세요."
+            : "이의신청서 다운로드 전 네 가지 최종 확인을 완료해 주세요."
+        );
         return;
       }
     }
@@ -612,9 +622,7 @@ export default function FrontendAppShell({
     }
     setReportActionStatus(
       reportAction === "download"
-        ? documentType === "objection_form"
-          ? "이의신청서 DOCX를 준비하고 있습니다."
-          : "분석 리포트 DOCX를 준비하고 있습니다."
+        ? "이의신청서 DOCX를 준비하고 있습니다."
         : "리포트를 저장하고 있습니다."
     );
     try {
@@ -645,6 +653,15 @@ export default function FrontendAppShell({
         setCurrentReport(persistedReport);
         let downloadedFilename = "";
         if (reportAction === "download") {
+          const confirmation = persistedReport?.content?.reporting_payload?.document_confirmation;
+          if (confirmation?.required === true && confirmation.confirmed !== true) {
+            setReportActionStatus(
+              confirmation.stale
+                ? "문서 내용이 바뀌었습니다. 네 가지 항목을 다시 확인해 주세요."
+                : "이의신청서 다운로드 전 네 가지 최종 확인을 완료해 주세요."
+            );
+            return;
+          }
           downloadedFilename = await triggerReportDownload({
             reportId: persistedReportId,
             sessionId: activeSessionId,
@@ -680,14 +697,69 @@ export default function FrontendAppShell({
     }
   }
 
-  async function triggerReportDownload({ reportId, sessionId: activeSessionId, requestIdentity, documentType = "report" }) {
+  async function confirmCurrentReportDocument(confirmation) {
+    const reportId = persistedAnalysisReportId(analysisResponse, currentReport);
+    if (!reportId) {
+      setReportActionStatus("최종 확인을 저장할 이의신청서가 아직 준비되지 않았습니다.");
+      return;
+    }
+    try {
+      let activeSessionId = currentReport?.session_id || analysisResponse?.session_id || sessionId;
+      let nextIdentity = identity;
+      if (!authSessionId) {
+        setPendingAuthAction({ type: "report_document_confirmation", reportId });
+        const loginState = await loginAndBindCurrentSession({
+          source: "report_document_confirmation",
+          nextRoute: "reporting",
+        });
+        activeSessionId = activeSessionId || loginState.sessionId;
+        nextIdentity = loginState.identity;
+        setPendingAuthAction(null);
+      }
+      await api.confirmReportDocument({
+        reportId,
+        sessionId: activeSessionId,
+        identity: nextIdentity,
+        confirmation,
+      });
+      const detailResult = await api.getReportDetail({
+        reportId,
+        sessionId: activeSessionId,
+        identity: nextIdentity,
+      });
+      setCurrentReport(detailResult?.report || currentReport);
+      setReportActionStatus("최종 확인이 저장되었습니다. 이의신청서 DOCX를 다운로드할 수 있습니다.");
+    } catch (_error) {
+      setPendingAuthAction(null);
+      setReportActionStatus(`최종 확인 저장에 실패했습니다. ${_error?.message || ""}`.trim());
+    }
+  }
+
+  async function copyReportDocumentCard(copyText, title) {
+    if (!copyText) {
+      setReportActionStatus("복사할 문서 내용이 아직 준비되지 않았습니다.");
+      return;
+    }
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setReportActionStatus("이 브라우저에서는 문서 내용을 자동으로 복사할 수 없습니다.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(copyText);
+      setReportActionStatus(`${title || "문서"} 내용을 클립보드에 복사했습니다.`);
+    } catch (_error) {
+      setReportActionStatus("문서 내용을 복사하지 못했습니다. 다시 시도해 주세요.");
+    }
+  }
+
+  async function triggerReportDownload({ reportId, sessionId: activeSessionId, requestIdentity, documentType = "objection_form" }) {
     const file = await api.downloadReport({
       reportId,
       sessionId: activeSessionId,
       identity: requestIdentity,
       documentType,
     });
-    const filename = file.filename || `${reportId}.txt`;
+    const filename = file.filename || `${reportId}.docx`;
     if (typeof document === "undefined" || typeof URL === "undefined") {
       return filename;
     }
@@ -1256,6 +1328,7 @@ export default function FrontendAppShell({
               onPreviewLoggedInUi={previewLoggedInUi}
               onRegisterAttachment={registerAttachmentMetadata}
               onOpenReporting={() => setActiveRoute("reporting")}
+              onConfirmReportDocument={confirmCurrentReportDocument}
               onRunReportAction={runCurrentReportAction}
               onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
@@ -1290,6 +1363,7 @@ export default function FrontendAppShell({
               onOpenReport={() => setActiveRoute("reporting")}
               onPrepareDraftRegeneration={prepareDraftRegeneration}
               onPrepareMissingEvidence={prepareMissingEvidenceUpload}
+              onConfirmDocument={confirmCurrentReportDocument}
               onRunReportAction={runCurrentReportAction}
               registeredAttachments={registeredAttachments}
               reportingPayload={reportingPayload}
@@ -1327,6 +1401,7 @@ export default function FrontendAppShell({
               }}
               onPrepareDraftRegeneration={prepareDraftRegeneration}
               onPrepareMissingEvidence={prepareMissingEvidenceUpload}
+              onCopyDocumentCard={copyReportDocumentCard}
               onRunReportAction={runCurrentReportAction}
               reportActionStatus={reportActionStatus}
               reportList={reportList}
@@ -1884,6 +1959,7 @@ function ChatScreenV2({
   onRegisterAttachment,
   onOpenReporting,
   onPreviewLoggedInUi,
+  onConfirmReportDocument,
   onRunReportAction,
   onSaveConversation,
   onSubmit,
@@ -2057,6 +2133,7 @@ function ChatScreenV2({
                               <ReportActionPanel
                                 currentReport={currentReport}
                                 isAuthenticated={Boolean(authSessionId)}
+                                onConfirmDocument={onConfirmReportDocument}
                                 onRunReportAction={onRunReportAction}
                                 reportingPayload={visibleReportingPayload}
                                 reportActionStatus={reportActionStatus}
@@ -2388,6 +2465,11 @@ function isSubmissionDocumentSection(section) {
 
 function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportingPayload, reportActionStatus }) {
   const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;
+  const confirmationReady = reportingPayload?.document_confirmation?.confirmed === true;
+  const hasOfficialDocument =
+    reportingPayload?.document_confirmation?.required === true ||
+    ["fine_notice", "traffic_accident"].includes(reportingPayload?.document_variant) ||
+    ["fine_notice_objection", "fault_ratio_analysis"].includes(reportingPayload?.report_type);
   return (
     <section className="report-ready-strip" aria-label="리포트 준비 완료">
       <div>
@@ -2398,22 +2480,90 @@ function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction
         <button className="button" type="button" onClick={onOpenReporting}>
           작업대
         </button>
-        <button
-          className="button primary"
-          type="button"
-          onClick={() => onRunReportAction("download_objection")}
-          disabled={appealDownloadBlocked}
-        >
-          {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 DOCX"}
-        </button>
+        {hasOfficialDocument && (
+          <button
+            className="button primary"
+            type="button"
+            onClick={() => onRunReportAction("download_objection")}
+            disabled={appealDownloadBlocked || !confirmationReady}
+          >
+            {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 DOCX"}
+          </button>
+        )}
       </div>
     </section>
   );
 }
 
-function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, reportingPayload, reportActionStatus }) {
+function DocumentConfirmationPanel({ confirmation, isAuthenticated, onConfirm }) {
+  const [checks, setChecks] = useState({
+    facts_confirmed: false,
+    agency_confirmed: false,
+    deadline_confirmed: false,
+    attachments_confirmed: false,
+  });
+  useEffect(() => {
+    setChecks({
+      facts_confirmed: false,
+      agency_confirmed: false,
+      deadline_confirmed: false,
+      attachments_confirmed: false,
+    });
+  }, [confirmation?.reportId, confirmation?.confirmed, confirmation?.stale]);
+  const allChecked = Object.values(checks).every(Boolean);
+  const appealBlocked = confirmation?.appealBlocked === true;
+  if (confirmation?.required !== true) {
+    return null;
+  }
+  if (confirmation.confirmed === true) {
+    return <p className="document-confirmation-status">최종 확인이 완료되었습니다.</p>;
+  }
+  return (
+    <fieldset className="document-confirmation-panel" disabled={appealBlocked}>
+      <legend>이의신청서 최종 확인</legend>
+      <p>{confirmation.stale ? "문서 내용이 변경되어 다시 확인해야 합니다." : "다운로드 전 아래 항목을 확인해 주세요."}</p>
+      {[
+        ["facts_confirmed", "사실관계"],
+        ["agency_confirmed", "관할기관"],
+        ["deadline_confirmed", "제출기한"],
+        ["attachments_confirmed", "첨부자료"],
+      ].map(([key, label]) => (
+        <label key={key} className="document-confirmation-check">
+          <input
+            type="checkbox"
+            checked={checks[key]}
+            onChange={(event) => setChecks((current) => ({ ...current, [key]: event.target.checked }))}
+          />
+          {label}을(를) 확인했습니다.
+        </label>
+      ))}
+      <button
+        className="button"
+        type="button"
+        onClick={() => onConfirm?.(checks)}
+        disabled={!isAuthenticated || appealBlocked || !allChecked}
+      >
+        {isAuthenticated ? "최종 확인 저장" : "로그인 후 최종 확인"}
+      </button>
+    </fieldset>
+  );
+}
+
+function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, onRunReportAction, reportingPayload, reportActionStatus }) {
   const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
   const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
+  const documentConfirmation = activeReportingPayload?.document_confirmation || null;
+  const hasOfficialDocument =
+    documentConfirmation?.required === true ||
+    ["fine_notice", "traffic_accident"].includes(activeReportingPayload?.document_variant) ||
+    ["fine_notice_objection", "fault_ratio_analysis"].includes(activeReportingPayload?.report_type);
+  const confirmation = {
+    required: hasOfficialDocument,
+    confirmed: documentConfirmation?.confirmed === true,
+    stale: documentConfirmation?.stale === true,
+    appealBlocked: appealDownloadBlocked,
+    reportId: currentReport?.report_id || activeReportingPayload?.report_id || null,
+  };
   const reportQuality =
     currentReport?.persistence?.report_quality ||
     currentReport?.report_quality ||
@@ -2423,7 +2573,7 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
   const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
   const reportQualityTitle = reportQuality?.partial_report ? "일부 자료가 부족한 리포트" : "검토 준비가 완료된 리포트";
   const helperText = isAuthenticated
-    ? reportActionStatus || activeReportingPayload?.appeal_gate?.reason || "상담 결과를 저장하거나 제출 문서와 분석 리포트 DOCX를 준비할 수 있습니다."
+    ? reportActionStatus || activeReportingPayload?.appeal_gate?.reason || "상담 결과를 저장하거나 제출용 이의신청서 DOCX를 준비할 수 있습니다."
     : reportActionStatus || "리포트 저장과 DOCX 다운로드는 Google 로그인 후 사용할 수 있습니다.";
 
   return (
@@ -2453,26 +2603,25 @@ function ReportActionPanel({ currentReport, isAuthenticated, onRunReportAction, 
           </div>
         )}
       </div>
+      <DocumentConfirmationPanel
+        confirmation={confirmation}
+        isAuthenticated={isAuthenticated}
+        onConfirm={onConfirmDocument}
+      />
       <div className="report-action-buttons">
         <button className="button" type="button" onClick={() => onRunReportAction("save")}>
           {isAuthenticated ? "저장" : "로그인 후 저장"}
         </button>
-        <button
-          className="button"
-          type="button"
-          onClick={() => onRunReportAction("download_report")}
-          disabled={appealDownloadBlocked}
-        >
-          분석 리포트 DOCX
-        </button>
-        <button
+        {hasOfficialDocument && (
+          <button
           className="button primary"
           type="button"
           onClick={() => onRunReportAction("download_objection")}
-          disabled={appealDownloadBlocked}
+          disabled={appealDownloadBlocked || !confirmation.confirmed}
         >
           {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 이의신청서 DOCX"}
         </button>
+        )}
       </div>
     </section>
   );
@@ -2807,14 +2956,6 @@ function CaseResultScreen({
               <div className="case-result-cta">
                 <button className="button primary full" type="button" onClick={onPrepareMissingEvidence}>자료 추가하기</button>
                 <button className="button full" type="button" onClick={onPrepareDraftRegeneration}>초안 다시 만들기</button>
-                <button
-                  className="button full"
-                  type="button"
-                  onClick={() => onRunReportAction?.("download")}
-                  disabled={(!currentReport && !reportingPayload) || appealDownloadBlocked}
-                >
-                  {isAuthenticated ? "리포트 다운로드" : "로그인 후 다운로드"}
-                </button>
               </div>
               {reportActionStatus && <p className="status-message inside" role="status">{reportActionStatus}</p>}
             </div>
@@ -2909,6 +3050,54 @@ function ReportActionAlert({ status }) {
     <div className={`report-action-alert ${tone}`} role="status">
       {text}
     </div>
+function DocumentTypeCards({ cards, onCopy }) {
+  const documentTitles = {
+    objection_draft: "이의신청서 초안",
+    fact_summary: "사실관계 정리",
+    insurance_submission: "보험사 제출용 요약",
+  };
+  if (!Array.isArray(cards) || cards.length === 0) {
+    return null;
+  }
+  return (
+    <section className="document-type-cards" aria-label="문서 유형별 정리">
+      {cards.map((card) => {
+        const sections = Array.isArray(card?.sections) ? card.sections : [];
+        const statusLabel =
+          card?.status === "ready"
+            ? "복사 가능"
+            : card?.status === "partial"
+              ? "자료 보완 필요"
+              : "제출 불가";
+        const canCopy = Boolean(card?.copy_text) && card?.status !== "unavailable";
+        const title = card?.title || documentTitles[card?.type] || "문서 정리";
+        return (
+          <article className="document-type-card" data-status={card?.status || "partial"} key={card?.type || card?.title}>
+            <div className="document-type-card-head">
+              <span className="tag">{statusLabel}</span>
+              <strong>{title}</strong>
+            </div>
+            <p>{card?.description || "리포트 내용을 문서 목적에 맞게 정리합니다."}</p>
+            {sections.length > 0 && (
+              <div className="document-type-card-sections">
+                {sections.slice(0, 2).map((section, index) => (
+                  <p key={`${card?.type || "document"}-${section?.title || index}`}>
+                    <strong>{section?.title || "리포트 항목"}</strong>
+                    {section?.body ? ` · ${compactValue(section.body)}` : ""}
+                  </p>
+                ))}
+              </div>
+            )}
+            {card?.notice && <p className="document-type-notice">{card.notice}</p>}
+            {canCopy && (
+              <button className="button" type="button" onClick={() => onCopy?.(card.copy_text, title)} disabled={!onCopy}>
+                내용 복사
+              </button>
+            )}
+          </article>
+        );
+      })}
+    </section>
   );
 }
 
@@ -2918,9 +3107,11 @@ function ReportingScreen({
   isAuthenticated = false,
   onOpenChat,
   onOpenReport,
+  onCopyDocumentCard,
   onPrepareDraftRegeneration,
   onPrepareMissingEvidence,
   onRefresh,
+  onConfirmDocument,
   onRunReportAction,
   reportActionStatus = "",
   reportList = [],
@@ -2931,8 +3122,23 @@ function ReportingScreen({
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
   const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
   const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
+  const documentConfirmation = activeReportingPayload?.document_confirmation || null;
+  const hasOfficialDocument =
+    documentConfirmation?.required === true ||
+    ["fine_notice", "traffic_accident"].includes(activeReportingPayload?.document_variant) ||
+    ["fine_notice_objection", "fault_ratio_analysis"].includes(activeReportingPayload?.report_type);
+  const confirmation = {
+    required: hasOfficialDocument,
+    confirmed: documentConfirmation?.confirmed === true,
+    stale: documentConfirmation?.stale === true,
+    appealBlocked: appealDownloadBlocked,
+    reportId: currentReport?.report_id || activeReportingPayload?.report_id || null,
+  };
   const hasReport = Boolean(activeReportingPayload || analysisCards.length || supervisorExecution || currentReport || hasSavedReports);
   const sections = Array.isArray(activeReportingPayload?.sections) ? activeReportingPayload.sections : [];
+  const documentCards = Array.isArray(activeReportingPayload?.document_cards)
+    ? activeReportingPayload.document_cards
+    : [];
   const nodeResults = Array.isArray(supervisorExecution?.node_results) ? supervisorExecution.node_results : [];
   const faultRatioNode = nodeResults.find((node) => node?.node_code === "text_ml_case_search");
   const lawGroundNode = nodeResults.find((node) => node?.node_code === "law_ground_search");
@@ -3041,6 +3247,8 @@ function ReportingScreen({
                 <MetricCard detail="제출·보완·재생성 중심" label="다음 작업" value={`${actionSections.length}개`} />
               </div>
 
+              <DocumentTypeCards cards={documentCards} onCopy={onCopyDocumentCard} />
+
               <div className="report-story-grid">
                 {overviewSections.map((section) => (
                   <ReportSectionPreview compact detailLimit={2} key={`overview-${section.title}`} section={section} />
@@ -3137,23 +3345,22 @@ function ReportingScreen({
           <ReportActionAlert status={reportActionStatus} />
           {hasReport ? (
             <>
+              <DocumentConfirmationPanel
+                confirmation={confirmation}
+                isAuthenticated={isAuthenticated}
+                onConfirm={onConfirmDocument}
+              />
               <div className="inspector-actions">
-                <button
-                  className="button"
-                  type="button"
-                  onClick={() => onRunReportAction?.("download_report")}
-                  disabled={!hasReport || appealDownloadBlocked}
-                >
-                  분석 리포트 DOCX
-                </button>
-                <button
+                {hasOfficialDocument && (
+                  <button
                   className="button"
                   type="button"
                   onClick={() => onRunReportAction?.("download_objection")}
-                  disabled={!hasReport || appealDownloadBlocked}
+                  disabled={!hasReport || appealDownloadBlocked || !confirmation.confirmed}
                 >
                   {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 이의신청서 DOCX"}
                 </button>
+                )}
                 <button
                   className="button"
                   type="button"

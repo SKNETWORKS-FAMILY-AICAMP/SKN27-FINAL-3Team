@@ -32,6 +32,8 @@ PUBLIC_REPORTING_PAYLOAD_KEYS = (
     "document_readiness",
     "report_actions",
     "appeal_gate",
+    "document_confirmation",
+    "document_cards",
     "sections",
 )
 PUBLIC_REPORT_QUALITY_KEYS = (
@@ -191,6 +193,8 @@ def _public_reporting_payload(value: object) -> dict[str, Any]:
                     "blocked": bool(appeal_gate.get("blocked")),
                     "reason": _optional_text(appeal_gate.get("reason")),
                 }
+        elif key == "document_cards":
+            public[key] = _public_document_cards(payload.get(key))
         elif key in payload:
             public[key] = deepcopy(payload[key])
     return public
@@ -240,6 +244,38 @@ def _public_report_actions(value: object) -> list[dict[str, str]]:
     return actions
 
 
+def _public_document_cards(value: object) -> list[dict[str, Any]]:
+    allowed_types = {"objection_draft", "fact_summary", "insurance_submission"}
+    allowed_statuses = {"ready", "partial", "unavailable"}
+    cards: list[dict[str, Any]] = []
+    for item in _sequence(value):
+        source = _mapping(item)
+        card_type = _optional_text(source.get("type"))
+        title = _optional_text(source.get("title"))
+        description = _optional_text(source.get("description"))
+        status = _optional_text(source.get("status"))
+        if (
+            card_type not in allowed_types
+            or status not in allowed_statuses
+            or title is None
+            or description is None
+        ):
+            continue
+        card: dict[str, Any] = {
+            "type": card_type,
+            "title": title,
+            "description": description,
+            "status": status,
+            "sections": _public_sections(source.get("sections")),
+        }
+        for key in ("copy_text", "notice"):
+            item_value = _optional_text(source.get(key))
+            if item_value is not None:
+                card[key] = item_value
+        cards.append(card)
+    return cards
+
+
 def _public_report_quality(value: object) -> dict[str, Any]:
     quality = _mapping(value)
     public: dict[str, Any] = {}
@@ -282,12 +318,9 @@ def _public_error_access(access: Mapping[str, Any]) -> dict[str, Any]:
         if value is not None:
             public[key] = value
     resource = _mapping(access.get("resource"))
-    if resource:
-        public["resource"] = {
-            key: _optional_text(resource.get(key))
-            for key in ("type", "report_id", "session_id")
-            if _optional_text(resource.get(key)) is not None
-        }
+    resource_type = _optional_text(resource.get("type"))
+    if resource_type is not None:
+        public["resource"] = {"type": resource_type}
     return public
 
 

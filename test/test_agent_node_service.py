@@ -97,6 +97,57 @@ def test_public_agent_registry_includes_every_non_dl_runtime_agent():
     assert "vision_media_analysis" not in public_codes
 
 
+def test_sync_reporting_payload_exposes_document_cards_without_generic_download_action():
+    payload = agent_node_service._build_reporting_payload(
+        {},
+        upstream_results={
+            "objection_report_generation": {
+                "status": "success",
+                "summary": "문서 초안을 만들었습니다.",
+                "structured_result": {
+                    "document_variant": "fine_notice",
+                    "document_title": "과태료 이의신청서",
+                    "form_sections": [
+                        {"title": "1. 이의신청 취지", "body": "처분 재검토 요청"},
+                        {"title": "2. 사실관계", "body": "확인된 사실"},
+                        {"title": "4. 관련 법령 및 근거", "body": "관련 근거"},
+                    ],
+                    "document_readiness": {"ready_for_docx": True},
+                    "appeal_gate": {"blocked": False},
+                    "report_actions": [
+                        {"type": "download_objection", "document_type": "objection_form"},
+                        {"type": "download_report", "document_type": "report"},
+                    ],
+                },
+            }
+        },
+        supervisor_handoff={"source_node_codes": ["objection_report_generation"]},
+    )
+
+    assert [card["type"] for card in payload["document_cards"]] == [
+        "objection_draft",
+        "fact_summary",
+        "insurance_submission",
+    ]
+    assert "download_report" not in [action["type"] for action in payload["report_actions"]]
+
+
+def test_objection_agent_stops_emitting_generic_report_download_action():
+    actions = objection_agent._report_actions(
+        document_variant="fine_notice",
+        ready_for_docx=True,
+    )
+
+    assert "download_report" not in [action["type"] for action in actions]
+
+
+def test_objection_agent_next_actions_keep_general_report_view_only():
+    next_actions = objection_agent._next_actions([], appeal_blocked=False)
+
+    assert "review_report_screen" in next_actions
+    assert "download_report" not in next_actions
+
+
 def test_legacy_mock_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypatch):
     calls = []
 
@@ -1191,7 +1242,8 @@ def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(
     assert structured_result["form_data"]["notice_received_date"] == "2026.06.10 13:33"
     assert structured_result["form_data"]["payment_deadline"] == "2026.07.02"
     assert structured_result["readiness"]["ready_for_download"] is True
-    assert {"download_objection", "download_report"} <= action_types
+    assert "download_objection" in action_types
+    assert "download_report" not in action_types
     download_actions = [
         action
         for action in structured_result["report_actions"]

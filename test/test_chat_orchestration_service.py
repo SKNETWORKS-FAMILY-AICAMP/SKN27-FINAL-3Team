@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 from app.services.chat_orchestration_service import compose_agent_response, submit_message
 from app.services.supervisor_llm_service import validate_slot_filling_state
-from app.services.supervisor_routing_service import routing_policy_metadata
+from app.services.supervisor_routing_service import DEFAULT_POLICY_PATH, routing_policy_metadata
 
 
 def test_supervisor_routing_uses_a_versioned_external_policy() -> None:
@@ -12,6 +13,12 @@ def test_supervisor_routing_uses_a_versioned_external_policy() -> None:
 
     assert metadata["contract_version"] == "supervisor_routing_policy.v1"
     assert metadata["source"].endswith("supervisor_routing_policy.v1.json")
+
+
+def test_report_routing_policy_has_no_obsolete_pre_merge_placement_rule() -> None:
+    policy = json.loads(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
+
+    assert "insert_before" not in policy["report_policy"]
 
 
 def test_empty_message_requests_input_without_creating_an_agent_plan() -> None:
@@ -165,8 +172,11 @@ def test_report_node_is_planned_only_when_document_generation_is_explicitly_requ
         "law_ground_search",
         "appeal_decision_flow",
         "agent_result_validation",
-        "objection_report_generation",
         "final_response_merge",
+        "objection_report_generation",
+    ]
+    assert response["analysis_plan"]["steps"][-1]["depends_on"] == [
+        "final_response_merge"
     ]
 
 

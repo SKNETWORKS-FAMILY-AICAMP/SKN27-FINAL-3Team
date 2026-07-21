@@ -14,7 +14,13 @@ VALID_COMBINATIONS: set[tuple[str, str]] = {
 _LAW_CODE_RE = re.compile(r".+(법|규칙|령|조례|규정).+제\d+조")
 
 
-def _structured_from_state(state: FineNoticeState, ocr_status: str) -> dict:
+def _structured_from_state(
+    state: FineNoticeState,
+    ocr_status: str,
+    *,
+    requires_confirmation: bool = False,
+    unconfirmed_fields: Optional[list] = None,
+) -> dict:
     return {
         "ocr_status":                 ocr_status,
         "ocr_error":                  state.get("ocr_error"),
@@ -36,6 +42,8 @@ def _structured_from_state(state: FineNoticeState, ocr_status: str) -> dict:
         "charge_number":              state.get("charge_number"),
         "court_venue":                state.get("court_venue"),
         "missing_fields":             state.get("missing_fields") or [],
+        "requires_confirmation":      requires_confirmation,
+        "unconfirmed_fields":         unconfirmed_fields or [],
     }
 
 
@@ -74,22 +82,45 @@ def confidence_verification_node(state: FineNoticeState) -> dict:
     # format_errors 있으면 partial로 오버라이드 (VFAIL 경로)
     ocr_status = "partial" if format_errors else state.get("ocr_status", "success")
 
+    CRITICAL_FIELDS = ["fine_amount", "opinion_deadline", "charge_number"]
+    unconfirmed_fields = [f for f in CRITICAL_FIELDS if f in missing]
+    requires_confirmation = False
+
     # ENV_OK_KT (과태료) vs ENV_OK_BJ (범칙금) — next_actions 분기
     if ocr_status == "success" and fine_type == "과태료":
-        next_actions = ["법률 근거 검색 노드 호출"]         # END_KT: 이의신청서 Agent 판단
+        requires_confirmation = True
+        next_actions = [
+            "추출된 핵심 정보 사용자 최종 승인 요청",
+            "법률 근거 검색 노드 호출 (승인 후)"
+        ]
     elif ocr_status == "success" and fine_type == "범칙금":
-        next_actions = ["OCR 결과만 반환 — 이의신청 불가"]  # END_BJ: 법원행정 영역
+        requires_confirmation = True
+        next_actions = [
+            "추출된 핵심 정보 사용자 최종 승인 요청",
+            "OCR 결과만 반환 — 이의신청 불가"
+        ]
     else:
-        next_actions = ["이미지 재업로드 요청"]
+        requires_confirmation = True
+        if unconfirmed_fields:
+            next_actions = ["이미지 재업로드 또는 누락/부정확 필드(금액, 기한 등) 직접 입력 요청"]
+        else:
+            next_actions = ["이미지 재업로드 요청"]
 
     violation_text = state.get("violation_text") or ""
     summary = f"{fine_type} {violation_text[:20] or '내용 미확인'} — {notice_stage} OCR {ocr_status}"
 
-    structured = _structured_from_state(state, ocr_status)
+    structured = _structured_from_state(
+        state,
+        ocr_status,
+        requires_confirmation=requires_confirmation,
+        unconfirmed_fields=unconfirmed_fields,
+    )
     env = make_envelope(ocr_status, structured, missing, next_actions, summary, limitations=format_errors)
 
     return {
         "ocr_status":    ocr_status,
         "format_errors": format_errors,
+        "unconfirmed_fields": unconfirmed_fields,
+        "requires_confirmation": requires_confirmation,
         "agent_results": update_agent_results(state, env),
     }

@@ -1052,26 +1052,12 @@ def _report_actions(
                 "document_type": TRAFFIC_ACCIDENT_DOCX_TYPE,
             }
         )
-        return [
-            primary_action,
-            {
-                "type": "download_report",
-                "label": "분석 리포트 DOCX 다운로드",
-                "document_type": "report",
-                "document_format": "docx",
-            },
-        ]
+        return [primary_action]
     return [
         {
             "type": "download_objection",
             "label": "이의신청서 DOCX 다운로드",
             "document_type": "objection_form",
-            "document_format": "docx",
-        },
-        {
-            "type": "download_report",
-            "label": "분석 리포트 DOCX 다운로드",
-            "document_type": "report",
             "document_format": "docx",
         },
         {
@@ -1211,7 +1197,7 @@ def _next_actions(missing_fields: list[str], *, appeal_blocked: bool = False) ->
     return [
         "review_objection_draft",
         "download_objection",
-        "download_report",
+        "review_report_screen",
     ]
 
 

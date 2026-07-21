@@ -35,6 +35,8 @@ class FineNoticeState(TypedDict, total=False):
 
     # ── confidence_verification_node 출력 ────────────────────────────
     format_errors:              list
+    unconfirmed_fields:         list[str]
+    requires_confirmation:      bool
 
     # ── Supervisor 수신 ──────────────────────────────────────────────
     agent_results:              dict
