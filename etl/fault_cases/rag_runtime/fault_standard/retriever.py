@@ -1,7 +1,7 @@
-"""인정기준 Qwen 4B·pgvector·전용 V9 Neo4j·결정식 계산기 RAG.
+"""인정기준 Qwen 4B·pgvector·전용 운영 Neo4j·결정식 계산기 RAG.
 
 법률 Neo4j는 참조하지 않는다. 검색은 `fault_standard_db.rag_qwen4`, 관계·계산
-근거는 별도 `fault-standard-neo4j`의 Complete30 V9 복원본에서만 읽는다.
+근거는 별도 `fault-standard-neo4j`의 운영 그래프에서만 읽는다.
 """
 
 from __future__ import annotations
@@ -55,12 +55,12 @@ def _graph_config() -> tuple[str, str, str, str]:
     password = os.environ.get("FAULT_STANDARD_NEO4J_PASSWORD")
     database = os.environ.get("FAULT_STANDARD_NEO4J_DATABASE", "neo4j")
     if not password:
-        raise RuntimeError("FAULT_STANDARD_NEO4J_PASSWORD가 없어 전용 V9 그래프를 읽을 수 없습니다.")
+        raise RuntimeError("FAULT_STANDARD_NEO4J_PASSWORD가 없어 전용 운영 그래프를 읽을 수 없습니다.")
     return uri, user, password, database
 
 
 def _graph_profiles(rule_ids: list[str]) -> tuple[dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]]]:
-    """V9의 조건·당사자·기준 과실·가감요인 관계를 후보 Rule별로 읽는다."""
+    """운영 그래프의 조건·당사자·기준 과실·가감요인 관계를 후보 Rule별로 읽는다."""
 
     conditions: dict[str, list[dict[str, Any]]] = defaultdict(list)
     profiles: dict[str, dict[str, Any]] = {
@@ -124,13 +124,13 @@ def _evidence(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def search_fault_standard(request: RagRequest) -> DomainSearchResult:
-    """인정기준 Top-20을 검색하고 V9 관계 대조·결정식 계산 결과를 함께 반환한다."""
+    """인정기준 후보를 검색하고 운영 관계 대조·결정식 계산 결과를 함께 반환한다."""
 
     try:
-        # V9 C2b의 승인 계약은 semantic Top-50 후보를 관계 대조하는 방식이다.
+        # 운영 그래프의 핵심 계약은 semantic Top-50 후보를 관계 대조하는 방식이다.
         candidates = search_by_vector("fault_standard", _resolve_vector(request), top_k=50, candidate_k=277)
         rule_ids = [str(candidate["document_id"]) for candidate in candidates]
-        # C2b는 V9 차로 경로·진입 순서·문맥 관계까지 읽어 당사자 방향을 대조한다.
+        # 운영 그래프는 차로 경로·진입 순서·문맥 관계까지 읽어 당사자 방향을 대조한다.
         graphs = graph_data(rule_ids)
         facts = _flat_facts(dict(request.get("accident_facts") or {}))
         selection = c2b_select(
@@ -148,7 +148,7 @@ def search_fault_standard(request: RagRequest) -> DomainSearchResult:
         )
         profiles = c2b_calculator_profiles([selection], graphs)
         calculation = calculate_fault_ratio(selection, facts, profiles)
-        # 슈퍼바이저가 계산 근거를 설명할 수 있도록 검색 순위·V9 조건 대조 trace를 보존한다.
+        # 슈퍼바이저가 계산 근거를 설명할 수 있도록 검색 순위·운영 조건 대조 trace를 보존한다.
         calculation["selection_trace"] = selection
     except (KeyError, RuntimeError, ValueError, OSError, json.JSONDecodeError) as error:
         return {
@@ -168,7 +168,7 @@ def search_fault_standard(request: RagRequest) -> DomainSearchResult:
         "evidence": [_evidence(row) for row in candidates[:10]],
         "calculation_result": calculation,
         "limitations": [
-            "선택은 Qwen 4B cosine 후보를 V9 `REQUIRES_FACT` 관계와 대조한 결과입니다.",
+            "선택은 Qwen 4B cosine 후보를 운영 `REQUIRES_FACT` 관계와 대조한 결과입니다.",
             "누락 Fact가 있거나 당사자 매핑이 모호하면 임의 과실비율을 만들지 않고 not_calculable을 반환합니다.",
             "현재 이관 벡터는 AB artifact의 revision 미고정 경고를 보존합니다.",
         ],

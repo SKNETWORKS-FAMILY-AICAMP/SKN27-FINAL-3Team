@@ -1,6 +1,6 @@
-"""전용 Complete30 V9 Neo4j에서 관계 대조·계산용 데이터를 읽는 어댑터.
+"""전용 운영 Neo4j에서 관계 대조·계산용 데이터를 읽는 어댑터.
 
-이 모듈은 기존 법률 Neo4j에 연결하지 않는다. C2b 선택기가 필요한 V9 관계만
+이 모듈은 기존 법률 Neo4j에 연결하지 않는다. 운영 선택기가 필요한 관계만
 `fault-standard-neo4j`에서 읽어, 검색 후보와 사고 Fact의 관계를 판정한다.
 """
 
@@ -29,7 +29,7 @@ def _config() -> tuple[str, str, str, str]:
 
 
 def graph_data(rule_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """C2b 관계 대조와 계산기에 필요한 V9 원본 레코드를 후보별로 반환한다."""
+    """운영 관계 대조와 계산기에 필요한 원본 레코드를 후보별로 반환한다."""
 
     output: dict[str, dict[str, Any]] = {
         rule_id: {

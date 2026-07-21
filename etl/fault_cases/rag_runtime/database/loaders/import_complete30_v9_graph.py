@@ -1,4 +1,7 @@
-"""검증된 Complete30/V9 논리 백업을 전용 Neo4j로 복원한다.
+"""[Deprecated] 검증된 Complete30/V9 논리 백업을 전용 Neo4j로 복원한다.
+
+운영 이관에는 사용하지 않는다. 이 모듈은 V7/V9 전체 스냅샷과 `V9Import` 라벨을
+그대로 복원하므로 운영 그래프에는 `import_fault_standard_operational_graph`를 사용한다.
 
 원본 법률 Neo4j 또는 기존 Complete30 실험 Neo4j에는 연결하지 않는다. 입력은
 1단계에서 생성·검증한 JSONL 논리 백업이며, 대상은 `fault-standard-neo4j`뿐이다.
@@ -174,4 +177,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

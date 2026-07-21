@@ -1,4 +1,4 @@
-"""Import a Complete30 V9 snapshot into a clean operational graph namespace."""
+"""Import a validated Complete30 V9 snapshot into a clean operational graph namespace."""
 
 from __future__ import annotations
 

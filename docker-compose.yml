@@ -75,7 +75,7 @@ services:
       NEO4J_USER: "${NEO4J_USER:-neo4j}"
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-change-me}
       NEO4J_DATABASE: "${NEO4J_DATABASE:-neo4j}"
-      # 인정기준 V9 전용 Neo4j입니다. 기존 법률 Neo4j 환경변수와 분리합니다.
+      # 인정기준 운영 Neo4j입니다. 기존 법률 Neo4j 환경변수와 분리합니다.
       FAULT_STANDARD_NEO4J_URI: "bolt://fault-standard-neo4j:7687"
       FAULT_STANDARD_NEO4J_USER: "${FAULT_STANDARD_NEO4J_USER:-neo4j}"
       FAULT_STANDARD_NEO4J_PASSWORD: ${FAULT_STANDARD_NEO4J_PASSWORD:-fault-standard-local-change-before-deploy}
@@ -235,7 +235,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 인정기준 V9 관계 대조 전용 그래프입니다.
+  # 인정기준 운영 관계 그래프입니다. 실험 버전 라벨은 운영 DB에 적재하지 않습니다.
   # profiles를 명시해야만 실행되므로 기존 법률 Neo4j에는 영향을 주지 않습니다.
   fault-standard-neo4j:
     image: ${FAULT_STANDARD_NEO4J_IMAGE:-neo4j:5-community}
@@ -251,8 +251,8 @@ services:
       NEO4J_server_memory_heap_max__size: 1G
       NEO4J_server_memory_pagecache_size: 512m
     volumes:
-      - fault_standard_neo4j_data:/data
-      - fault_standard_neo4j_logs:/logs
+      - fault_standard_neo4j_operational_next_data:/data
+      - fault_standard_neo4j_operational_next_logs:/logs
     healthcheck:
       test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${FAULT_STANDARD_NEO4J_PASSWORD:-fault-standard-local-change-before-deploy} 'RETURN 1'"]
       interval: 10s
@@ -301,8 +301,11 @@ volumes:
   object_storage_data:
   neo4j_data:
   neo4j_logs:
-  # 인정기준 V9 전용 볼륨이며 기존 법률 Neo4j 볼륨과 절대 공유하지 않습니다.
+  # 운영 이관 전후 모두 기존 법률 Neo4j 볼륨과 절대 공유하지 않습니다.
   fault_standard_neo4j_data:
   fault_standard_neo4j_logs:
+  fault_standard_neo4j_operational_next_data:
+    name: ${FAULT_STANDARD_NEO4J_DATA_VOLUME:-fault_standard_neo4j_operational_next_data}
+  fault_standard_neo4j_operational_next_logs:
+    name: ${FAULT_STANDARD_NEO4J_LOG_VOLUME:-fault_standard_neo4j_operational_next_logs}
   redis_data:
-

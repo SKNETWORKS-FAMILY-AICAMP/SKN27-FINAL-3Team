@@ -1,4 +1,4 @@
-"""Neo4j Reranker for Complete30 V9."""
+"""Neo4j reranker for the FaultStandardOperational graph."""
 
 from __future__ import annotations
 
