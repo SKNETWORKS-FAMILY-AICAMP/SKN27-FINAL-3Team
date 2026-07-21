@@ -26,8 +26,6 @@
   - 실제 AgentAdapterOutput 형태 fixture를 통한 허용·제외·불변성 단위 회귀 테스트.
 - Modify: `backend/chatbot/test_analysis_job_queue.py`
   - 인증된 실제 `GET /api/analysis/results/{job_id}/` 경로의 공개 DTO 검증.
-- Modify: `backend/chatbot/tests.py`
-  - mock 결과 경로의 legacy 상위 `agent_results` 기대값을 node 표시 결과 계약으로 정정.
 - Modify: `docs/ops/project-readiness-master-checklist.md`
   - 최종 검증 성공 뒤 `에이전트 노드 API 계약` 완료 처리.
 
@@ -37,7 +35,6 @@
 
 - Modify: `test/test_analysis_job_query_service.py`
 - Modify: `backend/chatbot/test_analysis_job_queue.py`
-- Modify: `backend/chatbot/tests.py`
 
 **Interfaces:**
 
@@ -158,13 +155,10 @@
   `agent_results`, `structured_results`가 없고, `supervisor_execution.node_results`의
   `node_code`, `status`, `summary`, `structured_result`는 남는지 검증한다.
 
-  `backend/chatbot/tests.py`의 mock 결과 테스트는 상위 `agent_results` 존재 assertion을
-  제거하고 동일 Agent 표시 정보가 `supervisor_execution.node_results`에 있는지 검증한다.
-
 - [ ] **Step 6: 테스트 변경을 커밋한다.**
 
   ```powershell
-  git add test/test_analysis_job_query_service.py backend/chatbot/test_analysis_job_queue.py backend/chatbot/tests.py
+  git add test/test_analysis_job_query_service.py backend/chatbot/test_analysis_job_queue.py
   git commit -m "test: define public analysis result dto contract"
   ```
 
@@ -292,15 +286,16 @@
 - [ ] **Step 1: 결과 API와 소유권 회귀 테스트를 실행한다.**
 
   ```powershell
-  python -m pytest -p no:timeout -p no:cacheprovider `
-    test/test_analysis_job_query_service.py `
-    backend/chatbot/test_analysis_job_queue.py `
-    backend/chatbot/test_resource_ownership_e2e.py `
-    backend/chatbot/test_guest_login_session_ownership_e2e.py -q
+  & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend\manage.py test `
+    chatbot.test_analysis_job_queue `
+    chatbot.test_resource_ownership_e2e `
+    chatbot.test_guest_login_session_ownership_e2e -v 1
+  & 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' -m pytest `
+    -p no:timeout -p no:cacheprovider test/test_analysis_job_query_service.py -q
   ```
 
-  Expected: 대상 테스트 전부 통과. `python-docx`가 없는 로컬 가상환경이면 프로젝트
-  의존성이 설치된 가상환경으로 전환한 뒤 같은 명령을 재실행한다.
+  Expected: 대상 테스트 전부 통과. Django 파일은 `manage.py test`로 실행하고,
+  루트 pytest는 Django 설정이 필요 없는 query-service 계약만 실행한다.
 
 - [ ] **Step 2: 프런트 생산 빌드를 실행한다.**
 
@@ -321,7 +316,7 @@
 - [ ] **Step 4: 최종 변경을 커밋한다.**
 
   ```powershell
-  git add backend/chatbot/test_analysis_job_queue.py backend/chatbot/tests.py docs/ops/project-readiness-master-checklist.md
+  git add backend/chatbot/test_analysis_job_queue.py docs/ops/project-readiness-master-checklist.md
   git commit -m "test: verify public agent result contract"
   ```
 
