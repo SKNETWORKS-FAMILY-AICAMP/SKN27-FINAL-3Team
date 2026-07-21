@@ -301,3 +301,91 @@ def test_run_ragas_requires_at_most_twenty_public_questions() -> None:
 
     with pytest.raises(ValueError, match="at most 20"):
         run_evaluation.run_ragas(records, generator_model="g", judge_model="j", embedding_model="e")
+
+
+def test_transition_decision_rejects_missing_ragas_evidence() -> None:
+    summary = {
+        "postgres_lexical": {
+            "recall_at_5": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_5": 1.0,
+            "no_result_rate": 0.0,
+            "p95_latency_ms": 10,
+            "metadata_complete_rate": 1.0,
+        },
+        "postgres_pgvector": {
+            "recall_at_5": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_5": 1.0,
+            "no_result_rate": 0.0,
+            "p95_latency_ms": 10,
+            "metadata_complete_rate": 1.0,
+        },
+    }
+
+    decision = evaluation.transition_decision(
+        summary,
+        {
+            "postgres_lexical": {"status": "not_evaluated"},
+            "postgres_pgvector": {"status": "not_evaluated"},
+        },
+    )
+
+    assert decision["eligible"] is False
+    assert "ragas_not_evaluated" in decision["failed_gates"]
+
+
+def test_transition_decision_rejects_vector_quality_regression() -> None:
+    summary = {
+        "postgres_lexical": {
+            "recall_at_5": 1.0,
+            "mrr": 1.0,
+            "ndcg_at_5": 1.0,
+            "no_result_rate": 0.0,
+            "p95_latency_ms": 10,
+            "metadata_complete_rate": 1.0,
+        },
+        "postgres_pgvector": {
+            "recall_at_5": 0.9,
+            "mrr": 0.97,
+            "ndcg_at_5": 0.97,
+            "no_result_rate": 0.1,
+            "p95_latency_ms": 20,
+            "metadata_complete_rate": 0.9,
+        },
+    }
+    ragas = {
+        "postgres_lexical": {"status": "evaluated", "metrics": {"context_recall": 1.0, "faithfulness": 1.0}},
+        "postgres_pgvector": {"status": "evaluated", "metrics": {"context_recall": 0.9, "faithfulness": 0.9}},
+    }
+
+    decision = evaluation.transition_decision(summary, ragas)
+
+    assert decision["eligible"] is False
+    assert set(decision["failed_gates"]) >= {
+        "recall_at_5_regression",
+        "mrr_regression",
+        "ndcg_at_5_regression",
+        "no_result_rate_regression",
+        "p95_latency_regression",
+        "metadata_incomplete",
+        "ragas_context_recall_regression",
+        "ragas_faithfulness_regression",
+    }
+
+
+def test_summary_counts_disabled_backend_as_not_ready() -> None:
+    summary = evaluation.summarize_backend_runs(
+        [
+            {
+                "query_id": "law-q001",
+                "backend": "postgres_pgvector",
+                "status": "disabled",
+                "latency_ms": 0,
+                "results": [],
+            }
+        ],
+        [{"query_id": "law-q001", "expected_source_references": ["도로교통법|제5조"]}],
+    )
+
+    assert summary["postgres_pgvector"]["unavailable_rate"] == 1.0

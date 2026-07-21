@@ -2,7 +2,7 @@
 
 ## 상태
 
-**평가 설계 완료 · 실행 결과 대기**
+**평가 도구 구현 완료 · 실제 A/B 결과 대기**
 
 이 문서는 Issue #280의 법령 RAG 평가 결과를 기록한다. 판례·심의사례·과실기준과 이재강 담당 RAG는 범위에 포함하지 않는다.
 
@@ -80,12 +80,32 @@
 
 | 항목 | 상태 | 근거 |
 | --- | --- | --- |
-| 공개 법령 평가셋·정답지 | 미실행 | Issue #280 구현 단계에서 생성 |
-| lexical 후보 수집 | 미실행 | PostgreSQL 평가 환경 필요 |
-| pgvector 후보 수집 | 미실행 | 동일 embedding space의 법령 seed 필요 |
+| 공개 법령 평가셋·정답지 | 구현 완료 | Git 추적 평가셋 20개, `public_law`만 허용 |
+| 결정적 지표·전환 gate | 구현 완료 | Recall@1/3/5, MRR, nDCG@5, no-result, p50/p95, metadata, RAGAS gate |
+| lexical 후보 수집 | 준비 상태 실행됨·비교 불가 | 2026-07-21 로컬 실행에서 PostgreSQL lexical backend가 준비되지 않아 20/20 `unavailable` |
+| pgvector 후보 수집 | 준비 상태 실행됨·비교 불가 | 같은 실행에서 vector backend가 비활성이라 20/20 not-ready; 점수 0은 품질 점수가 아님 |
 | 임베딩 모델 A/B | 미실행 | 후보 모델·corpus snapshot 확정 필요 |
 | chunk 전략 A/B | 미실행 | 1차 모델 결과 후 실행 |
-| RAGAS 파일럿 | 미실행 | 공개 법령 데이터·승인된 유료 호출 사용 예정 |
+| RAGAS 파일럿 | 미실행 | `--run-ragas`를 명시하지 않았으며, 실제 비교 backend가 준비되지 않았음 |
+
+### 실행 절차
+
+평가 도구는 운영 검색 우선순위를 변경하지 않고 기존 backend helper를 각각 직접 호출한다. 결과 파일은 Git에서 제외된 `output/law_ingestion/evaluation/<run-id>/`에만 생성된다.
+
+```powershell
+# 동일 PostgreSQL 법령 seed와 vector 설정이 준비된 평가 환경에서 실행
+python -m etl.legal.run_evaluation --run-id legal-ab-001
+
+# 위 결과가 정상일 때만, 공개 법령 20개·backend별 top-5로 RAGAS까지 실행
+python -m etl.legal.run_evaluation --run-id legal-ab-001-ragas --run-ragas `
+  --ragas-generator-model gpt-4o-mini `
+  --ragas-judge-model gpt-4o-mini `
+  --ragas-embedding-model text-embedding-3-small
+```
+
+- `candidates.json`에는 순위·출처·시점·점수만 기록하며 조문 원문과 질의는 넣지 않는다.
+- `ragas_input.jsonl`은 공개 법령 원문을 포함할 수 있어 로컬 ignored artifact로만 유지한다.
+- `summary.json`의 `transition_decision.eligible`이 `true`가 아니면 production pgvector 우선 전환을 제안하지 않는다.
 
 ## 7. 리스크와 한계
 
@@ -93,7 +113,9 @@
 - Ollama는 실행 환경이며, 설치·모델 준비가 확인되지 않으면 로컬 후보 결과를 만들지 않는다.
 - RAGAS 점수는 판정 모델과 생성 모델의 영향을 받으므로, A/B run 안에서는 두 모델을 고정한다.
 - RAGAS는 검색 ranking 지표를 대체하지 않는다.
+- 현재 checked-in 20개 평가셋은 현재 seed manifest에 있는 법률 중심이다. `administrative_rule`·`notice` source가 같은 corpus snapshot에 적재되기 전에는 해당 source type의 전환 근거가 되지 않는다.
+- 2026-07-21 로컬 준비 상태 실행은 backend readiness 검증일 뿐 품질 A/B 결과가 아니다.
 
 ## 8. 결론
 
-현재는 설계와 리포트 구조만 준비됐다. 실제 A/B와 RAGAS 결과가 기록되기 전에는 pgvector 우선 전환 또는 단일화 결론을 내리지 않는다.
+평가 도구와 공개 법령 평가셋은 준비됐지만, 실제 A/B와 RAGAS 결과는 아직 없다. PostgreSQL lexical·pgvector가 동일 corpus snapshot과 embedding space로 준비된 환경에서 재실행하기 전에는 pgvector 우선 전환 또는 단일화 결론을 내리지 않는다.

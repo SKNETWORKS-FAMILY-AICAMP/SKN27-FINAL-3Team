@@ -303,16 +303,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     _write_json(output_dir / "candidates.json", {"runs": runs})
     ragas_records = build_ragas_records(queries, responses)
     _write_jsonl(output_dir / "ragas_input.jsonl", ragas_records)
-    ragas_result = (
-        run_ragas(
-            ragas_records,
-            generator_model=args.ragas_generator_model,
-            judge_model=args.ragas_judge_model,
-            embedding_model=args.ragas_embedding_model,
-        )
-        if args.run_ragas
-        else {"status": "not_evaluated", "reason": "run_ragas_not_requested"}
+    ragas_result = _run_ragas_by_backend(
+        ragas_records,
+        enabled=args.run_ragas,
+        generator_model=args.ragas_generator_model,
+        judge_model=args.ragas_judge_model,
+        embedding_model=args.ragas_embedding_model,
     )
+    decision = evaluation.transition_decision(summary, ragas_result)
     _write_json(
         output_dir / "summary.json",
         {
@@ -323,6 +321,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "top_k": args.top_k,
             "backends": summary,
             "ragas": ragas_result,
+            "transition_decision": decision,
         },
     )
     print(f"Wrote deterministic legal RAG evaluation artifacts to {output_dir}")
@@ -338,6 +337,34 @@ def _write_jsonl(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True))
             handle.write("\n")
+
+
+def _run_ragas_by_backend(
+    records: Sequence[Mapping[str, object]],
+    *,
+    enabled: bool,
+    generator_model: str,
+    judge_model: str,
+    embedding_model: str,
+) -> dict[str, dict[str, Any]]:
+    by_backend = {
+        backend: [record for record in records if record.get("backend") == backend]
+        for backend in BACKENDS
+    }
+    if not enabled:
+        return {
+            backend: {"status": "not_evaluated", "reason": "run_ragas_not_requested"}
+            for backend in BACKENDS
+        }
+    return {
+        backend: run_ragas(
+            backend_records,
+            generator_model=generator_model,
+            judge_model=judge_model,
+            embedding_model=embedding_model,
+        )
+        for backend, backend_records in by_backend.items()
+    }
 
 
 def _required_text(row: Mapping[str, object], key: str) -> str:
