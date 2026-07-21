@@ -8,7 +8,7 @@ import json
 from uuid import uuid4
 
 
-NODE_CODE = "accident_situation_analysis"
+NODE_CODE = "vision_media_analysis"
 SCHEMA_VERSION = "vision-agent-output-v2"
 
 PM_ATTACHMENT_PURPOSES = {

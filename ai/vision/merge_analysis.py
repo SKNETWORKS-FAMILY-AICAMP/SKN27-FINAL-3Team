@@ -51,14 +51,14 @@ def build_video_understanding(videomae_result: dict[str, Any]) -> dict[str, Any]
         )
 
     return {
-        "analysis_type": "videomae_pretrained_clip_inference",
+        "analysis_type": "videomae_trained_accident_classifier_inference",
         "model_name": videomae_result.get("model_name"),
         "device": videomae_result.get("device"),
         "source_manifest": videomae_result.get("source_manifest"),
         "clip_count": videomae_result.get("clip_count"),
         "clips": clips,
         "interpretation_note": (
-            "VideoMAE Kinetics labels are supplementary action hints. "
+            "VideoMAE accident-classifier labels are trained-model predictions. "
             "They do not determine accident type, fault ratio, legal liability, "
             "or final situation summary by themselves."
         ),
@@ -82,14 +82,14 @@ def build_final_analysis(agent_output: dict[str, Any], videomae_result: dict[str
         "video_understanding": video_understanding,
         "comparison_summary": {
             "yolo_bbox_role": "key frame evidence, detected objects, bbox-change event window candidates",
-            "videomae_role": "clip-level pretrained action hint for comparison",
+            "videomae_role": "clip-level trained accident-type prediction",
             "videomae_top_labels": top_labels,
-            "decision": "Use VideoMAE as auxiliary evidence only until accident-domain training/evaluation is done.",
+            "decision": "Use the trained VideoMAE prediction with YOLO/Qwen evidence and human review.",
         },
         "limitations": [
             "This final analysis does not estimate fault ratio.",
             "This final analysis does not determine legal responsibility.",
-            "VideoMAE output is not accident-domain fine-tuned yet.",
+            "A trained VideoMAE prediction is probabilistic and may be wrong.",
             "Human review is required for the actual accident narrative.",
         ],
     }

@@ -69,6 +69,24 @@ def bbox_iou(a: list[float], b: list[float]) -> float:
     return inter / union if union > 0 else 0.0
 
 
+def bbox_union(a: list[float], b: list[float]) -> list[float]:
+    return [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
+
+
+def padded_crop_rect(bbox: list[float], width: int, height: int, padding_ratio: float) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = bbox
+    bw = max(1.0, x2 - x1)
+    bh = max(1.0, y2 - y1)
+    pad = max(bw, bh) * padding_ratio
+    left = max(0, int(math.floor(x1 - pad)))
+    top = max(0, int(math.floor(y1 - pad)))
+    right = min(width, int(math.ceil(x2 + pad)))
+    bottom = min(height, int(math.ceil(y2 + pad)))
+    if right - left < 2 or bottom - top < 2:
+        return 0, 0, width, height
+    return left, top, right, bottom
+
+
 def center_distance(a: list[float], b: list[float]) -> float:
     ax = (a[0] + a[2]) / 2
     ay = (a[1] + a[3]) / 2
@@ -96,6 +114,7 @@ def pair_score(a: dict, b: dict, width: float, height: float) -> dict:
         "center_distance_px": distance_px,
         "object_pair": f"{a['class_name']}-{b['class_name']}",
         "track_pair": f"{a.get('track_id', '')}-{b.get('track_id', '')}",
+        "bbox_xyxy": bbox_union(a["bbox"], b["bbox"]),
     }
 
 
@@ -115,6 +134,7 @@ def estimate_accident(video_path: Path, duration: float, source: str, model_name
         "min_center_distance_px": "",
         "object_pair": "",
         "track_pair": "",
+        "bbox_xyxy": "",
     }
     if source == "center":
         return base
@@ -159,6 +179,7 @@ def estimate_accident(video_path: Path, duration: float, source: str, model_name
                             "min_center_distance_px": best_frame_score["center_distance_px"],
                             "object_pair": best_frame_score["object_pair"],
                             "track_pair": best_frame_score["track_pair"],
+                            "bbox_xyxy": best_frame_score.get("bbox_xyxy", ""),
                         }
                     )
             previous_count = len(detections)
@@ -168,7 +189,14 @@ def estimate_accident(video_path: Path, duration: float, source: str, model_name
     return dict(base, basis="center_fallback")
 
 
-def write_clip(video_path: Path, output_path: Path, start_sec: float, end_sec: float) -> bool:
+def write_clip(
+    video_path: Path,
+    output_path: Path,
+    start_sec: float,
+    end_sec: float,
+    crop_bbox: list[float] | None = None,
+    crop_padding_ratio: float = 0.35,
+) -> bool:
     cap = cv2.VideoCapture(video_path.as_posix())
     if not cap.isOpened():
         return False
@@ -179,8 +207,15 @@ def write_clip(video_path: Path, output_path: Path, start_sec: float, end_sec: f
         cap.release()
         return False
 
+    crop_rect = padded_crop_rect(crop_bbox, width, height, crop_padding_ratio) if crop_bbox else None
+    if crop_rect:
+        left, top, right, bottom = crop_rect
+        out_width, out_height = right - left, bottom - top
+    else:
+        out_width, out_height = width, height
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    writer = cv2.VideoWriter(output_path.as_posix(), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    writer = cv2.VideoWriter(output_path.as_posix(), cv2.VideoWriter_fourcc(*"mp4v"), fps, (out_width, out_height))
     start_frame = max(0, math.floor(start_sec * fps))
     end_frame = max(start_frame + 1, math.ceil(end_sec * fps))
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
@@ -189,6 +224,9 @@ def write_clip(video_path: Path, output_path: Path, start_sec: float, end_sec: f
         ok, frame = cap.read()
         if not ok:
             break
+        if crop_rect:
+            left, top, right, bottom = crop_rect
+            frame = frame[top:bottom, left:right]
         writer.write(frame)
         written += 1
     cap.release()
@@ -229,18 +267,27 @@ def build_training_clips(args: argparse.Namespace) -> None:
         start_sec, end_sec = centered_window(duration, accident_sec, args.clip_sec)
         label = row.get(args.label_column) or row.get("label") or "unknown"
         asset_id = row.get("asset_id") or src.stem
-        if duration <= args.short_video_sec:
+        crop_bbox = accident["bbox_xyxy"] if args.crop_mode == "bbox" and accident["bbox_xyxy"] else None
+        crop_suffix = "_bboxcrop" if crop_bbox else ""
+        if duration <= args.short_video_sec and args.crop_mode == "none":
             # ponytail: short videos already contain full context; keep metadata aligned with the actual file.
             start_sec, end_sec = 0.0, duration
             clip_path = src
             ok = True
             basis = f"{basis}_short_video_full_context"
         else:
-            clip_path = args.clip_dir / safe_name(label) / f"{safe_name(asset_id)}_clip5s.mp4"
+            if duration <= args.short_video_sec:
+                start_sec, end_sec = 0.0, duration
+                basis = f"{basis}_short_video_full_context"
+            clip_path = args.clip_dir / safe_name(label) / f"{safe_name(asset_id)}_clip5s{crop_suffix}.mp4"
             ok = clip_path.exists() and not args.overwrite
             if not ok:
-                ok = write_clip(src, clip_path, start_sec, end_sec)
+                ok = write_clip(src, clip_path, start_sec, end_sec, crop_bbox, args.crop_padding_ratio)
+            if crop_bbox:
+                basis = f"{basis}_bbox_crop"
 
+        bbox_value = accident["bbox_xyxy"]
+        bbox_text = ",".join(f"{value:.3f}" for value in bbox_value) if bbox_value else ""
         copied = dict(row)
         copied.update(
             {
@@ -255,6 +302,7 @@ def build_training_clips(args: argparse.Namespace) -> None:
                 "accident_candidate_center_distance_px": f"{accident['min_center_distance_px']:.3f}" if accident["min_center_distance_px"] != "" else "",
                 "accident_candidate_object_pair": accident["object_pair"],
                 "accident_candidate_track_pair": accident["track_pair"],
+                "accident_candidate_bbox_xyxy": bbox_text,
                 "clip_basis": basis,
                 "clip_status": "ok" if ok else "failed",
                 "file_exists": str(clip_path.exists()),
@@ -280,6 +328,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--short-video-sec", type=float, default=10.0)
     parser.add_argument("--accident-source", choices=["center", "yolo_track"], default="center")
     parser.add_argument("--model-name", default="yolov8n.pt")
+    parser.add_argument("--crop-mode", choices=["none", "bbox"], default="none")
+    parser.add_argument("--crop-padding-ratio", type=float, default=0.35)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 

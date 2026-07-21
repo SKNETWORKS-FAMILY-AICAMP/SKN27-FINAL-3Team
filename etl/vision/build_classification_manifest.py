@@ -15,7 +15,7 @@ DEFAULT_LISTING_PATH = Path("storage/vision/manifests/drive_listing_aihub.json")
 DEFAULT_OUTPUT_PATH = Path(
     "storage/vision/datasets/classification/manifests/classification_manifest.csv"
 )
-TARGET_PREFIX = "Ai_Hub/Train/"
+TARGET_PREFIXES = {"Ai_Hub/Train/": "train", "Ai_Hub/Validation/": "val", "Ai_Hub/Val/": "val"}
 MEDIA_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -57,7 +57,14 @@ def is_supported_media(path: str) -> bool:
 
 def parse_aihub_train_item(item: dict) -> dict | None:
     source_path = normalize_path(item.get("path", ""))
-    if not source_path.startswith(TARGET_PREFIX):
+    split = ""
+    source_dataset = ""
+    for prefix, split_name in TARGET_PREFIXES.items():
+        if source_path.startswith(prefix):
+            split = split_name
+            source_dataset = prefix.rstrip("/")
+            break
+    if not split:
         return None
     if not is_supported_media(source_path):
         return None
@@ -72,7 +79,7 @@ def parse_aihub_train_item(item: dict) -> dict | None:
 
     return {
         "dataset_name": "Ai_Hub",
-        "source_dataset": "Ai_Hub/Train",
+        "source_dataset": source_dataset,
         "category": category,
         "label": fine_label(category),
         "coarse_label": coarse_label(category),
@@ -83,7 +90,7 @@ def parse_aihub_train_item(item: dict) -> dict | None:
         "file_ext": Path(file_name).suffix.lower(),
         "local_path": "",
         "sample_group": "full_candidate",
-        "split": "",
+        "split": split,
         "file_exists": "",
         "media_readable": "",
         "planned_use": "classification_frame_extraction",
@@ -148,7 +155,7 @@ def print_summary(rows: list[dict], output_path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build AI-Hub classification candidate manifest from gdown listing JSON.")
-    parser.add_argument("--listing", type=Path, default=DEFAULT_LISTING_PATH)
+    parser.add_argument("--listing", "--input", dest="listing", type=Path, default=DEFAULT_LISTING_PATH)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT_PATH)
     return parser.parse_args()
 

@@ -99,8 +99,8 @@ def top_video_hint(video_understanding: dict[str, Any]) -> dict[str, Any]:
         "clip_id": clip.get("clip_id"),
         "top_label": top.get("label"),
         "score": top.get("score"),
-        "usage_policy": "supplementary_context_only",
-        "note": "VideoMAE pretrained output is an action hint, not accident liability or fault-ratio evidence.",
+        "usage_policy": "trained_prediction_requires_evidence_review",
+        "note": "The trained VideoMAE class is a prediction, not accident liability or fault-ratio evidence.",
     }
 
 
