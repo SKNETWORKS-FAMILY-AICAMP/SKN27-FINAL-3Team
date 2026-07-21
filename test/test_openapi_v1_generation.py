@@ -200,6 +200,13 @@ def test_auth_session_routes_document_runtime_auth_boundary() -> None:
             "description": "Browser request marker required before Google provider exchange.",
             "schema": {"type": "string", "enum": ["XmlHttpRequest"]},
         },
+        {
+            "name": "X-Guest-Credential",
+            "in": "header",
+            "required": False,
+            "description": "Signed guest credential required to prove a supplied guest identity.",
+            "schema": {"type": "string"},
+        },
     ]
     assert google_code["responses"]["429"]["x-error-codes"] == [
         "rate_limit_exceeded"
@@ -220,10 +227,17 @@ def test_auth_session_routes_document_runtime_auth_boundary() -> None:
     assert current_subject["security"] == [{}, {"bearerAuth": []}]
     assert current_subject["parameters"] == [
         {
+            "name": "X-Guest-Credential",
+            "in": "header",
+            "required": False,
+            "description": "Signed guest credential required to prove a supplied guest identity.",
+            "schema": {"type": "string"},
+        },
+        {
             "name": "X-Guest-Id",
             "in": "header",
             "required": False,
-            "description": "Optional guest identity header when no Bearer token is supplied.",
+            "description": "Optional guest identifier. It is not valid identity proof without X-Guest-Credential.",
             "schema": {"type": "string"},
         },
         {

@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from app.services.guest_credential_service import issue_guest_credential
 from app.contracts.report import (
     ReportApiErrorResponse,
     ReportDetailResponse,
@@ -197,9 +198,10 @@ class ReportApiContractTests(TestCase):
             expires_at=timezone.now() - timedelta(minutes=1),
         )
 
-        response = Client(HTTP_X_GUEST_ID="gst_expired_report_api").get(
-            "/api/reports/"
-        )
+        response = Client(
+            HTTP_X_GUEST_ID="gst_expired_report_api",
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_expired_report_api")[0],
+        ).get("/api/reports/")
 
         self.assertEqual(response.status_code, 401)
         error = response.json()["error"]

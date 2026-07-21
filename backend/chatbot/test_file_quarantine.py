@@ -14,6 +14,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from app.services.guest_credential_service import issue_guest_credential
 from app.services.google_auth_service import issue_access_token
 from app.services.agent_node_service import _attachment_object_storage_bytes
 from app.services.attachment_mock_service import resolve_attachment_references
@@ -946,7 +947,10 @@ class FileQuarantinePipelineTests(TestCase):
             status=GuestIdentityStatus.ACTIVE,
             expires_at=timezone.now() + timedelta(hours=1),
         )
-        guest_client = Client(HTTP_X_GUEST_ID="gst_quarantine_owner")
+        guest_client = Client(
+            HTTP_X_GUEST_ID="gst_quarantine_owner",
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_quarantine_owner")[0],
+        )
 
         response = guest_client.post(
             "/api/files/",
@@ -1029,7 +1033,10 @@ class FileQuarantinePipelineTests(TestCase):
             status=GuestIdentityStatus.ACTIVE,
             expires_at=timezone.now() + timedelta(hours=1),
         )
-        attacker = Client(HTTP_X_GUEST_ID="gst_owner_spoof_attacker")
+        attacker = Client(
+            HTTP_X_GUEST_ID="gst_owner_spoof_attacker",
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_owner_spoof_attacker")[0],
+        )
 
         response = attacker.post(
             "/api/chat/messages/",
@@ -1152,7 +1159,10 @@ class FileQuarantinePipelineTests(TestCase):
             status=GuestIdentityStatus.ACTIVE,
             expires_at=timezone.now() + timedelta(hours=1),
         )
-        guest_client = Client(HTTP_X_GUEST_ID="gst_no_session_upload")
+        guest_client = Client(
+            HTTP_X_GUEST_ID="gst_no_session_upload",
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_no_session_upload")[0],
+        )
 
         response = guest_client.post(
             "/api/files/",

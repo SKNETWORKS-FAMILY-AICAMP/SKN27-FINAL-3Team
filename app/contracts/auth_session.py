@@ -114,6 +114,7 @@ class GuestSessionResponse(AuthResponse):
     guest: GuestIdentity
     subject: AuthSubject
     session_binding: SessionBinding
+    guest_credential: str = Field(min_length=1, max_length=8192)
     rate_limit: RateLimitPolicy
     merge_policy: MergePolicy
     limitations: list[str]

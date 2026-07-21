@@ -7,22 +7,37 @@ from typing import Any
 from uuid import uuid4
 
 from app.services.auth_error_contract import build_auth_error
+from app.services.guest_credential_service import (
+    decode_guest_credential,
+    issue_guest_credential,
+)
 from app.services.google_auth_service import decode_access_token
 
 
 GUEST_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
-def create_guest_session(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def create_guest_session(
+    payload: dict[str, Any] | None = None,
+    *,
+    guest_credential: str | None = None,
+) -> dict[str, Any]:
     """Create or refresh a guest identity without binding it to a login."""
 
     payload = payload or {}
     now = _now()
-    guest_id = _normalize_guest_id(payload.get("guest_id")) or f"gst_{uuid4().hex}"
-    session_id = _text(payload.get("session_id")) or None
+    credential_valid, credential_claims = decode_guest_credential(guest_credential)
+    guest_id = (
+        _normalize_guest_id(credential_claims.get("sub"))
+        if credential_valid
+        else None
+    ) or f"gst_{uuid4().hex}"
+    session_id = _text(payload.get("session_id")) if credential_valid else ""
+    session_id = session_id or None
     issued_at = now.isoformat()
     expires_at = (now + timedelta(seconds=GUEST_TTL_SECONDS)).isoformat()
 
+    issued_credential, _credential_claims = issue_guest_credential(guest_id)
     return {
         "auth_state": "guest",
         "guest": {
@@ -51,6 +66,7 @@ def create_guest_session(payload: dict[str, Any] | None = None) -> dict[str, Any
         },
         "rate_limit": _rate_limit_policy(subject_id=f"guest:{guest_id}"),
         "merge_policy": _merge_policy(),
+        "guest_credential": issued_credential,
         "limitations": [
             "The canonical Django endpoint persists this guest identity.",
             "Guest TTL and quota values remain deployment policy inputs.",
@@ -62,9 +78,18 @@ def get_current_auth_subject(
     *,
     authorization_header: str | None,
     guest_id: str | None = None,
+    guest_credential: str | None = None,
     session_id: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Return the current guest or signature-verified app-JWT subject."""
+
+    normalized_guest_id = _normalize_guest_id(guest_id)
+    credential_valid, credential_claims = decode_guest_credential(guest_credential)
+    credential_guest_id = (
+        _normalize_guest_id(credential_claims.get("sub"))
+        if credential_valid
+        else None
+    )
 
     if authorization_header:
         token = _bearer_token_from_header(authorization_header)
@@ -95,12 +120,12 @@ def get_current_auth_subject(
                 "provider_subject": app_jwt_claims.get("provider_subject"),
                 "policy_status": "app_jwt_verified",
             },
-            "guest": _guest_snapshot(guest_id),
+            "guest": _guest_snapshot(credential_guest_id),
             "subject": {
                 "subject_id": f"user:{user_id}",
                 "subject_type": "user",
                 "user_id": user_id,
-                "guest_id": _normalize_guest_id(guest_id),
+                "guest_id": credential_guest_id,
                 "auth_session_id": auth_session_id,
                 "is_authenticated": True,
             },
@@ -122,7 +147,24 @@ def get_current_auth_subject(
             ],
         }
 
-    normalized_guest_id = _normalize_guest_id(guest_id)
+    if guest_credential:
+        if not credential_valid:
+            reason = str(credential_claims.get("reason") or "invalid_guest_credential")
+            if reason == "expired_guest_credential":
+                return 401, build_auth_error("token_expired", reason=reason)
+            return 401, build_auth_error("token_invalid", reason=reason)
+        if normalized_guest_id and credential_guest_id != normalized_guest_id:
+            return 401, build_auth_error(
+                "token_invalid",
+                reason="guest_credential_guest_mismatch",
+            )
+        normalized_guest_id = credential_guest_id
+    elif normalized_guest_id:
+        return 401, build_auth_error(
+            "token_invalid",
+            reason="missing_guest_credential",
+        )
+
     if normalized_guest_id:
         return 200, {
             "auth_state": "guest",

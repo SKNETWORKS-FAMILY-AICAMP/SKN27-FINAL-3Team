@@ -48,6 +48,8 @@ SECRET_FIELD_KEYS = {
     "cookie",
     "credential",
     "credentials",
+    "guest_credential",
+    "http_x_guest_credential",
     "id_token",
     "oauth_token",
     "openai_api_key",

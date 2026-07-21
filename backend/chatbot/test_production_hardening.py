@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.test import RequestFactory, SimpleTestCase
 from django.urls import Resolver404, resolve
 
+from app.services.guest_credential_service import issue_guest_credential
 from chatbot.api_response import json_response
 from chatbot.models import ReportType
 from chatbot.runtime_health import build_runtime_health
@@ -1082,6 +1083,7 @@ class ProductionApiContractTests(SimpleTestCase):
         response = self.client.get(
             "/api/analysis/results/job_guest_owned/",
             HTTP_X_GUEST_ID="gst_owner",
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_owner")[0],
         )
 
         self.assertEqual(response.status_code, 202)
@@ -1131,6 +1133,7 @@ class ProductionApiContractTests(SimpleTestCase):
         response = self.client.get(
             "/api/analysis/results/job_guest_owned/",
             HTTP_X_GUEST_ID="gst_other",
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential("gst_other")[0],
         )
 
         self.assertEqual(response.status_code, 403)

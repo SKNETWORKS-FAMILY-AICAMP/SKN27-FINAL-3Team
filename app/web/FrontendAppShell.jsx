@@ -61,6 +61,7 @@ export default function FrontendAppShell({
   const [activeRoute, setActiveRoute] = useState("chatbot");
   const [sessionId, setSessionId] = useState(() => storedAuthSession.session_id || "");
   const [guestId, setGuestId] = useState(() => storedAuthSession.guest_id || "");
+  const [guestCredential, setGuestCredential] = useState(() => storedAuthSession.guest_credential || "");
   const [authSessionId, setAuthSessionId] = useState(() => storedAuthSession.auth_session_id || "");
   const [mypageSummary, setMypageSummary] = useState(null);
   const [historyEvents, setHistoryEvents] = useState(null);
@@ -89,13 +90,14 @@ export default function FrontendAppShell({
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMockDataMode, setIsMockDataMode] = useState(false);
-  const authRefreshContextRef = useRef({ guestId, sessionId });
-  authRefreshContextRef.current = { guestId, sessionId };
+  const authRefreshContextRef = useRef({ guestId, guestCredential, sessionId });
+  authRefreshContextRef.current = { guestId, guestCredential, sessionId };
 
   const effectiveAuthToken = activeAuthToken || "";
   const identity = {
     authToken: effectiveAuthToken,
     guestId,
+    guestCredential,
     authSessionId,
   };
   const authContext = buildAuthContext({
@@ -105,7 +107,7 @@ export default function FrontendAppShell({
     sessionId,
     userId: null,
   });
-  const isGuestReady = Boolean(guestId);
+  const isGuestReady = Boolean(guestId && guestCredential);
   const sessionLabel = authSessionId ? "Google 계정 상담" : isGuestReady ? "비회원 상담" : "상담 준비";
   const cases = mypageSummary?.cases || [];
   const history = historyEvents?.events || [];
@@ -168,6 +170,7 @@ export default function FrontendAppShell({
               authToken: activeAuthToken,
               authSessionId,
               guestId: refreshContext.guestId,
+              guestCredential: refreshContext.guestCredential,
             }
           );
           if (!refreshEffectActive) {
@@ -182,17 +185,19 @@ export default function FrontendAppShell({
           setActiveAuthToken(nextToken);
           setAuthSessionId(nextAuthSessionId);
           setGuestId(nextGuestId);
-          persistAuthSession({ guestId: nextGuestId });
+          persistAuthSession({
+            guestId: nextGuestId,
+            guestCredential: refreshContext.guestCredential,
+          });
         } catch (_error) {
           if (!refreshEffectActive) {
             return;
           }
           clearStoredAuthSession();
-          if (refreshContext.guestId) {
-            persistAuthSession({ guestId: refreshContext.guestId });
-          }
           setActiveAuthToken("");
           setAuthSessionId("");
+          setGuestId("");
+          setGuestCredential("");
           setMypageSummary(null);
           setHistoryEvents(null);
           setCurrentReport(null);
@@ -212,17 +217,33 @@ export default function FrontendAppShell({
   async function bootstrapGuestSession(nextRoute = "chatbot") {
     setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 준비하고 있습니다.");
     try {
-      const guest = await api.createGuestSession({
-        guest_id: guestId,
-        session_id: sessionId || undefined,
-      });
+      const guest = await api.createGuestSession(
+        {
+          guest_id: guestId || undefined,
+          session_id: sessionId || undefined,
+        },
+        { guestId, guestCredential }
+      );
       const nextGuestId = guest?.guest?.guest_id || guestId;
+      const nextGuestCredential = guest?.guest_credential || "";
       const nextSessionId = guest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;
+      if (!nextGuestId || !nextGuestCredential) {
+        throw new Error("Guest session response is incomplete.");
+      }
       setGuestId(nextGuestId);
+      setGuestCredential(nextGuestCredential);
       setSessionId(nextSessionId);
+      persistAuthSession({
+        guestId: nextGuestId,
+        guestCredential: nextGuestCredential,
+      });
       setStatusMessage("임시 상담을 시작했습니다. 상세 분석이나 이력 저장이 필요해질 때 Google 로그인을 안내합니다.");
       setActiveRoute(nextRoute);
-      return { guestId: nextGuestId, sessionId: nextSessionId };
+      return {
+        guestCredential: nextGuestCredential,
+        guestId: nextGuestId,
+        sessionId: nextSessionId,
+      };
     } catch (error) {
       setStatusMessage("상담 준비에 실패했습니다. 잠시 후 다시 시도해 주세요.");
       return null;
@@ -230,30 +251,34 @@ export default function FrontendAppShell({
   }
 
   async function ensureGuestSession(nextRoute = "chatbot") {
-    if (sessionId && guestId) {
+    if (sessionId && guestId && guestCredential) {
       setActiveRoute(nextRoute);
-      return { sessionId, guestId };
+      return { guestCredential, guestId, sessionId };
     }
     const guestSessionResult = await bootstrapGuestSession(nextRoute);
     if (guestSessionResult?.sessionId) {
       return guestSessionResult;
     }
-    const fallbackSessionId = sessionId || `ses_web_${Date.now()}`;
-    setSessionId(fallbackSessionId);
-    setActiveRoute(nextRoute);
-    return { sessionId: fallbackSessionId, guestId };
+    return null;
   }
 
   async function loginAndBindCurrentSession({ source = "manual_login", nextRoute = "chatbot" } = {}) {
     const activeGuestSession = await ensureGuestSession(nextRoute);
+    if (!activeGuestSession?.sessionId || !activeGuestSession?.guestCredential) {
+      throw new Error("Guest session is required before Google login.");
+    }
     const activeSessionId = activeGuestSession.sessionId || sessionId || `ses_web_${Date.now()}`;
     const activeGuestId = activeGuestSession.guestId || guestId || "";
+    const activeGuestCredential = activeGuestSession.guestCredential;
     const loginPayload = {
       guest_id: activeGuestId,
       session_id: activeSessionId,
       ...(await buildGoogleLoginPayload({ googleClientId, guestId: activeGuestId })),
     };
-    const loginResult = await api.loginWithGoogleCode(loginPayload);
+    const loginResult = await api.loginWithGoogleCode(loginPayload, {
+      guestId: activeGuestId,
+      guestCredential: activeGuestCredential,
+    });
     const nextToken = loginResult?.access_token || "";
     const subject = loginResult?.subject || {};
     const nextAuthSessionId = subject.auth_session_id || "";
@@ -263,12 +288,14 @@ export default function FrontendAppShell({
     setActiveAuthToken(nextToken);
     setAuthSessionId(nextAuthSessionId);
     setGuestId(nextGuestId);
+    setGuestCredential("");
     setSessionId(activeSessionId);
     persistAuthSession({
       accessToken: nextToken,
       googleProfile: loginResult?.user || null,
       authSessionId: nextAuthSessionId,
       guestId: nextGuestId,
+      guestCredential: "",
       sessionId: activeSessionId,
       userId: nextUserId,
     });
@@ -277,11 +304,13 @@ export default function FrontendAppShell({
       authToken: nextToken,
       authSessionId: nextAuthSessionId,
       guestId: nextGuestId,
+      guestCredential: "",
     };
     return {
       authSessionId: nextAuthSessionId,
       authToken: nextToken,
       guestId: nextGuestId,
+      guestCredential: "",
       identity: nextIdentity,
       loginResult,
       sessionId: activeSessionId,
@@ -290,18 +319,11 @@ export default function FrontendAppShell({
     };
   }
 
-  // Local dev only: fakes "logged in" purely in the browser so the logged-in UI can be
-  // reviewed, with zero backend calls. Deliberately does NOT set an auth token — leaving
-  // it empty keeps identity.authToken falsy, so requests still go out with X-Guest-Id and
-  // hit the backend's guest-allowed paths (chat/messages, files, reports, auth/me) instead
-  // of being forced through real Bearer-JWT validation with a fake, unparseable token.
-  // Screens that strictly require a real session (mypage summary/history) will still
-  // come back empty/error, since there's no real auth session in the database.
+  // Local dev only: this changes screen state without creating an app token, guest ID, or
+  // guest credential. It therefore cannot make a protected API request appear authenticated.
   function previewLoggedInUi() {
     const previewSessionId = sessionId || `ses_preview_${Date.now()}`;
-    const previewGuestId = guestId || `gst_preview_${Date.now()}`;
     setSessionId(previewSessionId);
-    setGuestId(previewGuestId);
     setAuthSessionId(`auth_preview_${Date.now()}`);
   }
 
@@ -453,6 +475,7 @@ export default function FrontendAppShell({
     setActiveAuthToken("");
     setAuthSessionId("");
     setGuestId("");
+    setGuestCredential("");
     setSessionId("");
     setMypageSummary(null);
     setHistoryEvents(null);
@@ -882,6 +905,9 @@ export default function FrontendAppShell({
     const guestSessionResult = followupLoginState?.sessionId || sessionId ? null : await bootstrapGuestSession("chatbot");
     const activeSession = followupLoginState?.sessionId || sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
     const activeGuestId = followupLoginState?.guestId || guestId || guestSessionResult?.guestId || "";
+    const activeGuestCredential = followupLoginState
+      ? followupLoginState.guestCredential || ""
+      : guestCredential || guestSessionResult?.guestCredential || "";
     const nextUserMessage = { role: "user", content: trimmedQuestion };
     const conversationHistory = [...chatMessages, nextUserMessage].map((message) => ({
       role: message.role,
@@ -902,6 +928,7 @@ export default function FrontendAppShell({
       const submitIdentity = {
         ...effectiveIdentity,
         guestId: activeGuestId,
+        guestCredential: activeGuestCredential,
         authSessionId: effectiveAuthSessionId,
       };
       logDeveloperDiagnostic("chat.submit", {

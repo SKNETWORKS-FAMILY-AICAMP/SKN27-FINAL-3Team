@@ -4,15 +4,17 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import RequestFactory, TestCase
+from django.test import Client, RequestFactory, TestCase
 
 from chatbot.models import (
     AgentWorkItem,
     AgentWorkItemStatus,
     AnalysisJob,
     AnalysisJobStatus,
+    AuthEvent,
     ChatSession,
     ChatSessionStatus,
+    HistoryEvent,
     UploadedFile,
     UploadedFileStatus,
 )
@@ -166,3 +168,29 @@ class OperationalLogPrivacyTests(TestCase):
                 "event": event.metadata,
             }
         )
+
+    def test_guest_credential_is_not_persisted_in_auth_or_history_records(self) -> None:
+        from app.services.guest_credential_service import issue_guest_credential
+
+        credential, _claims = issue_guest_credential("operational_privacy")
+        response = Client(HTTP_X_GUEST_CREDENTIAL=credential).post(
+            "/api/auth/guest-session/",
+            data={"guest_id": "gst_operational_privacy", "session_id": "ses_operational_privacy"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        event_id = response.json()["persistence"]["event_id"]
+        auth_event = AuthEvent.objects.get(event_id=event_id)
+        history_event = HistoryEvent.objects.get(event_type="guest_session_created")
+        persisted_values = {
+            "auth_event": auth_event.metadata,
+            "history": {
+                "actor": history_event.actor,
+                "subject": history_event.subject,
+                "metadata": history_event.metadata,
+                "privacy": history_event.privacy,
+            },
+        }
+
+        self.assertNotIn(credential, repr(persisted_values))
