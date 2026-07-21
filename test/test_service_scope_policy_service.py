@@ -26,6 +26,19 @@ def test_vehicle_to_vehicle_accident_is_within_supported_scope() -> None:
     assert result["scope_code"] == "vehicle_to_vehicle_accident"
 
 
+def test_criminal_review_requires_expert_handoff() -> None:
+    result = evaluate_service_scope(
+        user_text="사고 상대방을 형사 고소할 수 있는지 판단해 주세요.",
+        attachments=[],
+        routing_intent="accident_initial_consultation",
+    )
+
+    assert result["scope_code"] == "criminal_review"
+    assert result["decision"] == "expert_handoff"
+    assert result["limitations"]
+    assert result["next_actions"]
+
+
 def test_unknown_intent_returns_guidance_without_claiming_support() -> None:
     result = evaluate_service_scope(
         user_text="상속 분쟁을 해결해 주세요.",

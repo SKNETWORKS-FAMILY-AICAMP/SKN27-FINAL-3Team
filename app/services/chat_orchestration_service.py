@@ -313,6 +313,7 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
             "structured_results": dict(merged.get("structured_results") or {}),
             "evidence": list(merged.get("evidence") or []),
             "limitations": list(merged.get("limitations") or []),
+            "next_actions": list(merged.get("next_actions") or []),
             "deadline_guidance": dict(merged.get("deadline_guidance") or {}),
             "pending_questions": list(merged.get("pending_questions") or []),
             "cards": list(merged.get("cards") or []),
@@ -497,6 +498,7 @@ def _scope_guidance_response(
             "steps": [],
         },
         "limitations": list(service_scope["limitations"]),
+        "next_actions": list(service_scope["next_actions"]),
     }
 
 
