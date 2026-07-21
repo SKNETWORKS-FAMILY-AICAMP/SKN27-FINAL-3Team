@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from datetime import date
 
 import pytest
 
 from etl.legal import evaluation
+from etl.legal import run_evaluation
 
 
 def test_load_public_law_queries_requires_twenty_public_law_rows(tmp_path: Path) -> None:
@@ -146,3 +148,156 @@ def test_summary_calculates_recall_mrr_ndcg_latency_and_metadata() -> None:
     assert lexical["p50_latency_ms"] == 10
     assert lexical["p95_latency_ms"] == 30
     assert lexical["metadata_complete_rate"] == 1.0
+
+
+def test_collect_backend_runs_uses_identical_resolved_filters(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    query = {
+        "query_id": "law-q001",
+        "query": "신호 지시 준수",
+        "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-21"},
+        "scope": {"allowed_source_types": ["law"]},
+    }
+    monkeypatch.setattr(
+        run_evaluation.service,
+        "resolve_legal_search_filters",
+        lambda **_kwargs: (("law",), date(2026, 7, 21), ""),
+    )
+    monkeypatch.setattr(
+        run_evaluation.service,
+        "_search_law_chunks_lexical",
+        lambda _query, **kwargs: calls.append(("lexical", kwargs))
+        or {"backend": "postgres_lexical", "status": "ready", "latency_ms": 1, "results": []},
+    )
+    monkeypatch.setattr(
+        run_evaluation.service,
+        "_search_pgvector",
+        lambda _query, **kwargs: calls.append(("pgvector", kwargs))
+        or {"backend": "postgres_pgvector", "status": "ready", "latency_ms": 1, "results": []},
+    )
+
+    runs = run_evaluation.collect_backend_runs([query])
+
+    assert [run["backend"] for run in runs] == ["postgres_lexical", "postgres_pgvector"]
+    assert calls[0][1]["effective_at"] == calls[1][1]["effective_at"]
+    assert calls[0][1]["allowed_source_types"] == calls[1][1]["allowed_source_types"]
+    assert calls[0][1]["top_k"] == calls[1][1]["top_k"] == 5
+
+
+def test_collect_backend_runs_preserves_invalid_filter_as_non_search_result(monkeypatch) -> None:
+    query = {
+        "query_id": "law-q001",
+        "query": "신호 지시 준수",
+        "temporal_basis": {"mode": "as_of", "effective_at": "not-a-date"},
+        "scope": {"allowed_source_types": ["law"]},
+    }
+    monkeypatch.setattr(
+        run_evaluation.service,
+        "resolve_legal_search_filters",
+        lambda **_kwargs: ((), None, "invalid_effective_at"),
+    )
+
+    runs = run_evaluation.collect_backend_runs([query])
+
+    assert [run["status"] for run in runs] == ["invalid_filter", "invalid_filter"]
+    assert [run["error_code"] for run in runs] == ["invalid_effective_at", "invalid_effective_at"]
+
+
+def test_build_ragas_records_caps_public_contexts_at_top_five() -> None:
+    query = {
+        "query_id": "law-q001",
+        "query": "신호 지시 준수",
+        "reference_answer": "도로교통법 제5조를 확인한다.",
+        "data_classification": "public_law",
+    }
+    raw_response = {
+        "query_id": "law-q001",
+        "backend": "postgres_pgvector",
+        "results": [
+            {"provision_text": f"공개 법령 조문 {index}"}
+            for index in range(1, 8)
+        ],
+    }
+
+    records = run_evaluation.build_ragas_records([query], [raw_response])
+
+    assert records == [
+        {
+            "query_id": "law-q001",
+            "backend": "postgres_pgvector",
+            "question": "신호 지시 준수",
+            "ground_truth": "도로교통법 제5조를 확인한다.",
+            "contexts": [f"공개 법령 조문 {index}" for index in range(1, 6)],
+        }
+    ]
+
+
+def test_build_ragas_records_rejects_non_public_input() -> None:
+    with pytest.raises(ValueError, match="public_law"):
+        run_evaluation.build_ragas_records(
+            [
+                {
+                    "query_id": "law-q001",
+                    "query": "첨부 OCR 원문",
+                    "reference_answer": "답변",
+                    "data_classification": "ocr",
+                }
+            ],
+            [],
+        )
+
+
+def test_run_ragas_uses_fixed_generator_and_judge_for_each_backend_record(monkeypatch) -> None:
+    records = [
+        {
+            "query_id": "law-q001",
+            "backend": "postgres_lexical",
+            "question": "신호 지시 준수",
+            "ground_truth": "도로교통법 제5조를 확인한다.",
+            "contexts": ["공개 법령 조문"],
+        }
+    ]
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        run_evaluation,
+        "_generate_ragas_answers",
+        lambda rows, **kwargs: captured.update(generator=kwargs, rows=rows)
+        or [{**rows[0], "answer": "생성된 법령 답변"}],
+    )
+    monkeypatch.setattr(
+        run_evaluation,
+        "_evaluate_ragas_samples",
+        lambda rows, **kwargs: captured.update(judge=kwargs, evaluated_rows=rows)
+        or {"faithfulness": 1.0, "answer_relevancy": 0.9},
+    )
+
+    result = run_evaluation.run_ragas(
+        records,
+        generator_model="gpt-test-generator",
+        judge_model="gpt-test-judge",
+        embedding_model="text-embedding-test",
+    )
+
+    assert result["status"] == "evaluated"
+    assert result["metrics"]["faithfulness"] == 1.0
+    assert captured["generator"] == {"model": "gpt-test-generator"}
+    assert captured["judge"] == {
+        "judge_model": "gpt-test-judge",
+        "embedding_model": "text-embedding-test",
+    }
+
+
+def test_run_ragas_requires_at_most_twenty_public_questions() -> None:
+    records = [
+        {
+            "query_id": f"law-q{index:03d}",
+            "backend": "postgres_lexical",
+            "question": "공개 법령 질의",
+            "ground_truth": "공개 법령 정답",
+            "contexts": ["공개 법령 조문"],
+        }
+        for index in range(1, 22)
+    ]
+
+    with pytest.raises(ValueError, match="at most 20"):
+        run_evaluation.run_ragas(records, generator_model="g", judge_model="j", embedding_model="e")
