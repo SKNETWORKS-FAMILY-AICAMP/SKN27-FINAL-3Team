@@ -14,7 +14,7 @@ function Start-Dev($title, $workDir, $command) {
     Start-Process powershell -ArgumentList @(
         "-NoExit",
         "-Command",
-        "cd `"$workDir`"; `$env:DJANGO_ENV_FILE='.env'; `$Host.UI.RawUI.WindowTitle = '$title'; $command"
+        "cd `"$workDir`"; `$env:DJANGO_ENV_FILE='.env'; `$env:DJANGO_DATABASE_ENGINE='sqlite'; `$Host.UI.RawUI.WindowTitle = '$title'; $command"
     )
 }
 

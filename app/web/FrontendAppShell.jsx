@@ -87,6 +87,8 @@ export default function FrontendAppShell({
   const [reportList, setReportList] = useState([]);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMockDataMode, setIsMockDataMode] = useState(false);
   const authRefreshContextRef = useRef({ guestId, sessionId });
   authRefreshContextRef.current = { guestId, sessionId };
 
@@ -303,6 +305,134 @@ export default function FrontendAppShell({
     setAuthSessionId(`auth_preview_${Date.now()}`);
   }
 
+  // Dev-only: fills every screen's state with realistic fixture data so
+  // UI/UX work can be checked without depending on a working backend,
+  // agent worker, or seeded RAG data. Purely local state, no API calls.
+  function fillAllScreensWithMockData() {
+    const now = new Date().toISOString();
+    const previewSessionId = sessionId || `ses_mock_${Date.now()}`;
+    const previewGuestId = guestId || `gst_mock_${Date.now()}`;
+    setSessionId(previewSessionId);
+    setGuestId(previewGuestId);
+    setAuthSessionId(authSessionId || `auth_mock_${Date.now()}`);
+
+    const mockUserText = "어제 오후 3시에 교차로에서 좌회전하다가 직진 차량이랑 부딪혔어요.";
+    setSubmittedQuestion(mockUserText);
+    setChatMessages([
+      { role: "user", content: mockUserText },
+      {
+        role: "assistant",
+        content:
+          "말씀해주신 내용을 정리했습니다. 좌회전 차량과 직진 차량의 신호 상태에 따라 과실비율이 크게 달라질 수 있어요. 아래 항목을 확인해 주시면 더 정확하게 분석해드릴게요.",
+        status: "partial",
+        pending_questions: [],
+      },
+    ]);
+
+    const mockReportingPayload = {
+      contract_version: "reporting_payload.v1",
+      report_type: "fault_ratio_analysis",
+      stage: "success",
+      title: "교차로 좌회전 사고 리포트",
+      summary: "좌회전 차량과 직진 차량의 진입 순서, 신호 상태를 기준으로 과실비율 쟁점을 정리했습니다.",
+      sections: [
+        { title: "사고 개요", content: "교차로에서 좌회전 중 직진 차량과 충돌한 사건입니다." },
+        { title: "판단 근거", content: "도로교통법 제25조(교차로 통행방법) 등 관련 조문을 검토했습니다." },
+        { title: "후속 조치 가이드라인", content: "블랙박스 영상, 신호 주기 확인 자료를 준비해 주세요." },
+      ],
+    };
+
+    setAnalysisResponse({
+      assistant_message: { answer: "말씀해주신 내용을 정리했습니다. 좌회전과 직진 차량의 신호 상태 확인이 필요합니다." },
+      cards: [
+        {
+          card_type: "사고 분석",
+          title: "교차로 좌회전 vs 직진 충돌",
+          status: "partial",
+          summary: "신호 상태와 진입 순서 확인이 필요합니다.",
+        },
+      ],
+      supervisor_state: {
+        contract_version: "supervisor_conversation.v1",
+        stage: "need_more_input",
+        conversation_summary: "교차로 좌회전 중 직진 차량과 충돌",
+        collected_facts: [
+          { field: "발생 시간", value: "어제 오후 3시" },
+          { field: "사고 유형", value: "교차로 좌회전 충돌" },
+        ],
+        missing_fields: [{ field: "signal_priority" }, { field: "collision_location" }],
+        next_questions: [
+          {
+            field: "signal_priority",
+            question: "사고 당시 신호는 어느 쪽에 유리했나요? (직진 신호 / 좌회전 신호 / 비보호)",
+          },
+          { field: "collision_location", question: "충돌 지점이 교차로 진입 전인지, 교차로 안쪽인지 알려주세요." },
+        ],
+      },
+      reporting_payload: mockReportingPayload,
+      supervisor_execution: {
+        node_results: [
+          {
+            node_code: "text_ml_case_search",
+            structured_result: {
+              ratio_range_label: "60:40 ~ 70:30",
+              similar_cases: [
+                { case_id: "case_001", summary: "교차로 좌회전 vs 직진 충돌, 비보호 좌회전", ratio: "70:30" },
+              ],
+              recommended_evidence: ["블랙박스 영상", "신호 주기표"],
+            },
+            limitations: [],
+          },
+          {
+            node_code: "law_ground_search",
+            structured_result: {
+              matched_laws: [{ title: "도로교통법 제25조", summary: "교차로 통행방법" }],
+              retrieval: { status: "ready", attempted_backends: ["neo4j"] },
+            },
+            limitations: [],
+          },
+        ],
+      },
+    });
+
+    setMypageSummary({
+      active_cases: 2,
+      saved_reports: 1,
+      recent_analysis_count: 3,
+      cases: [
+        { case_id: "case_mock_1", type: "과실비율", title: "교차로 좌회전 사고", case_status: "진행 중", updated_at: now },
+        { case_id: "case_mock_2", type: "과태료", title: "주정차 위반 이의신청", case_status: "저장 완료", updated_at: now },
+      ],
+    });
+
+    setHistoryEvents({
+      events: [
+        { event_id: "evt_1", event_type: "상담", summary: "교차로 좌회전 사고 상담을 시작했습니다.", created_at: now },
+        { event_id: "evt_2", event_type: "리포트", summary: "과실비율 리포트를 저장했습니다.", created_at: now },
+        { event_id: "evt_3", event_type: "과태료", summary: "주정차 위반 이의신청서를 생성했습니다.", created_at: now },
+      ],
+    });
+
+    setReportList([{ case_id: "case_mock_2", title: "주정차 위반 이의신청", updated_at: now, report_count: 1 }]);
+
+    setCurrentReport({
+      status: "success",
+      title: "교차로 좌회전 사고 리포트",
+      summary: mockReportingPayload.summary,
+      report_type: "fault_ratio_analysis",
+      content: { reporting_payload: mockReportingPayload },
+      persistence: { status: "success" },
+      metadata: { case_id: "case_mock_1", title: "교차로 좌회전 사고 리포트", updated_at: now, report_count: 1 },
+    });
+
+    setRegisteredAttachments([
+      { attachment_id: "att_1", purpose: "supporting_evidence", type: "image/jpeg", storage_uri: "mock://evidence.jpg" },
+    ]);
+
+    setIsMockDataMode(true);
+    setActiveRoute("chatbot");
+  }
+
   async function logoutAndResetSession() {
     setStatusMessage("로그아웃하고 새 계정으로 시작할 준비를 하고 있습니다.");
     const logoutIdentity = identity;
@@ -332,7 +462,6 @@ export default function FrontendAppShell({
     setReportList([]);
     setPendingAuthAction(null);
     setReportActionStatus("");
-    setWorkerActionStatus("");
     setSavePromptVisible(false);
     setSaveDecision("undecided");
     setGuestDetailedReportUsed(false);
@@ -1081,9 +1210,11 @@ export default function FrontendAppShell({
     setActiveRoute("reporting");
   }
 
+  const showSidebar = activeRoute !== "entry" && activeRoute !== "mypage" && activeRoute !== "reporting";
+
   return (
     <div className="app-shell" data-auth-state={authContext.auth_state}>
-      <header className={activeRoute === "entry" ? "topbar" : "topbar topbar-with-mobile-nav"}>
+      <header className={showSidebar ? "topbar topbar-with-mobile-nav" : "topbar topbar-entry"}>
         <div className="topbar-inner">
           <button
             className="brand"
@@ -1095,21 +1226,32 @@ export default function FrontendAppShell({
             <span>교통분쟁 AI</span>
           </button>
           <nav className="top-actions" aria-label="주요 메뉴">
-            {TAB_ROUTES.map((route) => (
+            {activeRoute !== "entry" &&
+              TAB_ROUTES.map((route) => (
+                <button
+                  className={activeRoute === route.id ? "button active" : "button ghost"}
+                  aria-current={activeRoute === route.id ? "page" : undefined}
+                  key={route.id}
+                  onClick={() => setActiveRoute(route.id)}
+                  type="button"
+                >
+                  {route.label}
+                </button>
+              ))}
+            {import.meta.env.DEV && (
               <button
-                className={activeRoute === route.id ? "button active" : "button ghost"}
-                aria-current={activeRoute === route.id ? "page" : undefined}
-                key={route.id}
-                onClick={() => setActiveRoute(route.id)}
+                className="button ghost"
                 type="button"
+                onClick={fillAllScreensWithMockData}
+                title="로컬 개발 전용: 백엔드 호출 없이 모든 화면을 더미 데이터로 채움"
               >
-                {route.label}
+                전체 화면 더미로 채우기
               </button>
-            ))}
-            {activeRoute === "entry" && (
-              <button className="button primary" onClick={() => setActiveRoute("chatbot")} type="button">
-                상담 시작
-              </button>
+            )}
+            {import.meta.env.DEV && isMockDataMode && (
+              <span className="dev-mock-badge" title="실제 데이터가 아니라 화면 확인용 더미 데이터입니다.">
+                더미 데이터 모드
+              </span>
             )}
             {authSessionId ? (
               <button className="button ghost" type="button" onClick={logoutAndResetSession}>
@@ -1117,7 +1259,7 @@ export default function FrontendAppShell({
               </button>
             ) : (
               <button
-                className="button primary"
+                className={activeRoute === "entry" ? "button ghost" : "button primary"}
                 type="button"
                 onClick={saveConversationAfterLogin}
                 disabled={isSavingConversation}
@@ -1129,13 +1271,22 @@ export default function FrontendAppShell({
         </div>
       </header>
 
-      <div className={activeRoute === "entry" ? "layout is-entry" : "layout"}>
-        {activeRoute !== "entry" && (
+      <div
+        className={
+          !showSidebar
+            ? "layout is-entry"
+            : isSidebarCollapsed
+              ? "layout sidebar-collapsed"
+              : "layout"
+        }
+      >
+        {showSidebar && (
           <ConversationSidebar
             activeRoute={activeRoute}
             cases={cases}
             currentTitle={submittedQuestion}
             isAuthenticated={Boolean(authSessionId)}
+            isCollapsed={isSidebarCollapsed}
             isGuestReady={isGuestReady}
             isSavingConversation={isSavingConversation}
             onLogin={saveConversationAfterLogin}
@@ -1143,6 +1294,7 @@ export default function FrontendAppShell({
             onNavigate={setActiveRoute}
             onNewChat={startNewConversation}
             onOpenCase={openSavedCase}
+            onToggleCollapse={() => setIsSidebarCollapsed((value) => !value)}
             savePromptVisible={savePromptVisible}
             sessionLabel={sessionLabel}
             statusMessage={statusMessage}
@@ -1258,11 +1410,6 @@ export default function FrontendAppShell({
             />
           )}
 
-          {activeRoute !== "chatbot" && statusMessage && (
-            <p className="status-message" role="status">
-              {statusMessage}
-            </p>
-          )}
         </main>
       </div>
     </div>
@@ -1472,58 +1619,195 @@ function ChatScreen({
   );
 }
 
+function Reveal({ children, className = "", as = "div", ...rest }) {
+  const Tag = as;
+  const ref = useRef(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    if (typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return undefined;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.15 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <Tag ref={ref} className={`reveal${visible ? " reveal--visible" : ""}${className ? ` ${className}` : ""}`} {...rest}>
+      {children}
+    </Tag>
+  );
+}
+
 function EntryScreenV2({ onGuestStart, onOpenChat }) {
   return (
-    <section className="entry-screen">
-      <div className="entry-copy">
-        <span className="eyebrow">로그인 없이 먼저 상담</span>
-        <h1>당황한 순간에는 가입보다 질문이 먼저입니다.</h1>
-        <p className="lead">
-          사고 상황, 과태료 고지서, 보험사 설명을 바로 적어 주세요. 대화가 충분히 진행된 뒤
-          이력 저장이나 추가 자료 분석이 필요할 때 Google 로그인을 안내합니다.
-        </p>
-        <div className="hero-actions">
-          <button className="button primary large" type="button" onClick={onOpenChat}>
-            바로 상담 시작
-          </button>
-          <button className="button large" type="button" onClick={onGuestStart}>
-            비회원으로 상담 시작
-          </button>
+    <section className="entry-screen insurance-layout">
+      <div className="home-hero">
+        <div className="home-hero__copy">
+          <span className="eyebrow">교통 분쟁 지원 플랫폼</span>
+          <h1>
+            복잡한 교통 문제,<br />
+            <span className="accent-text">다음 행동부터</span> 함께 정리합니다.
+          </h1>
+          <p className="lead">
+            사고 과실, 과태료 이의신청, 법률 조회까지. 상황과 자료를 바탕으로 쟁점과 필요한
+            준비 자료, 다음 행동을 한눈에 안내합니다.
+          </p>
+          <div className="hero-actions hero-actions--start">
+            <button className="button primary large" type="button" onClick={onOpenChat}>
+              내 상황 정리 시작
+            </button>
+            <button className="button large" type="button" onClick={onGuestStart}>
+              자료 없이 먼저 질문하기
+            </button>
+          </div>
         </div>
-        <p className="entry-note">
-          저장을 선택하지 않으면 현재 상담은 임시로만 유지하고, 마이페이지 이력으로 넘기지 않습니다.
-        </p>
+        <div className="home-hero__visual">
+          <div className="hero-visual-stage">
+            <img
+              className="home-hero__car"
+              src="/design-references/02-consultation-desk.jpg"
+              alt="차량 관련 서류를 검토하는 상담 장면"
+              loading="lazy"
+            />
+            <div className="doc-assembly" aria-hidden="true">
+              <div className="doc-stack">
+                <span className="doc-chip doc-chip--statement">사고 사진</span>
+                <span className="doc-chip doc-chip--notice">과태료 고지서</span>
+                <span className="doc-chip doc-chip--photo">보험사 안내</span>
+              </div>
+              <div className="doc-assembly__result">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+                  <path d="M14 3v5h5" />
+                  <path d="M8.5 13.5l2 2 4-4.5" />
+                </svg>
+                <span>다음 행동 정리</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="entry-panel">
-        <div className="panel-topline">
-          <span>상담 흐름</span>
-          <strong>Chat first</strong>
+      <Reveal className="entry-steps" as="div">
+        <div className="entry-steps__head">
+          <span className="eyebrow">필요한 지원 선택</span>
+          <h2>지금 상황에 맞는 도움부터 시작하세요</h2>
         </div>
-        <div className="flow-stack">
-          <div className="flow-step active">
-            <span>1</span>
-            <div>
-              <strong>질문부터 시작</strong>
-              <p>로그인 화면으로 막지 않고 비회원 상담을 먼저 엽니다.</p>
+        <div className="entry-steps__grid">
+          <div className="entry-step active">
+            <div className="entry-step__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 5h16v11H8l-4 4V5z" />
+                <path d="M9 9h6M9 12.5h4" />
+              </svg>
             </div>
+            <strong>법률·판례 조회</strong>
+            <p>교통사고와 과태료 관련 법령, 판례, 핵심 쟁점을 이해하기 쉽게 확인합니다.</p>
+            <button className="service-link" type="button" onClick={onOpenChat}>법률 질문하기 →</button>
           </div>
-          <div className="flow-step">
-            <span>2</span>
-            <div>
-              <strong>상담 진행</strong>
-              <p>상황 정리, 필요한 자료, 다음 행동을 먼저 안내합니다.</p>
+          <div className="entry-step">
+            <div className="entry-step__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 7h4M11 7h9M4 12h4M11 12h9M4 17h4M11 17h9" />
+              </svg>
             </div>
+            <strong>사고 과실비율 예측</strong>
+            <p>사고 상황과 제출 자료를 토대로 과실 쟁점과 확인할 자료를 정리합니다.</p>
+            <button className="service-link" type="button" onClick={onOpenChat}>사고 상황 입력하기 →</button>
           </div>
-          <div className="flow-step">
-            <span>3</span>
-            <div>
-              <strong>저장 여부 선택</strong>
-              <p>로그인 후 저장하면 마이페이지 이력으로 연결하고, 아니면 임시로 둡니다.</p>
+          <div className="entry-step">
+            <div className="entry-step__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 4h12v16l-6-4-6 4V4z" />
+              </svg>
             </div>
+            <strong>과태료 이의신청 지원</strong>
+            <p>고지서 내용을 바탕으로 검토 포인트를 확인하고 신청서 초안 작성을 돕습니다.</p>
+            <button className="service-link" type="button" onClick={onOpenChat}>고지서 검토하기 →</button>
           </div>
         </div>
-      </div>
+      </Reveal>
+
+      <Reveal className="feature-section" as="div">
+        <div className="entry-steps__head">
+          <span className="eyebrow">간단한 시작</span>
+          <h2>몇 가지 질문으로<br />내 상황에 맞는 지원을 찾아보세요</h2>
+        </div>
+        <div className="feature-grid">
+          <div className="feature-card">
+            <div className="feature-card__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 5h16v11H8l-4 4V5z" />
+                <path d="M9 9h6M9 12.5h4" />
+              </svg>
+            </div>
+            <strong>상황 요약</strong>
+            <p>입력한 사고 내용과 고지서 정보를 먼저 간결하게 정리합니다.</p>
+          </div>
+          <div className="feature-card">
+            <div className="feature-card__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 4v16M6 4h12M4 20h16M6 4l-3 7a3 3 0 0 0 6 0L6 4ZM18 4l-3 7a3 3 0 0 0 6 0L18 4Z" />
+              </svg>
+            </div>
+            <strong>쟁점과 근거</strong>
+            <p>확인이 필요한 법률 쟁점, 과실 판단 기준, 관련 근거를 안내합니다.</p>
+          </div>
+          <div className="feature-card">
+            <div className="feature-card__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+                <path d="M14 3v5h5" />
+                <path d="M8.5 13.5l2 2 4-4.5" />
+              </svg>
+            </div>
+            <strong>다음 행동</strong>
+            <p>보완할 자료와 기한, 이의신청서 초안처럼 바로 할 일을 제안합니다.</p>
+          </div>
+        </div>
+      </Reveal>
+
+      <Reveal className="reassurance-strip" as="div">
+        <h2>결론을 대신 내리지 않습니다.<br />판단에 필요한 정보를 더 명확하게 만듭니다.</h2>
+        <p>AI 분석 결과는 참고용 안내이며, 중요한 법률 판단이나 절차는 전문가와 함께 확인할 수 있습니다.</p>
+      </Reveal>
+
+      <Reveal className="insurance-metrics" as="section">
+        <article><strong>01</strong><h2>상황 요약</h2><p>입력한 내용을 핵심 사실 중심으로 정리합니다.</p></article>
+        <article><strong>02</strong><h2>쟁점 확인</h2><p>판단에 중요한 기준과 빠진 자료를 알려드립니다.</p></article>
+        <article><strong>03</strong><h2>근거 조회</h2><p>관련 법령과 판례를 확인할 수 있습니다.</p></article>
+        <article><strong>04</strong><h2>다음 행동</h2><p>준비할 자료와 처리 순서를 제안합니다.</p></article>
+      </Reveal>
+
+      <Reveal className="insurance-reviews" as="section">
+        <h2>이렇게 활용할 수 있어요</h2>
+        <div>
+          <blockquote>“보험사 설명을 듣기 전에 제가 확인할 쟁점을 먼저 정리할 수 있었어요.”<cite>사고 과실 상담 이용</cite></blockquote>
+          <blockquote>“고지서에서 무엇을 봐야 하는지 알려줘서 자료를 준비하기 쉬웠습니다.”<cite>과태료 검토 이용</cite></blockquote>
+          <blockquote>“복잡한 법률 용어를 상황에 맞게 풀어줘서 다음 행동이 명확해졌어요.”<cite>법률 조회 이용</cite></blockquote>
+        </div>
+      </Reveal>
+
+      <Reveal className="closing-cta" as="div">
+        <h2>어떤 도움이 필요한가요?</h2>
+        <p>가입 없이 시작하고, 필요한 경우에만 이력과 자료를 저장하세요.</p>
+        <button className="button primary large" type="button" onClick={onOpenChat}>
+          내 상황 정리 시작
+        </button>
+      </Reveal>
     </section>
   );
 }
@@ -1533,6 +1817,7 @@ function ConversationSidebar({
   cases,
   currentTitle,
   isAuthenticated,
+  isCollapsed = false,
   isGuestReady,
   isSavingConversation,
   onLogin,
@@ -1540,6 +1825,7 @@ function ConversationSidebar({
   onNavigate,
   onNewChat,
   onOpenCase,
+  onToggleCollapse,
   savePromptVisible,
   sessionLabel,
   statusMessage,
@@ -1549,18 +1835,28 @@ function ConversationSidebar({
 
   return (
     <>
-      <aside className="sidebar chat-sidebar" aria-label="대화 목록과 계정">
+      <aside
+        className={isCollapsed ? "sidebar chat-sidebar collapsed" : "sidebar chat-sidebar"}
+        aria-label="대화 목록과 계정"
+      >
         <div className="sidebar-brand">
-          <button className="brand compact" type="button" onClick={() => onNavigate("chatbot")}>
-            <span className="brand-mark">AI</span>
-            <span>교통분쟁 AI</span>
+          <button
+            className="sidebar-collapse-toggle"
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+            title={isCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+          >
+            {isCollapsed ? "»" : "«"}
           </button>
         </div>
 
+      {!isCollapsed && (
+      <>
       <div className="sidebar-actions">
         <button className="nav-item primary-action" type="button" onClick={onNewChat}>
-          <span>새 상담</span>
           <span>+</span>
+          <span>새 상담</span>
         </button>
         <button className="nav-item" type="button" onClick={() => onNavigate("history")}>
           <span>상담 검색</span>
@@ -1588,16 +1884,12 @@ function ConversationSidebar({
         ) : (
           cases.slice(0, 8).map((item) => (
             <button
-              className="conversation-card"
+              className="conversation-card compact"
               key={item.case_id || item.job_id || item.title}
               type="button"
               onClick={() => onOpenCase(item)}
             >
               <strong>{item.title || item.case_id}</strong>
-              <span>
-                {caseStatusLabel(item.case_status || item.status)}
-                {item.latest_report_id ? " · 리포트 저장" : " · 리포트 대기"}
-              </span>
             </button>
           ))
         )}
@@ -1619,6 +1911,8 @@ function ConversationSidebar({
 
           {statusMessage && <p className="sidebar-status">{statusMessage}</p>}
         </section>
+      </>
+      )}
       </aside>
       <nav className="mobile-bottom-nav" aria-label="모바일 주요 메뉴">
         <button className="mobile-bottom-nav__item" type="button" onClick={onNewChat}>
@@ -2507,51 +2801,6 @@ function historyEventMatchesFilter(event, activeFilter) {
   return true;
 }
 
-function reportInspectorDetail(sections, mode) {
-  const selectedSections = reportSectionsForInspector(sections, mode);
-  if (mode === "grounds") {
-    return {
-      label: "근거",
-      title: "판단 근거와 제출 자료",
-      summary: "판단 근거, 핵심 쟁점, 유사 사례를 모아서 확인합니다.",
-      sections: selectedSections,
-    };
-  }
-  if (mode === "actions") {
-    return {
-      label: "작업",
-      title: "다음 제출 작업과 정리 순서",
-      summary: "누락 자료 보완, 제출 준비, 재생성 포인트를 모아서 확인합니다.",
-      sections: selectedSections,
-    };
-  }
-  return {
-    label: "리포트",
-    title: "리포트 상세",
-    summary: "선택한 리포트의 섹션과 검토 상태를 확인합니다.",
-    sections: selectedSections,
-  };
-}
-
-function reportSectionsForInspector(sections, mode) {
-  if (!Array.isArray(sections) || mode === "overview") {
-    return [];
-  }
-  if (mode === "grounds") {
-    return sections.filter((section) =>
-      /근거|법령|판례|증거|이의제기|예상 결과|판단 근거|핵심 쟁점|유사 사례/.test(String(section?.title || ""))
-    );
-  }
-  if (mode === "actions") {
-    return sections.filter((section) =>
-      /후속 조치|가이드라인|AI 작성|제출|첨부 자료|자료 요청|재생성|다운로드|모니터링|활용/.test(
-        String(section?.title || "")
-      )
-    );
-  }
-  return sections;
-}
-
 function DeadlineGuidancePanel({ guidance }) {
   const nextActions = Array.isArray(guidance?.next_actions) ? guidance.next_actions : [];
   const limitations = Array.isArray(guidance?.limitations) ? guidance.limitations : [];
@@ -2788,6 +3037,21 @@ function groupReportSections(sections) {
   return grouped;
 }
 
+function ReportActionAlert({ status }) {
+  const text = String(status || "").trim();
+  if (!text) {
+    return null;
+  }
+  const isError = /실패|못했|못해|오류|에러/.test(text);
+  const isSuccess = !isError && /완료|성공|저장했|반영했/.test(text);
+  const tone = isError ? "error" : isSuccess ? "success" : "info";
+  return (
+    <div className={`report-action-alert ${tone}`} role="status">
+      {text}
+    </div>
+  );
+}
+
 function DocumentTypeCards({ cards, onCopy }) {
   const documentTitles = {
     objection_draft: "이의신청서 초안",
@@ -2895,13 +3159,11 @@ function ReportingScreen({
   const activeReportTypeLabel = reportTypeLabel(activeReportType);
   const savedReportCountLabel = hasSavedReports ? `${reportList.length}건` : hasReport ? "1건" : "0건";
   const reportTagClass = currentReport || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber";
-  const [selectedInspectorMode, setSelectedInspectorMode] = useState("overview");
   const groupedSections = groupReportSections(sections);
   const overviewSections = (groupedSections.overview.length ? groupedSections.overview : groupedSections.remainder).slice(0, 4);
   const groundsSections = groupedSections.grounds;
   const actionSections = groupedSections.actions;
   const supportCards = analysisCards.slice(0, 3);
-  const inspectorDetail = reportInspectorDetail(sections, selectedInspectorMode);
 
   return (
     <section className="screen">
@@ -2940,7 +3202,6 @@ function ReportingScreen({
                   {reportPersistence.status ? ` · ${reportStatusLabel(reportPersistence.status)}` : ""}
                 </p>
               )}
-              {reportActionStatus && <p>{reportActionStatus}</p>}
               {hasSavedReports && (
                 <div className="report-saved-list">
                   {reportList.slice(0, 5).map((report) => (
@@ -3083,6 +3344,7 @@ function ReportingScreen({
           <div className="panel-head compact">
             <strong>상태·다운로드</strong>
           </div>
+          <ReportActionAlert status={reportActionStatus} />
           {hasReport ? (
             <>
               <DocumentConfirmationPanel
@@ -3117,42 +3379,6 @@ function ReportingScreen({
                 </button>
               </div>
               <div className="inspector-section">
-                <span className={reportTagClass}>{reportStatusLabel(reportStatus)}</span>
-                <strong>{activeReportTypeLabel}</strong>
-                <p>{reportSummary}</p>
-              </div>
-              <div className="inspector-section">
-                <strong>세부 보기</strong>
-                <p>중앙 문서에서 빠르게 보고, 필요한 경우 아래에서 섹션별로 다시 펼쳐봅니다.</p>
-                <div className="inspector-mode-switch">
-                  <button
-                    className={selectedInspectorMode === "overview" ? "button active" : "button"}
-                    type="button"
-                    onClick={() => setSelectedInspectorMode("overview")}
-                    disabled={!hasReport}
-                  >
-                    개요
-                  </button>
-                  <button
-                    className={selectedInspectorMode === "grounds" ? "button active" : "button"}
-                    type="button"
-                    onClick={() => setSelectedInspectorMode("grounds")}
-                    disabled={!hasReport}
-                  >
-                    근거
-                  </button>
-                  <button
-                    className={selectedInspectorMode === "actions" ? "button active" : "button"}
-                    type="button"
-                    onClick={() => setSelectedInspectorMode("actions")}
-                    disabled={!hasReport}
-                  >
-                    다음 작업
-                  </button>
-                </div>
-              </div>
-              <div className="inspector-section">
-                <span className={reportTagClass}>{reportStatusLabel(reportStatus)}</span>
                 <strong>리포트 검토 상태</strong>
                 <p>{supervisorState?.conversation_summary || "최신 상담 상태를 확인했습니다."}</p>
               </div>
@@ -3162,25 +3388,6 @@ function ReportingScreen({
               </div>
               {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
               {lawGroundNode && <LawGroundInsightPanel compact node={lawGroundNode} />}
-              {selectedInspectorMode !== "overview" && (
-                <div className="inspector-section report-inspector-detail">
-                  <span className="tag green">{inspectorDetail.label}</span>
-                  <strong>{inspectorDetail.title}</strong>
-                  <p>{inspectorDetail.summary}</p>
-                  <div className="inspector-detail-list">
-                    {inspectorDetail.sections.length > 0 ? (
-                      inspectorDetail.sections.map((section) => (
-                        <ReportSectionPreview compact detailLimit={4} key={`inspector-${section.title}`} section={section} />
-                      ))
-                    ) : (
-                      <article className="report-empty-hint">
-                        <strong>표시할 항목 없음</strong>
-                        <p>현재 리포트 payload에 해당 섹션이 없습니다. 상담을 이어가면 항목을 다시 채울 수 있습니다.</p>
-                      </article>
-                    )}
-                  </div>
-                </div>
-              )}
             </>
           ) : (
             <div className="inspector-section">
