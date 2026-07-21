@@ -263,6 +263,14 @@ def _analysis_job_errors(
     )
 
 
+ANALYSIS_IDENTITY_ERROR_CODES = (
+    "auth_required",
+    "token_invalid",
+    "token_expired",
+    "guest_session_invalid",
+)
+
+
 def _report_errors(
     *entries: tuple[int, tuple[str, ...]],
 ) -> tuple[RouteErrorSpec, ...]:
@@ -885,6 +893,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         response_model=AnalysisJobListResponse,
         success_status=200,
         errors=_analysis_job_errors(
+            (401, ANALYSIS_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
         ),
         auth_required=False,
@@ -905,6 +914,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         success_status=202,
         errors=_analysis_job_errors(
             (400, ("analysis_job_session_required", "chat_input_rejected")),
+            (401, ANALYSIS_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (
                 409,
@@ -936,7 +946,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         response_model=AnalysisJobDetailResponse,
         success_status=200,
         errors=_analysis_job_errors(
-            (401, ("guest_session_invalid",)),
+            (401, ANALYSIS_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (404, ("analysis_job_not_found",)),
         ),
@@ -959,7 +969,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         success_status=200,
         success_statuses=(200, 202),
         errors=_analysis_job_errors(
-            (401, ("guest_session_invalid",)),
+            (401, ANALYSIS_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (404, ("analysis_result_not_found",)),
         ),

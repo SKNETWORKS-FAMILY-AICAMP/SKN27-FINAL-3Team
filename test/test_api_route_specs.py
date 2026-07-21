@@ -283,6 +283,23 @@ def test_analysis_job_api_route_specs_promote_existing_django_endpoints() -> Non
         "job_id"
     )
     assert actual[("GET", "/api/analysis/results/{job_id}/")].success_statuses == (200, 202)
+    expected_identity_errors = (
+        "auth_required",
+        "token_invalid",
+        "token_expired",
+        "guest_session_invalid",
+    )
+    for route_key in (
+        ("GET", "/api/analysis/jobs/"),
+        ("POST", "/api/analysis/jobs/"),
+        ("GET", "/api/analysis/jobs/{job_id}/"),
+        ("GET", "/api/analysis/results/{job_id}/"),
+    ):
+        errors = {
+            error.status: error.codes
+            for error in actual[route_key].errors
+        }
+        assert errors[401] == expected_identity_errors
     for spec in actual.values():
         assert [
             (parameter.name, parameter.location)
