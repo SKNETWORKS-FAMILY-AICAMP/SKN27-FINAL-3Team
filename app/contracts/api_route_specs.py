@@ -408,7 +408,14 @@ GOOGLE_CODE_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 GUEST_ID_HEADER_PARAMETER = RequestParameterSpec(
     name="X-Guest-Id",
     location="header",
-    description="Optional guest identity header when no Bearer token is supplied.",
+    description="Optional guest identifier. It is not valid identity proof without X-Guest-Credential.",
+)
+
+
+GUEST_CREDENTIAL_HEADER_PARAMETER = RequestParameterSpec(
+    name="X-Guest-Credential",
+    location="header",
+    description="Signed guest credential required to prove a supplied guest identity.",
 )
 
 
@@ -471,6 +478,7 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         contract_status="shadow",
         tags=("Auth",),
         summary="Issue or refresh a guest identity",
+        request_parameters=(GUEST_CREDENTIAL_HEADER_PARAMETER,),
         request_body_required=False,
     ),
     RouteSpec(
@@ -497,7 +505,7 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         contract_status="shadow",
         tags=("Auth",),
         summary="Exchange a one-time Google authorization code for an app Bearer token",
-        request_parameters=GOOGLE_CODE_PARAMETERS,
+        request_parameters=(*GOOGLE_CODE_PARAMETERS, GUEST_CREDENTIAL_HEADER_PARAMETER),
     ),
     RouteSpec(
         operation_id="refreshAuthToken",
@@ -553,10 +561,11 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         tags=("Auth",),
         summary="Inspect current anonymous, guest, or authenticated subject",
         request_parameters=(
+            GUEST_CREDENTIAL_HEADER_PARAMETER,
             RequestParameterSpec(
                 name="X-Guest-Id",
                 location="header",
-                description="Optional guest identity header when no Bearer token is supplied.",
+                description="Optional guest identifier. It is not valid identity proof without X-Guest-Credential.",
             ),
             RequestParameterSpec(
                 name="guest_id",

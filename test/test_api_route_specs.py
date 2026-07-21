@@ -145,6 +145,15 @@ def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> Non
     assert actual[("POST", "/api/auth/guest-session/")].response_model is (
         auth_contracts.GuestSessionResponse
     )
+    assert "guest_credential" in auth_contracts.GuestSessionResponse.model_fields
+    assert [
+        (parameter.name, parameter.location)
+        for parameter in actual[("POST", "/api/auth/guest-session/")].request_parameters
+    ] == [("X-Guest-Credential", "header")]
+    assert [
+        (parameter.name, parameter.location)
+        for parameter in actual[("GET", "/api/auth/me/")].request_parameters
+    ][:2] == [("X-Guest-Credential", "header"), ("X-Guest-Id", "header")]
     assert actual[("POST", "/api/auth/google/code/")].request_model is (
         auth_contracts.GoogleAuthorizationCodeRequest
     )

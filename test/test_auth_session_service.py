@@ -7,6 +7,7 @@ from app.services.auth_session_service import (
     create_guest_session,
     get_current_auth_subject,
 )
+from app.services.guest_credential_service import issue_guest_credential
 from app.services.google_auth_service import create_google_login, issue_access_token
 
 
@@ -16,16 +17,18 @@ def test_generated_guest_identity_uses_full_uuid_entropy() -> None:
     assert re.fullmatch(r"gst_[0-9a-f]{32}", guest_session["guest"]["guest_id"])
 
 
-def test_create_guest_session_separates_guest_and_chat_session_ids():
+def test_guest_session_without_credential_ignores_client_guest_and_session_ids():
     payload = {"guest_id": "gst_existing", "session_id": "ses_guest_chat"}
 
     guest_session = create_guest_session(payload)
 
     assert guest_session["auth_state"] == "guest"
-    assert guest_session["guest"]["guest_id"] == "gst_existing"
-    assert guest_session["subject"]["subject_id"] == "guest:gst_existing"
+    assert guest_session["guest"]["guest_id"] != "gst_existing"
+    assert re.fullmatch(r"gst_[0-9a-f]{32}", guest_session["guest"]["guest_id"])
+    assert guest_session["subject"]["subject_id"] == f"guest:{guest_session['guest']['guest_id']}"
     assert guest_session["subject"]["auth_session_id"] is None
-    assert guest_session["session_binding"]["session_id"] == "ses_guest_chat"
+    assert guest_session["session_binding"]["session_id"] is None
+    assert guest_session["guest_credential"]
     assert guest_session["merge_policy"]["auto_merge"] is False
     assert guest_session["rate_limit"]["policy_status"] == "review_required"
 
@@ -77,16 +80,46 @@ def test_auth_me_accepts_signature_verified_app_jwt(monkeypatch):
     assert payload["auth_session"]["verification"] == "app_jwt_hmac"
 
 
-def test_auth_me_returns_guest_or_anonymous_without_bearer():
+def test_app_jwt_does_not_adopt_an_unverified_guest_id(monkeypatch):
+    monkeypatch.setattr(
+        google_auth_service,
+        "_jwt_secret",
+        lambda: "test-app-jwt-secret-at-least-32-characters",
+    )
+    token, _claims = issue_access_token(
+        user_id="usr_google_verified",
+        auth_session_id="auth_google_verified",
+    )
+
+    status, payload = get_current_auth_subject(
+        authorization_header=f"Bearer {token}",
+        guest_id="gst_other_guest",
+    )
+
+    assert status == 200
+    assert payload["subject"]["guest_id"] is None
+    assert payload["guest"] is None
+
+
+def test_auth_me_requires_signed_credential_for_guest_identity():
+    rejected_status, rejected_payload = get_current_auth_subject(
+        authorization_header=None,
+        guest_id="guest_from_header",
+    )
+    credential, _claims = issue_guest_credential("guest_from_header")
     guest_status, guest_payload = get_current_auth_subject(
         authorization_header=None,
         guest_id="guest_from_header",
+        guest_credential=credential,
     )
     anon_status, anon_payload = get_current_auth_subject(
         authorization_header=None,
         guest_id=None,
     )
 
+    assert rejected_status == 401
+    assert rejected_payload["error"]["code"] == "token_invalid"
+    assert rejected_payload["error"]["auth"]["reason"] == "missing_guest_credential"
     assert guest_status == 200
     assert guest_payload["auth_state"] == "guest"
     assert guest_payload["guest"]["guest_id"] == "gst_guest_from_header"
