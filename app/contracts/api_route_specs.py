@@ -45,6 +45,15 @@ from app.contracts.consultation_case import (
     StartCaseAnalysisRequest,
     StartCaseAnalysisResponse,
 )
+from app.contracts.chat_session import (
+    ChatApiErrorResponse,
+    ChatMessageRequest,
+    ChatMessageResponse,
+    ChatSaveStateRequest,
+    ChatSaveStateResponse,
+    ChatSessionCreateRequest,
+    ChatSessionCreateResponse,
+)
 from app.contracts.file_attachment import (
     FileAttachmentDetailResponse,
     FileAttachmentListResponse,
@@ -425,6 +434,23 @@ GUEST_FILE_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 )
 
 
+CHAT_SESSION_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    GUEST_CREDENTIAL_HEADER_PARAMETER,
+    GUEST_ID_HEADER_PARAMETER,
+)
+
+
+def _chat_errors(*entries: tuple[int, tuple[str, ...]]) -> tuple[RouteErrorSpec, ...]:
+    return tuple(
+        RouteErrorSpec(
+            status=status,
+            codes=codes,
+            response_model=ChatApiErrorResponse,
+        )
+        for status, codes in entries
+    )
+
+
 FILE_LIST_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
     *GUEST_FILE_REQUEST_PARAMETERS,
     RequestParameterSpec(
@@ -580,6 +606,73 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
                 description="Optional chat session binding identifier.",
             ),
         ),
+    ),
+)
+
+
+CHAT_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="issueChatSessionDraft",
+        method="POST",
+        path="/api/chat/sessions/",
+        route_name="canonical-create-chat-session",
+        view_name="create_chat_session",
+        request_model=ChatSessionCreateRequest,
+        response_model=ChatSessionCreateResponse,
+        success_status=200,
+        errors=_chat_errors(
+            (401, ("auth_required", "token_invalid", "token_expired", "guest_session_invalid")),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Chat",),
+        summary="Issue a draft chat session identifier; persistence occurs during message or save-state processing",
+        request_parameters=CHAT_SESSION_REQUEST_PARAMETERS,
+        request_body_required=False,
+    ),
+    RouteSpec(
+        operation_id="submitChatMessage",
+        method="POST",
+        path="/api/chat/messages/",
+        route_name="canonical-submit-chat-message",
+        view_name="submit_chat_message",
+        request_model=ChatMessageRequest,
+        response_model=ChatMessageResponse,
+        success_status=200,
+        success_statuses=(200, 202, 503),
+        errors=_chat_errors(
+            (400, ("chat_input_rejected",)),
+            (401, ("auth_required", "token_invalid", "token_expired", "guest_session_invalid")),
+            (403, ("object_access_denied",)),
+            (429, ("rate_limit_exceeded",)),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Chat",),
+        summary="Submit a chat turn and return immediate guidance, an asynchronous Worker receipt, or supervisor-unavailable state",
+        request_parameters=CHAT_SESSION_REQUEST_PARAMETERS,
+    ),
+    RouteSpec(
+        operation_id="updateChatSaveState",
+        method="POST",
+        path="/api/chat/save-state/",
+        route_name="canonical-chat-save-state",
+        view_name="update_chat_save_state",
+        request_model=ChatSaveStateRequest,
+        response_model=ChatSaveStateResponse,
+        success_status=200,
+        errors=_chat_errors(
+            (401, ("auth_required", "token_invalid", "token_expired", "guest_session_invalid")),
+            (403, ("login_required", "object_access_denied")),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Chat",),
+        summary="Update a conversation save preference; an unknown session returns 200 with skipped state",
+        request_parameters=CHAT_SESSION_REQUEST_PARAMETERS,
     ),
 )
 
@@ -967,6 +1060,7 @@ REPORT_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
 API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
     CASE_API_ROUTE_SPECS
     + AUTH_SESSION_API_ROUTE_SPECS
+    + CHAT_SESSION_API_ROUTE_SPECS
     + FILE_API_ROUTE_SPECS
     + ANALYSIS_JOB_API_ROUTE_SPECS
     + REPORT_API_ROUTE_SPECS
@@ -1015,27 +1109,6 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         route_name="canonical-history-events",
         view_name="history_events",
         reason="History filters and response DTO remain coupled to the Django view.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/chat/sessions/",
-        route_name="canonical-create-chat-session",
-        view_name="create_chat_session",
-        reason="Authenticated session ownership DTO is pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/chat/messages/",
-        route_name="canonical-submit-chat-message",
-        view_name="submit_chat_message",
-        reason="Chat orchestration request and async response DTOs are pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/chat/save-state/",
-        route_name="canonical-chat-save-state",
-        view_name="update_chat_save_state",
-        reason="Conversation ownership and save-state DTOs are pending.",
     ),
     DeferredRouteSpec(
         method="GET",
