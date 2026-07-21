@@ -44,6 +44,22 @@ def test_out_of_scope_accident_does_not_create_a_supervisor_plan() -> None:
     assert response["reporting_payload"] is None
 
 
+def test_criminal_scope_guidance_does_not_create_execution_or_report() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_criminal",
+            "user_text": "형사처벌과 고발 가능성을 판정해 주세요.",
+        }
+    )
+
+    assert response["status"] == "scope_guidance"
+    assert response["service_scope"]["scope_code"] == "criminal_review"
+    assert response["next_actions"] == response["service_scope"]["next_actions"]
+    assert response["analysis_plan"]["status"] == "blocked"
+    assert response["analysis_plan"]["steps"] == []
+    assert response["reporting_payload"] is None
+
+
 def test_fine_notice_message_queues_supervisor_boundaries_and_supported_real_agents() -> None:
     response = submit_message(
         {
@@ -510,3 +526,26 @@ def test_composed_agent_response_preserves_deadline_guidance() -> None:
 
     assert response["deadline_guidance"]["status"] == "needs_confirmation"
     assert response["cards"][0]["card_type"] == "deadline_guidance"
+
+
+def test_composed_agent_response_preserves_final_next_actions() -> None:
+    response = compose_agent_response(
+        {
+            "job_id": "job_next_actions",
+            "executions": [
+                {
+                    "node_code": "final_response_merge",
+                    "agent_output": {
+                        "status": "partial",
+                        "summary": "추가 근거 확인이 필요합니다.",
+                        "structured_result": {
+                            "assistant_message": {"answer": "추가 근거 확인이 필요합니다."},
+                            "next_actions": ["고지서 원문을 확인해 주세요."],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert response["next_actions"] == ["고지서 원문을 확인해 주세요."]
