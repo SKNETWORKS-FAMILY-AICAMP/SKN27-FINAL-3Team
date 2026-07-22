@@ -91,6 +91,19 @@ LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS=1024
 
 서로 다른 PostgreSQL DB 사이에는 단일 transaction을 가정하지 않는다. 각 도메인은 idempotent upsert 후 검증하고, 한 도메인 실패는 command를 실패로 종료해 불완전 seed를 성공으로 보고하지 않는다. unit test에서는 실제 임베딩 API를 호출하지 않고 embedding provider와 DB loader를 fake로 대체한다.
 
+### 4.2 Production seed loader 정정: 원본별 적재와 통합 검증 분리
+
+현재 production seed manifest의 `review_case_chunks`와 `precedent_fault_ratio_chunks` 항목은 검색용 chunk 필드만 포함한다. 이 형식에는 review case 문서와 과실비율 판례 원본 레코드를 생성하는 데 필요한 전체 source-document 필드가 없으므로, 해당 manifest만으로 두 도메인 DB를 직접 적재하는 것은 허용하지 않는다.
+
+따라서 `load_production_rag_seed`의 책임을 다음처럼 정정한다.
+
+1. 법령: 검증된 manifest를 사용해 기존의 `load_legal_rag_pgvector` 경로로 적재하거나 `--replace-legal`로 원자 교체한다.
+2. 심의사례: 검증된 원본 artifact를 `review_case`의 기존 source DB loader와 embedding loader로 적재·재임베딩한 뒤 HNSW index를 생성한다.
+3. 과실비율 판례: 검증된 원본 JSONL artifact를 `fault_ratio`의 기존 source DB loader와 embedding loader로 적재·재임베딩한 뒤 HNSW index를 생성한다.
+4. 통합 command: 세 도메인의 row count, embedding count, provider/model/dimensions, HNSW index, 대표 질의 결과를 읽기 전용으로 검증한다. 심의사례·과실비율 판례의 원본 적재는 이 command가 수행하지 않는다.
+
+배포 자동화는 두 원본별 적재·재임베딩을 먼저 완료한 후 통합 검증과 pgvector smoke를 통과해야만 ES/OpenSearch 제거 릴리스를 진행한다. 이 분리는 현재 manifest 계약을 보존하면서도 부분 문서 적재나 데이터 손상을 방지한다.
+
 ## 5. 오류 처리와 운영 안전성
 
 - 질의 임베딩 생성 실패, DB 연결 실패, embedding-space mismatch는 결과를 꾸며내지 않고 `unavailable` 또는 source별 실패로 반환한다.
