@@ -175,7 +175,7 @@
 - [x] 마이페이지 API 계약 — #272: shadow OpenAPI, owner/session 소유권·raw guest ID 차단·limit 기본값 폴백 회귀 검증
 - [x] 히스토리 API 계약 — #274: shadow OpenAPI, App JWT·guest credential 경계와 owner/session/job 소유권 회귀 검증
 - [x] 에이전트 노드 API 계약 — #268: 공개 분석 결과 DTO의 Worker/Supervisor 내부 필드 차단 및 API·소유권 회귀 검증
-- [ ] 전체 오류·권한 오류·부분 결과 응답 공통 계약 정리
+- [x] 전체 오류·권한 오류·부분 결과 응답 공통 계약 정리 — #277: 401/403 의미, 채팅 partial/unavailable, 분석 결과 pending OpenAPI·런타임 회귀 검증
 
 ## I. 검증·운영·발표 완성도
 
