@@ -63,3 +63,21 @@ RAGAS 20건 × 두 backend 실행은 현재 `ragas_execution_failed`로 끝나 �
 모든 질의가 성공하고 `context_precision`, `context_recall`, `faithfulness`, `answer_relevancy`가 모두 유한한 0~1 값일 때만 backend aggregate가 `evaluated`와 metric을 반환한다. 하나라도 실패·누락·NaN·범위 밖이면 aggregate는 `not_evaluated` / `incomplete_ragas_evidence`이며 metric을 반환하지 않는다. 빈 context는 외부 API를 호출하지 않고 `no_ragas_contexts`로 기록한다.
 
 `test/test_legal_rag_evaluation.py` 및 `test/test_legal_rag_evaluation_environment.py`의 로컬 계약 테스트 32개가 통과했다. 이는 구현 계약 검증일 뿐 실제 OpenAI/RAGAS 20건 × 두 backend 재실행은 아직 수행하지 않았으므로, `legal-ab-010-ragas`의 RAGAS 결과와 gate 상태는 계속 `not_evaluated`다.
+
+## 실행 업데이트 — `legal-ab-012-ragas-20260722`
+
+평가 전용 `.env.rag-eval`과 동일 corpus snapshot에서 공개 법령 20개 질의를 다시 실행했다. preflight는 `law_chunks`·`law_embeddings` 각각 97,394건, `openai / text-embedding-3-large / 1024` 단일 embedding space로 `ready`였다.
+
+| 지표 | PostgreSQL lexical | pgvector |
+| --- | ---: | ---: |
+| 처리된 평가 응답 | 20 / 20 | 20 / 20 |
+| Recall@5 / MRR / nDCG@5 | 0.45 / 0.385000 / 0.400889 | 0.00 / 0.000000 / 0.000000 |
+| no-result / unavailable rate | 0.00 / 0.00 | 1.00 / 1.00 |
+| p50 / p95 latency | 454 / 786 ms | 428 / 757 ms |
+| metadata complete rate | 1.00 | 0.00 |
+
+pgvector의 20건은 모두 안전한 `openai_authentication_failed`로 기록됐다. RAGAS는 pgvector의 빈 context 20건을 외부 호출 없이 `no_ragas_contexts`로 건너뛰었고, lexical 20건은 각각 `ragas_runtime_unavailable`로 격리됐다. 두 backend aggregate는 모두 `not_evaluated / incomplete_ragas_evidence`이며 RAGAS metric은 생성되지 않았다. 키 값과 예외 원문은 산출물·이 보고서에 기록하지 않는다.
+
+`transition_decision.eligible`는 `false`다. 실패 gate는 retrieval 품질 회귀, pgvector unavailable·metadata 불완전, 그리고 `ragas_not_evaluated`다. 인증이 가능한 평가 전용 OpenAI 키를 로컬에서 교체한 뒤에만 새 run ID로 재실행하며, 그 전까지 pgvector 우선 전환과 C-1 완료 처리는 하지 않는다.
+
+실행기는 Django를 직접 초기화하므로 `requirements-etl.txt`에 `Django==6.0.6`을 명시하고 회귀 테스트로 고정했다. `test/test_legal_rag_evaluation.py`, `test/test_legal_rag_evaluation_environment.py`, `test/test_legal_rag_service.py`의 관련 회귀 58개가 통과했다.

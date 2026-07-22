@@ -65,6 +65,14 @@ def test_evaluation_environment_example_matches_documented_pgvector_seed_space()
     assert "LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS=1024" in example
 
 
+def test_etl_requirements_include_django_for_evaluation_runner() -> None:
+    requirements = (Path(__file__).resolve().parents[1] / "requirements-etl.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Django==6.0.6" in requirements.splitlines()
+
+
 def test_sanitized_environment_result_never_contains_api_key_or_password(tmp_path: Path) -> None:
     path = tmp_path / ".env.rag-eval"
     path.write_text(
