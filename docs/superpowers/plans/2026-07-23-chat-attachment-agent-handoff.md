@@ -531,7 +531,7 @@ git commit -m "feat(#294): connect vision media sync adapter"
 - Produces: `AgentResult.raw_output` containing only source marker, execution ID/mode, redacted adapter context, structural plan step, and timestamp.
 - Preserves: `_node_execution_from_persisted_results` falls back to `_agent_result_handoff_record(result)` when the raw envelope intentionally excludes `agent_output`.
 
-- [ ] **Step 1: Write a failing regression test that persists a private Vision execution and rehydrates it.**
+- [x] **Step 1: Write a failing regression test that persists a private Vision execution and rehydrates it.**
 
 ```python
 def test_agent_result_raw_output_excludes_media_bytes_paths_and_agent_payload() -> None:
@@ -552,13 +552,13 @@ def test_agent_result_raw_output_excludes_media_bytes_paths_and_agent_payload() 
     assert "c2VjcmV0" not in repr(raw)
 ```
 
-- [ ] **Step 2: Run the privacy and queue tests to verify the old raw envelope fails.**
+- [x] **Step 2: Run the privacy and queue tests to verify the old raw envelope fails.**
 
 Run: `python -m pytest test/test_privacy_boundaries.py backend/chatbot/test_analysis_job_queue.py -q`
 
 Expected: FAIL because `_agent_result_raw_output` currently embeds the full `agent_output` and unfiltered context.
 
-- [ ] **Step 3: Replace the raw envelope with a structural persistence record.**
+- [x] **Step 3: Replace the raw envelope with a structural persistence record.**
 
 ```python
 def _agent_result_raw_output(execution: dict[str, Any], agent_output: dict[str, Any]) -> dict[str, Any]:
@@ -575,13 +575,13 @@ def _agent_result_raw_output(execution: dict[str, Any], agent_output: dict[str, 
 
 `_safe_adapter_context` must retain only `contract_version`, `execution_id`, `execution_mode`, `node_code`, and `plan_step_id`. `_safe_plan_step` must retain only `order`, `node_code`, `status`, `execution_mode`, `depends_on`, `required_inputs`, plus the non-content context keys `routing_intent`, `expected_node_codes`, `report_requested`, and `evidence_only`. Do not copy unknown keys. Update `_node_execution_from_persisted_results` to use `_agent_result_handoff_record(result)` whenever raw `agent_output` is absent, which preserves the existing AgentResult columns as the authoritative output.
 
-- [ ] **Step 4: Run the privacy and queue regression suite.**
+- [x] **Step 4: Run the privacy and queue regression suite.**
 
 Run: `python -m pytest test/test_privacy_boundaries.py backend/chatbot/test_analysis_job_queue.py test/test_report_query_service.py -q`
 
 Expected: PASS; query/replay paths still rebuild the execution envelope while persisted raw JSON has no content payload or private runtime detail.
 
-- [ ] **Step 5: Commit the persistence boundary.**
+- [x] **Step 5: Commit the persistence boundary.**
 
 ```bash
 git add backend/chatbot/repositories.py test/test_privacy_boundaries.py backend/chatbot/test_analysis_job_queue.py

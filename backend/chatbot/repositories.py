@@ -7112,7 +7112,8 @@ def _node_execution_from_persisted_results(
     executions = []
     for result in results:
         raw_output = _dict_or_empty(result.raw_output)
-        agent_output = _dict_or_empty(raw_output.get("agent_output")) or _agent_result_handoff_record(result)
+        raw_agent_output = _dict_or_empty(raw_output.get("agent_output"))
+        agent_output = raw_agent_output if raw_agent_output else _agent_result_handoff_record(result)
         executions.append(
             {
                 "execution_id": _text(raw_output.get("execution_id")) or result.result_id,
@@ -8256,15 +8257,60 @@ def _agent_result_raw_output(
     execution: dict[str, Any],
     agent_output: dict[str, Any],
 ) -> dict[str, Any]:
+    del agent_output
     return {
-        "source": "mock_node_execution",
-        "execution_id": execution.get("execution_id"),
-        "execution_mode": execution.get("execution_mode"),
-        "adapter_context": execution.get("adapter_context") or {},
-        "plan_step": execution.get("plan_step") or {},
-        "agent_output": agent_output,
-        "created_at": agent_output.get("created_at") or execution.get("created_at"),
+        "source": "agent_execution_metadata.v1",
+        "execution_id": _text(execution.get("execution_id")),
+        "execution_mode": _text(execution.get("execution_mode")),
+        "adapter_context": _safe_adapter_context(execution.get("adapter_context")),
+        "plan_step": _safe_plan_step(execution.get("plan_step")),
+        "created_at": _text(execution.get("created_at")),
     }
+
+
+def _safe_adapter_context(value: Any) -> dict[str, Any]:
+    context = _dict_or_empty(value)
+    node = _dict_or_empty(context.get("node"))
+    plan_step = _dict_or_empty(context.get("plan_step"))
+    return {
+        "contract_version": _text(
+            context.get("contract_version") or context.get("signature_version")
+        ),
+        "execution_id": _text(context.get("execution_id")),
+        "execution_mode": _text(context.get("execution_mode")),
+        "node_code": _text(context.get("node_code") or node.get("node_code")),
+        "plan_step_id": _text(
+            context.get("plan_step_id") or plan_step.get("step_id") or plan_step.get("id")
+        ),
+    }
+
+
+def _safe_plan_step(value: Any) -> dict[str, Any]:
+    step = _dict_or_empty(value)
+    context = _dict_or_empty(step.get("context"))
+    safe_context = {
+        "routing_intent": _text(context.get("routing_intent")),
+        "expected_node_codes": _safe_text_list(context.get("expected_node_codes")),
+        "report_requested": context.get("report_requested") is True,
+        "evidence_only": context.get("evidence_only") is True,
+    }
+    return {
+        "order": step.get("order"),
+        "node_code": _text(step.get("node_code")),
+        "status": _text(step.get("status")),
+        "execution_mode": _text(step.get("execution_mode")),
+        "depends_on": _safe_text_list(step.get("depends_on")),
+        "required_inputs": _safe_text_list(step.get("required_inputs")),
+        "context": safe_context,
+    }
+
+
+def _safe_text_list(value: Any) -> list[str]:
+    return [
+        _text(item)
+        for item in _list_or_empty(value)
+        if _text(item)
+    ]
 
 
 def _dict_or_empty(value: Any) -> dict[str, Any]:
