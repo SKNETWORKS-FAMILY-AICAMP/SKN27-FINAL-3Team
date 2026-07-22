@@ -45,6 +45,7 @@ from app.services.supervisor_reporting_handoff_service import (
     build_supervisor_reporting_handoff,
     sanitize_sensitive_text,
 )
+from chatbot.attachment_intake_policy import classify_attachment_intake
 from chatbot.models import (
     AgentInvocation,
     AgentInvocationStatus,
@@ -603,11 +604,33 @@ def register_uploaded_file(
     )
     registration_payload = dict(payload)
     registration_payload.pop("attachment_id", None)
+    intake = classify_attachment_intake(
+        content_type=(
+            getattr(upload_file, "content_type", None)
+            or registration_payload.get("content_type")
+            or ""
+        ),
+        filename=(
+            getattr(upload_file, "name", None)
+            or registration_payload.get("filename")
+            or registration_payload.get("original_filename")
+            or ""
+        ),
+        purpose=str(registration_payload.get("purpose") or "unknown"),
+    )
+    if not intake["accepted"]:
+        raise UploadValidationError(str(intake["error_code"]))
+    registration_payload["purpose"] = str(intake["routing_purpose"])
     attachment = register_mock_attachment(
         registration_payload,
         upload_file=upload_file,
         max_upload_bytes=int(getattr(settings, "FILE_UPLOAD_MAX_BYTES", 20 * 1024 * 1024)),
     )
+    attachment["intake"] = {
+        "file_type": intake["file_type"],
+        "routing_purpose": intake["routing_purpose"],
+        "purpose_conflict": intake["purpose_conflict"],
+    }
     return persist_uploaded_file_metadata(
         attachment,
         owner_id=owner_id,
@@ -5217,6 +5240,7 @@ def _metadata_snapshot(
         "filename": attachment.get("filename"),
         "mock_status": attachment.get("status"),
         "checks": attachment.get("checks") or {},
+        "intake": attachment.get("intake") or {},
         "limitations": attachment.get("limitations") or [],
         "raw_payload": _safe_payload(raw_payload or {}),
     }

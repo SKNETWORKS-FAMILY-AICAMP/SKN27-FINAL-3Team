@@ -46,7 +46,7 @@
 **Files:**
 - Create: `backend/chatbot/attachment_intake_policy.py`
 - Modify: `backend/chatbot/repositories.py:585-618`
-- Test: `backend/chatbot/test_file_retention.py`
+- Test: `test/test_attachment_intake_policy.py`
 - Test: `test/test_attachment_mock_service.py`
 
 **Interfaces:**
@@ -54,7 +54,7 @@
 - Produces: `classify_attachment_intake(content_type: str, filename: str, purpose: str) -> dict[str, str | bool]`.
 - Stable failure codes: `unsupported_media_type`, `purpose_media_mismatch`.
 
-- [ ] **Step 1: Write failing policy tests for accepted video and rejected MIME/purpose combinations.**
+- [x] **Step 1: Write failing policy tests for accepted video and rejected MIME/purpose combinations.**
 
 ```python
 from chatbot.attachment_intake_policy import classify_attachment_intake
@@ -98,13 +98,13 @@ def test_executable_mime_is_not_an_attachment_analysis_input() -> None:
     assert decision["error_code"] == "unsupported_media_type"
 ```
 
-- [ ] **Step 2: Run the focused tests to verify the new module is absent.**
+- [x] **Step 2: Run the focused tests to verify the new module is absent.**
 
 Run: `python -m pytest backend/chatbot/test_file_retention.py test/test_attachment_mock_service.py -q`
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'chatbot.attachment_intake_policy'` after the new import is added to the tests.
 
-- [ ] **Step 3: Implement one MIME allowlist and normalize only the routing purpose.**
+- [x] **Step 3: Implement one MIME allowlist and normalize only the routing purpose.**
 
 ```python
 # backend/chatbot/attachment_intake_policy.py
@@ -163,16 +163,20 @@ def classify_attachment_intake(*, content_type: str, filename: str, purpose: str
 
 In `register_uploaded_file`, call the classifier before `register_mock_attachment`, raise `UploadValidationError(str(decision["error_code"]))` on rejection, and pass `routing_purpose` into `registration_payload["purpose"]`. Persist only `file_type`, `routing_purpose`, and `purpose_conflict` under existing safe metadata; do not persist the filename-derived decision rationale.
 
-- [ ] **Step 4: Run the focused tests and the canonical upload API contract.**
+- [x] **Step 4: Run the focused tests and the canonical upload API contract.**
 
-Run: `python -m pytest backend/chatbot/test_file_retention.py test/test_attachment_mock_service.py backend/chatbot/test_consultation_v2.py -q`
+Run: `python -m pytest test/test_attachment_intake_policy.py test/test_attachment_mock_service.py -q`
 
-Expected: PASS; `video/mp4` is accepted as `blackbox_video`, while executable MIME and video/document-purpose mismatch produce only the stable validation code.
+Expected: PASS; `video/mp4` is accepted as `blackbox_video`, legacy `supporting_evidence` is normalized to `evidence`, and executable MIME/video-purpose mismatch produce only stable validation codes.
 
-- [ ] **Step 5: Commit the intake boundary.**
+Run: `& 'D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe' backend/manage.py test chatbot.test_consultation_v2 -v 1`
+
+Expected: PASS; canonical upload preserves existing session/case ownership responses after intake normalization.
+
+- [x] **Step 5: Commit the intake boundary.**
 
 ```bash
-git add backend/chatbot/attachment_intake_policy.py backend/chatbot/repositories.py backend/chatbot/test_file_retention.py test/test_attachment_mock_service.py
+git add backend/chatbot/attachment_intake_policy.py backend/chatbot/repositories.py test/test_attachment_intake_policy.py test/test_attachment_mock_service.py docs/superpowers/plans/2026-07-23-chat-attachment-agent-handoff.md
 git commit -m "feat(#294): validate attachment intake routing"
 ```
 
