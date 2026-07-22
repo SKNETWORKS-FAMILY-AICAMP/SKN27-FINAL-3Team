@@ -22,6 +22,21 @@ Date: 2026-07-22
 | active runtime/config reference scan | 0 references to Elasticsearch, OpenSearch, BM25, Nori, or lexical fallback |
 | changed-file whitespace validation | `git diff --check` passed |
 
+## Post-PR CI contract correction
+
+The initial Python 3.13 CI run found four stale deployment-contract assertions
+that still required the removed search service, its client package, and its
+Terraform resource. The production environment template and current `docs/ops`
+runbooks now require pgvector-only readiness instead. The corrected deployment
+and hardening contract suite passed `22 passed in 4.24s` locally.
+
+The local workspace uses Python 3.14, while the production gate uses Python
+3.13 with `requirements-dev.txt`. The latter declares `pyarrow` for the
+offline fault-RAG collection tests; its 3.13 wheel is not available in the
+local Python 3.14 environment. The final full-suite verdict must therefore be
+taken from the GitHub Actions Python 3.13 production gate after this correction
+is pushed.
+
 The legacy ES-only seed-loader tests were removed rather than retained as skipped tests. The
 pgvector readiness test covers the legal, review-case, and fault-ratio domains and requires their
 embedding/HNSW checks to be ready.

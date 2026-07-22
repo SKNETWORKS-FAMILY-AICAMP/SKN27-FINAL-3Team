@@ -21,19 +21,20 @@ def test_pytest_defaults_are_offline_and_live_tests_are_opt_in() -> None:
     assert "--run-aws" in conftest
 
 
-def test_manual_optional_input_runner_is_not_collected_as_a_test() -> None:
+def test_legacy_optional_input_runner_is_removed_with_the_es_path() -> None:
     old_path = ROOT / "etl/fault_cases/src/review_case/search/schema_search/run_full_optional_input_test.py"
     new_path = ROOT / "etl/fault_cases/src/review_case/search/schema_search/run_full_optional_input_check.py"
 
     assert not old_path.exists()
-    assert new_path.exists()
+    assert not new_path.exists()
 
 
-def test_runtime_dependencies_cover_production_server_auth_and_opensearch() -> None:
+def test_runtime_dependencies_cover_production_server_auth_without_opensearch() -> None:
     requirements = read("requirements.txt").lower()
 
-    for package in ("gunicorn", "pyjwt", "pydantic", "opensearch-py"):
+    for package in ("gunicorn", "pyjwt", "pydantic"):
         assert package in requirements
+    assert "opensearch-py" not in requirements
 
 
 def test_docker_image_contains_all_runtime_code_and_uses_gunicorn() -> None:
@@ -107,7 +108,6 @@ def test_terraform_defines_the_approved_aws_managed_topology() -> None:
         "aws_ecs_service",
         "aws_db_instance",
         "aws_elasticache_replication_group",
-        "aws_opensearch_domain",
         "aws_s3_bucket",
         "aws_secretsmanager_secret",
         "aws_wafv2_web_acl",
@@ -115,7 +115,8 @@ def test_terraform_defines_the_approved_aws_managed_topology() -> None:
     ]
     for resource in required_resources:
         assert f'resource "{resource}"' in terraform
-    assert 'engine_version = "OpenSearch_3.5"' in terraform
+    assert 'resource "aws_opensearch_domain"' not in terraform
+    assert "OpenSearch_3.5" not in terraform
     assert "multi_az" in terraform.lower()
 
 

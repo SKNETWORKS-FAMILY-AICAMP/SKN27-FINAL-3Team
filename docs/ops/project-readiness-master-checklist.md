@@ -94,8 +94,8 @@
 - [x] RAG, pgvector, Neo4j 기반 검색 구조
 - [x] 검색 결과 부족 시 partial/failed 처리 기반
 - [x] 선택된 RAG 도메인의 런타임 예외를 개별 `failed` 결과로 격리하고, 정상 도메인 결과는 `partial`로 유지하는 회귀 테스트 — PR #275
-- [?] Elasticsearch의 역할과 pgvector/Neo4j/Elasticsearch 선택 조건 문서화
-- [x] 법령 RAG의 PostgreSQL lexical ↔ pgvector 전환 기준, 임베딩·조문 chunk A/B, RAGAS 품질 평가 — #280, #282, #285, #289 (`legal-ab-018-pgvector-gates-20260722` Python 3.13 실제 A/B·RAGAS 완료: 두 backend 20/20, pgvector no-result 0.00·전체 p95 589 ms, RAGAS 20/20 aggregate와 4개 metric 생성, failed gate 없음, `eligible=true`; `017`은 summary 없는 부분 산출물로 전환 근거에서 제외; 법령만, 판례·심의사례·과실기준 제외)
+- [x] pgvector-only RAG 운영 경계와 Neo4j 선택 조건 문서화 — #291
+- [x] 법령 RAG pgvector 전환 기준, 임베딩·조문 chunk 품질 평가와 RAGAS 증적 정리 — #280, #282, #285, #289, #291
   - 전체 A/B 수치, phase·RAGAS latency, 실행환경, 자동화 테스트 증적: `docs/tech-validation-reports/legal-rag/2026-07-22-legal-rag-ab-execution-report.md`의 `legal-ab-018-pgvector-gates-20260722` 섹션
 - [ ] 대표 사고 시나리오별 검색 정확도 평가 세트
 - [ ] 검색 결과의 근거 출처·검색 시점·한계 표시
