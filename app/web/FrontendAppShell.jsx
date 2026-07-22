@@ -141,7 +141,6 @@ export default function FrontendAppShell({
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isMockDataMode, setIsMockDataMode] = useState(false);
   const authRefreshContextRef = useRef({ guestId, guestCredential, sessionId });
   authRefreshContextRef.current = { guestId, guestCredential, sessionId };
 
@@ -382,142 +381,6 @@ export default function FrontendAppShell({
       source,
       userId: nextUserId,
     };
-  }
-
-  // Local dev only: this changes screen state without creating an app token, guest ID, or
-  // guest credential. It therefore cannot make a protected API request appear authenticated.
-  function previewLoggedInUi() {
-    const previewSessionId = sessionId || `ses_preview_${Date.now()}`;
-    setSessionId(previewSessionId);
-    setAuthSessionId(`auth_preview_${Date.now()}`);
-  }
-
-  // Dev-only: fills every screen's state with realistic fixture data so
-  // UI/UX work can be checked without depending on a working backend,
-  // agent worker, or seeded RAG data. Purely local state, no API calls.
-  function fillAllScreensWithMockData() {
-    const now = new Date().toISOString();
-    const previewSessionId = sessionId || `ses_mock_${Date.now()}`;
-    const previewGuestId = guestId || `gst_mock_${Date.now()}`;
-    setSessionId(previewSessionId);
-    setGuestId(previewGuestId);
-    setAuthSessionId(authSessionId || `auth_mock_${Date.now()}`);
-
-    const mockUserText = "어제 오후 3시에 교차로에서 좌회전하다가 직진 차량이랑 부딪혔어요.";
-    setSubmittedQuestion(mockUserText);
-    setChatMessages([
-      { role: "user", content: mockUserText },
-      {
-        role: "assistant",
-        content:
-          "말씀해주신 내용을 정리했습니다. 좌회전 차량과 직진 차량의 신호 상태에 따라 과실비율이 크게 달라질 수 있어요. 아래 항목을 확인해 주시면 더 정확하게 분석해드릴게요.",
-        status: "partial",
-        pending_questions: [],
-      },
-    ]);
-
-    const mockReportingPayload = {
-      contract_version: "reporting_payload.v1",
-      report_type: "fault_ratio_analysis",
-      stage: "success",
-      title: "교차로 좌회전 사고 리포트",
-      summary: "좌회전 차량과 직진 차량의 진입 순서, 신호 상태를 기준으로 과실비율 쟁점을 정리했습니다.",
-      sections: [
-        { title: "사고 개요", content: "교차로에서 좌회전 중 직진 차량과 충돌한 사건입니다." },
-        { title: "판단 근거", content: "도로교통법 제25조(교차로 통행방법) 등 관련 조문을 검토했습니다." },
-        { title: "후속 조치 가이드라인", content: "블랙박스 영상, 신호 주기 확인 자료를 준비해 주세요." },
-      ],
-    };
-
-    setAnalysisResponse({
-      assistant_message: { answer: "말씀해주신 내용을 정리했습니다. 좌회전과 직진 차량의 신호 상태 확인이 필요합니다." },
-      cards: [
-        {
-          card_type: "사고 분석",
-          title: "교차로 좌회전 vs 직진 충돌",
-          status: "partial",
-          summary: "신호 상태와 진입 순서 확인이 필요합니다.",
-        },
-      ],
-      supervisor_state: {
-        contract_version: "supervisor_conversation.v1",
-        stage: "need_more_input",
-        conversation_summary: "교차로 좌회전 중 직진 차량과 충돌",
-        collected_facts: [
-          { field: "발생 시간", value: "어제 오후 3시" },
-          { field: "사고 유형", value: "교차로 좌회전 충돌" },
-        ],
-        missing_fields: [{ field: "signal_priority" }, { field: "collision_location" }],
-        next_questions: [
-          {
-            field: "signal_priority",
-            question: "사고 당시 신호는 어느 쪽에 유리했나요? (직진 신호 / 좌회전 신호 / 비보호)",
-          },
-          { field: "collision_location", question: "충돌 지점이 교차로 진입 전인지, 교차로 안쪽인지 알려주세요." },
-        ],
-      },
-      reporting_payload: mockReportingPayload,
-      supervisor_execution: {
-        node_results: [
-          {
-            node_code: "text_ml_case_search",
-            structured_result: {
-              ratio_range_label: "60:40 ~ 70:30",
-              similar_cases: [
-                { case_id: "case_001", summary: "교차로 좌회전 vs 직진 충돌, 비보호 좌회전", ratio: "70:30" },
-              ],
-              recommended_evidence: ["블랙박스 영상", "신호 주기표"],
-            },
-            limitations: [],
-          },
-          {
-            node_code: "law_ground_search",
-            structured_result: {
-              matched_laws: [{ title: "도로교통법 제25조", summary: "교차로 통행방법" }],
-              retrieval: { status: "ready", attempted_backends: ["neo4j"] },
-            },
-            limitations: [],
-          },
-        ],
-      },
-    });
-
-    setMypageSummary({
-      active_cases: 2,
-      saved_reports: 1,
-      recent_analysis_count: 3,
-      cases: [
-        { case_id: "case_mock_1", type: "과실비율", title: "교차로 좌회전 사고", case_status: "진행 중", updated_at: now },
-        { case_id: "case_mock_2", type: "과태료", title: "주정차 위반 이의신청", case_status: "저장 완료", updated_at: now },
-      ],
-    });
-
-    setHistoryEvents({
-      events: [
-        { event_id: "evt_1", event_type: "상담", summary: "교차로 좌회전 사고 상담을 시작했습니다.", created_at: now },
-        { event_id: "evt_2", event_type: "리포트", summary: "과실비율 리포트를 저장했습니다.", created_at: now },
-        { event_id: "evt_3", event_type: "과태료", summary: "주정차 위반 이의신청서를 생성했습니다.", created_at: now },
-      ],
-    });
-
-    setReportList([{ case_id: "case_mock_2", title: "주정차 위반 이의신청", updated_at: now, report_count: 1 }]);
-
-    setCurrentReport({
-      status: "success",
-      title: "교차로 좌회전 사고 리포트",
-      summary: mockReportingPayload.summary,
-      report_type: "fault_ratio_analysis",
-      content: { reporting_payload: mockReportingPayload },
-      persistence: { status: "success" },
-      metadata: { case_id: "case_mock_1", title: "교차로 좌회전 사고 리포트", updated_at: now, report_count: 1 },
-    });
-
-    setRegisteredAttachments([
-      { attachment_id: "att_1", purpose: "supporting_evidence", type: "image/jpeg", storage_uri: "mock://evidence.jpg" },
-    ]);
-
-    setIsMockDataMode(true);
-    setActiveRoute("chatbot");
   }
 
   async function logoutAndResetSession() {
@@ -1313,16 +1176,6 @@ export default function FrontendAppShell({
       />
       <div className="app-shell__body">
       <div className="top-float-actions" aria-label="주요 메뉴">
-        {import.meta.env.DEV && (
-          <button
-            className="button ghost small"
-            type="button"
-            onClick={fillAllScreensWithMockData}
-            title="로컬 개발 전용: 백엔드 호출 없이 모든 화면을 더미 데이터로 채움"
-          >
-            전체 화면 더미로 채우기
-          </button>
-        )}
         {authSessionId ? (
           <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
             로그아웃
@@ -1394,7 +1247,6 @@ export default function FrontendAppShell({
               isSubmitting={isSubmitting}
               isSavingConversation={isSavingConversation}
               onKeepTemporary={keepConversationTemporary}
-              onPreviewLoggedInUi={previewLoggedInUi}
               onRegisterAttachment={registerAttachmentMetadata}
               onOpenReporting={() => setActiveRoute("reporting")}
               onConfirmReportDocument={confirmCurrentReportDocument}
@@ -1402,7 +1254,6 @@ export default function FrontendAppShell({
               onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
               pendingAuthAction={pendingAuthAction}
-              showPreviewLoggedInUi={Boolean(import.meta.env.DEV)}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
@@ -2105,7 +1956,6 @@ function ChatScreenV2({
   onKeepTemporary,
   onRegisterAttachment,
   onOpenReporting,
-  onPreviewLoggedInUi,
   onConfirmReportDocument,
   onRunReportAction,
   onSaveConversation,
@@ -2121,7 +1971,6 @@ function ChatScreenV2({
   setAttachmentPurpose,
   setQuestion,
   setSelectedUploadFile,
-  showPreviewLoggedInUi,
   submittedQuestion,
   supervisorExecution,
   supervisorState,
@@ -2170,16 +2019,6 @@ function ChatScreenV2({
           <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
             {isSavingConversation ? "연결 중" : "Google 로그인 후 저장"}
           </button>
-          {showPreviewLoggedInUi && (
-            <button
-              className="button"
-              type="button"
-              onClick={onPreviewLoggedInUi}
-              title="로컬 개발 전용: 백엔드 호출 없이 화면만 로그인 상태로 바꿈"
-            >
-              UI 미리보기 (로그인 상태로 보기)
-            </button>
-          )}
         </div>
       </div>
 
