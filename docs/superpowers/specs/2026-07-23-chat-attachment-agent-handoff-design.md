@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | Vision 실행 | `ai/vision/run_to_supervisor.py`는 CLI/파일 산출물 중심이며 Worker adapter가 없다. | 서비스 호출용 wrapper와 안정된 결과 envelope를 만든다. |
 | Mock 경로 | `vision_media_analysis`가 `DL_MOCK_NODE_CODES`에 있어 항상 mock 실행된다. | 실제 adapter 등록 후 해당 노드의 mock 강제를 제거한다. |
-| 라우팅 | `supervisor_routing_policy.v1.json`에 사고 정밀 분석 계획이 없다. | 영상 및 사고 맥락용 `vision → text_ml_case_search → law_ground_search` 계획을 추가한다. |
+| 라우팅 | `supervisor_routing_policy.v1.json`에 사고 정밀 분석 계획이 없다. | scan-ready 영상만 `accident_evidence_analysis` 전용 intent로 라우팅하고, `vision_media_analysis → text_ml_case_search → law_ground_search → agent_result_validation → final_response_merge` 계획을 추가한다. 기존 `accident_initial_consultation`의 사실확인·사건 승격 보류 흐름은 유지한다. |
 | 프론트 | 파일 선택만 가능하고 `accept`에 영상과 DnD handler가 없다. | 채팅 입력 영역 DnD, 영상 MIME 허용, 업로드 상태를 추가한다. |
 | 동시 실행 | Vision 산출물 경로가 파일명과 공용 디렉터리에 의존한다. | `job_id`와 `execution_id`별 작업 경로를 사용한다. |
 | 개인정보·운영 로그 | `AgentResult.raw_output`에 전체 실행 결과가 저장될 수 있다. | 저장 전 원본·OCR 원문·경로·예외 원문을 제거한다. |
@@ -39,6 +39,8 @@
 
 3. **분류와 Supervisor 계획**
    - 영상(`video/*`, `blackbox_video`)은 실제 Vision adapter를 우선 호출한다.
+   - scan-ready 영상은 일반 `accident_initial_consultation`과 분리한 `accident_evidence_analysis` intent로만 계획을 생성한다. 이 계획은 `input_context_validation → vision_media_analysis → text_ml_case_search → law_ground_search → agent_result_validation → final_response_merge` 순서이며, 결과 상태는 항상 증거 분석의 `partial`이다.
+   - `accident_evidence_analysis`는 영상에서 식별한 사실·검색 근거만 제공한다. 과실비율, 법적 책임, 최종 사고유형, 이의신청·보고서 생성은 이 경로에서 결정하거나 실행하지 않는다. 텍스트·이미지 기반의 기존 초동상담은 사실 확인과 사건 승격 보류 절차를 계속 따른다.
    - 이미지와 PDF는 기존 `fine_notice_analysis` OCR로 고지서 여부와 과태료/범칙금을 확인한다.
    - 고지서 OCR이 성공하면 핵심 필드 사용자 확인 전에는 이의신청·법령 후속 단계를 실행하지 않는다.
    - 고지서가 아니고 사고 맥락이 확인되면 `text_ml_case_search`와 `law_ground_search`로 보낸다.
@@ -61,8 +63,9 @@ Drag & Drop / 파일 선택
   → 업로드
   → 파일 검사 완료 여부 확인
   → AnalysisJob / AgentWorkItem
-      ├─ 영상: Vision 실제 adapter
-      │        → 과실 사례 검색 → 법령 검색 → 결과 검증
+      ├─ 영상: `accident_evidence_analysis`
+      │        → Vision 실제 adapter → text_ml_case_search → law_ground_search
+      │        → agent_result_validation → final_response_merge (항상 partial, 보고서·과실판정 없음)
       └─ 이미지·PDF: 고지서 OCR
                ├─ 고지서: OCR 핵심 필드 확인 대기 → 법령/이의신청
                ├─ 사고 맥락: 과실 사례 검색 → 법령 검색
@@ -87,7 +90,7 @@ Drag & Drop / 파일 선택
 ## 검증 기준
 
 1. DnD와 파일 선택 모두 이미지, PDF, MP4를 업로드하며 검사 전 자료는 실행 payload에 없다.
-2. MP4가 mock이 아닌 실제 `vision_media_analysis` adapter를 호출하고 결과가 과실 사례·법령 검색의 upstream 결과가 된다.
+2. MP4가 mock이 아닌 실제 `vision_media_analysis` adapter를 호출하고, `accident_evidence_analysis`의 고정된 증거 분석 계획을 따라 검색 근거의 upstream 결과가 남는다. 이 응답에는 과실비율, 법적 결론, 보고서 생성 결과가 없다.
 3. 체크포인트, 의존성, 해독 실패가 각각 안정된 실패 코드와 안전한 trace로 남는다.
 4. 이미지·PDF 고지서는 기존 OCR이 분류하며 핵심 필드 확인 전에는 이의신청 흐름을 진행하지 않는다.
 5. 목적과 MIME/OCR 결과가 불일치하거나 불명확하면 추가 질문으로 종료한다.
@@ -97,6 +100,7 @@ Drag & Drop / 파일 선택
 ## 완료 조건
 
 - `vision_media_analysis`가 `mock`이 아닌 실제 adapter로 실행된다.
+- scan-ready 영상은 `accident_evidence_analysis`의 증거 분석 계획으로만 실행되고 `partial` 결과를 반환한다. 기존 초동상담의 사실확인·사건 승격 보류 경로는 변경하지 않는다.
 - 영상 성공, Vision 실행 불가, 고지서 OCR, 사고 자료, 목적 불일치, 검사 차단의 대표 흐름이 검증된다.
 - 사용자 응답과 DB 저장 결과에 내부 경로·개인정보·비밀값이 노출되지 않는다.
 - Vision 담당 변경사항과 #294 adapter 변경사항이 별도 요구사항 문서로 추적된다.
