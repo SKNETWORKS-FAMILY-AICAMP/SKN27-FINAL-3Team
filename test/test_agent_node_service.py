@@ -599,6 +599,60 @@ def test_execute_sync_fine_notice_adapter_returns_supervisor_envelope_without_im
     assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
 
 
+def test_fine_notice_adapter_requires_confirmation_and_rejects_conflicting_type(monkeypatch):
+    import importlib
+
+    fine_notice_graph_module = importlib.import_module("ai.agents.fine_notice_analysis.graph")
+
+    monkeypatch.setattr(
+        fine_notice_graph_module.graph,
+        "invoke",
+        lambda _state: {
+            "agent_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "summary": "OCR completed",
+                    "structured_result": {
+                        "fine_type": "범칙금",
+                        "notice_stage": "사전통지",
+                        "requires_confirmation": True,
+                        "unconfirmed_fields": ["fine_type", "notice_stage"],
+                    },
+                    "evidence": [],
+                    "next_actions": [],
+                    "limitations": [],
+                }
+            }
+        },
+    )
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "fine_notice_analysis",
+            "analysis_plan_id": "plan_ocr_conflict",
+            "job_id": "job_ocr_conflict",
+            "session_id": "ses_ocr_conflict",
+            "message_id": "msg_ocr_conflict",
+            "user_text": "OCR confirmed follow-up",
+            "context": {
+                "ocr_confirmation": {
+                    "confirmed": True,
+                    "fields": {"fine_type": "과태료", "notice_stage": "사전통지"},
+                }
+            },
+        }
+    )
+
+    output = execution["agent_output"]
+    structured = output["structured_result"]
+
+    assert output["status"] == "partial"
+    assert structured["error_code"] == "purpose_result_conflict"
+    assert structured["requires_confirmation"] is True
+    assert structured.get("confirmation_source") is None
+
+
 def test_execute_sync_fine_notice_adapter_reads_canonical_object_attachment(monkeypatch):
     captured_references = []
 

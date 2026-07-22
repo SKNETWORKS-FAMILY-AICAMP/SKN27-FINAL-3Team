@@ -17,6 +17,24 @@ class ChatSessionCreateRequest(ChatContractRequest):
     """Draft session issuance accepts no client-owned identity field."""
 
 
+class OcrConfirmationFields(ChatContractRequest):
+    """Editable fine-notice OCR values accepted from the confirmation card."""
+
+    fine_type: str | None = Field(default=None, max_length=120)
+    notice_stage: str | None = Field(default=None, max_length=120)
+    law_code: str | None = Field(default=None, max_length=120)
+    violation_text: str | None = Field(default=None, max_length=1000)
+    opinion_deadline: str | None = Field(default=None, max_length=120)
+    issuing_authority: str | None = Field(default=None, max_length=240)
+
+
+class OcrConfirmationRequest(ChatContractRequest):
+    """One-time explicit confirmation used to unlock fine-notice follow-up."""
+
+    confirmed: bool = False
+    fields: OcrConfirmationFields = Field(default_factory=OcrConfirmationFields)
+
+
 class ChatMessageRequest(ChatContractRequest):
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
     user_text: str | None = Field(default=None, min_length=1)
@@ -26,6 +44,7 @@ class ChatMessageRequest(ChatContractRequest):
     execution_mode: str | None = Field(default=None, min_length=1, max_length=64)
     routing_intent: str | None = Field(default=None, min_length=1, max_length=120)
     case_storage_consent: bool | None = None
+    ocr_confirmation: OcrConfirmationRequest | None = None
 
 
 class ChatSaveStateRequest(ChatContractRequest):

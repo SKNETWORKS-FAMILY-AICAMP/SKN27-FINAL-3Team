@@ -100,6 +100,16 @@ def test_frontend_attachment_intake_supports_drag_drop_and_video() -> None:
     assert "handleAttachmentDragOver" in shell
 
 
+def test_frontend_renders_editable_ocr_confirmation_before_follow_up() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    assert "ocr_confirmation" in shell
+    assert "requires_confirmation" in shell
+    assert "OCR 추출값 확인 후 후속 절차 진행" in shell
+    assert "fine_type" in shell
+    assert "notice_stage" in shell
+
+
 def test_vite_proxy_does_not_capture_frontend_api_client_module() -> None:
     config = read_text(ROOT / "app" / "web" / "vite.config.js")
 

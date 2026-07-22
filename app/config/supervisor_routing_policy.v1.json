@@ -57,8 +57,6 @@
     "fine_notice_analysis": [
       "input_context_validation",
       "fine_notice_analysis",
-      "law_ground_search",
-      "appeal_decision_flow",
       "agent_result_validation",
       "final_response_merge"
     ],

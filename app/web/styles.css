@@ -2850,6 +2850,51 @@ button.report-list-card.active {
   font-size: 12px;
 }
 
+.ocr-confirmation-card {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid var(--brand-soft-border);
+  border-radius: 14px;
+  background: var(--soft);
+}
+
+.ocr-confirmation-card strong,
+.ocr-confirmation-card p {
+  display: block;
+  margin: 0;
+}
+
+.ocr-confirmation-card p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ocr-confirmation-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ocr-confirmation-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ocr-confirmation-fields input {
+  width: 100%;
+}
+
+@media (max-width: 720px) {
+  .ocr-confirmation-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 .attachment-tools label {
   display: flex;
   align-items: center;

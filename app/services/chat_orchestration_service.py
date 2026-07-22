@@ -18,6 +18,7 @@ from app.services.supervisor_control_service import (
     reduce_consultation_fact_state,
 )
 from app.services.supervisor_llm_service import build_supervisor_state_with_optional_llm
+from app.services.supervisor_execution_input_service import canonical_attachment_selectors
 from app.services.supervisor_routing_service import (
     BASE_NODE_PLANS,
     PUBLIC_AGENT_NODE_CODES,
@@ -47,6 +48,17 @@ _LOCATION_KEYWORDS = (
     "교차로", "사거리", "골목", "주차장", "학교", "근처", "구간", "앞", "도로변", "인근",
 )
 _NOTICE_KEYWORDS = ("고지서", "통지서", "위반고지", "과태료", "범칙금", "딱지", "통지")
+OCR_CONFIRMATION_FIELDS = frozenset(
+    {
+        "fine_type",
+        "notice_stage",
+        "law_code",
+        "violation_text",
+        "opinion_deadline",
+        "issuing_authority",
+    }
+)
+OCR_CONFIRMATION_REQUIRED_FIELDS = frozenset({"fine_type", "notice_stage"})
 
 
 def _has_datetime_or_location(user_text: str) -> bool:
@@ -54,6 +66,29 @@ def _has_datetime_or_location(user_text: str) -> bool:
         return True
     return any(
         keyword in user_text for keyword in _RELATIVE_DATE_KEYWORDS + _LOCATION_KEYWORDS
+    )
+
+
+def _normalized_ocr_confirmation(value: Any) -> dict[str, Any]:
+    """Return the narrow user-confirmed OCR payload allowed into planning."""
+
+    raw = value if isinstance(value, dict) else {}
+    raw_fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else {}
+    fields = {
+        key: str(raw_fields[key]).strip()
+        for key in OCR_CONFIRMATION_FIELDS
+        if str(raw_fields.get(key) or "").strip()
+    }
+    return {
+        "confirmed": raw.get("confirmed") is True,
+        "fields": fields,
+    }
+
+
+def _has_valid_ocr_confirmation(value: dict[str, Any]) -> bool:
+    return bool(
+        value.get("confirmed") is True
+        and OCR_CONFIRMATION_REQUIRED_FIELDS.issubset(set(value.get("fields") or {}))
     )
 
 
@@ -121,10 +156,14 @@ def submit_message(
     )
     if scope_guidance is not None:
         return scope_guidance
+    ocr_confirmation = _normalized_ocr_confirmation(payload.get("ocr_confirmation"))
+    ocr_follow_up_allowed = _has_valid_ocr_confirmation(ocr_confirmation)
     report_requested = (
         report_generation_requested(user_text)
         and routing_intent != "accident_evidence_analysis"
     )
+    if routing_intent == "fine_notice_analysis" and not ocr_follow_up_allowed:
+        report_requested = False
     if routing_intent == "accident_initial_consultation":
         accident_supervisor_state = build_supervisor_state_with_optional_llm(
             payload={**payload, "user_text": user_text, "attachments": attachments},
@@ -206,9 +245,21 @@ def submit_message(
         )
 
     supervisor_state = build_supervisor_state_with_optional_llm(
-        payload={**payload, "user_text": user_text, "attachments": attachments},
+        payload={
+            **payload,
+            "user_text": user_text,
+            "attachments": attachments,
+            "ocr_confirmation": ocr_confirmation,
+        },
         scenario=routing_intent,
         fallback_builder=_fallback_supervisor_state,
+    )
+    supervisor_state = _apply_ocr_confirmation_to_supervisor_state(
+        supervisor_state,
+        routing_intent=routing_intent,
+        user_text=user_text,
+        attachments=attachments,
+        ocr_confirmation=ocr_confirmation,
     )
     if (supervisor_state.get("llm") or {}).get("status") == "failed":
         return _supervisor_unavailable_response(
@@ -252,6 +303,7 @@ def submit_message(
         routing_intent=routing_intent,
         supervisor_state=supervisor_state,
         report_requested=report_requested,
+        ocr_confirmation=ocr_confirmation,
     )
 
     response = {
@@ -676,9 +728,64 @@ def _case_evidence_questions(case_evidence: dict[str, Any]) -> list[dict[str, An
     return questions
 
 
+def _apply_ocr_confirmation_to_supervisor_state(
+    supervisor_state: dict[str, Any],
+    *,
+    routing_intent: str,
+    user_text: str,
+    attachments: list[dict[str, Any]],
+    ocr_confirmation: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep fine-notice follow-up packages server-gated by user confirmation."""
+
+    if routing_intent != "fine_notice_analysis":
+        return supervisor_state
+
+    state = dict(supervisor_state)
+    packages = [
+        dict(package)
+        for package in state.get("agent_input_packages") or []
+        if isinstance(package, dict)
+        and package.get("node_code") not in {"law_ground_search", "appeal_decision_flow"}
+    ]
+    if not _has_valid_ocr_confirmation(ocr_confirmation):
+        state["agent_input_packages"] = packages
+        state["reporting_payload"] = None
+        return state
+
+    slot_state = state.get("slot_state") if isinstance(state.get("slot_state"), dict) else {}
+    attachment_selectors = [
+        {"attachment_id": str(attachment.get("attachment_id"))}
+        for attachment in attachments
+        if str(attachment.get("attachment_id") or "").strip()
+    ]
+    existing_codes = {str(package.get("node_code") or "") for package in packages}
+    for node_code in ("law_ground_search", "appeal_decision_flow"):
+        if node_code in existing_codes:
+            continue
+        packages.append(
+            {
+                "schema_version": "agent_input_schema.v1",
+                "node_code": node_code,
+                "status": "ready",
+                "required_inputs": ["user_text|attachments"],
+                "payload": {
+                    "user_text": user_text,
+                    "attachments": attachment_selectors,
+                    "slot_state": slot_state,
+                },
+            }
+        )
+    state["agent_input_packages"] = packages
+    return state
+
+
 def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> dict[str, Any]:
     user_text = str(payload.get("user_text") or "").strip()
-    report_requested = report_generation_requested(user_text)
+    ocr_confirmation = _normalized_ocr_confirmation(payload.get("ocr_confirmation"))
+    report_requested = report_generation_requested(user_text) and (
+        routing_intent != "fine_notice_analysis" or _has_valid_ocr_confirmation(ocr_confirmation)
+    )
     node_codes = plan_node_codes(routing_intent, report_requested=report_requested)
     public_node_codes = [code for code in node_codes if code in PUBLIC_AGENT_NODE_CODES]
     slot_state = {
@@ -713,7 +820,7 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
                 "required_inputs": ["user_text|attachments"],
                 "payload": {
                     "user_text": user_text,
-                    "attachments": payload.get("attachments", []),
+                    "attachments": canonical_attachment_selectors(payload.get("attachments", [])),
                     "slot_state": slot_state,
                 },
             }
@@ -786,14 +893,24 @@ def _analysis_plan(
     routing_intent: str,
     supervisor_state: dict[str, Any],
     report_requested: bool,
+    ocr_confirmation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    node_codes = plan_node_codes(routing_intent, report_requested=report_requested)
+    normalized_confirmation = _normalized_ocr_confirmation(ocr_confirmation)
+    node_codes = list(plan_node_codes(routing_intent, report_requested=report_requested))
+    if routing_intent == "fine_notice_analysis" and _has_valid_ocr_confirmation(normalized_confirmation):
+        validation_index = node_codes.index("agent_result_validation")
+        node_codes[validation_index:validation_index] = [
+            "law_ground_search",
+            "appeal_decision_flow",
+        ]
     expected_node_codes = [code for code in node_codes if code in PUBLIC_AGENT_NODE_CODES]
     evidence_only = routing_intent == "accident_evidence_analysis"
     steps = []
     previous_node: str | None = None
     for order, node_code in enumerate(node_codes, start=1):
         context: dict[str, Any] = {"routing_intent": routing_intent}
+        if routing_intent == "fine_notice_analysis":
+            context["ocr_confirmation"] = normalized_confirmation
         if node_code == "agent_result_validation":
             context.update(
                 {

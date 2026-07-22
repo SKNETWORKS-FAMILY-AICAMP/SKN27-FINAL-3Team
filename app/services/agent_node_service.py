@@ -49,6 +49,17 @@ TRAFFIC_ACCIDENT_CONFIRMATION_ATTACHMENT_PURPOSE = "traffic_accident_confirmatio
 TRAFFIC_ACCIDENT_CONFIRMATION_REQUIRED_ATTACHMENT = (
     "attachments[purpose=traffic_accident_confirmation, scan_ready]"
 )
+FINE_NOTICE_CONFIRMATION_FIELDS = frozenset(
+    {
+        "fine_type",
+        "notice_stage",
+        "law_code",
+        "violation_text",
+        "opinion_deadline",
+        "issuing_authority",
+    }
+)
+FINE_NOTICE_CONFIRMATION_REQUIRED_FIELDS = frozenset({"fine_type", "notice_stage"})
 
 
 class SupervisorHandoffValidationError(RuntimeError):
@@ -432,6 +443,17 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
             step=step,
             upstream_results=upstream_results,
         )
+        ocr_gate_error = _ocr_follow_up_gate_error(step, upstream_results)
+        if ocr_gate_error:
+            execution = _blocked_ocr_follow_up_execution(
+                step_payload,
+                step=step,
+                error_code=ocr_gate_error,
+            )
+            execution["plan_step"] = deepcopy(step)
+            executions.append(execution)
+            upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
+            continue
         _validate_supervisor_step_binding(
             step_payload,
             step=step,
@@ -499,6 +521,76 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
         "supervisor_handoff": supervisor_handoff,
         "reporting_payload": reporting_payload,
         "limitations": limitations,
+        "created_at": _now_iso(),
+    }
+
+
+def _ocr_follow_up_gate_error(
+    step: dict[str, Any],
+    upstream_results: dict[str, Any],
+) -> str:
+    if step.get("node_code") not in {"law_ground_search", "appeal_decision_flow"}:
+        return ""
+    fine_notice = upstream_results.get("fine_notice_analysis")
+    if not isinstance(fine_notice, dict):
+        return ""
+    structured = fine_notice.get("structured_result")
+    if not isinstance(structured, dict):
+        return ""
+    error_code = str(structured.get("error_code") or "")
+    if error_code in {"ocr_confirmation_required", "purpose_result_conflict"}:
+        return error_code
+    return ""
+
+
+def _blocked_ocr_follow_up_execution(
+    payload: dict[str, Any],
+    *,
+    step: dict[str, Any],
+    error_code: str,
+) -> dict[str, Any]:
+    """Emit a safe skipped envelope without invoking law/appeal after OCR rejection."""
+
+    node_code = str(step.get("node_code") or "")
+    node = _node_with_adapter_contract(_production_node(node_code))
+    execution_id = f"exec_{uuid4().hex[:12]}"
+    agent_input = _agent_input(payload, node)
+    adapter_context = build_adapter_context(
+        execution_id=execution_id,
+        execution_mode="sync",
+        node=node,
+        plan_step=payload.get("plan_step"),
+    )
+    agent_output = _complete_adapter_output(
+        {
+            "status": "partial",
+            "execution_status": "blocked",
+            "summary": "OCR 확인이 완료되지 않아 후속 법령·이의절차 분석을 보류했습니다.",
+            "structured_result": {"error_code": error_code},
+            "evidence": [],
+            "next_actions": ["confirm_ocr_extracted_fields"],
+            "limitations": [
+                "The downstream node was not invoked until OCR fields are explicitly confirmed."
+            ],
+        },
+        node=node,
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "supervisor.ocr_confirmation_gate",
+            "execution_mode": "sync",
+            "source_status": "blocked",
+            "input_source": "fine_notice_analysis",
+        },
+    )
+    return {
+        "execution_id": execution_id,
+        "execution_mode": "sync",
+        "job_id": payload.get("job_id"),
+        "node_code": node_code,
+        "node": node,
+        "adapter_context": adapter_context,
+        "agent_input": agent_input,
+        "agent_output": agent_output,
         "created_at": _now_iso(),
     }
 
@@ -1312,6 +1404,10 @@ def _run_fine_notice_analysis_adapter(
             "next_actions": ["check_fine_notice_agent_output"],
             "limitations": ["The real fine_notice_analysis graph did not return a complete envelope."],
         }
+    raw_output = _apply_ocr_confirmation_to_fine_notice_output(
+        raw_output,
+        agent_input=agent_input,
+    )
     return _complete_adapter_output(
         raw_output,
         node=adapter_context["node"],
@@ -1712,6 +1808,84 @@ def _fine_notice_structured_result(result: dict[str, Any]) -> dict[str, Any]:
         "unconfirmed_fields",
     }
     return {key: result.get(key) for key in allowed if key in result}
+
+
+def _normalized_ocr_confirmation(agent_input: dict[str, Any]) -> dict[str, Any]:
+    context = _dict_context(agent_input)
+    raw = context.get("ocr_confirmation") if isinstance(context.get("ocr_confirmation"), dict) else {}
+    raw_fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else {}
+    fields = {
+        key: str(raw_fields[key]).strip()
+        for key in FINE_NOTICE_CONFIRMATION_FIELDS
+        if str(raw_fields.get(key) or "").strip()
+    }
+    return {"confirmed": raw.get("confirmed") is True, "fields": fields}
+
+
+def _has_valid_ocr_confirmation(confirmation: dict[str, Any]) -> bool:
+    return bool(
+        confirmation.get("confirmed") is True
+        and FINE_NOTICE_CONFIRMATION_REQUIRED_FIELDS.issubset(
+            set(confirmation.get("fields") or {})
+        )
+    )
+
+
+def _apply_ocr_confirmation_to_fine_notice_output(
+    raw_output: dict[str, Any],
+    *,
+    agent_input: dict[str, Any],
+) -> dict[str, Any]:
+    """Require explicit, compatible user confirmation before fine-notice follow-up."""
+
+    result = deepcopy(raw_output)
+    structured = (
+        deepcopy(result.get("structured_result"))
+        if isinstance(result.get("structured_result"), dict)
+        else {}
+    )
+    confirmation = _normalized_ocr_confirmation(agent_input)
+    source_status = str(result.get("status") or "partial")
+    ocr_status = str(structured.get("ocr_status") or "").lower()
+    can_confirm = source_status in {"success", "partial", "degraded"} and ocr_status not in {
+        "failed",
+        "rejected",
+    }
+
+    if not can_confirm:
+        return result
+
+    if not _has_valid_ocr_confirmation(confirmation):
+        structured["requires_confirmation"] = True
+        structured["unconfirmed_fields"] = sorted(FINE_NOTICE_CONFIRMATION_REQUIRED_FIELDS)
+        structured["error_code"] = "ocr_confirmation_required"
+        structured.pop("confirmation_source", None)
+        result["structured_result"] = structured
+        result["status"] = "partial"
+        result["execution_status"] = "confirmation_required"
+        result["next_actions"] = ["confirm_ocr_extracted_fields"]
+        return result
+
+    confirmed_fine_type = confirmation["fields"].get("fine_type")
+    recognized_fine_type = str(structured.get("fine_type") or "").strip()
+    if confirmed_fine_type and recognized_fine_type and confirmed_fine_type != recognized_fine_type:
+        structured["requires_confirmation"] = True
+        structured["unconfirmed_fields"] = ["fine_type"]
+        structured["error_code"] = "purpose_result_conflict"
+        structured.pop("confirmation_source", None)
+        result["structured_result"] = structured
+        result["status"] = "partial"
+        result["execution_status"] = "confirmation_conflict"
+        result["next_actions"] = ["review_ocr_fine_type"]
+        return result
+
+    structured.update(confirmation["fields"])
+    structured["requires_confirmation"] = False
+    structured["unconfirmed_fields"] = []
+    structured.pop("error_code", None)
+    structured["confirmation_source"] = "user_confirmation"
+    result["structured_result"] = structured
+    return result
 
 
 def _complete_adapter_output(

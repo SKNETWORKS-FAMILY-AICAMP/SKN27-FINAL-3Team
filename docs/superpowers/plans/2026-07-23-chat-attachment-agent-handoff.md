@@ -667,19 +667,23 @@ git commit -m "feat(#294): add chat attachment drag and drop"
 
 **Files:**
 - Modify: `app/config/supervisor_routing_policy.v1.json`
+- Modify: `app/contracts/chat_session.py`
+- Modify: `app/security/chat_input_privacy.py`
 - Modify: `app/services/chat_orchestration_service.py:99-255,779-819`
 - Modify: `app/services/agent_node_service.py:1241-1305,1664-1694`
 - Modify: `app/web/FrontendAppShell.jsx:120-145,800-910,1940-2090`
 - Test: `test/test_chat_orchestration_service.py`
 - Test: `test/test_agent_node_service.py`
 - Test: `test/test_frontend_auth_session_contract.py`
+- Test: `test/test_chat_session_contract.py`
+- Test: `test/test_chat_input_privacy.py`
 
 **Interfaces:**
 - Consumes: `structured_results.fine_notice_analysis` fields `requires_confirmation`, `unconfirmed_fields`, `fine_type`, `notice_stage`, `law_code`, `violation_text`, `opinion_deadline`, and `issuing_authority`.
 - Produces: chat payload `ocr_confirmation={"confirmed": true, "fields": {...}}` and a second fine-notice plan that permits `law_ground_search` and `appeal_decision_flow`.
 - Rejects: unconfirmed/invalid field payloads with `ocr_confirmation_required` or `purpose_result_conflict`; no downstream law or appeal node is queued in those cases.
 
-- [ ] **Step 1: Write failing backend and frontend contract tests for the confirmation gate.**
+- [x] **Step 1: Write failing backend and frontend contract tests for the confirmation gate.**
 
 ```python
 def test_fine_notice_first_pass_stops_before_law_and_appeal() -> None:
@@ -725,13 +729,13 @@ def test_frontend_renders_editable_ocr_confirmation_before_follow_up() -> None:
     assert "OCR 추출값 확인 후 후속 절차 진행" in shell
 ```
 
-- [ ] **Step 2: Run the focused tests to verify the current fine-notice plan starts law/appeal too early.**
+- [x] **Step 2: Run the focused tests to verify the current fine-notice plan starts law/appeal too early.**
 
 Run: `python -m pytest test/test_chat_orchestration_service.py test/test_agent_node_service.py test/test_frontend_auth_session_contract.py -q`
 
 Expected: FAIL because the current `fine_notice_analysis` plan contains law/appeal on its first pass and no OCR confirmation UI contract exists.
 
-- [ ] **Step 3: Split first-pass OCR from confirmed follow-up planning.**
+- [x] **Step 3: Split first-pass OCR from confirmed follow-up planning.**
 
 Change the policy's `fine_notice_analysis` base plan to:
 
@@ -759,7 +763,7 @@ def _normalized_ocr_confirmation(value: Any) -> dict[str, Any]:
 
 In `_run_fine_notice_analysis_adapter`, apply those normalized user-confirmed values only after the OCR graph returns a successful/partial fine-notice envelope. Set `requires_confirmation=False`, `unconfirmed_fields=[]`, and add `confirmation_source="user_confirmation"`; do not apply the override to rejected, non-fine, or failed OCR output. If the OCR result is rejected or its user-confirmed `fine_type` conflicts with OCR's recognized fine type, return a `partial` envelope with `error_code="purpose_result_conflict"` and no downstream-ready fields.
 
-- [ ] **Step 4: Render an editable confirmation card and submit the explicit confirmation.**
+- [x] **Step 4: Render an editable confirmation card and submit the explicit confirmation.**
 
 ```jsx
 const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
@@ -786,16 +790,16 @@ ocr_confirmation: pendingOcrConfirmation || undefined,
 
 Do not put extracted field values in browser diagnostics or status messages; render them only in the user-visible editable card.
 
-- [ ] **Step 5: Run the confirmation-gate suite.**
+- [x] **Step 5: Run the confirmation-gate suite.**
 
 Run: `python -m pytest test/test_chat_orchestration_service.py test/test_agent_node_service.py test/test_frontend_auth_session_contract.py test/test_fine_notice_ocr.py -q`
 
 Expected: PASS; initial OCR never queues downstream legal/appeal work, an explicit confirmation does, conflicts stop the flow, and the card sends only the allowed confirmation field names.
 
-- [ ] **Step 6: Commit the OCR confirmation gate.**
+- [x] **Step 6: Commit the OCR confirmation gate.**
 
 ```bash
-git add app/config/supervisor_routing_policy.v1.json app/services/chat_orchestration_service.py app/services/agent_node_service.py app/web/FrontendAppShell.jsx test/test_chat_orchestration_service.py test/test_agent_node_service.py test/test_frontend_auth_session_contract.py
+git add app/config/supervisor_routing_policy.v1.json app/contracts/chat_session.py app/security/chat_input_privacy.py app/services/chat_orchestration_service.py app/services/agent_node_service.py app/web/FrontendAppShell.jsx app/web/styles.css test/test_chat_orchestration_service.py test/test_agent_node_service.py test/test_frontend_auth_session_contract.py test/test_chat_session_contract.py test/test_chat_input_privacy.py
 git commit -m "feat(#294): gate fine notice follow-up on OCR confirmation"
 ```
 

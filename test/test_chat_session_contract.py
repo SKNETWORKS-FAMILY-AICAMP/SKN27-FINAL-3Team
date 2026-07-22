@@ -38,3 +38,31 @@ def test_public_chat_message_request_accepts_documented_input_shape() -> None:
 
     assert request.session_id == "ses_1"
     assert request.conversation_save_state == "pending"
+
+
+def test_chat_message_contract_accepts_only_documented_ocr_confirmation_fields() -> None:
+    request = ChatMessageRequest.model_validate(
+        {
+            "session_id": "ses_ocr_confirmation",
+            "user_text": "OCR 값을 확인했습니다.",
+            "ocr_confirmation": {
+                "confirmed": True,
+                "fields": {"fine_type": "과태료", "notice_stage": "사전통지"},
+            },
+        }
+    )
+
+    assert request.ocr_confirmation is not None
+    assert request.ocr_confirmation.fields.fine_type == "과태료"
+
+    with pytest.raises(ValidationError):
+        ChatMessageRequest.model_validate(
+            {
+                "session_id": "ses_ocr_confirmation_invalid",
+                "user_text": "OCR 값을 확인했습니다.",
+                "ocr_confirmation": {
+                    "confirmed": True,
+                    "fields": {"fine_type": "과태료", "unexpected": "not_allowed"},
+                },
+            }
+        )
