@@ -96,6 +96,14 @@ class VisionRunToSupervisorTest(unittest.TestCase):
         self.assertEqual(model, "yolo11n.pt")
         self.assertTrue(prediction["requires_review"])
 
+    def test_korean_videomae_label_selects_yolo(self):
+        prediction, model = select_yolo_model(
+            {"clips": [{"top_predictions": [{"label": "차대보행자", "score": .8}]}]}
+        )
+        self.assertEqual(prediction["label"], "car_vs_pedestrian")
+        self.assertEqual(prediction["raw_label"], "차대보행자")
+        self.assertEqual(model, "yolo11n.pt")
+
 
 if __name__ == "__main__":
     unittest.main()
