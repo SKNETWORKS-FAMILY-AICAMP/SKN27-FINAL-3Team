@@ -10,8 +10,6 @@ ARTIFACT_ROOT = PROJECT_ROOT / "etl" / "fault_cases" / "artifacts" / "review_cas
 REVIEW_CASE_MD_ROOT = PROJECT_ROOT / "etl" / "fault_cases" / "Fault_cases_MD" / "심의사례"
 PREPROCESSED_DIR = ARTIFACT_ROOT / "preprocessed"
 POSTGRES_EXPORT_ROOT = ARTIFACT_ROOT / "postgres_exports"
-ELASTICSEARCH_EXPORT_ROOT = ARTIFACT_ROOT / "elasticsearch_exports"
-RETRIEVAL_AB_EXPORT_ROOT = ARTIFACT_ROOT / "retrieval_ab_exports"
 SCHEMA_PATH = PROJECT_ROOT / "storage" / "schemas" / "review_case_db_schema.sql"
 
 
@@ -86,52 +84,3 @@ class PgvectorSearchSettings:
 
 
 PGVECTOR_SEARCH_SETTINGS = PgvectorSearchSettings()
-
-
-@dataclass(frozen=True)
-class ElasticsearchSettings:
-    host: str = os.getenv(
-        "ELASTICSEARCH_HOST",
-        f"http://localhost:{os.getenv('ELASTICSEARCH_PORT', '9200')}",
-    )
-    username: str = os.getenv("ELASTICSEARCH_USER", "elastic")
-    password: str = os.getenv("ELASTIC_PASSWORD", "change-me")
-    request_timeout: int = int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "120"))
-    bulk_chunk_size: int = int(os.getenv("ELASTICSEARCH_BULK_CHUNK_SIZE", "500"))
-    default_top_k: int = int(os.getenv("REVIEW_CASE_ES_TOP_K", str(PGVECTOR_SEARCH_SETTINGS.default_top_k)))
-    analyzer_name: str = os.getenv("REVIEW_CASE_ES_ANALYZER", "review_case_nori")
-    bm25_index_name: str = os.getenv(
-        "REVIEW_CASE_ES_BM25_INDEX",
-        "review_case_chunks_bm25_nori_v1",
-    )
-    bm25_index_version: str = os.getenv("REVIEW_CASE_ES_BM25_INDEX_VERSION", "bm25_nori_v1")
-    bm25_index_report_name: str = os.getenv(
-        "REVIEW_CASE_ES_BM25_INDEX_REPORT_NAME",
-        "review_case_elasticsearch_bm25_index_report.json",
-    )
-    bm25_sample_report_name: str = os.getenv(
-        "REVIEW_CASE_ES_BM25_SAMPLE_REPORT_NAME",
-        "review_case_elasticsearch_bm25_sample_queries.json",
-    )
-    vector_index_name: str = os.getenv(
-        "REVIEW_CASE_ES_VECTOR_INDEX",
-        "review_case_chunks_vector_hybrid_v1",
-    )
-    vector_index_version: str = os.getenv("REVIEW_CASE_ES_VECTOR_INDEX_VERSION", "vector_hybrid_v1")
-    vector_index_report_name: str = os.getenv(
-        "REVIEW_CASE_ES_VECTOR_INDEX_REPORT_NAME",
-        "review_case_elasticsearch_vector_index_report.json",
-    )
-    vector_sample_report_name: str = os.getenv(
-        "REVIEW_CASE_ES_VECTOR_SAMPLE_REPORT_NAME",
-        "review_case_elasticsearch_vector_sample_queries.json",
-    )
-    hybrid_sample_report_name: str = os.getenv(
-        "REVIEW_CASE_ES_HYBRID_SAMPLE_REPORT_NAME",
-        "review_case_elasticsearch_hybrid_sample_queries.json",
-    )
-    vector_num_candidates: int = int(os.getenv("REVIEW_CASE_ES_VECTOR_NUM_CANDIDATES", "100"))
-    hybrid_rrf_k: int = int(os.getenv("REVIEW_CASE_ES_HYBRID_RRF_K", "60"))
-
-
-ELASTICSEARCH_SETTINGS = ElasticsearchSettings()

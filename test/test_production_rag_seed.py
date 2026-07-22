@@ -661,7 +661,7 @@ def test_manifest_builder_rejects_manifest_target_colliding_with_an_artifact(
     assert (tmp_path / "legal_chunks.jsonl").read_bytes() == original_artifact
 
 
-def test_dry_run_validates_without_database_or_elasticsearch_writes(
+def test_dry_run_validates_without_external_writes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -671,14 +671,11 @@ def test_dry_run_validates_without_database_or_elasticsearch_writes(
         raise AssertionError("dry-run must not connect to an external service")
 
     monkeypatch.setattr(load_production_rag_seed, "_load_legal_pgvector", unexpected_write)
-    monkeypatch.setattr(load_production_rag_seed, "_load_review_case_elasticsearch", unexpected_write)
-    monkeypatch.setattr(load_production_rag_seed, "_load_fault_ratio_elasticsearch", unexpected_write)
 
     result = load_production_rag_seed.execute_rag_seed_load(
         bundle,
         dry_run=True,
         replace_legal=False,
-        recreate_es=False,
         batch_size=50,
     )
 
@@ -687,95 +684,13 @@ def test_dry_run_validates_without_database_or_elasticsearch_writes(
     assert result["artifacts"] == {role: 1 for role in REQUIRED_RAG_SEED_ROLES}
     assert result["targets"] == {
         "legal": "postgresql_pgvector",
-        "review_case": "review_case_chunks_bm25_nori_v1",
-        "precedent_fault_ratio": "precedent_fault_ratio_chunks_bm25_nori_v1",
+        "review_case": "source_specific_pgvector_loader_required",
+        "precedent_fault_ratio": "source_specific_pgvector_loader_required",
     }
-
-
-@pytest.mark.parametrize(
-    ("review_case_index", "fault_ratio_index"),
-    [
-        ("", "fault-ratio-index"),
-        ("review-case-index", ""),
-        ("shared-index", "shared-index"),
-    ],
-)
-def test_live_load_rejects_empty_or_shared_es_indexes_before_any_external_write(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    review_case_index: str,
-    fault_ratio_index: str,
-) -> None:
-    bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
-
-    def reject_external_write(*_args, **_kwargs):
-        raise AssertionError("no external write is allowed before target validation")
-
-    monkeypatch.setattr(load_production_rag_seed, "REVIEW_CASE_INDEX", review_case_index)
-    monkeypatch.setattr(load_production_rag_seed, "FAULT_RATIO_INDEX", fault_ratio_index)
-    monkeypatch.setattr(
-        load_production_rag_seed,
-        "_load_legal_pgvector",
-        reject_external_write,
+    assert any(
+        "verify_pgvector_rag_readiness" in condition
+        for condition in result["preconditions"]
     )
-    monkeypatch.setattr(
-        load_production_rag_seed,
-        "_load_review_case_elasticsearch",
-        reject_external_write,
-    )
-    monkeypatch.setattr(
-        load_production_rag_seed,
-        "_load_fault_ratio_elasticsearch",
-        reject_external_write,
-    )
-
-    with pytest.raises(
-        load_production_rag_seed.SeedLoadError,
-        match="non-empty and distinct",
-    ):
-        load_production_rag_seed.execute_rag_seed_load(
-            bundle,
-            dry_run=False,
-            replace_legal=False,
-            recreate_es=False,
-            batch_size=10,
-        )
-
-
-@pytest.mark.parametrize(
-    "invalid_index",
-    [
-        "Review-Case",
-        "review case",
-        "review\tcase",
-        ".",
-        "..",
-        "-review-case",
-        "_review-case",
-        "+review-case",
-        "review/case",
-        "review:case",
-        "review#case",
-        "가" * 86,
-    ],
-)
-def test_dry_run_rejects_invalid_elasticsearch_index_names(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    invalid_index: str,
-) -> None:
-    bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
-    monkeypatch.setattr(load_production_rag_seed, "REVIEW_CASE_INDEX", invalid_index)
-    monkeypatch.setattr(load_production_rag_seed, "FAULT_RATIO_INDEX", "fault-ratio-index")
-
-    with pytest.raises(load_production_rag_seed.SeedLoadError, match="Elasticsearch index"):
-        load_production_rag_seed.execute_rag_seed_load(
-            bundle,
-            dry_run=True,
-            replace_legal=False,
-            recreate_es=False,
-            batch_size=10,
-        )
 
 
 def test_live_load_calls_all_existing_load_paths_once(
@@ -783,48 +698,28 @@ def test_live_load_calls_all_existing_load_paths_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
-    calls: list[tuple[str, object, bool, int]] = []
+    calls: list[tuple[object, bool, int]] = []
 
     def load_legal(current_bundle, *, replace: bool, batch_size: int):
-        calls.append(("legal", current_bundle, replace, batch_size))
+        calls.append((current_bundle, replace, batch_size))
         return {"loaded": 1}
 
-    def load_review(current_bundle, *, recreate: bool, batch_size: int):
-        calls.append(("review", current_bundle, recreate, batch_size))
-        return {"indexed": 1}
-
-    def load_precedent(current_bundle, *, recreate: bool, batch_size: int):
-        calls.append(("precedent", current_bundle, recreate, batch_size))
-        return {"indexed": 1}
-
     monkeypatch.setattr(load_production_rag_seed, "_load_legal_pgvector", load_legal)
-    monkeypatch.setattr(load_production_rag_seed, "_load_review_case_elasticsearch", load_review)
-    monkeypatch.setattr(load_production_rag_seed, "_load_fault_ratio_elasticsearch", load_precedent)
 
     result = load_production_rag_seed.execute_rag_seed_load(
         bundle,
         dry_run=False,
         replace_legal=True,
-        recreate_es=True,
         batch_size=25,
     )
 
-    assert [call[0] for call in calls] == ["legal", "review", "precedent"]
-    assert all(call[1] is calls[0][1] for call in calls)
-    assert calls[0][1].manifest_path != bundle.manifest_path
-    assert all(call[1].embedding_space == bundle.embedding_space for call in calls)
-    assert all(
-        {
-            role: artifact.sha256
-            for role, artifact in call[1].artifacts.items()
-        }
-        == {
-            role: artifact.sha256
-            for role, artifact in bundle.artifacts.items()
-        }
-        for call in calls
-    )
-    assert all(call[2] is True and call[3] == 25 for call in calls)
+    assert len(calls) == 1
+    assert calls[0][0].manifest_path != bundle.manifest_path
+    assert calls[0][0].embedding_space == bundle.embedding_space
+    assert {
+        role: artifact.sha256 for role, artifact in calls[0][0].artifacts.items()
+    } == {role: artifact.sha256 for role, artifact in bundle.artifacts.items()}
+    assert calls[0][1:] == (True, 25)
     assert result["status"] == "loaded"
     assert result["external_writes"] is True
 
@@ -838,59 +733,40 @@ def test_live_load_revalidates_bundle_before_external_writes(tmp_path: Path) -> 
             bundle,
             dry_run=False,
             replace_legal=False,
-            recreate_es=False,
             batch_size=10,
         )
 
 
-def test_live_load_uses_verified_snapshot_across_all_targets(
+def test_live_load_uses_verified_snapshot_for_legal_pgvector(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
-    source_review_path = bundle.artifacts["review_case_chunks"].path
-    consumed_review_rows: list[dict[str, object]] = []
+    source_legal_path = bundle.artifacts["legal_chunks"].path
+    consumed_legal_rows: list[dict[str, object]] = []
 
     def load_legal(current_bundle, *, replace: bool, batch_size: int):
         assert replace is False
         assert batch_size == 10
-        mutated_row = dict(_valid_rows()["review_case_chunks"][0])
-        mutated_row["review_case_id"] = "changed-after-verification"
+        mutated_row = dict(_valid_rows()["legal_chunks"][0])
         mutated_row["chunk_id"] = "changed-after-verification"
-        _write_jsonl(source_review_path, [mutated_row])
+        _write_jsonl(source_legal_path, [mutated_row])
+        consumed_legal_rows.extend(
+            iter_rag_seed_jsonl(current_bundle.artifacts["legal_chunks"])
+        )
         return {"loaded": 1}
 
-    def load_review(current_bundle, *, recreate: bool, batch_size: int):
-        assert recreate is False
-        assert batch_size == 10
-        consumed_review_rows.extend(
-            iter_rag_seed_jsonl(current_bundle.artifacts["review_case_chunks"])
-        )
-        return {"indexed": 1}
-
     monkeypatch.setattr(load_production_rag_seed, "_load_legal_pgvector", load_legal)
-    monkeypatch.setattr(
-        load_production_rag_seed,
-        "_load_review_case_elasticsearch",
-        load_review,
-    )
-    monkeypatch.setattr(
-        load_production_rag_seed,
-        "_load_fault_ratio_elasticsearch",
-        lambda _bundle, *, recreate, batch_size: {"indexed": 1},
-    )
 
     result = load_production_rag_seed.execute_rag_seed_load(
         bundle,
         dry_run=False,
         replace_legal=False,
-        recreate_es=False,
         batch_size=10,
     )
 
     assert result["status"] == "loaded"
-    assert consumed_review_rows[0]["review_case_id"] == "review-1"
-    assert consumed_review_rows[0]["chunk_id"] == "review-1-summary"
+    assert consumed_legal_rows[0]["chunk_id"] == "law-1"
 
 
 def test_live_load_rejects_self_consistent_bundle_replacement(tmp_path: Path) -> None:
@@ -915,7 +791,6 @@ def test_live_load_rejects_self_consistent_bundle_replacement(tmp_path: Path) ->
             approved_bundle,
             dry_run=False,
             replace_legal=False,
-            recreate_es=False,
             batch_size=10,
         )
 
@@ -940,46 +815,6 @@ def test_legal_pgvector_load_rejects_manifest_count_mismatch(
 
     with pytest.raises(load_production_rag_seed.SeedLoadError, match="count did not match"):
         load_production_rag_seed._load_legal_pgvector(bundle, replace=False, batch_size=50)
-
-
-def test_bulk_loader_does_not_expose_failed_document_source(tmp_path: Path) -> None:
-    bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
-    artifact = bundle.artifacts["review_case_chunks"]
-
-    class FakeIndices:
-        def refresh(self, *, index: str) -> None:
-            assert index == "review-index"
-
-    class FakeClient:
-        indices = FakeIndices()
-
-        def options(self, **kwargs):
-            return self
-
-    def fake_bulk(client, actions, **kwargs):
-        list(actions)
-        assert kwargs["stats_only"] is True
-        return 0, 7
-
-    with pytest.raises(load_production_rag_seed.SeedLoadError) as exc_info:
-        load_production_rag_seed._bulk_index_artifact(
-            artifact=artifact,
-            client=FakeClient(),
-            ensure_index=lambda **kwargs: {"created": True},
-            action_builder=lambda row: {
-                "_index": "review-index",
-                "_id": row["chunk_id"],
-                "_source": row,
-            },
-            index_name="review-index",
-            recreate=False,
-            batch_size=100,
-            request_timeout=30,
-            bulk_fn=fake_bulk,
-        )
-
-    assert "private-case-text" not in str(exc_info.value)
-    assert str(exc_info.value) == "Elasticsearch bulk load failed for 7 document(s)"
 
 
 @pytest.mark.parametrize(
@@ -1177,7 +1012,7 @@ def test_all_new_legal_embedding_table_definitions_require_non_null_vectors() ->
     assert "embedding_vector vector({vector_dim}) NOT NULL" in loader
 
 
-def test_text_ml_smoke_require_results_rejects_empty_es_evidence(
+def test_text_ml_smoke_require_results_rejects_empty_pgvector_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -1188,9 +1023,12 @@ def test_text_ml_smoke_require_results_rejects_empty_es_evidence(
             "adapter_context": {"execution_mode": "sync"},
             "agent_output": {
                 "status": "success",
-                "limitations": ["Elasticsearch RAG was enabled"],
+                "limitations": [],
                 "structured_result": {
-                    "retrieval": {"adapter_source": "fault_ratio_knowledge_agent"},
+                    "retrieval": {
+                        "adapter_source": "fault_ratio_knowledge_agent",
+                        "backend": "unified_pgvector",
+                    },
                     "similar_cases": [],
                     "recommended_evidence": [],
                 },
@@ -1204,7 +1042,7 @@ def test_text_ml_smoke_require_results_rejects_empty_es_evidence(
             session_id="ses-rag-smoke",
             message_id="msg-rag-smoke",
             job_id="job-rag-smoke",
-            require_es=True,
+            require_pgvector=True,
             require_results=True,
             format="json",
         )
@@ -1233,7 +1071,7 @@ def test_law_search_uses_configured_runtime_rag_instead_of_hardcoded_openai(
         "search_legal_rag",
         lambda query, *, top_k, source_type, temporal_basis, scope: {
             "status": "ready",
-            "backend": "postgres_lexical",
+                "backend": "postgres_pgvector",
             "query": query,
             "top_k": top_k,
             "results": [
@@ -1260,5 +1098,5 @@ def test_law_search_uses_configured_runtime_rag_instead_of_hardcoded_openai(
     )
 
     assert provisions[0]["chunk_id"] == "law-runtime-1"
-    assert provisions[0]["match_reason"] == "legal_rag_fallback:postgres_lexical"
+    assert provisions[0]["match_reason"] == "pgvector_similarity"
     assert etl_calls == []

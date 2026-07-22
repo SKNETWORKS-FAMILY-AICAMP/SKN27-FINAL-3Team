@@ -32,7 +32,7 @@ variable "instance_type" {
 }
 
 variable "root_volume_size_gib" {
-  description = "Encrypted gp3 root volume size for images, Elasticsearch, and ClamAV data."
+  description = "Encrypted gp3 root volume size for images and ClamAV data."
   type        = number
   default     = 40
 }

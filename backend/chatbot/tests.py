@@ -204,7 +204,7 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(chunk.source_document, source)
         self.assertEqual(event.source_refs, ["rag_road_traffic_act_article_32"])
 
-    def test_law_ground_search_reads_django_rag_chunks_when_available(self):
+    def test_law_ground_search_requires_pgvector_evidence(self):
         source = SourceDocument.objects.create(
             source_document_id="src_school_zone_rule",
             source_type="law",
@@ -233,21 +233,10 @@ class ChatbotPersistenceModelTests(TestCase):
         )
         structured_result = execution["agent_output"]["structured_result"]
 
-        self.assertEqual(structured_result["retrieval_quality"], "django_rag_tables")
-        self.assertEqual(
-            structured_result["matched_laws"][0]["source_reference"],
-            "rag_school_zone_emergency_stop",
-        )
-        self.assertEqual(structured_result["retrieval"]["status"], "ready")
-        self.assertEqual(structured_result["retrieval"]["backend"], "django_rag_tables")
-        self.assertEqual(
-            structured_result["retrieval"]["attempted_backends"][0]["backend"],
-            "postgres_pgvector",
-        )
-        self.assertEqual(
-            structured_result["retrieval"]["attempted_backends"][0]["status"],
-            "disabled",
-        )
+        self.assertEqual(structured_result["retrieval_quality"], "unavailable")
+        self.assertEqual(structured_result["matched_laws"], [])
+        self.assertEqual(structured_result["retrieval"]["status"], "empty")
+        self.assertIsNone(structured_result["retrieval"]["backend"])
 
     def test_legal_rag_smoke_fixture_loads_searchable_chunks(self):
         output = StringIO()
@@ -267,9 +256,9 @@ class ChatbotPersistenceModelTests(TestCase):
         self.assertEqual(body["status"], "loaded")
         self.assertEqual(body["loaded"]["rag_chunks"], 3)
         self.assertEqual(body["counts"]["rag_chunks"], 3)
-        self.assertEqual(body["smoke"]["backend"], "django_rag_tables")
-        self.assertEqual(body["smoke"]["status"], "ready")
-        self.assertGreaterEqual(body["smoke"]["result_count"], 1)
+        self.assertEqual(body["smoke"]["backend"], "postgres_pgvector")
+        self.assertEqual(body["smoke"]["status"], "disabled")
+        self.assertEqual(body["smoke"]["result_count"], 0)
         self.assertTrue(
             RagChunk.objects.filter(chunk_id="rag_smoke_school_zone_stop", is_searchable=True).exists()
         )
@@ -596,20 +585,17 @@ class ProductionReadinessTests(TestCase):
         OAUTH_TOKEN_SECRET=("oauth-token-secret-oauth-token-123456"),
         REDIS_URL="redis://redis:6379/0",
         SUPERVISOR_LLM_ENABLED=False,
-        LEGAL_RAG_VECTOR_ENABLED=False,
+        LEGAL_RAG_VECTOR_ENABLED=True,
         OBJECT_STORAGE_PROVIDER="mock_s3",
         OBJECT_STORAGE_BUCKET="bucket",
     )
     def test_readiness_report_allows_non_blocking_warnings_for_optional_services(self):
         report = build_production_readiness_report(include_database=False)
 
-        self.assertEqual(report["status"], "warn")
-        self.assertEqual(report["summary"]["fail"], 0)
+        self.assertEqual(report["status"], "fail")
+        self.assertGreater(report["summary"]["fail"], 0)
         warning_checks = {check["name"] for check in report["checks"] if check["status"] == "warn"}
         self.assertIn("supervisor_llm", warning_checks)
-        self.assertIn("legal_rag", warning_checks)
-        self.assertIn("law_ground_search_sync", warning_checks)
-        self.assertIn("text_ml_case_search_rag", warning_checks)
         self.assertIn("object_storage", warning_checks)
 
     @override_settings(
@@ -754,7 +740,7 @@ class ProductionReadinessTests(TestCase):
         DJANGO_DATABASE_ENGINE="postgres",
         LEGAL_RAG_VECTOR_ENABLED=False,
     )
-    def test_readiness_requires_current_lexical_legal_rows_when_vector_is_off(self):
+    def test_readiness_requires_pgvector_legal_rows(self):
         class EmptyCursor:
             def __enter__(self):
                 return self
@@ -833,71 +819,36 @@ class ProductionReadinessTests(TestCase):
             )
         )
 
-    @override_settings(
-        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
-        REVIEW_CASE_ES_BM25_INDEX="review_case_chunks_bm25_nori_v1",
-        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="precedent_fault_ratio_chunks_bm25_nori_v1",
-    )
-    def test_readiness_report_requires_elasticsearch_package_for_text_ml_rag(self):
+    def test_readiness_report_accepts_pgvector_text_ml_modules(self):
         def fake_find_spec(name):
-            if name == "elasticsearch":
-                return None
             return object()
 
         with patch("chatbot.readiness.importlib.util.find_spec", side_effect=fake_find_spec):
             report = build_production_readiness_report(include_database=False)
 
         checks = {check["name"]: check for check in report["checks"]}
-        self.assertEqual(checks["text_ml_case_search_rag"]["status"], "fail")
+        self.assertEqual(checks["text_ml_case_search_rag"]["status"], "pass")
         self.assertTrue(
-            any("elasticsearch package is required" in detail["message"] for detail in checks["text_ml_case_search_rag"]["details"])
+            any("pgvector retrieval modules are importable" in detail["message"] for detail in checks["text_ml_case_search_rag"]["details"])
         )
 
-    @override_settings(
-        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
-        REVIEW_CASE_ES_BM25_INDEX="shared_chunks_v1",
-        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="shared_chunks_v1",
-    )
-    def test_readiness_rejects_shared_text_ml_elasticsearch_indexes(self):
+    def test_readiness_ignores_removed_text_ml_search_index_settings(self):
         with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
             report = build_production_readiness_report(include_database=False)
 
         check = {item["name"]: item for item in report["checks"]}[
             "text_ml_case_search_rag"
         ]
-        self.assertEqual(check["status"], "fail")
-        self.assertTrue(
-            any(
-                "non-empty and distinct" in detail["message"]
-                for detail in check["details"]
-            )
-        )
+        self.assertEqual(check["status"], "pass")
 
-    @override_settings(
-        TEXT_ML_CASE_SEARCH_SYNC_USE_ES=True,
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST="http://elasticsearch:9200",
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER="elastic",
-        TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=fixture_value("es-", "password-realistic-value"),
-        REVIEW_CASE_ES_BM25_INDEX="Invalid Index",
-        FAULT_RATIO_PRECEDENT_ES_BM25_INDEX="fault-ratio-index",
-    )
-    def test_readiness_rejects_invalid_text_ml_elasticsearch_index_name(self):
+    def test_readiness_ignores_removed_text_ml_search_host_settings(self):
         with patch("chatbot.readiness.importlib.util.find_spec", return_value=object()):
             report = build_production_readiness_report(include_database=False)
 
         check = {item["name"]: item for item in report["checks"]}[
             "text_ml_case_search_rag"
         ]
-        self.assertEqual(check["status"], "fail")
-        self.assertTrue(
-            any("Elasticsearch index" in detail["message"] for detail in check["details"])
-        )
+        self.assertEqual(check["status"], "pass")
 
     def test_readiness_legal_row_query_requires_usable_evidence(self):
         from chatbot import readiness
@@ -941,35 +892,31 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(body["contract_version"], "production_readiness.v1")
         self.assertIn(body["status"], {"pass", "warn", "fail"})
 
-    def test_text_ml_case_search_smoke_reports_safe_fallback_without_es(self):
+    def test_text_ml_case_search_smoke_reports_pgvector_contract(self):
         output = StringIO()
 
-        with patch.dict(os.environ, {"TEXT_ML_CASE_SEARCH_SYNC_USE_ES": ""}):
-            call_command(
-                "smoke_text_ml_case_search",
-                "--format",
-                "json",
-                stdout=output,
-            )
+        call_command(
+            "smoke_text_ml_case_search",
+            "--format",
+            "json",
+            stdout=output,
+        )
 
         body = json.loads(output.getvalue())
         self.assertEqual(body["contract_version"], "text_ml_case_search_smoke.v1")
         self.assertEqual(body["status"], "pass")
         self.assertEqual(body["execution_mode"], "sync")
         self.assertEqual(body["adapter_execution_mode"], "sync")
-        self.assertIn(body["adapter_source"], {"fault_ratio_knowledge_agent", "django_rag_tables"})
-        self.assertIn(body["retrieval_backend"], {"django_rag_tables", None})
-        self.assertFalse(body["es_rag_enabled"])
-        self.assertTrue(body["es_rag_fallback"])
+        self.assertEqual(body["adapter_source"], "fault_ratio_knowledge_agent")
+        self.assertEqual(body["retrieval_backend"], "unified_pgvector")
+        self.assertTrue(body["pgvector_rag_enabled"])
 
-    def test_text_ml_case_search_smoke_require_es_fails_without_es(self):
-        with patch.dict(os.environ, {"TEXT_ML_CASE_SEARCH_SYNC_USE_ES": ""}):
-            with self.assertRaises(CommandError):
-                call_command(
-                    "smoke_text_ml_case_search",
-                    "--require-es",
-                    stdout=StringIO(),
-                )
+    def test_text_ml_case_search_smoke_require_pgvector_passes(self):
+        call_command(
+            "smoke_text_ml_case_search",
+            "--require-pgvector",
+            stdout=StringIO(),
+        )
 
     def test_law_ground_search_smoke_reports_safe_partial_without_results(self):
         output = StringIO()

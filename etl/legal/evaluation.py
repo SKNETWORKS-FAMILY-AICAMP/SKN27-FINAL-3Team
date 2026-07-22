@@ -316,48 +316,28 @@ def transition_decision(
     backend_summary: Mapping[str, Mapping[str, object]],
     ragas_by_backend: Mapping[str, Mapping[str, object]],
 ) -> dict[str, Any]:
-    """Apply the documented pgvector transition gates without changing runtime routing."""
+    """Apply pgvector-only readiness gates to the legal retrieval evaluation."""
 
-    lexical = backend_summary.get("postgres_lexical")
     vector = backend_summary.get("postgres_pgvector")
     failed_gates: list[str] = []
-    if lexical is None or vector is None:
-        failed_gates.append("backend_comparison_incomplete")
+    if vector is None:
+        failed_gates.append("pgvector_evaluation_missing")
         return {"eligible": False, "failed_gates": failed_gates}
 
-    if _metric(vector, "recall_at_5") < _metric(lexical, "recall_at_5") - 0.02:
-        failed_gates.append("recall_at_5_regression")
-    if _metric(vector, "mrr") < _metric(lexical, "mrr") - 0.02:
-        failed_gates.append("mrr_regression")
-    if _metric(vector, "ndcg_at_5") < _metric(lexical, "ndcg_at_5") - 0.02:
-        failed_gates.append("ndcg_at_5_regression")
-    if _metric(vector, "no_result_rate") > _metric(lexical, "no_result_rate"):
-        failed_gates.append("no_result_rate_regression")
     if _metric(vector, "no_result_rate") >= 1.0:
         failed_gates.append("no_retrieval_evidence")
     if _metric(vector, "unavailable_rate") > 0.0:
         failed_gates.append("pgvector_unavailable")
-    if _metric(lexical, "unavailable_rate") > 0.0:
-        failed_gates.append("lexical_baseline_unavailable")
-    if _metric(vector, "p95_latency_ms") > _metric(lexical, "p95_latency_ms") * 1.5:
-        failed_gates.append("p95_latency_regression")
     if _metric(vector, "metadata_complete_rate") < 1.0:
         failed_gates.append("metadata_incomplete")
 
-    lexical_ragas = ragas_by_backend.get("postgres_lexical", {})
     vector_ragas = ragas_by_backend.get("postgres_pgvector", {})
-    if lexical_ragas.get("status") != "evaluated" or vector_ragas.get("status") != "evaluated":
+    if vector_ragas.get("status") != "evaluated":
         failed_gates.append("ragas_not_evaluated")
     else:
-        lexical_metrics = lexical_ragas.get("metrics")
         vector_metrics = vector_ragas.get("metrics")
-        if not isinstance(lexical_metrics, Mapping) or not isinstance(vector_metrics, Mapping):
+        if not isinstance(vector_metrics, Mapping):
             failed_gates.append("ragas_not_evaluated")
-        else:
-            if _metric(vector_metrics, "context_recall") < _metric(lexical_metrics, "context_recall") - 0.03:
-                failed_gates.append("ragas_context_recall_regression")
-            if _metric(vector_metrics, "faithfulness") < _metric(lexical_metrics, "faithfulness") - 0.03:
-                failed_gates.append("ragas_faithfulness_regression")
 
     return {"eligible": not failed_gates, "failed_gates": failed_gates}
 

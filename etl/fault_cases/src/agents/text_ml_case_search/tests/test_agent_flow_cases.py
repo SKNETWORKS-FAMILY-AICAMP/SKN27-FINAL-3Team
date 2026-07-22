@@ -52,7 +52,7 @@ def _valid_evidence() -> list[dict[str, Any]]:
                 "claimant_final_ratio": "70",
                 "respondent_final_ratio": "30",
                 "score": 13.5,
-                "score_type": "bm25_score",
+                "score_type": "cosine_similarity",
                 "rank": 1,
                 "highlight": {
                     "chunk_text": ["<em>intersection</em> entry timing"],

@@ -162,7 +162,7 @@ def run_law_ground_search(
         output["structured_result"]["law_provisions"] = valid_provisions
         if retrieval_metadata:
             output["structured_result"]["retrieval_quality"] = (
-                retrieval_metadata.get("backend") or "django_rag_tables"
+                retrieval_metadata.get("backend") or "postgres_pgvector"
             )
             output["structured_result"]["retrieval"] = retrieval_metadata
         

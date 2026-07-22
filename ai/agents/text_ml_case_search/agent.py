@@ -7,16 +7,9 @@ AgentAdapterInput -> AgentAdapterOutput contract stable.
 from __future__ import annotations
 
 import math
-import os
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
-
-from app.services.legal_rag_service import search_legal_rag
-
-
-CASE_SOURCE_TYPE = "review_case"
-
 
 def run_text_ml_case_search(
     agent_input: dict[str, Any],
@@ -50,35 +43,32 @@ def run_text_ml_case_search(
             limitations=["No query_text or accident_context was available for case search."],
         )
 
-    retrieval = search_legal_rag(query_text, top_k=3, source_type=CASE_SOURCE_TYPE)
-    cases = _cases_from_retrieval(retrieval)
-    fallback_used = False
-    status = "success" if cases else "partial"
-    limitations: list[str] = []
-
-    if not cases:
-        limitations.append(
-            "No review_case RAG chunks were available; no similar-case evidence was produced."
-        )
-
-    structured_result = _structured_result(
-        query_text=query_text,
-        cases=cases,
-        retrieval=retrieval,
-        agent_input=agent_input,
-        fallback_used=fallback_used,
-    )
-    evidence = _evidence_from_cases(cases, retrieval)
-
     return _output(
         agent_input=agent_input,
         node=node,
-        status=status,
-        summary=_summary(cases),
-        structured_result=structured_result,
-        evidence=evidence,
-        limitations=limitations
-        + [
+        status="partial",
+        summary="Fault-ratio knowledge agent was unavailable; no fallback evidence was produced.",
+        structured_result={
+            "query_text": query_text,
+            "normalized_description": query_text,
+            "similar_cases": [],
+            "top_cases": [],
+            "ratio_range_label": "",
+            "recommended_evidence": [],
+            "evidence_tags": [],
+            "reliability_score": 0.0,
+            "retrieval": {
+                "adapter_source": "fault_ratio_knowledge_agent",
+                "retrieval_backend": "unified_pgvector",
+                "status": "unavailable",
+            },
+            "limitations": [
+                "No pgvector evidence was available from the fault-ratio knowledge agent.",
+            ],
+        },
+        evidence=[],
+        limitations=[
+            "No pgvector evidence was available from the fault-ratio knowledge agent.",
             "This adapter does not assert a fixed numeric fault ratio.",
             "Similar cases are supporting references and require factual/legal review.",
         ],
@@ -135,13 +125,9 @@ def _run_fault_ratio_knowledge_agent(
     if not etl_input["query_text"]:
         return None
 
-    es_client, adapter_notes = _optional_elasticsearch_client()
+    adapter_notes: list[str] = []
     try:
-        raw_output = (
-            run_fault_ratio_agent(etl_input, es_client=es_client)
-            if es_client is not None
-            else run_fault_ratio_agent(etl_input)
-        )
+        raw_output = run_fault_ratio_agent(etl_input)
     except Exception as exc:
         raw_output = None
         adapter_notes.append(
@@ -205,30 +191,6 @@ def _etl_agent_input(agent_input: dict[str, Any], query_text: str) -> dict[str, 
     }
 
 
-def _optional_elasticsearch_client() -> tuple[Any | None, list[str]]:
-    if not _truthy(os.getenv("TEXT_ML_CASE_SEARCH_SYNC_USE_ES", "")):
-        return None, [
-            "TEXT_ML_CASE_SEARCH_SYNC_USE_ES is not enabled; ran fault-ratio agent without Elasticsearch RAG."
-        ]
-
-    try:
-        from etl.fault_cases.src.agents.text_ml_case_search.rag.es_client import (
-            get_elasticsearch_client,
-            ping_elasticsearch,
-        )
-
-        client = get_elasticsearch_client()
-        if not ping_elasticsearch(client):
-            return None, [
-                "Elasticsearch ping failed; ran fault-ratio agent without Elasticsearch RAG."
-            ]
-        return client, ["Elasticsearch RAG was enabled for text_ml_case_search."]
-    except Exception as exc:
-        return None, [
-            f"Elasticsearch RAG unavailable for text_ml_case_search:{exc.__class__.__name__}"
-        ]
-
-
 def _knowledge_structured_result(
     raw_output: dict[str, Any],
     query_text: str,
@@ -251,6 +213,9 @@ def _knowledge_structured_result(
     structured.setdefault("retrieval", {})
     if isinstance(structured["retrieval"], dict):
         structured["retrieval"].setdefault("adapter_source", "fault_ratio_knowledge_agent")
+        rag_debug = structured.get("rag_debug")
+        if isinstance(rag_debug, dict):
+            structured["retrieval"].setdefault("backend", rag_debug.get("retriever"))
         structured["retrieval"].setdefault(
             "source_summary",
             structured.get("source_summary") if isinstance(structured.get("source_summary"), dict) else {},

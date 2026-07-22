@@ -1759,10 +1759,6 @@ def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, An
         marker = "Sync adapter is connected through Supervisor sync execution mode."
     if marker not in limitations:
         limitations.append(marker)
-    if "text_ml_case_search" in adapter and not os.getenv("TEXT_ML_CASE_SEARCH_SYNC_USE_ES", "").strip():
-        es_marker = "TEXT_ML_CASE_SEARCH_SYNC_USE_ES is not enabled; ran fault-ratio agent without Elasticsearch RAG."
-        if es_marker not in limitations:
-            limitations.append(es_marker)
     if "fine_notice_analysis" in adapter and adapter_trace.get("input_source") == "missing":
         limitations.append("No fine_notice attachment image was available for OCR.")
     return limitations

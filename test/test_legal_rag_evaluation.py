@@ -224,13 +224,6 @@ def test_collect_backend_runs_uses_identical_resolved_filters(monkeypatch) -> No
     )
     monkeypatch.setattr(
         fake_service,
-        "_search_law_chunks_lexical",
-        lambda _query, **kwargs: calls.append(("lexical", kwargs))
-        or {"backend": "postgres_lexical", "status": "ready", "latency_ms": 1, "results": []},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        fake_service,
         "_search_pgvector",
         lambda _query, **kwargs: calls.append(("pgvector", kwargs))
         or {"backend": "postgres_pgvector", "status": "ready", "latency_ms": 1, "results": []},
@@ -239,10 +232,10 @@ def test_collect_backend_runs_uses_identical_resolved_filters(monkeypatch) -> No
 
     runs = run_evaluation.collect_backend_runs([query])
 
-    assert [run["backend"] for run in runs] == ["postgres_lexical", "postgres_pgvector"]
-    assert calls[0][1]["effective_at"] == calls[1][1]["effective_at"]
-    assert calls[0][1]["allowed_source_types"] == calls[1][1]["allowed_source_types"]
-    assert calls[0][1]["top_k"] == calls[1][1]["top_k"] == 5
+    assert [run["backend"] for run in runs] == ["postgres_pgvector"]
+    assert calls[0][1]["effective_at"] == date(2026, 7, 21)
+    assert calls[0][1]["allowed_source_types"] == ("law",)
+    assert calls[0][1]["top_k"] == 5
 
 
 def test_collect_backend_runs_normalizes_openai_auth_error_without_recording_message(monkeypatch) -> None:
@@ -262,12 +255,6 @@ def test_collect_backend_runs_normalizes_openai_auth_error_without_recording_mes
     )
     monkeypatch.setattr(
         fake_service,
-        "_search_law_chunks_lexical",
-        lambda _query, **_kwargs: {"backend": "postgres_lexical", "status": "ready", "latency_ms": 1, "results": []},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        fake_service,
         "_search_pgvector",
         lambda _query, **_kwargs: {
             "backend": "postgres_pgvector",
@@ -281,8 +268,8 @@ def test_collect_backend_runs_normalizes_openai_auth_error_without_recording_mes
 
     runs = run_evaluation.collect_backend_runs([query])
 
-    assert runs[1]["error_code"] == "openai_authentication_failed"
-    assert "sk-secret" not in str(runs[1])
+    assert runs[0]["error_code"] == "openai_authentication_failed"
+    assert "sk-secret" not in str(runs[0])
 
 
 def test_summarize_ragas_scores_averages_public_metric_rows() -> None:
@@ -329,8 +316,8 @@ def test_collect_backend_runs_preserves_invalid_filter_as_non_search_result(monk
 
     runs = run_evaluation.collect_backend_runs([query])
 
-    assert [run["status"] for run in runs] == ["invalid_filter", "invalid_filter"]
-    assert [run["error_code"] for run in runs] == ["invalid_effective_at", "invalid_effective_at"]
+    assert [run["status"] for run in runs] == ["invalid_filter"]
+    assert [run["error_code"] for run in runs] == ["invalid_effective_at"]
 
 
 def test_collect_evaluation_preflight_rejects_missing_legal_rag_tables() -> None:
@@ -762,16 +749,8 @@ def test_transition_decision_rejects_missing_ragas_evidence() -> None:
     assert "ragas_not_evaluated" in decision["failed_gates"]
 
 
-def test_transition_decision_rejects_vector_quality_regression() -> None:
+def test_transition_decision_rejects_incomplete_pgvector_metadata() -> None:
     summary = {
-        "postgres_lexical": {
-            "recall_at_5": 1.0,
-            "mrr": 1.0,
-            "ndcg_at_5": 1.0,
-            "no_result_rate": 0.0,
-            "p95_latency_ms": 10,
-            "metadata_complete_rate": 1.0,
-        },
         "postgres_pgvector": {
             "recall_at_5": 0.9,
             "mrr": 0.97,
@@ -782,23 +761,13 @@ def test_transition_decision_rejects_vector_quality_regression() -> None:
         },
     }
     ragas = {
-        "postgres_lexical": {"status": "evaluated", "metrics": {"context_recall": 1.0, "faithfulness": 1.0}},
         "postgres_pgvector": {"status": "evaluated", "metrics": {"context_recall": 0.9, "faithfulness": 0.9}},
     }
 
     decision = evaluation.transition_decision(summary, ragas)
 
     assert decision["eligible"] is False
-    assert set(decision["failed_gates"]) >= {
-        "recall_at_5_regression",
-        "mrr_regression",
-        "ndcg_at_5_regression",
-        "no_result_rate_regression",
-        "p95_latency_regression",
-        "metadata_incomplete",
-        "ragas_context_recall_regression",
-        "ragas_faithfulness_regression",
-    }
+    assert decision["failed_gates"] == ["metadata_incomplete"]
 
 
 def test_summary_counts_disabled_backend_as_not_ready() -> None:

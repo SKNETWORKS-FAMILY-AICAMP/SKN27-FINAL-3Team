@@ -23,7 +23,7 @@ def search_law_provisions(
     # Provider/model/cost policy는 legal_rag_service의 환경 설정 한 곳에서 결정한다.
     # Agent가 별도 ETL 검색기를 호출하면 운영 설정을 우회해 예기치 않은 유료
     # embedding 요청이나 seed provider 불일치가 생길 수 있으므로 사용하지 않는다.
-    core_provisions = _search_fallback_legal_rag(
+    core_provisions = _search_pgvector_legal_rag(
         query_text=query_text,
         top_k=top_k,
         temporal_basis=temporal_basis,
@@ -47,13 +47,13 @@ def search_law_provisions(
 
     return core_provisions
 
-def _search_fallback_legal_rag(
+def _search_pgvector_legal_rag(
     query_text: str,
     top_k: int,
     temporal_basis: dict[str, Any],
     scope: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Django RAG tables fallback for local/dev environments without pgvector."""
+    """Query the strict pgvector legal-RAG service for legal evidence."""
     try:
         from app.services import legal_rag_service
 
@@ -66,7 +66,7 @@ def _search_fallback_legal_rag(
         )
     except Exception as exc:
         logger.warning(
-            "Django RAG fallback failed; error_class=%s",
+            "pgvector legal RAG failed; error_class=%s",
             exc.__class__.__name__,
         )
         return []
@@ -75,7 +75,7 @@ def _search_fallback_legal_rag(
         return []
 
     provisions = []
-    backend = rag_response.get("backend") or "django_rag_tables"
+    backend = rag_response.get("backend") or "postgres_pgvector"
     retrieval_metadata = {
         key: value
         for key, value in rag_response.items()
@@ -102,7 +102,7 @@ def _search_fallback_legal_rag(
                 "score": item.get("score", 0.0),
                 "matched_token_count": item.get("matched_token_count"),
                 "query_token_count": item.get("query_token_count"),
-                "match_reason": f"legal_rag_fallback:{backend}",
+                "match_reason": "pgvector_similarity",
                 "_retrieval": retrieval_metadata,
             }
         )
@@ -115,31 +115,6 @@ def evaluate_confidence(provisions: list[dict[str, Any]]) -> dict[str, Any]:
     top_result = provisions[0]
     top1_score = float(top_result.get("score", top_result.get("retrieval_score", 0.0)) or 0.0)
     retrieval = top_result.get("_retrieval") if isinstance(top_result.get("_retrieval"), dict) else {}
-    score_kind = retrieval.get("score_kind")
-    backend = retrieval.get("backend")
-    if score_kind == "token_coverage" or backend in {"postgres_lexical", "django_rag_tables"}:
-        matched_token_count = int(top_result.get("matched_token_count") or 0)
-        query_token_count = int(
-            top_result.get("query_token_count") or retrieval.get("query_token_count") or 0
-        )
-        if matched_token_count < 2 or query_token_count < 2:
-            return {
-                "is_confident": False,
-                "reason": "Lexical 검색에서 서로 다른 검색 토큰 2개 이상이 일치하지 않음",
-                "reason_code": "insufficient_lexical_term_support",
-            }
-        if top1_score < 0.5:
-            return {
-                "is_confident": False,
-                "reason": f"Lexical token coverage({top1_score:.3f})가 기준치(0.5) 미만",
-                "reason_code": "low_lexical_token_coverage",
-            }
-        return {
-            "is_confident": True,
-            "reason": "Lexical token coverage와 일치 토큰 수가 기준을 충족",
-            "reason_code": "lexical_token_coverage_sufficient",
-        }
-
     THRESHOLD = 0.4
 
     if top1_score < THRESHOLD:

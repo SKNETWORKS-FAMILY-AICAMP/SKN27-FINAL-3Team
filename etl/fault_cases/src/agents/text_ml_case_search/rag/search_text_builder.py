@@ -11,11 +11,7 @@ def build_search_text(
     normalized: dict[str, Any],
     issue_tags: list[str],
 ) -> dict[str, Any]:
-    """Build stable text variants for BM25/Nori retrieval.
-
-    This step does not call Elasticsearch. It only prepares query text that the
-    next retriever step can use without re-reading the raw agent input.
-    """
+    """Build stable text variants for the pgvector retriever."""
 
     natural_query_text = _clean(context.get("query_text"))
     normalized_description = _clean(normalized.get("normalized_description"))

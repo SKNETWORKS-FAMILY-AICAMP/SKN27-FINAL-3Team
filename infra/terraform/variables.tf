@@ -55,16 +55,6 @@ variable "app_secret_arn" {
   type        = string
 }
 
-variable "opensearch_instance_type" {
-  type    = string
-  default = "m7g.large.search"
-}
-
-variable "opensearch_nori_package_id" {
-  description = "AWS OpenSearch package id for the region's Nori analysis plugin."
-  type        = string
-}
-
 variable "github_repository" {
   description = "GitHub Actions OIDC subject repository in owner/name form."
   type        = string

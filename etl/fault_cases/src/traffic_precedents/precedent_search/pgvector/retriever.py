@@ -8,8 +8,12 @@ from typing import Any
 from psycopg2.extras import RealDictCursor
 
 from etl.fault_cases.src.traffic_precedents.precedent_db_loading.db import get_connection
-from etl.fault_cases.src.traffic_precedents.precedent_embedding.openai_embedder import OpenAIEmbedder
-from etl.fault_cases.src.traffic_precedents.precedent_embedding.store_embeddings_common import vector_literal
+from etl.fault_cases.src.traffic_precedents.precedent_embedding.before_embedding.openai_embedder import (
+    OpenAIEmbedder,
+)
+from etl.fault_cases.src.traffic_precedents.precedent_embedding.before_embedding.store_embeddings_common import (
+    vector_literal,
+)
 
 from ..search_config import DATASET_SEARCH_CONFIGS, SEARCH_SETTINGS, SearchSettings
 

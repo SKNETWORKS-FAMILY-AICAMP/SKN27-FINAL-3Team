@@ -42,7 +42,6 @@ LEGAL_VARCHAR_LIMITS = {
     "embedding_provider": 50,
     "embedding_model": 255,
 }
-_ELASTICSEARCH_FORBIDDEN_INDEX_CHARACTERS = frozenset('\\/*?"<>|,#:')
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _CREDENTIAL_QUERY_KEYS = frozenset(
@@ -225,33 +224,6 @@ def iter_rag_seed_jsonl(artifact: RagSeedArtifact) -> Iterator[dict[str, Any]]:
     """Yield previously validated JSONL objects for a loader."""
 
     yield from _iter_jsonl(artifact.path, artifact.role)
-
-
-def validate_elasticsearch_index_targets(
-    review_case_index: Any,
-    fault_ratio_index: Any,
-) -> tuple[str, str]:
-    """Validate two distinct Elasticsearch index names before any target write."""
-
-    if (
-        not isinstance(review_case_index, str)
-        or not review_case_index.strip()
-        or not isinstance(fault_ratio_index, str)
-        or not fault_ratio_index.strip()
-        or review_case_index == fault_ratio_index
-    ):
-        raise RagSeedValidationError(
-            "Elasticsearch index targets must be non-empty and distinct"
-        )
-    review_case = _validate_elasticsearch_index_name(
-        review_case_index,
-        setting="REVIEW_CASE_ES_BM25_INDEX",
-    )
-    fault_ratio = _validate_elasticsearch_index_name(
-        fault_ratio_index,
-        setting="FAULT_RATIO_PRECEDENT_ES_BM25_INDEX",
-    )
-    return review_case, fault_ratio
 
 
 def _manifest_target(root: Path, manifest_path: Path) -> Path:
@@ -643,25 +615,6 @@ def _validate_legal_source_url(value: str, *, role: str, line_number: int) -> No
         is_loopback = False
     if placeholder_host or is_loopback:
         raise RagSeedValidationError(error)
-
-
-def _validate_elasticsearch_index_name(value: str, *, setting: str) -> str:
-    error = f"Elasticsearch index setting {setting} is invalid"
-    if value != value.strip() or any(character.isspace() for character in value):
-        raise RagSeedValidationError(error)
-    if value in {".", ".."} or value.startswith(("-", "_", "+")):
-        raise RagSeedValidationError(error)
-    if value != value.lower():
-        raise RagSeedValidationError(error)
-    if any(character in _ELASTICSEARCH_FORBIDDEN_INDEX_CHARACTERS for character in value):
-        raise RagSeedValidationError(error)
-    try:
-        encoded = value.encode("utf-8")
-    except UnicodeEncodeError:
-        raise RagSeedValidationError(error) from None
-    if len(encoded) > 255:
-        raise RagSeedValidationError(error)
-    return value
 
 
 def _validate_legal_id_alignment(row_ids_by_role: Mapping[str, set[str]]) -> None:

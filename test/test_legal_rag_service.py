@@ -107,12 +107,17 @@ def test_legal_rag_uses_pgvector_when_enabled(monkeypatch):
     monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_PROVIDER", "hash")
     monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_MODEL", "hashing-vectorizer")
     monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setenv("LEGAL_RAG_QUERY_EMBEDDING_MODEL", "hashing-vectorizer")
+    monkeypatch.setenv("LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_PROVIDER", "hash")
+    monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_MODEL", "hashing-vectorizer")
+    monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS", "1024")
     monkeypatch.setattr(service, "_django_connection", lambda: FakeConnection(cursor))
 
     result = service.search_legal_rag("school zone emergency stopping", top_k=2)
 
-    assert result["status"] == "ready"
-    assert result["attempted_backends"][0]["error_code"] == ""
+    assert result["error_code"] == "", result["error_code"]
+    assert result["status"] == "ready", result
     assert result["backend"] == "postgres_pgvector"
     assert result["embedding"]["provider"] == "hash"
     assert result["embedding"]["dimensions"] == 1024
@@ -137,43 +142,46 @@ def test_legal_rag_uses_pgvector_when_enabled(monkeypatch):
     )
 
 
-def test_legal_rag_falls_back_when_pgvector_is_unavailable(monkeypatch):
+def test_legal_rag_reports_pgvector_unavailable_without_lexical_fallback(monkeypatch):
     class MissingTableConnection:
         vendor = "postgresql"
         introspection = FakeIntrospection([])
 
     monkeypatch.setenv("LEGAL_RAG_VECTOR_ENABLED", "1")
     monkeypatch.setenv("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "hash")
+    monkeypatch.setenv("LEGAL_RAG_QUERY_EMBEDDING_MODEL", "hashing-vectorizer")
+    monkeypatch.setenv("LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_PROVIDER", "hash")
+    monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_MODEL", "hashing-vectorizer")
+    monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS", "1024")
     monkeypatch.setattr(service, "_django_connection", lambda: MissingTableConnection())
 
-    def fake_lexical(query, *, top_k, source_type, **_filters):
-        return {
-            "contract_version": "legal_rag_search.v1",
-            "status": "ready",
-            "backend": "django_rag_tables",
-            "query": query,
-            "top_k": top_k,
-            "result_count": 1,
-            "latency_ms": 0,
-            "results": [{"source_reference": "rag_fallback"}],
-            "error_code": "",
-        }
+    def unexpected_fallback(*_args, **_kwargs):
+        raise AssertionError("legal RAG must not call a lexical or Django fallback")
 
-    monkeypatch.setattr(service, "_search_django_rag_tables", fake_lexical)
+    monkeypatch.setattr(
+        service,
+        "_search_law_chunks_lexical",
+        unexpected_fallback,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service,
+        "_search_django_rag_tables",
+        unexpected_fallback,
+        raising=False,
+    )
 
     result = service.search_legal_rag("fallback query", top_k=1)
 
-    assert result["backend"] == "django_rag_tables"
-    assert result["fallback_from"]["backend"] == "postgres_pgvector"
-    assert result["fallback_from"]["status"] == "unavailable"
-    assert [item["backend"] for item in result["attempted_backends"]] == [
-        "postgres_pgvector",
-        "postgres_lexical",
-        "django_rag_tables",
-    ]
+    assert result["backend"] == "postgres_pgvector"
+    assert result["status"] == "unavailable"
+    assert result["error_code"] == "missing_tables:law_chunks,law_embeddings"
+    assert "fallback_from" not in result
+    assert "attempted_backends" not in result
 
 
-def test_legal_rag_uses_seeded_law_chunks_lexical_when_vector_is_disabled(monkeypatch):
+def test_legal_rag_reports_vector_disabled_when_runtime_is_not_enabled(monkeypatch):
     lexical_description = [
         item
         for item in VECTOR_DESCRIPTION
@@ -211,26 +219,14 @@ def test_legal_rag_uses_seeded_law_chunks_lexical_when_vector_is_disabled(monkey
     )
     monkeypatch.setenv("LEGAL_RAG_VECTOR_ENABLED", "0")
     monkeypatch.setattr(service, "_django_connection", lambda: FakeConnection(cursor))
-    monkeypatch.setattr(
-        service,
-        "_search_django_rag_tables",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("seeded law_chunks lexical results must win before legacy Django RAG")
-        ),
-    )
 
     result = service.search_legal_rag("신호 지시 준수", top_k=2)
 
-    assert result["status"] == "ready"
-    assert result["backend"] == "postgres_lexical"
-    assert result["sql_tables"] == ["law_chunks"]
-    assert result["results"][0]["source_reference"] == "law_chunk_lexical_001"
-    assert result["results"][0]["article"] == "제5조"
-    assert "law_chunks" in cursor.sql
-    assert "c.source_type = ANY(%s)" in cursor.sql
-    assert "btrim(c.source_url) <> ''" in cursor.sql
-    assert "btrim(c.provision_text) <> ''" in cursor.sql
-    assert cursor.params[-1] == 2
+    assert result["status"] == "disabled"
+    assert result["backend"] == "postgres_pgvector"
+    assert result["error_code"] == "vector_disabled"
+    assert result["results"] == []
+    assert cursor.sql == ""
 
 
 def test_pgvector_applies_legal_family_scope_and_effective_date(monkeypatch):
@@ -307,7 +303,7 @@ def test_pgvector_sets_local_hnsw_options_before_vector_select(monkeypatch):
     assert atomic_calls == ["legal-rag"]
 
 
-def test_lexical_score_is_normalized_token_coverage_with_match_metadata(monkeypatch):
+def test_vector_disabled_does_not_emit_token_coverage_metadata(monkeypatch):
     lexical_description = [
         item
         for item in VECTOR_DESCRIPTION
@@ -353,74 +349,26 @@ def test_lexical_score_is_normalized_token_coverage_with_match_metadata(monkeypa
         scope={"allowed_source_types": ["law"]},
     )
 
-    assert result["status"] == "ready"
-    assert result["score_kind"] == "token_coverage"
-    assert result["query_token_count"] == 3
-    assert result["results"][0]["matched_token_count"] == 2
-    assert result["results"][0]["query_token_count"] == 3
-    assert result["results"][0]["score"] == round(2 / 3, 6)
-    assert "/ 3.0" in cursor.sql
-    assert ["law"] in cursor.params
-    assert cursor.params.count(date(2026, 2, 1)) == 2
+    assert result["status"] == "disabled"
+    assert result["backend"] == "postgres_pgvector"
+    assert result["error_code"] == "vector_disabled"
+    assert "score_kind" not in result
+    assert result["results"] == []
+    assert cursor.sql == ""
 
 
-def test_django_legal_fallback_filters_family_and_effective_date(monkeypatch):
-    filter_calls = []
-
-    class RecordingQuerySet:
-        def filter(self, *args, **kwargs):
-            filter_calls.append((args, kwargs))
-            return self
-
-        def select_related(self, *_args):
-            return self
-
-        def order_by(self, *_args):
-            return self
-
-        def __getitem__(self, _key):
-            return self
-
-        def __iter__(self):
-            return iter(())
-
-    queryset = RecordingQuerySet()
-
-    class RecordingManager:
-        def filter(self, *args, **kwargs):
-            filter_calls.append((args, kwargs))
-            return queryset
-
-    fake_rag_chunk = SimpleNamespace(
-        _meta=SimpleNamespace(db_table="rag_chunks"),
-        objects=RecordingManager(),
-    )
-    monkeypatch.setitem(sys.modules, "chatbot.models", SimpleNamespace(RagChunk=fake_rag_chunk))
+def test_review_case_source_type_is_rejected_before_database_access(monkeypatch):
     monkeypatch.setattr(
         service,
         "_django_connection",
-        lambda: SimpleNamespace(introspection=FakeIntrospection(["rag_chunks"])),
+        lambda: (_ for _ in ()).throw(AssertionError("unsupported source must not query a database")),
     )
 
-    result = service._search_django_rag_tables(
-        "traffic signal",
-        top_k=2,
-        source_type="law",
-        allowed_source_types=("law", "enforcement_rule"),
-        effective_at=date(2026, 2, 1),
-    )
+    result = service.search_legal_rag("traffic signal", source_type="review_case")
 
-    assert result["status"] == "empty"
-    combined_kwargs = {key: value for _args, kwargs in filter_calls for key, value in kwargs.items()}
-    assert combined_kwargs["source_type__in"] == ("law", "enforcement_rule")
-    assert combined_kwargs["source_document__isnull"] is False
-    assert combined_kwargs["source_document__source_type__in"] == ("law", "enforcement_rule")
-    assert combined_kwargs["source_document__jurisdiction"] == "KR"
-    assert combined_kwargs["source_document__effective_date__isnull"] is False
-    assert combined_kwargs["source_document__effective_date__lte"] == date(2026, 2, 1)
-    assert combined_kwargs["content__regex"] == r"\S"
-    assert combined_kwargs["source_document__source_url__regex"] == r"\S"
-    assert any("expire_date__isnull" in str(args) and "expire_date__gte" in str(args) for args, _ in filter_calls)
+    assert result["status"] == "invalid_filter"
+    assert result["backend"] == "postgres_pgvector"
+    assert result["error_code"] == "unsupported_source_type"
 
 
 def test_invalid_legal_scope_fails_before_database_access(monkeypatch):
@@ -452,9 +400,7 @@ def test_law_agent_forwards_filters_and_uses_full_provision_text(monkeypatch):
         calls.append((query, kwargs))
         return {
             "status": "ready",
-            "backend": "postgres_lexical",
-            "score_kind": "token_coverage",
-            "query_token_count": 3,
+            "backend": "postgres_pgvector",
             "results": [
                 {
                     "source_reference": "law-1",
@@ -495,38 +441,35 @@ def test_law_agent_forwards_filters_and_uses_full_provision_text(monkeypatch):
     ]
     assert provisions[0]["provision_text"] == full_text
     assert provisions[0]["summary"] == full_text[:240]
+    assert provisions[0]["match_reason"] == "pgvector_similarity"
 
 
-def test_lexical_confidence_requires_more_than_one_matched_token():
+def test_vector_confidence_rejects_low_similarity_score():
     from ai.agents.law_ground_search.search import evaluate_confidence
 
     provision = {
-        "score": 1.0,
-        "matched_token_count": 1,
-        "query_token_count": 1,
-        "_retrieval": {"backend": "postgres_lexical", "score_kind": "token_coverage"},
+        "score": 0.39,
+        "_retrieval": {"backend": "postgres_pgvector"},
     }
 
     result = evaluate_confidence([provision])
 
     assert result["is_confident"] is False
-    assert result["reason_code"] == "insufficient_lexical_term_support"
+    assert result["reason_code"] == "low_vector_score"
 
 
-def test_lexical_confidence_accepts_multi_token_coverage():
+def test_vector_confidence_accepts_similarity_above_threshold():
     from ai.agents.law_ground_search.search import evaluate_confidence
 
     provision = {
         "score": 2 / 3,
-        "matched_token_count": 2,
-        "query_token_count": 3,
-        "_retrieval": {"backend": "postgres_lexical", "score_kind": "token_coverage"},
+        "_retrieval": {"backend": "postgres_pgvector"},
     }
 
     result = evaluate_confidence([provision])
 
     assert result["is_confident"] is True
-    assert result["reason_code"] == "lexical_token_coverage_sufficient"
+    assert result["reason_code"] == "vector_score_sufficient"
 
 
 def test_temporal_basis_rejects_compact_iso_date():
@@ -538,9 +481,9 @@ def test_temporal_basis_rejects_compact_iso_date():
     assert error == "invalid_effective_at"
 
 
-def test_lexical_tokens_do_not_treat_underscore_as_search_wildcard():
-    assert service._tokens("__ ___") == []
-    assert service._tokens("traffic_signal") == ["traffic", "signal"]
+def test_hash_embedding_tokens_do_not_treat_underscore_as_a_token():
+    assert service._hash_tokens("__ ___") == []
+    assert service._hash_tokens("traffic_signal") == ["traffic", "signal"]
 
 
 def test_vector_query_embedding_space_must_match_configured_seed(monkeypatch):
@@ -702,7 +645,7 @@ def test_openai_embedding_client_is_reused_without_exposing_the_key(monkeypatch)
 def test_graph_expansion_is_disabled_without_filtered_core_results(monkeypatch):
     from ai.agents.law_ground_search import search as law_search
 
-    monkeypatch.setattr(law_search, "_search_fallback_legal_rag", lambda **_kwargs: [])
+    monkeypatch.setattr(law_search, "_search_pgvector_legal_rag", lambda **_kwargs: [])
 
     class UnexpectedSession:
         def run(self, *_args, **_kwargs):
@@ -732,7 +675,7 @@ def test_graph_expansion_rechecks_source_family_and_effective_window(monkeypatch
     }
     monkeypatch.setattr(
         law_search,
-        "_search_fallback_legal_rag",
+        "_search_pgvector_legal_rag",
         lambda **_kwargs: [dict(core)],
     )
     future_node = {
