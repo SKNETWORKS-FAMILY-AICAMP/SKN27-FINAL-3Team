@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from datetime import date
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -423,6 +424,65 @@ def test_build_ragas_records_rejects_non_public_input() -> None:
             ],
             [],
         )
+
+
+def test_evaluate_ragas_samples_uses_ragas_evaluation_dataset(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeEvaluationDataset:
+        def __init__(self, samples: list[dict[str, object]]) -> None:
+            self.samples = [SimpleNamespace(**sample) for sample in samples]
+
+        @classmethod
+        def from_list(cls, samples: list[dict[str, object]]):
+            return cls(samples)
+
+    class LegacyDataset:
+        @classmethod
+        def from_list(cls, _samples: list[dict[str, object]]):
+            raise AssertionError("legacy Hugging Face Dataset path must not be used")
+
+    datasets_module = ModuleType("datasets")
+    datasets_module.Dataset = LegacyDataset
+    langchain_openai_module = ModuleType("langchain_openai")
+    langchain_openai_module.ChatOpenAI = lambda **kwargs: kwargs
+    langchain_openai_module.OpenAIEmbeddings = lambda **kwargs: kwargs
+    ragas_module = ModuleType("ragas")
+    ragas_module.__path__ = []
+    ragas_module.evaluate = lambda dataset, **kwargs: captured.update(dataset=dataset, kwargs=kwargs) or SimpleNamespace(
+        scores=[COMPLETE_RAGAS_METRICS]
+    )
+    ragas_dataset_schema_module = ModuleType("ragas.dataset_schema")
+    ragas_dataset_schema_module.EvaluationDataset = FakeEvaluationDataset
+    ragas_embeddings_module = ModuleType("ragas.embeddings")
+    ragas_embeddings_module.LangchainEmbeddingsWrapper = lambda value: value
+    ragas_llms_module = ModuleType("ragas.llms")
+    ragas_llms_module.LangchainLLMWrapper = lambda value: value
+    ragas_metrics_module = ModuleType("ragas.metrics")
+    ragas_metrics_module.answer_relevancy = "answer_relevancy"
+    ragas_metrics_module.context_precision = "context_precision"
+    ragas_metrics_module.context_recall = "context_recall"
+    ragas_metrics_module.faithfulness = "faithfulness"
+    for module_name, module in {
+        "datasets": datasets_module,
+        "langchain_openai": langchain_openai_module,
+        "ragas": ragas_module,
+        "ragas.dataset_schema": ragas_dataset_schema_module,
+        "ragas.embeddings": ragas_embeddings_module,
+        "ragas.llms": ragas_llms_module,
+        "ragas.metrics": ragas_metrics_module,
+    }.items():
+        monkeypatch.setitem(sys.modules, module_name, module)
+
+    result = run_evaluation._evaluate_ragas_samples(
+        [{**ragas_record("law-q001"), "answer": "공개 법령 근거 답변"}],
+        judge_model="gpt-test-judge",
+        embedding_model="text-embedding-test",
+    )
+
+    assert result == COMPLETE_RAGAS_METRICS
+    assert isinstance(captured["dataset"], FakeEvaluationDataset)
+    assert captured["dataset"].samples[0].question == "공개 법령 질의"
 
 
 def test_run_ragas_uses_fixed_generator_and_judge_for_each_backend_record(monkeypatch) -> None:

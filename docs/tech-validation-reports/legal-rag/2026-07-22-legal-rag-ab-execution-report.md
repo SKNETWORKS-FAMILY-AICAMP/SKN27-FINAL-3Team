@@ -89,3 +89,13 @@ pgvector의 20건은 모두 안전한 `openai_authentication_failed`로 기록�
 그러나 pgvector 20개는 다시 모두 안전한 `openai_authentication_failed`로 기록됐다. 즉 새 키도 질의 임베딩을 위한 OpenAI 인증을 통과하지 못했다. pgvector는 빈 context로 RAGAS 외부 호출 없이 `no_ragas_contexts`가 됐고, lexical 20개는 `ragas_runtime_unavailable`로 질의별 격리되어 어느 backend도 aggregate metric을 생성하지 못했다.
 
 `transition_decision.eligible`는 계속 `false`다. 새로운 키를 발급하거나 프로젝트·결제·권한이 활성화된 키로 교체한 다음, 새 run ID에서 pgvector의 `openai_authentication_failed`가 0건임을 먼저 확인해야 한다. 그 조건이 충족되기 전에는 pgvector 전환과 C-1 완료 처리를 하지 않는다. 키 값, 예외 원문, 질의·답변·context는 기록하지 않는다.
+
+## 실행 환경 업데이트 — `legal-ab-014` / `legal-ab-015`
+
+키 교체 후 `legal-ab-014-ragas-20260722`와 `legal-ab-015-ragas-20260722`를 재시도했다. `014`는 출력 디렉터리만 만들고 종료됐으며, `015`는 후보와 RAGAS 입력까지만 만들고 `summary.json` 작성 전에 RAGAS 평가 프로세스가 종료됐다. 따라서 두 디렉터리는 완료된 A/B 실행 근거나 전환 gate 판단에 사용하지 않는다.
+
+`015`의 후보 산출물은 키 교체 효과를 제한적으로 확인한다. PostgreSQL lexical은 20개 모두 `ready`이고 pgvector는 18개 `ready`, 2개 `empty`이며 `openai_authentication_failed`는 없다. 하지만 RAGAS 중단으로 backend aggregate와 `transition_decision`이 없으므로 이 수치는 품질 비교·전환 근거가 아니다.
+
+현재 로컬 평가 런타임은 Python 3.14.3뿐이다. 이 환경에서 Hugging Face `Dataset.from_list()`의 fingerprint 직렬화 `TypeError`를 재현했고, 평가기는 RAGAS 0.2.15가 지원하는 `EvaluationDataset.from_list()`를 사용하도록 수정했다. 관련 회귀 59개는 통과했다. 그러나 실제 RAGAS 평가 호출은 Python 프로세스를 종료해 안전한 query ledger나 aggregate를 남기지 못했다.
+
+다음 재실행은 Python 3.13 평가 전용 가상환경에서만 수행한다. 그 환경에서 단일 공개 법령 RAGAS 평가가 summary까지 완주하는 것을 먼저 확인한 뒤, 새 run ID로 20개 질의의 PostgreSQL lexical ↔ pgvector A/B와 RAGAS를 실행한다. 그 전까지 C-1과 pgvector 전환은 보류한다.

@@ -395,14 +395,14 @@ def _evaluate_ragas_samples(
 ) -> dict[str, float]:
     """Run the version-pinned legacy RAGAS API with explicit judge and embedding models."""
 
-    from datasets import Dataset
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from ragas import evaluate
+    from ragas.dataset_schema import EvaluationDataset
     from ragas.embeddings import LangchainEmbeddingsWrapper
     from ragas.llms import LangchainLLMWrapper
     from ragas.metrics import answer_relevancy, context_precision, context_recall, faithfulness
 
-    dataset = Dataset.from_list(
+    dataset = EvaluationDataset.from_list(
         [
             {
                 "question": _required_text(record, "question"),
