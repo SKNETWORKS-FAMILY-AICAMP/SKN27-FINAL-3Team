@@ -29,9 +29,16 @@ const EXECUTION_MODE = "async_worker";
 const WORKER_POLL_INTERVAL_MS = 500;
 const WORKER_POLL_MAX_ATTEMPTS = 60;
 const WORKER_PENDING_JOB_STATUSES = new Set(["queued", "running", "retrying"]);
+const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf,video/mp4,video/quicktime";
+const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime"]);
+const DOCUMENT_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const ATTACHMENT_PURPOSE_LABELS = {
   fine_notice: "고지서",
   supporting_evidence: "보조 자료",
+  blackbox_video: "블랙박스 영상",
+  accident_scene: "사고 현장 자료",
+  evidence: "증거 자료",
+  traffic_accident_confirmation: "교통사고 사실확인원",
 };
 const DEADLINE_GUIDANCE_STATUSES = new Set(["overdue", "due_soon", "normal", "needs_confirmation"]);
 const SERVICE_INFORMATION_NOTICE = "이 서비스는 법률 자문이나 개별 사건의 확정 판단을 대신하지 않으며, 확인할 사실과 근거를 정리합니다.";
@@ -193,7 +200,15 @@ export default function FrontendAppShell({
     ? analysisCards
     : analysisCards.filter((card) => card?.card_type !== "reporting_preview");
   const attachmentPurposes = Array.from(
-    new Set((capabilityCatalog?.capabilities || []).flatMap((capability) => capability.attachment_purposes || []))
+    new Set([
+      ...(capabilityCatalog?.capabilities || []).flatMap((capability) => capability.attachment_purposes || []),
+      "fine_notice",
+      "supporting_evidence",
+      "blackbox_video",
+      "accident_scene",
+      "evidence",
+      "traffic_accident_confirmation",
+    ])
   ).map((value) => ({ value, label: ATTACHMENT_PURPOSE_LABELS[value] || value }));
 
   useEffect(() => {
@@ -492,6 +507,34 @@ export default function FrontendAppShell({
     } finally {
       setIsRegisteringAttachment(false);
     }
+  }
+
+  function handleAttachmentFile(file) {
+    if (!file) return;
+    const contentType = String(file.type || "").toLowerCase();
+    if (!VIDEO_MIME_TYPES.has(contentType) && !DOCUMENT_MIME_TYPES.has(contentType)) {
+      setSelectedUploadFile(null);
+      setUploadInputResetKey((value) => value + 1);
+      setStatusMessage("이미지(JPEG/PNG/WebP), PDF, MP4 또는 MOV 파일만 첨부할 수 있습니다.");
+      return;
+    }
+    if (VIDEO_MIME_TYPES.has(contentType)) {
+      setAttachmentPurpose("blackbox_video");
+      setStatusMessage(`${file.name} 영상을 Vision 분석 대기열에 연결했습니다.`);
+    } else {
+      setStatusMessage(`${file.name} 파일을 OCR 분류 대기열에 연결했습니다.`);
+    }
+    setSelectedUploadFile(file);
+  }
+
+  function handleAttachmentDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleAttachmentDrop(event) {
+    event.preventDefault();
+    handleAttachmentFile(event.dataTransfer.files?.[0] || null);
   }
 
   async function runCurrentReportAction(action = "download_objection") {
@@ -1246,6 +1289,9 @@ export default function FrontendAppShell({
               isRegisteringAttachment={isRegisteringAttachment}
               isSubmitting={isSubmitting}
               isSavingConversation={isSavingConversation}
+              onAttachmentDragOver={handleAttachmentDragOver}
+              onAttachmentDrop={handleAttachmentDrop}
+              onAttachmentFile={handleAttachmentFile}
               onKeepTemporary={keepConversationTemporary}
               onRegisterAttachment={registerAttachmentMetadata}
               onOpenReporting={() => setActiveRoute("reporting")}
@@ -1263,7 +1309,6 @@ export default function FrontendAppShell({
               reportingPayload={reportingPayload}
               setAttachmentPurpose={setAttachmentPurpose}
               setQuestion={setQuestion}
-              setSelectedUploadFile={setSelectedUploadFile}
               capabilityError={capabilityError}
               submittedQuestion={submittedQuestion}
               supervisorExecution={supervisorExecution}
@@ -1949,6 +1994,9 @@ function ChatScreenV2({
   authSessionId,
   chatMessages,
   currentReport,
+  onAttachmentDragOver,
+  onAttachmentDrop,
+  onAttachmentFile,
   onOpenCaseResult,
   isRegisteringAttachment,
   isSavingConversation,
@@ -1970,7 +2018,6 @@ function ChatScreenV2({
   reportingPayload,
   setAttachmentPurpose,
   setQuestion,
-  setSelectedUploadFile,
   submittedQuestion,
   supervisorExecution,
   supervisorState,
@@ -2034,15 +2081,6 @@ function ChatScreenV2({
               ))}
             </select>
           </label>
-          <label className="file-picker">
-            <span>파일</span>
-            <input
-              key={uploadInputResetKey}
-              accept="image/*,application/pdf"
-              type="file"
-              onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
-            />
-          </label>
           <button
             className="button"
             type="button"
@@ -2052,6 +2090,28 @@ function ChatScreenV2({
             {uploadButtonLabel}
           </button>
           <span className="tag">자료 {registeredAttachments.length}건</span>
+        </div>
+        <div
+          className="attachment-dropzone"
+          onDragOver={onAttachmentDragOver}
+          onDrop={onAttachmentDrop}
+        >
+          <strong>파일을 끌어 놓거나 선택하세요.</strong>
+          <span>영상은 Vision 분석, 이미지와 PDF는 OCR 분류로 전달됩니다.</span>
+          <label className="file-picker">
+            <span>파일 선택</span>
+            <input
+              key={uploadInputResetKey}
+              accept={ATTACHMENT_ACCEPT}
+              type="file"
+              onChange={(event) => onAttachmentFile(event.target.files?.[0] || null)}
+            />
+          </label>
+          <span role="status">
+            {selectedUploadFile
+              ? `${selectedUploadFile.name} 선택됨 · ${VIDEO_MIME_TYPES.has(selectedUploadFile.type) ? "Vision" : "OCR"} 대기`
+              : "첨부할 파일을 하나 선택하세요."}
+          </span>
         </div>
         {capabilityError && <p className="attachment-help" role="alert">{capabilityError}</p>}
         {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (

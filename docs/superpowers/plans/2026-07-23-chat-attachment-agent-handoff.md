@@ -601,7 +601,7 @@ git commit -m "fix(#294): redact persisted agent execution metadata"
 - Produces: one selected file, an accepted/blocked client status, video purpose `blackbox_video`, and the existing `registerAttachmentMetadata` upload call.
 - Preserves: Google login handoff, asynchronous scan status polling, file picker operation, and no inline base64 upload.
 
-- [ ] **Step 1: Write source-contract tests for DnD, media accept list, and no legacy video exclusion.**
+- [x] **Step 1: Write source-contract tests for DnD, media accept list, and no legacy video exclusion.**
 
 ```python
 def test_frontend_attachment_intake_supports_drag_drop_and_video() -> None:
@@ -615,13 +615,13 @@ def test_frontend_attachment_intake_supports_drag_drop_and_video() -> None:
     assert "blackbox_video" in shell
 ```
 
-- [ ] **Step 2: Run frontend contract tests to verify they fail against the old picker.**
+- [x] **Step 2: Run frontend contract tests to verify they fail against the old picker.**
 
 Run: `python -m pytest test/test_frontend_auth_session_contract.py test/test_consultation_v2_contract.py -q`
 
 Expected: FAIL because the picker accepts only `image/*,application/pdf` and `ChatScreenV2` has no drop handlers.
 
-- [ ] **Step 3: Implement one client-side file handler and attach it to both entry points.**
+- [x] **Step 3: Implement one client-side file handler and attach it to both entry points.**
 
 ```jsx
 const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf,video/mp4,video/quicktime";
@@ -650,13 +650,13 @@ function handleAttachmentDrop(event) {
 
 Pass `handleAttachmentDrop` and `handleAttachmentDragOver={(event) => event.preventDefault()}` into `ChatScreenV2`. Replace the file picker `onChange` with `handleAttachmentFile(event.target.files?.[0] || null)`. Render the existing `.attachment-dropzone` inside the attachment bar with keyboard-accessible picker label, `role="status"` for selected/scan states, and text that says videos are sent to Vision while image/PDF files are sent to OCR classification. Extend `ATTACHMENT_PURPOSE_LABELS` with `blackbox_video`, `accident_scene`, `evidence`, and `traffic_accident_confirmation`.
 
-- [ ] **Step 4: Run frontend contract tests.**
+- [x] **Step 4: Run frontend contract tests.**
 
 Run: `python -m pytest test/test_frontend_auth_session_contract.py test/test_consultation_v2_contract.py test/test_service_scope_frontend_contract.py -q`
 
 Expected: PASS; both DnD and picker use the same handler, no unsupported MIME is submitted, and existing auth/session contracts remain intact.
 
-- [ ] **Step 5: Commit the DnD UI.**
+- [x] **Step 5: Commit the DnD UI.**
 
 ```bash
 git add app/web/FrontendAppShell.jsx app/web/styles.css test/test_frontend_auth_session_contract.py test/test_consultation_v2_contract.py

@@ -2820,6 +2820,30 @@ button.report-list-card.active {
   background: var(--soft);
 }
 
+.chat-attachment-bar .attachment-dropzone {
+  min-height: 96px;
+  padding: 14px;
+  gap: 6px;
+  border-color: var(--brand-soft-border);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.chat-attachment-bar .attachment-dropzone strong {
+  color: var(--ink);
+}
+
+.chat-attachment-bar .attachment-dropzone span {
+  font-size: 12px;
+}
+
+.chat-attachment-bar .attachment-dropzone .file-picker {
+  min-width: 0;
+}
+
+.chat-attachment-bar .attachment-dropzone input[type="file"] {
+  max-width: min(100%, 310px);
+}
+
 .attachment-help {
   margin: 0;
   color: var(--muted);

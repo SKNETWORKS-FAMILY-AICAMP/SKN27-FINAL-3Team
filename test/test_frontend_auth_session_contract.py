@@ -78,15 +78,26 @@ def test_frontend_catalog_drives_supported_attachments_without_demo_personas() -
     assert "capabilityCatalog?.capabilities" in shell
     assert "capabilityError" in shell
     assert 'const EXECUTION_MODE = "async_worker"' in shell
-    assert 'accept="image/*,application/pdf"' in shell
+    assert 'const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf,video/mp4,video/quicktime";' in shell
     assert "scan_pending" in shell
     assert "pollQueuedWorkerResult" in shell
     assert "api.getAnalysisResult" in shell
     assert "DEMO_PERSONAS" not in shell
     assert "persona-control-panel" not in shell
-    assert "accident_scene" not in shell
-    assert "blackbox_video" not in shell
+    assert "blackbox_video" in shell
     assert 'accept="image/*,application/pdf,video/*"' not in shell
+
+
+def test_frontend_attachment_intake_supports_drag_drop_and_video() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    assert 'accept={ATTACHMENT_ACCEPT}' in shell
+    assert "onDragOver={onAttachmentDragOver}" in shell
+    assert "onDrop={onAttachmentDrop}" in shell
+    assert "handleAttachmentFile" in shell
+    assert 'setAttachmentPurpose("blackbox_video")' in shell
+    assert "handleAttachmentDrop" in shell
+    assert "handleAttachmentDragOver" in shell
 
 
 def test_vite_proxy_does_not_capture_frontend_api_client_module() -> None:
