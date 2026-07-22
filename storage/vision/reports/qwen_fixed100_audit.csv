@@ -1,0 +1,5 @@
+﻿category,rows,unique_ids,fixed_ids,fixed_overlap,stale_ids,json_valid,target_correct,target_accuracy,uncertain,parse_errors,requires_review
+car_vs_car,100,100,100,100,0,91,63,0.6300,37,9,37
+car_vs_pedestrian,100,100,100,100,0,90,12,0.1200,41,10,41
+car_vs_motorcycle,100,100,100,100,0,84,0,0.0000,40,16,40
+car_vs_bicycle,100,100,100,100,0,86,2,0.0200,49,14,49

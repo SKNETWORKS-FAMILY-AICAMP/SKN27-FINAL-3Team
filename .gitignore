@@ -53,6 +53,11 @@ storage/vision/datasets/classification/manifests/*.csv
 storage/vision/datasets/classification/manifests/*.json
 storage/vision/manifests/*.json
 
+# RunPod session-only launchers and runtime state
+/run_runpod_qwen_adaptive.sh
+/watch_qwen_adaptive.py
+*.pid
+
 # Vision model weights stay out of Git; lightweight metadata stays trackable.
 storage/vision/models/**/*.pt
 storage/vision/models/**/*.pth
