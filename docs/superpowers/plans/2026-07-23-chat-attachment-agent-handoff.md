@@ -858,7 +858,7 @@ Run: `git diff --check`
 
 Expected: no output except an optional line-ending warning.
 
-- [ ] **Step 5: Commit the runbook and verification contract.**
+- [x] **Step 5: Commit the runbook and verification contract.**
 
 ```bash
 git add docs/ops/vision-media-adapter-runbook.md docs/vision/vision-service-handoff-requirements-2026-07-23.md test/test_runtime_worker_and_registry_contract.py test/test_api_route_specs.py
