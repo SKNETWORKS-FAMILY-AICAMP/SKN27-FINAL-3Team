@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from ai.vision.build_supervisor_handoff import build_handoff
 from ai.vision.run_to_supervisor import _checkpoint_files, run, select_yolo_model
 
 
@@ -57,6 +58,15 @@ class VisionRunToSupervisorTest(unittest.TestCase):
             self.assertEqual(payload["model_analysis"]["qwen"]["uncertainties"], ["occlusion"])
             self.assertEqual(payload["media_summary"]["summary"], "collision")
 
+    def test_korean_videomae_label_routes_to_a_yolo_model(self):
+        prediction, model = select_yolo_model(
+            {"clips": [{"top_predictions": [{"label": "차대차", "score": 0.9}]}]}
+        )
+
+        self.assertEqual(prediction["raw_label"], "차대차")
+        self.assertEqual(prediction["label"], "car_vs_car")
+        self.assertEqual(model, "yolov8m.pt")
+
     def test_qwen_failure_is_partial_handoff(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -83,7 +93,49 @@ class VisionRunToSupervisorTest(unittest.TestCase):
             self.assertEqual(payload["status"], "partial")
             self.assertFalse(payload["model_analysis"]["qwen"]["valid"])
             self.assertTrue(payload["model_analysis"]["qwen"]["requires_review"])
-            self.assertIn("RuntimeError", payload["model_analysis"]["qwen"]["error"])
+            self.assertEqual(payload["model_analysis"]["qwen"]["error_code"], "vision_qwen_unavailable")
+            self.assertNotIn("RuntimeError", json.dumps(payload, ensure_ascii=False))
+
+    def test_handoff_drops_local_paths_and_qwen_exception_text(self):
+        handoff = build_handoff(
+            {
+                "status": "partial",
+                "vision_agent_output": {
+                    "agent_output": {
+                        "structured_result": {
+                            "key_frames": [
+                                {
+                                    "frame_id": "frame_1",
+                                    "frame_path": "C:/private/frame.jpg",
+                                    "timestamp_sec": 1.2,
+                                }
+                            ],
+                            "evidence_candidates": [
+                                {
+                                    "evidence_id": "evidence_1",
+                                    "source_ref": "C:/private/detection.json",
+                                    "frame_path": "C:/private/frame.jpg",
+                                }
+                            ],
+                            "qwen_analysis": {
+                                "valid": False,
+                                "error": "RuntimeError: C:/private/model",
+                            },
+                        },
+                        "metadata": {"source_path": "C:/private/video.mp4"},
+                    }
+                },
+                "video_understanding": {"model_name": "C:/private/checkpoint"},
+            }
+        )
+
+        serialized = json.dumps(handoff, ensure_ascii=False)
+        self.assertNotIn("C:/private", serialized)
+        self.assertNotIn("RuntimeError", serialized)
+        self.assertEqual(
+            handoff["vision_supervisor_handoff"]["model_analysis"]["qwen"]["error_code"],
+            "vision_qwen_unavailable",
+        )
 
     def test_invalid_videomae_category_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unsupported"):

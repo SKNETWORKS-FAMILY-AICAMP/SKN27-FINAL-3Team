@@ -318,7 +318,7 @@ git commit -m "feat(#294): add video evidence analysis route"
 - Produces: a handoff that contains time-based evidence identifiers, object summaries, limitations, and `not_determined_by_vision`, but not local paths, source video URI, model checkpoint path, or raw Qwen exception text.
 - Required correctness fix: map `trained_category_classifier.LABELS` before selecting `BEST_YOLO_MODELS`.
 
-- [ ] **Step 1: Add failing tests for Korean class-label routing and handoff redaction.**
+- [x] **Step 1: Add failing tests for Korean class-label routing and handoff redaction.**
 
 ```python
 def test_korean_videomae_label_routes_to_a_yolo_model() -> None:
@@ -345,13 +345,13 @@ def test_handoff_drops_local_paths_and_qwen_exception_text() -> None:
     assert "RuntimeError" not in serialized
 ```
 
-- [ ] **Step 2: Run the Vision unit test file to verify the tests fail.**
+- [x] **Step 2: Run the Vision unit test file to verify the tests fail.**
 
 Run: `python -m pytest test/test_vision_run_to_supervisor.py -q`
 
 Expected: FAIL because `select_yolo_model` receives the Korean label unchanged and the current handoff contains `source_video`, `frame_path`, and raw Qwen error text.
 
-- [ ] **Step 3: Apply the label conversion and output allowlist.**
+- [x] **Step 3: Apply the label conversion and output allowlist.**
 
 ```python
 # ai/vision/run_to_supervisor.py, inside select_yolo_model
@@ -380,13 +380,13 @@ return {
 
 In `build_supervisor_handoff.py`, remove `source_video`, all `frame_path` fields, model-name/path fields, raw `qwen.error`, the report-agent routing recommendation, and fault-ratio recommendation fields. Keep only `frame_id`, `timestamp_sec`, `frame_role`, `selection_reason`, evidence IDs/types/timestamps/object classes/scores, detected-object counts, canonical prediction label/score, Qwen `valid`/summary/uncertainties/review flag/error code, limitations, and `NOT_DETERMINED_BY_VISION`.
 
-- [ ] **Step 4: Run the Vision tests.**
+- [x] **Step 4: Run the Vision tests.**
 
 Run: `python -m pytest test/test_vision_run_to_supervisor.py -q`
 
 Expected: PASS; the real pipeline keeps its callable interface, Korean labels select a model, and serialized handoff data contains no local path or raw exception diagnostic.
 
-- [ ] **Step 5: Commit Vision source hardening.**
+- [x] **Step 5: Commit Vision source hardening.**
 
 ```bash
 git add ai/vision/run_to_supervisor.py ai/vision/build_supervisor_handoff.py test/test_vision_run_to_supervisor.py
