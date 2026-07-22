@@ -82,6 +82,50 @@ class GuestCredentialBoundaryTests(TestCase):
         self.assertEqual(response.status_code, 401, response.content)
         self.assertEqual(response.json()["error"]["auth"]["reason"], "missing_guest_credential")
 
+    def test_raw_guest_id_cannot_create_or_read_analysis_resources(self) -> None:
+        client = Client(raise_request_exception=False, HTTP_X_GUEST_ID="gst_owner")
+        with patch("chatbot.views.submit_message") as submit_message:
+            create_response = client.post(
+                "/api/analysis/jobs/",
+                data={"session_id": "ses_credential_owner", "user_text": "start"},
+                content_type="application/json",
+            )
+
+        responses = (
+            create_response,
+            client.get("/api/analysis/jobs/job_credential_boundary/"),
+            client.get("/api/analysis/results/job_credential_boundary/"),
+        )
+        for response in responses:
+            self.assertEqual(response.status_code, 401, response.content)
+            self.assertEqual(response.json()["error"]["code"], "token_invalid")
+            self.assertEqual(
+                response.json()["error"]["auth"]["reason"],
+                "missing_guest_credential",
+            )
+        submit_message.assert_not_called()
+
+    def test_raw_guest_id_cannot_read_mypage_summary(self) -> None:
+        response = Client(HTTP_X_GUEST_ID="gst_owner").get(
+            "/api/mypage/summary/?session_id=ses_credential_owner"
+        )
+
+        self.assertEqual(response.status_code, 401, response.content)
+        self.assertEqual(response.json()["error"]["code"], "auth_required")
+        self.assertEqual(response.json()["error"]["auth"]["reason"], "missing_token")
+
+    def test_header_proved_guest_still_cannot_read_mypage_summary(self) -> None:
+        credential, _claims = issue_guest_credential("owner")
+
+        response = Client(
+            HTTP_X_GUEST_ID="gst_owner",
+            HTTP_X_GUEST_CREDENTIAL=credential,
+        ).get("/api/mypage/summary/?session_id=ses_credential_owner")
+
+        self.assertEqual(response.status_code, 401, response.content)
+        self.assertEqual(response.json()["error"]["code"], "auth_required")
+        self.assertEqual(response.json()["error"]["auth"]["reason"], "missing_token")
+
     def test_header_proved_guest_can_read_history_and_analysis_jobs(self) -> None:
         credential, _claims = issue_guest_credential("owner")
         client = Client(

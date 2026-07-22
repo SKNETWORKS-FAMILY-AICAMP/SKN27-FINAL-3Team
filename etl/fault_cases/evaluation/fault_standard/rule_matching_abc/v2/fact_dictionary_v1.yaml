@@ -1,0 +1,13 @@
+version: accident_facts_v1
+source_policy: query_text_and_raw_user_text_only
+states: [confirmed, unknown, conflict]
+party_fields:
+  actor_type: [vehicle, motorcycle, pedestrian, bicycle, pm]
+  movement: [straight, left_turn, right_turn, u_turn, lane_change, merge, rear_end, stop, start, enter, exit, pedestrian_crossing]
+  signal_state: [green, yellow, red, green_flash, yellow_flash, red_flash, green_arrow]
+  road_position: [main_road, side_road, crosswalk, sidewalk, parking_lot, non_road, bicycle_lane, roundabout, lane]
+  violation_type: [signal_violation, centerline_crossing, one_way_violation]
+environment_fields:
+  accident_group: [signalized_intersection, unsignalized_intersection, turn_and_lane_rule, lane_change_and_rear_end, road_entry_and_parking, roundabout, highway, vehicle_motorcycle, vehicle_pedestrian, vehicle_bicycle_pm]
+  entry_order: [first, simultaneous, disputed]
+unknown_policy: never_convert_to_false

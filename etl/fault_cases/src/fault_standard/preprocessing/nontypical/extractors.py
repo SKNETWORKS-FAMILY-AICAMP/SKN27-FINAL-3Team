@@ -347,8 +347,10 @@ def extract_review_cases(text: str, rule_id: str) -> List[Dict[str, Any]]:
         # 원문을 정리합니다.
         raw = normalize_spaces(match.group(0))
 
-        # 청구/피청구 과실비율을 추출합니다.
-        claim_ratio, respondent_ratio = extract_claim_respondent_ratios(raw)
+        # 청구/피청구 과실비율과 추출 근거를 함께 보존합니다.
+        ratio_info = extract_claim_respondent_ratio_info(raw)
+        claim_ratio = ratio_info["claim_ratio"]
+        respondent_ratio = ratio_info["respondent_ratio"]
 
         # 심의사례 row를 추가합니다.
         review_cases.append(
@@ -358,6 +360,10 @@ def extract_review_cases(text: str, rule_id: str) -> List[Dict[str, Any]]:
                 "review_receipt_no": match.group(1),
                 "claim_vehicle_fault_ratio": claim_ratio,
                 "respondent_vehicle_fault_ratio": respondent_ratio,
+                "claim_vehicle_fault_ratio_source": ratio_info["claim_source"],
+                "respondent_vehicle_fault_ratio_source": ratio_info["respondent_source"],
+                "ratio_pair_complete": claim_ratio is not None and respondent_ratio is not None,
+                "ratio_inference_applied": ratio_info["inference_applied"],
                 "accident_summary": raw[:300],
                 "decision_summary": raw,
                 "raw_text": raw,
@@ -617,6 +623,17 @@ def extract_fault_ratio_text(text: str) -> Optional[str]:
 def extract_claim_respondent_ratios(text: str) -> Tuple[Optional[int], Optional[int]]:
     """심의사례 문장에서 청구/피청구 과실비율을 추출합니다."""
 
+    info = extract_claim_respondent_ratio_info(text)
+    return info["claim_ratio"], info["respondent_ratio"]
+
+
+def extract_claim_respondent_ratio_info(text: str) -> Dict[str, Any]:
+    """심의사례의 쌍방 비율과 명시/파생 근거를 반환합니다.
+
+    두 당사자 과실비율은 합계 100인 쌍입니다. 한쪽만 ``과실 N%``로 명시된 경우에는
+    상대 비율을 100-N으로 계산하되, 원문 명시값과 구분되도록 source를 기록합니다.
+    """
+
     normalized = normalize_party_ratio_text(text)
     claim_ratio = find_labeled_ratio(
         normalized,
@@ -639,13 +656,39 @@ def extract_claim_respondent_ratios(text: str) -> Tuple[Optional[int], Optional[
             r"(?:피청구이륜차|피고이륜차|상대이륜차)\s*(?:과실)?\s*(\d{1,3})\s*%",
         ],
     )
+    claim_source = "explicit_text" if claim_ratio is not None else None
+    respondent_source = "explicit_text" if respondent_ratio is not None else None
+    inference_applied = False
 
     if claim_ratio is not None and respondent_ratio is None:
         ratios = [int(value) for value in re.findall(r"(?:과실\s*)?(\d{1,3})\s*%", normalized)]
         if len(ratios) >= 2:
             respondent_ratio = ratios[1]
+            respondent_source = "unlabeled_pair_text"
 
-    return claim_ratio, respondent_ratio
+    if respondent_ratio is not None and claim_ratio is None:
+        ratios = [int(value) for value in re.findall(r"(?:과실\s*)?(\d{1,3})\s*%", normalized)]
+        if len(ratios) >= 2:
+            claim_ratio = ratios[0]
+            claim_source = "unlabeled_pair_text"
+
+    if claim_ratio is not None and respondent_ratio is None:
+        respondent_ratio = 100 - claim_ratio
+        respondent_source = "derived_complement"
+        inference_applied = True
+
+    if respondent_ratio is not None and claim_ratio is None:
+        claim_ratio = 100 - respondent_ratio
+        claim_source = "derived_complement"
+        inference_applied = True
+
+    return {
+        "claim_ratio": claim_ratio,
+        "respondent_ratio": respondent_ratio,
+        "claim_source": claim_source,
+        "respondent_source": respondent_source,
+        "inference_applied": inference_applied,
+    }
 
 
 def normalize_party_ratio_text(text: str) -> str:
@@ -653,6 +696,9 @@ def normalize_party_ratio_text(text: str) -> str:
 
     normalized = normalize_spaces(text)
     normalized = normalized.replace("％", "%").replace("，", ",")
+    # PDF 줄바꿈 때문에 핵심 라벨 한 단어가 둘로 갈라진 경우를 복원합니다.
+    normalized = re.sub(r"과\s+실", "과실", normalized)
+    normalized = re.sub(r"피청\s+구", "피청구", normalized)
     normalized = re.sub(r"(청구|피청구|원고|피고|상대)\s+(차량|자동차|이륜차|차)", r"\1\2", normalized)
     normalized = re.sub(r"\s*,\s*", ", ", normalized)
     return normalized

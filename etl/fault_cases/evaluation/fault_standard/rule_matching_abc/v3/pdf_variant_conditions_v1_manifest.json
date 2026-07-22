@@ -1,0 +1,13 @@
+{
+  "approved_executable_count": 6,
+  "approved_mapping": "exact labels 동시/선진입/후진입 -> environment.entry_order",
+  "excluded": [
+    "query/qrels/ratio",
+    "signal-party inference",
+    "adjustment trigger inference",
+    "lane sequence inference"
+  ],
+  "requires_pdf_semantic_review_count": 34,
+  "variant_count": 40,
+  "version": "v3_variant_condition_registry_v1"
+}

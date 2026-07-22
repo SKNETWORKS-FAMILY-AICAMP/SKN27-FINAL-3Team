@@ -1,0 +1,61 @@
+{
+  "dataset": "fault_complete30_v1",
+  "manifest_version": "1.1",
+  "status": "PASS",
+  "verified_at": "2026-07-20",
+  "supersedes": "complete30_manifest.json",
+  "correction_reason": "기존 manifest의 질문지·정답지 SHA-256이 실제 V9 실행 입력과 달라, G0 고정 입력과 Qwen 4B 임베딩 실행 기록을 기준으로 현재 파일 해시를 다시 검증했다.",
+  "question_file": "complete30_consumer_questions_v1.jsonl",
+  "question_count": 30,
+  "question_unique_case_id_count": 30,
+  "question_sha256": "8bc649f5f38a07c893bcce4a5aa397c540b926d544cd60b3d40fc7a3cf876889",
+  "answer_file": "complete30_answer_key_with_explanations_v1.jsonl",
+  "answer_count": 30,
+  "answer_unique_case_id_count": 30,
+  "answer_sha256": "47c21dedb248aa9138609925c24801b3e6fb1443949aefa29125388110062128",
+  "case_id_validation": {
+    "question_answer_one_to_one": true,
+    "question_answer_case_ids_equal": true
+  },
+  "book_distribution": {
+    "2020": 7,
+    "2021": 6,
+    "2023": 11,
+    "2025": 6
+  },
+  "adjustment_case_count": 4,
+  "g0_execution_evidence": {
+    "manifest_file": "../../artifacts/v7_complete30_abc/00_frozen_input/g0_manifest.json",
+    "manifest_sha256": "b2504e27683f155470f61e3f191fbca0040d0b0ce24a0d9e2aa1ed5990034b3c",
+    "status": "PASS",
+    "question_hash_matches": true,
+    "answer_hash_matches": true,
+    "answer_leakage_detected": false
+  },
+  "qwen4_embedding_evidence": {
+    "manifest_file": "../../artifacts/v7_complete30_abc/01_common_candidates/runpod_all_embeddings_manifest.json",
+    "manifest_sha256": "5490fd7678fab360ed7e560eacd3a593b81460f25c53822e078637ca007fceb7",
+    "status": "PASS",
+    "model_name": "Qwen/Qwen3-Embedding-4B",
+    "model_revision": "5cf2132abc99cad020ac570b19d031efec650f2b",
+    "dimension": 2560,
+    "normalization": "L2",
+    "document_count": 277,
+    "query_count": 30,
+    "question_hash_matches": true
+  },
+  "gates": {
+    "question_count_30": true,
+    "answer_count_30": true,
+    "one_to_one_case_id": true,
+    "all_calculated": true,
+    "all_ratios_sum_100": true,
+    "question_label_leakage": false,
+    "g0_hash_binding": true,
+    "embedding_input_hash_binding": true
+  },
+  "notes": [
+    "이 파일은 질문지나 정답지를 새로 만든 것이 아니라 실제 V9 실행에 사용된 두 파일의 현재 해시를 기록한 교정 manifest다.",
+    "기존 complete30_manifest.json은 이력 확인용으로 보존하고, 이후 V9 재현과 폴더 이관에는 이 v1.1 파일을 사용한다."
+  ]
+}

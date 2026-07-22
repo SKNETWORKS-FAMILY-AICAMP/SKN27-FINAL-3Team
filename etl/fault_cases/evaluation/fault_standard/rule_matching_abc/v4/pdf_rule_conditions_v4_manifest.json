@@ -1,0 +1,9 @@
+{
+  "approved_from_pdf_visual_review": true,
+  "base_condition_count": 1065,
+  "override_count": 7,
+  "qrels_used": false,
+  "ratio_used": false,
+  "source": "230630 PDF printed page 584 / file page 586",
+  "version": "v4_pdf_rule_heading_overrides_v1"
+}

@@ -1,0 +1,78 @@
+{
+  "version": "v1_draft",
+  "description": "Gate 1-2 가상 발동 전용 규칙이다. Query ID·판례 ID·qrels·기존 검색순위를 포함하지 않는다.",
+  "rules": [
+    {
+      "rule_id": "unsignalized_equal_width_right_approach",
+      "name": "같은 폭 비신호 교차로 우측 접근",
+      "variants": {
+        "broad": {"all": ["unsignalized", "two_actors_straight"], "none": []},
+        "balanced": {"all": ["unsignalized", "equal_width", "two_actors_straight", "right_approach"], "none": ["left_turn", "right_turn", "motorcycle"]},
+        "strict": {"all": ["unsignalized", "equal_width", "four_way_intersection", "two_actors_straight", "right_approach"], "none": ["left_turn", "right_turn", "unequal_road", "motorcycle"]}
+      }
+    },
+    {
+      "rule_id": "illegal_uturn_vs_oncoming_straight",
+      "name": "신호위반 불법 유턴 대 맞은편 직진",
+      "variants": {
+        "broad": {"all": ["uturn", "straight"], "none": []},
+        "balanced": {"all": ["uturn", "straight", "illegal_uturn"], "none": ["overtake"]},
+        "strict": {"all": ["uturn", "straight", "illegal_uturn", "center_line"], "none": ["overtake", "motorcycle_only"]}
+      }
+    },
+    {
+      "rule_id": "lane_change_rear_straight_vehicle",
+      "name": "변경 차로 후행 직진차",
+      "variants": {
+        "broad": {"all": ["lane_change"], "none": []},
+        "balanced": {"all": ["lane_change", "changed_lane_rear_straight"], "none": []},
+        "strict": {"all": ["lane_change", "changed_lane_rear_straight", "side_collision"], "none": ["signal_waiting", "turn_lane"]}
+      }
+    },
+    {
+      "rule_id": "signal_stop_rear_end",
+      "name": "신호대기 정상정차 후방추돌",
+      "variants": {
+        "broad": {"all": ["stop", "rear_end"], "none": []},
+        "balanced": {"all": ["signal_waiting", "rear_end"], "none": []},
+        "strict": {"all": ["signal_waiting", "rear_end", "forward_attention_or_distance"], "none": ["prior_accident", "expressway", "icing"]}
+      }
+    },
+    {
+      "rule_id": "offroad_entry_to_mainline",
+      "name": "도로 외 장소에서 본선 진입",
+      "variants": {
+        "broad": {"all": ["road_entry", "straight"], "none": []},
+        "balanced": {"all": ["offroad_place", "road_entry", "mainline_straight"], "none": []},
+        "strict": {"all": ["offroad_place", "road_entry", "mainline_straight"], "none": ["unsignalized", "mainline_exit"]}
+      }
+    },
+    {
+      "rule_id": "highway_passing_lane_change",
+      "name": "고속도로 추월차로 변경",
+      "variants": {
+        "broad": {"all": ["expressway", "lane_change"], "none": []},
+        "balanced": {"all": ["expressway", "driving_lane", "passing_lane", "lane_change", "passing_lane_straight"], "none": []},
+        "strict": {"all": ["expressway", "driving_lane", "passing_lane", "lane_change", "passing_lane_straight"], "none": ["center_line", "oncoming", "mainline_merge"]}
+      }
+    },
+    {
+      "rule_id": "right_turn_vs_right_rear_motorcycle",
+      "name": "자동차 우회전 대 우측 후행 이륜차 직진",
+      "variants": {
+        "broad": {"all": ["right_turn", "motorcycle"], "none": []},
+        "balanced": {"all": ["car", "right_turn", "motorcycle", "right_side", "following", "straight"], "none": []},
+        "strict": {"all": ["car", "right_turn", "motorcycle", "right_side", "following", "straight"], "none": ["bicycle", "left_turn", "overtake"]}
+      }
+    },
+    {
+      "rule_id": "lane_change_vs_rear_motorcycle",
+      "name": "자동차 차로변경 대 후행 이륜차 직진",
+      "variants": {
+        "broad": {"all": ["lane_change", "motorcycle"], "none": []},
+        "balanced": {"all": ["car", "lane_change", "motorcycle", "following", "straight"], "none": []},
+        "strict": {"all": ["car", "lane_change", "motorcycle", "following", "straight"], "none": ["bicycle", "left_turn", "overtake"]}
+      }
+    }
+  ]
+}

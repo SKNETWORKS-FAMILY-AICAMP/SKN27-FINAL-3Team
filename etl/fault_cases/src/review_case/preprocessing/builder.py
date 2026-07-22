@@ -43,7 +43,7 @@ def _apply_toc(doc: ReviewCaseDocument, toc_items: list[ReviewCaseTocItem]) -> R
 
 def build_document(case: ReviewCaseText, config: PipelineConfig, toc_items: list[ReviewCaseTocItem]) -> ReviewCaseDocument:
     header = parse_header(case.clean_text)
-    scenario = parse_standard_scenario(case.clean_text)
+    scenario = parse_standard_scenario(case.clean_text, header.header_title_raw)
     ratio = parse_decision_ratio(case.clean_text)
     sections = parse_sections(case)
     claimant_behavior, respondent_behavior = behavior_for_role(

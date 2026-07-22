@@ -1,0 +1,82 @@
+{
+  "ground_truth_version": "fault_standard_qrels_v1",
+  "corpus": "fault_standard",
+  "query_set_version": "fault_common_queries_v1",
+  "query_file": "../../../../common/embedding_ab/v1/common_fault_queries_v1.jsonl",
+  "qrels_file": "fault_standard_qrels_v1.jsonl",
+  "query_count": 50,
+  "qrels_row_count": 103,
+  "unique_query_count": 50,
+  "query_coverage_count": 50,
+  "query_coverage_rate": 1.0,
+  "query_sha256": "a50921b0ea409ebfdd46d50c8ef632fb1fdac7c53b80ebb95fbb353c4ea02102",
+  "qrels_sha256": "bbd8f8f1e3647edfc7e7c49fce58e606b697b96d5150fa989f0c11b459c98b36",
+  "rule_corpus_count": 277,
+  "judgment_status_query_counts": {
+    "has_relevant_document": 47,
+    "no_relevant_document": 3
+  },
+  "judgment_status_row_counts": {
+    "has_relevant_document": 100,
+    "no_relevant_document": 3
+  },
+  "relevance_counts": {
+    "0": 47,
+    "1": 4,
+    "2": 49
+  },
+  "hard_negative_judgment_count": 47,
+  "exact_judgment_count": 49,
+  "distinct_exact_rule_count": 36,
+  "exact_judgment_rulebook_distribution": {
+    "2020_nontypical_accident_rulebook": 4,
+    "2021_pm_vs_auto_nontypical_rulebook": 1,
+    "2023_official_auto_accident_rulebook": 43,
+    "2025_two_lane_roundabout_rulebook": 1
+  },
+  "accident_group_distribution": {
+    "signalized_intersection": 8,
+    "unsignalized_intersection": 7,
+    "turn_and_lane_rule": 5,
+    "lane_change_and_rear_end": 8,
+    "road_entry_and_parking": 4,
+    "roundabout": 3,
+    "highway": 4,
+    "vehicle_motorcycle": 6,
+    "vehicle_pedestrian": 3,
+    "vehicle_bicycle_pm": 2
+  },
+  "difficulty_distribution": {
+    "easy": 25,
+    "medium": 21,
+    "hard": 4
+  },
+  "query_calculation_status_distribution": {
+    "calculable_from_query": 35,
+    "base_ratio_only": 4,
+    "base_ratio_with_scope_assumption": 1,
+    "requires_fact_resolution": 5,
+    "requires_adjustment_review": 2,
+    "no_exact_rule_in_corpus": 3
+  },
+  "no_relevant_query_ids": [
+    "fault_common_q07",
+    "fault_common_q31",
+    "fault_common_q46"
+  ],
+  "annotation_status": "draft_flat_103_rows_pending_two_person_review",
+  "initial_labeler": "codex_initial_labeler",
+  "independent_review_status": "not_started",
+  "adjudication_status": "not_started",
+  "frozen_for_embedding_ab": false,
+  "created_at": "2026-07-15",
+  "notes": [
+    "심의사례와 동일하게 Rule 판정 1건당 1줄인 flat JSONL이며 judgments 중첩 배열을 사용하지 않는다.",
+    "qrels 103줄이 공통 query 50개를 query_id 기준으로 모두 커버한다.",
+    "정답이 없는 3개 query는 no_relevant_document 한 줄씩만 둔다.",
+    "relevance=2 Rule 49건이 참조하는 서로 다른 exact Rule은 36개다.",
+    "모든 참조 rule_id, variant_id, adjustment_id가 전처리 테이블에 존재함을 확인했다.",
+    "ground_truth 폴더는 정답지 저장 위치를 뜻하며 사람 검수 완료 상태를 뜻하지 않는다.",
+    "두 명의 독립 검수와 adjudication 전에는 임베딩 A/B의 동결 정답지로 사용하지 않는다."
+  ]
+}

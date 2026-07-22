@@ -1,0 +1,13 @@
+{
+  "approved_executable_count": 22,
+  "approved_mapping": "exact Variant labels -> controlled environment fact vocabulary",
+  "excluded": [
+    "query/qrels/ratio",
+    "signal-party inference",
+    "adjustment trigger inference",
+    "lane sequence inference"
+  ],
+  "requires_pdf_semantic_review_count": 18,
+  "variant_count": 40,
+  "version": "v3_variant_condition_registry_v1"
+}

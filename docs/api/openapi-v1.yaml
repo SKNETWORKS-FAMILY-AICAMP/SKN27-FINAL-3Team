@@ -33,6 +33,7 @@ paths:
                 $ref: '#/components/schemas/CaseApiErrorResponse'
           x-error-codes:
           - login_required
+          x-response-semantics: authorization_denied
     post:
       tags:
       - Cases
@@ -59,6 +60,7 @@ paths:
           x-error-codes:
           - login_required
           - case_owner_mismatch
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -116,6 +118,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -161,6 +164,7 @@ paths:
           - login_required
           - object_access_denied
           - case_owner_mismatch
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -228,6 +232,7 @@ paths:
           - login_required
           - object_access_denied
           - case_owner_mismatch
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -324,6 +329,7 @@ paths:
                 $ref: '#/components/schemas/AuthErrorResponse'
           x-error-codes:
           - token_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -332,6 +338,7 @@ paths:
                 $ref: '#/components/schemas/AuthErrorResponse'
           x-error-codes:
           - forbidden
+          x-response-semantics: authorization_denied
         '503':
           description: Typed API error response
           content:
@@ -405,6 +412,7 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
+          x-response-semantics: authentication_failure
       requestBody:
         required: false
         content:
@@ -440,6 +448,7 @@ paths:
           - auth_required
           - token_invalid
           - token_expired
+          x-response-semantics: authentication_failure
       requestBody:
         required: false
         content:
@@ -474,6 +483,7 @@ paths:
           x-error-codes:
           - token_invalid
           - token_expired
+          x-response-semantics: authentication_failure
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -497,6 +507,366 @@ paths:
         in: query
         required: false
         description: Optional chat session binding identifier.
+        schema:
+          type: string
+  /api/chat/sessions/:
+    post:
+      tags:
+      - Chat
+      summary: Issue a draft chat session identifier; persistence occurs during message or save-state
+        processing
+      operationId: issueChatSessionDraft
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-create-chat-session
+      x-django-view: create_chat_session
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSessionCreateResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatApiErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - guest_session_invalid
+          x-response-semantics: authentication_failure
+      parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
+        schema:
+          type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatSessionCreateRequest'
+  /api/chat/messages/:
+    post:
+      tags:
+      - Chat
+      summary: Submit a chat turn and return immediate guidance, an asynchronous Worker receipt, or supervisor-unavailable
+        state
+      operationId: submitChatMessage
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-submit-chat-message
+      x-django-view: submit_chat_message
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessageResponse'
+        '202':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessageResponse'
+        '409':
+          description: Attachment scan blocked; safe partial guidance is available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessageResponse'
+          x-response-semantics: partial_result
+        '503':
+          description: Supervisor planning is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessageResponse'
+          x-response-semantics: service_unavailable
+        '400':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatApiErrorResponse'
+          x-error-codes:
+          - chat_input_rejected
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatApiErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - guest_session_invalid
+          x-response-semantics: authentication_failure
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatApiErrorResponse'
+          x-error-codes:
+          - object_access_denied
+          x-response-semantics: authorization_denied
+        '429':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatApiErrorResponse'
+          x-error-codes:
+          - rate_limit_exceeded
+      parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatMessageRequest'
+  /api/chat/save-state/:
+    post:
+      tags:
+      - Chat
+      summary: Update a conversation save preference; an unknown session returns 200 with skipped state
+      operationId: updateChatSaveState
+      security:
+      - {}
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-chat-save-state
+      x-django-view: update_chat_save_state
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatSaveStateResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatApiErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          - guest_session_invalid
+          x-response-semantics: authentication_failure
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatApiErrorResponse'
+          x-error-codes:
+          - login_required
+          - object_access_denied
+          x-response-semantics: authorization_denied
+      parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatSaveStateRequest'
+  /api/mypage/summary/:
+    get:
+      tags:
+      - MyPage
+      summary: Read the authenticated user's summary after owner or session authorization
+      operationId: getMyPageSummary
+      security:
+      - bearerAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-mypage-summary
+      x-django-view: mypage_summary
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyPageSummaryResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          x-response-semantics: authentication_failure
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - object_access_denied
+          x-response-semantics: authorization_denied
+      parameters:
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier used to scope the summary and session cache.
+        schema:
+          type: string
+      - name: owner_id
+        in: query
+        required: false
+        description: Optional owner identifier. When supplied, it takes precedence over user_id.
+        schema:
+          type: string
+      - name: user_id
+        in: query
+        required: false
+        description: Legacy owner alias used only when owner_id is absent.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        description: Optional positive integer with a default of 10; invalid values fall back to that
+          default.
+        schema:
+          type: string
+  /api/history/:
+    get:
+      tags:
+      - History
+      summary: List the current subject's standard-light history events with owner-scoped filters
+      operationId: listHistoryEvents
+      security:
+      - bearerAuth: []
+      - guestCredentialAuth: []
+      x-contract-status: shadow
+      x-django-route-name: canonical-history-events
+      x-django-view: history_events
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryListResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryApiErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          x-response-semantics: authentication_failure
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryApiErrorResponse'
+          x-error-codes:
+          - object_access_denied
+          x-response-semantics: authorization_denied
+      parameters:
+      - name: X-Guest-Credential
+        in: header
+        required: false
+        description: Signed guest credential required to prove a supplied guest identity.
+        schema:
+          type: string
+      - name: X-Guest-Id
+        in: header
+        required: false
+        description: Optional guest identifier. It is not valid identity proof without X-Guest-Credential.
+        schema:
+          type: string
+      - name: session_id
+        in: query
+        required: false
+        description: Optional chat session identifier; the server verifies session ownership.
+        schema:
+          type: string
+      - name: user_id
+        in: query
+        required: false
+        description: Optional user identifier; the server verifies owner access.
+        schema:
+          type: string
+      - name: guest_id
+        in: query
+        required: false
+        description: Optional guest identifier; the server verifies guest access.
+        schema:
+          type: string
+      - name: job_id
+        in: query
+        required: false
+        description: Optional analysis job identifier; the server verifies its session owner.
+        schema:
+          type: string
+      - name: event_type
+        in: query
+        required: false
+        description: Optional history event type filter.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        description: Optional positive integer; invalid or non-positive values fall back and the default
+          is 100.
         schema:
           type: string
   /api/files/:
@@ -526,6 +896,7 @@ paths:
                 $ref: '#/components/schemas/FileGuestSessionErrorResponse'
           x-error-codes:
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -534,6 +905,7 @@ paths:
                 $ref: '#/components/schemas/FileObjectAccessErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -587,6 +959,7 @@ paths:
                 $ref: '#/components/schemas/FileGuestSessionErrorResponse'
           x-error-codes:
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -595,6 +968,7 @@ paths:
                 $ref: '#/components/schemas/FileObjectAccessErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '413':
           description: Typed API error response
           content:
@@ -668,6 +1042,7 @@ paths:
                 $ref: '#/components/schemas/FileGuestSessionErrorResponse'
           x-error-codes:
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -676,6 +1051,7 @@ paths:
                 $ref: '#/components/schemas/FileObjectAccessErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -730,6 +1106,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnalysisJobListResponse'
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -738,6 +1125,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -784,6 +1172,17 @@ paths:
           x-error-codes:
           - analysis_job_session_required
           - chat_input_rejected
+        '401':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisJobErrorResponse'
+          x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -792,6 +1191,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '409':
           description: Typed API error response
           content:
@@ -864,7 +1264,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -873,6 +1277,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -922,11 +1327,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnalysisResultResponse'
         '202':
-          description: Successful response
+          description: Analysis result is not ready; continue polling the result endpoint.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnalysisResultResponse'
+          x-response-semantics: pending
         '401':
           description: Typed API error response
           content:
@@ -934,7 +1340,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
+          - auth_required
+          - token_invalid
+          - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -943,6 +1353,7 @@ paths:
                 $ref: '#/components/schemas/AnalysisJobErrorResponse'
           x-error-codes:
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1001,6 +1412,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1009,6 +1421,7 @@ paths:
                 $ref: '#/components/schemas/ReportApiErrorResponse'
           x-error-codes:
           - login_required
+          x-response-semantics: authorization_denied
       parameters:
       - name: X-Guest-Credential
         in: header
@@ -1058,6 +1471,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1067,6 +1481,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1154,6 +1569,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1163,6 +1579,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1245,6 +1662,7 @@ paths:
           - token_invalid
           - token_expired
           - guest_session_invalid
+          x-response-semantics: authentication_failure
         '403':
           description: Typed API error response
           content:
@@ -1254,6 +1672,7 @@ paths:
           x-error-codes:
           - login_required
           - object_access_denied
+          x-response-semantics: authorization_denied
         '404':
           description: Typed API error response
           content:
@@ -1318,6 +1737,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    guestCredentialAuth:
+      type: apiKey
+      in: header
+      name: X-Guest-Credential
+      description: Server-verified guest credential for protected guest routes.
   schemas:
     AnalysisJobAccepted:
       additionalProperties: true
@@ -2370,6 +2794,282 @@ components:
       - $ref: '#/components/schemas/CaseObjectAccessDeniedErrorResponse'
       description: Strict union of the error envelopes emitted by Case v2 endpoints.
       title: CaseApiErrorResponse
+    ChatApiError:
+      additionalProperties: true
+      properties:
+        code:
+          maxLength: 120
+          minLength: 1
+          title: Code
+          type: string
+        message:
+          minLength: 1
+          title: Message
+          type: string
+        status:
+          anyOf:
+          - maximum: 599
+            minimum: 400
+            type: integer
+          - type: 'null'
+          default: null
+          title: Status
+      required:
+      - code
+      - message
+      title: ChatApiError
+      type: object
+    ChatApiErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/ChatApiError'
+      required:
+      - error
+      title: ChatApiErrorResponse
+      type: object
+    ChatMessageRequest:
+      additionalProperties: false
+      properties:
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        user_text:
+          anyOf:
+          - minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: User Text
+        attachments:
+          items:
+            additionalProperties: true
+            type: object
+          title: Attachments
+          type: array
+        conversation_history:
+          items:
+            additionalProperties: true
+            type: object
+          title: Conversation History
+          type: array
+        conversation_save_state:
+          anyOf:
+          - enum:
+            - saved
+            - pending
+            - session_only
+            type: string
+          - type: 'null'
+          default: null
+          title: Conversation Save State
+        execution_mode:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Execution Mode
+        routing_intent:
+          anyOf:
+          - maxLength: 120
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Routing Intent
+        case_storage_consent:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          default: null
+          title: Case Storage Consent
+      title: ChatMessageRequest
+      type: object
+    ChatMessageResponse:
+      additionalProperties: true
+      properties:
+        contract_version:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Contract Version
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        message_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        execution_mode:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Execution Mode
+        work_item:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Work Item
+        supervisor_execution:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Supervisor Execution
+        persistence:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Persistence
+      required:
+      - status
+      title: ChatMessageResponse
+      type: object
+    ChatSaveStateRequest:
+      additionalProperties: false
+      properties:
+        session_id:
+          maxLength: 128
+          minLength: 1
+          title: Session Id
+          type: string
+        conversation_save_state:
+          enum:
+          - saved
+          - pending
+          - session_only
+          title: Conversation Save State
+          type: string
+        conversation_save_source:
+          anyOf:
+          - maxLength: 120
+            type: string
+          - type: 'null'
+          default: null
+          title: Conversation Save Source
+      required:
+      - session_id
+      - conversation_save_state
+      title: ChatSaveStateRequest
+      type: object
+    ConversationSaveResult:
+      additionalProperties: true
+      properties:
+        status:
+          enum:
+          - updated
+          - skipped
+          title: Status
+          type: string
+        conversation_save_state:
+          enum:
+          - saved
+          - pending
+          - session_only
+          title: Conversation Save State
+          type: string
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Reason
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+      required:
+      - status
+      - conversation_save_state
+      title: ConversationSaveResult
+      type: object
+    ChatSaveStateResponse:
+      additionalProperties: true
+      properties:
+        conversation_save:
+          $ref: '#/components/schemas/ConversationSaveResult'
+      required:
+      - conversation_save
+      title: ChatSaveStateResponse
+      type: object
+    ChatSessionCreateRequest:
+      additionalProperties: false
+      description: Draft session issuance accepts no client-owned identity field.
+      properties: {}
+      title: ChatSessionCreateRequest
+      type: object
+    ChatSessionCreateResponse:
+      additionalProperties: true
+      properties:
+        contract_version:
+          const: chat_session.v1
+          title: Contract Version
+          type: string
+        session_id:
+          maxLength: 128
+          minLength: 1
+          title: Session Id
+          type: string
+        user_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: User Id
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        created_at:
+          minLength: 1
+          title: Created At
+          type: string
+      required:
+      - contract_version
+      - session_id
+      - status
+      - created_at
+      title: ChatSessionCreateResponse
+      type: object
     ConfirmCaseFactsRequest:
       additionalProperties: false
       properties:
@@ -3638,6 +4338,209 @@ components:
       - limitations
       - persistence
       title: GuestSessionResponse
+      type: object
+    HistoryApiError:
+      additionalProperties: true
+      properties:
+        code:
+          maxLength: 120
+          minLength: 1
+          title: Code
+          type: string
+        message:
+          minLength: 1
+          title: Message
+          type: string
+        status:
+          anyOf:
+          - maximum: 599
+            minimum: 400
+            type: integer
+          - type: 'null'
+          default: null
+          title: Status
+      required:
+      - code
+      - message
+      title: HistoryApiError
+      type: object
+    HistoryApiErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/HistoryApiError'
+      required:
+      - error
+      title: HistoryApiErrorResponse
+      type: object
+    HistoryEvent:
+      additionalProperties: true
+      properties:
+        event_id:
+          maxLength: 128
+          minLength: 1
+          title: Event Id
+          type: string
+        event_type:
+          maxLength: 128
+          minLength: 1
+          title: Event Type
+          type: string
+        event_version:
+          maxLength: 64
+          minLength: 1
+          title: Event Version
+          type: string
+        occurred_at:
+          minLength: 1
+          title: Occurred At
+          type: string
+        actor:
+          additionalProperties: true
+          title: Actor
+          type: object
+        subject:
+          additionalProperties: true
+          title: Subject
+          type: object
+        source:
+          additionalProperties: true
+          title: Source
+          type: object
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+      required:
+      - event_id
+      - event_type
+      - event_version
+      - occurred_at
+      - actor
+      - subject
+      - source
+      - status
+      title: HistoryEvent
+      type: object
+    HistoryListResponse:
+      additionalProperties: true
+      description: Compatibility-preserving response from ``GET /api/history/``.
+      properties:
+        history_contract:
+          maxLength: 64
+          minLength: 1
+          title: History Contract
+          type: string
+        storage:
+          additionalProperties: true
+          title: Storage
+          type: object
+        history_policy:
+          additionalProperties: true
+          title: History Policy
+          type: object
+        after_service_summary:
+          additionalProperties: true
+          title: After Service Summary
+          type: object
+        count:
+          minimum: 0
+          title: Count
+          type: integer
+        events:
+          items:
+            $ref: '#/components/schemas/HistoryEvent'
+          title: Events
+          type: array
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+      required:
+      - history_contract
+      - storage
+      - history_policy
+      - after_service_summary
+      - count
+      - events
+      - limitations
+      title: HistoryListResponse
+      type: object
+    MyPageCaseSummary:
+      additionalProperties: true
+      description: Stable case identity fields; runtime may expose additional case metadata.
+      properties:
+        job_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Job Id
+        session_id:
+          anyOf:
+          - maxLength: 128
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Session Id
+        status:
+          anyOf:
+          - maxLength: 64
+            minLength: 1
+            type: string
+          - type: 'null'
+          default: null
+          title: Status
+      title: MyPageCaseSummary
+      type: object
+    MyPageSummaryResponse:
+      additionalProperties: true
+      description: Compatibility-preserving summary returned by ``GET /api/mypage/summary/``.
+      properties:
+        active_cases:
+          minimum: 0
+          title: Active Cases
+          type: integer
+        due_soon_cases:
+          minimum: 0
+          title: Due Soon Cases
+          type: integer
+        saved_reports:
+          minimum: 0
+          title: Saved Reports
+          type: integer
+        recent_analysis_count:
+          minimum: 0
+          title: Recent Analysis Count
+          type: integer
+        cases:
+          items:
+            $ref: '#/components/schemas/MyPageCaseSummary'
+          title: Cases
+          type: array
+        conversation_save_policy:
+          additionalProperties: true
+          title: Conversation Save Policy
+          type: object
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+      required:
+      - active_cases
+      - due_soon_cases
+      - saved_reports
+      - recent_analysis_count
+      - cases
+      - conversation_save_policy
+      - limitations
+      title: MyPageSummaryResponse
       type: object
     RateLimitErrorDetail:
       additionalProperties: true

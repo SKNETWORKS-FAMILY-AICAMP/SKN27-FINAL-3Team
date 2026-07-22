@@ -40,10 +40,13 @@ def build_road_context(title: str, text: str) -> Dict[str, Any]:
     # 제목과 본문을 합쳐서 판단합니다.
     combined = f"{title}\n{text}"
 
-    # 도로 context를 반환합니다.
+    road_area = infer_road_area(title, combined)
+
+    # 도로 context를 반환합니다. 교차로 유형은 도로 영역이 실제 교차로일 때만 채웁니다.
+    # 뒤쪽 법규/판례에 등장한 '교차로'가 주차장·동일차로 사고를 오염시키지 않게 합니다.
     return {
-        "road_area": infer_road_area(title, combined),
-        "intersection_type": infer_intersection_type(title, combined),
+        "road_area": road_area,
+        "intersection_type": infer_intersection_type(title, combined) if road_area == "교차로" else None,
         "road_width_relation": infer_road_width_relation(combined),
         "lane_relation": infer_lane_relation(title, combined),
         "main_road_party": infer_party_by_keyword(combined, "대로"),
@@ -149,20 +152,47 @@ def infer_road_area(title: str, text: str) -> str:
 
     source = f"{title}\n{text}"
 
-    if "버스정류장" in source:
+    # rule 제목은 기본 사고상황의 정본이므로, 제목의 명시 영역을 본문 fallback보다 우선합니다.
+    if "버스정류장" in title:
         return "버스정류장"
+
+    if any(word in title for word in ["주차장", "주차구획", "주차진행", "출차"]):
+        return "주차장"
 
     if any(word in title for word in ["동일차로", "진로변경", "차로변경", "끼어들기", "급진입"]):
         return "동일차로"
 
-    if "교차로" in source or "적색점멸" in source or "황색점멸" in source or "신호없는 사거리" in source:
+    if not is_non_intersection_title(title) and (
+        "교차로" in title
+        or "사거리" in title
+        or "삼거리" in title
+        or "적색점멸" in title
+        or "황색점멸" in title
+    ):
+        return "교차로"
+
+    if "횡단보도" in title:
+        return "횡단보도"
+
+    if "이면도로" in title:
+        return "이면도로"
+
+    if "추월" in title or "앞지르기" in title:
+        return "추월"
+
+    if "버스정류장" in source:
+        return "버스정류장"
+
+    if "주차장" in source or "주차구획" in source or "출차" in source:
+        return "주차장"
+
+    if not is_non_intersection_title(title) and (
+        "교차로" in source or "적색점멸" in source or "황색점멸" in source or "신호없는 사거리" in source
+    ):
         return "교차로"
 
     if "동일차로" in source or "진로변경" in source or "끼어들기" in source or "급진입" in source:
         return "동일차로"
-
-    if "주차장" in source or "주차구획" in source or "출차" in source or "주차" in title:
-        return "주차장"
 
     if "이륜차" in source and ("교차로" in source or "우회전" in source or "좌회전" in source):
         return "교차로"
@@ -179,10 +209,19 @@ def infer_road_area(title: str, text: str) -> str:
     return infer_accident_group(title, source)
 
 
+def is_non_intersection_title(title: str) -> bool:
+    """제목이 교차로를 언급하되 적용 대상이 아님을 명시하는지 판단합니다."""
+
+    normalized = normalize_spaces(title)
+    return bool(re.search(r"교차로\s*(?:가\s*)?(?:아닌|아님|외)", normalized))
+
+
 def infer_intersection_type(title: str, text: str) -> Optional[str]:
     """교차로 유형을 제목/사고상황 표현으로 세분화합니다."""
 
     source = f"{title}\n{text}"
+    if is_non_intersection_title(title):
+        return None
     if "적색점멸" in source or "황색점멸" in source:
         return "flashing_signal_intersection"
     if "신호없는 사거리" in source or "신호 없는 사거리" in source:

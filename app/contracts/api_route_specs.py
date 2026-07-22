@@ -45,6 +45,15 @@ from app.contracts.consultation_case import (
     StartCaseAnalysisRequest,
     StartCaseAnalysisResponse,
 )
+from app.contracts.chat_session import (
+    ChatApiErrorResponse,
+    ChatMessageRequest,
+    ChatMessageResponse,
+    ChatSaveStateRequest,
+    ChatSaveStateResponse,
+    ChatSessionCreateRequest,
+    ChatSessionCreateResponse,
+)
 from app.contracts.file_attachment import (
     FileAttachmentDetailResponse,
     FileAttachmentListResponse,
@@ -58,6 +67,8 @@ from app.contracts.file_attachment import (
     FileUploadTooLargeErrorResponse,
     FileUploadValidationErrorResponse,
 )
+from app.contracts.mypage import MyPageSummaryResponse
+from app.contracts.history import HistoryApiErrorResponse, HistoryListResponse
 from app.contracts.report import (
     ConfirmReportDocumentRequest,
     ConfirmReportDocumentResponse,
@@ -70,6 +81,8 @@ from app.contracts.report import (
 HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 ContractStatus = Literal["shadow", "generated"]
 RequestMediaType = Literal["application/json", "multipart/form-data"]
+SecurityRequirement = dict[str, tuple[str, ...]]
+OutcomeSemantic = Literal["partial_result", "pending", "service_unavailable"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +102,24 @@ class RouteErrorSpec:
     status: int
     codes: tuple[str, ...]
     response_model: type[BaseModel]
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeResponseSpec:
+    status: int
+    semantic: OutcomeSemantic
+    description: str
+    response_model: type[BaseModel]
+
+    def __post_init__(self) -> None:
+        if not 100 <= self.status <= 599 or not self.description.strip():
+            raise ValueError("outcome status and description are required")
+        if self.semantic not in {
+            "partial_result",
+            "pending",
+            "service_unavailable",
+        }:
+            raise ValueError("unknown outcome semantic")
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,8 +172,10 @@ class RouteSpec:
     request_media_types: tuple[RequestMediaType, ...] = ("application/json",)
     auth_optional: bool = False
     success_statuses: tuple[int, ...] = ()
+    outcome_responses: tuple[OutcomeResponseSpec, ...] = ()
     success_content: tuple[ResponseContentSpec, ...] = ()
     success_headers: tuple[ResponseHeaderSpec, ...] = ()
+    security_requirements: tuple[SecurityRequirement, ...] = ()
 
     def __post_init__(self) -> None:
         placeholders = tuple(re.findall(r"\{([^{}]+)\}", self.path))
@@ -154,6 +187,10 @@ class RouteSpec:
             )
         if self.auth_required and self.auth_optional:
             raise ValueError("a route cannot require and optionally accept Bearer auth")
+        if self.security_requirements and (self.auth_required or self.auth_optional):
+            raise ValueError("explicit security cannot combine with legacy auth flags")
+        if any(not requirement for requirement in self.security_requirements):
+            raise ValueError("explicit security requirements cannot be anonymous")
         if self.response_model is None and not self.success_content:
             raise ValueError("route requires a JSON response model or explicit success content")
         if self.response_model is not None and self.success_content:
@@ -175,6 +212,13 @@ class RouteSpec:
             or len(set(self.success_statuses)) != len(self.success_statuses)
         ):
             raise ValueError("success status codes must include the primary status and be unique")
+        outcome_statuses = {outcome.status for outcome in self.outcome_responses}
+        success_statuses = set(self.success_statuses or (self.success_status,))
+        error_statuses = {error.status for error in self.errors}
+        if len(outcome_statuses) != len(self.outcome_responses) or outcome_statuses & (
+            success_statuses | error_statuses
+        ):
+            raise ValueError("outcome status codes must be unique and disjoint")
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +288,19 @@ def _analysis_job_errors(
         )
         for status, codes in entries
     )
+
+
+ANALYSIS_TRANSPORT_IDENTITY_ERROR_CODES = (
+    "auth_required",
+    "token_invalid",
+    "token_expired",
+)
+
+
+ANALYSIS_RESOURCE_IDENTITY_ERROR_CODES = (
+    *ANALYSIS_TRANSPORT_IDENTITY_ERROR_CODES,
+    "guest_session_invalid",
+)
 
 
 def _report_errors(
@@ -425,6 +482,83 @@ GUEST_FILE_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
 )
 
 
+CHAT_SESSION_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    GUEST_CREDENTIAL_HEADER_PARAMETER,
+    GUEST_ID_HEADER_PARAMETER,
+)
+
+
+MYPAGE_SUMMARY_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    RequestParameterSpec(
+        name="session_id",
+        location="query",
+        description="Optional chat session identifier used to scope the summary and session cache.",
+    ),
+    RequestParameterSpec(
+        name="owner_id",
+        location="query",
+        description="Optional owner identifier. When supplied, it takes precedence over user_id.",
+    ),
+    RequestParameterSpec(
+        name="user_id",
+        location="query",
+        description="Legacy owner alias used only when owner_id is absent.",
+    ),
+    RequestParameterSpec(
+        name="limit",
+        location="query",
+        description="Optional positive integer with a default of 10; invalid values fall back to that default.",
+    ),
+)
+
+
+HISTORY_API_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
+    GUEST_CREDENTIAL_HEADER_PARAMETER,
+    GUEST_ID_HEADER_PARAMETER,
+    RequestParameterSpec(
+        name="session_id",
+        location="query",
+        description="Optional chat session identifier; the server verifies session ownership.",
+    ),
+    RequestParameterSpec(
+        name="user_id",
+        location="query",
+        description="Optional user identifier; the server verifies owner access.",
+    ),
+    RequestParameterSpec(
+        name="guest_id",
+        location="query",
+        description="Optional guest identifier; the server verifies guest access.",
+    ),
+    RequestParameterSpec(
+        name="job_id",
+        location="query",
+        description="Optional analysis job identifier; the server verifies its session owner.",
+    ),
+    RequestParameterSpec(
+        name="event_type",
+        location="query",
+        description="Optional history event type filter.",
+    ),
+    RequestParameterSpec(
+        name="limit",
+        location="query",
+        description="Optional positive integer; invalid or non-positive values fall back and the default is 100.",
+    ),
+)
+
+
+def _chat_errors(*entries: tuple[int, tuple[str, ...]]) -> tuple[RouteErrorSpec, ...]:
+    return tuple(
+        RouteErrorSpec(
+            status=status,
+            codes=codes,
+            response_model=ChatApiErrorResponse,
+        )
+        for status, codes in entries
+    )
+
+
 FILE_LIST_REQUEST_PARAMETERS: tuple[RequestParameterSpec, ...] = (
     *GUEST_FILE_REQUEST_PARAMETERS,
     RequestParameterSpec(
@@ -584,6 +718,145 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
 )
 
 
+CHAT_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="issueChatSessionDraft",
+        method="POST",
+        path="/api/chat/sessions/",
+        route_name="canonical-create-chat-session",
+        view_name="create_chat_session",
+        request_model=ChatSessionCreateRequest,
+        response_model=ChatSessionCreateResponse,
+        success_status=200,
+        errors=_chat_errors(
+            (401, ("auth_required", "token_invalid", "token_expired", "guest_session_invalid")),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Chat",),
+        summary="Issue a draft chat session identifier; persistence occurs during message or save-state processing",
+        request_parameters=CHAT_SESSION_REQUEST_PARAMETERS,
+        request_body_required=False,
+    ),
+    RouteSpec(
+        operation_id="submitChatMessage",
+        method="POST",
+        path="/api/chat/messages/",
+        route_name="canonical-submit-chat-message",
+        view_name="submit_chat_message",
+        request_model=ChatMessageRequest,
+        response_model=ChatMessageResponse,
+        success_status=200,
+        success_statuses=(200, 202),
+        outcome_responses=(
+            OutcomeResponseSpec(
+                status=409,
+                semantic="partial_result",
+                description="Attachment scan blocked; safe partial guidance is available.",
+                response_model=ChatMessageResponse,
+            ),
+            OutcomeResponseSpec(
+                status=503,
+                semantic="service_unavailable",
+                description="Supervisor planning is temporarily unavailable.",
+                response_model=ChatMessageResponse,
+            ),
+        ),
+        errors=_chat_errors(
+            (400, ("chat_input_rejected",)),
+            (401, ("auth_required", "token_invalid", "token_expired", "guest_session_invalid")),
+            (403, ("object_access_denied",)),
+            (429, ("rate_limit_exceeded",)),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Chat",),
+        summary="Submit a chat turn and return immediate guidance, an asynchronous Worker receipt, or supervisor-unavailable state",
+        request_parameters=CHAT_SESSION_REQUEST_PARAMETERS,
+    ),
+    RouteSpec(
+        operation_id="updateChatSaveState",
+        method="POST",
+        path="/api/chat/save-state/",
+        route_name="canonical-chat-save-state",
+        view_name="update_chat_save_state",
+        request_model=ChatSaveStateRequest,
+        response_model=ChatSaveStateResponse,
+        success_status=200,
+        errors=_chat_errors(
+            (401, ("auth_required", "token_invalid", "token_expired", "guest_session_invalid")),
+            (403, ("login_required", "object_access_denied")),
+        ),
+        auth_required=False,
+        auth_optional=True,
+        contract_status="shadow",
+        tags=("Chat",),
+        summary="Update a conversation save preference; an unknown session returns 200 with skipped state",
+        request_parameters=CHAT_SESSION_REQUEST_PARAMETERS,
+    ),
+)
+
+
+MYPAGE_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="getMyPageSummary",
+        method="GET",
+        path="/api/mypage/summary/",
+        route_name="canonical-mypage-summary",
+        view_name="mypage_summary",
+        request_model=None,
+        response_model=MyPageSummaryResponse,
+        success_status=200,
+        errors=_auth_errors(
+            (401, ("auth_required", "token_invalid", "token_expired")),
+            (403, ("object_access_denied",)),
+        ),
+        auth_required=True,
+        contract_status="shadow",
+        tags=("MyPage",),
+        summary="Read the authenticated user's summary after owner or session authorization",
+        request_parameters=MYPAGE_SUMMARY_REQUEST_PARAMETERS,
+    ),
+)
+
+
+HISTORY_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
+    RouteSpec(
+        operation_id="listHistoryEvents",
+        method="GET",
+        path="/api/history/",
+        route_name="canonical-history-events",
+        view_name="history_events",
+        request_model=None,
+        response_model=HistoryListResponse,
+        success_status=200,
+        errors=(
+            RouteErrorSpec(
+                status=401,
+                codes=("auth_required", "token_invalid", "token_expired"),
+                response_model=HistoryApiErrorResponse,
+            ),
+            RouteErrorSpec(
+                status=403,
+                codes=("object_access_denied",),
+                response_model=HistoryApiErrorResponse,
+            ),
+        ),
+        auth_required=False,
+        contract_status="shadow",
+        tags=("History",),
+        summary="List the current subject's standard-light history events with owner-scoped filters",
+        request_parameters=HISTORY_API_REQUEST_PARAMETERS,
+        security_requirements=(
+            {"bearerAuth": ()},
+            {"guestCredentialAuth": ()},
+        ),
+    ),
+)
+
+
 FILE_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
     RouteSpec(
         operation_id="listFileAttachments",
@@ -666,6 +939,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         response_model=AnalysisJobListResponse,
         success_status=200,
         errors=_analysis_job_errors(
+            (401, ANALYSIS_TRANSPORT_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
         ),
         auth_required=False,
@@ -686,6 +960,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         success_status=202,
         errors=_analysis_job_errors(
             (400, ("analysis_job_session_required", "chat_input_rejected")),
+            (401, ANALYSIS_TRANSPORT_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (
                 409,
@@ -717,7 +992,7 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         response_model=AnalysisJobDetailResponse,
         success_status=200,
         errors=_analysis_job_errors(
-            (401, ("guest_session_invalid",)),
+            (401, ANALYSIS_RESOURCE_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (404, ("analysis_job_not_found",)),
         ),
@@ -738,9 +1013,17 @@ ANALYSIS_JOB_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         request_model=None,
         response_model=AnalysisResultResponse,
         success_status=200,
-        success_statuses=(200, 202),
+        success_statuses=(200,),
+        outcome_responses=(
+            OutcomeResponseSpec(
+                status=202,
+                semantic="pending",
+                description="Analysis result is not ready; continue polling the result endpoint.",
+                response_model=AnalysisResultResponse,
+            ),
+        ),
         errors=_analysis_job_errors(
-            (401, ("guest_session_invalid",)),
+            (401, ANALYSIS_RESOURCE_IDENTITY_ERROR_CODES),
             (403, ("object_access_denied",)),
             (404, ("analysis_result_not_found",)),
         ),
@@ -967,6 +1250,9 @@ REPORT_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
 API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
     CASE_API_ROUTE_SPECS
     + AUTH_SESSION_API_ROUTE_SPECS
+    + CHAT_SESSION_API_ROUTE_SPECS
+    + MYPAGE_API_ROUTE_SPECS
+    + HISTORY_API_ROUTE_SPECS
     + FILE_API_ROUTE_SPECS
     + ANALYSIS_JOB_API_ROUTE_SPECS
     + REPORT_API_ROUTE_SPECS
@@ -1001,41 +1287,6 @@ DEFERRED_ROUTE_SPECS: tuple[DeferredRouteSpec, ...] = (
         route_name="capabilities",
         view_name="capabilities",
         reason="Capability DTO exists in runtime data but is not registered as a route contract.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/mypage/summary/",
-        route_name="canonical-mypage-summary",
-        view_name="mypage_summary",
-        reason="Response DTO and application query service are not yet extracted.",
-    ),
-    DeferredRouteSpec(
-        method="GET",
-        path="/api/history/",
-        route_name="canonical-history-events",
-        view_name="history_events",
-        reason="History filters and response DTO remain coupled to the Django view.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/chat/sessions/",
-        route_name="canonical-create-chat-session",
-        view_name="create_chat_session",
-        reason="Authenticated session ownership DTO is pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/chat/messages/",
-        route_name="canonical-submit-chat-message",
-        view_name="submit_chat_message",
-        reason="Chat orchestration request and async response DTOs are pending.",
-    ),
-    DeferredRouteSpec(
-        method="POST",
-        path="/api/chat/save-state/",
-        route_name="canonical-chat-save-state",
-        view_name="update_chat_save_state",
-        reason="Conversation ownership and save-state DTOs are pending.",
     ),
     DeferredRouteSpec(
         method="GET",

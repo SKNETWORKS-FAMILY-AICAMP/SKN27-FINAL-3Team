@@ -1,0 +1,14 @@
+{
+  "version": "v1_selected_draft",
+  "description": "Gate 1-2 가상발동 검증을 통과한 B단계 후보 규칙이다. 실행 규칙에는 Query ID·판례 ID·qrels·기존 검색순위가 포함되지 않는다.",
+  "rules": [
+    {"rule_id":"unsignalized_equal_width_right_approach","selected_variant":"balanced","enabled":true,"expansion":"비신호 같은 폭 교차로에서 오른쪽 도로 차량과 양 차량 직진의 우선관계"},
+    {"rule_id":"illegal_uturn_vs_oncoming_straight","selected_variant":"balanced","enabled":true,"expansion":"신호위반 불법 유턴 차량과 맞은편 직진 차량의 충돌 책임"},
+    {"rule_id":"lane_change_rear_straight_vehicle","selected_variant":"strict","enabled":true,"expansion":"진로변경 차량과 변경 차로 후행 직진 차량의 측면 충돌 책임"},
+    {"rule_id":"signal_stop_rear_end","selected_variant":"strict","enabled":true,"expansion":"신호 대기 정상 정차 차량에 대한 전방주시·안전거리 미확보 추돌 책임"},
+    {"rule_id":"offroad_entry_to_mainline","selected_variant":"balanced","enabled":true,"expansion":"도로 외 장소에서 본선 도로로 진입하는 차량과 본선 직진 차량의 충돌 책임"},
+    {"rule_id":"highway_passing_lane_change","selected_variant":"balanced","enabled":true,"expansion":"고속도로 주행차로에서 추월차로로 진로변경하는 차량과 추월차로 직진 차량의 충돌 책임"},
+    {"rule_id":"right_turn_vs_right_rear_motorcycle","selected_variant":"strict","enabled":true,"expansion":"자동차 우회전과 우측 후행 이륜차 직진의 충돌 책임"},
+    {"rule_id":"lane_change_vs_rear_motorcycle","selected_variant":"balanced","enabled":true,"expansion":"자동차 차로변경과 변경 차로 후행 이륜차 직진의 충돌 책임"}
+  ]
+}
