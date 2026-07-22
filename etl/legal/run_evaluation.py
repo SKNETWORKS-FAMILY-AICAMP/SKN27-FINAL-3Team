@@ -112,11 +112,47 @@ def collect_backend_responses(
         )
         responses.extend(
             (
-                {**lexical_response, "query_id": query_id},
-                {**vector_response, "query_id": query_id},
+                _evaluation_response(lexical_response, query_id=query_id),
+                _evaluation_response(vector_response, query_id=query_id),
             )
         )
     return responses
+
+
+def _evaluation_response(response: Mapping[str, Any], *, query_id: str) -> dict[str, Any]:
+    sanitized = dict(response)
+    sanitized["query_id"] = query_id
+    sanitized["error_code"] = _safe_evaluation_error_code(sanitized.get("error_code"))
+    return sanitized
+
+
+def _safe_evaluation_error_code(value: object) -> str:
+    error_code = str(value or "").strip()
+    if not error_code:
+        return ""
+    if error_code in {
+        "vector_disabled",
+        "source_type_not_supported",
+        "postgresql_connection_required",
+        "no_eligible_seed_embeddings",
+        "query_embedding_disabled",
+        "embedding_space_mismatch",
+        "query_embedding_space_not_configured",
+        "sentence_transformers_unavailable",
+        "openai_api_key_required",
+        "openai_sdk_unavailable",
+        "django_apps_not_ready",
+        "no_search_tokens",
+    }:
+        return error_code
+    normalized = error_code.lower()
+    if "incorrect api key" in normalized or "authentication" in normalized or "error code: 401" in normalized:
+        return "openai_authentication_failed"
+    if error_code.startswith("missing_tables:"):
+        return "rag_tables_missing"
+    if error_code.startswith("unsupported_embedding_provider:"):
+        return "unsupported_embedding_provider"
+    return "backend_runtime_unavailable"
 
 
 def build_ragas_records(

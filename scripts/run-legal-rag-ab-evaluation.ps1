@@ -11,15 +11,29 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $EnvFile = (Resolve-Path $EnvFile -ErrorAction Stop).Path
 
 if ($StartPostgres) {
-    Push-Location $repoRoot
-    try {
-        docker compose up -d postgres
-        if ($LASTEXITCODE -ne 0) {
-            throw "Local PostgreSQL startup failed."
-        }
+    $existingPostgres = docker ps -aq --filter "name=^/skn27-postgres$"
+    $runningPostgres = docker ps -q --filter "name=^/skn27-postgres$"
+    if ($runningPostgres) {
+        Write-Host "Local PostgreSQL container is already running; reusing it."
     }
-    finally {
-        Pop-Location
+    elseif ($existingPostgres) {
+        docker start skn27-postgres
+        if ($LASTEXITCODE -ne 0) {
+            throw "Existing local PostgreSQL container could not be started."
+        }
+        Write-Host "Existing local PostgreSQL container was started."
+    }
+    else {
+        Push-Location $repoRoot
+        try {
+            docker compose up -d postgres
+            if ($LASTEXITCODE -ne 0) {
+                throw "Local PostgreSQL startup failed."
+            }
+        }
+        finally {
+            Pop-Location
+        }
     }
 }
 

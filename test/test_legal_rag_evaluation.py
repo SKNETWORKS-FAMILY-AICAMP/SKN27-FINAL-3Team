@@ -190,6 +190,46 @@ def test_collect_backend_runs_uses_identical_resolved_filters(monkeypatch) -> No
     assert calls[0][1]["top_k"] == calls[1][1]["top_k"] == 5
 
 
+def test_collect_backend_runs_normalizes_openai_auth_error_without_recording_message(monkeypatch) -> None:
+    query = {
+        "query_id": "law-q001",
+        "query": "공개 법률 질의",
+        "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-21"},
+        "scope": {"allowed_source_types": ["law"]},
+    }
+    fake_service = SimpleNamespace()
+    monkeypatch.setattr(run_evaluation, "_get_service", lambda: fake_service)
+    monkeypatch.setattr(
+        fake_service,
+        "resolve_legal_search_filters",
+        lambda **_kwargs: (("law",), date(2026, 7, 21), ""),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        fake_service,
+        "_search_law_chunks_lexical",
+        lambda _query, **_kwargs: {"backend": "postgres_lexical", "status": "ready", "latency_ms": 1, "results": []},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        fake_service,
+        "_search_pgvector",
+        lambda _query, **_kwargs: {
+            "backend": "postgres_pgvector",
+            "status": "unavailable",
+            "latency_ms": 1,
+            "error_code": 'Error code: 401 - Incorrect API key provided: "sk-secret"',
+            "results": [],
+        },
+        raising=False,
+    )
+
+    runs = run_evaluation.collect_backend_runs([query])
+
+    assert runs[1]["error_code"] == "openai_authentication_failed"
+    assert "sk-secret" not in str(runs[1])
+
+
 def test_collect_backend_runs_preserves_invalid_filter_as_non_search_result(monkeypatch) -> None:
     query = {
         "query_id": "law-q001",
@@ -273,6 +313,15 @@ def test_local_evaluation_wrapper_is_explicit_and_does_not_seed_or_print_secrets
     assert "run_pipeline" not in script
     assert "load_legal_rag_pgvector" not in script
     assert "Write-Host $line" not in script
+
+
+def test_local_evaluation_wrapper_reuses_a_running_named_postgres_container() -> None:
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "run-legal-rag-ab-evaluation.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'docker ps -q --filter "name=^/skn27-postgres$"' in script
+    assert "Local PostgreSQL container is already running; reusing it." in script
 
 
 def test_build_ragas_records_caps_public_contexts_at_top_five() -> None:

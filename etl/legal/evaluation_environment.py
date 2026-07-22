@@ -52,6 +52,8 @@ def validate_evaluation_environment(values: Mapping[str, str]) -> dict[str, obje
     missing = sorted(set(missing))
     if missing:
         return _not_ready("required_variables_missing", missing, values)
+    if str(values.get("DJANGO_DATABASE_ENGINE", "")).strip().lower() != "postgres":
+        return _not_ready("django_database_engine_not_postgres", [], values)
 
     query_space = _embedding_space(values, "LEGAL_RAG_QUERY_EMBEDDING")
     seed_space = _embedding_space(values, "LEGAL_RAG_SEED_EMBEDDING")
