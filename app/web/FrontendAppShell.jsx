@@ -3366,13 +3366,13 @@ function ReportingScreen({
         </div>
       </div>
 
-      <ServiceInformationNotice />
       <div className="report-workbench">
         <aside className="report-list" aria-label="리포트 목록">
           <div className="panel-head compact">
             <strong>리포트 목록</strong>
             <span className="tag">{savedReportCountLabel}</span>
           </div>
+          <ServiceInformationNotice />
         </aside>
 
         <article className="report-canvas" aria-label="리포트 미리보기">
