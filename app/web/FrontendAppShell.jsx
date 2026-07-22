@@ -537,7 +537,8 @@ export default function FrontendAppShell({
         setStatusMessage("첨부 등록 응답을 확인하지 못했습니다.");
       }
     } catch (_error) {
-      setStatusMessage("첨부 등록에 실패했습니다.");
+      const publicMessage = _error?.publicMessage;
+      setStatusMessage(publicMessage || "첨부 등록에 실패했습니다. 다시 시도해 주세요.");
       setPendingAuthAction(null);
     } finally {
       setIsRegisteringAttachment(false);

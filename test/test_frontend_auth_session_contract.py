@@ -100,6 +100,18 @@ def test_frontend_attachment_intake_supports_drag_drop_and_video() -> None:
     assert "handleAttachmentDragOver" in shell
 
 
+def test_frontend_attachment_failure_shows_the_safe_server_retry_message() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+    registration_start = shell.index("async function registerAttachmentMetadata")
+    registration_end = shell.index("function handleAttachmentFile", registration_start)
+    registration = shell[registration_start:registration_end]
+
+    assert "requestError.publicMessage = publicMessage" in api_client
+    assert "const publicMessage = _error?.publicMessage" in registration
+    assert "setStatusMessage(publicMessage || \"첨부 등록에 실패했습니다. 다시 시도해 주세요.\")" in registration
+
+
 def test_frontend_renders_editable_ocr_confirmation_before_follow_up() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 
