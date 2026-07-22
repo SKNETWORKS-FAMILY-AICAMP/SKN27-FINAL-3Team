@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Mapping, Sequence
 
 from etl.legal import evaluation, evaluation_environment
@@ -20,6 +21,12 @@ DEFAULT_FIXTURE = PROJECT_ROOT / "etl" / "legal" / "evaluation_fixtures" / "publ
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "output" / "law_ingestion" / "evaluation"
 BACKENDS = ("postgres_lexical", "postgres_pgvector")
 MAX_RAGAS_QUERY_COUNT = 20
+RAGAS_METRIC_NAMES = (
+    "context_precision",
+    "context_recall",
+    "faithfulness",
+    "answer_relevancy",
+)
 
 
 def _load_service():
@@ -211,26 +218,132 @@ def run_ragas(
     if not records:
         return {"status": "not_evaluated", "reason": "no_ragas_records"}
 
-    try:
-        answered_records = _generate_ragas_answers(records, model=generator_model)
-        metrics = _evaluate_ragas_samples(
-            answered_records,
-            judge_model=judge_model,
-            embedding_model=embedding_model,
+    query_results: list[dict[str, object]] = []
+    per_query_metrics: list[Mapping[str, object]] = []
+    for record in records:
+        if not _has_ragas_contexts(record):
+            query_results.append(
+                _ragas_query_result(
+                    record,
+                    status="not_evaluated",
+                    error_code="no_ragas_contexts",
+                    latency_ms=0,
+                )
+            )
+            continue
+
+        started_at = perf_counter()
+        try:
+            answered_records = _generate_ragas_answers([record], model=generator_model)
+            metrics = _evaluate_ragas_samples(
+                answered_records,
+                judge_model=judge_model,
+                embedding_model=embedding_model,
+            )
+        except Exception as exc:
+            query_results.append(
+                _ragas_query_result(
+                    record,
+                    status="not_evaluated",
+                    error_code=_safe_ragas_error_code(exc),
+                    latency_ms=_elapsed_milliseconds(started_at),
+                )
+            )
+            continue
+
+        metrics_error_code = _ragas_metrics_error_code(metrics)
+        if metrics_error_code:
+            query_results.append(
+                _ragas_query_result(
+                    record,
+                    status="not_evaluated",
+                    error_code=metrics_error_code,
+                    latency_ms=_elapsed_milliseconds(started_at),
+                )
+            )
+            continue
+
+        per_query_metrics.append(metrics)
+        query_results.append(
+            _ragas_query_result(
+                record,
+                status="evaluated",
+                error_code=None,
+                latency_ms=_elapsed_milliseconds(started_at),
+            )
         )
-    except ImportError:
-        return {"status": "not_evaluated", "reason": "ragas_dependencies_not_installed"}
-    except RuntimeError as exc:
-        return {"status": "not_evaluated", "reason": _safe_ragas_reason(exc)}
-    except Exception:
-        return {"status": "not_evaluated", "reason": "ragas_execution_failed"}
-    return {
-        "status": "evaluated",
+
+    result: dict[str, Any] = {
         "generator_model": generator_model,
         "judge_model": judge_model,
         "embedding_model": embedding_model,
-        "metrics": metrics,
+        "query_results": query_results,
     }
+    if any(query_result["status"] != "evaluated" for query_result in query_results):
+        return {
+            "status": "not_evaluated",
+            "reason": "incomplete_ragas_evidence",
+            **result,
+        }
+
+    return {
+        "status": "evaluated",
+        **result,
+        "metrics": summarize_ragas_scores(per_query_metrics),
+    }
+
+
+def _ragas_query_result(
+    record: Mapping[str, object],
+    *,
+    status: str,
+    error_code: str | None,
+    latency_ms: int,
+) -> dict[str, object]:
+    return {
+        "query_id": _required_text(record, "query_id"),
+        "backend": _required_text(record, "backend"),
+        "status": status,
+        "error_code": error_code,
+        "latency_ms": latency_ms,
+    }
+
+
+def _elapsed_milliseconds(started_at: float) -> int:
+    return max(0, round((perf_counter() - started_at) * 1000))
+
+
+def _has_ragas_contexts(record: Mapping[str, object]) -> bool:
+    contexts = record.get("contexts")
+    return isinstance(contexts, list) and any(
+        isinstance(context, str) and context.strip() for context in contexts
+    )
+
+
+def _safe_ragas_error_code(exc: Exception) -> str:
+    if isinstance(exc, ImportError):
+        return "ragas_dependencies_not_installed"
+    if isinstance(exc, RuntimeError):
+        return _safe_ragas_reason(exc)
+    return "ragas_runtime_unavailable"
+
+
+def _ragas_metrics_error_code(metrics: object) -> str | None:
+    if not isinstance(metrics, Mapping):
+        return "ragas_metrics_invalid"
+    if any(metric_name not in metrics for metric_name in RAGAS_METRIC_NAMES):
+        return "ragas_metrics_incomplete"
+    for metric_name in RAGAS_METRIC_NAMES:
+        value = metrics[metric_name]
+        if isinstance(value, bool):
+            return "ragas_metrics_invalid"
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return "ragas_metrics_invalid"
+        if not math.isfinite(numeric_value) or not 0 <= numeric_value <= 1:
+            return "ragas_metrics_invalid"
+    return None
 
 
 def _generate_ragas_answers(
@@ -315,9 +428,8 @@ def _evaluate_ragas_samples(
 
 
 def summarize_ragas_scores(scores: Sequence[Mapping[str, object]]) -> dict[str, float]:
-    metric_names = ("context_precision", "context_recall", "faithfulness", "answer_relevancy")
     summary: dict[str, float] = {}
-    for metric_name in metric_names:
+    for metric_name in RAGAS_METRIC_NAMES:
         values: list[float] = []
         for score in scores:
             try:
