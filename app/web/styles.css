@@ -959,41 +959,47 @@ p {
 .entry-step-list {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
   overflow: auto;
 }
 
 .entry-step-row {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
-  padding: 8px 2px;
-  border-bottom: 1px solid var(--line);
-}
-
-.entry-step-row:last-child {
+  gap: 0;
+  padding: 0;
   border-bottom: none;
 }
 
+.entry-step-row > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.entry-step-row .index {
+  font-size: clamp(32px, 4vw, 44px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
 .index--brand {
-  background: var(--brand-soft);
   color: var(--brand);
 }
 
 .index--info {
-  background: var(--info-soft);
   color: var(--info);
 }
 
 .index--green {
-  background: var(--green-soft);
   color: var(--green);
 }
 
 .index--amber {
-  background: var(--amber-soft);
   color: var(--amber);
 }
 
@@ -1007,8 +1013,8 @@ p {
 }
 
 .entry-quick-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 
 .entry-quick-icon--info {
@@ -1032,13 +1038,46 @@ p {
 
 .entry-step-row div strong {
   display: block;
-  font-size: 13px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .entry-step-row div p {
-  margin: 2px 0 0;
-  font-size: 12px;
+  margin: 3px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--muted);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.entry-step-icon {
+  display: inline-flex;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.entry-step-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.entry-step-icon--brand {
+  color: var(--brand);
+}
+
+.entry-step-icon--info {
+  color: var(--info);
+}
+
+.entry-step-icon--green {
+  color: var(--green);
+}
+
+.entry-step-icon--amber {
+  color: var(--amber);
 }
 
 @media (max-width: 900px) {
@@ -1050,6 +1089,10 @@ p {
   .entry-dashboard__grid {
     grid-template-columns: 1fr;
     grid-template-rows: none;
+  }
+
+  .entry-step-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -4648,4 +4691,49 @@ button.report-list-card.active {
 .insurance-layout .closing-cta .button,
 .insurance-layout .hero-actions .button.primary {
   box-shadow: 0 8px 14px rgba(91, 32, 10, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Focus the entry message without changing the surrounding dashboard layout. */
+.entry-card--intro {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(28px, 4vw, 54px);
+  border: 1px solid rgba(187, 211, 235, 0.14);
+  background: linear-gradient(135deg, #0b1014 0%, #18232b 100%);
+}
+
+.entry-card--intro::before {
+  position: absolute;
+  top: -110px;
+  right: -80px;
+  width: 250px;
+  height: 250px;
+  border: 1px solid rgba(238, 105, 11, 0.35);
+  border-radius: 50%;
+  box-shadow: 0 0 0 34px rgba(238, 105, 11, 0.06), 0 0 0 68px rgba(238, 105, 11, 0.035);
+  content: "";
+}
+
+.entry-card--intro p,
+.entry-card--intro .entry-card__actions {
+  position: relative;
+  z-index: 1;
+}
+
+.entry-card--intro p {
+  max-width: 540px;
+  font-size: clamp(16px, 1.4vw, 19px);
+  line-height: 1.72;
+  letter-spacing: -0.025em;
+}
+
+.entry-card__actions {
+  margin-top: 10px;
+}
+
+.entry-card__actions .button {
+  min-height: 46px;
+  padding: 10px 17px;
+  border-radius: 10px;
+  font-weight: 800;
 }

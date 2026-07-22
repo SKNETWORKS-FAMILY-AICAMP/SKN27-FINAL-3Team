@@ -1850,19 +1850,55 @@ function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
             <div className="entry-step-list">
               <div className="entry-step-row">
                 <strong className="index index--brand">01</strong>
-                <div><strong>상황 요약</strong><p>입력한 내용을 핵심 사실 중심으로 정리합니다.</p></div>
+                <div>
+                  <strong>상황 요약</strong>
+                  <p>입력한 내용을 핵심 사실 중심으로 정리합니다.</p>
+                  <span className="entry-step-icon entry-step-icon--brand">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M6 4h9l3 3v13H6V4z" />
+                      <path d="M9 10h6M9 13.5h6M9 17h4" />
+                    </svg>
+                  </span>
+                </div>
               </div>
               <div className="entry-step-row">
                 <strong className="index index--info">02</strong>
-                <div><strong>쟁점 확인</strong><p>판단에 중요한 기준과 빠진 자료를 알려드립니다.</p></div>
+                <div>
+                  <strong>쟁점 확인</strong>
+                  <p>판단에 중요한 기준과 빠진 자료를 알려드립니다.</p>
+                  <span className="entry-step-icon entry-step-icon--info">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="6.5" />
+                      <path d="M16 16l4.5 4.5" />
+                    </svg>
+                  </span>
+                </div>
               </div>
               <div className="entry-step-row">
                 <strong className="index index--green">03</strong>
-                <div><strong>근거 조회</strong><p>관련 법령과 판례를 확인할 수 있습니다.</p></div>
+                <div>
+                  <strong>근거 조회</strong>
+                  <p>관련 법령과 판례를 확인할 수 있습니다.</p>
+                  <span className="entry-step-icon entry-step-icon--green">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 5c-2-1.2-4.6-1.5-7-1v13c2.4-.5 5 -.2 7 1 2-1.2 4.6-1.5 7-1V4c-2.4-.5-5-.2-7 1z" />
+                      <path d="M12 5v13" />
+                    </svg>
+                  </span>
+                </div>
               </div>
               <div className="entry-step-row">
                 <strong className="index index--amber">04</strong>
-                <div><strong>다음 행동</strong><p>준비할 자료와 처리 순서를 제안합니다.</p></div>
+                <div>
+                  <strong>다음 행동</strong>
+                  <p>준비할 자료와 처리 순서를 제안합니다.</p>
+                  <span className="entry-step-icon entry-step-icon--amber">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M5 12h13" />
+                      <path d="M13 6l6 6-6 6" />
+                    </svg>
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -1870,14 +1906,17 @@ function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
           <div className="entry-card entry-card--features">
             <div className="entry-card__head">
               <strong>우리 기능들</strong>
-              <p>필요한 지원을 선택하면 바로 이어서 진행합니다.</p>
             </div>
             <div className="entry-quick-list entry-quick-list--light">
               <button className="entry-quick-item" type="button" onClick={onOpenChat}>
                 <span className="entry-quick-icon entry-quick-icon--info">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 5h16v11H8l-4 4V5z" />
-                    <path d="M9 9h6M9 12.5h4" />
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 4v2" />
+                    <path d="M4 6h16" />
+                    <path d="M4 6L2 11a2.2 2.2 0 0 0 4.4 0z" />
+                    <path d="M20 6l-2 5a2.2 2.2 0 0 0 4.4 0z" />
+                    <path d="M12 6v14" />
+                    <path d="M8.5 20h7" />
                   </svg>
                 </span>
                 <span>
@@ -1887,8 +1926,11 @@ function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
               </button>
               <button className="entry-quick-item" type="button" onClick={onOpenChat}>
                 <span className="entry-quick-icon entry-quick-icon--green">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 7h4M11 7h9M4 12h4M11 12h9M4 17h4M11 17h9" />
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 16l1.1-4.5A2 2 0 0 1 8 10h8a2 2 0 0 1 1.9 1.5L20 16" />
+                    <path d="M4 16h16v2a1 1 0 0 1-1 1h-1.3a1 1 0 0 1-1-1v-.3H7.3v.3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2z" />
+                    <circle cx="7.5" cy="16" r="1.3" />
+                    <circle cx="16.5" cy="16" r="1.3" />
                   </svg>
                 </span>
                 <span>
@@ -1898,8 +1940,10 @@ function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
               </button>
               <button className="entry-quick-item" type="button" onClick={onOpenChat}>
                 <span className="entry-quick-icon entry-quick-icon--amber">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M6 4h12v16l-6-4-6 4V4z" />
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7 3.5h7l3 3v14H7z" />
+                    <path d="M14 3.5v3h3" />
+                    <path d="M9.5 16.8l5-5 2 2-5 5H9.5v-2z" />
                   </svg>
                 </span>
                 <span>
