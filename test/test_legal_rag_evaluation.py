@@ -3,11 +3,34 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
 from etl.legal import evaluation
 from etl.legal import run_evaluation
+
+
+COMPLETE_RAGAS_METRICS = {
+    "context_precision": 0.8,
+    "context_recall": 0.7,
+    "faithfulness": 0.9,
+    "answer_relevancy": 0.6,
+}
+
+
+def ragas_record(
+    query_id: str,
+    backend: str = "postgres_lexical",
+    contexts: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "query_id": query_id,
+        "backend": backend,
+        "question": "공개 법령 질의",
+        "ground_truth": "공개 법령 정답",
+        "contexts": contexts if contexts is not None else ["공개 법령 조문"],
+    }
 
 
 def test_load_public_law_queries_requires_twenty_public_law_rows(tmp_path: Path) -> None:
@@ -158,22 +181,27 @@ def test_collect_backend_runs_uses_identical_resolved_filters(monkeypatch) -> No
         "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-21"},
         "scope": {"allowed_source_types": ["law"]},
     }
+    fake_service = SimpleNamespace()
+    monkeypatch.setattr(run_evaluation, "_get_service", lambda: fake_service)
     monkeypatch.setattr(
-        run_evaluation.service,
+        fake_service,
         "resolve_legal_search_filters",
         lambda **_kwargs: (("law",), date(2026, 7, 21), ""),
+        raising=False,
     )
     monkeypatch.setattr(
-        run_evaluation.service,
+        fake_service,
         "_search_law_chunks_lexical",
         lambda _query, **kwargs: calls.append(("lexical", kwargs))
         or {"backend": "postgres_lexical", "status": "ready", "latency_ms": 1, "results": []},
+        raising=False,
     )
     monkeypatch.setattr(
-        run_evaluation.service,
+        fake_service,
         "_search_pgvector",
         lambda _query, **kwargs: calls.append(("pgvector", kwargs))
         or {"backend": "postgres_pgvector", "status": "ready", "latency_ms": 1, "results": []},
+        raising=False,
     )
 
     runs = run_evaluation.collect_backend_runs([query])
@@ -184,6 +212,72 @@ def test_collect_backend_runs_uses_identical_resolved_filters(monkeypatch) -> No
     assert calls[0][1]["top_k"] == calls[1][1]["top_k"] == 5
 
 
+def test_collect_backend_runs_normalizes_openai_auth_error_without_recording_message(monkeypatch) -> None:
+    query = {
+        "query_id": "law-q001",
+        "query": "공개 법률 질의",
+        "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-21"},
+        "scope": {"allowed_source_types": ["law"]},
+    }
+    fake_service = SimpleNamespace()
+    monkeypatch.setattr(run_evaluation, "_get_service", lambda: fake_service)
+    monkeypatch.setattr(
+        fake_service,
+        "resolve_legal_search_filters",
+        lambda **_kwargs: (("law",), date(2026, 7, 21), ""),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        fake_service,
+        "_search_law_chunks_lexical",
+        lambda _query, **_kwargs: {"backend": "postgres_lexical", "status": "ready", "latency_ms": 1, "results": []},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        fake_service,
+        "_search_pgvector",
+        lambda _query, **_kwargs: {
+            "backend": "postgres_pgvector",
+            "status": "unavailable",
+            "latency_ms": 1,
+            "error_code": 'Error code: 401 - Incorrect API key provided: "sk-secret"',
+            "results": [],
+        },
+        raising=False,
+    )
+
+    runs = run_evaluation.collect_backend_runs([query])
+
+    assert runs[1]["error_code"] == "openai_authentication_failed"
+    assert "sk-secret" not in str(runs[1])
+
+
+def test_summarize_ragas_scores_averages_public_metric_rows() -> None:
+    summary = run_evaluation.summarize_ragas_scores(
+        [
+            {
+                "context_precision": 0.8,
+                "context_recall": 0.6,
+                "faithfulness": 1.0,
+                "answer_relevancy": 0.4,
+            },
+            {
+                "context_precision": 0.6,
+                "context_recall": 0.8,
+                "faithfulness": 0.5,
+                "answer_relevancy": 0.6,
+            },
+        ]
+    )
+
+    assert summary == {
+        "context_precision": 0.7,
+        "context_recall": 0.7,
+        "faithfulness": 0.75,
+        "answer_relevancy": 0.5,
+    }
+
+
 def test_collect_backend_runs_preserves_invalid_filter_as_non_search_result(monkeypatch) -> None:
     query = {
         "query_id": "law-q001",
@@ -191,16 +285,100 @@ def test_collect_backend_runs_preserves_invalid_filter_as_non_search_result(monk
         "temporal_basis": {"mode": "as_of", "effective_at": "not-a-date"},
         "scope": {"allowed_source_types": ["law"]},
     }
+    fake_service = SimpleNamespace()
+    monkeypatch.setattr(run_evaluation, "_get_service", lambda: fake_service)
     monkeypatch.setattr(
-        run_evaluation.service,
+        fake_service,
         "resolve_legal_search_filters",
         lambda **_kwargs: ((), None, "invalid_effective_at"),
+        raising=False,
     )
 
     runs = run_evaluation.collect_backend_runs([query])
 
     assert [run["status"] for run in runs] == ["invalid_filter", "invalid_filter"]
     assert [run["error_code"] for run in runs] == ["invalid_effective_at", "invalid_effective_at"]
+
+
+def test_collect_evaluation_preflight_rejects_missing_legal_rag_tables() -> None:
+    connection = SimpleNamespace(
+        vendor="postgresql",
+        introspection=SimpleNamespace(table_names=lambda: ["unrelated_table"]),
+    )
+
+    result = run_evaluation.collect_evaluation_preflight(
+        connection,
+        expected_embedding_space={
+            "provider": "sentence-transformers",
+            "model": "intfloat/multilingual-e5-large",
+            "dimensions": 1024,
+        },
+    )
+
+    assert result == {
+        "status": "not_ready",
+        "reason": "law_rag_tables_missing",
+        "table_names": ["unrelated_table"],
+    }
+
+
+def test_main_writes_not_ready_summary_without_loading_django_service(tmp_path: Path, monkeypatch) -> None:
+    env_file = tmp_path / ".env.rag-eval"
+    env_file.write_text("LEGAL_RAG_VECTOR_ENABLED=0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        run_evaluation,
+        "_get_service",
+        lambda: pytest.fail("Django service must not load for an invalid evaluation environment"),
+    )
+
+    result = run_evaluation.main(
+        [
+            "--env-file",
+            str(env_file),
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--run-id",
+            "invalid-environment",
+        ]
+    )
+
+    summary = json.loads((tmp_path / "output" / "invalid-environment" / "summary.json").read_text(encoding="utf-8"))
+    assert result == 2
+    assert summary["preflight"]["status"] == "not_ready"
+    assert summary["preflight"]["reason"] == "evaluation_environment_invalid"
+    assert "OPENAI_API_KEY" not in json.dumps(summary)
+
+
+def test_local_evaluation_wrapper_is_explicit_and_does_not_seed_or_print_secrets() -> None:
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "run-legal-rag-ab-evaluation.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "[switch]$StartPostgres" in script
+    assert "docker compose up -d postgres" in script
+    assert "--env-file" in script
+    assert "etl.legal.run_evaluation" in script
+    assert "run_pipeline" not in script
+    assert "load_legal_rag_pgvector" not in script
+    assert "Write-Host $line" not in script
+
+
+def test_local_evaluation_wrapper_reuses_a_running_named_postgres_container() -> None:
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "run-legal-rag-ab-evaluation.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'docker ps -q --filter "name=^/skn27-postgres$"' in script
+    assert "Local PostgreSQL container is already running; reusing it." in script
+
+
+def test_local_evaluation_wrapper_allows_an_explicit_python_executable() -> None:
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "run-legal-rag-ab-evaluation.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert '[string]$PythonExecutable = "python"' in script
+    assert "& $PythonExecutable @arguments" in script
 
 
 def test_build_ragas_records_caps_public_contexts_at_top_five() -> None:
@@ -268,7 +446,7 @@ def test_run_ragas_uses_fixed_generator_and_judge_for_each_backend_record(monkey
         run_evaluation,
         "_evaluate_ragas_samples",
         lambda rows, **kwargs: captured.update(judge=kwargs, evaluated_rows=rows)
-        or {"faithfulness": 1.0, "answer_relevancy": 0.9},
+        or COMPLETE_RAGAS_METRICS,
     )
 
     result = run_evaluation.run_ragas(
@@ -279,12 +457,164 @@ def test_run_ragas_uses_fixed_generator_and_judge_for_each_backend_record(monkey
     )
 
     assert result["status"] == "evaluated"
-    assert result["metrics"]["faithfulness"] == 1.0
+    assert result["metrics"]["faithfulness"] == 0.9
+    assert set(result["query_results"][0]) == {
+        "query_id",
+        "backend",
+        "status",
+        "error_code",
+        "latency_ms",
+    }
+    assert result["query_results"][0]["status"] == "evaluated"
+    assert result["query_results"][0]["error_code"] is None
     assert captured["generator"] == {"model": "gpt-test-generator"}
     assert captured["judge"] == {
         "judge_model": "gpt-test-judge",
         "embedding_model": "text-embedding-test",
     }
+
+
+def test_run_ragas_continues_after_one_query_failure_without_leaking_exception_text(monkeypatch) -> None:
+    generated: list[str] = []
+
+    def generate(rows, **_kwargs):
+        query_id = rows[0]["query_id"]
+        generated.append(query_id)
+        if query_id == "law-q002":
+            raise RuntimeError("provider response included api_key=secret-value")
+        return [{**rows[0], "answer": "생성 답변"}]
+
+    monkeypatch.setattr(run_evaluation, "_generate_ragas_answers", generate)
+    monkeypatch.setattr(
+        run_evaluation,
+        "_evaluate_ragas_samples",
+        lambda _rows, **_kwargs: COMPLETE_RAGAS_METRICS,
+    )
+
+    result = run_evaluation.run_ragas(
+        [ragas_record("law-q001"), ragas_record("law-q002"), ragas_record("law-q003")],
+        generator_model="g",
+        judge_model="j",
+        embedding_model="e",
+    )
+
+    assert generated == ["law-q001", "law-q002", "law-q003"]
+    assert result["status"] == "not_evaluated"
+    assert result["reason"] == "incomplete_ragas_evidence"
+    assert result["query_results"][1]["query_id"] == "law-q002"
+    assert result["query_results"][1]["status"] == "not_evaluated"
+    assert result["query_results"][1]["error_code"] == "ragas_runtime_unavailable"
+    assert set(result["query_results"][1]) == {
+        "query_id",
+        "backend",
+        "status",
+        "error_code",
+        "latency_ms",
+    }
+    assert "secret-value" not in json.dumps(result, ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    ("metrics", "expected_error_code"),
+    [
+        ({"faithfulness": 1.0}, "ragas_metrics_incomplete"),
+        ({**COMPLETE_RAGAS_METRICS, "faithfulness": float("nan")}, "ragas_metrics_invalid"),
+        ({**COMPLETE_RAGAS_METRICS, "context_recall": 1.01}, "ragas_metrics_invalid"),
+    ],
+)
+def test_run_ragas_rejects_incomplete_or_invalid_query_metrics(
+    monkeypatch,
+    metrics: dict[str, float],
+    expected_error_code: str,
+) -> None:
+    monkeypatch.setattr(
+        run_evaluation,
+        "_generate_ragas_answers",
+        lambda rows, **_kwargs: [{**rows[0], "answer": "생성 답변"}],
+    )
+    monkeypatch.setattr(
+        run_evaluation,
+        "_evaluate_ragas_samples",
+        lambda _rows, **_kwargs: metrics,
+    )
+
+    result = run_evaluation.run_ragas(
+        [ragas_record("law-q001")],
+        generator_model="g",
+        judge_model="j",
+        embedding_model="e",
+    )
+
+    assert result["status"] == "not_evaluated"
+    assert result["reason"] == "incomplete_ragas_evidence"
+    assert "metrics" not in result
+    assert result["query_results"][0]["status"] == "not_evaluated"
+    assert result["query_results"][0]["error_code"] == expected_error_code
+
+
+def test_run_ragas_averages_complete_metrics_only_after_every_query_succeeds(monkeypatch) -> None:
+    metrics_by_query_id = {
+        "law-q001": COMPLETE_RAGAS_METRICS,
+        "law-q002": {
+            "context_precision": 0.6,
+            "context_recall": 0.5,
+            "faithfulness": 0.7,
+            "answer_relevancy": 0.8,
+        },
+    }
+    monkeypatch.setattr(
+        run_evaluation,
+        "_generate_ragas_answers",
+        lambda rows, **_kwargs: [{**rows[0], "answer": "생성 답변"}],
+    )
+    monkeypatch.setattr(
+        run_evaluation,
+        "_evaluate_ragas_samples",
+        lambda rows, **_kwargs: metrics_by_query_id[rows[0]["query_id"]],
+    )
+
+    result = run_evaluation.run_ragas(
+        [ragas_record("law-q001"), ragas_record("law-q002")],
+        generator_model="g",
+        judge_model="j",
+        embedding_model="e",
+    )
+
+    assert result["status"] == "evaluated"
+    assert result["metrics"] == {
+        "context_precision": 0.7,
+        "context_recall": 0.6,
+        "faithfulness": 0.8,
+        "answer_relevancy": 0.7,
+    }
+    assert [row["status"] for row in result["query_results"]] == ["evaluated", "evaluated"]
+
+
+def test_run_ragas_skips_empty_contexts_without_calling_external_services(monkeypatch) -> None:
+    def should_not_run(*_args, **_kwargs):
+        raise AssertionError("empty contexts must not invoke an external RAGAS service")
+
+    monkeypatch.setattr(run_evaluation, "_generate_ragas_answers", should_not_run)
+    monkeypatch.setattr(run_evaluation, "_evaluate_ragas_samples", should_not_run)
+
+    result = run_evaluation.run_ragas(
+        [ragas_record("law-q001", contexts=[])],
+        generator_model="g",
+        judge_model="j",
+        embedding_model="e",
+    )
+
+    assert result["status"] == "not_evaluated"
+    assert result["reason"] == "incomplete_ragas_evidence"
+    assert result["query_results"] == [
+        {
+            "query_id": "law-q001",
+            "backend": "postgres_lexical",
+            "status": "not_evaluated",
+            "error_code": "no_ragas_contexts",
+            "latency_ms": 0,
+        }
+    ]
 
 
 def test_run_ragas_requires_at_most_twenty_public_questions() -> None:

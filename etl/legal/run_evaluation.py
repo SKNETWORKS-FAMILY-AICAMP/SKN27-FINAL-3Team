@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Mapping, Sequence
 
-from etl.legal import evaluation
+from etl.legal import evaluation, evaluation_environment
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +21,12 @@ DEFAULT_FIXTURE = PROJECT_ROOT / "etl" / "legal" / "evaluation_fixtures" / "publ
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "output" / "law_ingestion" / "evaluation"
 BACKENDS = ("postgres_lexical", "postgres_pgvector")
 MAX_RAGAS_QUERY_COUNT = 20
+RAGAS_METRIC_NAMES = (
+    "context_precision",
+    "context_recall",
+    "faithfulness",
+    "answer_relevancy",
+)
 
 
 def _load_service():
@@ -33,7 +42,16 @@ def _load_service():
     return legal_rag_service
 
 
-service = _load_service()
+service: Any | None = None
+
+
+def _get_service():
+    """Initialize Django only after the explicit evaluation environment is validated."""
+
+    global service
+    if service is None:
+        service = _load_service()
+    return service
 
 
 def collect_backend_runs(
@@ -59,13 +77,14 @@ def collect_backend_responses(
     if top_k <= 0:
         raise ValueError("top_k must be greater than zero")
 
+    rag_service = _get_service()
     responses: list[dict[str, Any]] = []
     for query in queries:
         query_id = _required_text(query, "query_id")
         query_text = _required_text(query, "query")
         temporal_basis = query.get("temporal_basis")
         scope = query.get("scope")
-        allowed_source_types, effective_at, filter_error = service.resolve_legal_search_filters(
+        allowed_source_types, effective_at, filter_error = rag_service.resolve_legal_search_filters(
             source_type="law",
             temporal_basis=temporal_basis if isinstance(temporal_basis, dict) else None,
             scope=scope if isinstance(scope, dict) else None,
@@ -85,14 +104,14 @@ def collect_backend_responses(
                 )
             continue
 
-        lexical_response = service._search_law_chunks_lexical(
+        lexical_response = rag_service._search_law_chunks_lexical(
             query_text,
             top_k=top_k,
             source_type="law",
             allowed_source_types=allowed_source_types,
             effective_at=effective_at,
         )
-        vector_response = service._search_pgvector(
+        vector_response = rag_service._search_pgvector(
             query_text,
             top_k=top_k,
             source_type="law",
@@ -101,11 +120,47 @@ def collect_backend_responses(
         )
         responses.extend(
             (
-                {**lexical_response, "query_id": query_id},
-                {**vector_response, "query_id": query_id},
+                _evaluation_response(lexical_response, query_id=query_id),
+                _evaluation_response(vector_response, query_id=query_id),
             )
         )
     return responses
+
+
+def _evaluation_response(response: Mapping[str, Any], *, query_id: str) -> dict[str, Any]:
+    sanitized = dict(response)
+    sanitized["query_id"] = query_id
+    sanitized["error_code"] = _safe_evaluation_error_code(sanitized.get("error_code"))
+    return sanitized
+
+
+def _safe_evaluation_error_code(value: object) -> str:
+    error_code = str(value or "").strip()
+    if not error_code:
+        return ""
+    if error_code in {
+        "vector_disabled",
+        "source_type_not_supported",
+        "postgresql_connection_required",
+        "no_eligible_seed_embeddings",
+        "query_embedding_disabled",
+        "embedding_space_mismatch",
+        "query_embedding_space_not_configured",
+        "sentence_transformers_unavailable",
+        "openai_api_key_required",
+        "openai_sdk_unavailable",
+        "django_apps_not_ready",
+        "no_search_tokens",
+    }:
+        return error_code
+    normalized = error_code.lower()
+    if "incorrect api key" in normalized or "authentication" in normalized or "error code: 401" in normalized:
+        return "openai_authentication_failed"
+    if error_code.startswith("missing_tables:"):
+        return "rag_tables_missing"
+    if error_code.startswith("unsupported_embedding_provider:"):
+        return "unsupported_embedding_provider"
+    return "backend_runtime_unavailable"
 
 
 def build_ragas_records(
@@ -163,26 +218,132 @@ def run_ragas(
     if not records:
         return {"status": "not_evaluated", "reason": "no_ragas_records"}
 
-    try:
-        answered_records = _generate_ragas_answers(records, model=generator_model)
-        metrics = _evaluate_ragas_samples(
-            answered_records,
-            judge_model=judge_model,
-            embedding_model=embedding_model,
+    query_results: list[dict[str, object]] = []
+    per_query_metrics: list[Mapping[str, object]] = []
+    for record in records:
+        if not _has_ragas_contexts(record):
+            query_results.append(
+                _ragas_query_result(
+                    record,
+                    status="not_evaluated",
+                    error_code="no_ragas_contexts",
+                    latency_ms=0,
+                )
+            )
+            continue
+
+        started_at = perf_counter()
+        try:
+            answered_records = _generate_ragas_answers([record], model=generator_model)
+            metrics = _evaluate_ragas_samples(
+                answered_records,
+                judge_model=judge_model,
+                embedding_model=embedding_model,
+            )
+        except Exception as exc:
+            query_results.append(
+                _ragas_query_result(
+                    record,
+                    status="not_evaluated",
+                    error_code=_safe_ragas_error_code(exc),
+                    latency_ms=_elapsed_milliseconds(started_at),
+                )
+            )
+            continue
+
+        metrics_error_code = _ragas_metrics_error_code(metrics)
+        if metrics_error_code:
+            query_results.append(
+                _ragas_query_result(
+                    record,
+                    status="not_evaluated",
+                    error_code=metrics_error_code,
+                    latency_ms=_elapsed_milliseconds(started_at),
+                )
+            )
+            continue
+
+        per_query_metrics.append(metrics)
+        query_results.append(
+            _ragas_query_result(
+                record,
+                status="evaluated",
+                error_code=None,
+                latency_ms=_elapsed_milliseconds(started_at),
+            )
         )
-    except ImportError:
-        return {"status": "not_evaluated", "reason": "ragas_dependencies_not_installed"}
-    except RuntimeError as exc:
-        return {"status": "not_evaluated", "reason": _safe_ragas_reason(exc)}
-    except Exception:
-        return {"status": "not_evaluated", "reason": "ragas_execution_failed"}
-    return {
-        "status": "evaluated",
+
+    result: dict[str, Any] = {
         "generator_model": generator_model,
         "judge_model": judge_model,
         "embedding_model": embedding_model,
-        "metrics": metrics,
+        "query_results": query_results,
     }
+    if any(query_result["status"] != "evaluated" for query_result in query_results):
+        return {
+            "status": "not_evaluated",
+            "reason": "incomplete_ragas_evidence",
+            **result,
+        }
+
+    return {
+        "status": "evaluated",
+        **result,
+        "metrics": summarize_ragas_scores(per_query_metrics),
+    }
+
+
+def _ragas_query_result(
+    record: Mapping[str, object],
+    *,
+    status: str,
+    error_code: str | None,
+    latency_ms: int,
+) -> dict[str, object]:
+    return {
+        "query_id": _required_text(record, "query_id"),
+        "backend": _required_text(record, "backend"),
+        "status": status,
+        "error_code": error_code,
+        "latency_ms": latency_ms,
+    }
+
+
+def _elapsed_milliseconds(started_at: float) -> int:
+    return max(0, round((perf_counter() - started_at) * 1000))
+
+
+def _has_ragas_contexts(record: Mapping[str, object]) -> bool:
+    contexts = record.get("contexts")
+    return isinstance(contexts, list) and any(
+        isinstance(context, str) and context.strip() for context in contexts
+    )
+
+
+def _safe_ragas_error_code(exc: Exception) -> str:
+    if isinstance(exc, ImportError):
+        return "ragas_dependencies_not_installed"
+    if isinstance(exc, RuntimeError):
+        return _safe_ragas_reason(exc)
+    return "ragas_runtime_unavailable"
+
+
+def _ragas_metrics_error_code(metrics: object) -> str | None:
+    if not isinstance(metrics, Mapping):
+        return "ragas_metrics_invalid"
+    if any(metric_name not in metrics for metric_name in RAGAS_METRIC_NAMES):
+        return "ragas_metrics_incomplete"
+    for metric_name in RAGAS_METRIC_NAMES:
+        value = metrics[metric_name]
+        if isinstance(value, bool):
+            return "ragas_metrics_invalid"
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return "ragas_metrics_invalid"
+        if not math.isfinite(numeric_value) or not 0 <= numeric_value <= 1:
+            return "ragas_metrics_invalid"
+    return None
 
 
 def _generate_ragas_answers(
@@ -263,11 +424,23 @@ def _evaluate_ragas_samples(
         embeddings=embeddings,
         raise_exceptions=True,
     )
-    return {
-        metric: round(float(value), 6)
-        for metric, value in dict(result).items()
-        if metric in {"context_precision", "context_recall", "faithfulness", "answer_relevancy"}
-    }
+    return summarize_ragas_scores(result.scores)
+
+
+def summarize_ragas_scores(scores: Sequence[Mapping[str, object]]) -> dict[str, float]:
+    summary: dict[str, float] = {}
+    for metric_name in RAGAS_METRIC_NAMES:
+        values: list[float] = []
+        for score in scores:
+            try:
+                value = float(score.get(metric_name))
+            except (TypeError, ValueError):
+                continue
+            if not math.isnan(value):
+                values.append(value)
+        if values:
+            summary[metric_name] = round(sum(values) / len(values), 6)
+    return summary
 
 
 def _safe_ragas_reason(exc: RuntimeError) -> str:
@@ -278,6 +451,7 @@ def _safe_ragas_reason(exc: RuntimeError) -> str:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
+    parser.add_argument("--env-file", type=Path, default=PROJECT_ROOT / ".env.rag-eval")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--run-id", default="")
     parser.add_argument("--top-k", type=int, default=5)
@@ -290,6 +464,39 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    output_dir = args.output_dir / run_id
+    output_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        environment_values = evaluation_environment.load_evaluation_environment(args.env_file)
+    except (FileNotFoundError, ValueError):
+        return _write_not_ready_summary(
+            output_dir,
+            run_id=run_id,
+            args=args,
+            preflight={"status": "not_ready", "reason": "evaluation_environment_invalid"},
+        )
+
+    environment = evaluation_environment.validate_evaluation_environment(environment_values)
+    if environment["status"] != "ready":
+        return _write_not_ready_summary(
+            output_dir,
+            run_id=run_id,
+            args=args,
+            preflight={"status": "not_ready", "reason": "evaluation_environment_invalid", "environment": environment},
+        )
+
+    evaluation_environment.apply_evaluation_environment(environment_values)
+    _get_service()
+    from django.db import connection
+
+    preflight = collect_evaluation_preflight(
+        connection,
+        expected_embedding_space=environment["seed_embedding_space"],
+    )
+    if preflight["status"] != "ready":
+        return _write_not_ready_summary(output_dir, run_id=run_id, args=args, preflight=preflight)
+
     queries = evaluation.load_public_law_queries(args.fixture)
     responses = collect_backend_responses(queries, top_k=args.top_k)
     runs = [
@@ -297,9 +504,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         for response in responses
     ]
     summary = evaluation.summarize_backend_runs(runs, queries)
-    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output_dir = args.output_dir / run_id
-    output_dir.mkdir(parents=True, exist_ok=False)
     _write_json(output_dir / "candidates.json", {"runs": runs})
     ragas_records = build_ragas_records(queries, responses)
     _write_jsonl(output_dir / "ragas_input.jsonl", ragas_records)
@@ -319,6 +523,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "fixture": str(args.fixture),
             "query_count": len(queries),
             "top_k": args.top_k,
+            "preflight": preflight,
             "backends": summary,
             "ragas": ragas_result,
             "transition_decision": decision,
@@ -326,6 +531,110 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(f"Wrote deterministic legal RAG evaluation artifacts to {output_dir}")
     return 0
+
+
+def collect_evaluation_preflight(
+    connection: Any,
+    *,
+    expected_embedding_space: Mapping[str, object],
+) -> dict[str, Any]:
+    """Verify only aggregate seed state before either backend is queried."""
+
+    if getattr(connection, "vendor", "") != "postgresql":
+        return {"status": "not_ready", "reason": "postgresql_required"}
+    try:
+        table_names = sorted(connection.introspection.table_names())
+    except Exception:
+        return {"status": "not_ready", "reason": "database_introspection_unavailable"}
+    required_tables = {"law_chunks", "law_embeddings"}
+    if not required_tables.issubset(table_names):
+        return {"status": "not_ready", "reason": "law_rag_tables_missing", "table_names": table_names}
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM law_chunks WHERE is_searchable = TRUE;")
+            searchable_chunks = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*) FROM law_embeddings;")
+            embeddings = int(cursor.fetchone()[0])
+            cursor.execute(
+                """
+                SELECT embedding_provider, embedding_model, embedding_dimensions, COUNT(*)
+                FROM law_embeddings
+                GROUP BY embedding_provider, embedding_model, embedding_dimensions
+                ORDER BY embedding_provider, embedding_model, embedding_dimensions
+                """
+            )
+            embedding_spaces = [
+                {
+                    "provider": str(provider),
+                    "model": str(model),
+                    "dimensions": int(dimensions),
+                    "count": int(count),
+                }
+                for provider, model, dimensions, count in cursor.fetchall()
+            ]
+            cursor.execute("SELECT chunk_id FROM law_embeddings ORDER BY chunk_id;")
+            snapshot = hashlib.sha256()
+            for (chunk_id,) in cursor.fetchall():
+                snapshot.update(str(chunk_id).encode("utf-8"))
+                snapshot.update(b"\n")
+    except Exception:
+        return {"status": "not_ready", "reason": "database_query_unavailable"}
+
+    result: dict[str, Any] = {
+        "status": "ready",
+        "reason": "",
+        "searchable_chunks": searchable_chunks,
+        "embeddings": embeddings,
+        "embedding_spaces": embedding_spaces,
+        "corpus_snapshot": snapshot.hexdigest(),
+    }
+    if searchable_chunks == 0 or embeddings == 0:
+        result.update(status="not_ready", reason="law_rag_seed_missing")
+        return result
+    expected = {
+        "provider": str(expected_embedding_space.get("provider") or ""),
+        "model": str(expected_embedding_space.get("model") or ""),
+        "dimensions": int(expected_embedding_space.get("dimensions") or 0),
+    }
+    matching_spaces = [
+        space
+        for space in embedding_spaces
+        if {key: space[key] for key in expected} == expected
+    ]
+    if len(embedding_spaces) != 1:
+        result.update(status="not_ready", reason="seed_embedding_space_ambiguous")
+    elif not matching_spaces:
+        result.update(status="not_ready", reason="seed_embedding_space_mismatch")
+    return result
+
+
+def _write_not_ready_summary(
+    output_dir: Path,
+    *,
+    run_id: str,
+    args: argparse.Namespace,
+    preflight: Mapping[str, object],
+) -> int:
+    _write_json(
+        output_dir / "summary.json",
+        {
+            "run_id": run_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "fixture": str(args.fixture),
+            "query_count": 0,
+            "top_k": args.top_k,
+            "preflight": dict(preflight),
+            "backends": {},
+            "ragas": {
+                backend: {"status": "not_evaluated", "reason": "preflight_not_ready"}
+                for backend in BACKENDS
+            },
+            "transition_decision": {"eligible": False, "failed_gates": ["preflight_not_ready"]},
+        },
+    )
+    print(f"Wrote not-ready legal RAG evaluation summary to {output_dir}")
+    return 2
 
 
 def _write_json(path: Path, value: Mapping[str, object]) -> None:
