@@ -183,3 +183,48 @@ pgvector RAGAS metric을 공란·0·부분 평균으로 대체하지 않았다. 
 | pgvector RAGAS 완결성 | 18 / 20 평가 | 20 / 20 평가 및 aggregate 생성 | 실패 |
 
 따라서 `transition_decision.eligible=false`를 유지한다. 다음 작업은 pgvector의 2건 no-result 원인과 p95 지연을 해결하고, 같은 20개 질의를 재실행해 **no-result 0, p95 1,413 ms 이하, RAGAS 20/20 평가 및 aggregate 생성**을 함께 충족하는지 확인하는 것이다. 이 세 조건이 충족되기 전에는 pgvector 우선 전환이나 C-1 완료를 선언하지 않는다.
+
+## 실행 업데이트 — `legal-ab-018-pgvector-gates-20260722`
+
+Issue #289 구현 후 Python 3.13.14 전용 환경에서 같은 공개 법령 20개 질의와 동일 corpus snapshot으로 PostgreSQL lexical ↔ pgvector A/B·RAGAS를 다시 실행했다. preflight는 `ready`였고 searchable chunks와 embeddings는 각각 97,394건, embedding space는 `openai / text-embedding-3-large / 1024` 단일 공간이었다. `legal-ab-017-pgvector-gates-20260722`는 장기 실행 세션이 종료되어 `summary.json`이 없는 부분 산출물만 남았으므로 전환 근거에서 제외한다. 아래 값은 `summary.json`이 생성되고 종료 코드 0으로 끝난 `018`의 측정값이다.
+
+| 지표 | PostgreSQL lexical | pgvector |
+| --- | ---: | ---: |
+| query count / completed run count | 20 / 20 | 20 / 20 |
+| Recall@1 / Recall@3 / Recall@5 | 0.350000 / 0.400000 / 0.450000 | 0.500000 / 0.900000 / 1.000000 |
+| MRR / nDCG@5 | 0.385000 / 0.400889 | 0.705833 / 0.780155 |
+| no-result rate / unavailable rate | 0.000000 / 0.000000 | 0.000000 / 0.000000 |
+| metadata complete rate | 1.000000 | 1.000000 |
+| 전체 p50 / p95 latency | 575 ms / 756 ms | 394 ms / 589 ms |
+
+pgvector의 전체 latency phase 증적은 다음과 같다. lexical 경로는 이번 telemetry 대상이 아니므로 각 phase의 count는 0이며, 이를 0 ms로 측정됐다는 뜻으로 해석하지 않는다.
+
+| phase | PostgreSQL lexical (count / p50 / p95 / mean) | pgvector (count / p50 / p95 / mean) |
+| --- | ---: | ---: |
+| preflight | 0 / 0 / 0 / 0.000 ms | 20 / 6 / 9 / 6.450 ms |
+| embedding | 0 / 0 / 0 / 0.000 ms | 20 / 318 / 445 / 421.250 ms |
+| vector query | 0 / 0 / 0 / 0.000 ms | 20 / 88 / 125 / 89.800 ms |
+| result mapping | 0 / 0 / 0 / 0.000 ms | 20 / 0 / 0 / 0.000 ms |
+
+RAGAS는 생성·판정 모델 `gpt-4o-mini`, judge embedding `text-embedding-3-small`을 사용했다. 두 backend 모두 20개 전부 `evaluated`였고 error code는 모두 없었다.
+
+| RAGAS 지표 | PostgreSQL lexical | pgvector |
+| --- | ---: | ---: |
+| evaluated / not-evaluated count | 20 / 0 | 20 / 0 |
+| aggregate status | `evaluated` | `evaluated` |
+| context precision | 0.661944 | 0.811806 |
+| context recall | 0.700000 | 0.900000 |
+| faithfulness | 0.753333 | 0.840833 |
+| answer relevancy | 0.353673 | 0.447695 |
+| evaluated-only p50 / p95 / mean latency | 11,065 / 14,997 / 13,126.700 ms | 10,643 / 13,091 / 10,872.450 ms |
+
+| 전환 게이트 | 측정값 | 통과 기준 | 판정 |
+| --- | ---: | ---: | --- |
+| pgvector no-result | 0.000000 | lexical 0.000000 이하 | 통과 |
+| pgvector 전체 p95 latency | 589 ms | 1,413 ms 이하 | 통과 |
+| pgvector RAGAS 완결성 | 20 / 20, aggregate 생성 | 20 / 20, aggregate 생성 | 통과 |
+| `transition_decision.eligible` | `true` | `true` | 통과 |
+
+자동화 회귀는 `pytest -q test/test_legal_rag_evaluation.py test/test_legal_rag_evaluation_environment.py test/test_legal_rag_service.py --timeout=30 -p no:cacheprovider`로 새 임시 경로에서 실행해 **61 passed in 0.81s**를 확인했다. 이전에 사용한 임시 경로를 재사용한 1회 실행은 pytest의 디렉터리 정리 권한 오류로 setup 4건이 중단됐고, 코드 실패와 구분하기 위해 새 경로에서 재실행했다. `git diff --check`은 CRLF 변환 안내만 출력하고 공백 오류 없이 종료 코드 0이었다.
+
+따라서 이번 유효 실행의 failed gate는 없고, C-1의 법령 RAG PostgreSQL lexical ↔ pgvector 전환 기준 검증을 완료로 갱신한다. 원문 질의·답변·context·API key·예외 전문은 이 보고서와 산출물 요약에 기록하지 않았다.

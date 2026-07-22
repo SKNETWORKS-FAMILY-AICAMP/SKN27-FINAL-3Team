@@ -86,6 +86,13 @@ def test_normalize_backend_response_removes_raw_text_and_keeps_ranked_metadata()
             "status": "ready",
             "latency_ms": 12,
             "error_code": "",
+            "latency_breakdown_ms": {
+                "preflight_ms": 4,
+                "embedding_ms": 12,
+                "vector_query_ms": -3,
+                "result_mapping_ms": 2,
+                "secret_like_detail": "must-not-leak",
+            },
             "results": [
                 {
                     "source_reference": "volatile-chunk-id",
@@ -108,6 +115,13 @@ def test_normalize_backend_response_removes_raw_text_and_keeps_ranked_metadata()
     assert normalized["results"][0]["source_reference"] == "volatile-chunk-id"
     assert "summary" not in normalized["results"][0]
     assert "provision_text" not in normalized["results"][0]
+    assert normalized["latency_breakdown_ms"] == {
+        "preflight_ms": 4,
+        "embedding_ms": 12,
+        "vector_query_ms": 0,
+        "result_mapping_ms": 2,
+    }
+    assert "secret_like_detail" not in repr(normalized)
 
 
 def test_summary_calculates_recall_mrr_ndcg_latency_and_metadata() -> None:
@@ -121,6 +135,12 @@ def test_summary_calculates_recall_mrr_ndcg_latency_and_metadata() -> None:
             "backend": "postgres_lexical",
             "status": "ready",
             "latency_ms": 10,
+            "latency_breakdown_ms": {
+                "preflight_ms": 2,
+                "embedding_ms": 4,
+                "vector_query_ms": 3,
+                "result_mapping_ms": 1,
+            },
             "results": [
                 {
                     "rank": 1,
@@ -138,6 +158,12 @@ def test_summary_calculates_recall_mrr_ndcg_latency_and_metadata() -> None:
             "backend": "postgres_lexical",
             "status": "ready",
             "latency_ms": 30,
+            "latency_breakdown_ms": {
+                "preflight_ms": 4,
+                "embedding_ms": 8,
+                "vector_query_ms": 7,
+                "result_mapping_ms": 1,
+            },
             "results": [
                 {
                     "rank": 1,
@@ -172,6 +198,12 @@ def test_summary_calculates_recall_mrr_ndcg_latency_and_metadata() -> None:
     assert lexical["p50_latency_ms"] == 10
     assert lexical["p95_latency_ms"] == 30
     assert lexical["metadata_complete_rate"] == 1.0
+    assert lexical["latency_breakdown_ms"]["embedding_ms"] == {
+        "count": 2,
+        "p50_ms": 4,
+        "p95_ms": 8,
+        "mean_ms": 6.0,
+    }
 
 
 def test_collect_backend_runs_uses_identical_resolved_filters(monkeypatch) -> None:
