@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import os
 from pathlib import Path
 
 
@@ -71,6 +72,13 @@ def validate_evaluation_environment(values: Mapping[str, str]) -> dict[str, obje
             or str(values.get("LAW_API_KEY", "")).strip()
         ),
     }
+
+
+def apply_evaluation_environment(values: Mapping[str, str]) -> None:
+    """Apply an already-read local evaluation environment to this process only."""
+
+    for key, value in values.items():
+        os.environ[key] = value
 
 
 def _not_ready(
