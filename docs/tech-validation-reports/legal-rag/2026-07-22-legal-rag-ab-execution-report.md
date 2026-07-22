@@ -81,3 +81,11 @@ pgvector의 20건은 모두 안전한 `openai_authentication_failed`로 기록�
 `transition_decision.eligible`는 `false`다. 실패 gate는 retrieval 품질 회귀, pgvector unavailable·metadata 불완전, 그리고 `ragas_not_evaluated`다. 인증이 가능한 평가 전용 OpenAI 키를 로컬에서 교체한 뒤에만 새 run ID로 재실행하며, 그 전까지 pgvector 우선 전환과 C-1 완료 처리는 하지 않는다.
 
 실행기는 Django를 직접 초기화하므로 `requirements-etl.txt`에 `Django==6.0.6`을 명시하고 회귀 테스트로 고정했다. `test/test_legal_rag_evaluation.py`, `test/test_legal_rag_evaluation_environment.py`, `test/test_legal_rag_service.py`의 관련 회귀 58개가 통과했다.
+
+## 실행 업데이트 — `legal-ab-013-ragas-20260722`
+
+평가 전용 키를 교체한 뒤 동일한 corpus snapshot과 공개 법령 20개 질의로 다시 실행했다. preflight는 계속 `ready`였고, PostgreSQL lexical은 20개 질의를 모두 완료했다(Recall@5 0.45, MRR 0.385, nDCG@5 0.401, p50/p95 430/614 ms).
+
+그러나 pgvector 20개는 다시 모두 안전한 `openai_authentication_failed`로 기록됐다. 즉 새 키도 질의 임베딩을 위한 OpenAI 인증을 통과하지 못했다. pgvector는 빈 context로 RAGAS 외부 호출 없이 `no_ragas_contexts`가 됐고, lexical 20개는 `ragas_runtime_unavailable`로 질의별 격리되어 어느 backend도 aggregate metric을 생성하지 못했다.
+
+`transition_decision.eligible`는 계속 `false`다. 새로운 키를 발급하거나 프로젝트·결제·권한이 활성화된 키로 교체한 다음, 새 run ID에서 pgvector의 `openai_authentication_failed`가 0건임을 먼저 확인해야 한다. 그 조건이 충족되기 전에는 pgvector 전환과 C-1 완료 처리를 하지 않는다. 키 값, 예외 원문, 질의·답변·context는 기록하지 않는다.

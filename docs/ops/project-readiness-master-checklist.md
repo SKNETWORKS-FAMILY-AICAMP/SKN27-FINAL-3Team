@@ -95,7 +95,7 @@
 - [x] 검색 결과 부족 시 partial/failed 처리 기반
 - [x] 선택된 RAG 도메인의 런타임 예외를 개별 `failed` 결과로 격리하고, 정상 도메인 결과는 `partial`로 유지하는 회귀 테스트 — PR #275
 - [?] Elasticsearch의 역할과 pgvector/Neo4j/Elasticsearch 선택 조건 문서화
-- [~] 법령 RAG의 PostgreSQL lexical ↔ pgvector 전환 기준, 임베딩·조문 chunk A/B, RAGAS 품질 평가 — #280, #282, #285 (`legal-ab-012-ragas-20260722` preflight·실제 PostgreSQL A/B·RAGAS 질의별 실패 격리 실행 완료; pgvector 20개는 `openai_authentication_failed`로 unavailable·빈 context, lexical RAGAS 20개는 `ragas_runtime_unavailable`로 격리되어 aggregate metric 미생성; no-result·metadata·RAGAS gate 미통과이므로 `not_evaluated`와 `[~]` 유지; 법령만, 판례·심의사례·과실기준 제외)
+- [~] 법령 RAG의 PostgreSQL lexical ↔ pgvector 전환 기준, 임베딩·조문 chunk A/B, RAGAS 품질 평가 — #280, #282, #285 (`legal-ab-012-ragas-20260722`, 키 교체 후 `legal-ab-013-ragas-20260722` preflight·실제 PostgreSQL A/B·RAGAS 질의별 실패 격리 실행 완료; 두 run 모두 pgvector 20개가 `openai_authentication_failed`로 unavailable·빈 context, lexical RAGAS 20개는 `ragas_runtime_unavailable`로 격리되어 aggregate metric 미생성; no-result·metadata·RAGAS gate 미통과이므로 `not_evaluated`와 `[~]` 유지; 법령만, 판례·심의사례·과실기준 제외)
 - [ ] 대표 사고 시나리오별 검색 정확도 평가 세트
 - [ ] 검색 결과의 근거 출처·검색 시점·한계 표시
 - [ ] 유사도 점수만으로 결론을 내리지 않도록 하는 근거 검토 기준
