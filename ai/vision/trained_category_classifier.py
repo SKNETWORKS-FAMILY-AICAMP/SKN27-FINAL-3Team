@@ -44,7 +44,7 @@ def find_best_checkpoint(project_root: Path) -> Path:
 
 
 class TrainedCategoryClassifier:
-    def __init__(self, checkpoint: Path, frame_count: int = 16, device_name: str = "auto"):
+    def __init__(self, checkpoint: Path, frame_count: int = 32, device_name: str = "auto"):
         import torch
         from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
 

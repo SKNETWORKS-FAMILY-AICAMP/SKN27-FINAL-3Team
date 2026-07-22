@@ -18,6 +18,8 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
 
+from ai.vision.adaptive_preprocessing import enhance_frame_adaptive
+
 
 DEFAULT_MANIFEST_PATH = Path(
     "storage/vision/datasets/classification/manifests/train_700_download_manifest.csv"
@@ -104,7 +106,7 @@ def read_video_frames(path: Path, frame_count: int) -> list[np.ndarray]:
         ok, frame = capture.read()
         if not ok:
             continue
-        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        frames.append(cv2.cvtColor(enhance_frame_adaptive(frame), cv2.COLOR_BGR2RGB))
     capture.release()
 
     if not frames:
@@ -173,7 +175,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--label-column", default=DEFAULT_LABEL_COLUMN)
     parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME)
-    parser.add_argument("--frame-count", type=int, default=16)
+    parser.add_argument("--frame-count", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=1e-5)

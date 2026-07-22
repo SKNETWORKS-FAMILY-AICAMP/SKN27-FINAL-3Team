@@ -8,6 +8,8 @@ import json
 
 import cv2
 
+from ai.vision.adaptive_preprocessing import enhance_frame_adaptive
+
 
 RAW_DIR = Path("storage/vision/raw")
 FRAME_DIR = Path("storage/vision/processed/frames")
@@ -75,7 +77,7 @@ def extract_keyframes(video_path: Path, frame_count_target: int = 5):
         frame_name = f"{video_stem}_frame_{order:02d}_{frame_index:06d}.jpg"
         frame_path = FRAME_DIR / frame_name
 
-        cv2.imwrite(str(frame_path), frame)
+        cv2.imwrite(str(frame_path), enhance_frame_adaptive(frame))
 
         records.append(
             {

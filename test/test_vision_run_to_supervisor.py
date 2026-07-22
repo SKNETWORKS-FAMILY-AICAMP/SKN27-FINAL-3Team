@@ -34,7 +34,9 @@ class VisionRunToSupervisorTest(unittest.TestCase):
             final_dir, handoff_dir = root / "final", root / "handoff"
             calls = []
             modules = {
-                "ai.vision.pipeline": types.SimpleNamespace(extract_keyframes=lambda *_: (calls.append("extract") or (root / "keys.json", {}))),
+                "ai.vision.pipeline": types.SimpleNamespace(extract_keyframes=lambda _, count: (
+                    calls.append(("extract", count)) or (root / "keys.json", {})
+                )),
                 "ai.vision.models": types.SimpleNamespace(detect_keyframes=lambda _, model, confidence: (
                     calls.append(("detect", model, confidence)) or (root / "detections.json", {})
                 )),
@@ -45,13 +47,17 @@ class VisionRunToSupervisorTest(unittest.TestCase):
                  patch("ai.vision.merge_analysis.FINAL_OUTPUT_DIR", final_dir), \
                  patch("ai.vision.build_supervisor_handoff.OUTPUT_DIR", handoff_dir), \
                  patch("ai.vision.run_to_supervisor.infer_videomae", side_effect=lambda *_: calls.append("videomae") or video_result), \
-                 patch("ai.vision.run_to_supervisor.analyze_qwen", return_value={
-                     "valid": True, "summary": "collision", "collision_moment_visible": True,
-                     "uncertainties": ["occlusion"],
-                 }):
+                 patch("ai.vision.run_to_supervisor.analyze_qwen", side_effect=lambda _, __, count, ___: (
+                     calls.append(("qwen", count)) or {
+                         "valid": True, "summary": "collision", "collision_moment_visible": True,
+                         "uncertainties": ["occlusion"],
+                     }
+                 )):
                 result = run(video, checkpoint=checkpoint)
             payload = json.loads(result.read_text())["vision_supervisor_handoff"]
-            self.assertEqual(calls[:3], ["videomae", "extract", ("detect", "yolov8m.pt", .25)])
+            self.assertEqual(calls[:4], [
+                "videomae", ("extract", 32), ("detect", "yolov8m.pt", .25), ("qwen", 32)
+            ])
             self.assertEqual(payload["model_analysis"]["trained_accident_prediction"]["label"], "car_vs_car")
             self.assertEqual(payload["model_analysis"]["selected_yolo_model"], "yolov8m.pt")
             self.assertEqual(payload["model_analysis"]["qwen"]["uncertainties"], ["occlusion"])

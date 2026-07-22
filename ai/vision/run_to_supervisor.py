@@ -152,12 +152,12 @@ def run(
     input_path: Path,
     *,
     checkpoint: Path,
-    frame_count: int = 8,
-    videomae_frame_count: int = 16,
+    frame_count: int = 32,
+    videomae_frame_count: int = 32,
     yolo_model: str | None = None,
     confidence: float = 0.25,
     qwen_model: str = "Qwen/Qwen2.5-VL-3B-Instruct",
-    qwen_frame_count: int = 4,
+    qwen_frame_count: int = 32,
     device: str = "auto",
     skip_qwen: bool = False,
     min_category_confidence: float = 0.5,
@@ -213,12 +213,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run trained VideoMAE, YOLO and Qwen for Supervisor handoff.")
     parser.add_argument("input", type=Path)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--frame-count", type=int, default=8)
-    parser.add_argument("--videomae-frame-count", type=int, default=16)
+    parser.add_argument("--frame-count", type=int, default=32)
+    parser.add_argument("--videomae-frame-count", type=int, default=32)
     parser.add_argument("--yolo-model", default=None, help="Optional explicit override for category-selected YOLO")
     parser.add_argument("--confidence", type=float, default=0.25)
     parser.add_argument("--qwen-model", default="Qwen/Qwen2.5-VL-3B-Instruct")
-    parser.add_argument("--qwen-frame-count", type=int, default=4)
+    parser.add_argument("--qwen-frame-count", type=int, default=32)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--skip-qwen", action="store_true", help="Troubleshooting only")
     parser.add_argument("--min-category-confidence", type=float, default=0.5)
