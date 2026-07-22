@@ -1,8 +1,5 @@
-"""Run YOLO baseline detection on extracted key frames.
+"""Run YOLO detection on extracted key frames as visual evidence."""
 
-This step produces object class, confidence, and bbox evidence. It is used as
-visual evidence, not as a legal/fault-ratio decision model.
-"""
 from pathlib import Path
 import json
 
@@ -18,8 +15,7 @@ def find_latest_keyframe_output() -> Path:
     outputs = sorted(OUTPUT_DIR.glob("keyframes_*.json"))
     if not outputs:
         raise FileNotFoundError(
-            f"No keyframe output JSON found under {OUTPUT_DIR}. "
-            "Run ai/vision/pipeline.py first."
+            f"No keyframe output JSON found under {OUTPUT_DIR}. Run ai/vision/pipeline.py first."
         )
     return outputs[-1]
 
@@ -41,7 +37,6 @@ def detect_keyframes(
 
     for keyframe in keyframe_output.get("keyframes", []):
         frame_path = keyframe.get("frame_path")
-
         if keyframe.get("status") != "ok" or not frame_path:
             detections.append(
                 {
@@ -61,21 +56,15 @@ def detect_keyframes(
             save=False,
             verbose=False,
         )[0]
-
         objects = []
-        names = result.names
-
         for box in result.boxes:
             class_id = int(box.cls[0].item())
-            confidence = float(box.conf[0].item())
-            xyxy = [float(value) for value in box.xyxy[0].tolist()]
-
             objects.append(
                 {
                     "class_id": class_id,
-                    "class_name": names.get(class_id, str(class_id)),
-                    "confidence": round(confidence, 4),
-                    "bbox_xyxy": [round(value, 2) for value in xyxy],
+                    "class_name": result.names.get(class_id, str(class_id)),
+                    "confidence": round(float(box.conf[0].item()), 4),
+                    "bbox_xyxy": [round(float(value), 2) for value in box.xyxy[0].tolist()],
                 }
             )
 
@@ -94,38 +83,21 @@ def detect_keyframes(
     output = {
         "source_video": keyframe_output.get("source_video"),
         "keyframe_output_path": keyframe_output_path.as_posix(),
-        "model": {
-            "name": model_name,
-            "confidence_threshold": confidence_threshold,
-        },
+        "model": {"name": model_name, "confidence_threshold": confidence_threshold},
         "detections": detections,
     }
-
     source_stem = Path(keyframe_output.get("source_video", "video")).stem
     output_path = DETECTION_DIR / f"detections_{source_stem}.json"
-    output_path.write_text(
-        json.dumps(output, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
+    output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
     return output_path, output
 
 
-def main():
+def main() -> None:
     keyframe_output_path = find_latest_keyframe_output()
     output_path, output = detect_keyframes(keyframe_output_path)
-
     print(f"keyframe_output_path: {keyframe_output_path}")
     print(f"detection_output_path: {output_path}")
     print(f"detection_frame_count: {len(output['detections'])}")
-
-    for item in output["detections"]:
-        print(
-            f"{item['status']} "
-            f"frame_order={item['frame_order']} "
-            f"frame_index={item['frame_index']} "
-            f"object_count={item.get('object_count', 0)}"
-        )
 
 
 if __name__ == "__main__":

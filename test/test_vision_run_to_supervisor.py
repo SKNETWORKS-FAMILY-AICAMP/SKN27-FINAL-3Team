@@ -1,4 +1,5 @@
 import json
+import importlib
 import sys
 import types
 import unittest
@@ -10,6 +11,11 @@ from ai.vision.run_to_supervisor import _checkpoint_files, run, select_yolo_mode
 
 
 class VisionRunToSupervisorTest(unittest.TestCase):
+    def test_yolo_detection_module_is_not_empty(self):
+        with patch.dict(sys.modules, {"ultralytics": types.SimpleNamespace(YOLO=object)}):
+            models = importlib.import_module("ai.vision.models")
+        self.assertTrue(callable(models.detect_keyframes))
+
     def test_missing_trained_checkpoint_fails(self):
         with TemporaryDirectory() as directory:
             with self.assertRaises(FileNotFoundError):
