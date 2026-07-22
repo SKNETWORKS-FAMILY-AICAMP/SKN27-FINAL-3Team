@@ -261,6 +261,20 @@ def test_main_writes_not_ready_summary_without_loading_django_service(tmp_path: 
     assert "OPENAI_API_KEY" not in json.dumps(summary)
 
 
+def test_local_evaluation_wrapper_is_explicit_and_does_not_seed_or_print_secrets() -> None:
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "run-legal-rag-ab-evaluation.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "[switch]$StartPostgres" in script
+    assert "docker compose up -d postgres" in script
+    assert "--env-file" in script
+    assert "etl.legal.run_evaluation" in script
+    assert "run_pipeline" not in script
+    assert "load_legal_rag_pgvector" not in script
+    assert "Write-Host $line" not in script
+
+
 def test_build_ragas_records_caps_public_contexts_at_top_five() -> None:
     query = {
         "query_id": "law-q001",
