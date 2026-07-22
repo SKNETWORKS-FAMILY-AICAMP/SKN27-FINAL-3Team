@@ -10,6 +10,12 @@ from typing import Any, Sequence
 
 
 MINIMUM_PUBLIC_LAW_QUERY_COUNT = 20
+LATENCY_BREAKDOWN_KEYS = (
+    "preflight_ms",
+    "embedding_ms",
+    "vector_query_ms",
+    "result_mapping_ms",
+)
 REQUIRED_QUERY_FIELDS = frozenset(
     {
         "query_id",
@@ -107,6 +113,7 @@ def normalize_backend_response(
         "backend": _text(response.get("backend")),
         "status": _text(response.get("status")),
         "latency_ms": _nonnegative_int(response.get("latency_ms")),
+        "latency_breakdown_ms": _normalize_latency_breakdown(response.get("latency_breakdown_ms")),
         "error_code": _text(response.get("error_code")),
         "result_count": len(normalized_results),
         "results": normalized_results,
@@ -213,6 +220,7 @@ def _summarize_single_backend(
         "unavailable_rate": _ratio(unavailable_count, total_queries),
         "p50_latency_ms": _percentile(latencies, 0.50),
         "p95_latency_ms": _percentile(latencies, 0.95),
+        "latency_breakdown_ms": _summarize_latency_breakdown(runs),
         "metadata_complete_rate": _ratio(complete_metadata_count, candidate_count),
     }
 
@@ -267,6 +275,34 @@ def _nonnegative_int(value: object) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _normalize_latency_breakdown(value: object) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: _nonnegative_int(value.get(key)) for key in LATENCY_BREAKDOWN_KEYS}
+
+
+def _summarize_latency_breakdown(
+    runs: Sequence[Mapping[str, object]],
+) -> dict[str, dict[str, float | int]]:
+    values_by_key: dict[str, list[int]] = {key: [] for key in LATENCY_BREAKDOWN_KEYS}
+    for run in runs:
+        value = run.get("latency_breakdown_ms")
+        if not isinstance(value, Mapping):
+            continue
+        for key in LATENCY_BREAKDOWN_KEYS:
+            if key in value:
+                values_by_key[key].append(_nonnegative_int(value.get(key)))
+    return {
+        key: {
+            "count": len(values),
+            "p50_ms": _percentile(values, 0.50),
+            "p95_ms": _percentile(values, 0.95),
+            "mean_ms": _mean(values),
+        }
+        for key, values in values_by_key.items()
+    }
 
 
 def _number_or_none(value: object) -> float | None:
