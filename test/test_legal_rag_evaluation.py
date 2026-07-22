@@ -11,6 +11,28 @@ from etl.legal import evaluation
 from etl.legal import run_evaluation
 
 
+COMPLETE_RAGAS_METRICS = {
+    "context_precision": 0.8,
+    "context_recall": 0.7,
+    "faithfulness": 0.9,
+    "answer_relevancy": 0.6,
+}
+
+
+def ragas_record(
+    query_id: str,
+    backend: str = "postgres_lexical",
+    contexts: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "query_id": query_id,
+        "backend": backend,
+        "question": "공개 법령 질의",
+        "ground_truth": "공개 법령 정답",
+        "contexts": contexts if contexts is not None else ["공개 법령 조문"],
+    }
+
+
 def test_load_public_law_queries_requires_twenty_public_law_rows(tmp_path: Path) -> None:
     fixture = tmp_path / "queries.json"
     fixture.write_text("[]", encoding="utf-8")
@@ -424,7 +446,7 @@ def test_run_ragas_uses_fixed_generator_and_judge_for_each_backend_record(monkey
         run_evaluation,
         "_evaluate_ragas_samples",
         lambda rows, **kwargs: captured.update(judge=kwargs, evaluated_rows=rows)
-        or {"faithfulness": 1.0, "answer_relevancy": 0.9},
+        or COMPLETE_RAGAS_METRICS,
     )
 
     result = run_evaluation.run_ragas(
@@ -435,12 +457,164 @@ def test_run_ragas_uses_fixed_generator_and_judge_for_each_backend_record(monkey
     )
 
     assert result["status"] == "evaluated"
-    assert result["metrics"]["faithfulness"] == 1.0
+    assert result["metrics"]["faithfulness"] == 0.9
+    assert set(result["query_results"][0]) == {
+        "query_id",
+        "backend",
+        "status",
+        "error_code",
+        "latency_ms",
+    }
+    assert result["query_results"][0]["status"] == "evaluated"
+    assert result["query_results"][0]["error_code"] is None
     assert captured["generator"] == {"model": "gpt-test-generator"}
     assert captured["judge"] == {
         "judge_model": "gpt-test-judge",
         "embedding_model": "text-embedding-test",
     }
+
+
+def test_run_ragas_continues_after_one_query_failure_without_leaking_exception_text(monkeypatch) -> None:
+    generated: list[str] = []
+
+    def generate(rows, **_kwargs):
+        query_id = rows[0]["query_id"]
+        generated.append(query_id)
+        if query_id == "law-q002":
+            raise RuntimeError("provider response included api_key=secret-value")
+        return [{**rows[0], "answer": "생성 답변"}]
+
+    monkeypatch.setattr(run_evaluation, "_generate_ragas_answers", generate)
+    monkeypatch.setattr(
+        run_evaluation,
+        "_evaluate_ragas_samples",
+        lambda _rows, **_kwargs: COMPLETE_RAGAS_METRICS,
+    )
+
+    result = run_evaluation.run_ragas(
+        [ragas_record("law-q001"), ragas_record("law-q002"), ragas_record("law-q003")],
+        generator_model="g",
+        judge_model="j",
+        embedding_model="e",
+    )
+
+    assert generated == ["law-q001", "law-q002", "law-q003"]
+    assert result["status"] == "not_evaluated"
+    assert result["reason"] == "incomplete_ragas_evidence"
+    assert result["query_results"][1]["query_id"] == "law-q002"
+    assert result["query_results"][1]["status"] == "not_evaluated"
+    assert result["query_results"][1]["error_code"] == "ragas_runtime_unavailable"
+    assert set(result["query_results"][1]) == {
+        "query_id",
+        "backend",
+        "status",
+        "error_code",
+        "latency_ms",
+    }
+    assert "secret-value" not in json.dumps(result, ensure_ascii=False)
+
+
+@pytest.mark.parametrize(
+    ("metrics", "expected_error_code"),
+    [
+        ({"faithfulness": 1.0}, "ragas_metrics_incomplete"),
+        ({**COMPLETE_RAGAS_METRICS, "faithfulness": float("nan")}, "ragas_metrics_invalid"),
+        ({**COMPLETE_RAGAS_METRICS, "context_recall": 1.01}, "ragas_metrics_invalid"),
+    ],
+)
+def test_run_ragas_rejects_incomplete_or_invalid_query_metrics(
+    monkeypatch,
+    metrics: dict[str, float],
+    expected_error_code: str,
+) -> None:
+    monkeypatch.setattr(
+        run_evaluation,
+        "_generate_ragas_answers",
+        lambda rows, **_kwargs: [{**rows[0], "answer": "생성 답변"}],
+    )
+    monkeypatch.setattr(
+        run_evaluation,
+        "_evaluate_ragas_samples",
+        lambda _rows, **_kwargs: metrics,
+    )
+
+    result = run_evaluation.run_ragas(
+        [ragas_record("law-q001")],
+        generator_model="g",
+        judge_model="j",
+        embedding_model="e",
+    )
+
+    assert result["status"] == "not_evaluated"
+    assert result["reason"] == "incomplete_ragas_evidence"
+    assert "metrics" not in result
+    assert result["query_results"][0]["status"] == "not_evaluated"
+    assert result["query_results"][0]["error_code"] == expected_error_code
+
+
+def test_run_ragas_averages_complete_metrics_only_after_every_query_succeeds(monkeypatch) -> None:
+    metrics_by_query_id = {
+        "law-q001": COMPLETE_RAGAS_METRICS,
+        "law-q002": {
+            "context_precision": 0.6,
+            "context_recall": 0.5,
+            "faithfulness": 0.7,
+            "answer_relevancy": 0.8,
+        },
+    }
+    monkeypatch.setattr(
+        run_evaluation,
+        "_generate_ragas_answers",
+        lambda rows, **_kwargs: [{**rows[0], "answer": "생성 답변"}],
+    )
+    monkeypatch.setattr(
+        run_evaluation,
+        "_evaluate_ragas_samples",
+        lambda rows, **_kwargs: metrics_by_query_id[rows[0]["query_id"]],
+    )
+
+    result = run_evaluation.run_ragas(
+        [ragas_record("law-q001"), ragas_record("law-q002")],
+        generator_model="g",
+        judge_model="j",
+        embedding_model="e",
+    )
+
+    assert result["status"] == "evaluated"
+    assert result["metrics"] == {
+        "context_precision": 0.7,
+        "context_recall": 0.6,
+        "faithfulness": 0.8,
+        "answer_relevancy": 0.7,
+    }
+    assert [row["status"] for row in result["query_results"]] == ["evaluated", "evaluated"]
+
+
+def test_run_ragas_skips_empty_contexts_without_calling_external_services(monkeypatch) -> None:
+    def should_not_run(*_args, **_kwargs):
+        raise AssertionError("empty contexts must not invoke an external RAGAS service")
+
+    monkeypatch.setattr(run_evaluation, "_generate_ragas_answers", should_not_run)
+    monkeypatch.setattr(run_evaluation, "_evaluate_ragas_samples", should_not_run)
+
+    result = run_evaluation.run_ragas(
+        [ragas_record("law-q001", contexts=[])],
+        generator_model="g",
+        judge_model="j",
+        embedding_model="e",
+    )
+
+    assert result["status"] == "not_evaluated"
+    assert result["reason"] == "incomplete_ragas_evidence"
+    assert result["query_results"] == [
+        {
+            "query_id": "law-q001",
+            "backend": "postgres_lexical",
+            "status": "not_evaluated",
+            "error_code": "no_ragas_contexts",
+            "latency_ms": 0,
+        }
+    ]
 
 
 def test_run_ragas_requires_at_most_twenty_public_questions() -> None:

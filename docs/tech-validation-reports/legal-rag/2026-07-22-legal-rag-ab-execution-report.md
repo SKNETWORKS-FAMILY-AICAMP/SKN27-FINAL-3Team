@@ -55,3 +55,11 @@
 pgvector는 검색 정확도 지표에서 lexical보다 높았지만, no-result rate와 p95 latency gate를 통과하지 못했다. 따라서 pgvector 우선 전환은 하지 않는다.
 
 RAGAS 20건 × 두 backend 실행은 현재 `ragas_execution_failed`로 끝나 지표를 남기지 못했다. 공개 법률 1건의 최소 재현에서는 네 metric이 실제로 실행되는 것을 확인했지만, 이는 전체 평가의 대체 근거가 아니다. 다음 작업은 batch 실패의 안전한 오류 분류와 대표 질의별 실패 격리이며, 그 전까지 RAGAS gate는 `not_evaluated`를 유지한다.
+
+## Issue #285 구현 검증
+
+2026-07-22에 배치 실패 격리 계약을 구현하고 로컬 회귀 테스트를 수행했다. `run_ragas()`는 각 공개 법률 질의를 독립적으로 생성·평가하며, 한 질의의 실패나 빈 context는 다음 질의를 중단시키지 않는다. 질의 결과에는 `query_id`, `backend`, `status`, 안전한 `error_code`, `latency_ms`만 남기며, 예외 원문·질문·답변·context·키 값은 남기지 않는다.
+
+모든 질의가 성공하고 `context_precision`, `context_recall`, `faithfulness`, `answer_relevancy`가 모두 유한한 0~1 값일 때만 backend aggregate가 `evaluated`와 metric을 반환한다. 하나라도 실패·누락·NaN·범위 밖이면 aggregate는 `not_evaluated` / `incomplete_ragas_evidence`이며 metric을 반환하지 않는다. 빈 context는 외부 API를 호출하지 않고 `no_ragas_contexts`로 기록한다.
+
+`test/test_legal_rag_evaluation.py` 및 `test/test_legal_rag_evaluation_environment.py`의 로컬 계약 테스트 32개가 통과했다. 이는 구현 계약 검증일 뿐 실제 OpenAI/RAGAS 20건 × 두 backend 재실행은 아직 수행하지 않았으므로, `legal-ab-010-ragas`의 RAGAS 결과와 gate 상태는 계속 `not_evaluated`다.
