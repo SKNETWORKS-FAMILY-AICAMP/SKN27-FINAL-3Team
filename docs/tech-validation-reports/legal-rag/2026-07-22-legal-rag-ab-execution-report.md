@@ -38,3 +38,20 @@
 2. 새 run ID로 A/B를 다시 실행한다.
 3. 두 backend가 모두 20개 질의를 처리한 경우에만 같은 조건으로 RAGAS를 실행한다.
 4. `transition_decision.eligible=true`와 RAGAS gate를 모두 충족하기 전에는 pgvector 우선 전환을 하지 않는다.
+
+## 실행 업데이트 — `legal-ab-010-ragas`
+
+유효한 OpenAI 키와 Python 3.13 평가 환경에서 같은 corpus snapshot과 공개 법률 20개 질의로 A/B를 다시 실행했다. 두 backend 모두 20개 질의를 처리했고, 시드 메타데이터와 출처 메타데이터도 모두 확인됐다.
+
+| 지표 | PostgreSQL lexical | pgvector |
+| --- | ---: | ---: |
+| Recall@1 / Recall@3 / Recall@5 | 0.35 / 0.40 / 0.45 | 0.50 / 0.75 / 0.80 |
+| MRR | 0.385000 | 0.620833 |
+| nDCG@5 | 0.400889 | 0.666173 |
+| no-result rate | 0.00 | 0.10 |
+| p50 / p95 latency | 377 / 719 ms | 900 / 1,142 ms |
+| metadata complete rate | 1.00 | 1.00 |
+
+pgvector는 검색 정확도 지표에서 lexical보다 높았지만, no-result rate와 p95 latency gate를 통과하지 못했다. 따라서 pgvector 우선 전환은 하지 않는다.
+
+RAGAS 20건 × 두 backend 실행은 현재 `ragas_execution_failed`로 끝나 지표를 남기지 못했다. 공개 법률 1건의 최소 재현에서는 네 metric이 실제로 실행되는 것을 확인했지만, 이는 전체 평가의 대체 근거가 아니다. 다음 작업은 batch 실패의 안전한 오류 분류와 대표 질의별 실패 격리이며, 그 전까지 RAGAS gate는 `not_evaluated`를 유지한다.

@@ -2,6 +2,7 @@
 param(
     [string]$EnvFile = (Join-Path $PSScriptRoot "..\.env.rag-eval"),
     [string]$RunId = (Get-Date -Format "yyyyMMddTHHmmssZ"),
+    [string]$PythonExecutable = "python",
     [switch]$StartPostgres,
     [switch]$RunRagas
 )
@@ -62,7 +63,7 @@ try {
     if ($RunRagas) {
         $arguments += "--run-ragas"
     }
-    & python @arguments
+    & $PythonExecutable @arguments
     exit $LASTEXITCODE
 }
 finally {

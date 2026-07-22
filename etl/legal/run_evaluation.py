@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -310,11 +311,24 @@ def _evaluate_ragas_samples(
         embeddings=embeddings,
         raise_exceptions=True,
     )
-    return {
-        metric: round(float(value), 6)
-        for metric, value in dict(result).items()
-        if metric in {"context_precision", "context_recall", "faithfulness", "answer_relevancy"}
-    }
+    return summarize_ragas_scores(result.scores)
+
+
+def summarize_ragas_scores(scores: Sequence[Mapping[str, object]]) -> dict[str, float]:
+    metric_names = ("context_precision", "context_recall", "faithfulness", "answer_relevancy")
+    summary: dict[str, float] = {}
+    for metric_name in metric_names:
+        values: list[float] = []
+        for score in scores:
+            try:
+                value = float(score.get(metric_name))
+            except (TypeError, ValueError):
+                continue
+            if not math.isnan(value):
+                values.append(value)
+        if values:
+            summary[metric_name] = round(sum(values) / len(values), 6)
+    return summary
 
 
 def _safe_ragas_reason(exc: RuntimeError) -> str:

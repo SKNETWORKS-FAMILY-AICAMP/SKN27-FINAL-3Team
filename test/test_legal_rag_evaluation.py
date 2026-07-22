@@ -230,6 +230,32 @@ def test_collect_backend_runs_normalizes_openai_auth_error_without_recording_mes
     assert "sk-secret" not in str(runs[1])
 
 
+def test_summarize_ragas_scores_averages_public_metric_rows() -> None:
+    summary = run_evaluation.summarize_ragas_scores(
+        [
+            {
+                "context_precision": 0.8,
+                "context_recall": 0.6,
+                "faithfulness": 1.0,
+                "answer_relevancy": 0.4,
+            },
+            {
+                "context_precision": 0.6,
+                "context_recall": 0.8,
+                "faithfulness": 0.5,
+                "answer_relevancy": 0.6,
+            },
+        ]
+    )
+
+    assert summary == {
+        "context_precision": 0.7,
+        "context_recall": 0.7,
+        "faithfulness": 0.75,
+        "answer_relevancy": 0.5,
+    }
+
+
 def test_collect_backend_runs_preserves_invalid_filter_as_non_search_result(monkeypatch) -> None:
     query = {
         "query_id": "law-q001",
@@ -322,6 +348,15 @@ def test_local_evaluation_wrapper_reuses_a_running_named_postgres_container() ->
 
     assert 'docker ps -q --filter "name=^/skn27-postgres$"' in script
     assert "Local PostgreSQL container is already running; reusing it." in script
+
+
+def test_local_evaluation_wrapper_allows_an_explicit_python_executable() -> None:
+    script = (Path(__file__).resolve().parents[1] / "scripts" / "run-legal-rag-ab-evaluation.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert '[string]$PythonExecutable = "python"' in script
+    assert "& $PythonExecutable @arguments" in script
 
 
 def test_build_ragas_records_caps_public_contexts_at_top_five() -> None:
