@@ -40,6 +40,39 @@ output/erd/
 outputs/
 etl/fault_cases/artifacts/OCR_output/
 project-progress-report-*.html
+# Downloaded/trained model weights are artifacts, not source.
+*.pt
+
+# Vision data/model outputs
+storage/vision/raw/
+storage/vision/processed/
+storage/vision/outputs/
+storage/vision/datasets/classification/raw_videos/
+storage/vision/datasets/classification/frames/
+storage/vision/datasets/classification/clips_5s/
+storage/vision/datasets/classification/clip_strategy_test/
+storage/vision/datasets/classification/manifests/*.csv
+storage/vision/datasets/classification/manifests/*.json
+storage/vision/manifests/*.json
+
+# RunPod session-only launchers and runtime state
+/run_runpod_qwen_adaptive.sh
+/watch_qwen_adaptive.py
+*.pid
+
+# Vision model weights stay out of Git; lightweight metadata stays trackable.
+storage/vision/models/**/*.pt
+storage/vision/models/**/*.pth
+storage/vision/models/**/*.safetensors
+!storage/vision/models/**/run_config.json
+!storage/vision/models/**/training_history.csv
+!storage/vision/models/**/class_mapping.json
+!storage/vision/models/**/config.json
+!storage/vision/models/**/preprocessor_config.json
+
+# Vision report artifacts are meant for tables, figures, and appendix reuse.
+!storage/vision/reports/
+!storage/vision/reports/**
 
 # Generated PDF/export scratch artifacts not already tracked
 output/pdf/SKN27_*.pdf
