@@ -45,6 +45,8 @@ def _validate_policy(policy: Any) -> None:
         raise ValueError("supervisor_routing_policy_requires_agent_result_validation_policy")
     if not _string_list(validation_policy.get("evidence_required_node_codes")):
         raise ValueError("supervisor_routing_policy_requires_evidence_rules")
+    if not _string_list(validation_policy.get("partial_result_intents")):
+        raise ValueError("supervisor_routing_policy_requires_partial_result_intents")
     if not isinstance(validation_policy.get("report_required_nodes"), dict):
         raise ValueError("supervisor_routing_policy_requires_report_readiness_rules")
     if not _text(policy.get("default_intent")):
@@ -137,6 +139,9 @@ def agent_result_validation_policy() -> dict[str, Any]:
             _text(intent): set(_string_list(node_codes))
             for intent, node_codes in policy["report_required_nodes"].items()
         },
+        "partial_result_intents": set(
+            _string_list(policy.get("partial_result_intents"))
+        ),
     }
 
 

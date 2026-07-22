@@ -2,6 +2,11 @@
   "contract_version": "supervisor_routing_policy.v1",
   "intent_rules": [
     {
+      "intent": "accident_evidence_analysis",
+      "attachment_purposes": ["blackbox_video"],
+      "keywords": []
+    },
+    {
       "intent": "fine_notice_analysis",
       "attachment_purposes": ["fine_notice"],
       "keywords": []
@@ -41,6 +46,14 @@
   ],
   "default_intent": "general_consultation",
   "plans": {
+    "accident_evidence_analysis": [
+      "input_context_validation",
+      "vision_media_analysis",
+      "text_ml_case_search",
+      "law_ground_search",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
     "fine_notice_analysis": [
       "input_context_validation",
       "fine_notice_analysis",
@@ -81,6 +94,9 @@
     "action_terms": ["작성", "만들", "생성", "초안", "다운로드"]
   },
   "agent_result_validation_policy": {
+    "partial_result_intents": [
+      "accident_evidence_analysis"
+    ],
     "evidence_required_node_codes": [
       "appeal_decision_flow",
       "fine_notice_analysis",

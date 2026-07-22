@@ -121,7 +121,10 @@ def submit_message(
     )
     if scope_guidance is not None:
         return scope_guidance
-    report_requested = report_generation_requested(user_text)
+    report_requested = (
+        report_generation_requested(user_text)
+        and routing_intent != "accident_evidence_analysis"
+    )
     if routing_intent == "accident_initial_consultation":
         accident_supervisor_state = build_supervisor_state_with_optional_llm(
             payload={**payload, "user_text": user_text, "attachments": attachments},
@@ -786,6 +789,7 @@ def _analysis_plan(
 ) -> dict[str, Any]:
     node_codes = plan_node_codes(routing_intent, report_requested=report_requested)
     expected_node_codes = [code for code in node_codes if code in PUBLIC_AGENT_NODE_CODES]
+    evidence_only = routing_intent == "accident_evidence_analysis"
     steps = []
     previous_node: str | None = None
     for order, node_code in enumerate(node_codes, start=1):
@@ -795,10 +799,16 @@ def _analysis_plan(
                 {
                     "expected_node_codes": expected_node_codes,
                     "report_requested": report_requested,
+                    "evidence_only": evidence_only,
                 }
             )
         elif node_code == "final_response_merge":
-            context["pending_questions"] = list(supervisor_state.get("next_questions") or [])
+            context.update(
+                {
+                    "pending_questions": list(supervisor_state.get("next_questions") or []),
+                    "evidence_only": evidence_only,
+                }
+            )
         steps.append(
             {
                 "order": order,

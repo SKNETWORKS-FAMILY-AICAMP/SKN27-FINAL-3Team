@@ -197,7 +197,7 @@ git commit -m "feat(#294): validate attachment intake routing"
 - Produces: routing intent `accident_evidence_analysis`, no report plan step, `evidence_only=True` in validation and merge step contexts.
 - Preserves: `accident_initial_consultation` remains the only route that enters `_consultation_hold_response`.
 
-- [ ] **Step 1: Write failing tests for exact plan order, no report node, and unchanged text-only consultation.**
+- [x] **Step 1: Write failing tests for exact plan order, no report node, and unchanged text-only consultation.**
 
 ```python
 def test_blackbox_video_uses_partial_evidence_plan_without_a_report() -> None:
@@ -230,13 +230,13 @@ def test_text_only_accident_still_waits_for_fact_confirmation() -> None:
     assert response["analysis_plan"]["steps"] == []
 ```
 
-- [ ] **Step 2: Run the focused tests to verify the policy has no video route.**
+- [x] **Step 2: Run the focused tests to verify the policy has no video route.**
 
 Run: `python -m pytest test/test_chat_orchestration_service.py test/test_service_scope_policy_service.py test/test_supervisor_control_service.py -q`
 
 Expected: FAIL because `blackbox_video` falls through to `general_consultation` and there is no `evidence_only` context.
 
-- [ ] **Step 3: Add the versioned route and force non-determinative final merging.**
+- [x] **Step 3: Add the versioned route and force non-determinative final merging.**
 
 Add this rule before keyword rules and this plan to `supervisor_routing_policy.v1.json`:
 
@@ -293,16 +293,16 @@ EVIDENCE_ONLY_NOTICE = (
 )
 ```
 
-- [ ] **Step 4: Run policy, scope, and Supervisor tests.**
+- [x] **Step 4: Run policy, scope, and Supervisor tests.**
 
 Run: `python -m pytest test/test_chat_orchestration_service.py test/test_service_scope_policy_service.py test/test_supervisor_control_service.py -q`
 
 Expected: PASS; the video path has exactly six ordered steps, its validation/final response status is `partial`, and no text-only accident route is changed.
 
-- [ ] **Step 5: Commit the Supervisor route.**
+- [x] **Step 5: Commit the Supervisor route.**
 
 ```bash
-git add app/config/supervisor_routing_policy.v1.json app/config/service_scope_policy.v1.json app/services/chat_orchestration_service.py app/services/supervisor_control_service.py test/test_chat_orchestration_service.py test/test_service_scope_policy_service.py test/test_supervisor_control_service.py
+git add app/config/supervisor_routing_policy.v1.json app/config/service_scope_policy.v1.json app/services/supervisor_routing_service.py app/services/chat_orchestration_service.py app/services/supervisor_control_service.py test/test_chat_orchestration_service.py test/test_service_scope_policy_service.py test/test_supervisor_control_service.py docs/superpowers/plans/2026-07-23-chat-attachment-agent-handoff.md
 git commit -m "feat(#294): add video evidence analysis route"
 ```
 

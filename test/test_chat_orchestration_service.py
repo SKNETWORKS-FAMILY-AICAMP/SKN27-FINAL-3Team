@@ -84,6 +84,44 @@ def test_fine_notice_message_queues_supervisor_boundaries_and_supported_real_age
     assert "mock" not in str(response).lower()
 
 
+def test_blackbox_video_uses_partial_evidence_plan_without_a_report() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_video_1",
+            "user_text": "블랙박스 영상의 관련 법령과 사례를 확인해 주세요.",
+            "attachments": [
+                {
+                    "attachment_id": "att_video_1",
+                    "purpose": "blackbox_video",
+                    "status": "ready",
+                }
+            ],
+        }
+    )
+
+    assert response["routing_intent"] == "accident_evidence_analysis"
+    assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
+        "input_context_validation",
+        "vision_media_analysis",
+        "text_ml_case_search",
+        "law_ground_search",
+        "agent_result_validation",
+        "final_response_merge",
+    ]
+    assert response["reporting_payload"] is None
+    assert response["analysis_plan"]["steps"][-2]["context"]["evidence_only"] is True
+
+
+def test_text_only_accident_still_waits_for_fact_confirmation() -> None:
+    response = submit_message(
+        {"session_id": "ses_text_only", "user_text": "교차로 충돌 사고입니다."}
+    )
+
+    assert response["routing_intent"] == "accident_initial_consultation"
+    assert response["status"] == "needs_input"
+    assert response["analysis_plan"]["steps"] == []
+
+
 def test_enabled_supervisor_failure_blocks_analysis_plan_and_reporting(monkeypatch) -> None:
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
