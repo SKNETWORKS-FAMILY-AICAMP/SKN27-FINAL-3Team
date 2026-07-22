@@ -106,12 +106,80 @@ Python 3.13.14 전용 가상환경에서 RAGAS 0.2.15의 `EvaluationDataset` 스
 
 | 지표 | PostgreSQL lexical | pgvector |
 | --- | ---: | ---: |
-| Recall@1 / Recall@3 / Recall@5 | 0.35 / 0.40 / 0.45 | 0.50 / 0.75 / 0.80 |
-| MRR / nDCG@5 | 0.385 / 0.401 | 0.621 / 0.666 |
-| no-result rate | 0.00 | 0.10 |
-| p50 / p95 latency | 595 / 942 ms | 1,058 / 2,826 ms |
-| metadata complete rate | 1.00 | 1.00 |
+| query count | 20 | 20 |
+| completed run count | 20 | 20 |
+| Recall@1 | 0.350000 | 0.500000 |
+| Recall@3 | 0.400000 | 0.750000 |
+| Recall@5 | 0.450000 | 0.800000 |
+| MRR | 0.385000 | 0.620833 |
+| nDCG@5 | 0.400889 | 0.666173 |
+| no-result rate | 0.000000 | 0.100000 |
+| unavailable rate | 0.000000 | 0.000000 |
+| metadata complete rate | 1.000000 | 1.000000 |
+| p50 latency | 595 ms | 1,058 ms |
+| p95 latency | 942 ms | 2,826 ms |
 
 lexical RAGAS는 20개 모두 평가돼 `context_precision` 0.654, `context_recall` 0.650, `faithfulness` 0.735, `answer_relevancy` 0.309를 기록했다. pgvector는 18개가 평가됐지만 2개가 빈 context여서 외부 호출 없이 `no_ragas_contexts`로 기록됐다. 엄격한 완전성 계약에 따라 pgvector aggregate는 `not_evaluated / incomplete_ragas_evidence`이며 metric을 만들지 않는다.
 
 `transition_decision.eligible`는 `false`다. pgvector는 검색 정확도 지표가 높지만 no-result rate 0.10, p95 latency 2,826 ms, 그리고 RAGAS aggregate 미생성으로 `no_result_rate_regression`, `p95_latency_regression`, `ragas_not_evaluated` gate를 통과하지 못했다. 따라서 pgvector 우선 전환과 C-1 완료 처리는 하지 않는다.
+
+## 검증·테스트 증적 — `legal-ab-016-ragas-20260722`
+
+### 실행 환경과 의존성 무결성
+
+| 항목 | 확인값 |
+| --- | --- |
+| Python | 3.13.14 |
+| Django | 6.0.6 |
+| RAGAS | 0.2.15 |
+| datasets | 3.6.0 |
+| openai | 2.44.0 |
+| langchain-openai | 0.3.35 |
+| `pip check` | `No broken requirements found` |
+| corpus snapshot | `30b0541ac5d567749daa301930c8c71d292cfa4dfeb07de8bc413fa5ee7e52b0` |
+| searchable chunks / embeddings | 97,394 / 97,394 |
+| embedding space | `openai / text-embedding-3-large / 1024` |
+
+### 자동화 테스트와 정적 검증
+
+RAGAS 0.2 계약 회귀 테스트를 추가했다. 이 테스트는 구 `datasets.Dataset.from_list()` 사용을 즉시 실패시키고, `EvaluationDataset.from_list()`에 전달하는 각 행이 `user_input`, `reference`, `response`, `retrieved_contexts`로 정확히 변환되는지를 검증한다. 이 계약은 수정 전에는 구 데이터셋 API 사용 때문에 실패했고, RAGAS 0.2 스키마로 교체한 뒤 통과했다.
+
+| 검증 | 명령 또는 범위 | 결과 |
+| --- | --- | --- |
+| RAGAS 실행·환경·서비스 회귀 | `pytest -q test/test_legal_rag_evaluation.py test/test_legal_rag_evaluation_environment.py test/test_legal_rag_service.py --timeout=30 -p no:cacheprovider` | **59 passed in 1.11s** |
+| 변경 공백 오류 | `git diff --check` | 통과 (Windows CRLF 변환 안내만 출력, 공백 오류 없음) |
+| 단일 공개 법령 RAGAS 사전 검증 | RAGAS 실행부터 summary 생성까지 | 통과; metric 이름 `answer_relevancy`, `context_precision`, `context_recall`, `faithfulness` 확인 |
+
+### 전체 라이브 A/B·RAGAS 실행 증적
+
+`legal-ab-016-ragas-20260722`는 동일 corpus snapshot과 공개 법령 20개 질의로 두 backend를 끝까지 실행했다. 후보 상태는 lexical 20건 `ready`, pgvector 18건 `ready`와 2건 `empty`였다. 인증 실패나 backend unavailable은 없었다.
+
+RAGAS는 생성·판정 모델 모두 `gpt-4o-mini`, judge embedding은 `text-embedding-3-small`을 사용했다. latency는 RAGAS가 실제로 평가한 레코드만 대상으로 계산했다.
+
+| RAGAS 지표 | PostgreSQL lexical | pgvector |
+| --- | ---: | ---: |
+| query count | 20 | 20 |
+| evaluated count | 20 | 18 |
+| not-evaluated count | 0 | 2 |
+| `no_ragas_contexts` | 0 | 2 |
+| aggregate status | `evaluated` | `not_evaluated` |
+| aggregate reason | 없음 | `incomplete_ragas_evidence` |
+| context precision | 0.653819 | 생성하지 않음 |
+| context recall | 0.650000 | 생성하지 않음 |
+| faithfulness | 0.735000 | 생성하지 않음 |
+| answer relevancy | 0.309416 | 생성하지 않음 |
+| evaluated-only p50 latency | 11,878 ms | 13,958 ms |
+| evaluated-only p95 latency | 16,341 ms | 19,090 ms |
+| evaluated-only mean latency | 12,785.850 ms | 13,974.611 ms |
+
+pgvector RAGAS metric을 공란·0·부분 평균으로 대체하지 않았다. 20건 중 2건이 context 없이 끝난 이상, 완료되지 않은 evidence를 유효 aggregate로 오인하지 않도록 계약상 aggregate를 생성하지 않는 것이 맞다.
+
+### 전환 게이트와 후속 조치
+
+| 게이트 | 현재값 | 통과 기준 | 판정 |
+| --- | ---: | ---: | --- |
+| no-result 회귀 | 0.100000 | lexical 0.000000 이하 | 실패 |
+| p95 검색 latency 회귀 | 2,826 ms | lexical p95의 1.5배 이하 = 1,413 ms 이하 | 실패 |
+| pgvector RAGAS 완결성 | 18 / 20 평가 | 20 / 20 평가 및 aggregate 생성 | 실패 |
+
+따라서 `transition_decision.eligible=false`를 유지한다. 다음 작업은 pgvector의 2건 no-result 원인과 p95 지연을 해결하고, 같은 20개 질의를 재실행해 **no-result 0, p95 1,413 ms 이하, RAGAS 20/20 평가 및 aggregate 생성**을 함께 충족하는지 확인하는 것이다. 이 세 조건이 충족되기 전에는 pgvector 우선 전환이나 C-1 완료를 선언하지 않는다.
