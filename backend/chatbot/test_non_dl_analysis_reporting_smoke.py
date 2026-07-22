@@ -88,6 +88,16 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
         self.assertEqual(server_context["query"]["search_query"], payload["user_text"])
         self.assertEqual(server_context["temporal_basis"], {"mode": "current"})
         self.assertEqual(server_context["scope"], {"jurisdiction": "KR"})
+        self.assertEqual(
+            server_context["ocr_confirmation"],
+            {
+                "confirmed": True,
+                "fields": {
+                    "fine_type": "과태료",
+                    "notice_stage": "사전통지",
+                },
+            },
+        )
 
     def test_smoke_contract_covers_every_non_dl_sync_adapter(self) -> None:
         self.assertEqual(
