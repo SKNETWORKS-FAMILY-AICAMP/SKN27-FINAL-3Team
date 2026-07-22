@@ -99,3 +99,19 @@ pgvector의 20건은 모두 안전한 `openai_authentication_failed`로 기록�
 현재 로컬 평가 런타임은 Python 3.14.3뿐이다. 이 환경에서 Hugging Face `Dataset.from_list()`의 fingerprint 직렬화 `TypeError`를 재현했고, 평가기는 RAGAS 0.2.15가 지원하는 `EvaluationDataset.from_list()`를 사용하도록 수정했다. 관련 회귀 59개는 통과했다. 그러나 실제 RAGAS 평가 호출은 Python 프로세스를 종료해 안전한 query ledger나 aggregate를 남기지 못했다.
 
 다음 재실행은 Python 3.13 평가 전용 가상환경에서만 수행한다. 그 환경에서 단일 공개 법령 RAGAS 평가가 summary까지 완주하는 것을 먼저 확인한 뒤, 새 run ID로 20개 질의의 PostgreSQL lexical ↔ pgvector A/B와 RAGAS를 실행한다. 그 전까지 C-1과 pgvector 전환은 보류한다.
+
+## 실행 업데이트 — `legal-ab-016-ragas-20260722`
+
+Python 3.13.14 전용 가상환경에서 RAGAS 0.2.15의 `EvaluationDataset` 스키마(`user_input`, `reference`, `response`, `retrieved_contexts`)로 단일 공개 법령 평가를 먼저 통과한 뒤, 같은 corpus snapshot과 공개 법령 20개 질의의 전체 A/B·RAGAS를 완료했다. preflight는 `ready`였고 `law_chunks`·`law_embeddings`는 각각 97,394건, embedding space는 `openai / text-embedding-3-large / 1024` 단일 공간이었다.
+
+| 지표 | PostgreSQL lexical | pgvector |
+| --- | ---: | ---: |
+| Recall@1 / Recall@3 / Recall@5 | 0.35 / 0.40 / 0.45 | 0.50 / 0.75 / 0.80 |
+| MRR / nDCG@5 | 0.385 / 0.401 | 0.621 / 0.666 |
+| no-result rate | 0.00 | 0.10 |
+| p50 / p95 latency | 595 / 942 ms | 1,058 / 2,826 ms |
+| metadata complete rate | 1.00 | 1.00 |
+
+lexical RAGAS는 20개 모두 평가돼 `context_precision` 0.654, `context_recall` 0.650, `faithfulness` 0.735, `answer_relevancy` 0.309를 기록했다. pgvector는 18개가 평가됐지만 2개가 빈 context여서 외부 호출 없이 `no_ragas_contexts`로 기록됐다. 엄격한 완전성 계약에 따라 pgvector aggregate는 `not_evaluated / incomplete_ragas_evidence`이며 metric을 만들지 않는다.
+
+`transition_decision.eligible`는 `false`다. pgvector는 검색 정확도 지표가 높지만 no-result rate 0.10, p95 latency 2,826 ms, 그리고 RAGAS aggregate 미생성으로 `no_result_rate_regression`, `p95_latency_regression`, `ragas_not_evaluated` gate를 통과하지 못했다. 따라서 pgvector 우선 전환과 C-1 완료 처리는 하지 않는다.

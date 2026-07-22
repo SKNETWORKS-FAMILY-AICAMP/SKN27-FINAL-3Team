@@ -482,7 +482,12 @@ def test_evaluate_ragas_samples_uses_ragas_evaluation_dataset(monkeypatch) -> No
 
     assert result == COMPLETE_RAGAS_METRICS
     assert isinstance(captured["dataset"], FakeEvaluationDataset)
-    assert captured["dataset"].samples[0].question == "공개 법령 질의"
+    assert vars(captured["dataset"].samples[0]) == {
+        "user_input": "공개 법령 질의",
+        "reference": "공개 법령 정답",
+        "response": "공개 법령 근거 답변",
+        "retrieved_contexts": ["공개 법령 조문"],
+    }
 
 
 def test_run_ragas_uses_fixed_generator_and_judge_for_each_backend_record(monkeypatch) -> None:

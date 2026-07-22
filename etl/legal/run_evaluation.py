@@ -405,10 +405,10 @@ def _evaluate_ragas_samples(
     dataset = EvaluationDataset.from_list(
         [
             {
-                "question": _required_text(record, "question"),
-                "ground_truth": _required_text(record, "ground_truth"),
-                "answer": _required_text(record, "answer"),
-                "contexts": [
+                "user_input": _required_text(record, "question"),
+                "reference": _required_text(record, "ground_truth"),
+                "response": _required_text(record, "answer"),
+                "retrieved_contexts": [
                     text for text in record.get("contexts", []) if isinstance(text, str) and text.strip()
                 ],
             }
