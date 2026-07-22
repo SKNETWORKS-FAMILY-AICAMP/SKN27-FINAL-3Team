@@ -134,3 +134,25 @@ def test_subprocess_timeout_uses_a_stable_failure(monkeypatch) -> None:
     )
 
     assert result["structured_result"]["error_code"] == "vision_execution_timeout"
+
+
+def test_subprocess_video_decode_failure_uses_a_stable_failure(monkeypatch) -> None:
+    monkeypatch.setenv("VISION_TRAINED_CLASSIFIER_CHECKPOINT", "C:/models/checkpoint")
+    monkeypatch.setattr(adapter, "_read_scan_ready_video_bytes", lambda _attachment: b"video")
+    monkeypatch.setattr(adapter, "_checkpoint_is_complete", lambda _path: True)
+    monkeypatch.setattr(
+        adapter,
+        "_run_vision_subprocess",
+        lambda **_kwargs: SimpleNamespace(
+            returncode=1,
+            stderr="RuntimeError: Could not open video: C:/private/input.mp4",
+        ),
+    )
+
+    result = adapter.run_vision_media_analysis(
+        _canonical_video_input(),
+        {"execution_id": "exec_vision_5"},
+    )
+
+    assert result["structured_result"]["error_code"] == "vision_media_decode_failed"
+    assert "C:/" not in repr(result)

@@ -157,6 +157,8 @@ def _subprocess_failure_code(completed: subprocess.CompletedProcess[str]) -> str
     diagnostics = str(completed.stderr or "")
     if "ModuleNotFoundError" in diagnostics or "ImportError" in diagnostics:
         return "vision_dependency_missing"
+    if "could not open video" in diagnostics.lower():
+        return "vision_media_decode_failed"
     return "vision_execution_failed"
 
 

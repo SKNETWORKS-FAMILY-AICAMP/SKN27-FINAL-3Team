@@ -815,23 +815,25 @@ git commit -m "feat(#294): gate fine notice follow-up on OCR confirmation"
 - Consumes: `VISION_TRAINED_CLASSIFIER_CHECKPOINT`, optional `VISION_RUNTIME_TIMEOUT_SECONDS`, safe `AgentInvocation`/`AgentResult` fields.
 - Produces: an operator-facing preflight and error-code table without secrets or local paths.
 
-- [ ] **Step 1: Write a failing registry/runtime contract assertion.**
+- [x] **Step 1: Write the registry/runtime contract assertion.**
 
 ```python
 def test_vision_is_a_public_sync_agent_without_mock_mode() -> None:
-    nodes = {node["node_code"]: node for node in list_public_agent_nodes()}
+    public_nodes = {node["node_code"]: node for node in list_public_agent_nodes()}
+    registry_nodes = {node["node_code"]: node for node in list_agent_nodes()}
 
-    assert nodes["vision_media_analysis"]["adapter_contract"]["execution_modes"] == ["sync"]
-    assert "mock" not in repr(nodes["vision_media_analysis"])
+    assert public_nodes["vision_media_analysis"]["execution_modes"] == ["sync"]
+    assert registry_nodes["vision_media_analysis"]["adapter_contract"]["execution_modes"] == ["sync"]
+    assert "mock" not in repr(public_nodes["vision_media_analysis"])
 ```
 
-- [ ] **Step 2: Run the worker and API contract tests to verify the mock declaration fails.**
+- [x] **Step 2: Run the worker and API contract tests to verify the public sync contract.**
 
 Run: `python -m pytest test/test_runtime_worker_and_registry_contract.py test/test_api_route_specs.py -q`
 
-Expected: FAIL until the Vision node is public and uses the sync adapter contract from Task 4.
+Expected: PASS because Task 4 has made the Vision node public and bound it to the sync adapter contract.
 
-- [ ] **Step 3: Create the short operational runbook with concrete diagnostics.**
+- [x] **Step 3: Create the short operational runbook with concrete diagnostics.**
 
 The runbook must contain this table and no actual checkpoint path, access key, user filename, raw error, or user content:
 
@@ -846,7 +848,7 @@ The runbook must contain this table and no actual checkpoint path, access key, u
 
 Document the optional smoke command as `python -m ai.vision.run_to_supervisor <fixture.mp4> --checkpoint <approved-checkpoint-dir>` and state it runs only on a secured runtime with a non-production fixture.
 
-- [ ] **Step 4: Run the complete #294 contract suite and static checks.**
+- [x] **Step 4: Run the complete #294 contract suite and static checks.**
 
 Run: `python -m pytest test/test_attachment_mock_service.py test/test_chat_orchestration_service.py test/test_service_scope_policy_service.py test/test_supervisor_control_service.py test/test_fine_notice_ocr.py test/test_vision_run_to_supervisor.py test/test_vision_media_analysis_adapter.py test/test_agent_node_service.py test/test_supervisor_plan_execution.py test/test_privacy_boundaries.py backend/chatbot/test_analysis_job_queue.py test/test_frontend_auth_session_contract.py test/test_consultation_v2_contract.py test/test_runtime_worker_and_registry_contract.py test/test_api_route_specs.py -q`
 

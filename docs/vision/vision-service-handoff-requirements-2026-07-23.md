@@ -55,6 +55,12 @@
 
 위 항목은 #294의 연결 안정화와 별도의 품질 개선 작업으로 관리한다.
 
+## 운영 진단 기준
+
+- 운영 사전점검, stable error code, Worker 재시도 기준은 [Vision media adapter 운영 진단 가이드](../ops/vision-media-adapter-runbook.md)를 단일 기준으로 사용한다.
+- 운영 문서와 로그 조회에는 `job_id`, `execution_id`, `attachment_id`, node code, result status, `latency_ms`만 사용한다.
+- 사용자 파일명·원본 영상·프레임·경로·checkpoint 값·access key·raw error는 해당 가이드와 handoff 결과 어디에도 기록하거나 노출하지 않는다.
+
 ## 검증
 
 - 라벨 매핑: 한국어 학습 라벨이 올바른 YOLO 모델로 변환된다.
