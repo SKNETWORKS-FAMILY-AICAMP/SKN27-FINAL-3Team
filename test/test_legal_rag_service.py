@@ -44,6 +44,7 @@ class FakeCursor:
         self.description = description or VECTOR_DESCRIPTION
         self.sql = ""
         self.params = []
+        self.executions = []
 
     def __enter__(self):
         return self
@@ -51,9 +52,10 @@ class FakeCursor:
     def __exit__(self, _exc_type, _exc, _tb):
         return False
 
-    def execute(self, sql, params):
+    def execute(self, sql, params=None):
         self.sql = sql
-        self.params = params
+        self.params = params or []
+        self.executions.append((sql, self.params))
 
     def fetchall(self):
         return self.rows
@@ -110,6 +112,7 @@ def test_legal_rag_uses_pgvector_when_enabled(monkeypatch):
     result = service.search_legal_rag("school zone emergency stopping", top_k=2)
 
     assert result["status"] == "ready"
+    assert result["attempted_backends"][0]["error_code"] == ""
     assert result["backend"] == "postgres_pgvector"
     assert result["embedding"]["provider"] == "hash"
     assert result["embedding"]["dimensions"] == 1024
@@ -122,6 +125,16 @@ def test_legal_rag_uses_pgvector_when_enabled(monkeypatch):
     assert "btrim(c.source_url) <> ''" in cursor.sql
     assert "btrim(c.provision_text) <> ''" in cursor.sql
     assert "e.embedding_vector IS NOT NULL" in cursor.sql
+    assert set(result["latency_breakdown_ms"]) == {
+        "preflight_ms",
+        "embedding_ms",
+        "vector_query_ms",
+        "result_mapping_ms",
+    }
+    assert all(
+        isinstance(value, int) and value >= 0
+        for value in result["latency_breakdown_ms"].values()
+    )
 
 
 def test_legal_rag_falls_back_when_pgvector_is_unavailable(monkeypatch):
@@ -246,6 +259,52 @@ def test_pgvector_applies_legal_family_scope_and_effective_date(monkeypatch):
     assert "c.expire_date IS NULL OR c.expire_date >= %s" in cursor.sql
     assert ["law", "enforcement_decree"] in cursor.params
     assert cursor.params.count(date(2026, 2, 1)) == 2
+
+
+def test_pgvector_sets_local_hnsw_options_before_vector_select(monkeypatch):
+    cursor = FakeCursor([])
+    connection = FakeConnection(cursor)
+    connection.alias = "legal-rag"
+    atomic_calls = []
+
+    class FakeAtomic:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+    def fake_atomic(*, using):
+        atomic_calls.append(using)
+        return FakeAtomic()
+
+    monkeypatch.setattr(service.transaction, "atomic", fake_atomic)
+
+    service._query_pgvector_rows(
+        connection,
+        query_vector=[1.0] + [0.0] * 1023,
+        top_k=5,
+        source_type="law",
+        allowed_source_types=("law",),
+        effective_at=date(2026, 7, 21),
+        embedding_space={
+            "provider": "hash",
+            "model": "hashing-vectorizer",
+            "dimensions": 1024,
+        },
+    )
+
+    sql_statements = [sql for sql, _params in cursor.executions]
+
+    assert sql_statements[:2] == [
+        "SET LOCAL hnsw.ef_search = 400",
+        "SET LOCAL hnsw.iterative_scan = 'strict_order'",
+    ]
+    assert "ORDER BY e.embedding_vector <=> %s::vector" in sql_statements[2]
+    assert "c.source_type = ANY(%s)" in sql_statements[2]
+    assert "c.enforce_date <= %s" in sql_statements[2]
+    assert "btrim(c.source_url) <> ''" in sql_statements[2]
+    assert atomic_calls == ["legal-rag"]
 
 
 def test_lexical_score_is_normalized_token_coverage_with_match_metadata(monkeypatch):
@@ -597,6 +656,47 @@ def test_sentence_transformer_model_is_cached_per_process(monkeypatch):
 
     assert created == [("model-a", "cpu")]
     service._sentence_transformer_model.cache_clear()
+
+
+def test_openai_embedding_client_is_reused_without_exposing_the_key(monkeypatch):
+    created = []
+
+    class FakeEmbeddings:
+        def create(self, **kwargs):
+            assert kwargs == {
+                "model": "text-embedding-3-large",
+                "input": "public law query",
+                "encoding_format": "float",
+                "dimensions": 1024,
+            }
+            return SimpleNamespace(data=[SimpleNamespace(embedding=[3.0, 4.0])])
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            created.append(kwargs)
+            self.embeddings = FakeEmbeddings()
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    monkeypatch.setenv("LEGAL_RAG_OPENAI_API_KEY", "test-key-not-for-output")
+    monkeypatch.setenv("LEGAL_RAG_QUERY_EMBEDDING_TIMEOUT_SECONDS", "12")
+    service._openai_embedding_client.cache_clear()
+
+    first = service._openai_embedding(
+        "public law query",
+        model_id="text-embedding-3-large",
+        dimensions=1024,
+    )
+    second = service._openai_embedding(
+        "public law query",
+        model_id="text-embedding-3-large",
+        dimensions=1024,
+    )
+
+    assert first == second == [0.6, 0.8]
+    assert len(created) == 1
+    assert created[0]["base_url"] == "https://api.openai.com/v1"
+    assert "test-key-not-for-output" not in repr(first)
+    service._openai_embedding_client.cache_clear()
 
 
 def test_graph_expansion_is_disabled_without_filtered_core_results(monkeypatch):

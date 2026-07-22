@@ -30,7 +30,7 @@
 - Consumes: `_query_pgvector_rows(connection, query_vector, top_k, source_type, allowed_source_types, effective_at, embedding_space)`
 - Produces: 동일한 `list[dict[str, Any]]`; vector SELECT 직전에 transaction-local HNSW 설정을 적용한다.
 
-- [ ] **Step 1: SQL 실행 순서를 저장하는 failing test를 작성한다.**
+- [x] **Step 1: SQL 실행 순서를 저장하는 failing test를 작성한다.**
 
 `FakeCursor`가 마지막 SQL만 보관하지 않고 모든 실행을 기록하도록 확장하고, 아래 테스트를 `test_pgvector_applies_legal_family_scope_and_effective_date` 뒤에 추가한다.
 
@@ -86,7 +86,7 @@ class FakeCursor:
         self.executions.append((sql, self.params))
 ```
 
-- [ ] **Step 2: failing test를 실행해 RED를 확인한다.**
+- [x] **Step 2: failing test를 실행해 RED를 확인한다.**
 
 Run:
 
@@ -96,7 +96,7 @@ D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test
 
 Expected: `AttributeError` (`service.transaction` 또는 `cursor.executions` 없음) 혹은 첫 HNSW assertion 실패.
 
-- [ ] **Step 3: 최소 production 구현을 작성한다.**
+- [x] **Step 3: 최소 production 구현을 작성한다.**
 
 `app/services/legal_rag_service.py` 상단 import에 다음을 추가한다.
 
@@ -116,7 +116,7 @@ from django.db import transaction
             return [dict(zip(columns, row, strict=False)) for row in cursor.fetchall()]
 ```
 
-- [ ] **Step 4: targeted service tests를 GREEN으로 확인한다.**
+- [x] **Step 4: targeted service tests를 GREEN으로 확인한다.**
 
 Run:
 
@@ -143,7 +143,7 @@ git commit -m "fix: use iterative pgvector scan for legal filters"
 - Produces: `_openai_embedding_client() -> Any`, process-scoped cached OpenAI client.
 - Preserves: `_openai_embedding(query, model_id, dimensions) -> list[float]`의 request payload와 L2-normalized vector 반환값.
 
-- [ ] **Step 1: 동일 설정에서 client를 한 번만 만드는 failing test를 작성한다.**
+- [x] **Step 1: 동일 설정에서 client를 한 번만 만드는 failing test를 작성한다.**
 
 `test_sentence_transformer_model_is_cached_per_process` 뒤에 추가한다.
 
@@ -181,7 +181,7 @@ def test_openai_embedding_client_is_reused_without_exposing_the_key(monkeypatch)
     service._openai_embedding_client.cache_clear()
 ```
 
-- [ ] **Step 2: failing test를 실행해 RED를 확인한다.**
+- [x] **Step 2: failing test를 실행해 RED를 확인한다.**
 
 Run:
 
@@ -191,7 +191,7 @@ D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test
 
 Expected: `AttributeError: module ... has no attribute '_openai_embedding_client'`.
 
-- [ ] **Step 3: cached client factory와 기존 embedding 호출의 최소 변경을 작성한다.**
+- [x] **Step 3: cached client factory와 기존 embedding 호출의 최소 변경을 작성한다.**
 
 `_openai_embedding()` 바로 앞에 아래 helper를 추가하고, 기존 client 생성 block을 helper 호출로 바꾼다.
 
@@ -221,7 +221,7 @@ def _openai_embedding(query: str, *, model_id: str, dimensions: int) -> list[flo
     return _normalize_l2([float(item) for item in response.data[0].embedding])
 ```
 
-- [ ] **Step 4: targeted cache tests를 GREEN으로 확인한다.**
+- [x] **Step 4: targeted cache tests를 GREEN으로 확인한다.**
 
 Run:
 
@@ -251,7 +251,7 @@ git commit -m "perf: reuse legal rag embedding client"
 - Produces: per-backend summary `latency_breakdown_ms[phase] = {count, p50_ms, p95_ms, mean_ms}`.
 - Preserves: `latency_ms` and `transition_decision()` inputs without semantic change.
 
-- [ ] **Step 1: artifact whitelist와 summary aggregation failing tests를 작성한다.**
+- [x] **Step 1: artifact whitelist와 summary aggregation failing tests를 작성한다.**
 
 `test_normalize_backend_response_removes_raw_text_and_keeps_ranked_metadata`에 response field와 assertion을 추가한다.
 
@@ -300,7 +300,7 @@ git commit -m "perf: reuse legal rag embedding client"
 
 `test_legal_rag_service.py`에는 pgvector happy path response에 네 latency key가 모두 있고 모두 `int` 및 `>= 0`임을 확인하는 test를 추가한다.
 
-- [ ] **Step 2: failing tests를 실행해 RED를 확인한다.**
+- [x] **Step 2: failing tests를 실행해 RED를 확인한다.**
 
 Run:
 
@@ -310,7 +310,7 @@ D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test
 
 Expected: `KeyError: 'latency_breakdown_ms'`.
 
-- [ ] **Step 3: service phase timer와 evaluator whitelist/aggregation을 구현한다.**
+- [x] **Step 3: service phase timer와 evaluator whitelist/aggregation을 구현한다.**
 
 `app/services/legal_rag_service.py`에 constants와 helper를 추가한다.
 
@@ -372,7 +372,7 @@ def _summarize_latency_breakdown(runs: Sequence[Mapping[str, object]]) -> dict[s
 
 Add `"latency_breakdown_ms": _summarize_latency_breakdown(runs)` to `_summarize_single_backend()` without changing any existing metric calculation or `transition_decision()`.
 
-- [ ] **Step 4: service and evaluator telemetry tests를 GREEN으로 확인한다.**
+- [x] **Step 4: service and evaluator telemetry tests를 GREEN으로 확인한다.**
 
 Run:
 
@@ -394,13 +394,13 @@ git commit -m "feat: record safe pgvector latency phases"
 **Files:**
 - Modify after measured execution only: `docs/tech-validation-reports/legal-rag/2026-07-22-legal-rag-ab-execution-report.md`
 - Modify after measured execution only: `docs/ops/project-readiness-master-checklist.md`
-- Local ignored only: `output/law_ingestion/evaluation/legal-ab-017-pgvector-gates-20260722/`
+- Local ignored only: `output/law_ingestion/evaluation/legal-ab-018-pgvector-gates-20260722/` (`017` is incomplete and excluded from transition evidence)
 
 **Interfaces:**
 - Consumes: `summary.json` with existing backend metrics, transition decision, and phase aggregates.
 - Produces: evidence-backed report; never fabricates a passed gate or pgvector RAGAS aggregate.
 
-- [ ] **Step 1: 전체 automated regression을 실행한다.**
+- [x] **Step 1: 전체 automated regression을 실행한다.**
 
 Run:
 
@@ -410,7 +410,7 @@ D:\dev\project\SKN27-FINAL-3Team\.venv\Scripts\python.exe -m pytest -q test/test
 
 Expected: all tests pass with no failure or timeout.
 
-- [ ] **Step 2: changed-file integrity를 확인한다.**
+- [x] **Step 2: changed-file integrity를 확인한다.**
 
 Run:
 
@@ -421,17 +421,17 @@ git status --short --branch
 
 Expected: whitespace error 없음; source/test/spec/plan 외의 변경 없음.
 
-- [ ] **Step 3: 사용자에게 live OpenAI·PostgreSQL 실행 승인을 받은 뒤 preflight와 A/B·RAGAS를 실행한다.**
+- [x] **Step 3: 사용자에게 live OpenAI·PostgreSQL 실행 승인을 받은 뒤 preflight와 A/B·RAGAS를 실행한다.**
 
 Run:
 
 ```powershell
-C:\tmp\skn27-ragas313\Scripts\python.exe -m etl.legal.run_evaluation --env-file D:\dev\project\SKN27-FINAL-3Team-issue-282\.env.rag-eval --run-id legal-ab-017-pgvector-gates-20260722 --run-ragas
+C:\tmp\skn27-ragas313\Scripts\python.exe -m etl.legal.run_evaluation --env-file D:\dev\project\SKN27-FINAL-3Team-issue-282\.env.rag-eval --run-id legal-ab-018-pgvector-gates-20260722 --run-ragas
 ```
 
 Expected: `summary.json`이 생성되고 public-law 20개 질의의 lexical/pgvector 결과, RAGAS status, transition decision을 포함한다. 출력에서 key·원문·context·예외 전문을 공유하지 않는다.
 
-- [ ] **Step 4: 실행 산출물에서 정확한 gate 지표를 추출한다.**
+- [x] **Step 4: 실행 산출물에서 정확한 gate 지표를 추출한다.**
 
 Check:
 
@@ -447,7 +447,7 @@ transition_decision.eligible = true
 
 하나라도 다르면 `eligible=false`를 유지하고 failed gate, 전체 A/B metrics, phase p50/p95/mean, RAGAS evaluated/not-evaluated counts를 보고한다.
 
-- [ ] **Step 5: 측정값으로만 보고서와 C-1을 갱신한다.**
+- [x] **Step 5: 측정값으로만 보고서와 C-1을 갱신한다.**
 
 보고서에는 corpus snapshot, embedding/RAGAS model, 각 backend의 query/completed count, Recall@1/3/5, MRR, nDCG@5, no-result/unavailable rate, 전체 p50/p95, phase count/p50/p95/mean, RAGAS count·metrics·latency, transition gate verdict를 기록한다. C-1은 `eligible=true`일 때만 완료로 바꾸며, 그렇지 않으면 `[~]`를 유지하고 보고서 section을 연결한다.
 
