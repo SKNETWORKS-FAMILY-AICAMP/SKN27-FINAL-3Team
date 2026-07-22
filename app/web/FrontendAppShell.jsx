@@ -1306,62 +1306,38 @@ export default function FrontendAppShell({
 
   return (
     <div className="app-shell" data-auth-state={authContext.auth_state}>
-      <header className={showSidebar ? "topbar topbar-with-mobile-nav" : "topbar topbar-entry"}>
-        <div className="topbar-inner">
+      <AppIconRail
+        activeRoute={activeRoute}
+        onNavigate={setActiveRoute}
+        onOpenChat={() => bootstrapGuestSession("chatbot")}
+      />
+      <div className="app-shell__body">
+      <div className="top-float-actions" aria-label="주요 메뉴">
+        {import.meta.env.DEV && (
           <button
-            className="brand"
+            className="button ghost small"
             type="button"
-            onClick={() => setActiveRoute("entry")}
-            aria-label="교통분쟁 AI 처음 화면"
+            onClick={fillAllScreensWithMockData}
+            title="로컬 개발 전용: 백엔드 호출 없이 모든 화면을 더미 데이터로 채움"
           >
-            <span className="brand-mark">AI</span>
-            <span>교통분쟁 AI</span>
+            전체 화면 더미로 채우기
           </button>
-          <nav className="top-actions" aria-label="주요 메뉴">
-            {activeRoute !== "entry" &&
-              TAB_ROUTES.map((route) => (
-                <button
-                  className={activeRoute === route.id ? "button active" : "button ghost"}
-                  aria-current={activeRoute === route.id ? "page" : undefined}
-                  key={route.id}
-                  onClick={() => setActiveRoute(route.id)}
-                  type="button"
-                >
-                  {route.label}
-                </button>
-              ))}
-            {import.meta.env.DEV && (
-              <button
-                className="button ghost"
-                type="button"
-                onClick={fillAllScreensWithMockData}
-                title="로컬 개발 전용: 백엔드 호출 없이 모든 화면을 더미 데이터로 채움"
-              >
-                전체 화면 더미로 채우기
-              </button>
-            )}
-            {import.meta.env.DEV && isMockDataMode && (
-              <span className="dev-mock-badge" title="실제 데이터가 아니라 화면 확인용 더미 데이터입니다.">
-                더미 데이터 모드
-              </span>
-            )}
-            {authSessionId ? (
-              <button className="button ghost" type="button" onClick={logoutAndResetSession}>
-                로그아웃
-              </button>
-            ) : (
-              <button
-                className={activeRoute === "entry" ? "button ghost" : "button primary"}
-                type="button"
-                onClick={saveConversationAfterLogin}
-                disabled={isSavingConversation}
-              >
-                {isSavingConversation ? "연결 중" : "Google 로그인"}
-              </button>
-            )}
-          </nav>
-        </div>
-      </header>
+        )}
+        {authSessionId ? (
+          <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
+            로그아웃
+          </button>
+        ) : (
+          <button
+            className="button primary small"
+            type="button"
+            onClick={saveConversationAfterLogin}
+            disabled={isSavingConversation}
+          >
+            {isSavingConversation ? "연결 중" : "Google 로그인"}
+          </button>
+        )}
+      </div>
 
       <div
         className={
@@ -1398,6 +1374,7 @@ export default function FrontendAppShell({
             <EntryScreenV2
               onGuestStart={() => bootstrapGuestSession("chatbot")}
               onOpenChat={() => bootstrapGuestSession("chatbot")}
+              onNavigate={setActiveRoute}
             />
           )}
 
@@ -1505,6 +1482,7 @@ export default function FrontendAppShell({
           )}
 
         </main>
+      </div>
       </div>
     </div>
   );
@@ -1745,163 +1723,194 @@ function Reveal({ children, className = "", as = "div", ...rest }) {
   );
 }
 
-function EntryScreenV2({ onGuestStart, onOpenChat }) {
+const RAIL_ITEMS = [
+  {
+    id: "entry",
+    label: "홈",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 11.5 12 4l8 7.5" />
+        <path d="M6 10v9h12v-9" />
+      </svg>
+    ),
+  },
+  {
+    id: "chatbot",
+    label: "AI 상담",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 5h16v11H8l-4 4V5z" />
+      </svg>
+    ),
+  },
+  {
+    id: "reporting",
+    label: "리포트",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+        <path d="M14 3v5h5" />
+      </svg>
+    ),
+  },
+  {
+    id: "mypage",
+    label: "마이페이지",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="8" r="3.4" />
+        <path d="M5 20c1.4-3.6 4.2-5.5 7-5.5s5.6 1.9 7 5.5" />
+      </svg>
+    ),
+  },
+];
+
+function AppIconRail({ activeRoute, onNavigate, onOpenChat }) {
+  const handleClick = (routeId) => {
+    if (routeId === "chatbot" && typeof onOpenChat === "function") {
+      onOpenChat();
+      return;
+    }
+    if (typeof onNavigate === "function") {
+      onNavigate(routeId);
+    }
+  };
+
   return (
-    <section className="entry-screen insurance-layout">
-      <div className="home-hero">
-        <div className="home-hero__copy">
-          <span className="eyebrow">교통 분쟁 지원 플랫폼</span>
-          <h1>
-            복잡한 교통 문제,<br />
-            <span className="accent-text">다음 행동부터</span> 함께 정리합니다.
-          </h1>
-          <p className="lead">
-            사고 과실, 과태료 이의신청, 법률 조회까지. 상황과 자료를 바탕으로 쟁점과 필요한
-            준비 자료, 다음 행동을 한눈에 안내합니다.
-          </p>
-          <div className="hero-actions hero-actions--start">
-            <button className="button primary large" type="button" onClick={onOpenChat}>
-              내 상황 정리 시작
-            </button>
-            <button className="button large" type="button" onClick={onGuestStart}>
-              자료 없이 먼저 질문하기
-            </button>
-          </div>
-        </div>
-        <div className="home-hero__visual">
-          <div className="hero-visual-stage">
+    <aside className="app-rail" aria-label="빠른 이동">
+      {RAIL_ITEMS.map((item) => (
+        <button
+          key={item.id}
+          className={activeRoute === item.id ? "rail-icon active" : "rail-icon"}
+          type="button"
+          onClick={() => handleClick(item.id)}
+          title={item.label}
+          aria-label={item.label}
+          aria-current={activeRoute === item.id ? "page" : undefined}
+        >
+          {item.icon}
+        </button>
+      ))}
+      <button
+        className={activeRoute === "history" ? "rail-icon rail-icon--bottom active" : "rail-icon rail-icon--bottom"}
+        type="button"
+        onClick={() => handleClick("history")}
+        title="과거 이력"
+        aria-label="과거 이력"
+        aria-current={activeRoute === "history" ? "page" : undefined}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M12 7.5V12l3 2" />
+        </svg>
+      </button>
+    </aside>
+  );
+}
+
+function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
+  const goToRoute = (route) => {
+    if (typeof onNavigate === "function") {
+      onNavigate(route);
+    }
+  };
+
+  return (
+    <section className="entry-screen insurance-layout entry-dashboard">
+      <div className="entry-dashboard__main">
+        <div className="entry-dashboard__grid entry-dashboard__grid--photo">
+          <div className="entry-card entry-card--photo">
             <img
-              className="home-hero__car"
               src="/design-references/02-consultation-desk.jpg"
               alt="차량 관련 서류를 검토하는 상담 장면"
               loading="lazy"
             />
-            <div className="doc-assembly" aria-hidden="true">
-              <div className="doc-stack">
-                <span className="doc-chip doc-chip--statement">사고 사진</span>
-                <span className="doc-chip doc-chip--notice">과태료 고지서</span>
-                <span className="doc-chip doc-chip--photo">보험사 안내</span>
+          </div>
+
+          <div className="entry-card entry-card--intro">
+            <p>
+              과실비율 예측과 과태료 이의신청 지원까지, 상황과 자료를 바탕으로
+              쟁점과 다음 행동을 정리해 드리는 서비스입니다.
+            </p>
+            <div className="entry-card__actions">
+              <button className="button primary" type="button" onClick={onOpenChat}>
+                바로 상담 시작
+              </button>
+              <button className="button on-dark" type="button" onClick={() => goToRoute("reporting")}>
+                지난 리포트
+              </button>
+            </div>
+          </div>
+
+          <div className="entry-card entry-card--steps">
+            <div className="entry-card__head">
+              <strong>진행 순서</strong>
+              <p>이렇게 도와드립니다</p>
+            </div>
+            <div className="entry-step-list">
+              <div className="entry-step-row">
+                <strong className="index index--brand">01</strong>
+                <div><strong>상황 요약</strong><p>입력한 내용을 핵심 사실 중심으로 정리합니다.</p></div>
               </div>
-              <div className="doc-assembly__result">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
-                  <path d="M14 3v5h5" />
-                  <path d="M8.5 13.5l2 2 4-4.5" />
-                </svg>
-                <span>다음 행동 정리</span>
+              <div className="entry-step-row">
+                <strong className="index index--info">02</strong>
+                <div><strong>쟁점 확인</strong><p>판단에 중요한 기준과 빠진 자료를 알려드립니다.</p></div>
               </div>
+              <div className="entry-step-row">
+                <strong className="index index--green">03</strong>
+                <div><strong>근거 조회</strong><p>관련 법령과 판례를 확인할 수 있습니다.</p></div>
+              </div>
+              <div className="entry-step-row">
+                <strong className="index index--amber">04</strong>
+                <div><strong>다음 행동</strong><p>준비할 자료와 처리 순서를 제안합니다.</p></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="entry-card entry-card--features">
+            <div className="entry-card__head">
+              <strong>우리 기능들</strong>
+              <p>필요한 지원을 선택하면 바로 이어서 진행합니다.</p>
+            </div>
+            <div className="entry-quick-list entry-quick-list--light">
+              <button className="entry-quick-item" type="button" onClick={onOpenChat}>
+                <span className="entry-quick-icon entry-quick-icon--info">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 5h16v11H8l-4 4V5z" />
+                    <path d="M9 9h6M9 12.5h4" />
+                  </svg>
+                </span>
+                <span>
+                  <strong>법률·판례 조회</strong>
+                  <small>관련 법령과 판례를 확인합니다</small>
+                </span>
+              </button>
+              <button className="entry-quick-item" type="button" onClick={onOpenChat}>
+                <span className="entry-quick-icon entry-quick-icon--green">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 7h4M11 7h9M4 12h4M11 12h9M4 17h4M11 17h9" />
+                  </svg>
+                </span>
+                <span>
+                  <strong>사고 과실비율 예측</strong>
+                  <small>사고 상황과 자료를 정리합니다</small>
+                </span>
+              </button>
+              <button className="entry-quick-item" type="button" onClick={onOpenChat}>
+                <span className="entry-quick-icon entry-quick-icon--amber">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 4h12v16l-6-4-6 4V4z" />
+                  </svg>
+                </span>
+                <span>
+                  <strong>과태료 이의신청 지원</strong>
+                  <small>신청서 초안 작성을 돕습니다</small>
+                </span>
+              </button>
             </div>
           </div>
         </div>
       </div>
-
-      <Reveal className="entry-steps" as="div">
-        <div className="entry-steps__head">
-          <span className="eyebrow">필요한 지원 선택</span>
-          <h2>지금 상황에 맞는 도움부터 시작하세요</h2>
-        </div>
-        <div className="entry-steps__grid">
-          <div className="entry-step active">
-            <div className="entry-step__icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 5h16v11H8l-4 4V5z" />
-                <path d="M9 9h6M9 12.5h4" />
-              </svg>
-            </div>
-            <strong>법률·판례 조회</strong>
-            <p>교통사고와 과태료 관련 법령, 판례, 핵심 쟁점을 이해하기 쉽게 확인합니다.</p>
-            <button className="service-link" type="button" onClick={onOpenChat}>법률 질문하기 →</button>
-          </div>
-          <div className="entry-step">
-            <div className="entry-step__icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 7h4M11 7h9M4 12h4M11 12h9M4 17h4M11 17h9" />
-              </svg>
-            </div>
-            <strong>사고 과실비율 예측</strong>
-            <p>사고 상황과 제출 자료를 토대로 과실 쟁점과 확인할 자료를 정리합니다.</p>
-            <button className="service-link" type="button" onClick={onOpenChat}>사고 상황 입력하기 →</button>
-          </div>
-          <div className="entry-step">
-            <div className="entry-step__icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 4h12v16l-6-4-6 4V4z" />
-              </svg>
-            </div>
-            <strong>과태료 이의신청 지원</strong>
-            <p>고지서 내용을 바탕으로 검토 포인트를 확인하고 신청서 초안 작성을 돕습니다.</p>
-            <button className="service-link" type="button" onClick={onOpenChat}>고지서 검토하기 →</button>
-          </div>
-        </div>
-      </Reveal>
-
-      <Reveal className="feature-section" as="div">
-        <div className="entry-steps__head">
-          <span className="eyebrow">간단한 시작</span>
-          <h2>몇 가지 질문으로<br />내 상황에 맞는 지원을 찾아보세요</h2>
-        </div>
-        <div className="feature-grid">
-          <div className="feature-card">
-            <div className="feature-card__icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 5h16v11H8l-4 4V5z" />
-                <path d="M9 9h6M9 12.5h4" />
-              </svg>
-            </div>
-            <strong>상황 요약</strong>
-            <p>입력한 사고 내용과 고지서 정보를 먼저 간결하게 정리합니다.</p>
-          </div>
-          <div className="feature-card">
-            <div className="feature-card__icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 4v16M6 4h12M4 20h16M6 4l-3 7a3 3 0 0 0 6 0L6 4ZM18 4l-3 7a3 3 0 0 0 6 0L18 4Z" />
-              </svg>
-            </div>
-            <strong>쟁점과 근거</strong>
-            <p>확인이 필요한 법률 쟁점, 과실 판단 기준, 관련 근거를 안내합니다.</p>
-          </div>
-          <div className="feature-card">
-            <div className="feature-card__icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
-                <path d="M14 3v5h5" />
-                <path d="M8.5 13.5l2 2 4-4.5" />
-              </svg>
-            </div>
-            <strong>다음 행동</strong>
-            <p>보완할 자료와 기한, 이의신청서 초안처럼 바로 할 일을 제안합니다.</p>
-          </div>
-        </div>
-      </Reveal>
-
-      <Reveal className="reassurance-strip" as="div">
-        <h2>결론을 대신 내리지 않습니다.<br />판단에 필요한 정보를 더 명확하게 만듭니다.</h2>
-        <p>AI 분석 결과는 참고용 안내이며, 중요한 법률 판단이나 절차는 전문가와 함께 확인할 수 있습니다.</p>
-      </Reveal>
-
-      <Reveal className="insurance-metrics" as="section">
-        <article><strong>01</strong><h2>상황 요약</h2><p>입력한 내용을 핵심 사실 중심으로 정리합니다.</p></article>
-        <article><strong>02</strong><h2>쟁점 확인</h2><p>판단에 중요한 기준과 빠진 자료를 알려드립니다.</p></article>
-        <article><strong>03</strong><h2>근거 조회</h2><p>관련 법령과 판례를 확인할 수 있습니다.</p></article>
-        <article><strong>04</strong><h2>다음 행동</h2><p>준비할 자료와 처리 순서를 제안합니다.</p></article>
-      </Reveal>
-
-      <Reveal className="insurance-reviews" as="section">
-        <h2>이렇게 활용할 수 있어요</h2>
-        <div>
-          <blockquote>“보험사 설명을 듣기 전에 제가 확인할 쟁점을 먼저 정리할 수 있었어요.”<cite>사고 과실 상담 이용</cite></blockquote>
-          <blockquote>“고지서에서 무엇을 봐야 하는지 알려줘서 자료를 준비하기 쉬웠습니다.”<cite>과태료 검토 이용</cite></blockquote>
-          <blockquote>“복잡한 법률 용어를 상황에 맞게 풀어줘서 다음 행동이 명확해졌어요.”<cite>법률 조회 이용</cite></blockquote>
-        </div>
-      </Reveal>
-
-      <Reveal className="closing-cta" as="div">
-        <h2>어떤 도움이 필요한가요?</h2>
-        <p>가입 없이 시작하고, 필요한 경우에만 이력과 자료를 저장하세요.</p>
-        <button className="button primary large" type="button" onClick={onOpenChat}>
-          내 상황 정리 시작
-        </button>
-      </Reveal>
     </section>
   );
 }
@@ -2728,12 +2737,16 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
   const recentCount = summary?.recent_analysis_count ?? cases.length;
   const hasCases = cases.length > 0;
   const [showActionableOnly, setShowActionableOnly] = useState(false);
+  const [selectedCaseKey, setSelectedCaseKey] = useState(null);
   const visibleCases = showActionableOnly
     ? cases.filter((item) => {
         const status = String(item.case_status || item.status || "").toLowerCase();
         return /partial|pending|queued|running|draft|review|기한|추가|확인|대기|진행|작성/.test(status);
       })
     : cases;
+  const caseKey = (item) => item.case_id || item.job_id || item.title;
+  const selectedCase =
+    visibleCases.find((item) => caseKey(item) === selectedCaseKey) || visibleCases[0] || null;
 
   return (
     <section className="screen">
@@ -2758,55 +2771,98 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
           <MetricCard label="최근 분석" value={`${recentCount}건`} detail="상담/리포트 포함" />
         </div>
 
-        <article className="table-panel">
-          <div className="panel-head">
-            <strong>최근 분석 이력</strong>
-            <button
-              className={showActionableOnly ? "button active" : "button"}
-              type="button"
-              disabled={!hasCases}
-              aria-pressed={showActionableOnly}
-              onClick={() => setShowActionableOnly((value) => !value)}
-            >
-              {showActionableOnly ? "전체 보기" : "필터"}
-            </button>
-          </div>
-          <div className="table-scroll">
-            <table className="history-table">
-              <thead>
-                <tr>
-                  <th>유형</th>
-                  <th>사건명</th>
-                  <th>상태</th>
-                  <th>최근 작업</th>
-                  <th>이동</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleCases.length === 0 ? (
+        <div className="mypage-split">
+          <article className="table-panel">
+            <div className="panel-head">
+              <strong>최근 분석 이력</strong>
+              <button
+                className={showActionableOnly ? "button active" : "button"}
+                type="button"
+                disabled={!hasCases}
+                aria-pressed={showActionableOnly}
+                onClick={() => setShowActionableOnly((value) => !value)}
+              >
+                {showActionableOnly ? "전체 보기" : "필터"}
+              </button>
+            </div>
+            <div className="table-scroll">
+              <table className="history-table">
+                <thead>
                   <tr>
-                    <td colSpan="5">
-                      <div className="table-empty">
-                        <strong>아직 저장된 사건이 없습니다.</strong>
-                        <p>상담을 시작하거나 리포트를 저장하면 이곳에 표시됩니다.</p>
-                      </div>
-                    </td>
+                    <th>유형</th>
+                    <th>사건명</th>
+                    <th>상태</th>
+                    <th>최근 작업</th>
+                    <th>이동</th>
                   </tr>
-                ) : (
-                  visibleCases.map((item) => (
-                    <tr key={item.case_id || item.job_id || item.title}>
-                      <td><span className="tag">{item.type || "상담"}</span></td>
-                      <td>{item.title || item.case_id}</td>
-                      <td>{item.case_status || item.status || "확인 필요"}</td>
-                      <td>{item.updated_at || item.created_at || "-"}</td>
-                      <td><button className="button" type="button" onClick={() => onOpenCase(item)}>열기</button></td>
+                </thead>
+                <tbody>
+                  {visibleCases.length === 0 ? (
+                    <tr>
+                      <td colSpan="5">
+                        <div className="table-empty">
+                          <strong>아직 저장된 사건이 없습니다.</strong>
+                          <p>상담을 시작하거나 리포트를 저장하면 이곳에 표시됩니다.</p>
+                        </div>
+                      </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </article>
+                  ) : (
+                    visibleCases.map((item) => (
+                      <tr
+                        key={caseKey(item)}
+                        className={selectedCase && caseKey(item) === caseKey(selectedCase) ? "is-selected" : undefined}
+                        onClick={() => setSelectedCaseKey(caseKey(item))}
+                      >
+                        <td><span className="tag">{item.type || "상담"}</span></td>
+                        <td>{item.title || item.case_id}</td>
+                        <td>{item.case_status || item.status || "확인 필요"}</td>
+                        <td>{item.updated_at || item.created_at || "-"}</td>
+                        <td>
+                          <button
+                            className="button"
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenCase(item);
+                            }}
+                          >
+                            열기
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <aside className="case-detail-panel" aria-label="사건 상세">
+            {selectedCase ? (
+              <>
+                <div className="panel-head">
+                  <strong>사건 상세</strong>
+                  <span className="tag">{selectedCase.type || "상담"}</span>
+                </div>
+                <div className="case-detail-body">
+                  <h3>{selectedCase.title || selectedCase.case_id}</h3>
+                  <dl>
+                    <div><dt>상태</dt><dd>{selectedCase.case_status || selectedCase.status || "확인 필요"}</dd></div>
+                    <div><dt>최근 작업</dt><dd>{selectedCase.updated_at || selectedCase.created_at || "-"}</dd></div>
+                    <div><dt>사건 ID</dt><dd>{selectedCase.case_id || selectedCase.job_id || "-"}</dd></div>
+                  </dl>
+                  <button className="button primary full" type="button" onClick={() => onOpenCase(selectedCase)}>
+                    이어서 보기
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="empty-panel compact">
+                <p>사건을 선택하면 상세 정보가 여기에 표시됩니다.</p>
+              </div>
+            )}
+          </aside>
+        </div>
       </div>
     </section>
   );
@@ -3310,63 +3366,13 @@ function ReportingScreen({
         </div>
       </div>
 
-      <ServiceInformationNotice />
       <div className="report-workbench">
         <aside className="report-list" aria-label="리포트 목록">
           <div className="panel-head compact">
             <strong>리포트 목록</strong>
             <span className="tag">{savedReportCountLabel}</span>
           </div>
-          {hasReport ? (
-            <div className="report-list-card">
-              <span className={reportTagClass}>
-                {reportStatusLabel(reportStatus)}
-              </span>
-              <strong>{reportTitle}</strong>
-              <div className="report-card-tags">
-                <span className="tag">{activeReportTypeLabel}</span>
-                <span className={reportTagClass}>{reportStatusLabel(reportStatus)}</span>
-              </div>
-              <strong>{activeReportTitle}</strong>
-              <p>{reportSummary}</p>
-              {currentReport && (
-                <p>
-                  저장 리포트: {currentReport.report_id}
-                  {reportPersistence.status ? ` · ${reportStatusLabel(reportPersistence.status)}` : ""}
-                </p>
-              )}
-              {hasSavedReports && (
-                <div className="report-saved-list">
-                  {reportList.slice(0, 5).map((report) => (
-                    <button
-                      className={
-                        currentReport?.report_id === report.report_id
-                          ? "report-list-card compact active"
-                          : "report-list-card compact"
-                      }
-                      key={report.report_id}
-                      type="button"
-                      onClick={() => onOpenReport?.(report)}
-                    >
-                      <div className="report-card-tags">
-                        <span className="tag">{reportTypeLabel(report.report_type)}</span>
-                        <span className={report.partial_report ? "tag amber" : "tag green"}>
-                          {reportQualityLabel(report)}
-                        </span>
-                      </div>
-                      <strong>{report.title || report.report_id}</strong>
-                      <p>{report.summary || report.status}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="empty-panel report-empty">
-              <strong>선택할 리포트가 없습니다.</strong>
-              <p>상담 결과에서 리포트를 저장하면 사고 개요와 근거 문서가 여기에 표시됩니다.</p>
-            </div>
-          )}
+          <ServiceInformationNotice />
         </aside>
 
         <article className="report-canvas" aria-label="리포트 미리보기">
