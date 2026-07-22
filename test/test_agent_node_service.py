@@ -55,27 +55,27 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert traffic_ocr_node["status"] == "sync_adapter_ready"
     assert traffic_ocr_node["adapter_modes"] == ["sync"]
     assert traffic_ocr_node["adapter_contract"]["execution_modes"] == ["sync"]
-    assert vision_node["status"] == "mock_contract_only"
-    assert vision_node["adapter_modes"] == ["mock"]
-    assert vision_node["adapter_contract"]["execution_modes"] == ["mock"]
+    assert vision_node["status"] == "sync_adapter_ready"
+    assert vision_node["adapter_modes"] == ["sync"]
+    assert vision_node["adapter_contract"]["execution_modes"] == ["sync"]
     assert objection_node["status"] == "sync_adapter_ready"
     assert objection_node["adapter_modes"] == ["sync"]
     assert objection_node["adapter_contract"]["execution_modes"] == ["sync"]
 
 
-def test_only_vision_agent_advertises_mock_execution():
+def test_no_public_agent_advertises_mock_execution():
     agents = {
         node["node_code"]: node
         for node in list_agent_nodes()
         if node["node_type"] == "agent"
     }
 
-    assert agents["vision_media_analysis"]["adapter_modes"] == ["mock"]
     for node_code in {
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
         "traffic_accident_confirmation_ocr",
+        "vision_media_analysis",
         "appeal_decision_flow",
         "objection_report_generation",
     }:
@@ -83,7 +83,7 @@ def test_only_vision_agent_advertises_mock_execution():
         assert agents[node_code]["adapter_contract"]["execution_modes"] == ["sync"]
 
 
-def test_public_agent_registry_includes_every_non_dl_runtime_agent():
+def test_public_agent_registry_includes_every_sync_runtime_agent():
     public_codes = {node["node_code"] for node in list_public_agent_nodes()}
 
     assert public_codes == {
@@ -91,10 +91,10 @@ def test_public_agent_registry_includes_every_non_dl_runtime_agent():
         "law_ground_search",
         "text_ml_case_search",
         "traffic_accident_confirmation_ocr",
+        "vision_media_analysis",
         "appeal_decision_flow",
         "objection_report_generation",
     }
-    assert "vision_media_analysis" not in public_codes
 
 
 def test_sync_reporting_payload_exposes_document_cards_without_generic_download_action():
@@ -170,16 +170,22 @@ def test_legacy_mock_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypat
     assert calls[0]["attachment_resolution"]["unresolved_attachment_ids"] == []
 
 
-def test_legacy_mock_entrypoint_keeps_dl_agent_as_explicit_mock():
-    result = execute_mock_node(
-        {
-            "node_code": "vision_media_analysis",
-            "attachments": [{"attachment_id": "att_vision", "purpose": "evidence"}],
-        }
-    )
+def test_legacy_mock_entrypoint_delegates_vision_to_real_runtime(monkeypatch):
+    calls = []
 
-    assert result["execution_mode"] == "mock"
-    assert result["node_code"] == "vision_media_analysis"
+    def fake_execute_agent_node(payload):
+        calls.append(payload)
+        return {"execution_mode": "sync", "node_code": payload["node_code"], "agent_output": {"status": "partial"}}
+
+    monkeypatch.setattr(agent_node_service, "execute_agent_node", fake_execute_agent_node)
+
+    result = execute_mock_node({"node_code": "vision_media_analysis"})
+
+    assert result["execution_mode"] == "sync"
+    assert len(calls) == 1
+    assert calls[0]["node_code"] == "vision_media_analysis"
+    assert calls[0]["attachments"] == []
+    assert calls[0]["attachment_resolution"]["unresolved_attachment_ids"] == []
 
 
 def test_appeal_decision_runtime_invokes_real_graph_with_upstream_results(monkeypatch):
@@ -1653,7 +1659,7 @@ def test_law_ground_sync_adapter_can_feed_sync_objection_when_sync_requested(mon
     )
 
 
-def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():
+def test_text_ml_and_vision_use_sync_adapters_when_sync_requested(monkeypatch):
     plan = {
         "plan_id": "plan_mock_only_agents",
         "session_id": "ses_mock_only_agents",
@@ -1664,6 +1670,19 @@ def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():
         ],
     }
 
+    monkeypatch.setattr(
+        agent_node_service,
+        "_run_sync_adapter",
+        lambda agent_input, _context: {
+            "status": "partial" if agent_input["node_code"] == "vision_media_analysis" else "success",
+            "summary": f"{agent_input['node_code']} result",
+            "structured_result": {},
+            "evidence": [],
+            "next_actions": [],
+            "limitations": [],
+        },
+    )
+
     execution = execute_mock_plan(
         plan,
         {
@@ -1673,8 +1692,8 @@ def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():
     )
 
     executions_by_node = {item["node_code"]: item for item in execution["executions"]}
-    assert execution["execution_mode"] == "hybrid"
+    assert execution["execution_mode"] == "sync"
     assert executions_by_node["text_ml_case_search"]["execution_mode"] == "sync"
-    assert executions_by_node["vision_media_analysis"]["execution_mode"] == "mock"
+    assert executions_by_node["vision_media_analysis"]["execution_mode"] == "sync"
     assert executions_by_node["text_ml_case_search"]["adapter_context"]["execution_mode"] == "sync"
-    assert executions_by_node["vision_media_analysis"]["adapter_context"]["execution_mode"] == "mock"
+    assert executions_by_node["vision_media_analysis"]["adapter_context"]["execution_mode"] == "sync"

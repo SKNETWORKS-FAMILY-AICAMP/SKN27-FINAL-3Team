@@ -158,9 +158,9 @@ class ProductionApiContractTests(SimpleTestCase):
                 "objection_report_generation",
                 "text_ml_case_search",
                 "traffic_accident_confirmation_ocr",
+                "vision_media_analysis",
             },
         )
-        self.assertNotIn("vision_media_analysis", str(body))
         self.assertNotIn("mock", str(body).lower())
 
     def test_internal_and_legacy_mock_routes_are_not_resolvable(self) -> None:

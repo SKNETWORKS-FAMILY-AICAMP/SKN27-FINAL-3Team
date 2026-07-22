@@ -42,7 +42,7 @@ from app.services.supervisor_execution_input_service import (
 from app.services.supervisor_routing_service import PUBLIC_AGENT_NODE_CODES
 
 
-DL_MOCK_NODE_CODES = {"vision_media_analysis"}
+DL_MOCK_NODE_CODES: set[str] = set()
 REPORTING_NODE_CODE = "objection_report_generation"
 TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE = "traffic_accident_confirmation_ocr"
 TRAFFIC_ACCIDENT_CONFIRMATION_ATTACHMENT_PURPOSE = "traffic_accident_confirmation"
@@ -60,9 +60,6 @@ try:
 except Exception:  # pragma: no cover - keeps CLI-only mock service imports decoupled from Django.
     read_object_bytes = None
     storage_reference_from_uri = None
-
-
-DL_MOCK_NODE_CODES = {"vision_media_analysis"}
 
 
 NODE_REGISTRY: dict[str, dict[str, Any]] = {
@@ -161,11 +158,11 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "node_type": "agent",
         "owner": "ohjuheecode",
         "description": "사진/영상에서 사고 장면 후보, 객체, 품질 이슈를 추출해 텍스트 분석 노드에 넘긴다.",
-        "required_inputs": ["attachments[purpose=accident_scene|evidence]"],
-        "produces": ["key_frames", "scene_summary", "quality_issues"],
+        "required_inputs": ["attachments[purpose=blackbox_video, scan_ready]"],
+        "produces": ["accident_evidence", "key_frames", "detected_object_summary", "limitations"],
         "handoff_to": ["text_ml_case_search", "agent_result_validation"],
-        "status": "mock_contract_only",
-        "adapter_modes": ["mock"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["sync"],
     },
     "appeal_decision_flow": {
         "order": 55,
@@ -226,6 +223,7 @@ PRODUCTION_AGENT_TIMEOUT_SECONDS = {
     "objection_report_generation": 30,
     "text_ml_case_search": 60,
     "traffic_accident_confirmation_ocr": 120,
+    "vision_media_analysis": 180,
 }
 
 
@@ -266,7 +264,7 @@ def get_agent_node(node_code: str) -> dict[str, Any]:
 
 
 def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
-    """Compatibility entrypoint; only the DL node may still return mock output."""
+    """Compatibility entrypoint for legacy callers that now use sync adapters."""
 
     payload = resolve_attachment_references(payload)
     node_code = _payload_node_code(payload)
@@ -620,6 +618,7 @@ def _sync_adapter_node_codes() -> set[str]:
         "objection_report_generation",
         "text_ml_case_search",
         TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE,
+        "vision_media_analysis",
     }
 
 
@@ -1154,6 +1153,8 @@ def _run_sync_adapter(
     adapter_context: dict[str, Any],
 ) -> dict[str, Any]:
     node_code = str(agent_input.get("node_code") or "")
+    if node_code == "vision_media_analysis":
+        return _run_vision_media_analysis_adapter(agent_input, adapter_context)
     if node_code == "appeal_decision_flow":
         return _run_appeal_decision_flow_adapter(agent_input, adapter_context)
     if node_code == "fine_notice_analysis":
@@ -1169,6 +1170,26 @@ def _run_sync_adapter(
     if node_code == TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE:
         return _run_traffic_accident_confirmation_ocr_adapter(agent_input, adapter_context)
     raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
+
+
+def _run_vision_media_analysis_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    from app.services.vision_media_analysis_adapter import run_vision_media_analysis
+
+    raw_output = run_vision_media_analysis(agent_input, adapter_context)
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "app.services.vision_media_analysis_adapter.run_vision_media_analysis",
+            "execution_mode": "sync",
+            "source_status": raw_output.get("status"),
+            "input_source": "canonical_scan_ready_blackbox_video",
+        },
+    )
 
 
 def _run_appeal_decision_flow_adapter(
@@ -1797,9 +1818,10 @@ def _adapter_error_output(
     exc: Exception,
 ) -> dict[str, Any]:
     adapter_trace = _adapter_error_trace(node["node_code"], agent_input, exc)
+    error_code = str(adapter_trace.get("error_code") or exc.__class__.__name__)
     structured_result = _normalize_adapter_structured_result(
         {
-            "error_code": exc.__class__.__name__,
+            "error_code": error_code,
             "error_message": "Sync adapter execution failed.",
         },
         node_code=node["node_code"],
@@ -1831,6 +1853,7 @@ def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Excep
         "law_ground_search": "ai.agents.law_ground_search.run_law_ground_search",
         "text_ml_case_search": "ai.agents.text_ml_case_search.run_text_ml_case_search",
         "traffic_accident_confirmation_ocr": "etl.fault_cases.src.OCR.traffic_accident_confirmation_ocr.graph",
+        "vision_media_analysis": "app.services.vision_media_analysis_adapter.run_vision_media_analysis",
     }
     if node_code == "fine_notice_analysis":
         input_source = "attachment" if _has_fine_notice_attachment(agent_input) else "missing"
@@ -1838,6 +1861,8 @@ def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Excep
         input_source = "agent_input.context"
     elif node_code == TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE:
         input_source = "canonical_scan_ready_attachment"
+    elif node_code == "vision_media_analysis":
+        input_source = "canonical_scan_ready_blackbox_video"
     else:
         input_source = "agent_input"
     return {
@@ -1845,7 +1870,7 @@ def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Excep
         "execution_mode": "sync",
         "source_status": "adapter_error",
         "input_source": input_source,
-        "error_code": exc.__class__.__name__,
+        "error_code": "vision_execution_failed" if node_code == "vision_media_analysis" else exc.__class__.__name__,
     }
 
 

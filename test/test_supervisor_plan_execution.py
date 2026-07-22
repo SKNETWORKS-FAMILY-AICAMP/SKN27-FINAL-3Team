@@ -44,6 +44,47 @@ def test_canonical_plan_executes_supervisor_validation_and_final_merge(run_adapt
 
 
 @patch("app.services.agent_node_service._run_sync_adapter")
+def test_video_plan_uses_the_sync_vision_adapter_and_preserves_partial_result(run_adapter) -> None:
+    def adapter(agent_input, _adapter_context):
+        if agent_input["node_code"] == "vision_media_analysis":
+            return {
+                "status": "partial",
+                "summary": "Vision evidence was extracted for review.",
+                "structured_result": {"analysis_kind": "accident_evidence"},
+                "evidence": [],
+                "next_actions": ["review_evidence_with_case_and_law_sources"],
+                "limitations": ["Vision does not determine fault or legal responsibility."],
+            }
+        return {
+            "status": "success",
+            "summary": f"{agent_input['node_code']} result",
+            "structured_result": {},
+            "evidence": [],
+            "next_actions": [],
+            "limitations": [],
+        }
+
+    run_adapter.side_effect = adapter
+    chat = submit_message(
+        {
+            "session_id": "ses_video_sync",
+            "user_text": "Please analyze this dashcam video.",
+            "attachments": [
+                {"attachment_id": "att_video_sync", "purpose": "blackbox_video", "status": "ready"}
+            ],
+        }
+    )
+
+    execution = execute_agent_plan(chat["analysis_plan"], {"session_id": "ses_video_sync"})
+    vision = next(item for item in execution["executions"] if item["node_code"] == "vision_media_analysis")
+
+    assert execution["execution_mode"] == "sync"
+    assert vision["execution_mode"] == "sync"
+    assert vision["agent_output"]["status"] == "partial"
+    assert vision["agent_output"]["structured_result"]["analysis_kind"] == "accident_evidence"
+
+
+@patch("app.services.agent_node_service._run_sync_adapter")
 def test_report_agent_is_not_executed_when_validation_report_gate_is_closed(run_adapter) -> None:
     called_nodes: list[str] = []
 

@@ -407,7 +407,7 @@ git commit -m "fix(#294): harden vision supervisor handoff"
 - Produces: `run_vision_media_analysis(agent_input: dict[str, Any], adapter_context: dict[str, Any]) -> dict[str, Any]`, a raw adapter result compatible with `_complete_adapter_output`.
 - Stable failure codes: `attachment_not_scan_ready`, `vision_checkpoint_missing`, `vision_dependency_missing`, `vision_media_decode_failed`, `vision_execution_timeout`, `vision_execution_failed`.
 
-- [ ] **Step 1: Write failing adapter tests with no real Vision dependency.**
+- [x] **Step 1: Write failing adapter tests with no real Vision dependency.**
 
 ```python
 def test_adapter_runs_in_an_execution_scoped_workspace_and_returns_partial(monkeypatch) -> None:
@@ -437,13 +437,13 @@ def test_missing_checkpoint_returns_a_stable_failure_without_path(monkeypatch) -
     assert "checkpoint" not in result["summary"].lower()
 ```
 
-- [ ] **Step 2: Run focused adapter and registry tests to verify they fail.**
+- [x] **Step 2: Run focused adapter and registry tests to verify they fail.**
 
 Run: `python -m pytest test/test_vision_media_analysis_adapter.py test/test_agent_node_service.py -q`
 
 Expected: FAIL because the adapter does not exist and `vision_media_analysis` is still advertised as mock-only.
 
-- [ ] **Step 3: Implement preflight, subprocess isolation, and a strict handoff allowlist.**
+- [x] **Step 3: Implement preflight, subprocess isolation, and a strict handoff allowlist.**
 
 ```python
 # app/services/vision_media_analysis_adapter.py
@@ -506,13 +506,13 @@ DL_MOCK_NODE_CODES: set[str] = set()
 
 Add `vision_media_analysis` to `_sync_adapter_node_codes`, dispatch it in `_run_sync_adapter`, and use the adapter's stable error code in `_adapter_error_trace`. Keep the canonical scan-ready check in the new module rather than permitting inline or mock attachments.
 
-- [ ] **Step 4: Run adapter, registry, and plan-execution tests.**
+- [x] **Step 4: Run adapter, registry, and plan-execution tests.**
 
 Run: `python -m pytest test/test_vision_media_analysis_adapter.py test/test_agent_node_service.py test/test_supervisor_plan_execution.py -q`
 
 Expected: PASS; public capabilities advertise Vision as sync, the execution mode contains no `mock`, a synthetic handoff is `partial`, and each temporary workspace is removed after the run.
 
-- [ ] **Step 5: Commit the actual Vision adapter integration.**
+- [x] **Step 5: Commit the actual Vision adapter integration.**
 
 ```bash
 git add app/services/vision_media_analysis_adapter.py app/services/agent_node_service.py test/test_vision_media_analysis_adapter.py test/test_agent_node_service.py test/test_supervisor_plan_execution.py

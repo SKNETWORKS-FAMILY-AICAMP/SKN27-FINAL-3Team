@@ -2777,7 +2777,7 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(completed_detail["progress_state"]["state"], "success")
         self.assertGreater(completed_detail["agent_result_count"], 0)
 
-    def test_canonical_chat_sync_request_runs_ready_fault_ratio_adapter_only(self):
+    def test_canonical_chat_sync_request_runs_fault_ratio_and_vision_sync_adapters(self):
         response = self.client.post(
             "/api/chat/messages/",
             data={
@@ -2797,13 +2797,17 @@ class RemovedChatbotMockApiContract:
         text_ml_result = node_results["text_ml_case_search"]
         vision_result = node_results["vision_media_analysis"]
 
-        self.assertEqual(execution["execution_mode"], "hybrid")
+        self.assertEqual(execution["execution_mode"], "sync")
         self.assertEqual(text_ml_result["execution_mode"], "sync")
         self.assertEqual(text_ml_result["adapter_execution_mode"], "sync")
         self.assertIn("sync", text_ml_result["adapter_modes"])
-        self.assertEqual(vision_result["execution_mode"], "mock")
-        self.assertEqual(vision_result["adapter_execution_mode"], "mock")
-        self.assertEqual(vision_result["adapter_modes"], ["mock"])
+        self.assertEqual(vision_result["execution_mode"], "sync")
+        self.assertEqual(vision_result["adapter_execution_mode"], "sync")
+        self.assertEqual(vision_result["adapter_modes"], ["sync"])
+        self.assertEqual(
+            vision_result["structured_result"]["error_code"],
+            "attachment_not_scan_ready",
+        )
 
         structured_result = text_ml_result["structured_result"]
         self.assertEqual(structured_result["adapter_trace"]["execution_mode"], "sync")
@@ -2827,7 +2831,7 @@ class RemovedChatbotMockApiContract:
             for invocation in invocations
         }
         self.assertEqual(invocation_modes["text_ml_case_search"], "sync")
-        self.assertEqual(invocation_modes["vision_media_analysis"], "mock")
+        self.assertEqual(invocation_modes["vision_media_analysis"], "sync")
 
     def test_canonical_chat_message_covers_all_demo_personas_before_real_agents(self):
         for persona in list_demo_personas():
