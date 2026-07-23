@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+
+RUN_SUMMARY_CONTRACT_VERSION = "legal_ingestion_run_summary.v2"
 
 
 # ==========================================
@@ -79,6 +84,8 @@ def build_run_summary(
     quality_report: dict,
     failed_items: list[dict],
     started_at: str,
+    source_summaries: list[dict] | None = None,
+    dataset_version: str | None = None,
 ) -> dict:
     """파이프라인 구동 시간, 성공 개수, 에러 항목을 통합 요약 보고서용 사전 구조로 구성합니다."""
     failed_chunks = quality_report.get("failed_chunks", 0)
@@ -86,10 +93,35 @@ def build_run_summary(
     if failed_items or failed_chunks:
         status = "partial" if chunks else "failed"
 
+    finished_at = datetime.now(timezone.utc).isoformat()
+    resolved_source_summaries = (
+        source_summaries
+        if source_summaries is not None
+        else _source_summaries(
+            sources=sources,
+            versions=versions,
+            raw_records=raw_records,
+            chunks=chunks,
+            searchable_chunks=searchable_chunks,
+            failed_items=failed_items,
+            finished_at=finished_at,
+        )
+    )
+    resolved_dataset_version = dataset_version or sha256_version(
+        [
+            f"{row['source_id']}:{row['data_version']}"
+            for row in resolved_source_summaries
+        ]
+    )
+    if any(row.get("status") != "success" for row in resolved_source_summaries):
+        status = "partial" if chunks else "failed"
     return {
+        "contract_version": RUN_SUMMARY_CONTRACT_VERSION,
         "run_id": run_id,
         "mode": mode,
         "status": status,
+        "dataset_version": resolved_dataset_version,
+        "source_summaries": resolved_source_summaries,
         "total_sources": len(sources),
         "total_versions": len(versions),
         "total_raw_documents": len(raw_records),
@@ -101,9 +133,116 @@ def build_run_summary(
         "extra_relation_count": len(extra_relations or []),
         "embedding_input_count": len(embedding_inputs),
         "started_at": started_at,
-        "finished_at": datetime.now(timezone.utc).isoformat(),
-        "limitations": [item["error"] for item in failed_items if item.get("error")],
+        "finished_at": finished_at,
+        "limitations": [
+            _safe_failed_item_code(item)
+            for item in failed_items
+            if item.get("error")
+        ],
     }
+
+
+def _source_summaries(
+    *,
+    sources: list[dict],
+    versions: list[dict],
+    raw_records: list[dict],
+    chunks: list[dict],
+    searchable_chunks: list[dict],
+    failed_items: list[dict],
+    finished_at: str,
+) -> list[dict]:
+    rows = []
+    for source in sorted(sources, key=lambda item: item["source_id"]):
+        source_id = source["source_id"]
+        source_versions = [
+            row for row in versions if row.get("source_id") == source_id
+        ]
+        source_raw = [
+            row for row in raw_records if row.get("source_id") == source_id
+        ]
+        source_chunks = [
+            row for row in chunks if row.get("source_id") == source_id
+        ]
+        source_searchable = [
+            row
+            for row in searchable_chunks
+            if row.get("source_id") == source_id
+        ]
+        errors = [
+            _safe_failed_item_code(item)
+            for item in failed_items
+            if item.get("source_id") == source_id and item.get("error")
+        ]
+        effective_dates = sorted(
+            str(row["enforce_date"])
+            for row in source_versions
+            if row.get("enforce_date")
+        )
+        collected_dates = sorted(
+            str(row["fetched_at"]) for row in source_raw if row.get("fetched_at")
+        )
+        if not source_versions:
+            status = "failed" if errors else "missing"
+        elif errors or not source_raw or not source_chunks or not source_searchable:
+            status = "partial"
+        else:
+            status = "success"
+
+        rows.append(
+            {
+                "source_id": source_id,
+                "source_name": source.get("source_name"),
+                "source_type": source.get("source_type"),
+                "provider": source.get("provider"),
+                "provider_source_id": source.get("provider_source_id"),
+                "status": status,
+                "version_count": len(source_versions),
+                "raw_document_count": len(source_raw),
+                "chunk_count": len(source_chunks),
+                "searchable_chunk_count": len(source_searchable),
+                "first_effective_at": effective_dates[0] if effective_dates else None,
+                "last_effective_at": effective_dates[-1] if effective_dates else None,
+                "collected_at": collected_dates[-1] if collected_dates else None,
+                "last_verified_at": finished_at if status == "success" else None,
+                "data_version": sha256_version(
+                    [
+                        str(row.get("source_version_id") or "")
+                        for row in source_versions
+                    ]
+                    + [
+                        f"{row.get('chunk_id', '')}:{row.get('content_hash', '')}"
+                        for row in source_chunks
+                    ]
+                ),
+                "errors": errors,
+            }
+        )
+    return rows
+
+
+def sha256_version(rows: list[str]) -> str:
+    payload = "\n".join(sorted(value for value in rows if value))
+    return f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+
+
+def _safe_failed_item_code(item: dict) -> str:
+    error = str(item.get("error") or "").strip()
+    if re.fullmatch(r"[a-z][a-z0-9_]{2,63}", error):
+        return error
+
+    stage = str(item.get("stage") or "pipeline").strip().lower()
+    if not re.fullmatch(r"[a-z][a-z0-9_]{1,31}", stage):
+        stage = "pipeline"
+    normalized_error = error.lower()
+    if "timeout" in normalized_error or "timed out" in normalized_error:
+        return f"{stage}_timeout"
+    if any(
+        token in normalized_error
+        for token in ("unauthorized", "forbidden", "authentication", "401", "403")
+    ):
+        return f"{stage}_auth_failed"
+    return f"{stage}_failed"
 
 
 def write_reports(output_dir: str | Path, run_summary: dict, ingestion_log: list[dict]) -> None:
