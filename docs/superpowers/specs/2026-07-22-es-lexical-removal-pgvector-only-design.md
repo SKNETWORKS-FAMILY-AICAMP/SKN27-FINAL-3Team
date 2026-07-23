@@ -1,138 +1,82 @@
-# Elasticsearch·OpenSearch·Lexical 제거 및 pgvector 단일 검색 설계
+# ES·lexical 제거 및 law·review_case pgvector 단일화 설계
 
-**Issue:** #291
-**Branch:** `feat-291-pgvector-only-rag`
-**Date:** 2026-07-22
+**Issue:** #291  
+**Branch:** `feat-291-pgvector-only-rag`  
+**Updated:** 2026-07-23
 
-## 1. 목표와 결정
+## 목표
 
-프로젝트의 활성 검색·적재·배포 경로에서 Elasticsearch, Kibana, AWS OpenSearch, BM25/Nori와 PostgreSQL lexical/Django token-coverage fallback을 제거한다. 법령, 심의사례(`review_case`), 과실비율 판례(`fault_ratio_precedent`)는 각자의 PostgreSQL pgvector 테이블과 HNSW 인덱스만 사용한다.
+활성 검색·배포 경로에서 Elasticsearch, Kibana, OpenSearch, BM25/Nori,
+`postgres_lexical`, `django_rag_tables` fallback을 제거한다. `law`와
+`review_case`는 PostgreSQL/pgvector만 사용하고 동일한 임베딩 공간을 공유한다.
 
-이 설계는 과거 실험 보고서 안의 Elasticsearch 또는 OpenSearch 언급을 삭제하지 않는다. 보고서는 검증 이력이며 실행 경로나 운영 지침은 아니다. 반면 실행 코드, 배포 구성, 의존성, 환경 변수, seed loader, DB의 검색엔진 전용 메타데이터는 제거 대상이다.
+## 범위
 
-## 2. 현재 구조와 전환 대상
+- `law`와 `review_case`의 기준은 `openai / text-embedding-3-large / 1024`다.
+  법령의 검증 완료 공간을 기준으로 review-case를 재임베딩한다.
+- 법령 검색은 `ready`, `empty`, `unavailable`,
+  `embedding_space_mismatch` 상태를 유지하며 다른 backend로 fallback하지 않는다.
+- review-case loader, query embedder, schema, HNSW partial index와 readiness는
+  동일한 provider/model/dimensions를 강제한다.
+- fault-ratio precedent는 공통 임베딩 공간 통합 대상이 아니다. 기존 pgvector
+  동작은 보존하고, ES 제거에 필요한 호출부만 정리한다.
+- 실제 DB 재임베딩, Terraform apply/destroy, OpenSearch 삭제는 운영 runbook
+  단계이며 코드 PR에서 실행하지 않는다.
 
-| 도메인 | 현재 활성 또는 fallback 경로 | 전환 후 |
-| --- | --- | --- |
-| 법령 | `postgres_pgvector -> postgres_lexical -> django_rag_tables` | `postgres_pgvector` 단일 |
-| 심의사례 | Elasticsearch/OpenSearch BM25/Nori 또는 Django `RagChunk` token coverage | `review_case_chunk_embeddings` pgvector 단일 |
-| 과실비율 판례 | Elasticsearch/OpenSearch BM25/Nori | `fault_ratio_precedent_chunk_embeddings` pgvector 단일 |
+## 임베딩 계약
 
-이미 존재하는 `etl/fault_cases/src/review_case/search/pgvector/`와 `etl/fault_cases/src/traffic_precedents/precedent_search/pgvector/`를 재사용한다. 새 검색 엔진이나 lexical 대체 인덱스는 만들지 않는다.
-
-## 3. 런타임 설계
-
-### 3.1 법령 검색
-
-`app/services/legal_rag_service.py`의 `search_legal_rag()`는 `_search_pgvector()`을 한 번만 호출한다. 성공하면 `ready`, 매칭이 없으면 `empty`, DB·임베딩·설정 오류면 `unavailable`을 반환한다. `postgres_lexical`, `django_rag_tables`, `attempted_backends`, `fallback_from`은 반환 계약에서 제거한다.
-
-법령은 `law_chunks`와 `law_embeddings`의 1024차원 공간을 유지한다. 쿼리 provider/model/dimensions와 적재된 embedding metadata가 일치하지 않으면 벡터 질의를 실행하지 않고 `embedding_space_mismatch`로 실패 종료한다.
-
-배포 전에는 법령 runtime 설정을 아래 값으로 함께 바꾼다. 값은 SSM runtime secret에만 두며 키 값은 문서나 로그에 기록하지 않는다.
+공통 설정은 아래 값이다.
 
 ```text
-LEGAL_RAG_VECTOR_ENABLED=1
-LEGAL_RAG_QUERY_EMBEDDING_PROVIDER=openai
-LEGAL_RAG_QUERY_EMBEDDING_MODEL=text-embedding-3-large
-LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS=1024
-LEGAL_RAG_SEED_EMBEDDING_PROVIDER=openai
-LEGAL_RAG_SEED_EMBEDDING_MODEL=text-embedding-3-large
-LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS=1024
+RAG_EMBEDDING_PROVIDER=openai
+RAG_EMBEDDING_MODEL=text-embedding-3-large
+RAG_EMBEDDING_DIMENSIONS=1024
 ```
 
-법령 재임베딩과 위 runtime 값은 같은 배포 단위에서 적용한다. `LEGAL_RAG_VECTOR_ENABLED=0` 또는 seed/query metadata 불일치는 배포 readiness를 실패시킨다.
+법령 query/seed와 review-case embedding/query는 이 공통 설정을 읽는다.
+기존 `LEGAL_RAG_*`와 `OPENAI_EMBEDDING_*` 키는 전환 기간 호환 입력으로만
+허용하되, 공통 설정과 값이 다르면 readiness를 실패시킨다.
 
-### 3.2 심의사례·과실비율 판례 검색
+`review_case_chunk_embeddings.embedding_vector`는 `vector(1024)`이며
+`embedding_dim = 1024` check를 갖는다. 기존 1536차원 행은 백업 후 운영
+마이그레이션에서 제거하고 1024차원으로 재생성한다.
 
-`text_ml_case_search`는 ES client를 받지 않는다. 입력 정규화와 source-quota 병합은 유지하고, 선택된 질의 문자열을 다음 두 pgvector 검색기에 전달한다.
+## 검색 및 오류 처리
 
-1. `review_case_chunk_embeddings`의 cosine pgvector 검색
-2. `fault_ratio_precedent_chunk_embeddings`의 cosine pgvector 검색
+- 법령과 review-case는 각각 자신의 DB에서 cosine pgvector 검색을 수행한다.
+- query vector 길이와 저장 metadata가 1024 계약과 다르면 SQL을 실행하지 않고
+  `embedding_space_mismatch`로 종료한다.
+- 빈 결과는 `empty`, 연결·API·index 오류는 `unavailable`이다.
+- ES나 lexical 결과로 빈 결과·장애를 숨기지 않는다.
 
-두 검색 결과는 기존 evidence mapper·validator·source quota 병합 규칙을 사용해 기존 Agent 출력 구조를 유지한다. `retriever` 값은 `unified_pgvector`로 바꾸고 source별 값은 `review_case_pgvector`, `fault_ratio_precedent_pgvector`으로 명확히 기록한다. 한 source가 실패해도 다른 source의 정상 evidence는 반환하고, 결과 상태는 `partial`로 유지한다.
+## 배포 및 데이터 전환
 
-`text_ml_case_search_v2` contract version, `adapter_source=fault_ratio_knowledge_agent`, `similar_cases`, `recommended_evidence`, `source_summary` 및 source quota 필드는 유지한다. ES client 유무로 V2를 결정하는 조건을 제거하고, pgvector 결과가 있는 모든 정상 경로에서 V2를 반환한다. 최상위 adapter의 `search_legal_rag(source_type="review_case")` fallback은 삭제한다. review_case와 과실비율 판례는 항상 이 pgvector unified pipeline을 통해 검색한다.
+1. law/review-case DB와 기존 검색 인프라 설정을 백업한다.
+2. review-case embedding column을 1024차원으로 전환한다.
+3. review-case 전체를 `text-embedding-3-large`, 1024차원으로 재임베딩한다.
+4. HNSW index를 재생성한다.
+5. law/review-case readiness와 대표 질의, p50/p95를 검증한다.
+6. 애플리케이션·배포 정의에서 ES/OpenSearch를 제거한다.
+7. 관찰 기간 후 외부 검색 리소스를 별도 승인 절차로 삭제한다.
 
-### 3.3 임베딩 재생성
+## 검증
 
-임베딩은 모든 도메인을 하나의 차원으로 강제하지 않는다. 각 테이블은 이미 다른 차원을 가진다(법령 1024, 심의사례·판례 1536). 대신 각 도메인에서 다음 세 값이 적재 데이터와 질의 설정에 정확히 일치해야 한다.
+- 법령과 review-case가 동일 provider/model/dimensions를 보고한다.
+- 두 도메인의 chunk/embedding count와 HNSW index가 준비 상태다.
+- 대표 질의가 ES/lexical 없이 결과를 반환한다.
+- 전체 테스트는 Python 3.13에서 실행한다.
+- 실제 latency는 운영 데이터가 준비된 실행에서만 기록하며 추정값을 쓰지 않는다.
 
-- provider
-- model
-- dimensions
+## 체크리스트 반영
 
-법령은 기존 loader의 `--replace`로 `law_chunks`/`law_embeddings`를 원자적으로 교체한다. 심의사례와 과실비율 판례는 기존 embedding loader와 HNSW index creator를 사용해 해당 embedding 테이블을 재생성하고 인덱스를 만든다. 적재 수, vector 수, HNSW index 존재 여부, 대표 질의 결과를 모두 확인한 뒤에만 ES 제거 배포를 통과시킨다.
+`docs/ops/project-readiness-master-checklist.md` C-1에서 다음만 #291 증적으로
+완료 처리한다.
 
-## 4. 구성·적재·스키마 정리
+- ES/lexical 제거와 pgvector-only 운영 경계
+- law/review_case 동일 임베딩 공간, readiness, 대표 질의·지연 증적
 
-다음 활성 자산을 제거한다.
+다음 항목은 별도 작업이므로 미완료로 유지한다.
 
-- `docker-compose.yml`의 Elasticsearch/Kibana 서비스·healthcheck·volume
-- `deploy/aws-pilot/`의 ES env file, ES 변수, ES를 전제로 한 deploy/rollback/seed 절차, 이미지 build/push, reserved IP, release-volume cleanup
-- `.env.production.example` 및 runtime example의 ES 설정
-- `requirements.txt`의 `elasticsearch` 의존성
-- `infra/elasticsearch/` 이미지 정의
-- `backend/chatbot/readiness.py`, production seed loader, smoke command의 ES 조건
-- ES 전용 ETL indexer/retriever/sample-query/test 모듈
-- `infra/terraform/`의 AWS OpenSearch domain, Nori package association, IAM policy, Terraform variables·outputs 및 `TEXT_ML_CASE_SEARCH_PROVIDER=opensearch_aws` runtime injection
-- `requirements.txt`의 `opensearch-py` 의존성과 OpenSearch 전용 계약 테스트
-
-`review_case_db_schema.sql`와 `precedent_db_schema.sql`에서 ES 전용 컬럼과 index-job 테이블을 제거한다. 이미 생성된 DB에는 별도 idempotent SQL migration으로 같은 컬럼·테이블을 제거한다. 이 migration은 운영 DB에 적용하기 전 백업과 re-embedding 검증이 완료되어야 한다.
-
-`SourceDocument`와 `RagChunk` Django 모델 및 기존 migration은 이 이슈에서 삭제하지 않는다. 이들은 smoke fixture와 일반 지식 데이터 구조에서도 사용된다. `django_rag_tables` 검색 backend, review_case lexical loader와 그 호출만 제거한다. 남은 모델 행의 물리 삭제는 별도 데이터 정리 작업으로 분리한다.
-
-### 4.1 Production seed loader 전환
-
-`load_production_rag_seed`는 더 이상 Elasticsearch index 이름을 검증하거나 ES bulk write를 수행하지 않는다. 검증된 manifest snapshot으로 다음 세 PostgreSQL pgvector 적재 단위를 실행하고, 각 단위의 row count·embedding count·HNSW index 상태를 결과에 기록한다.
-
-1. 법령: `law_chunks`와 `law_embeddings`를 `--replace-legal`로 재생성한다.
-2. 심의사례: `review_case_chunks` artifact를 source DB에 적재·재임베딩하고 `review_case_chunk_embeddings` HNSW index를 생성한다.
-3. 과실비율 판례: `precedent_fault_ratio_chunks` artifact를 source DB에 적재·재임베딩하고 `fault_ratio_precedent_chunk_embeddings` HNSW index를 생성한다.
-
-서로 다른 PostgreSQL DB 사이에는 단일 transaction을 가정하지 않는다. 각 도메인은 idempotent upsert 후 검증하고, 한 도메인 실패는 command를 실패로 종료해 불완전 seed를 성공으로 보고하지 않는다. unit test에서는 실제 임베딩 API를 호출하지 않고 embedding provider와 DB loader를 fake로 대체한다.
-
-### 4.2 Production seed loader 정정: 원본별 적재와 통합 검증 분리
-
-현재 production seed manifest의 `review_case_chunks`와 `precedent_fault_ratio_chunks` 항목은 검색용 chunk 필드만 포함한다. 이 형식에는 review case 문서와 과실비율 판례 원본 레코드를 생성하는 데 필요한 전체 source-document 필드가 없으므로, 해당 manifest만으로 두 도메인 DB를 직접 적재하는 것은 허용하지 않는다.
-
-따라서 `load_production_rag_seed`의 책임을 다음처럼 정정한다.
-
-1. 법령: 검증된 manifest를 사용해 기존의 `load_legal_rag_pgvector` 경로로 적재하거나 `--replace-legal`로 원자 교체한다.
-2. 심의사례: 검증된 원본 artifact를 `review_case`의 기존 source DB loader와 embedding loader로 적재·재임베딩한 뒤 HNSW index를 생성한다.
-3. 과실비율 판례: 검증된 원본 JSONL artifact를 `fault_ratio`의 기존 source DB loader와 embedding loader로 적재·재임베딩한 뒤 HNSW index를 생성한다.
-4. 통합 command: 세 도메인의 row count, embedding count, provider/model/dimensions, HNSW index, 대표 질의 결과를 읽기 전용으로 검증한다. 심의사례·과실비율 판례의 원본 적재는 이 command가 수행하지 않는다.
-
-배포 자동화는 두 원본별 적재·재임베딩을 먼저 완료한 후 통합 검증과 pgvector smoke를 통과해야만 ES/OpenSearch 제거 릴리스를 진행한다. 이 분리는 현재 manifest 계약을 보존하면서도 부분 문서 적재나 데이터 손상을 방지한다.
-
-## 5. 오류 처리와 운영 안전성
-
-- 질의 임베딩 생성 실패, DB 연결 실패, embedding-space mismatch는 결과를 꾸며내지 않고 `unavailable` 또는 source별 실패로 반환한다.
-- 심의사례 또는 과실비율 판례 한 도메인의 실패는 다른 도메인의 evidence를 차단하지 않는다.
-- ES 또는 OpenSearch가 없다는 사실을 fallback limitation으로 노출하지 않는다. 대신 `pgvector_unavailable`, `embedding_space_mismatch`, `no_eligible_seed_embeddings` 같은 실제 원인을 기록한다.
-- 배포 순서는 `재임베딩 및 HNSW 생성 -> pgvector smoke/회귀 검증 -> Elasticsearch·OpenSearch 코드/인프라 제거 -> 운영 지표 확인 -> Elasticsearch volume·OpenSearch domain·연관 SSM/ECR 자산 물리 정리`로 한다. 마지막 단계는 승인된 배포 운영자가 Terraform plan/apply와 클라우드 자산 정리 절차로 수행한다.
-
-## 6. 검증 기준
-
-### 자동 테스트
-
-- 법령 pgvector 검색의 `ready`, `empty`, `unavailable`, embedding-space mismatch 계약
-- 법령 검색에서 lexical/Django fallback이 호출되지 않는 회귀 테스트
-- 심의사례·과실비율 판례의 pgvector 결과를 기존 evidence 계약으로 매핑하는 단위 테스트
-- 한 source의 pgvector 장애에서 다른 source evidence와 `partial` 상태를 보존하는 테스트
-- pgvector unified pipeline이 ES client 없이도 V2 Agent 계약과 기존 source quota를 보존하는 테스트
-- production seed loader와 readiness/smoke command가 Elasticsearch/OpenSearch 패키지·환경 변수 없이 동작하는 테스트
-- Compose·pilot 배포·Terraform·requirements에 Elasticsearch/Kibana/OpenSearch 활성 의존성이 없는 계약 테스트
-
-### 실제 데이터 검증
-
-- 법령, 심의사례, 과실비율 판례별 chunk 수와 embedding 수 일치
-- 각 도메인의 provider/model/dimensions 일치
-- HNSW 인덱스 존재
-- 대표 질의에서 결과 수, `unavailable` 비율, p50/p95 latency 기록
-- 법령은 기존 전환 기준(p95 589 ms 이하 검증 증적)을 보존하고, 심의사례·과실비율 판례는 별도 실제 실행 결과를 새 보고서에 추가
-
-## 7. 완료 기준과 체크리스트
-
-이 이슈가 완료되면 C-1의 `Elasticsearch의 역할과 pgvector/Neo4j/Elasticsearch 선택 조건 문서화` 항목은 ES 퇴역 및 PostgreSQL/pgvector·Neo4j 기준으로 완료 처리한다.
-
-다만 C-1 전체 완료에는 대표 사고 시나리오 평가 세트, 출처·검색 시점·한계 표시, 근거 검토 기준이 별도로 남는다. 이 이슈는 그 세 항목을 완료로 표시하지 않는다.
+- 대표 사고 시나리오별 정확도 평가 세트
+- 사용자 표시용 출처·검색 시점·한계
+- 유사도 점수만으로 결론 내리지 않는 근거 검토 기준
