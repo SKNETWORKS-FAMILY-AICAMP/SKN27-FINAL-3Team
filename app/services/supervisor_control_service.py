@@ -162,6 +162,8 @@ def merge_final_response(
     *,
     pending_questions: list[dict[str, Any]] | None = None,
     evidence_only: bool = False,
+    routing_intent: str = "",
+    user_text: str = "",
 ) -> dict[str, Any]:
     validation = _agent_output(upstream_results.get("agent_result_validation"))
     validation_result = _dict(validation.get("structured_result"))
@@ -196,6 +198,17 @@ def merge_final_response(
         limitations.extend(_string_list(report_output.get("limitations")))
 
     questions = _dict_list(pending_questions)
+    unavailable_guidance = (
+        _verified_result_unavailable_guidance(
+            routing_intent=routing_intent,
+            user_text=user_text,
+        )
+        if not accepted
+        else {}
+    )
+    if not accepted and not questions and unavailable_guidance:
+        questions = _dict_list(unavailable_guidance.get("pending_questions"))
+        limitations.extend(_string_list(unavailable_guidance.get("limitations")))
     deadline_guidance = None if evidence_only else _deadline_guidance(accepted, structured_results)
     cards = [] if evidence_only else _result_cards(accepted, upstream_results)
     if deadline_guidance and deadline_guidance["status"] != "normal":
@@ -218,7 +231,11 @@ def merge_final_response(
     elif summaries:
         answer = "\n\n".join(_dedupe_strings(summaries))
     elif questions:
-        answer = _text(questions[0].get("question")) or "사실관계를 추가로 알려주세요."
+        answer = (
+            _text(unavailable_guidance.get("answer"))
+            if unavailable_guidance
+            else _text(questions[0].get("question"))
+        ) or "사실관계를 추가로 알려주세요."
     else:
         answer = "검증을 통과한 분석 결과가 없습니다. 입력 자료와 근거를 확인한 뒤 다시 시도해 주세요."
 
@@ -228,6 +245,8 @@ def merge_final_response(
         else
         _string_list(deadline_guidance["next_actions"])
         if deadline_guidance and deadline_guidance["status"] != "normal"
+        else _string_list(unavailable_guidance.get("next_actions"))
+        if unavailable_guidance
         else ["answer_pending_question"] if questions else ["review_verified_results"]
     )
     return {
@@ -240,6 +259,64 @@ def merge_final_response(
         "cards": cards,
         "report_links": [],
         "next_actions": next_actions,
+    }
+
+
+def _verified_result_unavailable_guidance(
+    *,
+    routing_intent: str,
+    user_text: str,
+) -> dict[str, Any]:
+    if routing_intent != "fine_notice_procedure":
+        return {}
+
+    emergency_context = any(
+        marker in user_text
+        for marker in ("응급", "병원", "진료", "아파", "고열", "구급")
+    )
+    pending_questions = [
+        {
+            "field": "notice_received",
+            "question": "실제로 고지서나 단속 통지를 받으셨나요?",
+        },
+        (
+            {
+                "field": "emergency_evidence",
+                "question": "응급상황을 확인할 수 있는 진료기록이나 영수증이 있나요?",
+            }
+            if emergency_context
+            else {
+                "field": "notice_details",
+                "question": "고지서의 발급기관과 의견제출 또는 이의신청 기한을 확인하셨나요?",
+            }
+        ),
+    ]
+    evidence_guidance = (
+        "응급상황을 확인할 자료(진료기록·영수증 등)를 확보한 뒤 "
+        if emergency_context
+        else "정차 또는 위반 당시 사정을 확인할 자료를 확보한 뒤 "
+    )
+    return {
+        "answer": (
+            "단속 여부를 지금 확정할 수 없습니다. 실제 고지서나 단속 통지를 받았다면 "
+            "발급기관과 의견제출·이의신청 기한을 먼저 확인하세요. 정차 시각·장소와 "
+            f"불가피했던 사정을 시간순으로 정리하고, {evidence_guidance}"
+            "관할기관에 적용 가능한 절차를 문의하세요. 검증된 법령 검색 결과가 "
+            "확보되기 전에는 단속 제외나 처분 취소를 단정할 수 없습니다."
+        ),
+        "pending_questions": pending_questions,
+        "limitations": [
+            "현재 실행에서는 검증 가능한 법령 검색 결과를 확보하지 못했습니다.",
+            "일반적인 준비 순서이며 실제 단속 제외나 처분 취소를 보장하지 않습니다.",
+        ],
+        "next_actions": [
+            "verified_law_evidence_unavailable",
+            (
+                "collect_notice_and_emergency_evidence"
+                if emergency_context
+                else "collect_notice_details_and_evidence"
+            ),
+        ],
     }
 
 
@@ -304,6 +381,8 @@ def run_supervisor_control_node(
             upstream_results,
             pending_questions=_dict_list(context.get("pending_questions")),
             evidence_only=bool(context.get("evidence_only")),
+            routing_intent=_text(context.get("routing_intent")),
+            user_text=_text(payload.get("user_text")),
         )
         return {
             "status": "partial" if context.get("evidence_only") else "success" if merged["structured_results"] else "partial",

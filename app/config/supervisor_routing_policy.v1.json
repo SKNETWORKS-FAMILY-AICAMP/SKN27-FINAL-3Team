@@ -19,7 +19,7 @@
     {
       "intent": "fine_notice_procedure",
       "attachment_purposes": [],
-      "keywords": ["과태료", "고지서", "범칙금", "의견제출", "이의신청"]
+      "keywords": ["과태료", "고지서", "범칙금", "의견제출", "이의신청", "단속 대상"]
     },
     {
       "intent": "traffic_law_search",
