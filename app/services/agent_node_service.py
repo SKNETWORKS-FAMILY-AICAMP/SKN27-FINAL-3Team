@@ -42,13 +42,35 @@ from app.services.supervisor_execution_input_service import (
 from app.services.supervisor_routing_service import PUBLIC_AGENT_NODE_CODES
 
 
-DL_MOCK_NODE_CODES = {"vision_media_analysis"}
+DL_MOCK_NODE_CODES: set[str] = set()
 REPORTING_NODE_CODE = "objection_report_generation"
+ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE = "attachment_document_classification"
+DOCUMENT_CLASSIFICATION_CONTENT_TYPES = frozenset(
+    {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+)
+DOCUMENT_CLASSIFICATION_ERROR_CODES = frozenset(
+    {
+        "attachment_not_scan_ready",
+        "attachment_unavailable",
+        "document_classification_failed",
+    }
+)
 TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE = "traffic_accident_confirmation_ocr"
 TRAFFIC_ACCIDENT_CONFIRMATION_ATTACHMENT_PURPOSE = "traffic_accident_confirmation"
 TRAFFIC_ACCIDENT_CONFIRMATION_REQUIRED_ATTACHMENT = (
     "attachments[purpose=traffic_accident_confirmation, scan_ready]"
 )
+FINE_NOTICE_CONFIRMATION_FIELDS = frozenset(
+    {
+        "fine_type",
+        "notice_stage",
+        "law_code",
+        "violation_text",
+        "opinion_deadline",
+        "issuing_authority",
+    }
+)
+FINE_NOTICE_CONFIRMATION_REQUIRED_FIELDS = frozenset({"fine_type", "notice_stage"})
 
 
 class SupervisorHandoffValidationError(RuntimeError):
@@ -62,9 +84,6 @@ except Exception:  # pragma: no cover - keeps CLI-only mock service imports deco
     storage_reference_from_uri = None
 
 
-DL_MOCK_NODE_CODES = {"vision_media_analysis"}
-
-
 NODE_REGISTRY: dict[str, dict[str, Any]] = {
     "input_context_validation": {
         "order": 10,
@@ -75,7 +94,12 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "사용자 명령문, 첨부 목적, 입력 modality를 정리하고 필수 입력 누락을 확인한다.",
         "required_inputs": ["user_text|attachments"],
         "produces": ["input_summary", "routing_hints", "missing_fields"],
-        "handoff_to": ["fine_notice_analysis", "text_ml_case_search", "vision_media_analysis"],
+        "handoff_to": [
+            ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE,
+            "fine_notice_analysis",
+            "text_ml_case_search",
+            "vision_media_analysis",
+        ],
         "status": "internal_ready",
     },
     "consultation_fact_state_reducer": {
@@ -112,6 +136,19 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["attachments[purpose=fine_notice]|user_text"],
         "produces": ["fine_notice_analysis", "notice_fields", "required_documents"],
         "handoff_to": ["law_ground_search", "appeal_decision_flow"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["sync"],
+    },
+    ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE: {
+        "order": 25,
+        "node_name": "Attachment document classification",
+        "node_code": ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE,
+        "node_type": "agent",
+        "owner": "hi20260204-maker",
+        "description": "Classifies one clean image/PDF as a fine notice, accident evidence, or unknown without returning document text.",
+        "required_inputs": ["attachments[image|pdf, canonical_scan_ready]"],
+        "produces": ["classification", "confidence_band", "requires_confirmation"],
+        "handoff_to": ["fine_notice_analysis", "consultation_fact_state_reducer"],
         "status": "sync_adapter_ready",
         "adapter_modes": ["sync"],
     },
@@ -161,11 +198,11 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "node_type": "agent",
         "owner": "ohjuheecode",
         "description": "사진/영상에서 사고 장면 후보, 객체, 품질 이슈를 추출해 텍스트 분석 노드에 넘긴다.",
-        "required_inputs": ["attachments[purpose=accident_scene|evidence]"],
-        "produces": ["key_frames", "scene_summary", "quality_issues"],
+        "required_inputs": ["attachments[purpose=blackbox_video, scan_ready]"],
+        "produces": ["accident_evidence", "key_frames", "detected_object_summary", "limitations"],
         "handoff_to": ["text_ml_case_search", "agent_result_validation"],
-        "status": "mock_contract_only",
-        "adapter_modes": ["mock"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["sync"],
     },
     "appeal_decision_flow": {
         "order": 55,
@@ -221,11 +258,13 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
 
 PRODUCTION_AGENT_TIMEOUT_SECONDS = {
     "appeal_decision_flow": 120,
+    ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE: 60,
     "fine_notice_analysis": 120,
     "law_ground_search": 30,
     "objection_report_generation": 30,
     "text_ml_case_search": 60,
     "traffic_accident_confirmation_ocr": 120,
+    "vision_media_analysis": 180,
 }
 
 
@@ -266,7 +305,7 @@ def get_agent_node(node_code: str) -> dict[str, Any]:
 
 
 def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
-    """Compatibility entrypoint; only the DL node may still return mock output."""
+    """Compatibility entrypoint for legacy callers that now use sync adapters."""
 
     payload = resolve_attachment_references(payload)
     node_code = _payload_node_code(payload)
@@ -434,6 +473,17 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
             step=step,
             upstream_results=upstream_results,
         )
+        ocr_gate_error = _ocr_follow_up_gate_error(step, upstream_results)
+        if ocr_gate_error:
+            execution = _blocked_ocr_follow_up_execution(
+                step_payload,
+                step=step,
+                error_code=ocr_gate_error,
+            )
+            execution["plan_step"] = deepcopy(step)
+            executions.append(execution)
+            upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
+            continue
         _validate_supervisor_step_binding(
             step_payload,
             step=step,
@@ -501,6 +551,76 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
         "supervisor_handoff": supervisor_handoff,
         "reporting_payload": reporting_payload,
         "limitations": limitations,
+        "created_at": _now_iso(),
+    }
+
+
+def _ocr_follow_up_gate_error(
+    step: dict[str, Any],
+    upstream_results: dict[str, Any],
+) -> str:
+    if step.get("node_code") not in {"law_ground_search", "appeal_decision_flow"}:
+        return ""
+    fine_notice = upstream_results.get("fine_notice_analysis")
+    if not isinstance(fine_notice, dict):
+        return ""
+    structured = fine_notice.get("structured_result")
+    if not isinstance(structured, dict):
+        return ""
+    error_code = str(structured.get("error_code") or "")
+    if error_code in {"ocr_confirmation_required", "purpose_result_conflict"}:
+        return error_code
+    return ""
+
+
+def _blocked_ocr_follow_up_execution(
+    payload: dict[str, Any],
+    *,
+    step: dict[str, Any],
+    error_code: str,
+) -> dict[str, Any]:
+    """Emit a safe skipped envelope without invoking law/appeal after OCR rejection."""
+
+    node_code = str(step.get("node_code") or "")
+    node = _node_with_adapter_contract(_production_node(node_code))
+    execution_id = f"exec_{uuid4().hex[:12]}"
+    agent_input = _agent_input(payload, node)
+    adapter_context = build_adapter_context(
+        execution_id=execution_id,
+        execution_mode="sync",
+        node=node,
+        plan_step=payload.get("plan_step"),
+    )
+    agent_output = _complete_adapter_output(
+        {
+            "status": "partial",
+            "execution_status": "blocked",
+            "summary": "OCR 확인이 완료되지 않아 후속 법령·이의절차 분석을 보류했습니다.",
+            "structured_result": {"error_code": error_code},
+            "evidence": [],
+            "next_actions": ["confirm_ocr_extracted_fields"],
+            "limitations": [
+                "The downstream node was not invoked until OCR fields are explicitly confirmed."
+            ],
+        },
+        node=node,
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "supervisor.ocr_confirmation_gate",
+            "execution_mode": "sync",
+            "source_status": "blocked",
+            "input_source": "fine_notice_analysis",
+        },
+    )
+    return {
+        "execution_id": execution_id,
+        "execution_mode": "sync",
+        "job_id": payload.get("job_id"),
+        "node_code": node_code,
+        "node": node,
+        "adapter_context": adapter_context,
+        "agent_input": agent_input,
+        "agent_output": agent_output,
         "created_at": _now_iso(),
     }
 
@@ -615,11 +735,13 @@ def _build_plan_step_payload(
 def _sync_adapter_node_codes() -> set[str]:
     return {
         "appeal_decision_flow",
+        ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE,
         "fine_notice_analysis",
         "law_ground_search",
         "objection_report_generation",
         "text_ml_case_search",
         TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE,
+        "vision_media_analysis",
     }
 
 
@@ -1154,6 +1276,10 @@ def _run_sync_adapter(
     adapter_context: dict[str, Any],
 ) -> dict[str, Any]:
     node_code = str(agent_input.get("node_code") or "")
+    if node_code == ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE:
+        return _run_attachment_document_classification_adapter(agent_input, adapter_context)
+    if node_code == "vision_media_analysis":
+        return _run_vision_media_analysis_adapter(agent_input, adapter_context)
     if node_code == "appeal_decision_flow":
         return _run_appeal_decision_flow_adapter(agent_input, adapter_context)
     if node_code == "fine_notice_analysis":
@@ -1169,6 +1295,184 @@ def _run_sync_adapter(
     if node_code == TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE:
         return _run_traffic_accident_confirmation_ocr_adapter(agent_input, adapter_context)
     raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
+
+
+def _run_attachment_document_classification_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    attachment = next(
+        (
+            item
+            for item in agent_input.get("attachments") or []
+            if isinstance(item, dict) and _is_scan_ready_classification_attachment(item)
+        ),
+        None,
+    )
+    adapter_trace = {
+        "adapter": "app.services.attachment_document_classification_adapter.classify_document_bytes",
+        "execution_mode": "sync",
+        "input_source": "canonical_scan_ready_image_or_pdf",
+    }
+    if attachment is None:
+        raw_output = _document_classification_failure("attachment_not_scan_ready")
+    else:
+        storage_uri = str(attachment.get("storage_uri") or "")
+        file_bytes = _attachment_object_storage_bytes(attachment, storage_uri)
+        if not file_bytes:
+            raw_output = _document_classification_failure("attachment_unavailable")
+        else:
+            try:
+                from app.services.attachment_document_classification_adapter import (
+                    classify_document_bytes,
+                )
+
+                raw_output = classify_document_bytes(
+                    file_bytes,
+                    str(attachment.get("content_type") or ""),
+                )
+            except Exception:
+                raw_output = _document_classification_failure("document_classification_failed")
+
+    raw_output = _safe_document_classification_output(
+        raw_output,
+        attachment_id=str(attachment.get("attachment_id") or "") if attachment else "",
+    )
+    if attachment is not None and raw_output["status"] == "success":
+        try:
+            _persist_attachment_document_classification(
+                attachment_id=str(attachment["attachment_id"]),
+                storage_uri=str(attachment["storage_uri"]),
+                execution_id=str(adapter_context["execution_id"]),
+                structured_result=raw_output["structured_result"],
+            )
+        except Exception:
+            raw_output = _safe_document_classification_output(
+                _document_classification_failure("document_classification_failed"),
+                attachment_id=str(attachment.get("attachment_id") or ""),
+            )
+    adapter_trace["source_status"] = raw_output["status"]
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace=adapter_trace,
+    )
+
+
+def _persist_attachment_document_classification(**kwargs: Any) -> dict[str, Any]:
+    from chatbot.attachment_classification_service import (
+        persist_attachment_document_classification,
+    )
+
+    return persist_attachment_document_classification(**kwargs)
+
+
+def _is_scan_ready_classification_attachment(attachment: dict[str, Any]) -> bool:
+    storage_uri = str(attachment.get("storage_uri") or "")
+    object_storage = attachment.get("object_storage")
+    return bool(
+        attachment.get("metadata_source") == "canonical_scan_gate"
+        and attachment.get("resolution_status") == "scan_ready"
+        and attachment.get("status") == "ready"
+        and attachment.get("scan_status") == "clean"
+        and attachment.get("type") in {"image", "pdf"}
+        and str(attachment.get("content_type") or "").lower()
+        in DOCUMENT_CLASSIFICATION_CONTENT_TYPES
+        and storage_uri.startswith("s3://")
+        and isinstance(object_storage, dict)
+        and object_storage.get("resource_type") == "uploaded_file"
+        and object_storage.get("status") == "ready"
+        and object_storage.get("storage_uri") == storage_uri
+    )
+
+
+def _document_classification_failure(error_code: str) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "structured_result": {"error_code": error_code},
+        "evidence": [],
+        "next_actions": ["retry_upload"],
+        "limitations": ["Document classification could not be completed safely."],
+    }
+
+
+def _safe_document_classification_output(
+    value: Any,
+    *,
+    attachment_id: str,
+) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    structured = raw.get("structured_result") if isinstance(raw.get("structured_result"), dict) else {}
+    error_code = str(structured.get("error_code") or "")
+    if error_code and error_code not in DOCUMENT_CLASSIFICATION_ERROR_CODES:
+        error_code = "document_classification_failed"
+
+    classification = str(structured.get("classification") or "unknown")
+    confidence_band = str(structured.get("confidence_band") or "low")
+    if classification not in {"fine_notice", "accident_evidence"}:
+        classification = "unknown"
+    if confidence_band not in {"high", "medium", "low"}:
+        confidence_band = "low"
+
+    if error_code:
+        status = "failed"
+        next_action = "retry_upload"
+        requires_confirmation = False
+        classification = "unknown"
+        confidence_band = "low"
+    elif classification == "unknown" or confidence_band == "low":
+        status = "partial"
+        next_action = "change_purpose"
+        requires_confirmation = False
+    else:
+        status = "success"
+        next_action = "confirm_classification"
+        requires_confirmation = True
+
+    safe_result: dict[str, Any] = {
+        "classification": classification,
+        "confidence_band": confidence_band,
+        "requires_confirmation": requires_confirmation,
+        "next_action": next_action,
+        "attachment_id": attachment_id,
+    }
+    if error_code:
+        safe_result["error_code"] = error_code
+    return {
+        "status": status,
+        "summary": "Attachment document classification completed."
+        if status == "success"
+        else "Attachment document classification needs a safe follow-up action.",
+        "structured_result": sanitize_pii(safe_result),
+        "evidence": [],
+        "next_actions": [next_action],
+        "limitations": (
+            []
+            if status == "success"
+            else ["Document classification did not produce a confirmed category."]
+        ),
+    }
+
+
+def _run_vision_media_analysis_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    from app.services.vision_media_analysis_adapter import run_vision_media_analysis
+
+    raw_output = run_vision_media_analysis(agent_input, adapter_context)
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace={
+            "adapter": "app.services.vision_media_analysis_adapter.run_vision_media_analysis",
+            "execution_mode": "sync",
+            "source_status": raw_output.get("status"),
+            "input_source": "canonical_scan_ready_blackbox_video",
+        },
+    )
 
 
 def _run_appeal_decision_flow_adapter(
@@ -1291,6 +1595,10 @@ def _run_fine_notice_analysis_adapter(
             "next_actions": ["check_fine_notice_agent_output"],
             "limitations": ["The real fine_notice_analysis graph did not return a complete envelope."],
         }
+    raw_output = _apply_ocr_confirmation_to_fine_notice_output(
+        raw_output,
+        agent_input=agent_input,
+    )
     return _complete_adapter_output(
         raw_output,
         node=adapter_context["node"],
@@ -1693,6 +2001,84 @@ def _fine_notice_structured_result(result: dict[str, Any]) -> dict[str, Any]:
     return {key: result.get(key) for key in allowed if key in result}
 
 
+def _normalized_ocr_confirmation(agent_input: dict[str, Any]) -> dict[str, Any]:
+    context = _dict_context(agent_input)
+    raw = context.get("ocr_confirmation") if isinstance(context.get("ocr_confirmation"), dict) else {}
+    raw_fields = raw.get("fields") if isinstance(raw.get("fields"), dict) else {}
+    fields = {
+        key: str(raw_fields[key]).strip()
+        for key in FINE_NOTICE_CONFIRMATION_FIELDS
+        if str(raw_fields.get(key) or "").strip()
+    }
+    return {"confirmed": raw.get("confirmed") is True, "fields": fields}
+
+
+def _has_valid_ocr_confirmation(confirmation: dict[str, Any]) -> bool:
+    return bool(
+        confirmation.get("confirmed") is True
+        and FINE_NOTICE_CONFIRMATION_REQUIRED_FIELDS.issubset(
+            set(confirmation.get("fields") or {})
+        )
+    )
+
+
+def _apply_ocr_confirmation_to_fine_notice_output(
+    raw_output: dict[str, Any],
+    *,
+    agent_input: dict[str, Any],
+) -> dict[str, Any]:
+    """Require explicit, compatible user confirmation before fine-notice follow-up."""
+
+    result = deepcopy(raw_output)
+    structured = (
+        deepcopy(result.get("structured_result"))
+        if isinstance(result.get("structured_result"), dict)
+        else {}
+    )
+    confirmation = _normalized_ocr_confirmation(agent_input)
+    source_status = str(result.get("status") or "partial")
+    ocr_status = str(structured.get("ocr_status") or "").lower()
+    can_confirm = source_status in {"success", "partial", "degraded"} and ocr_status not in {
+        "failed",
+        "rejected",
+    }
+
+    if not can_confirm:
+        return result
+
+    if not _has_valid_ocr_confirmation(confirmation):
+        structured["requires_confirmation"] = True
+        structured["unconfirmed_fields"] = sorted(FINE_NOTICE_CONFIRMATION_REQUIRED_FIELDS)
+        structured["error_code"] = "ocr_confirmation_required"
+        structured.pop("confirmation_source", None)
+        result["structured_result"] = structured
+        result["status"] = "partial"
+        result["execution_status"] = "confirmation_required"
+        result["next_actions"] = ["confirm_ocr_extracted_fields"]
+        return result
+
+    confirmed_fine_type = confirmation["fields"].get("fine_type")
+    recognized_fine_type = str(structured.get("fine_type") or "").strip()
+    if confirmed_fine_type and recognized_fine_type and confirmed_fine_type != recognized_fine_type:
+        structured["requires_confirmation"] = True
+        structured["unconfirmed_fields"] = ["fine_type"]
+        structured["error_code"] = "purpose_result_conflict"
+        structured.pop("confirmation_source", None)
+        result["structured_result"] = structured
+        result["status"] = "partial"
+        result["execution_status"] = "confirmation_conflict"
+        result["next_actions"] = ["review_ocr_fine_type"]
+        return result
+
+    structured.update(confirmation["fields"])
+    structured["requires_confirmation"] = False
+    structured["unconfirmed_fields"] = []
+    structured.pop("error_code", None)
+    structured["confirmation_source"] = "user_confirmation"
+    result["structured_result"] = structured
+    return result
+
+
 def _complete_adapter_output(
     raw_output: dict[str, Any],
     *,
@@ -1793,9 +2179,10 @@ def _adapter_error_output(
     exc: Exception,
 ) -> dict[str, Any]:
     adapter_trace = _adapter_error_trace(node["node_code"], agent_input, exc)
+    error_code = str(adapter_trace.get("error_code") or exc.__class__.__name__)
     structured_result = _normalize_adapter_structured_result(
         {
-            "error_code": exc.__class__.__name__,
+            "error_code": error_code,
             "error_message": "Sync adapter execution failed.",
         },
         node_code=node["node_code"],
@@ -1827,6 +2214,7 @@ def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Excep
         "law_ground_search": "ai.agents.law_ground_search.run_law_ground_search",
         "text_ml_case_search": "ai.agents.text_ml_case_search.run_text_ml_case_search",
         "traffic_accident_confirmation_ocr": "etl.fault_cases.src.OCR.traffic_accident_confirmation_ocr.graph",
+        "vision_media_analysis": "app.services.vision_media_analysis_adapter.run_vision_media_analysis",
     }
     if node_code == "fine_notice_analysis":
         input_source = "attachment" if _has_fine_notice_attachment(agent_input) else "missing"
@@ -1834,6 +2222,8 @@ def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Excep
         input_source = "agent_input.context"
     elif node_code == TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE:
         input_source = "canonical_scan_ready_attachment"
+    elif node_code == "vision_media_analysis":
+        input_source = "canonical_scan_ready_blackbox_video"
     else:
         input_source = "agent_input"
     return {
@@ -1841,7 +2231,7 @@ def _adapter_error_trace(node_code: str, agent_input: dict[str, Any], exc: Excep
         "execution_mode": "sync",
         "source_status": "adapter_error",
         "input_source": input_source,
-        "error_code": exc.__class__.__name__,
+        "error_code": "vision_execution_failed" if node_code == "vision_media_analysis" else exc.__class__.__name__,
     }
 
 

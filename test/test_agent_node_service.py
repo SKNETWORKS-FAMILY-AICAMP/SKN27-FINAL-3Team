@@ -26,6 +26,7 @@ def test_agent_node_registry_lists_all_integration_nodes():
 
     assert {
         "input_context_validation",
+        "attachment_document_classification",
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
@@ -37,6 +38,12 @@ def test_agent_node_registry_lists_all_integration_nodes():
     } <= node_codes
     assert {node["node_type"] for node in nodes} >= {"agent", "supervisor_internal"}
     fine_notice_node = next(node for node in nodes if node["node_code"] == "fine_notice_analysis")
+    document_classification_node = next(
+        node for node in nodes if node["node_code"] == "attachment_document_classification"
+    )
+    assert document_classification_node["status"] == "sync_adapter_ready"
+    assert document_classification_node["adapter_modes"] == ["sync"]
+    assert document_classification_node["adapter_contract"]["execution_modes"] == ["sync"]
     assert fine_notice_node["status"] == "sync_adapter_ready"
     assert "sync" in fine_notice_node["adapter_modes"]
     text_ml_node = next(node for node in nodes if node["node_code"] == "text_ml_case_search")
@@ -55,27 +62,28 @@ def test_agent_node_registry_lists_all_integration_nodes():
     assert traffic_ocr_node["status"] == "sync_adapter_ready"
     assert traffic_ocr_node["adapter_modes"] == ["sync"]
     assert traffic_ocr_node["adapter_contract"]["execution_modes"] == ["sync"]
-    assert vision_node["status"] == "mock_contract_only"
-    assert vision_node["adapter_modes"] == ["mock"]
-    assert vision_node["adapter_contract"]["execution_modes"] == ["mock"]
+    assert vision_node["status"] == "sync_adapter_ready"
+    assert vision_node["adapter_modes"] == ["sync"]
+    assert vision_node["adapter_contract"]["execution_modes"] == ["sync"]
     assert objection_node["status"] == "sync_adapter_ready"
     assert objection_node["adapter_modes"] == ["sync"]
     assert objection_node["adapter_contract"]["execution_modes"] == ["sync"]
 
 
-def test_only_vision_agent_advertises_mock_execution():
+def test_no_public_agent_advertises_mock_execution():
     agents = {
         node["node_code"]: node
         for node in list_agent_nodes()
         if node["node_type"] == "agent"
     }
 
-    assert agents["vision_media_analysis"]["adapter_modes"] == ["mock"]
     for node_code in {
+        "attachment_document_classification",
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
         "traffic_accident_confirmation_ocr",
+        "vision_media_analysis",
         "appeal_decision_flow",
         "objection_report_generation",
     }:
@@ -83,18 +91,107 @@ def test_only_vision_agent_advertises_mock_execution():
         assert agents[node_code]["adapter_contract"]["execution_modes"] == ["sync"]
 
 
-def test_public_agent_registry_includes_every_non_dl_runtime_agent():
+def test_public_agent_registry_includes_every_sync_runtime_agent():
     public_codes = {node["node_code"] for node in list_public_agent_nodes()}
 
     assert public_codes == {
+        "attachment_document_classification",
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
         "traffic_accident_confirmation_ocr",
+        "vision_media_analysis",
         "appeal_decision_flow",
         "objection_report_generation",
     }
-    assert "vision_media_analysis" not in public_codes
+
+
+def test_document_classification_node_reads_only_canonical_attachment_and_keeps_output_safe(monkeypatch):
+    from app.services import attachment_document_classification_adapter as adapter
+
+    persisted = []
+    storage_uri = "s3://clean-bucket/canonical/uploads/usr/ses_document/att_document/notice.png"
+    monkeypatch.setattr(
+        agent_node_service,
+        "_attachment_object_storage_bytes",
+        lambda attachment, expected_uri: b"clean-image-bytes"
+        if attachment["attachment_id"] == "att_document" and expected_uri == storage_uri
+        else None,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "classify_document_bytes",
+        lambda _bytes, _content_type: {
+            "status": "success",
+            "structured_result": {
+                "classification": "accident_evidence",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+                "next_action": "confirm_classification",
+            },
+            "evidence": [],
+            "next_actions": ["confirm_classification"],
+            "limitations": [],
+        },
+    )
+    monkeypatch.setattr(
+        agent_node_service,
+        "_persist_attachment_document_classification",
+        lambda **kwargs: persisted.append(kwargs),
+        raising=False,
+    )
+
+    execution = execute_agent_node(
+        {
+            "node_code": "attachment_document_classification",
+            "session_id": "ses_document",
+            "message_id": "msg_document",
+            "attachments": [
+                {
+                    "attachment_id": "att_document",
+                    "type": "image",
+                    "content_type": "image/png",
+                    "metadata_source": "canonical_scan_gate",
+                    "resolution_status": "scan_ready",
+                    "status": "ready",
+                    "scan_status": "clean",
+                    "storage_uri": storage_uri,
+                    "object_storage": {
+                        "resource_type": "uploaded_file",
+                        "status": "ready",
+                        "storage_uri": storage_uri,
+                    },
+                }
+            ],
+        }
+    )
+
+    output = execution["agent_output"]
+    assert execution["execution_mode"] == "sync"
+    assert output["status"] == "success"
+    assert output["structured_result"]["attachment_id"] == "att_document"
+    assert output["structured_result"]["adapter_trace"]["input_source"] == (
+        "canonical_scan_ready_image_or_pdf"
+    )
+    assert "s3://" not in str(output)
+    assert persisted == [
+        {
+            "attachment_id": "att_document",
+            "storage_uri": storage_uri,
+            "execution_id": execution["execution_id"],
+            "structured_result": {
+                "classification": "accident_evidence",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+                "next_action": "confirm_classification",
+                "attachment_id": "att_document",
+            },
+        }
+    ]
+    assert validate_agent_output_envelope(
+        output,
+        expected_node_code="attachment_document_classification",
+    )["valid"]
 
 
 def test_sync_reporting_payload_exposes_document_cards_without_generic_download_action():
@@ -194,16 +291,22 @@ def test_legacy_law_result_defaults_to_pgvector_backend(monkeypatch):
     assert result["retrieval_quality"] == "postgres_pgvector"
 
 
-def test_legacy_mock_entrypoint_keeps_dl_agent_as_explicit_mock():
-    result = execute_mock_node(
-        {
-            "node_code": "vision_media_analysis",
-            "attachments": [{"attachment_id": "att_vision", "purpose": "evidence"}],
-        }
-    )
+def test_legacy_mock_entrypoint_delegates_vision_to_real_runtime(monkeypatch):
+    calls = []
 
-    assert result["execution_mode"] == "mock"
-    assert result["node_code"] == "vision_media_analysis"
+    def fake_execute_agent_node(payload):
+        calls.append(payload)
+        return {"execution_mode": "sync", "node_code": payload["node_code"], "agent_output": {"status": "partial"}}
+
+    monkeypatch.setattr(agent_node_service, "execute_agent_node", fake_execute_agent_node)
+
+    result = execute_mock_node({"node_code": "vision_media_analysis"})
+
+    assert result["execution_mode"] == "sync"
+    assert len(calls) == 1
+    assert calls[0]["node_code"] == "vision_media_analysis"
+    assert calls[0]["attachments"] == []
+    assert calls[0]["attachment_resolution"]["unresolved_attachment_ids"] == []
 
 
 def test_appeal_decision_runtime_invokes_real_graph_with_upstream_results(monkeypatch):
@@ -615,6 +718,60 @@ def test_execute_sync_fine_notice_adapter_returns_supervisor_envelope_without_im
     assert output["structured_result"]["ocr_error"] == "이미지 없음"
     assert output["structured_result"]["adapter_trace"]["execution_mode"] == "sync"
     assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
+
+
+def test_fine_notice_adapter_requires_confirmation_and_rejects_conflicting_type(monkeypatch):
+    import importlib
+
+    fine_notice_graph_module = importlib.import_module("ai.agents.fine_notice_analysis.graph")
+
+    monkeypatch.setattr(
+        fine_notice_graph_module.graph,
+        "invoke",
+        lambda _state: {
+            "agent_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "summary": "OCR completed",
+                    "structured_result": {
+                        "fine_type": "범칙금",
+                        "notice_stage": "사전통지",
+                        "requires_confirmation": True,
+                        "unconfirmed_fields": ["fine_type", "notice_stage"],
+                    },
+                    "evidence": [],
+                    "next_actions": [],
+                    "limitations": [],
+                }
+            }
+        },
+    )
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "fine_notice_analysis",
+            "analysis_plan_id": "plan_ocr_conflict",
+            "job_id": "job_ocr_conflict",
+            "session_id": "ses_ocr_conflict",
+            "message_id": "msg_ocr_conflict",
+            "user_text": "OCR confirmed follow-up",
+            "context": {
+                "ocr_confirmation": {
+                    "confirmed": True,
+                    "fields": {"fine_type": "과태료", "notice_stage": "사전통지"},
+                }
+            },
+        }
+    )
+
+    output = execution["agent_output"]
+    structured = output["structured_result"]
+
+    assert output["status"] == "partial"
+    assert structured["error_code"] == "purpose_result_conflict"
+    assert structured["requires_confirmation"] is True
+    assert structured.get("confirmation_source") is None
 
 
 def test_execute_sync_fine_notice_adapter_reads_canonical_object_attachment(monkeypatch):
@@ -1485,7 +1642,7 @@ def test_law_ground_sync_adapter_can_feed_sync_objection_when_sync_requested(mon
     )
 
 
-def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():
+def test_text_ml_and_vision_use_sync_adapters_when_sync_requested(monkeypatch):
     plan = {
         "plan_id": "plan_mock_only_agents",
         "session_id": "ses_mock_only_agents",
@@ -1496,6 +1653,19 @@ def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():
         ],
     }
 
+    monkeypatch.setattr(
+        agent_node_service,
+        "_run_sync_adapter",
+        lambda agent_input, _context: {
+            "status": "partial" if agent_input["node_code"] == "vision_media_analysis" else "success",
+            "summary": f"{agent_input['node_code']} result",
+            "structured_result": {},
+            "evidence": [],
+            "next_actions": [],
+            "limitations": [],
+        },
+    )
+
     execution = execute_mock_plan(
         plan,
         {
@@ -1505,8 +1675,8 @@ def test_text_ml_sync_adapter_can_mix_with_mock_vision_when_sync_requested():
     )
 
     executions_by_node = {item["node_code"]: item for item in execution["executions"]}
-    assert execution["execution_mode"] == "hybrid"
+    assert execution["execution_mode"] == "sync"
     assert executions_by_node["text_ml_case_search"]["execution_mode"] == "sync"
-    assert executions_by_node["vision_media_analysis"]["execution_mode"] == "mock"
+    assert executions_by_node["vision_media_analysis"]["execution_mode"] == "sync"
     assert executions_by_node["text_ml_case_search"]["adapter_context"]["execution_mode"] == "sync"
-    assert executions_by_node["vision_media_analysis"]["adapter_context"]["execution_mode"] == "mock"
+    assert executions_by_node["vision_media_analysis"]["adapter_context"]["execution_mode"] == "sync"

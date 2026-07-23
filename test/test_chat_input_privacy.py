@@ -71,6 +71,27 @@ def test_gateway_sanitizes_conversation_and_agent_context_boundaries() -> None:
     assert protected["facts"]["road_layout"] == "교차로"
 
 
+def test_gateway_sanitizes_editable_ocr_confirmation_fields() -> None:
+    protected = protect_chat_input_payload(
+        {
+            "user_text": "고지서 OCR 값을 확인했습니다.",
+            "ocr_confirmation": {
+                "confirmed": True,
+                "fields": {
+                    "fine_type": "과태료",
+                    "notice_stage": "사전통지",
+                    "violation_text": "연락처 010-1234-5678로 안내된 위반 내용",
+                },
+            },
+        }
+    )
+
+    serialized = repr(protected)
+    assert "010-1234-5678" not in serialized
+    assert protected["ocr_confirmation"]["confirmed"] is True
+    assert MASK_TOKEN in protected["ocr_confirmation"]["fields"]["violation_text"]
+
+
 def test_gateway_rejects_input_over_the_configured_limit() -> None:
     policy = ChatInputPrivacyPolicy(max_chars=10)
 

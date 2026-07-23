@@ -25,13 +25,89 @@ from app.security.pii_masking import MASK_TOKEN
 from app.services import agent_node_service
 from app.services.agent_node_service import execute_mock_node
 from app.services.history_event_mock_service import build_history_event
-from chatbot import file_scan_service, object_storage
+from chatbot import file_scan_service, object_storage, repositories
 
 
 PRIVATE_ERROR = (
     "홍길동 010-1234-5678 900101-1234567 "
     "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature secret provider detail"
 )
+
+
+def test_agent_result_raw_output_excludes_media_bytes_paths_and_agent_payload() -> None:
+    raw = repositories._agent_result_raw_output(
+        {
+            "execution_id": "exec_private",
+            "execution_mode": "sync",
+            "created_at": "2026-07-23T00:00:00+00:00",
+            "adapter_context": {
+                "signature_version": "agent_adapter.v1",
+                "execution_id": "exec_private",
+                "execution_mode": "sync",
+                "node": {
+                    "node_code": "vision_media_analysis",
+                    "description": "C:/private/adapter-description",
+                },
+                "plan_step": {"step_id": "step_vision_1"},
+                "input_path": "C:/private/video.mp4",
+            },
+            "plan_step": {
+                "order": 2,
+                "node_code": "vision_media_analysis",
+                "status": "ready",
+                "execution_mode": "sync",
+                "depends_on": ["input_context_validation"],
+                "required_inputs": ["attachments[purpose=blackbox_video, scan_ready]"],
+                "context": {
+                    "routing_intent": "accident_evidence_analysis",
+                    "expected_node_codes": ["vision_media_analysis"],
+                    "report_requested": False,
+                    "evidence_only": True,
+                    "user_text": "홍길동의 비공개 문장",
+                },
+            },
+        },
+        {
+            "summary": "010-1234-5678",
+            "structured_result": {"file_base64": "c2VjcmV0"},
+        },
+    )
+
+    assert raw == {
+        "source": "agent_execution_metadata.v1",
+        "execution_id": "exec_private",
+        "execution_mode": "sync",
+        "adapter_context": {
+            "contract_version": "agent_adapter.v1",
+            "execution_id": "exec_private",
+            "execution_mode": "sync",
+            "node_code": "vision_media_analysis",
+            "plan_step_id": "step_vision_1",
+        },
+        "plan_step": {
+            "order": 2,
+            "node_code": "vision_media_analysis",
+            "status": "ready",
+            "execution_mode": "sync",
+            "depends_on": ["input_context_validation"],
+            "required_inputs": ["attachments[purpose=blackbox_video, scan_ready]"],
+            "context": {
+                "routing_intent": "accident_evidence_analysis",
+                "expected_node_codes": ["vision_media_analysis"],
+                "report_requested": False,
+                "evidence_only": True,
+            },
+        },
+        "created_at": "2026-07-23T00:00:00+00:00",
+    }
+    serialized = repr(raw)
+    for private_value in (
+        "C:/private",
+        "홍길동의 비공개 문장",
+        "010-1234-5678",
+        "c2VjcmV0",
+    ):
+        assert private_value not in serialized
 
 
 def test_history_summary_and_metadata_never_persist_raw_pii_or_secrets() -> None:

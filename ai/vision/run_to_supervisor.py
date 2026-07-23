@@ -111,10 +111,12 @@ def select_yolo_model(
     videomae: dict[str, Any], override: str | None = None, min_confidence: float = 0.5
 ) -> tuple[dict[str, Any], str]:
     from ai.vision.category_vlm_config import BEST_YOLO_MODELS
+    from ai.vision.trained_category_classifier import LABELS
 
     try:
         prediction = videomae["clips"][0]["top_predictions"][0]
-        label = str(prediction["label"])
+        raw_label = str(prediction["label"])
+        label = LABELS.get(raw_label, raw_label)
         score = float(prediction["score"])
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise ValueError("VideoMAE did not return a valid top prediction") from exc
@@ -124,19 +126,24 @@ def select_yolo_model(
         raise ValueError(f"Invalid VideoMAE confidence: {score}")
     if not 0 <= min_confidence <= 1:
         raise ValueError("min_confidence must be in [0, 1]")
-    prediction = {**prediction, "requires_review": score < min_confidence}
+    prediction = {
+        **prediction,
+        "label": label,
+        "raw_label": raw_label,
+        "requires_review": score < min_confidence,
+    }
     return prediction, override or BEST_YOLO_MODELS[label]
 
 
 def safe_analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, device_name: str) -> dict[str, Any]:
     try:
         return analyze_qwen(frame_paths, model_name, max_frames, device_name)
-    except Exception as exc:
+    except Exception:
         return {
             "valid": False,
-            "error": f"{type(exc).__name__}: {exc}",
+            "error_code": "vision_qwen_unavailable",
             "requires_review": True,
-            "limitations": ["Qwen analysis failed; VideoMAE and YOLO results remain available."],
+            "limitations": ["Qwen analysis was unavailable; VideoMAE and YOLO results remain available."],
         }
 
 

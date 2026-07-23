@@ -104,6 +104,9 @@
 ### C-2. 데이터 최신성
 
 - [?] ETL·수집·색인 기반 존재
+- [!] P0 법령 `data-seed`는 법령 API secret 또는 검증된 seed bundle이 없으면 실제 적재 성공을 주장할 수 없음. 0건 수집은 빈 embedding·후속 단계 오류로 진행하지 않고 즉시 실패해야 함
+- [ ] P0 build/deploy 승인 단계에서 법령은 pgvector·Neo4j에, 판례·심의사례·과실기준은 승인된 pgvector 저장소에 자동 적재. 개발 중 임의 재빌드나 비밀값 없는 실행이 기존 정상 데이터를 바꾸지 않도록 명시적 실행 경계, idempotent run, 정상 seed 보존 정책 필요
+- [ ] P0 적재 전후 검증·실패 기록: source manifest/snapshot, run ID, 단계별 입력/출력 수, embedding provider/model/dimension, 중복·참조 무결성, PostgreSQL chunk/embedding 수, Neo4j node/relation 수, 대표 검색 smoke test를 확인. 실패 run은 활성 데이터로 승격하지 않고 안전한 오류 코드·원인 범주·산출물 경로를 `run_summary`/`ingestion_log`에 남김
 - [ ] 법령·과실 기준·판례별 최신성 메타데이터
 - [ ] 수집 시점, 마지막 검증일, 출처, 적용 시점 저장
 - [ ] 정기 갱신 스케줄 또는 운영 수동 갱신 절차
@@ -125,8 +128,8 @@
 
 ### D-2. 블랙박스·영상 분석
 
-- [?] 첨부자료 또는 요청 자료로 다루는 코드·테스트 흔적
-- [?] 프론트엔드 업로드 계약이 영상 입력을 아직 열어 두지 않은 상태
+- [~] #294 / PR #295: 채팅 drag-and-drop과 MP4/MOV 업로드 계약, scan-ready 영상의 `vision_media_analysis` sync adapter, 안전한 실패 코드, 근거 검색 handoff 구현. 최신 커밋 CI와 실제 checkpoint 환경 smoke는 병합 전 확인 필요
+- [?] 실제 Vision checkpoint·의존성·실행 장치가 준비된 환경에서 원본 블랙박스 영상으로 handoff를 생성하는 운영 smoke는 아직 미검증. 모델 품질 개선은 이 작업 범위에서 제외
 - [ ] 진로 변경, 차선 침범, 신호 위반, 정지·감속, 충돌 직전 거리·상대 위치, 시야 가림·판단 불가 구간을 다루는 비전 파이프라인
 - [ ] 단순 객체 탐지와 사고 쟁점 분석을 구분하는 출력 계약
 - [ ] 프레임 추출·시간축·저품질/실패 영상 처리
@@ -142,6 +145,14 @@
 - [~] 역질문 UX에서 부족한 정보와 필요한 이유를 짧고 명확하게 표시 — 2026-07-22 점검: `FollowUpNote` 컴포넌트가 "꼭 필요해요"/"알려주시면 더 좋아요"로 필수·선택 항목을 구분해 표시. 다만 각 항목이 왜 필요한지 이유(reason) 텍스트는 렌더링하지 않고 라벨만 노출. 담당: 프론트 파트(현재 작성자 담당 범위 아님)
 - [x] 분석 진행·대기·부분 완료·실패 상태를 사용자 언어로 표시 — 2026-07-22 점검: `reportStatusLabel`/`caseStatusLabel`/`attachmentStatusLabel` 함수가 draft·running·partial·success·failed를 "작성 중"/"분석 중"/"보완 필요"/"분석 완료"/"확인 필요" 등으로 변환. 모든 노출 지점이 이 함수를 거치는지 전수 조사는 하지 않음
 - [ ] 모바일/태블릿과 접근성 점검 — 2026-07-22 점검: `max-width` 반응형 브레이크포인트(720/860/900/1000/1280px) 다수 존재하나 실기기 테스트·키보드 내비게이션·스크린리더 점검은 없음. 오늘 다크 테마 전환으로 `--subtle`/`--muted`(반투명 텍스트) 명도 대비를 아직 검증하지 않아 우선 점검 필요
+
+### E-6. 채팅창 drag-and-drop 첨부 분류와 실제 Agent handoff — P0
+
+- [~] #294 / PR #295: 채팅 입력 drop zone, JPEG/PNG/WebP/PDF/MP4/MOV 허용 정책, 업로드 목적·MIME 불일치 차단, 스캔 상태 표시, 지원하지 않는 파일의 사용자용 재시도 안내를 구현. 최신 커밋 CI 재실행 중
+- [~] 고지서 PDF/이미지는 `fine_notice_analysis`의 OCR 1차 결과를 사용자 확인 카드로 표시하고, 확인 전 법령 검색·이의절차·문서 생성을 차단. 확인 후에만 `law_ground_search`와 `appeal_decision_flow`을 계획에 추가
+- [~] 블랙박스 영상은 mock 결과가 아닌 기존 Vision pipeline adapter를 통해 `text_ml_case_search`·`law_ground_search`로 handoff. checkpoint 부재·의존성·decode·timeout은 안전한 실패 코드와 다음 행동으로 반환하며, 영상 품질 고도화는 제외
+- [!] P1 사고 사진(`accident_scene`)은 현재 OCR/문서 분류 뒤 사고 근거 검색으로 자동 연결되지 않고 기존 사실확인 대기 흐름에 머묾. 고지서/사고 증거/분류 불명을 판정하는 OCR 분류와 확인 뒤 검색 handoff 설계·구현이 필요
+- [ ] PDF 고지서, 사고 사진, 블랙박스 영상, 지원하지 않는 파일, 분류 불명 파일의 다섯 E2E 시나리오를 실제 adapter 경계까지 검증. mock fixture 통과만으로 실제 Vision 연결 완료로 판단하지 않음
 
 ## F. P1 — 채팅 맥락·사건 상태 관리
 
@@ -186,6 +197,8 @@
 - [x] PR 단위 CI 체계
 - [ ] 대표 사용자 흐름 E2E: 자료 입력, 사실/주장 분리, OCR, Supervisor 계획, 법령·판례 검색, 한계 표시, 리포트 생성·다운로드
 - [ ] OCR·검색·생성형·영상 분석 품질 지표와 결과 공개 방식
+- [~] #294 / PR #295: `job_id`·`execution_id` 기반 Agent 실행 metadata와 handoff를 보존하고 원문·OCR 전문·경로·비밀값을 raw execution metadata에서 제거. 운영자가 run/trace로 첨부 수신·분류·Agent 시작/완료/실패·소요 시간·안전한 오류 코드·다음 조치를 조회하는 절차와 회귀 테스트는 보강 필요
+- [ ] 법령·판례 적재와 Agent 호출의 대표 성공·부분 실패·실패 시나리오에서 run/trace 로그가 실제 생성되고, 운영자가 관련 산출물·실패 단계·다음 조치를 추적할 수 있는 회귀 테스트와 조회 절차 제공
 - [ ] 외부 서비스 장애, 데이터 갱신 실패, 큐 적체의 운영 관측
 - [ ] 분석 작업 중복 요청·재시도·취소·타임아웃 계약
 - [ ] 대화·첨부파일·OCR·보고서 보존 기간, 삭제 요청, 접근 감사 정책

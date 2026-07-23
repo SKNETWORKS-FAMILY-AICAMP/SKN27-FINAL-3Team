@@ -302,6 +302,13 @@ def _smoke_payloads(
         "user_text": user_facts,
         "attachments": [fine_notice_fixture],
     }
+    ocr_confirmation = {
+        "confirmed": True,
+        "fields": {
+            "fine_type": "과태료",
+            "notice_stage": "사전통지",
+        },
+    }
     server_execution_context = {
         "user_facts": user_facts,
         "raw_user_text": user_facts,
@@ -315,6 +322,9 @@ def _smoke_payloads(
         "temporal_basis": {"mode": "current"},
         "scope": {"jurisdiction": "KR"},
         "law_graph": {"enabled": False},
+        # This command bypasses the public chat endpoint, so the user-confirmed
+        # OCR fields are supplied only through the trusted worker context.
+        "ocr_confirmation": ocr_confirmation,
     }
 
     job_payload = {
