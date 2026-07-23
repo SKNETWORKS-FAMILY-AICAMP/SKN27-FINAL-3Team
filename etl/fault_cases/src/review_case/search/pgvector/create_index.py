@@ -28,13 +28,19 @@ def count_embedding_rows() -> int:
                     """
                     SELECT COUNT(*)
                     FROM {embedding_table}
-                    WHERE embedding_model = %s
+                    WHERE embedding_provider = %s
+                      AND embedding_model = %s
                       AND embedding_version = %s
                       AND embedding_dim = %s
                       AND embedding_vector IS NOT NULL
                     """
                 ).format(embedding_table=sql.Identifier(EMBEDDING_TABLE)),
-                (EMBEDDING_SETTINGS.model, EMBEDDING_SETTINGS.version, EMBEDDING_SETTINGS.dim),
+                (
+                    EMBEDDING_SETTINGS.provider,
+                    EMBEDDING_SETTINGS.model,
+                    EMBEDDING_SETTINGS.version,
+                    EMBEDDING_SETTINGS.dim,
+                ),
             )
             return int(cur.fetchone()[0])
 
@@ -71,7 +77,8 @@ def create_hnsw_index() -> dict[str, Any]:
         ON {embedding_table}
         USING hnsw ({vector_column} vector_cosine_ops)
         WITH (m = {hnsw_m}, ef_construction = {hnsw_ef_construction})
-        WHERE embedding_model = {embedding_model}
+        WHERE embedding_provider = {embedding_provider}
+          AND embedding_model = {embedding_model}
           AND embedding_version = {embedding_version}
           AND embedding_dim = {embedding_dim}
           AND embedding_vector IS NOT NULL
@@ -82,6 +89,7 @@ def create_hnsw_index() -> dict[str, Any]:
         vector_column=sql.Identifier(VECTOR_COLUMN),
         hnsw_m=sql.Literal(settings.hnsw_m),
         hnsw_ef_construction=sql.Literal(settings.hnsw_ef_construction),
+        embedding_provider=sql.Literal(EMBEDDING_SETTINGS.provider),
         embedding_model=sql.Literal(EMBEDDING_SETTINGS.model),
         embedding_version=sql.Literal(EMBEDDING_SETTINGS.version),
         embedding_dim=sql.Literal(EMBEDDING_SETTINGS.dim),
