@@ -11,6 +11,10 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+
+CASE_SOURCE_TYPE = "review_case"
+
+
 def run_text_ml_case_search(
     agent_input: dict[str, Any],
     context: dict[str, Any],
