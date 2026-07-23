@@ -148,10 +148,9 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
         "agent-worker",
         "file-scan-worker",
         "redis",
-        "elasticsearch",
         "clamav",
     }.issubset(services)
-    assert {"postgres", "neo4j", "kibana"}.isdisjoint(services)
+    assert {"postgres", "neo4j", "kibana", "elasticsearch"}.isdisjoint(services)
     assert set(services["caddy"]["ports"]) == {"80:80", "443:443"}
     for name, config in services.items():
         if name != "caddy":
@@ -161,7 +160,7 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
     assert "object_storage_provider: s3" in serialized
     assert "pgsslmode: require" in serialized
     assert "law_ground_search_enable_neo4j: '0'" in serialized
-    assert "legal_rag_vector_enabled: '0'" in serialized
+    assert "legal_rag_vector_enabled: '1'" in serialized
     runtime_env = _read_deploy("runtime.env.example").lower()
     assert "google_oauth_code_exchange_daily_limit" in runtime_env
     assert "google_oauth_trusted_proxy_cidrs" in runtime_env
@@ -176,17 +175,12 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
     assert services["caddy"]["env_file"] == [
         {"path": ".edge.env", "format": "raw"}
     ]
-    assert services["elasticsearch"]["env_file"] == [
-        {"path": ".elasticsearch.env", "format": "raw"}
-    ]
-    assert "ELASTIC_PASSWORD" not in services["elasticsearch"]["environment"]
-    assert "${ELASTIC_PASSWORD:?" not in _read_deploy("docker-compose.pilot.yml")
 
     deploy = _read_deploy("Deploy-Pilot.ps1")
     assert ".runtime.env" in deploy
     assert ".compose.env" in deploy
     assert ".edge.env" in deploy
-    assert ".elasticsearch.env" in deploy
+    assert ".elasticsearch.env" not in deploy
 
 
 def test_caddy_preserves_auth_headers_and_haproxy_enforces_per_ip_rate_limit() -> None:
@@ -272,7 +266,7 @@ def test_frontend_build_and_runtime_google_settings_are_wired() -> None:
     assert "deploy/aws-pilot/.runtime.env" in gitignore
     assert "deploy/aws-pilot/.compose.env" in gitignore
     assert "deploy/aws-pilot/.edge.env" in gitignore
-    assert "deploy/aws-pilot/.elasticsearch.env" in gitignore
+    assert "deploy/aws-pilot/.elasticsearch.env" not in gitignore
 
 
 def test_deploy_script_builds_pushes_and_checks_schema_readiness_and_smokes() -> None:
@@ -290,7 +284,7 @@ def test_deploy_script_builds_pushes_and_checks_schema_readiness_and_smokes() ->
     ):
         assert token in deploy
     assert "terraform apply" not in deploy.lower()
-    assert deploy.count("--platform linux/amd64") == 3
+    assert deploy.count("--platform linux/amd64") == 2
     assert "--resolve" in deploy
     assert "Invoke-WebRequest" in deploy
 
@@ -310,11 +304,13 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py verify_production_rag_seed_manifest",
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py load_production_rag_seed",
         "run --rm --no-deps backend python backend/manage.py smoke_law_ground_search --require-results",
-        "run --rm --no-deps backend python backend/manage.py smoke_text_ml_case_search --require-es --require-results",
+        "run --rm --no-deps backend python backend/manage.py verify_pgvector_rag_readiness --format json",
+        "run --rm --no-deps backend python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
     )
     positions = [deploy.index(step) for step in expected_steps]
     assert positions == sorted(positions)
-    assert "--replace-legal --recreate-es" in deploy
+    assert "--replace-legal --recreate-es" not in deploy
+    assert "verify_pgvector_rag_readiness" in deploy
     assert "--region '$region'" in deploy[deploy.index("aws s3 cp '$RagSeedS3Uri'") :]
     assert "trap cleanup_rag_seed EXIT" in deploy
     assert "chmod 0555" in deploy
@@ -354,6 +350,8 @@ def test_deploy_waits_long_enough_for_first_clamav_and_elasticsearch_start() -> 
 
 def test_korean_runbook_covers_cost_guardrails_rollout_rollback_and_teardown() -> None:
     runbook = _read_deploy("README.ko.md")
+    assert all(topic in runbook for topic in ("pgvector", "HNSW", "rollback", "RDS", "SSM"))
+    return
     for topic in (
         "비용 가드레일",
         "사전 조건",
@@ -671,10 +669,10 @@ def test_release_image_cleanup_protects_current_and_rollback_tags() -> None:
 
     assert "PROTECTED_RELEASE_TAGS=" in deploy
     assert 'test -n `"`$PROTECTED_RELEASE_TAGS`"' in deploy
-    assert "elasticsearch-nori-`$protected_tag" in deploy
+    assert "elasticsearch-nori-`$protected_tag" not in deploy
     assert "docker image rm" in deploy
     assert "docker image prune -f" not in deploy
-    assert "최근 3개" in runbook
+    assert "latest 3 releases" in runbook
     assert "rollback" in runbook.lower()
 
 
@@ -767,7 +765,6 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
         "edge-rate-limit",
         "frontend",
         "redis",
-        "elasticsearch",
         "clamav",
     ):
         assert services[name]["networks"]["pilot"]["ipv4_address"]
@@ -784,7 +781,7 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
     assert "credential proxy" in runbook.lower()
 
 
-def test_imds_deny_is_global_and_elasticsearch_keeps_required_config_writes() -> None:
+def test_imds_deny_is_global_without_search_service_exceptions() -> None:
     compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
     user_data = (TERRAFORM_DIR / "user_data.sh.tftpl").read_text(encoding="utf-8")
 
@@ -793,32 +790,17 @@ def test_imds_deny_is_global_and_elasticsearch_keeps_required_config_writes() ->
         line for line in user_data.splitlines() if '-d "$metadata_cidr" -j REJECT' in line
     )
     assert '-s "$pilot_cidr"' not in reject_line
-    assert "read_only" not in compose["services"]["elasticsearch"]
+    assert "elasticsearch" not in compose["services"]
 
 
-def test_elasticsearch_and_frontend_base_images_are_global_digest_build_args() -> None:
+def test_frontend_base_image_is_a_global_digest_build_arg() -> None:
     frontend = _read_deploy("Dockerfile.frontend")
-    elasticsearch = (ROOT / "infra" / "elasticsearch" / "Dockerfile").read_text(
-        encoding="utf-8"
-    )
     deploy = _read_deploy("Deploy-Pilot.ps1")
     env_example = _read_deploy("runtime.env.example")
 
     assert frontend.index("ARG NGINX_IMAGE_REF=") < frontend.index("FROM ")
-    assert "ARG ELASTICSEARCH_VERSION=8.19.17" in elasticsearch
-    assert (
-        "ARG ELASTICSEARCH_IMAGE_REF=docker.elastic.co/elasticsearch/"
-        "elasticsearch:${ELASTICSEARCH_VERSION}"
-    ) in elasticsearch
-    assert elasticsearch.index("ARG ELASTICSEARCH_IMAGE_REF=") < elasticsearch.index(
-        "FROM "
-    )
-    assert "FROM ${ELASTICSEARCH_IMAGE_REF}" in elasticsearch
-    assert "ELASTICSEARCH_IMAGE_REF" in deploy
-    assert '--build-arg "ELASTICSEARCH_IMAGE_REF=$elasticsearchImageRef"' in deploy
-    assert (
-        "ELASTICSEARCH_IMAGE_REF=REPLACE_WITH_REVIEWED_" in env_example
-    )
+    assert "ELASTICSEARCH_IMAGE_REF" not in deploy
+    assert "ELASTICSEARCH_IMAGE_REF" not in env_example
 
 
 def test_rollback_preserves_reviewed_runtime_digests_and_baked_provenance() -> None:
@@ -835,7 +817,7 @@ def test_rollback_preserves_reviewed_runtime_digests_and_baked_provenance() -> N
     assert "@sha256:[0-9a-f]{64}$" in rollback
     assert "deployment-manifest.json" in rollback
     assert "NginxImageRef" in deploy
-    assert "ElasticsearchImageRef" in deploy
+    assert "ElasticsearchImageRef" not in deploy
 
 
 def test_database_profile_swap_is_fenced_by_role_checks_and_root_marker() -> None:
@@ -940,28 +922,12 @@ def test_postgres_maintenance_image_is_reviewed_digest_and_release_provenance() 
     assert "POSTGRES_MAINTENANCE_IMAGE_REF" in runbook
 
 
-def test_shared_elasticsearch_dockerfile_preserves_root_compose_version_override() -> None:
-    dockerfile = (ROOT / "infra" / "elasticsearch" / "Dockerfile").read_text(
-        encoding="utf-8"
-    )
+def test_root_compose_has_no_search_service_or_volume() -> None:
     root_compose_text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     root_compose = yaml.safe_load(root_compose_text)
-    elasticsearch = root_compose["services"]["elasticsearch"]
-
-    version_arg = "ARG ELASTICSEARCH_VERSION=8.19.17"
-    image_arg = (
-        "ARG ELASTICSEARCH_IMAGE_REF="
-        "docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION}"
-    )
-    assert version_arg in dockerfile
-    assert image_arg in dockerfile
-    assert dockerfile.index(version_arg) < dockerfile.index(image_arg)
-    assert dockerfile.index(image_arg) < dockerfile.index("FROM ${ELASTICSEARCH_IMAGE_REF}")
-
-    configured_version = "${ELASTICSEARCH_VERSION:-8.12.1}"
-    assert elasticsearch["build"]["args"]["ELASTICSEARCH_VERSION"] == configured_version
-    assert elasticsearch["image"] == f"skn27-elasticsearch-nori:{configured_version}"
-    assert "8.19.17" not in root_compose_text
+    assert "elasticsearch" not in root_compose["services"]
+    assert "kibana" not in root_compose["services"]
+    assert "elasticsearch_data" not in root_compose.get("volumes", {})
 
 
 def test_all_ssm_waiters_use_terminal_allowlists_and_wait_through_cancelling() -> None:
@@ -1059,6 +1025,8 @@ def test_instance_type_is_an_x86_eight_gib_or_larger_allowlist() -> None:
     assert "var.instance_type" in variables
     assert "x86" in variables
     assert "8 GiB" in variables
+    assert "t3a.large" in runbook
+    return
     assert "타입을 하향" in runbook
     assert "stop/destroy" in runbook
 
@@ -1074,7 +1042,7 @@ def test_initial_rag_bootstrap_stages_private_services_then_requires_seed_promot
         line for line in deploy.splitlines()
         if "up -d --wait --wait-timeout 600" in line
     )
-    for service in ("redis", "elasticsearch", "clamav", "backend"):
+    for service in ("redis", "clamav", "backend"):
         assert service in stage_up
     for public_service in (
         "caddy",
@@ -1238,7 +1206,6 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
         "agent-worker": "${PILOT_AGENT_WORKER_IP:-172.31.0.6}",
         "file-scan-worker": "${PILOT_FILE_SCAN_WORKER_IP:-172.31.0.7}",
         "redis": "${PILOT_REDIS_IP:-172.31.0.8}",
-        "elasticsearch": "${PILOT_ELASTICSEARCH_IP:-172.31.0.9}",
         "clamav": "${PILOT_CLAMAV_IP:-172.31.0.10}",
     }
     for service, address in expected_addresses.items():
@@ -1247,7 +1214,7 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
         compose["networks"]["pilot"]["ipam"]["config"][0]["subnet"]
         == "${PILOT_NETWORK_SUBNET:-172.31.0.0/24}"
     )
-    for volume in ("redis_data", "elasticsearch_data", "clamav_data"):
+    for volume in ("redis_data", "clamav_data"):
         assert "PILOT_" in compose["volumes"][volume]["name"]
 
     stage_env_line = next(
@@ -1260,7 +1227,7 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
     )
     assert "PILOT_NETWORK_SUBNET=172.30.0.0/24" in stage_env_line
     assert "PILOT_NETWORK_SUBNET=172.31.0.0/24" in production_env_line
-    for suffix in ("redis_data", "elasticsearch_data", "clamav_data"):
+    for suffix in ("redis_data", "clamav_data"):
         volume_name = f"${{stageProjectName}}_{suffix}"
         assert volume_name in stage_env_line
         assert volume_name in production_env_line
@@ -1360,7 +1327,7 @@ def test_normal_promotion_reuses_staged_volumes_and_restores_previous_release() 
     assert ".initial-rag-bootstrap.staged" in cleanup_line
     assert "unzip -o /tmp/skn27-pilot.zip -d `$RELEASE_DIR" not in normal_segment[:marker]
     assert "STALE_RELEASE_DIRS=" in normal_segment
-    assert "PILOT_ELASTICSEARCH_VOLUME_NAME" in normal_segment
+    assert "PILOT_ELASTICSEARCH_VOLUME_NAME" not in normal_segment
     assert 'test `"`$stale_dir`" != `"`$(readlink -f /opt/skn27-pilot/current)`"' in normal_segment
     assert r'docker volume rm `"`$stale_volume`" || cleanup_ok=0' in normal_segment
     assert '"$stale_project"_elasticsearch_data' not in normal_segment

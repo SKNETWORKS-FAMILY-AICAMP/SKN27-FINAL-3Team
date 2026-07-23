@@ -16,10 +16,6 @@ from app.services.google_auth_service import (
     is_google_web_client_id,
     normalize_google_web_origin,
 )
-from app.services.rag_seed_bundle import (
-    RagSeedValidationError,
-    validate_elasticsearch_index_targets,
-)
 from chatbot.file_scan_service import DEFAULT_MAX_SCAN_BYTES
 from chatbot.object_storage import object_storage_policy
 
@@ -257,8 +253,8 @@ def _legal_rag_check(*, include_database: bool, database_state: dict[str, Any]) 
     if not enabled:
         details.append(
             _detail(
-                WARN,
-                "Legal RAG vector search is disabled; PostgreSQL lexical retrieval remains active.",
+                FAIL,
+                "Legal RAG pgvector search must be enabled in production.",
             )
         )
     else:
@@ -310,7 +306,7 @@ def _legal_rag_check(*, include_database: bool, database_state: dict[str, Any]) 
                         details.append(
                             _detail(
                                 FAIL,
-                                "No current searchable legal row exists for PostgreSQL lexical retrieval.",
+                                "No current searchable legal row exists for PostgreSQL pgvector retrieval.",
                             )
                         )
                 except Exception as exc:
@@ -454,72 +450,22 @@ def _law_ground_search_sync_check() -> dict[str, Any]:
 
 def _text_ml_case_search_rag_check() -> dict[str, Any]:
     details = []
-    enabled = _truthy(_runtime_setting("TEXT_ML_CASE_SEARCH_SYNC_USE_ES", ""))
-    host = str(
-        _runtime_setting(
-            "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST",
-            _runtime_setting("ELASTICSEARCH_HOST", "http://localhost:9200"),
-        )
-        or ""
+    required_modules = (
+        "etl.fault_cases.src.agents.text_ml_case_search.rag.pgvector_unified_retriever",
+        "etl.fault_cases.src.review_case.search.pgvector.retriever",
+        "etl.fault_cases.src.traffic_precedents.precedent_search.pgvector.retriever",
     )
-    user = str(
-        _runtime_setting(
-            "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER",
-            _runtime_setting("ELASTICSEARCH_USER", "elastic"),
-        )
-        or ""
-    )
-    password = str(
-        _runtime_setting(
-            "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD",
-            _runtime_setting("ELASTIC_PASSWORD", ""),
-        )
-        or ""
-    )
-    review_case_index = str(
-        _runtime_setting("REVIEW_CASE_ES_BM25_INDEX", "review_case_chunks_bm25_nori_v1") or ""
-    )
-    fault_ratio_index = str(
-        _runtime_setting("FAULT_RATIO_PRECEDENT_ES_BM25_INDEX", "precedent_fault_ratio_chunks_bm25_nori_v1") or ""
-    )
-
-    if not enabled:
-        details.append(
-            _detail(
-                WARN,
-                "TEXT_ML_CASE_SEARCH_SYNC_USE_ES is disabled; text_ml_case_search will use safe non-ES fallback.",
-            )
-        )
-    else:
-        if not host.strip():
-            details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST is required when ES RAG is enabled."))
-        if _looks_placeholder(host):
-            details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST must not contain a placeholder."))
-        if user.strip() and not password.strip():
-            details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD is required when an Elasticsearch user is set."))
-        if password and _looks_placeholder(password):
-            details.append(_detail(FAIL, "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD must not contain a placeholder."))
-        try:
-            validate_elasticsearch_index_targets(
-                review_case_index,
-                fault_ratio_index,
-            )
-        except RagSeedValidationError as exc:
-            details.append(_detail(FAIL, str(exc)))
-        if importlib.util.find_spec("elasticsearch") is None:
-            details.append(_detail(FAIL, "elasticsearch package is required when text_ml_case_search ES RAG is enabled."))
+    for module_name in required_modules:
+        if importlib.util.find_spec(module_name) is None:
+            details.append(_detail(FAIL, f"Required pgvector retrieval module is not importable: {module_name}."))
 
     return _check(
         "text_ml_case_search_rag",
         details,
-        ok_message="text_ml_case_search Elasticsearch RAG settings are present.",
+        ok_message="text_ml_case_search pgvector retrieval modules are importable.",
         metadata={
-            "sync_use_es": enabled,
-            "host": host or None,
-            "user_set": bool(user.strip()),
-            "review_case_index": review_case_index or None,
-            "fault_ratio_precedent_index": fault_ratio_index or None,
-            "smoke": "smoke_text_ml_case_search --require-es",
+            "retrieval_backend": "unified_pgvector",
+            "smoke": "smoke_text_ml_case_search --require-pgvector",
         },
     )
 

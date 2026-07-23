@@ -78,7 +78,7 @@ trap - EXIT
 
 install -d -m 0750 /opt/skn27-pilot/releases /opt/skn27-pilot/shared
 
-# A small pilot host runs ClamAV and Elasticsearch together. Swap prevents a
+# A small pilot host runs ClamAV alongside the application. Swap prevents a
 # transient signature/index spike from immediately killing the Django workers.
 if ! swapon --show | grep -q /swapfile; then
   fallocate -l 4G /swapfile

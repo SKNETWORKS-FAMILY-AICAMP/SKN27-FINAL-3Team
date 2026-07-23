@@ -2145,10 +2145,6 @@ def _adapter_limitations(raw_output: dict[str, Any], adapter_trace: dict[str, An
         marker = "Sync adapter is connected through Supervisor sync execution mode."
     if marker not in limitations:
         limitations.append(marker)
-    if "text_ml_case_search" in adapter and not os.getenv("TEXT_ML_CASE_SEARCH_SYNC_USE_ES", "").strip():
-        es_marker = "TEXT_ML_CASE_SEARCH_SYNC_USE_ES is not enabled; ran fault-ratio agent without Elasticsearch RAG."
-        if es_marker not in limitations:
-            limitations.append(es_marker)
     if "fine_notice_analysis" in adapter and adapter_trace.get("input_source") == "missing":
         limitations.append("No fine_notice attachment image was available for OCR.")
     return limitations
@@ -2342,7 +2338,7 @@ def _structured_result_for_node(
                 ],
                 "applicable_conditions": ["RAG 근거는 사용자 사실관계와 처분 문구 확인 후 적용 여부를 판단해야 합니다."],
                 "exceptions": [],
-                "retrieval_quality": rag_search.get("backend") or "django_rag_tables",
+                "retrieval_quality": rag_search.get("backend") or "postgres_pgvector",
                 "retrieval": _retrieval_metadata(rag_search),
             }
         return {

@@ -806,7 +806,7 @@ class ConsultationV2DesignContractTests(SimpleTestCase):
             "consultation_state.v2",
             "fault_assessment.v2",
             "consultation_report.v2",
-            "OpenSearch + pgvector + Neo4j",
+            "pgvector + Neo4j",
         ):
             self.assertIn(required, content)
 

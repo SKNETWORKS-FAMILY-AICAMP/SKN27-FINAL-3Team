@@ -16,18 +16,17 @@ def test_failed_retrieval_removes_preexisting_source_backed_law_matches() -> Non
                 }
             ],
             "retrieval": {
-                "backend": "django_rag_tables",
+                "backend": "postgres_pgvector",
                 "status": "failed",
-                "attempted_backends": ["postgres_lexical", "django_rag_tables"],
             },
         }
     )
 
     assert structured["matched_laws"] == []
     assert structured["retrieval"] == {
-        "backend": "django_rag_tables",
+        "backend": "postgres_pgvector",
         "status": "failed",
-        "attempted_backends": ["postgres_lexical", "django_rag_tables"],
+        "attempted_backends": ["postgres_pgvector"],
         "contract_version": LAW_RETRIEVAL_CONTRACT_VERSION,
     }
 
@@ -43,7 +42,7 @@ def test_legacy_source_alias_is_accepted_only_at_the_contract_boundary() -> None
                     "source_ref": "law:road-traffic:5",
                 }
             ],
-            "retrieval": {"backend": "postgres_lexical", "status": "ready"},
+            "retrieval": {"backend": "postgres_pgvector", "status": "ready"},
         }
     )
     evidence = normalize_law_evidence(
@@ -53,9 +52,9 @@ def test_legacy_source_alias_is_accepted_only_at_the_contract_boundary() -> None
     assert structured["matched_laws"][0]["source_reference"] == "law:road-traffic:5"
     assert "source_ref" not in structured["matched_laws"][0]
     assert structured["retrieval"] == {
-        "backend": "postgres_lexical",
+        "backend": "postgres_pgvector",
         "status": "ready",
-        "attempted_backends": ["postgres_lexical"],
+        "attempted_backends": ["postgres_pgvector"],
         "contract_version": LAW_RETRIEVAL_CONTRACT_VERSION,
     }
     assert evidence == [
@@ -97,7 +96,7 @@ def test_internal_retrieval_metadata_is_lifted_out_of_law_provisions() -> None:
                     "article_no": "Article 32",
                     "provision_text": "Stopping restrictions.",
                     "_retrieval": {
-                        "backend": "django_rag_tables",
+                        "backend": "postgres_pgvector",
                         "status": "ready",
                     },
                 }
@@ -105,7 +104,7 @@ def test_internal_retrieval_metadata_is_lifted_out_of_law_provisions() -> None:
         }
     )
 
-    assert structured["retrieval"]["backend"] == "django_rag_tables"
+    assert structured["retrieval"]["backend"] == "postgres_pgvector"
     assert structured["law_provisions"][0]["source_reference"] == "law:road-traffic:32"
     assert "source_ref" not in structured["law_provisions"][0]
     assert "_retrieval" not in structured["law_provisions"][0]

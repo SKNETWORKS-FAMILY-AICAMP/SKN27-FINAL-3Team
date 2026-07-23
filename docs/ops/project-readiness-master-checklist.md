@@ -94,8 +94,9 @@
 - [x] RAG, pgvector, Neo4j 기반 검색 구조
 - [x] 검색 결과 부족 시 partial/failed 처리 기반
 - [x] 선택된 RAG 도메인의 런타임 예외를 개별 `failed` 결과로 격리하고, 정상 도메인 결과는 `partial`로 유지하는 회귀 테스트 — PR #275
-- [?] Elasticsearch의 역할과 pgvector/Neo4j/Elasticsearch 선택 조건 문서화
-- [x] 법령 RAG의 PostgreSQL lexical ↔ pgvector 전환 기준, 임베딩·조문 chunk A/B, RAGAS 품질 평가 — #280, #282, #285, #289 (`legal-ab-018-pgvector-gates-20260722` Python 3.13 실제 A/B·RAGAS 완료: 두 backend 20/20, pgvector no-result 0.00·전체 p95 589 ms, RAGAS 20/20 aggregate와 4개 metric 생성, failed gate 없음, `eligible=true`; `017`은 summary 없는 부분 산출물로 전환 근거에서 제외; 법령만, 판례·심의사례·과실기준 제외)
+- [x] ES·lexical fallback 제거와 법령·심의사례 pgvector-only 런타임 경계 문서화 — #291
+- [x] 법령·심의사례 필수 readiness 및 공통 임베딩 공간(`openai/text-embedding-3-large/1024`) 불일치 차단 계약·회귀 테스트 — #291
+- [x] 법령 RAG pgvector 전환 기준, 임베딩·조문 chunk 품질 평가와 RAGAS 증적 정리 — #280, #282, #285, #289
   - 전체 A/B 수치, phase·RAGAS latency, 실행환경, 자동화 테스트 증적: `docs/tech-validation-reports/legal-rag/2026-07-22-legal-rag-ab-execution-report.md`의 `legal-ab-018-pgvector-gates-20260722` 섹션
 - [ ] 대표 사고 시나리오별 검색 정확도 평가 세트
 - [ ] 검색 결과의 근거 출처·검색 시점·한계 표시
@@ -106,6 +107,7 @@
 - [?] ETL·수집·색인 기반 존재
 - [!] P0 법령 `data-seed`는 법령 API secret 또는 검증된 seed bundle이 없으면 실제 적재 성공을 주장할 수 없음. 0건 수집은 빈 embedding·후속 단계 오류로 진행하지 않고 즉시 실패해야 함
 - [ ] P0 build/deploy 승인 단계에서 법령은 pgvector·Neo4j에, 판례·심의사례·과실기준은 승인된 pgvector 저장소에 자동 적재. 개발 중 임의 재빌드나 비밀값 없는 실행이 기존 정상 데이터를 바꾸지 않도록 명시적 실행 경계, idempotent run, 정상 seed 보존 정책 필요
+- [ ] P0 심의사례 1536차원 데이터 백업 후 `text-embedding-3-large/1024`로 재임베딩하고, 법령·심의사례 공통 공간 readiness와 대표 쿼리 latency를 운영 DB에서 검증 — #291
 - [ ] P0 적재 전후 검증·실패 기록: source manifest/snapshot, run ID, 단계별 입력/출력 수, embedding provider/model/dimension, 중복·참조 무결성, PostgreSQL chunk/embedding 수, Neo4j node/relation 수, 대표 검색 smoke test를 확인. 실패 run은 활성 데이터로 승격하지 않고 안전한 오류 코드·원인 범주·산출물 경로를 `run_summary`/`ingestion_log`에 남김
 - [ ] 법령·과실 기준·판례별 최신성 메타데이터
 - [ ] 수집 시점, 마지막 검증일, 출처, 적용 시점 저장

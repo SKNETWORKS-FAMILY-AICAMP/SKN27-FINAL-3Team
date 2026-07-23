@@ -267,6 +267,30 @@ def test_legacy_mock_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypat
     assert calls[0]["attachment_resolution"]["unresolved_attachment_ids"] == []
 
 
+def test_legacy_law_result_defaults_to_pgvector_backend(monkeypatch):
+    monkeypatch.setattr(
+        agent_node_service,
+        "search_legal_rag",
+        lambda *_args, **_kwargs: {
+            "results": [
+                {
+                    "source_name": "Road Traffic Act",
+                    "article": "Article 5",
+                    "summary": "Drivers must follow traffic signals.",
+                }
+            ]
+        },
+    )
+
+    result = agent_node_service._structured_result_for_node(
+        "law_ground_search",
+        {"user_text": "traffic signal violation"},
+        "success",
+    )
+
+    assert result["retrieval_quality"] == "postgres_pgvector"
+
+
 def test_legacy_mock_entrypoint_delegates_vision_to_real_runtime(monkeypatch):
     calls = []
 
@@ -821,62 +845,38 @@ def test_legacy_plan_entrypoint_does_not_mock_supervisor_steps():
 def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypatch):
     from ai.agents.text_ml_case_search import agent as text_ml_agent
 
-    class FakeElasticsearch:
-        def __init__(self):
-            self.calls = []
-
-        def search(self, *, index, body):
-            self.calls.append({"index": index, "body": body})
-            if index == "precedent_fault_ratio_chunks_bm25_nori_v1":
-                return {
-                    "hits": {
-                        "hits": [
-                            {
-                                "_index": "precedent_fault_ratio_chunks_bm25_nori_v1",
-                                "_score": 31.5,
-                                "_source": {
-                                    "case_id": "616249",
-                                    "chunk_id": "616249:structured_1500_250:0001",
-                                    "chunk_type": "fault_ratio_evidence",
-                                    "case_name": "precedent title",
-                                    "case_number": "2022da287284",
-                                    "court_name": "Supreme Court",
-                                    "decision_date": "2025-05-15",
-                                    "chunk_text": "valid precedent evidence text " * 5,
-                                    "search_text": "sample search text",
-                                },
-                            }
-                        ]
-                    }
-                }
-            return {
-                "hits": {
-                    "hits": [
-                        {
-                            "_index": "review_case_chunks_bm25_nori_v1",
-                            "_score": 10.1,
-                            "_source": {
-                                "review_case_id": "rc_001",
-                                "review_no": "2017-032889",
-                                "chunk_id": "rc_001:case_overview",
-                                "chunk_type": "case_overview",
-                                "case_title": "sample case",
-                                "decision_fault_ratio": "A 70 : B 30",
-                                "claimant_final_ratio": "70",
-                                "respondent_final_ratio": "30",
-                                "chunk_text": "valid review case evidence text " * 4,
-                                "search_text": "sample search text",
-                            },
-                        }
-                    ]
-                }
-            }
-
-    fake_es = FakeElasticsearch()
     monkeypatch.setattr(
         text_ml_agent,
-        "_optional_elasticsearch_client",
-        lambda: (fake_es, ["test Elasticsearch client enabled"]),
+        "_run_fault_ratio_knowledge_agent",
+        lambda **_kwargs: {
+            "session_id": "ses_sync_text_ml",
+            "message_id": "msg_sync_text_ml",
+            "job_id": "job_sync_text_ml",
+            "node_code": "text_ml_case_search",
+            "status": "success",
+            "summary": "pgvector evidence returned",
+            "structured_result": {
+                "similar_cases": [
+                    {
+                        "source_ref": "review_case_db:rc_001#rc_001:case_overview",
+                        "source_reference": "review_case_db:rc_001#rc_001:case_overview",
+                    }
+                ],
+                "ratio_range_label": "A 70 : B 30",
+                "retrieval": {
+                    "adapter_source": "fault_ratio_knowledge_agent",
+                    "source_summary": {
+                        "source_counts": {
+                            "review_case": 1,
+                            "fault_ratio_precedent": 1,
+                        }
+                    },
+                },
+            },
+            "evidence": [{"source_type": "review_case"}],
+            "next_actions": [],
+            "limitations": [],
+        },
     )
 
     execution = execute_mock_node(
@@ -905,7 +905,6 @@ def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypa
     assert execution["adapter_context"]["execution_mode"] == "sync"
     assert output["node_code"] == "text_ml_case_search"
     assert output["status"] == "success"
-    assert len(fake_es.calls) == 2
     assert structured_result["similar_cases"][0]["source_ref"] == "review_case_db:rc_001#rc_001:case_overview"
     assert structured_result["top_cases"] == structured_result["similar_cases"]
     assert structured_result["ratio_range_label"] == "A 70 : B 30"
@@ -919,7 +918,7 @@ def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypa
     assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
 
 
-def test_execute_sync_text_ml_case_search_falls_back_to_django_review_case_rag(monkeypatch):
+def test_execute_sync_text_ml_case_search_does_not_fallback_to_legal_rag(monkeypatch):
     from ai.agents.text_ml_case_search import agent as text_ml_agent
 
     monkeypatch.setattr(
@@ -928,30 +927,15 @@ def test_execute_sync_text_ml_case_search_falls_back_to_django_review_case_rag(m
         lambda **_kwargs: None,
     )
 
-    def fake_search_legal_rag(query, *, top_k, source_type):
-        assert "교차로" in query
-        assert top_k == 3
-        assert source_type == "review_case"
-        return {
-            "contract_version": "legal_rag_search.v1",
-            "status": "ready",
-            "backend": "django_rag_tables",
-            "query": query,
-            "top_k": top_k,
-            "result_count": 1,
-            "results": [
-                {
-                    "source_reference": "review_case:local_chunk_001",
-                    "source_type": "review_case",
-                    "source_name": "local review case chunks",
-                    "title": "신호 없는 교차로 직진/우측 진입 사고",
-                    "summary": "선진입과 일시정지 여부가 과실 판단의 핵심 쟁점입니다.",
-                    "score": 7.5,
-                }
-            ],
-        }
+    def unexpected_legal_search(*_args, **_kwargs):
+        raise AssertionError("text-ML must not fall back to legal RAG")
 
-    monkeypatch.setattr(text_ml_agent, "search_legal_rag", fake_search_legal_rag)
+    monkeypatch.setattr(
+        text_ml_agent,
+        "search_legal_rag",
+        unexpected_legal_search,
+        raising=False,
+    )
 
     execution = execute_mock_node(
         {
@@ -968,164 +952,12 @@ def test_execute_sync_text_ml_case_search_falls_back_to_django_review_case_rag(m
     output = execution["agent_output"]
     structured_result = output["structured_result"]
 
-    assert output["status"] == "success"
-    assert structured_result["similar_cases"][0]["source_ref"] == "review_case:local_chunk_001"
-    assert structured_result["top_cases"] == structured_result["similar_cases"]
-    assert structured_result["retrieval"]["backend"] == "django_rag_tables"
-    assert structured_result["retrieval"]["source_type"] == "review_case"
-    assert structured_result["retrieval"]["fallback_used"] is False
-    assert output["evidence"][0]["metadata"]["retrieval_backend"] == "django_rag_tables"
-    assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
-
-
-def test_execute_sync_text_ml_case_search_does_not_fabricate_evidence_when_rag_is_empty(
-    monkeypatch,
-):
-    from ai.agents.text_ml_case_search import agent as text_ml_agent
-
-    monkeypatch.setattr(
-        text_ml_agent,
-        "_run_fault_ratio_knowledge_agent",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        text_ml_agent,
-        "search_legal_rag",
-        lambda query, *, top_k, source_type: {
-            "contract_version": "legal_rag_search.v1",
-            "status": "empty",
-            "backend": "django_rag_tables",
-            "query": query,
-            "top_k": top_k,
-            "result_count": 0,
-            "results": [],
-            "error_code": "no_review_case_results",
-        },
-    )
-
-    execution = execute_mock_node(
-        {
-            "execution_mode": "sync",
-            "node_code": "text_ml_case_search",
-            "analysis_plan_id": "plan_sync_text_ml_empty",
-            "job_id": "job_sync_text_ml_empty",
-            "session_id": "ses_sync_text_ml_empty",
-            "message_id": "msg_sync_text_ml_empty",
-            "user_text": "교차로 접촉 사고와 유사한 판례를 찾아줘.",
-        }
-    )
-
-    output = execution["agent_output"]
-    structured_result = output["structured_result"]
-
     assert output["status"] == "partial"
     assert structured_result["similar_cases"] == []
-    assert structured_result["top_cases"] == []
-    assert structured_result["reliability_score"] == 0.0
-    assert structured_result["retrieval"]["fallback_used"] is False
+    assert structured_result["top_cases"] == structured_result["similar_cases"]
+    assert structured_result["retrieval"]["adapter_source"] == "fault_ratio_knowledge_agent"
     assert output["evidence"] == []
-    assert "heuristic" not in str(output).lower()
     assert validate_agent_output_envelope(output, expected_node_code="text_ml_case_search")["valid"]
-
-
-def test_execute_sync_text_ml_case_search_drops_malformed_rag_hits(monkeypatch):
-    from ai.agents.text_ml_case_search import agent as text_ml_agent
-
-    monkeypatch.setattr(
-        text_ml_agent,
-        "_run_fault_ratio_knowledge_agent",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        text_ml_agent,
-        "search_legal_rag",
-        lambda query, *, top_k, source_type: {
-            "contract_version": "legal_rag_search.v1",
-            "status": "ready",
-            "backend": "django_rag_tables",
-            "query": query,
-            "top_k": top_k,
-            "result_count": 4,
-            "results": [
-                {},
-                {
-                    "source_reference": " ",
-                    "source_type": "review_case",
-                    "title": "blank provenance",
-                    "summary": "must be dropped",
-                    "score": 0.9,
-                },
-                {
-                    "source_reference": "review_case:blank-content",
-                    "source_type": "review_case",
-                    "title": " ",
-                    "summary": " ",
-                    "score": 0.8,
-                },
-                {
-                    "source_reference": "review_case:bad-score",
-                    "source_type": "review_case",
-                    "title": "Bad score",
-                    "summary": "must be dropped",
-                    "score": "not-a-number",
-                },
-            ],
-        },
-    )
-
-    execution = execute_mock_node(
-        {
-            "execution_mode": "sync",
-            "node_code": "text_ml_case_search",
-            "analysis_plan_id": "plan_sync_text_ml_malformed",
-            "job_id": "job_sync_text_ml_malformed",
-            "session_id": "ses_sync_text_ml_malformed",
-            "message_id": "msg_sync_text_ml_malformed",
-            "user_text": "교차로 접촉 사고 유사 사례를 찾아줘",
-        }
-    )
-
-    output = execution["agent_output"]
-    assert output["status"] == "partial"
-    assert output["structured_result"]["similar_cases"] == []
-    assert output["structured_result"]["top_cases"] == []
-    assert output["structured_result"]["reliability_score"] == 0.0
-    assert output["evidence"] == []
-
-
-def test_text_ml_case_search_preserves_only_valid_rag_provenance_and_score():
-    from ai.agents.text_ml_case_search import agent as text_ml_agent
-
-    cases = text_ml_agent._cases_from_retrieval(
-        {
-            "results": [
-                {
-                    "source_reference": "review_case:missing-score",
-                    "source_type": "review_case",
-                    "title": "Missing score",
-                    "summary": "must be dropped",
-                },
-                {
-                    "source_reference": "review_case:valid-001",
-                    "source_type": "review_case",
-                    "title": "Verified intersection case",
-                    "summary": "A source-backed summary.",
-                    "score": 0.73,
-                },
-            ]
-        }
-    )
-
-    assert cases == [
-        {
-            "case_id": "review_case:valid-001",
-            "title": "Verified intersection case",
-            "summary": "A source-backed summary.",
-            "reliability_score": 0.73,
-            "source_type": "review_case",
-            "source_ref": "review_case:valid-001",
-        }
-    ]
 
 
 def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch):
@@ -1165,9 +997,9 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
                 "query_token_count": 4,
                 "match_reason": "query_term_match",
                 "_retrieval": {
-                    "backend": "django_rag_tables",
+                    "backend": "postgres_pgvector",
                     "status": "ready",
-                    "attempted_backends": ["django_rag_tables"],
+                    "attempted_backends": ["postgres_pgvector"],
                 },
             }
         ]
@@ -1219,9 +1051,9 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
         }
     ]
     assert structured_result["retrieval"] == {
-        "backend": "django_rag_tables",
+        "backend": "postgres_pgvector",
         "status": "ready",
-        "attempted_backends": ["django_rag_tables"],
+        "attempted_backends": ["postgres_pgvector"],
         "contract_version": "law_retrieval.v1",
     }
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"
@@ -1276,7 +1108,7 @@ def test_law_ground_agent_emits_canonical_provision_source_reference(monkeypatch
     assert output["evidence"][0]["source_reference"] == "law:road-traffic:5"
 
 
-def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
+def test_law_ground_search_uses_pgvector_legal_rag(monkeypatch):
     from ai.agents.law_ground_search import search as law_search
     from app.services import legal_rag_service
     from etl.legal import search as etl_search
@@ -1287,7 +1119,7 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
         "search_legal_rag",
         lambda query, *, top_k, source_type, temporal_basis, scope: {
             "status": "ready",
-            "backend": "django_rag_tables",
+                "backend": "postgres_pgvector",
             "query": query,
             "top_k": top_k,
             "results": [
@@ -1318,7 +1150,7 @@ def test_law_ground_search_falls_back_to_django_rag(monkeypatch):
     assert provisions[0]["source_type"] == "law"
     assert provisions[0]["article_no"] == "Article 32"
     assert provisions[0]["provision_text"].startswith("어린이보호구역")
-    assert provisions[0]["match_reason"] == "legal_rag_fallback:django_rag_tables"
+    assert provisions[0]["match_reason"] == "pgvector_similarity"
 
 
 def test_execute_sync_objection_report_generation_adapter_returns_form_envelope():

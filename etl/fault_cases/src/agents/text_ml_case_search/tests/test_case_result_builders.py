@@ -29,7 +29,7 @@ def _sample_evidence() -> list[dict]:
                 "claimant_final_ratio": "70",
                 "respondent_final_ratio": "30",
                 "score": 10.5,
-                "score_type": "bm25_score",
+                "score_type": "cosine_similarity",
                 "rank": 1,
                 "standard_context": {"signal_condition": "none"},
             },

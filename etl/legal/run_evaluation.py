@@ -1,4 +1,4 @@
-"""Run a local, public-law-only PostgreSQL lexical ↔ pgvector comparison."""
+"""Run a local, public-law-only PostgreSQL pgvector retrieval evaluation."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from etl.legal import evaluation, evaluation_environment
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FIXTURE = PROJECT_ROOT / "etl" / "legal" / "evaluation_fixtures" / "public_law_queries.json"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "output" / "law_ingestion" / "evaluation"
-BACKENDS = ("postgres_lexical", "postgres_pgvector")
+BACKENDS = ("postgres_pgvector",)
 MAX_RAGAS_QUERY_COUNT = 20
 RAGAS_METRIC_NAMES = (
     "context_precision",
@@ -59,7 +59,7 @@ def collect_backend_runs(
     *,
     top_k: int = 5,
 ) -> list[dict[str, Any]]:
-    """Call lexical and pgvector directly with identical resolved search filters."""
+    """Call the configured pgvector retriever with identical resolved search filters."""
 
     return [
         evaluation.normalize_backend_response(_required_text(response, "query_id"), response)
@@ -104,13 +104,6 @@ def collect_backend_responses(
                 )
             continue
 
-        lexical_response = rag_service._search_law_chunks_lexical(
-            query_text,
-            top_k=top_k,
-            source_type="law",
-            allowed_source_types=allowed_source_types,
-            effective_at=effective_at,
-        )
         vector_response = rag_service._search_pgvector(
             query_text,
             top_k=top_k,
@@ -118,12 +111,7 @@ def collect_backend_responses(
             allowed_source_types=allowed_source_types,
             effective_at=effective_at,
         )
-        responses.extend(
-            (
-                _evaluation_response(lexical_response, query_id=query_id),
-                _evaluation_response(vector_response, query_id=query_id),
-            )
-        )
+        responses.append(_evaluation_response(vector_response, query_id=query_id))
     return responses
 
 
@@ -150,7 +138,6 @@ def _safe_evaluation_error_code(value: object) -> str:
         "openai_api_key_required",
         "openai_sdk_unavailable",
         "django_apps_not_ready",
-        "no_search_tokens",
     }:
         return error_code
     normalized = error_code.lower()

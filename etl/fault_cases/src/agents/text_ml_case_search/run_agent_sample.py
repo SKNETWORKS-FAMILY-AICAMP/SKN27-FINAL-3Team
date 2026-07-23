@@ -8,11 +8,7 @@ from typing import Any
 
 from etl.fault_cases.src.agents.text_ml_case_search.agent import run_text_ml_case_search
 from etl.fault_cases.src.agents.text_ml_case_search.config import NODE_CODE
-from etl.fault_cases.src.agents.text_ml_case_search.rag.es_client import (
-    get_elasticsearch_client,
-    ping_elasticsearch,
-)
-from etl.fault_cases.src.agents.text_ml_case_search.rag.retrieval_pipeline import (
+from etl.fault_cases.src.agents.text_ml_case_search.rag.pgvector_unified_retriever import (
     DEFAULT_SEARCH_VARIANT,
 )
 
@@ -68,24 +64,16 @@ def run_agent_sample(
     *,
     agent_input: dict[str, Any],
     search_variant: str = DEFAULT_SEARCH_VARIANT,
-    skip_ping: bool = False,
 ) -> dict[str, Any]:
-    client = get_elasticsearch_client()
-    if not skip_ping and not ping_elasticsearch(client):
-        raise RuntimeError(
-            "Elasticsearch ping failed. Check docker compose, host, username, and password."
-        )
-
     return run_text_ml_case_search(
         agent_input,
-        es_client=client,
         search_variant=search_variant,
     )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run text_ml_case_search with real Elasticsearch BM25/Nori RAG.",
+        description="Run text_ml_case_search with unified pgvector RAG.",
     )
     parser.add_argument(
         "--input-json",
@@ -95,11 +83,6 @@ def parse_args() -> argparse.Namespace:
         "--search-variant",
         default=DEFAULT_SEARCH_VARIANT,
         help="Search text variant to use. Default: schema_search_text.",
-    )
-    parser.add_argument(
-        "--skip-ping",
-        action="store_true",
-        help="Skip Elasticsearch ping before running the Agent.",
     )
     parser.add_argument(
         "--compact",
@@ -118,7 +101,6 @@ def main() -> None:
     result = run_agent_sample(
         agent_input=agent_input,
         search_variant=args.search_variant,
-        skip_ping=args.skip_ping,
     )
 
     indent = None if args.compact else 2

@@ -127,10 +127,10 @@ def _agent_output(node_code: str, *, status: str = "success") -> dict:
             "retrieval": {
                 "contract_version": "law_retrieval.v1",
                 "status": "ready",
-                "backend": "django_rag_tables",
-                "attempted_backends": ["postgres_lexical", "django_rag_tables"],
+                "backend": "postgres_pgvector",
+                "attempted_backends": ["postgres_pgvector"],
             },
-            "retrieval_quality": "django_rag_tables",
+            "retrieval_quality": "postgres_pgvector",
         },
         "text_ml_case_search": {
             "query_text": "confirmed intersection collision facts",
@@ -797,7 +797,7 @@ class SupervisorReportingPipelineTests(TestCase):
         law_result = AgentResult.objects.get(job=job, node_code="law_ground_search")
         self.assertEqual(
             law_result.structured_result["retrieval"]["attempted_backends"],
-            ["postgres_lexical", "django_rag_tables"],
+            ["postgres_pgvector"],
         )
         law_api_result = next(
             item
@@ -825,10 +825,10 @@ class SupervisorReportingPipelineTests(TestCase):
         )
         self.assertEqual(retrieval_event.source_refs, ["law:1"])
         self.assertEqual(retrieval_event.metadata["retrieval_status"], "ready")
-        self.assertEqual(retrieval_event.metadata["retrieval_backend"], "django_rag_tables")
+        self.assertEqual(retrieval_event.metadata["retrieval_backend"], "postgres_pgvector")
         self.assertEqual(
             retrieval_event.metadata["attempted_backends"],
-            ["postgres_lexical", "django_rag_tables"],
+            ["postgres_pgvector"],
         )
         self.assertEqual(job_detail["report_links"][0]["report_id"], report.report_id)
         report_detail = get_report_record_detail(report.report_id)

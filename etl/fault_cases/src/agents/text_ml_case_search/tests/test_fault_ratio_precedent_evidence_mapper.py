@@ -33,10 +33,10 @@ def test_map_fault_ratio_precedent_hit_to_evidence_maps_core_fields() -> None:
     evidence = map_fault_ratio_precedent_hit_to_evidence(
         {
             "rank": 1,
-            "retriever": "fault_ratio_precedent_bm25_nori",
-            "score_type": "bm25_score",
+            "retriever": "fault_ratio_precedent_pgvector",
+            "score_type": "cosine_similarity",
             "retriever_score": 31.5,
-            "index": "precedent_fault_ratio_chunks_bm25_nori_v1",
+            "index": None,
             "case_id": "616249",
             "chunk_id": "616249:structured_1500_250:0001",
             "chunk_index": 1,

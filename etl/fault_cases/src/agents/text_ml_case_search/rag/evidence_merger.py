@@ -20,9 +20,9 @@ def merge_evidence_by_source_quota(
 ) -> dict[str, Any]:
     """Merge V2 evidence with fixed source quotas.
 
-    BM25 scores from different Elasticsearch indexes are not directly
-    comparable, so this merger keeps each source's own rank order and applies
-    a fixed quota before producing the final evidence list.
+    Scores from independent pgvector stores are not directly comparable, so
+    this merger keeps each source's own rank order and applies a fixed quota
+    before producing the final evidence list.
     """
 
     review_selected = _take_unique(

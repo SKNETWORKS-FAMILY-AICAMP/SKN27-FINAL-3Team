@@ -408,11 +408,6 @@ resource "aws_iam_role_policy" "app_data" {
         Action   = ["kms:Decrypt", "kms:Encrypt", "kms:GenerateDataKey"]
         Resource = [aws_kms_key.data.arn]
       },
-      {
-        Effect   = "Allow"
-        Action   = ["es:ESHttpGet", "es:ESHttpPost", "es:ESHttpPut"]
-        Resource = ["${aws_opensearch_domain.main.arn}/*"]
-      }
     ]
   })
 }
@@ -450,56 +445,6 @@ resource "aws_iam_role_policy" "scanner_object_promotion" {
       }
     ]
   })
-}
-
-resource "aws_opensearch_domain" "main" {
-  domain_name    = local.name
-  engine_version = "OpenSearch_3.5"
-
-  cluster_config {
-    instance_type            = var.opensearch_instance_type
-    instance_count           = 2
-    zone_awareness_enabled   = true
-    dedicated_master_enabled = false
-    zone_awareness_config { availability_zone_count = 2 }
-  }
-
-  ebs_options {
-    ebs_enabled = true
-    volume_type = "gp3"
-    volume_size = 100
-  }
-
-  encrypt_at_rest {
-    enabled    = true
-    kms_key_id = aws_kms_key.data.arn
-  }
-  node_to_node_encryption {
-    enabled = true
-  }
-  domain_endpoint_options {
-    enforce_https       = true
-    tls_security_policy = "Policy-Min-TLS-1-2-PFS-2023-10"
-  }
-  vpc_options {
-    subnet_ids         = values(aws_subnet.private)[*].id
-    security_group_ids = [aws_security_group.data.id]
-  }
-
-  access_policies = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { AWS = aws_iam_role.ecs_task.arn }
-      Action    = "es:ESHttp*"
-      Resource  = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${local.name}/*"
-    }]
-  })
-}
-
-resource "aws_opensearch_package_association" "nori" {
-  package_id  = var.opensearch_nori_package_id
-  domain_name = aws_opensearch_domain.main.domain_name
 }
 
 resource "aws_ecr_repository" "app" {
@@ -545,8 +490,6 @@ locals {
     { name = "FILE_UPLOAD_MAX_BYTES", value = "20971520" },
     { name = "FILE_MAX_ATTACHMENTS_PER_REQUEST", value = "20" },
     { name = "REPORT_STAGING_CLEANUP_LIMIT", value = "100" },
-    { name = "TEXT_ML_CASE_SEARCH_PROVIDER", value = "opensearch_aws" },
-    { name = "TEXT_ML_CASE_SEARCH_OPENSEARCH_HOST", value = "https://${aws_opensearch_domain.main.endpoint}" },
     { name = "AWS_REGION", value = var.aws_region },
     { name = "LEGAL_PROVISION_DB_ENABLED", value = "1" },
   ]
