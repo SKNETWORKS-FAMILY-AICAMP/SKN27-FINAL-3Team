@@ -26,6 +26,7 @@ def test_agent_node_registry_lists_all_integration_nodes():
 
     assert {
         "input_context_validation",
+        "attachment_document_classification",
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
@@ -37,6 +38,12 @@ def test_agent_node_registry_lists_all_integration_nodes():
     } <= node_codes
     assert {node["node_type"] for node in nodes} >= {"agent", "supervisor_internal"}
     fine_notice_node = next(node for node in nodes if node["node_code"] == "fine_notice_analysis")
+    document_classification_node = next(
+        node for node in nodes if node["node_code"] == "attachment_document_classification"
+    )
+    assert document_classification_node["status"] == "sync_adapter_ready"
+    assert document_classification_node["adapter_modes"] == ["sync"]
+    assert document_classification_node["adapter_contract"]["execution_modes"] == ["sync"]
     assert fine_notice_node["status"] == "sync_adapter_ready"
     assert "sync" in fine_notice_node["adapter_modes"]
     text_ml_node = next(node for node in nodes if node["node_code"] == "text_ml_case_search")
@@ -71,6 +78,7 @@ def test_no_public_agent_advertises_mock_execution():
     }
 
     for node_code in {
+        "attachment_document_classification",
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
@@ -87,6 +95,7 @@ def test_public_agent_registry_includes_every_sync_runtime_agent():
     public_codes = {node["node_code"] for node in list_public_agent_nodes()}
 
     assert public_codes == {
+        "attachment_document_classification",
         "fine_notice_analysis",
         "law_ground_search",
         "text_ml_case_search",
@@ -95,6 +104,73 @@ def test_public_agent_registry_includes_every_sync_runtime_agent():
         "appeal_decision_flow",
         "objection_report_generation",
     }
+
+
+def test_document_classification_node_reads_only_canonical_attachment_and_keeps_output_safe(monkeypatch):
+    from app.services import attachment_document_classification_adapter as adapter
+
+    storage_uri = "s3://clean-bucket/canonical/uploads/usr/ses_document/att_document/notice.png"
+    monkeypatch.setattr(
+        agent_node_service,
+        "_attachment_object_storage_bytes",
+        lambda attachment, expected_uri: b"clean-image-bytes"
+        if attachment["attachment_id"] == "att_document" and expected_uri == storage_uri
+        else None,
+    )
+    monkeypatch.setattr(
+        adapter,
+        "classify_document_bytes",
+        lambda _bytes, _content_type: {
+            "status": "success",
+            "structured_result": {
+                "classification": "accident_evidence",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+                "next_action": "confirm_classification",
+            },
+            "evidence": [],
+            "next_actions": ["confirm_classification"],
+            "limitations": [],
+        },
+    )
+
+    execution = execute_agent_node(
+        {
+            "node_code": "attachment_document_classification",
+            "session_id": "ses_document",
+            "message_id": "msg_document",
+            "attachments": [
+                {
+                    "attachment_id": "att_document",
+                    "type": "image",
+                    "content_type": "image/png",
+                    "metadata_source": "canonical_scan_gate",
+                    "resolution_status": "scan_ready",
+                    "status": "ready",
+                    "scan_status": "clean",
+                    "storage_uri": storage_uri,
+                    "object_storage": {
+                        "resource_type": "uploaded_file",
+                        "status": "ready",
+                        "storage_uri": storage_uri,
+                    },
+                }
+            ],
+        }
+    )
+
+    output = execution["agent_output"]
+    assert execution["execution_mode"] == "sync"
+    assert output["status"] == "success"
+    assert output["structured_result"]["attachment_id"] == "att_document"
+    assert output["structured_result"]["adapter_trace"]["input_source"] == (
+        "canonical_scan_ready_image_or_pdf"
+    )
+    assert "s3://" not in str(output)
+    assert validate_agent_output_envelope(
+        output,
+        expected_node_code="attachment_document_classification",
+    )["valid"]
 
 
 def test_sync_reporting_payload_exposes_document_cards_without_generic_download_action():

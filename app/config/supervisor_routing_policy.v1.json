@@ -54,6 +54,12 @@
       "agent_result_validation",
       "final_response_merge"
     ],
+    "attachment_document_classification": [
+      "input_context_validation",
+      "attachment_document_classification",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
     "fine_notice_analysis": [
       "input_context_validation",
       "fine_notice_analysis",
@@ -117,6 +123,7 @@
   },
   "public_agent_node_codes": [
     "appeal_decision_flow",
+    "attachment_document_classification",
     "fine_notice_analysis",
     "law_ground_search",
     "objection_report_generation",

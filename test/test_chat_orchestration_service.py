@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+from app.services.attachment_mock_service import CANONICAL_SCAN_GATE_MARKER
 from app.services.agent_node_service import execute_agent_plan
 from app.services.chat_orchestration_service import compose_agent_response, submit_message
 from app.services.supervisor_llm_service import validate_slot_filling_state
@@ -81,6 +82,63 @@ def test_fine_notice_message_queues_supervisor_boundaries_and_supported_real_age
     assert response["assistant_message"] is None
     assert "vision_media_analysis" not in str(response)
     assert "mock" not in str(response).lower()
+
+
+def test_canonical_scan_ready_image_or_pdf_queues_document_classification_before_declared_purpose() -> None:
+    storage_uri = "s3://clean-bucket/canonical/uploads/usr/ses_document/att_document/notice.pdf"
+    response = submit_message(
+        {
+            "session_id": "ses_document_classification",
+            "user_text": "첨부 자료를 확인해 주세요.",
+            "attachments": [
+                {
+                    "_canonical_scan_gate": CANONICAL_SCAN_GATE_MARKER,
+                    "attachment_id": "att_document",
+                    "purpose": "fine_notice",
+                    "type": "pdf",
+                    "content_type": "application/pdf",
+                    "status": "ready",
+                    "scan_status": "clean",
+                    "resolution_status": "scan_ready",
+                    "storage_uri": storage_uri,
+                    "object_storage": {
+                        "resource_type": "uploaded_file",
+                        "status": "ready",
+                        "storage_uri": storage_uri,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert response["routing_intent"] == "attachment_document_classification"
+    assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
+        "input_context_validation",
+        "attachment_document_classification",
+        "agent_result_validation",
+        "final_response_merge",
+    ]
+
+
+def test_traffic_accident_confirmation_keeps_its_specialized_ocr_route() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_specialized_ocr",
+            "user_text": "사실확인서를 읽어 주세요.",
+            "attachments": [
+                {
+                    "attachment_id": "att_confirmation",
+                    "purpose": "traffic_accident_confirmation",
+                    "type": "image",
+                    "content_type": "image/png",
+                    "status": "ready",
+                    "scan_status": "clean",
+                }
+            ],
+        }
+    )
+
+    assert response["routing_intent"] == "traffic_accident_confirmation_ocr"
 
 
 def test_confirmed_ocr_fields_enable_law_and_appeal_only_after_first_pass() -> None:

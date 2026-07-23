@@ -44,6 +44,17 @@ from app.services.supervisor_routing_service import PUBLIC_AGENT_NODE_CODES
 
 DL_MOCK_NODE_CODES: set[str] = set()
 REPORTING_NODE_CODE = "objection_report_generation"
+ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE = "attachment_document_classification"
+DOCUMENT_CLASSIFICATION_CONTENT_TYPES = frozenset(
+    {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+)
+DOCUMENT_CLASSIFICATION_ERROR_CODES = frozenset(
+    {
+        "attachment_not_scan_ready",
+        "attachment_unavailable",
+        "document_classification_failed",
+    }
+)
 TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE = "traffic_accident_confirmation_ocr"
 TRAFFIC_ACCIDENT_CONFIRMATION_ATTACHMENT_PURPOSE = "traffic_accident_confirmation"
 TRAFFIC_ACCIDENT_CONFIRMATION_REQUIRED_ATTACHMENT = (
@@ -83,7 +94,12 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "사용자 명령문, 첨부 목적, 입력 modality를 정리하고 필수 입력 누락을 확인한다.",
         "required_inputs": ["user_text|attachments"],
         "produces": ["input_summary", "routing_hints", "missing_fields"],
-        "handoff_to": ["fine_notice_analysis", "text_ml_case_search", "vision_media_analysis"],
+        "handoff_to": [
+            ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE,
+            "fine_notice_analysis",
+            "text_ml_case_search",
+            "vision_media_analysis",
+        ],
         "status": "internal_ready",
     },
     "consultation_fact_state_reducer": {
@@ -120,6 +136,19 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
         "required_inputs": ["attachments[purpose=fine_notice]|user_text"],
         "produces": ["fine_notice_analysis", "notice_fields", "required_documents"],
         "handoff_to": ["law_ground_search", "appeal_decision_flow"],
+        "status": "sync_adapter_ready",
+        "adapter_modes": ["sync"],
+    },
+    ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE: {
+        "order": 25,
+        "node_name": "Attachment document classification",
+        "node_code": ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE,
+        "node_type": "agent",
+        "owner": "hi20260204-maker",
+        "description": "Classifies one clean image/PDF as a fine notice, accident evidence, or unknown without returning document text.",
+        "required_inputs": ["attachments[image|pdf, canonical_scan_ready]"],
+        "produces": ["classification", "confidence_band", "requires_confirmation"],
+        "handoff_to": ["fine_notice_analysis", "consultation_fact_state_reducer"],
         "status": "sync_adapter_ready",
         "adapter_modes": ["sync"],
     },
@@ -229,6 +258,7 @@ NODE_REGISTRY: dict[str, dict[str, Any]] = {
 
 PRODUCTION_AGENT_TIMEOUT_SECONDS = {
     "appeal_decision_flow": 120,
+    ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE: 60,
     "fine_notice_analysis": 120,
     "law_ground_search": 30,
     "objection_report_generation": 30,
@@ -705,6 +735,7 @@ def _build_plan_step_payload(
 def _sync_adapter_node_codes() -> set[str]:
     return {
         "appeal_decision_flow",
+        ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE,
         "fine_notice_analysis",
         "law_ground_search",
         "objection_report_generation",
@@ -1245,6 +1276,8 @@ def _run_sync_adapter(
     adapter_context: dict[str, Any],
 ) -> dict[str, Any]:
     node_code = str(agent_input.get("node_code") or "")
+    if node_code == ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE:
+        return _run_attachment_document_classification_adapter(agent_input, adapter_context)
     if node_code == "vision_media_analysis":
         return _run_vision_media_analysis_adapter(agent_input, adapter_context)
     if node_code == "appeal_decision_flow":
@@ -1262,6 +1295,143 @@ def _run_sync_adapter(
     if node_code == TRAFFIC_ACCIDENT_CONFIRMATION_OCR_NODE_CODE:
         return _run_traffic_accident_confirmation_ocr_adapter(agent_input, adapter_context)
     raise RuntimeError(f"sync_adapter_unregistered:{node_code}")
+
+
+def _run_attachment_document_classification_adapter(
+    agent_input: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    attachment = next(
+        (
+            item
+            for item in agent_input.get("attachments") or []
+            if isinstance(item, dict) and _is_scan_ready_classification_attachment(item)
+        ),
+        None,
+    )
+    adapter_trace = {
+        "adapter": "app.services.attachment_document_classification_adapter.classify_document_bytes",
+        "execution_mode": "sync",
+        "input_source": "canonical_scan_ready_image_or_pdf",
+    }
+    if attachment is None:
+        raw_output = _document_classification_failure("attachment_not_scan_ready")
+    else:
+        storage_uri = str(attachment.get("storage_uri") or "")
+        file_bytes = _attachment_object_storage_bytes(attachment, storage_uri)
+        if not file_bytes:
+            raw_output = _document_classification_failure("attachment_unavailable")
+        else:
+            try:
+                from app.services.attachment_document_classification_adapter import (
+                    classify_document_bytes,
+                )
+
+                raw_output = classify_document_bytes(
+                    file_bytes,
+                    str(attachment.get("content_type") or ""),
+                )
+            except Exception:
+                raw_output = _document_classification_failure("document_classification_failed")
+
+    raw_output = _safe_document_classification_output(
+        raw_output,
+        attachment_id=str(attachment.get("attachment_id") or "") if attachment else "",
+    )
+    adapter_trace["source_status"] = raw_output["status"]
+    return _complete_adapter_output(
+        raw_output,
+        node=adapter_context["node"],
+        agent_input=agent_input,
+        adapter_trace=adapter_trace,
+    )
+
+
+def _is_scan_ready_classification_attachment(attachment: dict[str, Any]) -> bool:
+    storage_uri = str(attachment.get("storage_uri") or "")
+    object_storage = attachment.get("object_storage")
+    return bool(
+        attachment.get("metadata_source") == "canonical_scan_gate"
+        and attachment.get("resolution_status") == "scan_ready"
+        and attachment.get("status") == "ready"
+        and attachment.get("scan_status") == "clean"
+        and attachment.get("type") in {"image", "pdf"}
+        and str(attachment.get("content_type") or "").lower()
+        in DOCUMENT_CLASSIFICATION_CONTENT_TYPES
+        and storage_uri.startswith("s3://")
+        and isinstance(object_storage, dict)
+        and object_storage.get("resource_type") == "uploaded_file"
+        and object_storage.get("status") == "ready"
+        and object_storage.get("storage_uri") == storage_uri
+    )
+
+
+def _document_classification_failure(error_code: str) -> dict[str, Any]:
+    return {
+        "status": "failed",
+        "structured_result": {"error_code": error_code},
+        "evidence": [],
+        "next_actions": ["retry_upload"],
+        "limitations": ["Document classification could not be completed safely."],
+    }
+
+
+def _safe_document_classification_output(
+    value: Any,
+    *,
+    attachment_id: str,
+) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    structured = raw.get("structured_result") if isinstance(raw.get("structured_result"), dict) else {}
+    error_code = str(structured.get("error_code") or "")
+    if error_code and error_code not in DOCUMENT_CLASSIFICATION_ERROR_CODES:
+        error_code = "document_classification_failed"
+
+    classification = str(structured.get("classification") or "unknown")
+    confidence_band = str(structured.get("confidence_band") or "low")
+    if classification not in {"fine_notice", "accident_evidence"}:
+        classification = "unknown"
+    if confidence_band not in {"high", "medium", "low"}:
+        confidence_band = "low"
+
+    if error_code:
+        status = "failed"
+        next_action = "retry_upload"
+        requires_confirmation = False
+        classification = "unknown"
+        confidence_band = "low"
+    elif classification == "unknown" or confidence_band == "low":
+        status = "partial"
+        next_action = "change_purpose"
+        requires_confirmation = False
+    else:
+        status = "success"
+        next_action = "confirm_classification"
+        requires_confirmation = True
+
+    safe_result: dict[str, Any] = {
+        "classification": classification,
+        "confidence_band": confidence_band,
+        "requires_confirmation": requires_confirmation,
+        "next_action": next_action,
+        "attachment_id": attachment_id,
+    }
+    if error_code:
+        safe_result["error_code"] = error_code
+    return {
+        "status": status,
+        "summary": "Attachment document classification completed."
+        if status == "success"
+        else "Attachment document classification needs a safe follow-up action.",
+        "structured_result": sanitize_pii(safe_result),
+        "evidence": [],
+        "next_actions": [next_action],
+        "limitations": (
+            []
+            if status == "success"
+            else ["Document classification did not produce a confirmed category."]
+        ),
+    }
 
 
 def _run_vision_media_analysis_adapter(

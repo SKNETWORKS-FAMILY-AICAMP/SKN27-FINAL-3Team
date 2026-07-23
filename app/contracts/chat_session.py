@@ -35,6 +35,13 @@ class OcrConfirmationRequest(ChatContractRequest):
     fields: OcrConfirmationFields = Field(default_factory=OcrConfirmationFields)
 
 
+class AttachmentClassificationConfirmationRequest(ChatContractRequest):
+    """Confirm a server-owned attachment classification by attachment ID only."""
+
+    confirmed: bool = False
+    attachment_id: str = Field(min_length=1, max_length=64)
+
+
 class ChatMessageRequest(ChatContractRequest):
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
     user_text: str | None = Field(default=None, min_length=1)
@@ -45,6 +52,7 @@ class ChatMessageRequest(ChatContractRequest):
     routing_intent: str | None = Field(default=None, min_length=1, max_length=120)
     case_storage_consent: bool | None = None
     ocr_confirmation: OcrConfirmationRequest | None = None
+    attachment_classification_confirmation: AttachmentClassificationConfirmationRequest | None = None
 
 
 class ChatSaveStateRequest(ChatContractRequest):
