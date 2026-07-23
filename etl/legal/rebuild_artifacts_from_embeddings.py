@@ -5,11 +5,17 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
 import yaml
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from etl.legal.ingestion.reporter import build_run_summary, sha256_version
 
 
 DEFAULT_MANIFEST = Path("etl/legal/manifests/traffic_law_manifest.yaml")
@@ -67,6 +73,8 @@ def rebuild_artifacts(
 
     versions: dict[str, dict] = {}
     chunk_type_counts: dict[str, int] = {}
+    source_chunk_counts: dict[str, int] = {}
+    source_chunk_evidence: dict[str, list[str]] = {}
     relation_count = 0
     total_chunks = 0
 
@@ -107,6 +115,12 @@ def rebuild_artifacts(
             write_jsonl_row(searchable_handle, chunk)
             total_chunks += 1
             chunk_type_counts[chunk["chunk_type"]] = chunk_type_counts.get(chunk["chunk_type"], 0) + 1
+            source_chunk_counts[parsed["source_id"]] = (
+                source_chunk_counts.get(parsed["source_id"], 0) + 1
+            )
+            source_chunk_evidence.setdefault(parsed["source_id"], []).append(
+                f"{chunk['chunk_id']}:{chunk.get('content_hash') or ''}"
+            )
 
             if chunk["chunk_type"] == "article":
                 relation = {
@@ -122,44 +136,61 @@ def rebuild_artifacts(
                 relation_count += 1
 
     sorted_versions = sorted(versions.values(), key=lambda row: (row["source_id"], row["enforce_date"], row["mst"]))
+    raw_records = build_raw_records(sorted_versions, sources_by_id)
     write_jsonl(output_dir / "normalized" / "legal_sources.jsonl", sources)
     write_jsonl(output_dir / "normalized" / "legal_source_versions.jsonl", sorted_versions)
-    write_jsonl(output_dir / "normalized" / "raw_law_documents.jsonl", build_raw_records(sorted_versions, sources_by_id))
+    write_jsonl(output_dir / "normalized" / "raw_law_documents.jsonl", raw_records)
     write_jsonl(extra_relations_path, [])
 
-    run_summary = {
-        "run_id": f"legal_embedding_baseline:{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
-        "mode": "rebuild_from_embedding_baseline",
-        "status": "success",
-        "total_sources": len(sources),
-        "total_versions": len(sorted_versions),
-        "total_raw_documents": len(sorted_versions),
+    quality_report = {
         "total_chunks": total_chunks,
         "searchable_chunks": total_chunks,
         "failed_chunks": 0,
-        "partial_chunks": 0,
-        "relation_count": relation_count,
-        "extra_relation_count": 0,
-        "embedding_input_count": total_chunks,
-        "embedding_baseline_path": str(embeddings_path),
-        "started_at": started_at,
-        "finished_at": datetime.now(timezone.utc).isoformat(),
-        "limitations": [
-            "chunk metadata was reconstructed from chunk_id and embedding_text because the original 99,590-row law_chunks artifact was not present",
-            "source URLs are stable law.go.kr lookup URLs, not exact per-version document URLs",
-        ],
+        "status_counts": {"validated": total_chunks},
+        "chunk_type_counts": chunk_type_counts,
     }
-    write_json(output_dir / "reports" / "run_summary.json", run_summary)
-    write_json(
-        output_dir / "reports" / "quality_report.json",
-        {
-            "total_chunks": total_chunks,
-            "searchable_chunks": total_chunks,
-            "failed_chunks": 0,
-            "status_counts": {"validated": total_chunks},
-            "chunk_type_counts": chunk_type_counts,
-        },
+    source_summaries = _build_rebuild_source_summaries(
+        sources=sources,
+        versions=sorted_versions,
+        source_chunk_counts=source_chunk_counts,
+        source_chunk_evidence=source_chunk_evidence,
+        verified_at=datetime.now(timezone.utc).isoformat(),
     )
+    dataset_version = sha256_version(
+        [
+            f"{row['source_id']}:{row['data_version']}"
+            for row in source_summaries
+        ]
+    )
+    count_placeholders = [{}] * total_chunks
+    run_summary = build_run_summary(
+        run_id=(
+            "legal_embedding_baseline:"
+            f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        ),
+        mode="rebuild_from_embedding_baseline",
+        sources=sources,
+        versions=sorted_versions,
+        raw_records=raw_records,
+        chunks=count_placeholders,
+        searchable_chunks=count_placeholders,
+        relations=[{}] * relation_count,
+        embedding_inputs=count_placeholders,
+        quality_report=quality_report,
+        failed_items=[],
+        started_at=started_at,
+        source_summaries=source_summaries,
+        dataset_version=dataset_version,
+    )
+    if any(row["status"] != "success" for row in source_summaries):
+        run_summary["status"] = "partial" if total_chunks else "failed"
+    run_summary["embedding_baseline_path"] = str(embeddings_path)
+    run_summary["limitations"] = [
+        "chunk metadata was reconstructed from chunk_id and embedding_text because the original 99,590-row law_chunks artifact was not present",
+        "source URLs are stable law.go.kr lookup URLs, not exact per-version document URLs",
+    ]
+    write_json(output_dir / "reports" / "run_summary.json", run_summary)
+    write_json(output_dir / "reports" / "quality_report.json", quality_report)
     write_json(
         output_dir / "reports" / "coverage_report.json",
         {
@@ -173,6 +204,56 @@ def rebuild_artifacts(
     )
     write_jsonl(output_dir / "reports" / "ingestion_log.jsonl", [])
     return run_summary
+
+
+def _build_rebuild_source_summaries(
+    *,
+    sources: list[dict],
+    versions: list[dict],
+    source_chunk_counts: dict[str, int],
+    source_chunk_evidence: dict[str, list[str]],
+    verified_at: str,
+) -> list[dict]:
+    rows = []
+    for source in sorted(sources, key=lambda item: item["source_id"]):
+        source_id = source["source_id"]
+        source_versions = [
+            row for row in versions if row.get("source_id") == source_id
+        ]
+        effective_dates = sorted(
+            str(row["enforce_date"])
+            for row in source_versions
+            if row.get("enforce_date")
+        )
+        chunk_count = source_chunk_counts.get(source_id, 0)
+        status = "success" if source_versions and chunk_count else "missing"
+        rows.append(
+            {
+                "source_id": source_id,
+                "source_name": source.get("source_name"),
+                "source_type": source.get("source_type"),
+                "provider": source.get("provider"),
+                "provider_source_id": source.get("provider_source_id"),
+                "status": status,
+                "version_count": len(source_versions),
+                "raw_document_count": len(source_versions),
+                "chunk_count": chunk_count,
+                "searchable_chunk_count": chunk_count,
+                "first_effective_at": effective_dates[0] if effective_dates else None,
+                "last_effective_at": effective_dates[-1] if effective_dates else None,
+                "collected_at": None,
+                "last_verified_at": verified_at if status == "success" else None,
+                "data_version": sha256_version(
+                    [
+                        str(row.get("source_version_id") or "")
+                        for row in source_versions
+                    ]
+                    + source_chunk_evidence.get(source_id, [])
+                ),
+                "errors": [],
+            }
+        )
+    return rows
 
 
 def load_sources(manifest_path: Path) -> list[dict]:
