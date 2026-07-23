@@ -2828,6 +2828,23 @@ components:
       - error
       title: ChatApiErrorResponse
       type: object
+    AttachmentClassificationConfirmationRequest:
+      additionalProperties: false
+      description: Confirm a server-owned attachment classification by attachment ID only.
+      properties:
+        confirmed:
+          default: false
+          title: Confirmed
+          type: boolean
+        attachment_id:
+          maxLength: 64
+          minLength: 1
+          title: Attachment Id
+          type: string
+      required:
+      - attachment_id
+      title: AttachmentClassificationConfirmationRequest
+      type: object
     OcrConfirmationFields:
       additionalProperties: false
       description: Editable fine-notice OCR values accepted from the confirmation card.
@@ -2953,6 +2970,11 @@ components:
         ocr_confirmation:
           anyOf:
           - $ref: '#/components/schemas/OcrConfirmationRequest'
+          - type: 'null'
+          default: null
+        attachment_classification_confirmation:
+          anyOf:
+          - $ref: '#/components/schemas/AttachmentClassificationConfirmationRequest'
           - type: 'null'
           default: null
       title: ChatMessageRequest
