@@ -15,6 +15,7 @@ ANALYSIS_TEXT_FIELDS = (
     "facts",
     "fact_sources",
     "fact_conflicts",
+    "ocr_confirmation",
     "context",
     "slot_state",
     "upstream_results",

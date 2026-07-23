@@ -2689,6 +2689,26 @@ def _file_upload_validation_response(
     *,
     reason: str,
 ) -> JsonResponse:
+    message, required_action = {
+        "session_id_required": (
+            "A bound chat session is required for file uploads.",
+            "create_or_select_session",
+        ),
+        "unsupported_media_type": (
+            "This file type is not supported. Choose a JPEG, PNG, WebP, PDF, MP4, or MOV file.",
+            "select_supported_file",
+        ),
+        "purpose_media_mismatch": (
+            "The selected file type does not match its analysis purpose.",
+            "select_matching_file_or_purpose",
+        ),
+    }.get(
+        reason,
+        (
+            "The file upload request is invalid. Review the selected file and try again.",
+            "review_upload_request",
+        ),
+    )
     return _json_response(
         request,
         {
@@ -2697,8 +2717,8 @@ def _file_upload_validation_response(
                 "type": "validation",
                 "code": reason,
                 "status": 400,
-                "message": "A bound chat session is required for file uploads.",
-                "required_action": "create_or_select_session",
+                "message": message,
+                "required_action": required_action,
             }
         },
         status=400,

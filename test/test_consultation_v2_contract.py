@@ -55,6 +55,18 @@ def test_frontend_uses_canonical_capability_and_async_result_contracts() -> None
     assert "/scan/" not in api_client
 
 
+def test_chat_attachment_bar_has_one_accessible_dropzone_for_vision_and_ocr() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    styles = read_text(ROOT / "app" / "web" / "styles.css")
+
+    assert 'className="attachment-dropzone"' in shell
+    assert 'role="status"' in shell
+    assert "영상은 Vision 분석" in shell
+    assert "이미지와 PDF는 OCR 분류" in shell
+    assert "onAttachmentFile(event.target.files?.[0] || null)" in shell
+    assert ".chat-attachment-bar .attachment-dropzone" in styles
+
+
 def test_chat_report_ready_notice_uses_a_locally_declared_gated_payload() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     chat_start = shell.index("function ChatScreenV2(")

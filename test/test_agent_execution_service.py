@@ -261,7 +261,7 @@ def test_non_supervisor_plan_preserves_server_checkpoint_upstream_results(run_ad
     run_adapter.assert_not_called()
 
 
-def test_production_plan_allows_mock_execution_only_for_dl_agent() -> None:
+def test_production_plan_runs_vision_through_the_sync_adapter() -> None:
     result = execute_agent_plan(
         {
             "plan_id": "plan_1",
@@ -280,10 +280,11 @@ def test_production_plan_allows_mock_execution_only_for_dl_agent() -> None:
     )
 
     execution = result["executions"][0]
-    assert result["execution_mode"] == "dl_mock"
+    assert result["execution_mode"] == "sync"
     assert execution["node_code"] == "vision_media_analysis"
-    assert execution["execution_mode"] == "mock"
-    assert execution["agent_output"]["status"] in {"success", "partial"}
+    assert execution["execution_mode"] == "sync"
+    assert execution["agent_output"]["status"] == "partial"
+    assert execution["agent_output"]["structured_result"]["error_code"] == "attachment_not_scan_ready"
 
 
 @patch("app.services.agent_node_service._run_sync_adapter")

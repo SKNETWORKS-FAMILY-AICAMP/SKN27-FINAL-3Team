@@ -2828,6 +2828,83 @@ components:
       - error
       title: ChatApiErrorResponse
       type: object
+    AttachmentClassificationConfirmationRequest:
+      additionalProperties: false
+      description: Confirm a server-owned attachment classification by attachment ID only.
+      properties:
+        confirmed:
+          default: false
+          title: Confirmed
+          type: boolean
+        attachment_id:
+          maxLength: 64
+          minLength: 1
+          title: Attachment Id
+          type: string
+      required:
+      - attachment_id
+      title: AttachmentClassificationConfirmationRequest
+      type: object
+    OcrConfirmationFields:
+      additionalProperties: false
+      description: Editable fine-notice OCR values accepted from the confirmation card.
+      properties:
+        fine_type:
+          anyOf:
+          - maxLength: 120
+            type: string
+          - type: 'null'
+          default: null
+          title: Fine Type
+        notice_stage:
+          anyOf:
+          - maxLength: 120
+            type: string
+          - type: 'null'
+          default: null
+          title: Notice Stage
+        law_code:
+          anyOf:
+          - maxLength: 120
+            type: string
+          - type: 'null'
+          default: null
+          title: Law Code
+        violation_text:
+          anyOf:
+          - maxLength: 1000
+            type: string
+          - type: 'null'
+          default: null
+          title: Violation Text
+        opinion_deadline:
+          anyOf:
+          - maxLength: 120
+            type: string
+          - type: 'null'
+          default: null
+          title: Opinion Deadline
+        issuing_authority:
+          anyOf:
+          - maxLength: 240
+            type: string
+          - type: 'null'
+          default: null
+          title: Issuing Authority
+      title: OcrConfirmationFields
+      type: object
+    OcrConfirmationRequest:
+      additionalProperties: false
+      description: One-time explicit confirmation used to unlock fine-notice follow-up.
+      properties:
+        confirmed:
+          default: false
+          title: Confirmed
+          type: boolean
+        fields:
+          $ref: '#/components/schemas/OcrConfirmationFields'
+      title: OcrConfirmationRequest
+      type: object
     ChatMessageRequest:
       additionalProperties: false
       properties:
@@ -2890,6 +2967,16 @@ components:
           - type: 'null'
           default: null
           title: Case Storage Consent
+        ocr_confirmation:
+          anyOf:
+          - $ref: '#/components/schemas/OcrConfirmationRequest'
+          - type: 'null'
+          default: null
+        attachment_classification_confirmation:
+          anyOf:
+          - $ref: '#/components/schemas/AttachmentClassificationConfirmationRequest'
+          - type: 'null'
+          default: null
       title: ChatMessageRequest
       type: object
     ChatMessageResponse:

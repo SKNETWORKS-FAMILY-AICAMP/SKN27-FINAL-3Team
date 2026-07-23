@@ -82,6 +82,13 @@ def _report_ready_chat_response(*, session_id: str, message_id: str) -> dict:
         routing_intent="fine_notice_analysis",
         supervisor_state=supervisor_state,
         report_requested=True,
+        ocr_confirmation={
+            "confirmed": True,
+            "fields": {
+                "fine_type": "fine",
+                "notice_stage": "pre_notice",
+            },
+        },
     )
     packages = [
         {
@@ -406,9 +413,9 @@ class GuestLoginSessionOwnershipE2ETests(TestCase):
                 "session_id": session_id,
                 "purpose": "fine_notice",
                 "file": SimpleUploadedFile(
-                    "guest-fine-notice.txt",
+                    "guest-fine-notice.png",
                     b"guest-owned fine notice fixture",
-                    content_type="text/plain",
+                    content_type="image/png",
                 ),
             },
         )

@@ -26,6 +26,18 @@ def test_vehicle_to_vehicle_accident_is_within_supported_scope() -> None:
     assert result["scope_code"] == "vehicle_to_vehicle_accident"
 
 
+def test_scan_ready_video_evidence_is_within_the_limited_scope() -> None:
+    result = evaluate_service_scope(
+        user_text="블랙박스 영상의 관련 근거를 정리해 주세요.",
+        attachments=[],
+        routing_intent="accident_evidence_analysis",
+    )
+
+    assert result["decision"] == "proceed"
+    assert result["scope_code"] == "vehicle_to_vehicle_video_evidence"
+    assert "과실 비율" in result["limitations"][0]
+
+
 def test_criminal_review_requires_expert_handoff() -> None:
     result = evaluate_service_scope(
         user_text="사고 상대방을 형사 고소할 수 있는지 판단해 주세요.",
