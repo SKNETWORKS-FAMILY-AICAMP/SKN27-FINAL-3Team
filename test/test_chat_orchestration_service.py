@@ -120,6 +120,47 @@ def test_canonical_scan_ready_image_or_pdf_queues_document_classification_before
     ]
 
 
+def test_confirmed_accident_photo_routes_to_search_without_video_analysis() -> None:
+    storage_uri = "s3://clean-bucket/canonical/uploads/usr/ses_photo/att_photo/scene.png"
+    response = submit_message(
+        {
+            "session_id": "ses_confirmed_accident_photo",
+            "user_text": "교차로 사고 사진과 설명을 기준으로 관련 사례와 법령을 찾아 주세요.",
+            "attachments": [
+                {
+                    "_canonical_scan_gate": CANONICAL_SCAN_GATE_MARKER,
+                    "attachment_id": "att_photo",
+                    "purpose": "accident_scene",
+                    "type": "image",
+                    "content_type": "image/png",
+                    "status": "ready",
+                    "scan_status": "clean",
+                    "resolution_status": "scan_ready",
+                    "storage_uri": storage_uri,
+                    "object_storage": {
+                        "resource_type": "uploaded_file",
+                        "status": "ready",
+                        "storage_uri": storage_uri,
+                    },
+                }
+            ],
+        },
+        routing_intent_override="accident_photo_evidence_analysis",
+    )
+
+    assert response["routing_intent"] == "accident_photo_evidence_analysis"
+    node_codes = [step["node_code"] for step in response["analysis_plan"]["steps"]]
+    assert node_codes == [
+        "input_context_validation",
+        "text_ml_case_search",
+        "law_ground_search",
+        "agent_result_validation",
+        "final_response_merge",
+    ]
+    assert "attachment_document_classification" not in node_codes
+    assert "vision_media_analysis" not in node_codes
+
+
 def test_traffic_accident_confirmation_keeps_its_specialized_ocr_route() -> None:
     response = submit_message(
         {

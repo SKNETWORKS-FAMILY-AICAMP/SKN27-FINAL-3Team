@@ -27,6 +27,15 @@ def test_chat_attachment_menu_has_explicit_supported_options() -> None:
     assert "video/mp4" in shell
 
 
+def test_ui_v3_confirms_server_classification_by_attachment_id_only() -> None:
+    shell = _shell()
+
+    assert "AttachmentClassificationConfirmationCard" in shell
+    assert "attachment_classification_confirmation" in shell
+    assert "attachmentClassificationResult?.attachment_id" in shell
+    assert "attachmentClassificationResult.classification" not in shell
+
+
 def test_chat_file_selection_uses_parent_validation_boundary() -> None:
     chat_screen = _chat_screen_source()
 

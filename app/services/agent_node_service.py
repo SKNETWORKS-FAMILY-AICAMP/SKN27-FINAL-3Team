@@ -2421,6 +2421,8 @@ def _retrieval_metadata(rag_search: dict[str, Any]) -> dict[str, Any]:
             "top_k",
             "result_count",
             "latency_ms",
+            "retrieved_at",
+            "effective_at",
             "error_code",
             "fallback_from",
             "attempted_backends",

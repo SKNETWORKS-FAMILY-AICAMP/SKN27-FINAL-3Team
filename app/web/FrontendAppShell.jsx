@@ -325,6 +325,8 @@ export default function FrontendAppShell({
     ? analysisResponse.deadline_guidance
     : null;
   const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
+  const attachmentClassificationResult =
+    analysisResponse?.structured_results?.attachment_document_classification || null;
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -1020,7 +1022,28 @@ export default function FrontendAppShell({
     });
   }
 
-  async function submitServiceMessage({ userText, ocrConfirmation } = {}) {
+  function submitAttachmentClassificationConfirmation() {
+    const attachmentId = String(attachmentClassificationResult?.attachment_id || "").trim();
+    if (!attachmentId) {
+      setStatusMessage("확인할 자료 분류를 찾지 못했습니다. 자료를 다시 첨부해 주세요.");
+      return;
+    }
+    const followUpMessage = "자료 분류를 확인했습니다. 다음 분석을 진행해 주세요.";
+    setQuestion(followUpMessage);
+    void submitServiceMessage({
+      userText: followUpMessage,
+      attachmentClassificationConfirmation: {
+        confirmed: true,
+        attachment_id: attachmentId,
+      },
+    });
+  }
+
+  async function submitServiceMessage({
+    userText,
+    ocrConfirmation,
+    attachmentClassificationConfirmation,
+  } = {}) {
     const trimmedQuestion = String(userText ?? question).trim();
     const confirmationForRequest = ocrConfirmation || pendingOcrConfirmation;
     if (!trimmedQuestion) {
@@ -1090,6 +1113,8 @@ export default function FrontendAppShell({
           conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
           user_text: trimmedQuestion,
           ocr_confirmation: confirmationForRequest || undefined,
+          attachment_classification_confirmation:
+            attachmentClassificationConfirmation || undefined,
           execution_mode: executionMode,
           conversation_history: conversationHistory,
           attachments: registeredAttachments.map((attachment) => ({
@@ -1512,6 +1537,7 @@ export default function FrontendAppShell({
               onAttachmentDrop={handleAttachmentDrop}
               onAttachmentFile={handleAttachmentFile}
               onConfirmOcr={submitOcrConfirmation}
+              onConfirmAttachmentClassification={submitAttachmentClassificationConfirmation}
               onOcrFieldChange={updateOcrConfirmationField}
               onKeepTemporary={keepConversationTemporary}
               onRegisterAttachment={registerAttachmentMetadata}
@@ -1523,6 +1549,7 @@ export default function FrontendAppShell({
               pendingAuthAction={pendingAuthAction}
               ocrConfirmationFields={ocrConfirmationFields}
               ocrResult={ocrResult}
+              attachmentClassificationResult={attachmentClassificationResult}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
@@ -1559,6 +1586,7 @@ export default function FrontendAppShell({
               reportActionStatus={reportActionStatus}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
+              userClaims={analysisResponse?.user_claims || []}
             />
           )}
 
@@ -2305,6 +2333,7 @@ function ConversationSidebar({
 
 function ChatScreenV2({
   analysisCards,
+  attachmentClassificationResult,
   attachmentOptions,
   assistantAnswer,
   assistantFollowUp,
@@ -2316,6 +2345,7 @@ function ChatScreenV2({
   onAttachmentDragOver,
   onAttachmentDrop,
   onAttachmentFile,
+  onConfirmAttachmentClassification,
   onConfirmOcr,
   onOcrFieldChange,
   onOpenCaseResult,
@@ -2524,6 +2554,15 @@ function ChatScreenV2({
             />
           )}
 
+          {attachmentClassificationResult?.requires_confirmation === true && (
+            <AttachmentClassificationConfirmationCard
+              classification={attachmentClassificationResult?.classification}
+              confidenceBand={attachmentClassificationResult?.confidence_band}
+              isSubmitting={isSubmitting}
+              onConfirm={onConfirmAttachmentClassification}
+            />
+          )}
+
           <div className="quick-row" aria-label="빠른 질문">
             {quickQuestions.map((item) => (
               <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
@@ -2649,6 +2688,32 @@ function OcrConfirmationCard({ fields, isSubmitting, onChange, onConfirm }) {
   );
 }
 
+function AttachmentClassificationConfirmationCard({
+  classification,
+  confidenceBand,
+  isSubmitting,
+  onConfirm,
+}) {
+  const classificationLabel =
+    classification === "fine_notice" ? "고지서·행정 문서" : "사고 현장·증거 사진";
+  const confidenceLabel = confidenceBand === "high" ? "높음" : "보통";
+  return (
+    <section className="ocr-confirmation-card" aria-label="자료 분류 확인">
+      <div>
+        <span className="eyebrow">자료 분류 확인</span>
+        <strong>{classificationLabel}(으)로 분류했습니다.</strong>
+        <p>
+          분류 신뢰도 {confidenceLabel} · 확인 후에만 자료 종류에 맞는 OCR 또는 근거 검색을
+          진행합니다.
+        </p>
+      </div>
+      <button className="button primary" type="button" onClick={onConfirm} disabled={isSubmitting}>
+        자료 분류 확인 후 다음 분석 진행
+      </button>
+    </section>
+  );
+}
+
 function MissingFieldsPrompt({ supervisorState }) {
   const questions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
   if (!questions.length) {
@@ -2683,7 +2748,10 @@ function FollowUpNote({ followUp }) {
           <span className="follow-up-group-label">꼭 필요해요</span>
           <ul>
             {requiredItems.map((item, index) => (
-              <li key={item.label || index}>{item.label}</li>
+              <li key={item.label || index}>
+                {item.label}
+                {item.reason && <small>{item.reason}</small>}
+              </li>
             ))}
           </ul>
         </div>
@@ -2693,7 +2761,10 @@ function FollowUpNote({ followUp }) {
           <span className="follow-up-group-label">알려주시면 더 좋아요</span>
           <ul>
             {optionalItems.map((item, index) => (
-              <li key={item.label || index}>{item.label}</li>
+              <li key={item.label || index}>
+                {item.label}
+                {item.reason && <small>{item.reason}</small>}
+              </li>
             ))}
           </ul>
         </div>
@@ -2782,7 +2853,9 @@ function LawGroundInsightPanel({ node, compact = false }) {
   const retrieval = structuredResult.retrieval || {};
   const matchedLaws = Array.isArray(structuredResult.matched_laws)
     ? structuredResult.matched_laws
-    : [];
+    : Array.isArray(structuredResult.law_provisions)
+      ? structuredResult.law_provisions
+      : [];
   const attemptedBackends = Array.isArray(retrieval.attempted_backends)
     ? retrieval.attempted_backends
     : [];
@@ -2812,14 +2885,34 @@ function LawGroundInsightPanel({ node, compact = false }) {
           <strong>{matchedLaws.length}건</strong>
         </p>
       </div>
+      {retrieval.retrieved_at && (
+        <p className="agent-insight-timestamp">
+          조회 시각: {formatDateTime(retrieval.retrieved_at)}
+          {retrieval.effective_at ? ` · 적용 기준일: ${formatDate(retrieval.effective_at)}` : ""}
+        </p>
+      )}
       {matchedLaws.length > 0 && (
         <div className="agent-insight-section">
           <strong>관련 법령 후보</strong>
           {matchedLaws.slice(0, compact ? 2 : 4).map((item, index) => (
             <p key={item.source_reference || `law-ground-${index}`}>
-              <strong>{compactValue([item.law_name || item.title, item.article].filter(Boolean).join(" "))}</strong>
-              {item.summary && <span>{compactValue(item.summary)}</span>}
+              <strong>
+                {compactValue(
+                  [
+                    item.law_name || item.source_name || item.title || item.article_title,
+                    item.article || item.article_no,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                )}
+              </strong>
+              {(item.summary || item.provision_text) && (
+                <span>{compactValue(item.summary || item.provision_text)}</span>
+              )}
               <small>출처: {compactValue(item.source_reference)}</small>
+              {(item.effective_date || item.enforce_date) && (
+                <small>시행 기준일: {formatDate(item.effective_date || item.enforce_date)}</small>
+              )}
             </p>
           ))}
         </div>
@@ -3378,6 +3471,43 @@ function ServiceInformationNotice() {
   return <aside className="service-information-notice" role="note">{SERVICE_INFORMATION_NOTICE}</aside>;
 }
 
+function EvidenceBoundaryPanel({ facts = [], userClaims = [] }) {
+  if (!facts.length && !userClaims.length) {
+    return null;
+  }
+  return (
+    <section className="evidence-boundary-panel" aria-label="사실과 사용자 진술 구분">
+      <div>
+        <span className="eyebrow">현재 확인된 사실</span>
+        {facts.length > 0 ? (
+          facts.slice(0, 5).map((fact, index) => (
+            <p key={`${fact.field || fact.label || "fact"}-${index}`}>
+              <strong>{fact.field || fact.label || "확인 항목"}</strong>
+              <span>{compactValue(fact.value || fact.description || fact)}</span>
+            </p>
+          ))
+        ) : (
+          <p>첨부 자료나 추가 확인을 통해 사실관계를 보완해야 합니다.</p>
+        )}
+      </div>
+      <div>
+        <span className="eyebrow">사용자 진술 · 추가 확인 필요</span>
+        {userClaims.length > 0 ? (
+          userClaims.slice(0, 5).map((claim, index) => (
+            <p key={`${claim.field || "claim"}-${index}`}>
+              <strong>{claim.field || "사용자 진술"}</strong>
+              <span>{compactValue(claim.value)}</span>
+              {claim.source_type && <small>출처 유형: {claim.source_type}</small>}
+            </p>
+          ))
+        ) : (
+          <p>별도로 분리해 표시할 사용자 진술이 없습니다.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 
 function CaseResultScreen({
   analysisCards = [],
@@ -3396,6 +3526,7 @@ function CaseResultScreen({
   reportActionStatus = "",
   supervisorExecution = null,
   supervisorState = null,
+  userClaims = [],
 }) {
   const isFault = caseType === "fault";
   const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;
@@ -3472,10 +3603,11 @@ function CaseResultScreen({
                 <strong>{isFault ? "진입 순서와 충돌 위치를 먼저 고정해야 합니다." : "처분 내용과 제출기한을 확인한 뒤 추가 자료를 보완해야 합니다."}</strong>
                 <p>{reportingPayload?.summary || supervisorState?.conversation_summary || "현재 상담에서 확인된 사실과 다음 행동을 정리했습니다."}</p>
               </div>
+              <EvidenceBoundaryPanel facts={facts} userClaims={userClaims} />
 
               {isFault && faultRatioNode ? (
                 <FaultRatioInsightPanel node={faultRatioNode} />
-              ) : (
+              ) : facts.length === 0 && userClaims.length === 0 ? (
                 <div className="case-result-facts">
                   {(facts.length > 0 ? facts.slice(0, 4) : [
                     { field: "확인된 사실", value: "상담 내용과 첨부 자료를 기준으로 정리 중" },
@@ -3487,7 +3619,7 @@ function CaseResultScreen({
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
               {lawGroundNode && <LawGroundInsightPanel node={lawGroundNode} />}
 
               {analysisCards.length > 0 && (

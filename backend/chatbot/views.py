@@ -106,6 +106,10 @@ from chatbot.case_repository import (
     list_cases,
     start_case_analysis,
 )
+from chatbot.attachment_classification_service import (
+    AttachmentClassificationConfirmationError,
+    resolve_confirmed_attachment_classification,
+)
 from chatbot.file_scan_service import apply_attachment_scan_gate
 from chatbot.request_parsing import (
     first_upload_file as _first_upload_file,
@@ -1270,6 +1274,13 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             request,
             chat_response=_scan_blocked_chat_response_from_payload(identity_body),
         )
+    (
+        identity_body,
+        classification_routing_intent,
+        classification_error,
+    ) = _apply_attachment_classification_confirmation(request, identity_body)
+    if classification_error is not None:
+        return classification_error
 
     stored_followup_state = None
     if requested_session_id and session_access is not None:
@@ -1285,7 +1296,10 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     try:
         chat_response = submit_message(
             identity_body,
-            routing_intent_override=followup_routing_intent(stored_followup_state),
+            routing_intent_override=(
+                classification_routing_intent
+                or followup_routing_intent(stored_followup_state)
+            ),
         )
     except Exception:
         _refund_usage_safely(usage, reason="chat_planning_failed")
@@ -2793,6 +2807,108 @@ def _history_source(request: HttpRequest, node_code: str | None = None) -> dict[
 def _has_blocked_attachments(chat_response: dict[str, object]) -> bool:
     blocked = chat_response.get("blocked_attachments")
     return isinstance(blocked, list) and bool(blocked)
+
+
+def _apply_attachment_classification_confirmation(
+    request: HttpRequest,
+    payload: dict[str, object],
+) -> tuple[dict[str, object], str, JsonResponse | None]:
+    """Consume a narrow client confirmation using only the server-owned record."""
+
+    normalized = dict(payload)
+    raw_confirmation = normalized.pop("attachment_classification_confirmation", None)
+    if not isinstance(raw_confirmation, dict) or raw_confirmation.get("confirmed") is not True:
+        return normalized, "", None
+
+    attachment_id = str(raw_confirmation.get("attachment_id") or "").strip()
+    session_id = str(normalized.get("session_id") or "").strip()
+    attachments = [
+        dict(item)
+        for item in normalized.get("attachments", [])
+        if isinstance(item, dict)
+    ]
+    if not any(
+        str(attachment.get("attachment_id") or "") == attachment_id
+        for attachment in attachments
+    ):
+        return normalized, "", _attachment_classification_confirmation_error(
+            request,
+            code="classification_stale_or_unavailable",
+            session_id=session_id,
+        )
+    try:
+        confirmed = resolve_confirmed_attachment_classification(
+            session_id=session_id,
+            attachment_id=attachment_id,
+        )
+    except AttachmentClassificationConfirmationError as exc:
+        return normalized, "", _attachment_classification_confirmation_error(
+            request,
+            code=exc.code,
+            session_id=session_id,
+        )
+
+    classification = confirmed["classification"]
+    routing_intent = {
+        "fine_notice": "fine_notice_analysis",
+        "accident_evidence": "accident_photo_evidence_analysis",
+    }.get(classification, "")
+    purpose = {
+        "fine_notice": "fine_notice",
+        "accident_evidence": "accident_scene",
+    }.get(classification, "")
+    matched = False
+    for attachment in attachments:
+        if str(attachment.get("attachment_id") or "") != attachment_id:
+            continue
+        attachment["purpose"] = purpose
+        attachment["classification_confirmation"] = {
+            "source": "server_record",
+            "classification": classification,
+            "confidence_band": confirmed["confidence_band"],
+        }
+        matched = True
+    if not routing_intent or not purpose or not matched:
+        return normalized, "", _attachment_classification_confirmation_error(
+            request,
+            code="classification_stale_or_unavailable",
+            session_id=session_id,
+        )
+    normalized["attachments"] = attachments
+    return normalized, routing_intent, None
+
+
+def _attachment_classification_confirmation_error(
+    request: HttpRequest,
+    *,
+    code: str,
+    session_id: str,
+) -> JsonResponse:
+    return _json_response(
+        request,
+        {
+            "contract_version": "chat_message_accepted.v2",
+            "status": "classification_confirmation_required",
+            "session_id": session_id or None,
+            "message_id": None,
+            "routing_intent": "attachment_document_classification",
+            "assistant_message": {
+                "answer": (
+                    "저장된 자료 분류가 없거나 현재 파일과 일치하지 않습니다. "
+                    "자료 분류를 다시 실행해 주세요."
+                ),
+                "summary": "자료 분류를 다시 확인해야 합니다.",
+            },
+            "analysis_plan": {
+                "contract_version": "analysis_plan.v2",
+                "steps": [],
+            },
+            "error_code": code,
+            "limitations": ["확인되지 않은 분류로 후속 분석을 실행하지 않았습니다."],
+            "next_actions": ["rerun_attachment_classification"],
+        },
+        status=409,
+    )
 
 
 def _scan_blocked_chat_response(chat_response: dict[str, object]) -> dict[str, object]:
