@@ -89,3 +89,6 @@ output/pptx/*.inspect.ndjson
 models/
 
 etl/fault_cases/artifacts/
+
+# Local isolated development worktrees
+.worktrees/
