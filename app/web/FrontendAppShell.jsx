@@ -29,6 +29,7 @@ const EXECUTION_MODE = "async_worker";
 const WORKER_POLL_INTERVAL_MS = 500;
 const WORKER_POLL_MAX_ATTEMPTS = 60;
 const WORKER_PENDING_JOB_STATUSES = new Set(["queued", "running", "retrying"]);
+const FINE_NOTICE_DEADLINE_DAYS = 60;
 const CHAT_ATTACHMENT_OPTIONS = [
   { label: "영상", description: "블랙박스·현장 영상", purpose: "supporting_evidence", accept: "video/*" },
   { label: "고지서", description: "과태료·범칙금 고지서", purpose: "fine_notice", accept: "image/*,application/pdf" },
@@ -41,6 +42,42 @@ const USER_FACING_NEXT_ACTION_LABELS = {
   answer_pending_question: "추가 질문에 답변해 주세요.",
   review_verified_results: "확인된 결과와 근거를 검토해 주세요.",
 };
+
+function upcomingDeadlineSummary(cases, windowDays = 7) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const upcoming = cases
+    .map((item) => {
+      if (!isFineNoticeCase(item)) return null;
+      const raw = item?.notice_received_at || item?.notice_received_date;
+      if (!raw || (item?.notice_received_source && item.notice_received_source !== "user")) return null;
+      const receivedAt = new Date(`${String(raw).slice(0, 10)}T00:00:00`);
+      if (Number.isNaN(receivedAt.getTime())) return null;
+      const deadline = new Date(receivedAt);
+      deadline.setDate(deadline.getDate() + FINE_NOTICE_DEADLINE_DAYS);
+      const days = Math.ceil((deadline.getTime() - today.getTime()) / 86400000);
+      return { days, deadline };
+    })
+    .filter((item) => item && item.days >= 0 && item.days <= windowDays)
+    .sort((left, right) => left.days - right.days);
+  return {
+    count: upcoming.length,
+    nearestLabel: upcoming.length
+      ? (upcoming[0].days === 0 ? "과태료 이의제기 오늘 마감" : `과태료 이의제기 마감 D-${upcoming[0].days}`)
+      : "7일 이내 과태료 이의제기 마감 없음",
+  };
+}
+
+function isFineNoticeCase(item) {
+  const caseType = [
+    item?.type,
+    item?.report_type,
+    item?.case_type,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return /과태료|fine_notice/.test(caseType);
+}
 
 function waitForWorkerPoll() {
   return new Promise((resolve) => window.setTimeout(resolve, WORKER_POLL_INTERVAL_MS));
@@ -178,8 +215,15 @@ export default function FrontendAppShell({
     userId: null,
   });
   const isGuestReady = Boolean(guestId && guestCredential);
-  const sessionLabel = authSessionId ? "Google 계정 상담" : isGuestReady ? "비회원 상담" : "상담 준비";
-  const cases = mypageSummary?.cases || [];
+  const sessionLabel = authSessionId
+    ? "Google 계정 상담"
+    : isGuestReady
+      ? "비회원 상담"
+      : "상담 준비";
+  const cases = mypageSummary?.cases?.length ? mypageSummary.cases : [];
+  const effectiveReportList = reportList;
+  const effectiveCurrentReport = currentReport || effectiveReportList[0] || null;
+  const effectiveMypageSummary = mypageSummary;
   const history = historyEvents?.events || [];
   const analysisCards = analysisResponse?.cards?.length
     ? normalizeAnalysisCards(analysisResponse.cards)
@@ -1344,7 +1388,7 @@ export default function FrontendAppShell({
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenCase={openSavedCase}
               onRefresh={loadMyPageSummary}
-              summary={mypageSummary}
+              summary={effectiveMypageSummary}
             />
           )}
 
@@ -1355,7 +1399,7 @@ export default function FrontendAppShell({
           {activeRoute === "reporting" && (
             <ReportingScreen
               analysisCards={visibleAnalysisCards}
-              currentReport={currentReport}
+              currentReport={effectiveCurrentReport}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenReport={openReportDetail}
@@ -1369,7 +1413,7 @@ export default function FrontendAppShell({
               onCopyDocumentCard={copyReportDocumentCard}
               onRunReportAction={runCurrentReportAction}
               reportActionStatus={reportActionStatus}
-              reportList={reportList}
+              reportList={effectiveReportList}
               reportingPayload={visibleReportingPayload}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
@@ -1704,25 +1748,107 @@ function AppIconRail({ activeRoute, onNavigate, onOpenChat }) {
 }
 
 function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }) {
+  const [activeCard, setActiveCard] = useState(0);
+  const lastWheelAt = useRef(0);
+  const touchStartRef = useRef(null);
+  const wheelCards = ["상황과 자료", "서비스 안내", "진행 순서", "주요 기능"];
   const goToRoute = (route) => {
     if (typeof onNavigate === "function") {
       onNavigate(route);
     }
   };
+  const rotateWheel = (direction) => {
+    setActiveCard((current) => (current + direction + 4) % 4);
+  };
+  const handleWheel = (event) => {
+    const now = Date.now();
+    if (now - lastWheelAt.current < 420 || Math.abs(event.deltaY) < 8) return;
+    lastWheelAt.current = now;
+    rotateWheel(event.deltaY > 0 ? 1 : -1);
+  };
 
   return (
-    <section className="entry-screen insurance-layout entry-dashboard">
-      <div className="entry-dashboard__main">
-        <div className="entry-dashboard__grid entry-dashboard__grid--photo">
-          <div className="entry-card entry-card--photo">
+    <section className="entry-screen insurance-layout entry-dashboard entry-wheel">
+      <div className="entry-wheel__shell">
+        <div
+          className="entry-wheel__viewport"
+          tabIndex={0}
+          onWheel={handleWheel}
+          onTouchStart={(event) => {
+            const touch = event.touches[0];
+            touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+          }}
+          onTouchEnd={(event) => {
+            const start = touchStartRef.current;
+            const touch = event.changedTouches[0];
+            touchStartRef.current = null;
+            if (!start || !touch) return;
+            const deltaX = touch.clientX - start.x;
+            const deltaY = touch.clientY - start.y;
+            const primaryDelta = Math.abs(deltaY) >= Math.abs(deltaX) ? deltaY : deltaX;
+            if (Math.abs(primaryDelta) < 46) return;
+            rotateWheel(primaryDelta < 0 ? 1 : -1);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") rotateWheel(-1);
+            if (event.key === "ArrowRight") rotateWheel(1);
+          }}
+          aria-label="홈 화면 기능 카드 캐러셀"
+        >
+          <nav className="entry-wheel__radial-nav" aria-label="홈 화면 카드 선택">
+            <div className="entry-wheel__orbit" aria-hidden="true" />
+            {wheelCards.map((label, index) => {
+              let offset = (index - activeCard + wheelCards.length) % wheelCards.length;
+              if (offset > 1) offset -= wheelCards.length;
+              const radialPosition = {
+                "-2": { x: 6, y: -205 },
+                "-1": { x: 74, y: -112 },
+                "0": { x: 118, y: 0 },
+                "1": { x: 78, y: 132 },
+              }[String(offset)];
+              return (
+                <button
+                  className={activeCard === index ? "entry-wheel__radial-item is-active" : "entry-wheel__radial-item"}
+                  type="button"
+                  key={label}
+                  style={{
+                    "--radial-x": `${radialPosition.x}px`,
+                    "--radial-y": `${radialPosition.y}px`,
+                  }}
+                  onClick={() => setActiveCard(index)}
+                  aria-current={activeCard === index ? "true" : undefined}
+                >
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <strong>{label}</strong>
+                </button>
+              );
+            })}
+          </nav>
+          <div
+            className="entry-wheel__rotor"
+          >
+          <article
+            className={`entry-card entry-card--photo entry-wheel__card ${activeCard === 0 ? "is-active" : ""}`}
+            style={{ "--wheel-index": 0 }}
+            onClick={() => setActiveCard(0)}
+          >
             <img
               src="/design-references/02-consultation-desk.jpg"
               alt="차량 관련 서류를 검토하는 상담 장면"
               loading="lazy"
             />
-          </div>
+            <div className="entry-wheel__photo-label">
+              <span>01</span>
+              <strong>당신의 편리한 교통사고 서포트 앱</strong>
+            </div>
+          </article>
 
-          <div className="entry-card entry-card--intro">
+          <article
+            className={`entry-card entry-card--intro entry-wheel__card ${activeCard === 1 ? "is-active" : ""}`}
+            style={{ "--wheel-index": 1 }}
+            onClick={() => setActiveCard(1)}
+          >
+            <span className="entry-wheel__number">02 · 서비스 안내</span>
             <p>
               과실비율 예측과 과태료 이의신청 지원까지, 상황과 자료를 바탕으로
               쟁점과 다음 행동을 정리해 드리는 서비스입니다.
@@ -1737,10 +1863,15 @@ function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }
                 </button>
               )}
             </div>
-          </div>
+          </article>
 
-          <div className="entry-card entry-card--steps">
+          <article
+            className={`entry-card entry-card--steps entry-wheel__card ${activeCard === 2 ? "is-active" : ""}`}
+            style={{ "--wheel-index": 2 }}
+            onClick={() => setActiveCard(2)}
+          >
             <div className="entry-card__head">
+              <span className="entry-wheel__number">03 · 이용 과정</span>
               <strong>진행 순서</strong>
               <p>이렇게 도와드립니다</p>
             </div>
@@ -1798,10 +1929,15 @@ function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }
                 </div>
               </div>
             </div>
-          </div>
+          </article>
 
-          <div className="entry-card entry-card--features">
+          <article
+            className={`entry-card entry-card--features entry-wheel__card ${activeCard === 3 ? "is-active" : ""}`}
+            style={{ "--wheel-index": 3 }}
+            onClick={() => setActiveCard(3)}
+          >
             <div className="entry-card__head">
+              <span className="entry-wheel__number">04 · 주요 기능</span>
               <strong>우리 기능들</strong>
             </div>
             <div className="entry-quick-list entry-quick-list--light">
@@ -1849,8 +1985,10 @@ function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }
                 </span>
               </button>
             </div>
+          </article>
           </div>
         </div>
+
       </div>
     </section>
   );
@@ -1893,6 +2031,7 @@ function ConversationSidebar({
           >
             {isCollapsed ? "»" : "«"}
           </button>
+          {!isCollapsed && <span className="sidebar-collapse-label">접기</span>}
         </div>
 
       {!isCollapsed && (
@@ -2530,6 +2669,14 @@ function isSubmissionDocumentSection(section) {
   return /이의신청서|의견제출서|제출 가이드라인|제출 가이드|초안/.test(title);
 }
 
+function shouldShowDocumentConfirmation({
+  documentConfirmation,
+  isAuthenticated,
+}) {
+  if (!isAuthenticated) return false;
+  return documentConfirmation?.required === true;
+}
+
 function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportingPayload, reportActionStatus }) {
   const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;
   const confirmationReady = reportingPayload?.document_confirmation?.confirmed === true;
@@ -2590,10 +2737,10 @@ function DocumentConfirmationPanel({ confirmation, isAuthenticated, onConfirm })
       <legend>이의신청서 최종 확인</legend>
       <p>{confirmation.stale ? "문서 내용이 변경되어 다시 확인해야 합니다." : "다운로드 전 아래 항목을 확인해 주세요."}</p>
       {[
-        ["facts_confirmed", "사실관계"],
-        ["agency_confirmed", "관할기관"],
-        ["deadline_confirmed", "제출기한"],
-        ["attachments_confirmed", "첨부자료"],
+        ["facts_confirmed", "사실관계를 확인했습니다."],
+        ["agency_confirmed", "관할 기관을 확인했습니다."],
+        ["deadline_confirmed", "제출 기한을 확인했습니다."],
+        ["attachments_confirmed", "첨부 자료를 확인했습니다."],
       ].map(([key, label]) => (
         <label key={key} className="document-confirmation-check">
           <input
@@ -2601,7 +2748,7 @@ function DocumentConfirmationPanel({ confirmation, isAuthenticated, onConfirm })
             checked={checks[key]}
             onChange={(event) => setChecks((current) => ({ ...current, [key]: event.target.checked }))}
           />
-          {label}을(를) 확인했습니다.
+          {label}
         </label>
       ))}
       <button
@@ -2625,7 +2772,10 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
     ["fine_notice", "traffic_accident"].includes(activeReportingPayload?.document_variant) ||
     ["fine_notice_objection", "fault_ratio_analysis"].includes(activeReportingPayload?.report_type);
   const confirmation = {
-    required: hasOfficialDocument,
+    required: shouldShowDocumentConfirmation({
+      documentConfirmation,
+      isAuthenticated,
+    }),
     confirmed: documentConfirmation?.confirmed === true,
     stale: documentConfirmation?.stale === true,
     appealBlocked: appealDownloadBlocked,
@@ -2695,21 +2845,27 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
 }
 
 function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
+  const pageSize = 5;
   const activeCases = summary?.active_cases ?? cases.length;
   const savedReports = summary?.saved_reports ?? 0;
   const recentCount = summary?.recent_analysis_count ?? cases.length;
+  const deadlineSummary = upcomingDeadlineSummary(cases);
   const hasCases = cases.length > 0;
   const [showActionableOnly, setShowActionableOnly] = useState(false);
   const [selectedCaseKey, setSelectedCaseKey] = useState(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const visibleCases = showActionableOnly
     ? cases.filter((item) => {
         const status = String(item.case_status || item.status || "").toLowerCase();
         return /partial|pending|queued|running|draft|review|기한|추가|확인|대기|진행|작성/.test(status);
       })
     : cases;
+  const pageCount = Math.max(1, Math.ceil(visibleCases.length / pageSize));
+  const currentPage = Math.min(historyPage, pageCount);
+  const pagedCases = visibleCases.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const caseKey = (item) => item.case_id || item.job_id || item.title;
   const selectedCase =
-    visibleCases.find((item) => caseKey(item) === selectedCaseKey) || visibleCases[0] || null;
+    pagedCases.find((item) => caseKey(item) === selectedCaseKey) || pagedCases[0] || null;
 
   return (
     <section className="screen">
@@ -2729,7 +2885,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
       <div className="dashboard">
         <div className="summary-grid">
           <MetricCard label="등록 사건" value={`${activeCases}건`} detail="최근 30일 기준" />
-          <MetricCard label="기한 임박" value="1건" detail="의견제출 D-3" />
+          <MetricCard label="과태료 이의제기 기한 임박" value={`${deadlineSummary.count}건`} detail={deadlineSummary.nearestLabel} />
           <MetricCard label="저장 리포트" value={`${savedReports}건`} detail="DOCX 다운로드 가능" />
           <MetricCard label="최근 분석" value={`${recentCount}건`} detail="상담/리포트 포함" />
         </div>
@@ -2743,9 +2899,12 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                 type="button"
                 disabled={!hasCases}
                 aria-pressed={showActionableOnly}
-                onClick={() => setShowActionableOnly((value) => !value)}
+                onClick={() => {
+                  setShowActionableOnly((value) => !value);
+                  setHistoryPage(1);
+                }}
               >
-                {showActionableOnly ? "전체 보기" : "필터"}
+                {showActionableOnly ? "✓ 조치가 필요한 항목들 표시 중" : "조치가 필요한 항목들 보기"}
               </button>
             </div>
             <div className="table-scroll">
@@ -2770,7 +2929,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                       </td>
                     </tr>
                   ) : (
-                    visibleCases.map((item) => (
+                    pagedCases.map((item) => (
                       <tr
                         key={caseKey(item)}
                         className={selectedCase && caseKey(item) === caseKey(selectedCase) ? "is-selected" : undefined}
@@ -2778,7 +2937,11 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                       >
                         <td><span className="tag">{item.type || "상담"}</span></td>
                         <td>{item.title || item.case_id}</td>
-                        <td>{item.case_status || item.status || "확인 필요"}</td>
+                        <td>
+                          <span className={`report-list-status ${caseStatusTone(item.case_status || item.status)}`}>
+                            {item.case_status || item.status || "확인 필요"}
+                          </span>
+                        </td>
                         <td>{item.updated_at || item.created_at || "-"}</td>
                         <td>
                           <button
@@ -2798,6 +2961,27 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                 </tbody>
               </table>
             </div>
+            {visibleCases.length > pageSize && (
+              <nav className="table-pagination" aria-label="최근 분석 이력 페이지">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setHistoryPage((page) => Math.max(1, page - 1))}
+                >
+                  이전
+                </button>
+                <span>{currentPage} / {pageCount}</span>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={currentPage === pageCount}
+                  onClick={() => setHistoryPage((page) => Math.min(pageCount, page + 1))}
+                >
+                  다음
+                </button>
+              </nav>
+            )}
           </article>
 
           <aside className="case-detail-panel" aria-label="사건 상세">
@@ -2810,7 +2994,14 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                 <div className="case-detail-body">
                   <h3>{selectedCase.title || selectedCase.case_id}</h3>
                   <dl>
-                    <div><dt>상태</dt><dd>{selectedCase.case_status || selectedCase.status || "확인 필요"}</dd></div>
+                    <div>
+                      <dt>상태</dt>
+                      <dd>
+                        <span className={`report-list-status ${caseStatusTone(selectedCase.case_status || selectedCase.status)}`}>
+                          {selectedCase.case_status || selectedCase.status || "확인 필요"}
+                        </span>
+                      </dd>
+                    </div>
                     <div><dt>최근 작업</dt><dd>{selectedCase.updated_at || selectedCase.created_at || "-"}</dd></div>
                     <div><dt>사건 ID</dt><dd>{selectedCase.case_id || selectedCase.job_id || "-"}</dd></div>
                   </dl>
@@ -3281,6 +3472,7 @@ function ReportingScreen({
   supervisorExecution = null,
   supervisorState = null,
 }) {
+  const [isReportListCollapsed, setIsReportListCollapsed] = useState(false);
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
   const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
   const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
@@ -3290,7 +3482,10 @@ function ReportingScreen({
     ["fine_notice", "traffic_accident"].includes(activeReportingPayload?.document_variant) ||
     ["fine_notice_objection", "fault_ratio_analysis"].includes(activeReportingPayload?.report_type);
   const confirmation = {
-    required: hasOfficialDocument,
+    required: shouldShowDocumentConfirmation({
+      documentConfirmation,
+      isAuthenticated,
+    }),
     confirmed: documentConfirmation?.confirmed === true,
     stale: documentConfirmation?.stale === true,
     appealBlocked: appealDownloadBlocked,
@@ -3339,13 +3534,48 @@ function ReportingScreen({
         </div>
       </div>
 
-      <div className="report-workbench">
-        <aside className="report-list" aria-label="리포트 목록">
+      <div className={isReportListCollapsed ? "report-workbench is-list-collapsed" : "report-workbench"}>
+        <aside className={isReportListCollapsed ? "report-list is-collapsed" : "report-list"} aria-label="리포트 목록">
           <div className="panel-head compact">
-            <strong>리포트 목록</strong>
-            <span className="report-list-count">{savedReportCountLabel}</span>
+            {!isReportListCollapsed && <strong>리포트 목록</strong>}
+            <div className="report-list-head-actions">
+              {!isReportListCollapsed && <span className="report-list-count">{savedReportCountLabel}</span>}
+              <button
+                className="report-list-collapse-toggle"
+                type="button"
+                onClick={() => setIsReportListCollapsed((value) => !value)}
+                aria-label={isReportListCollapsed ? "리포트 목록 펼치기" : "리포트 목록 접기"}
+                title={isReportListCollapsed ? "리포트 목록 펼치기" : "리포트 목록 접기"}
+              >
+                <span>{isReportListCollapsed ? "»" : "«"}</span>
+                {!isReportListCollapsed && <strong>접기</strong>}
+              </button>
+            </div>
           </div>
-          <ServiceInformationNotice />
+          {!isReportListCollapsed && !hasSavedReports && <ServiceInformationNotice />}
+          {!isReportListCollapsed && hasSavedReports && (
+            <div className="report-saved-list">
+              {reportList.map((report) => {
+                const isActive = report?.report_id === currentReport?.report_id;
+                const payload = report?.content?.reporting_payload || {};
+                return (
+                  <button
+                    className={isActive ? "report-list-card active" : "report-list-card"}
+                    type="button"
+                    key={report?.report_id || report?.title}
+                    onClick={() => onOpenReport?.(report)}
+                  >
+                    <span className={`report-list-status ${reportStatusTone(payload.stage || report?.status)}`}>
+                      {reportStatusLabel(payload.stage || report?.status)}
+                    </span>
+                    <strong>{payload.title || report?.title || "상담 리포트"}</strong>
+                    <p>{report?.metadata?.updated_at || "최근 작업 시간 없음"}</p>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {!isReportListCollapsed && hasSavedReports && <ServiceInformationNotice />}
         </aside>
 
         <article className="report-canvas" aria-label="리포트 미리보기">
@@ -3706,6 +3936,14 @@ function caseStatusLabel(value) {
     failed: "확인 필요",
   };
   return labels[String(value || "").toLowerCase()] || value || "상태 확인";
+}
+
+function caseStatusTone(value) {
+  const status = String(value || "").toLowerCase();
+  if (/완료|success|ready|저장/.test(status)) return "complete";
+  if (/다운로드|downloaded/.test(status)) return "downloaded";
+  if (/보완|확인|기한 임박|기한 경과|partial|failed/.test(status)) return "attention";
+  return "ready";
 }
 
 function isReportingPayloadReady(reportingPayload, supervisorState) {
