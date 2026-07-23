@@ -76,6 +76,19 @@ function userFacingNextActions(value) {
   });
 }
 
+function userFacingLimitations(value) {
+  const normalized = stringList(value).flatMap((item) => {
+    if (/lexical|token coverage|검색 토큰/i.test(item)) {
+      return ["검색 결과의 일치도가 낮아 추가 확인이 필요합니다."];
+    }
+    if (/sync adapter|supervisor|postgres|execution mode|adapter/i.test(item)) {
+      return [];
+    }
+    return [item];
+  });
+  return [...new Set(normalized)];
+}
+
 function isDeadlineGuidance(value) {
   return Boolean(
     value &&
@@ -89,11 +102,11 @@ function buildSafetyGuidance({ serviceScope = null, limitations = [], nextAction
     return {
       title: serviceScope.decision === "expert_handoff" ? "전문가 확인이 필요한 요청입니다" : "서비스 범위 안내",
       reason: String(serviceScope.reason || "").trim(),
-      limitations: stringList(serviceScope.limitations),
-      nextActions: stringList(serviceScope.next_actions),
+      limitations: userFacingLimitations(serviceScope.limitations),
+      nextActions: userFacingNextActions(serviceScope.next_actions),
     };
   }
-  const safeLimitations = stringList(limitations);
+  const safeLimitations = userFacingLimitations(limitations);
   const safeNextActions = userFacingNextActions(nextActions);
   if (!safeLimitations.length && !safeNextActions.length) {
     return null;
@@ -2034,11 +2047,36 @@ function ChatScreenV2({
       attachmentInputRef.current.click();
     }
   };
-  const quickQuestions = [
-    "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
-    "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했어",
-    "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어",
-    "보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘",
+  const quickQuestionGroups = [
+    {
+      title: "과태료·범칙금",
+      questions: [
+        "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
+        "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했어",
+        "과태료와 범칙금은 어떤 차이가 있고 벌점은 언제 붙어?",
+        "무인 단속 고지서를 받았는데 실제 운전자가 내가 아니면 어떻게 해야 해?",
+        "과태료 의견제출 기한이 지났는데 이의를 제기할 방법이 있을까?",
+        "어린이보호구역에서 응급상황 때문에 잠깐 정차한 경우도 단속 대상이야?",
+      ],
+    },
+    {
+      title: "과실비율",
+      questions: [
+        "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어",
+        "보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘",
+        "차선을 바꾸던 중 뒤차와 부딪혔는데 과실비율은 무엇을 기준으로 정해?",
+        "앞차가 갑자기 급정거해서 추돌했는데 뒤차가 항상 100% 책임이야?",
+        "불법 주정차 차량 때문에 시야가 가려져 사고가 나면 그 차량에도 책임이 있어?",
+        "보험사가 제시한 과실비율에 동의하지 않을 때 어떤 자료를 준비해야 해?",
+      ],
+    },
+    {
+      title: "법령 관련 질문",
+      questions: [
+        "황색 신호에 교차로에 진입했다가 사고가 났는데 신호위반으로 볼 수 있어?",
+        "교통사고 사실확인원과 경찰 조사 결과는 과실비율 판단에 어떤 영향을 줘?",
+      ],
+    },
   ];
   return (
     <section className="screen">
@@ -2129,9 +2167,9 @@ function ChatScreenV2({
           {savePromptVisible && (
             <section className="save-choice-panel" aria-label="상담 저장 선택">
               <div>
-                <span className="eyebrow">저장 선택</span>
-                <strong>이 상담을 마이페이지 이력에 저장할까요?</strong>
-                <p>저장하면 Google 계정에 연결하고, 저장하지 않으면 PostgreSQL 이력 전환 없이 임시 상담으로 유지합니다.</p>
+                <span className="save-choice-label">상담 저장</span>
+                <strong>이 상담을 내 상담 기록에 저장하시겠어요?</strong>
+                <p>로그인하면 나중에 다시 확인할 수 있습니다. 저장하지 않은 상담은 현재 접속 중에만 유지됩니다.</p>
               </div>
               <div className="save-choice-actions">
                 <button className="button" type="button" onClick={onKeepTemporary}>
@@ -2151,13 +2189,28 @@ function ChatScreenV2({
             </section>
           )}
 
-          <div className="quick-row" aria-label="빠른 질문">
-            {quickQuestions.map((item) => (
-              <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
-                {item}
-              </button>
-            ))}
-          </div>
+          <details className="quick-examples">
+            <summary className="quick-examples-header">
+              <span>
+                <strong>서비스 예시 작동 방식</strong>
+                <small>궁금한 상황을 선택하면 질문이 입력창에 담깁니다.</small>
+              </span>
+            </summary>
+            <div className="quick-example-groups">
+              {quickQuestionGroups.map((group) => (
+                <section className="quick-example-group" aria-label={group.title} key={group.title}>
+                  <h4>{group.title}</h4>
+                  <div className="quick-row">
+                    {group.questions.map((item) => (
+                      <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </details>
 
           <div className="chat-input">
             <div className="input-stack">
@@ -2437,7 +2490,7 @@ function ReportingPreviewPanel({ reportingPayload }) {
     <section className="reporting-preview" aria-label="리포팅 미리보기">
       <div className="flow-panel-head">
         <div>
-          <span className="eyebrow">리포트 미리보기</span>
+          <span className="report-document-label">리포트 미리보기</span>
           <strong>{reportingPayload.title || "상담 분석 리포트"}</strong>
           <p>{reportingPayload.summary}</p>
         </div>
@@ -3088,6 +3141,15 @@ function reportStatusLabel(value) {
   return labels[String(value || "").toLowerCase()] || value || "상태 확인";
 }
 
+function reportStatusTone(value) {
+  const status = String(value || "").toLowerCase();
+  if (["success", "ready", "report_saved", "metadata_saved"].includes(status)) return "complete";
+  if (status === "downloaded") return "downloaded";
+  if (status === "partial") return "attention";
+  if (status === "agent_execution_ready") return "ready";
+  return "progress";
+}
+
 function reportQualityLabel(report = {}) {
   if (report.partial_report) {
     return "검토 필요";
@@ -3256,7 +3318,7 @@ function ReportingScreen({
   const activeReportType = activeReportingPayload?.report_type || currentReport?.report_type || "general";
   const activeReportTypeLabel = reportTypeLabel(activeReportType);
   const reportDisplayLabel = activeReportType === "general" ? "상담 리포트" : activeReportTypeLabel;
-  const savedReportCountLabel = hasSavedReports ? `${reportList.length}건` : hasReport ? "1건" : "0건";
+  const savedReportCountLabel = hasSavedReports ? `${reportList.length}건` : hasReport ? "1건" : "리포트 없음";
   const reportTagClass = currentReport || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber";
   const groupedSections = groupReportSections(sections);
   const overviewSections = (groupedSections.overview.length ? groupedSections.overview : groupedSections.remainder).slice(0, 4);
@@ -3281,7 +3343,7 @@ function ReportingScreen({
         <aside className="report-list" aria-label="리포트 목록">
           <div className="panel-head compact">
             <strong>리포트 목록</strong>
-            <span className="tag">{savedReportCountLabel}</span>
+            <span className="report-list-count">{savedReportCountLabel}</span>
           </div>
           <ServiceInformationNotice />
         </aside>
@@ -3294,7 +3356,9 @@ function ReportingScreen({
               <p>{reportSummary}</p>
               <div className="report-status-strip">
                 <span>작성 상태</span>
-                <strong>{reportStatusLabel(reportStatus)}</strong>
+                <strong className={`report-status-badge ${reportStatusTone(reportStatus)}`}>
+                  {reportStatusLabel(reportStatus)}
+                </strong>
                 <p>상담 내용을 바탕으로 확인된 내용을 정리하고 있습니다.</p>
               </div>
 
@@ -3368,15 +3432,8 @@ function ReportingScreen({
             </div>
           ) : (
             <div className="report-page-empty">
-              <span className="eyebrow">리포트 미리보기</span>
               <h3>사고 리포트를 선택하면 문서가 열립니다.</h3>
               <p>저장된 사고 리포트의 개요, 근거, 후속 행동을 문서 형태로 검토할 수 있습니다.</p>
-              <div className="report-placeholder-grid">
-                <div />
-                <div />
-                <div />
-                <div />
-              </div>
             </div>
           )}
         </article>

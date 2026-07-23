@@ -28,4 +28,5 @@ def test_frontend_does_not_expose_internal_next_action_identifiers() -> None:
     assert "return /^[a-z][a-z0-9_]*$/i.test(action) ? [] : [action];" in shell
     assert "const safeNextActions = userFacingNextActions(nextActions);" in shell
     assert "nextActions: safeNextActions," in shell
-    assert "nextActions: stringList(serviceScope.next_actions)," in shell
+    assert "nextActions: userFacingNextActions(serviceScope.next_actions)," in shell
+    assert "limitations: userFacingLimitations(serviceScope.limitations)," in shell
