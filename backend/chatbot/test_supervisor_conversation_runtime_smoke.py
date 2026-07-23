@@ -242,6 +242,13 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
             routing_intent="fine_notice_analysis",
             supervisor_state=plan_state,
             report_requested=True,
+            ocr_confirmation={
+                "confirmed": True,
+                "fields": {
+                    "fine_type": "과태료",
+                    "notice_stage": "사전통지",
+                },
+            },
         )
         packages = [
             {

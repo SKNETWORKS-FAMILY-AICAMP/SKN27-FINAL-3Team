@@ -33,11 +33,13 @@ def test_public_agent_registry_is_typed_and_never_exposes_mock_execution() -> No
     nodes = agent_node_service.list_public_agent_nodes()
     assert {node["node_code"] for node in nodes} == {
         "appeal_decision_flow",
+        "attachment_document_classification",
         "fine_notice_analysis",
         "law_ground_search",
         "objection_report_generation",
         "text_ml_case_search",
         "traffic_accident_confirmation_ocr",
+        "vision_media_analysis",
     }
     for node in nodes:
         assert node["contract_version"] == "agent_capability.v1"
@@ -48,3 +50,15 @@ def test_public_agent_registry_is_typed_and_never_exposes_mock_execution() -> No
         assert isinstance(node["timeout_seconds"], int)
         assert node["timeout_seconds"] > 0
         assert "mock" not in json.dumps(node, ensure_ascii=False).lower()
+
+
+def test_vision_is_a_public_sync_agent_without_mock_mode() -> None:
+    public_nodes = {
+        node["node_code"]: node for node in agent_node_service.list_public_agent_nodes()
+    }
+    registry_nodes = {node["node_code"]: node for node in agent_node_service.list_agent_nodes()}
+    vision = public_nodes["vision_media_analysis"]
+
+    assert vision["execution_modes"] == ["sync"]
+    assert registry_nodes["vision_media_analysis"]["adapter_contract"]["execution_modes"] == ["sync"]
+    assert "mock" not in json.dumps(vision, ensure_ascii=False).lower()

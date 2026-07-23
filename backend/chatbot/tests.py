@@ -2777,7 +2777,7 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(completed_detail["progress_state"]["state"], "success")
         self.assertGreater(completed_detail["agent_result_count"], 0)
 
-    def test_canonical_chat_sync_request_runs_ready_fault_ratio_adapter_only(self):
+    def test_canonical_chat_sync_request_runs_fault_ratio_and_vision_sync_adapters(self):
         response = self.client.post(
             "/api/chat/messages/",
             data={
@@ -2797,13 +2797,17 @@ class RemovedChatbotMockApiContract:
         text_ml_result = node_results["text_ml_case_search"]
         vision_result = node_results["vision_media_analysis"]
 
-        self.assertEqual(execution["execution_mode"], "hybrid")
+        self.assertEqual(execution["execution_mode"], "sync")
         self.assertEqual(text_ml_result["execution_mode"], "sync")
         self.assertEqual(text_ml_result["adapter_execution_mode"], "sync")
         self.assertIn("sync", text_ml_result["adapter_modes"])
-        self.assertEqual(vision_result["execution_mode"], "mock")
-        self.assertEqual(vision_result["adapter_execution_mode"], "mock")
-        self.assertEqual(vision_result["adapter_modes"], ["mock"])
+        self.assertEqual(vision_result["execution_mode"], "sync")
+        self.assertEqual(vision_result["adapter_execution_mode"], "sync")
+        self.assertEqual(vision_result["adapter_modes"], ["sync"])
+        self.assertEqual(
+            vision_result["structured_result"]["error_code"],
+            "attachment_not_scan_ready",
+        )
 
         structured_result = text_ml_result["structured_result"]
         self.assertEqual(structured_result["adapter_trace"]["execution_mode"], "sync")
@@ -2827,7 +2831,7 @@ class RemovedChatbotMockApiContract:
             for invocation in invocations
         }
         self.assertEqual(invocation_modes["text_ml_case_search"], "sync")
-        self.assertEqual(invocation_modes["vision_media_analysis"], "mock")
+        self.assertEqual(invocation_modes["vision_media_analysis"], "sync")
 
     def test_canonical_chat_message_covers_all_demo_personas_before_real_agents(self):
         for persona in list_demo_personas():
@@ -3745,8 +3749,9 @@ class RemovedChatbotMockApiContract:
         fine_notice_result = persisted_job.agent_results.get(node_code="fine_notice_analysis")
         self.assertEqual(fine_notice_result.status, AgentResultStatus.SUCCESS)
         self.assertIn("notice_fields", fine_notice_result.structured_result)
-        self.assertEqual(fine_notice_result.raw_output["source"], "mock_node_execution")
+        self.assertEqual(fine_notice_result.raw_output["source"], "agent_execution_metadata.v1")
         self.assertNotIn("agent_input", fine_notice_result.raw_output)
+        self.assertNotIn("agent_output", fine_notice_result.raw_output)
         ai_session = AiSession.objects.get(ai_session_id=job["persistence"]["ai_session_id"])
         self.assertEqual(ai_session.session, persisted_job.session)
         self.assertEqual(ai_session.user.user_id, "usr_mock")
@@ -4366,3 +4371,95 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(response["X-API-Surface"], "canonical_mock")
         self.assertEqual(response["X-Execution-Mode"], "mock")
         self.assertNotIn("X-Report-Persistence", response)
+
+
+class AttachmentClassificationPersistenceTests(TestCase):
+    def setUp(self):
+        self.session = ChatSession.objects.create(
+            session_id="ses_attachment_classification",
+            owner_id="usr_attachment_classification",
+        )
+        self.upload = UploadedFile.objects.create(
+            attachment_id="att_attachment_classification",
+            owner_id="usr_attachment_classification",
+            session=self.session,
+            purpose="unknown",
+            file_type="image",
+            original_filename="attachment.png",
+            content_type="image/png",
+            storage_uri="s3://clean-bucket/canonical/att_attachment_classification.png",
+            status=UploadedFileStatus.READY,
+            scan_status="clean",
+            metadata={
+                "object_storage_write": {"snapshot_sha256": "snapshot-current"},
+            },
+        )
+
+    def test_classification_record_uses_current_scan_snapshot_and_excludes_sensitive_fields(self):
+        try:
+            from chatbot.attachment_classification_service import (
+                persist_attachment_document_classification,
+            )
+        except ModuleNotFoundError:
+            self.fail("attachment classification persistence service must exist")
+
+        record = persist_attachment_document_classification(
+            attachment_id=self.upload.attachment_id,
+            storage_uri=self.upload.storage_uri,
+            execution_id="exec_classification",
+            structured_result={
+                "classification": "accident_evidence",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+                "ocr_text": "must not persist",
+                "storage_uri": "s3://must-not-persist",
+            },
+        )
+
+        self.upload.refresh_from_db()
+        stored = self.upload.metadata["attachment_document_classification"]
+        self.assertEqual(record["classification"], "accident_evidence")
+        self.assertEqual(stored["scan_snapshot_sha256"], "snapshot-current")
+        self.assertNotIn("ocr_text", stored)
+        self.assertNotIn("storage_uri", stored)
+        self.assertEqual(stored["execution_id"], "exec_classification")
+
+    def test_confirmation_rejects_stale_scan_record_and_resolves_only_server_record(self):
+        try:
+            from chatbot.attachment_classification_service import (
+                AttachmentClassificationConfirmationError,
+                persist_attachment_document_classification,
+                resolve_confirmed_attachment_classification,
+            )
+        except ModuleNotFoundError:
+            self.fail("attachment classification persistence service must exist")
+
+        persist_attachment_document_classification(
+            attachment_id=self.upload.attachment_id,
+            storage_uri=self.upload.storage_uri,
+            execution_id="exec_classification",
+            structured_result={
+                "classification": "fine_notice",
+                "confidence_band": "medium",
+                "requires_confirmation": True,
+            },
+        )
+        resolved = resolve_confirmed_attachment_classification(
+            session_id=self.session.session_id,
+            attachment_id=self.upload.attachment_id,
+        )
+        self.assertEqual(resolved, {
+            "attachment_id": self.upload.attachment_id,
+            "classification": "fine_notice",
+            "confidence_band": "medium",
+        })
+
+        self.upload.metadata["object_storage_write"] = {"snapshot_sha256": "snapshot-next"}
+        self.upload.save(update_fields=["metadata", "updated_at"])
+        with self.assertRaises(AttachmentClassificationConfirmationError) as raised:
+            resolve_confirmed_attachment_classification(
+                session_id=self.session.session_id,
+                attachment_id=self.upload.attachment_id,
+            )
+        self.assertEqual(raised.exception.code, "classification_stale_or_unavailable")
+

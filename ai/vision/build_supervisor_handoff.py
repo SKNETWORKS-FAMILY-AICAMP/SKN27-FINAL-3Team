@@ -47,7 +47,6 @@ def compact_event_candidates(event_windows: list[dict[str, Any]]) -> list[dict[s
             "end_sec": event.get("event_window_end_sec"),
             "priority_score": event.get("priority_score"),
             "basis": event.get("basis"),
-            "source_refs": event.get("source_refs", []),
         }
         for event in event_windows
     ]
@@ -59,7 +58,6 @@ def compact_key_frames(key_frames: list[dict[str, Any]]) -> list[dict[str, Any]]
             "frame_id": frame.get("frame_id"),
             "timestamp_sec": frame.get("timestamp_sec"),
             "frame_role": frame.get("frame_role"),
-            "frame_path": frame.get("frame_path"),
             "selection_reason": frame.get("selection_reason"),
         }
         for frame in key_frames
@@ -71,9 +69,7 @@ def compact_evidence_candidates(evidence: list[dict[str, Any]]) -> list[dict[str
         {
             "evidence_id": item.get("evidence_id"),
             "evidence_type": item.get("evidence_type"),
-            "source_ref": item.get("source_ref"),
             "timestamp_sec": item.get("timestamp_sec"),
-            "frame_path": item.get("frame_path"),
             "object_classes": item.get("object_classes", []),
             "score": item.get("score"),
             "score_type": item.get("score_type"),
@@ -82,11 +78,29 @@ def compact_evidence_candidates(evidence: list[dict[str, Any]]) -> list[dict[str
     ]
 
 
+def _canonical_label(label: Any) -> str | None:
+    if label is None:
+        return None
+    from ai.vision.trained_category_classifier import LABELS
+
+    raw_label = str(label)
+    return LABELS.get(raw_label, raw_label)
+
+
+def compact_prediction(prediction: Any) -> dict[str, Any]:
+    value = prediction if isinstance(prediction, dict) else {}
+    return {
+        "label": _canonical_label(value.get("label")),
+        "raw_label": value.get("raw_label"),
+        "score": value.get("score"),
+        "requires_review": value.get("requires_review", False),
+    }
+
+
 def top_video_hint(video_understanding: dict[str, Any]) -> dict[str, Any]:
     clips = video_understanding.get("clips", [])
     if not clips:
         return {
-            "model_name": video_understanding.get("model_name"),
             "top_label": None,
             "score": None,
             "usage_policy": "supplementary_context_only",
@@ -95,19 +109,35 @@ def top_video_hint(video_understanding: dict[str, Any]) -> dict[str, Any]:
     clip = clips[0]
     top = clip.get("top_prediction") or {}
     return {
-        "model_name": video_understanding.get("model_name"),
-        "clip_id": clip.get("clip_id"),
-        "top_label": top.get("label"),
+        "top_label": _canonical_label(top.get("label")),
         "score": top.get("score"),
         "usage_policy": "trained_prediction_requires_evidence_review",
         "note": "The trained VideoMAE class is a prediction, not accident liability or fault-ratio evidence.",
     }
 
 
+def compact_qwen_analysis(qwen: Any) -> dict[str, Any]:
+    value = qwen if isinstance(qwen, dict) else {}
+    error_code = value.get("error_code")
+    if not error_code and value.get("error"):
+        error_code = "vision_qwen_unavailable"
+    return {
+        "valid": value.get("valid", False),
+        "summary": value.get("summary"),
+        "predicted_accident_target": value.get("predicted_accident_target"),
+        "accident_target_evidence": value.get("accident_target_evidence"),
+        "collision_moment_visible": value.get("collision_moment_visible"),
+        "accident_situation": value.get("accident_situation"),
+        "scene_conditions": value.get("scene_conditions"),
+        "uncertainties": value.get("uncertainties", []),
+        "requires_review": value.get("requires_review", not value.get("valid", False)),
+        "error_code": error_code,
+    }
+
+
 def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
     agent = final_analysis.get("vision_agent_output", {}).get("agent_output", {})
     structured = agent.get("structured_result", {})
-    metadata = agent.get("metadata", {})
     video_understanding = final_analysis.get("video_understanding", {})
 
     detected_objects = structured.get("detected_objects", [])
@@ -119,8 +149,6 @@ def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
                 "final_analysis_schema_version": final_analysis.get("schema_version"),
                 "vision_node_code": agent.get("node_code"),
                 "analysis_scope": final_analysis.get("analysis_scope"),
-                "source_video": metadata.get("source_path"),
-                "vision_result_id": metadata.get("vision_result_id"),
             },
             "status": final_analysis.get("status") or agent.get("status"),
             "media_summary": {
@@ -136,38 +164,20 @@ def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
             },
             "video_understanding_hint": top_video_hint(video_understanding),
             "model_analysis": {
-                "trained_accident_prediction": structured.get("trained_model_prediction"),
+                "trained_accident_prediction": compact_prediction(structured.get("trained_model_prediction")),
                 "selected_yolo_model": structured.get("selected_yolo_model"),
-                "qwen": {
-                    "valid": qwen.get("valid", False),
-                    "summary": qwen.get("summary"),
-                    "predicted_accident_target": qwen.get("predicted_accident_target"),
-                    "accident_target_evidence": qwen.get("accident_target_evidence"),
-                    "collision_moment_visible": qwen.get("collision_moment_visible"),
-                    "accident_situation": qwen.get("accident_situation"),
-                    "scene_conditions": qwen.get("scene_conditions"),
-                    "uncertainties": qwen.get("uncertainties", []),
-                    "requires_review": qwen.get("requires_review", not qwen.get("valid", False)),
-                    "error": qwen.get("error"),
-                },
+                "qwen": compact_qwen_analysis(qwen),
             },
             "not_determined_by_vision": NOT_DETERMINED_BY_VISION,
             "routing_recommendation": {
-                "next_agents": ["legal_rag_agent", "precedent_agent", "report_agent"],
+                "next_agents": ["text_ml_case_search", "law_ground_search"],
                 "legal_agent_focus": [
-                    "traffic_violation",
-                    "legal_responsibility",
                     "applicable_law",
+                    "evidence_context",
                 ],
                 "precedent_agent_focus": [
                     "similar_accident_cases",
-                    "fault_ratio_reference",
-                    "case_factors",
-                ],
-                "report_agent_focus": [
-                    "visual_evidence_summary",
-                    "timeline",
-                    "limitations",
+                    "factual_case_factors",
                 ],
             },
             "limitations": final_analysis.get("limitations", []) + structured.get("limitations", []),

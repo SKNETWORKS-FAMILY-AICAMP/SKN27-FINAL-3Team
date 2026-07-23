@@ -113,6 +113,13 @@ def _run_smoke(fixture: dict) -> dict:
                 "session_id": session_id,
                 "user_text": "과태료 고지서에 대해 이의신청서와 분석 리포트를 작성해 주세요.",
                 "attachments": [{"attachment_id": attachment_id}],
+                "ocr_confirmation": {
+                    "confirmed": True,
+                    "fields": {
+                        "fine_type": "과태료",
+                        "notice_stage": "사전통지",
+                    },
+                },
             }
         ),
         content_type="application/json",
