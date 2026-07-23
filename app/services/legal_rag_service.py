@@ -379,7 +379,7 @@ def _pgvector_seed_space_has_eligible_row(
 
 
 def _build_query_embedding(query: str) -> tuple[list[float], dict[str, Any]]:
-    provider = _text(_setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "sentence-transformers")).lower()
+    provider = _text(_setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "openai")).lower()
     if provider in {"", "disabled", "none"}:
         raise RuntimeError("query_embedding_disabled")
     if provider == "hash":
@@ -440,10 +440,10 @@ def _validate_configured_embedding_space() -> dict[str, Any]:
         raise RuntimeError("query_embedding_space_not_configured")
 
     query_provider = _text(
-        _setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "sentence-transformers")
+        _setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "openai")
     ).lower()
     query_model = _text(
-        _setting("LEGAL_RAG_QUERY_EMBEDDING_MODEL", DEFAULT_SENTENCE_TRANSFORMER_MODEL)
+        _setting("LEGAL_RAG_QUERY_EMBEDDING_MODEL", "text-embedding-3-large")
     )
     query_dimensions = _int_setting("LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS", 0)
 

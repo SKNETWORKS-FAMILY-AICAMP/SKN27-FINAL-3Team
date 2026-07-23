@@ -10,22 +10,67 @@ from django.db import connection
 
 
 def verify_pgvector_rag_readiness() -> dict[str, Any]:
-    """Return a credential-safe readiness report for the three pgvector corpora."""
+    """Return a credential-safe readiness report for required and optional corpora."""
 
     domains = {
         "legal": _safe_verify(_verify_legal),
         "review_case": _safe_verify(_verify_review_case),
         "fault_ratio_precedent": _safe_verify(_verify_fault_ratio_precedent),
     }
+    required_domains = ("legal", "review_case")
+    for domain, payload in domains.items():
+        payload["required"] = domain in required_domains
+
+    shared_embedding_space = _shared_embedding_space(domains)
+    required_ready = all(
+        domains[domain].get("status") == "ready" for domain in required_domains
+    )
+    spaces_match = shared_embedding_space is not None
+
     return {
         "contract_version": "pgvector_rag_readiness.v1",
-        "status": "ready" if all(item.get("status") == "ready" for item in domains.values()) else "fail",
+        "status": "ready" if required_ready and spaces_match else "fail",
+        "error_code": (
+            ""
+            if required_ready and spaces_match
+            else (
+                "shared_embedding_space_mismatch"
+                if required_ready
+                else "required_pgvector_domain_not_ready"
+            )
+        ),
+        "required_domains": list(required_domains),
+        "shared_embedding_space": shared_embedding_space,
         "domains": domains,
     }
 
 
+def _shared_embedding_space(
+    domains: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    spaces = []
+    for domain in ("legal", "review_case"):
+        payload = domains[domain]
+        if payload.get("status") != "ready":
+            return None
+        space = payload.get("embedding_space")
+        if not isinstance(space, dict):
+            return None
+        spaces.append(
+            {
+                "provider": str(space.get("provider") or "").strip().lower(),
+                "model": str(space.get("model") or "").strip(),
+                "dimensions": int(space.get("dimensions") or 0),
+            }
+        )
+    return spaces[0] if spaces[0] == spaces[1] else None
+
+
 class Command(BaseCommand):
-    help = "Verify legal, review-case, and fault-ratio pgvector stores without performing writes."
+    help = (
+        "Verify required legal/review-case pgvector stores and report the optional "
+        "fault-ratio store without performing writes."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("--format", choices=["json", "text"], default="json")

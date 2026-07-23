@@ -25,6 +25,8 @@ def embed_query(query: str) -> list[float]:
 
 
 def search_by_vector(query_vector: list[float], top_k: int | None = None) -> list[dict[str, Any]]:
+    if len(query_vector) != EMBEDDING_SETTINGS.dim:
+        raise RuntimeError("embedding_space_mismatch")
     limit = top_k or PGVECTOR_SEARCH_SETTINGS.default_top_k
     vector_text = vector_literal(query_vector)
 

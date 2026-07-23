@@ -214,18 +214,16 @@ CREATE TABLE IF NOT EXISTS review_case_chunk_embeddings (
     chunk_id TEXT NOT NULL REFERENCES review_case_chunks(chunk_id) ON DELETE CASCADE,
     embedding_model TEXT NOT NULL,
     embedding_version TEXT NOT NULL,
-    -- Current baseline dimension is 1536 for text-embedding-3-small.
-    -- If a later experiment stores native 3072-dimensional vectors, create a new
-    -- embedding table or migrate this column intentionally instead of mixing dims.
-    embedding_dim INTEGER NOT NULL DEFAULT 1536,
+    -- Shared law/review-case embedding space: text-embedding-3-large, 1024 dimensions.
+    embedding_dim INTEGER NOT NULL DEFAULT 1024,
     embedding_provider TEXT,
     input_field TEXT DEFAULT 'chunk_text',
-    embedding_vector vector(1536),
+    embedding_vector vector(1024),
     embedding_meta JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (chunk_id, embedding_model, embedding_version),
-    CHECK (embedding_dim = 1536)
+    CHECK (embedding_dim = 1024)
 );
 
 CREATE TABLE IF NOT EXISTS review_case_embedding_jobs (

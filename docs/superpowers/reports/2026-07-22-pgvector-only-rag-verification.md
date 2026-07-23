@@ -6,7 +6,8 @@ Date: 2026-07-22
 
 - Legal retrieval has no lexical or Django-table fallback.
 - text-ML retrieval calls unified review-case and fault-ratio pgvector retrievers.
-- The readiness command verifies legal, review-case, and fault-ratio embedding/HNSW state.
+- The readiness command requires legal and review-case embedding/HNSW state and
+  reports fault-ratio pgvector as an optional diagnostic.
 - Seed and Pilot smoke contracts use `--require-pgvector`; no seed action recreates a separate search index.
 - Local Compose, Pilot Compose, Terraform, runtime templates, Python requirements, and DB schemas no
   longer provision a separate search service.
@@ -34,6 +35,33 @@ Date: 2026-07-22
 | active production-code reference scan | 0 references |
 | changed-file whitespace validation | passed |
 
+## Issue #291 scope correction (2026-07-23)
+
+The PR was reconciled with the issue's actual target: Elasticsearch and lexical
+fallback removal plus a single embedding contract for law and review-case.
+Fault-ratio precedent remains on its existing pgvector path but is not part of
+the cross-domain embedding-space gate.
+
+The canonical law/review-case space is now
+`openai / text-embedding-3-large / 1024`, matching the validated law run
+`legal-ab-018-pgvector-gates-20260722`. Fresh review-case schema, query-vector
+validation, deployment examples, and readiness checks use that contract.
+
+The dated SQL migration is backup-gated and idempotent: it preserves existing
+1536-dimensional review-case rows, changes the empty active table to
+`vector(1024)`, and does not perform paid re-embedding. The checklist therefore
+keeps live re-embedding, representative-query latency, and the three separate
+C-1 quality controls open.
+
+| Corrected scope check | Result |
+|---|---:|
+| shared-space, schema, migration, retrieval, and legal RAG focused tests | 35 passed in 0.68s |
+| post-merge focused pytest suites | 87 passed in 1.09s |
+| post-merge Django `chatbot` suite | 349 passed in 18.853s |
+| repository pytest on Python 3.14, excluding incompatible `rag_runtime` collection | 952 passed, 38 skipped in 77.79s |
+| active Python/JSON/YAML/SQL runtime reference scan | 0 ES/OpenSearch/Kibana/BM25/Nori/lexical references |
+| changed-file whitespace validation | passed |
+
 The local full-suite collection still cannot import the independent
 `etl/fault_cases/rag_runtime` tests. The shared virtual environment runs Python
 3.14.3, while the declared `pyarrow>=20,<22` range has no compatible Windows
@@ -56,9 +84,10 @@ local Python 3.14 environment. The final full-suite verdict must therefore be
 taken from the GitHub Actions Python 3.13 production gate after this correction
 is pushed.
 
-The legacy ES-only seed-loader tests were removed rather than retained as skipped tests. The
-pgvector readiness test covers the legal, review-case, and fault-ratio domains and requires their
-embedding/HNSW checks to be ready.
+The legacy ES-only seed-loader tests were removed rather than retained as
+skipped tests. The pgvector readiness test requires legal and review-case to be
+ready in one embedding space; fault-ratio readiness is reported separately and
+does not block issue #291.
 
 ## Operational limitations
 
