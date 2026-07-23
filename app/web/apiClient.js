@@ -247,7 +247,12 @@ async function parseJsonResponse(response) {
   if (!response.ok) {
     const error = payload?.error || {};
     const reason = error?.auth?.reason || error?.reason || error?.code || response.statusText;
-    throw new Error(`Request failed: ${response.status}${reason ? ` ${reason}` : ""}`);
+    const requestError = new Error(`Request failed: ${response.status}${reason ? ` ${reason}` : ""}`);
+    requestError.status = response.status;
+    requestError.code = error?.code || "";
+    requestError.requiredAction = error?.required_action || "";
+    requestError.payload = payload;
+    throw requestError;
   }
   return payload ?? response.json();
 }

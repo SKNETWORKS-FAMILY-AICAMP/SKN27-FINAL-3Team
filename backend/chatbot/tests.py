@@ -4366,4 +4366,3 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(response["X-API-Surface"], "canonical_mock")
         self.assertEqual(response["X-Execution-Mode"], "mock")
         self.assertNotIn("X-Report-Persistence", response)
-

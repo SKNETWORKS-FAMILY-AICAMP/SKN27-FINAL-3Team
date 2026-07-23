@@ -29,10 +29,12 @@ const EXECUTION_MODE = "async_worker";
 const WORKER_POLL_INTERVAL_MS = 500;
 const WORKER_POLL_MAX_ATTEMPTS = 60;
 const WORKER_PENDING_JOB_STATUSES = new Set(["queued", "running", "retrying"]);
-const ATTACHMENT_PURPOSE_LABELS = {
-  fine_notice: "고지서",
-  supporting_evidence: "보조 자료",
-};
+const CHAT_ATTACHMENT_OPTIONS = [
+  { label: "영상", description: "블랙박스·현장 영상", purpose: "supporting_evidence", accept: "video/*" },
+  { label: "고지서", description: "과태료·범칙금 고지서", purpose: "fine_notice", accept: "image/*,application/pdf" },
+  { label: "사고 경위서", description: "사고 내용이 정리된 문서", purpose: "supporting_evidence", accept: "image/*,application/pdf,.doc,.docx" },
+  { label: "기타 자료", description: "사진·PDF·보조 문서", purpose: "supporting_evidence", accept: "image/*,application/pdf,.doc,.docx" },
+];
 const DEADLINE_GUIDANCE_STATUSES = new Set(["overdue", "due_soon", "normal", "needs_confirmation"]);
 const SERVICE_INFORMATION_NOTICE = "이 서비스는 법률 자문이나 개별 사건의 확정 판단을 대신하지 않으며, 확인할 사실과 근거를 정리합니다.";
 const USER_FACING_NEXT_ACTION_LABELS = {
@@ -42,6 +44,10 @@ const USER_FACING_NEXT_ACTION_LABELS = {
 
 function waitForWorkerPoll() {
   return new Promise((resolve) => window.setTimeout(resolve, WORKER_POLL_INTERVAL_MS));
+}
+
+function waitForAssistantToken() {
+  return new Promise((resolve) => window.setTimeout(resolve, 20));
 }
 
 function assistantMessageText(value, fallback = "") {
@@ -192,10 +198,6 @@ export default function FrontendAppShell({
   const visibleAnalysisCards = isLiveReportingReady
     ? analysisCards
     : analysisCards.filter((card) => card?.card_type !== "reporting_preview");
-  const attachmentPurposes = Array.from(
-    new Set((capabilityCatalog?.capabilities || []).flatMap((capability) => capability.attachment_purposes || []))
-  ).map((value) => ({ value, label: ATTACHMENT_PURPOSE_LABELS[value] || value }));
-
   useEffect(() => {
     let active = true;
     api.getCapabilities()
@@ -884,18 +886,16 @@ export default function FrontendAppShell({
       );
       const workerResult = await pollQueuedWorkerResult(result, submitIdentity);
       logDeveloperDiagnostic("chat.result", buildDeveloperDiagnostic(workerResult));
-      setChatMessages([
-        ...conversationHistory,
-        {
-          role: "assistant",
-          content:
-            workerResult?.assistant_message?.core_answer ||
-            assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
-          status: workerResult?.status || "partial",
-          pending_questions: workerResult?.pending_questions || [],
-          followUp: workerResult?.assistant_message?.follow_up || null,
-        },
-      ]);
+      const assistantMessage = {
+        role: "assistant",
+        content:
+          workerResult?.assistant_message?.core_answer ||
+          assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
+        status: workerResult?.status || "partial",
+        pending_questions: workerResult?.pending_questions || [],
+        followUp: workerResult?.assistant_message?.follow_up || null,
+      };
+      await streamAssistantMessage(conversationHistory, assistantMessage);
       setAnalysisResponse(workerResult);
       setQuestion("");
       const canSaveGuestConversation = !effectiveAuthSessionId && Boolean(
@@ -917,22 +917,52 @@ export default function FrontendAppShell({
       logDeveloperDiagnostic("chat.error", {
         message: _error?.message || "unknown error",
       });
+      const isRateLimitExceeded = _error?.status === 429 || _error?.code === "rate_limit_exceeded";
+      const errorMessage = isRateLimitExceeded
+        ? effectiveAuthSessionId
+          ? "오늘의 상담 가능 횟수를 모두 사용했습니다. 잠시 후 다시 시도해 주세요."
+          : "비회원 상담 가능 횟수를 모두 사용했습니다. 계속 상담하려면 Google 로그인해 주세요."
+        : "응답을 불러오지 못해 접수 상태만 표시합니다.";
       setChatMessages([
         ...conversationHistory,
         {
           role: "assistant",
-          content: "응답을 불러오지 못해 접수 상태만 표시합니다.",
+          content: errorMessage,
           status: "partial",
           pending_questions: [],
         },
       ]);
-      setAnalysisResponse({
-        cards: FALLBACK_ANALYSIS_CARDS,
-      });
-      setSavePromptVisible(!authSessionId);
-      setStatusMessage("응답을 불러오지 못해 접수 상태만 표시합니다.");
+      setAnalysisResponse(isRateLimitExceeded ? null : { cards: FALLBACK_ANALYSIS_CARDS });
+      setSavePromptVisible(!isRateLimitExceeded && !authSessionId);
+      setStatusMessage(errorMessage);
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function streamAssistantMessage(conversationHistory, assistantMessage) {
+    const tokens = String(assistantMessage.content || "").match(/\S+\s*/g) || [];
+    const batchSize = Math.max(1, Math.ceil(tokens.length / 160));
+    let renderedContent = "";
+
+    setChatMessages([
+      ...conversationHistory,
+      { ...assistantMessage, content: "", streaming: true },
+    ]);
+
+    for (let index = 0; index < tokens.length; index += batchSize) {
+      renderedContent += tokens.slice(index, index + batchSize).join("");
+      setChatMessages([
+        ...conversationHistory,
+        {
+          ...assistantMessage,
+          content: renderedContent,
+          streaming: index + batchSize < tokens.length,
+        },
+      ]);
+      if (index + batchSize < tokens.length) {
+        await waitForAssistantToken();
+      }
     }
   }
 
@@ -1175,22 +1205,24 @@ export default function FrontendAppShell({
         onOpenChat={() => bootstrapGuestSession("chatbot")}
       />
       <div className="app-shell__body">
-      <div className="top-float-actions" aria-label="주요 메뉴">
-        {authSessionId ? (
-          <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
-            로그아웃
-          </button>
-        ) : (
-          <button
-            className="button primary small"
-            type="button"
-            onClick={saveConversationAfterLogin}
-            disabled={isSavingConversation}
-          >
-            {isSavingConversation ? "연결 중" : "Google 로그인"}
-          </button>
-        )}
-      </div>
+      {(authSessionId || !["chatbot", "history"].includes(activeRoute)) && (
+        <div className="top-float-actions" aria-label="주요 메뉴">
+          {authSessionId ? (
+            <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
+              로그아웃
+            </button>
+          ) : (
+            <button
+              className="button primary small"
+              type="button"
+              onClick={saveConversationAfterLogin}
+              disabled={isSavingConversation}
+            >
+              {isSavingConversation ? "연결 중" : "Google 로그인"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div
         className={
@@ -1225,6 +1257,7 @@ export default function FrontendAppShell({
         <main className="workspace" aria-live="polite">
           {activeRoute === "entry" && (
             <EntryScreenV2
+              isAuthenticated={Boolean(authSessionId)}
               onGuestStart={() => bootstrapGuestSession("chatbot")}
               onOpenChat={() => bootstrapGuestSession("chatbot")}
               onNavigate={setActiveRoute}
@@ -1234,8 +1267,6 @@ export default function FrontendAppShell({
           {activeRoute === "chatbot" && (
             <ChatScreenV2
               analysisCards={visibleAnalysisCards}
-              attachmentPurpose={attachmentPurpose}
-              attachmentPurposes={attachmentPurposes}
               assistantAnswer={assistantAnswer}
               assistantFollowUp={assistantFollowUp}
               chatSafetyGuidance={chatSafetyGuidance}
@@ -1659,7 +1690,7 @@ function AppIconRail({ activeRoute, onNavigate, onOpenChat }) {
   );
 }
 
-function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
+function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }) {
   const goToRoute = (route) => {
     if (typeof onNavigate === "function") {
       onNavigate(route);
@@ -1687,9 +1718,11 @@ function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
               <button className="button primary" type="button" onClick={onOpenChat}>
                 바로 상담 시작
               </button>
-              <button className="button on-dark" type="button" onClick={() => goToRoute("reporting")}>
-                지난 리포트
-              </button>
+              {isAuthenticated && (
+                <button className="button on-dark" type="button" onClick={() => goToRoute("reporting")}>
+                  지난 리포트
+                </button>
+              )}
             </div>
           </div>
 
@@ -1864,7 +1897,7 @@ function ConversationSidebar({
       <section className="conversation-section" aria-label="현재 대화">
         <div className="section-label">현재</div>
         <button
-          className={activeRoute === "chatbot" ? "conversation-card active" : "conversation-card"}
+          className="conversation-card active"
           type="button"
           onClick={() => onNavigate("chatbot")}
         >
@@ -1940,8 +1973,6 @@ function ConversationSidebar({
 
 function ChatScreenV2({
   analysisCards,
-  attachmentPurpose,
-  attachmentPurposes,
   assistantAnswer,
   assistantFollowUp,
   capabilityError,
@@ -1976,6 +2007,8 @@ function ChatScreenV2({
   supervisorState,
   uploadInputResetKey,
 }) {
+  const attachmentInputRef = useRef(null);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const visibleMessages = chatMessages.length
     ? chatMessages
     : submittedQuestion
@@ -1993,13 +2026,14 @@ function ChatScreenV2({
   const isAuthenticated = Boolean(authSessionId);
   const visibleReportingPayload = isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;
   const canGenerateReport = hasReportGenerationNode(supervisorState);
-  const uploadButtonLabel = isRegisteringAttachment
-    ? "등록 중"
-    : selectedUploadFile
-      ? isAuthenticated
-        ? "파일 업로드"
-        : "Google 로그인 후 업로드"
-      : "파일 선택 필요";
+  const openAttachmentPicker = (option) => {
+    setAttachmentPurpose(option.purpose);
+    setAttachmentMenuOpen(false);
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.accept = option.accept;
+      attachmentInputRef.current.click();
+    }
+  };
   const quickQuestions = [
     "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
     "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했어",
@@ -2012,69 +2046,7 @@ function ChatScreenV2({
         <div className="screen-title">
           <h2>AI 교통 상담</h2>
         </div>
-        <div className="screen-actions">
-          <button className="button" type="button" onClick={onKeepTemporary}>
-            저장하지 않고 계속하기
-          </button>
-          <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
-            {isSavingConversation ? "연결 중" : "Google 로그인 후 저장"}
-          </button>
-        </div>
       </div>
-
-      <section className="chat-attachment-bar" aria-label="상담 자료 첨부">
-        <div className="attachment-tools">
-          <label>
-            <span>첨부 목적</span>
-            <select value={attachmentPurpose} onChange={(event) => setAttachmentPurpose(event.target.value)}>
-              {attachmentPurposes.map((item) => (
-                <option value={item.value} key={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="file-picker">
-            <span>파일</span>
-            <input
-              key={uploadInputResetKey}
-              accept="image/*,application/pdf"
-              type="file"
-              onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
-            />
-          </label>
-          <button
-            className="button"
-            type="button"
-            onClick={onRegisterAttachment}
-            disabled={isRegisteringAttachment || !selectedUploadFile || Boolean(capabilityError)}
-          >
-            {uploadButtonLabel}
-          </button>
-          <span className="tag">자료 {registeredAttachments.length}건</span>
-        </div>
-        {capabilityError && <p className="attachment-help" role="alert">{capabilityError}</p>}
-        {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
-          <p className="attachment-help" role="status">
-            자료 분석은 Google 로그인 후 현재 상담에 그대로 연결됩니다.
-          </p>
-        )}
-        {pendingAuthAction && (
-          <p className="attachment-help" role="status">
-            로그인 후 요청한 작업을 같은 상담에서 이어갑니다.
-          </p>
-        )}
-        {registeredAttachments.length > 0 && (
-          <div className="attachment-list" aria-label="상담 연결 자료">
-            {registeredAttachments.slice(-3).map((attachment) => (
-              <span key={attachment.attachment_id}>
-                {attachment.original_filename || attachment.filename || attachment.purpose}
-                <em>{attachmentStatusLabel(attachment.scan_status || attachment.status)}</em>
-              </span>
-            ))}
-          </div>
-        )}
-      </section>
 
       <div className="chat-shell">
         <div className="conversation-list">
@@ -2092,7 +2064,7 @@ function ChatScreenV2({
           <div className="messages">
             {!hasConversation && (
               <section className="chat-empty-state" aria-label="상담 시작">
-                <span className="eyebrow">비회원 상담</span>
+                <span className="chat-session-status">비회원으로 상담 중</span>
                 <h3>지금 가장 급한 상황부터 적어 주세요.</h3>
                 <p>
                   사고 직후라면 장소, 시간, 상대방 주장, 고지서 내용처럼 기억나는 것만 적어도 됩니다.
@@ -2109,10 +2081,10 @@ function ChatScreenV2({
                   return (
                     <article className={isUser ? "message user" : "message"} key={`${message.role}-${index}`}>
                       <span className="message-avatar">{isUser ? "나" : "AI"}</span>
-                      <div className={isUser ? "bubble" : "bubble wide"}>
+                      <div className={`${isUser ? "bubble" : "bubble wide"}${message.streaming ? " is-streaming" : ""}`}>
                         <p>{message.content}</p>
-                        {!isUser && message.followUp && <FollowUpNote followUp={message.followUp} />}
-                        {!isUser && isLatestAssistant && (
+                        {!isUser && !message.streaming && message.followUp && <FollowUpNote followUp={message.followUp} />}
+                        {!isUser && !message.streaming && isLatestAssistant && (
                           <>
                             {chatSafetyGuidance && <SafetyGuidancePanel guidance={chatSafetyGuidance} />}
                             <MissingFieldsPrompt supervisorState={supervisorState} />
@@ -2141,7 +2113,7 @@ function ChatScreenV2({
                     </article>
                   );
                 })}
-                {isSubmitting && (
+                {isSubmitting && visibleMessages[visibleMessages.length - 1]?.role !== "assistant" && (
                   <article className="message" aria-live="polite">
                     <span className="message-avatar">AI</span>
                     <div className="bubble wide bubble-loading">
@@ -2195,10 +2167,65 @@ function ChatScreenV2({
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
               />
+              <div className="composer-toolbar">
+                <div className="attachment-menu-wrap">
+                  <button
+                    className="attachment-plus"
+                    type="button"
+                    aria-label="자료 첨부"
+                    aria-expanded={attachmentMenuOpen}
+                    onClick={() => setAttachmentMenuOpen((open) => !open)}
+                  >
+                    +
+                  </button>
+                  {attachmentMenuOpen && (
+                    <div className="attachment-menu" role="menu">
+                      {CHAT_ATTACHMENT_OPTIONS.map((option) => (
+                        <button type="button" role="menuitem" key={option.label} onClick={() => openAttachmentPicker(option)}>
+                          <strong>{option.label}</strong>
+                          <span>{option.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    ref={attachmentInputRef}
+                    key={uploadInputResetKey}
+                    className="attachment-file-input"
+                    type="file"
+                    onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
+                  />
+                </div>
+
+                {selectedUploadFile && (
+                  <div className="selected-attachment">
+                    <span>{selectedUploadFile.name}</span>
+                    <button
+                      type="button"
+                      onClick={onRegisterAttachment}
+                      disabled={isRegisteringAttachment || Boolean(capabilityError)}
+                    >
+                      {isRegisteringAttachment ? "첨부 중" : isAuthenticated ? "첨부" : "로그인 후 첨부"}
+                    </button>
+                    <button type="button" aria-label="선택한 파일 제거" onClick={() => setSelectedUploadFile(null)}>×</button>
+                  </div>
+                )}
+
+                {!selectedUploadFile && registeredAttachments.length > 0 && (
+                  <span className="attachment-count">첨부 {registeredAttachments.length}개</span>
+                )}
+
+                <button className="button primary composer-send" type="button" onClick={onSubmit} disabled={isSubmitting}>
+                  {isSubmitting ? "정리 중" : "전송"}
+                </button>
+              </div>
+
+              {capabilityError && <p className="attachment-help" role="alert">{capabilityError}</p>}
+              {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
+                <p className="attachment-help" role="status">자료 첨부는 Google 로그인 후 현재 상담에 연결됩니다.</p>
+              )}
+              {pendingAuthAction && <p className="attachment-help" role="status">로그인 후 같은 상담에서 첨부를 이어갑니다.</p>}
             </div>
-            <button className="button primary" type="button" onClick={onSubmit} disabled={isSubmitting}>
-              {isSubmitting ? "정리 중" : "전송"}
-            </button>
           </div>
         </div>
       </div>
@@ -3228,6 +3255,7 @@ function ReportingScreen({
   const activeReportTitle = activeReportingPayload?.title || currentReport?.title || reportTitle;
   const activeReportType = activeReportingPayload?.report_type || currentReport?.report_type || "general";
   const activeReportTypeLabel = reportTypeLabel(activeReportType);
+  const reportDisplayLabel = activeReportType === "general" ? "상담 리포트" : activeReportTypeLabel;
   const savedReportCountLabel = hasSavedReports ? `${reportList.length}건` : hasReport ? "1건" : "0건";
   const reportTagClass = currentReport || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber";
   const groupedSections = groupReportSections(sections);
@@ -3261,14 +3289,13 @@ function ReportingScreen({
         <article className="report-canvas" aria-label="리포트 미리보기">
           {hasReport ? (
             <div className="report-page">
-              <span className="eyebrow">{activeReportTypeLabel}</span>
+              <span className="report-document-label">{reportDisplayLabel}</span>
               <h3>{activeReportTitle}</h3>
               <p>{reportSummary}</p>
-              <div className="summary-grid">
-                <MetricCard detail={activeReportTypeLabel} label="리포트 상태" value={reportStatusLabel(reportStatus)} />
-                <MetricCard detail="표시 가능한 주요 섹션" label="리포트 섹션" value={`${sections.length}개`} />
-                <MetricCard detail="법령·증거·판례 중심" label="근거 묶음" value={`${groundsSections.length}개`} />
-                <MetricCard detail="제출·보완·재생성 중심" label="다음 작업" value={`${actionSections.length}개`} />
+              <div className="report-status-strip">
+                <span>작성 상태</span>
+                <strong>{reportStatusLabel(reportStatus)}</strong>
+                <p>상담 내용을 바탕으로 확인된 내용을 정리하고 있습니다.</p>
               </div>
 
               <DocumentTypeCards cards={documentCards} onCopy={onCopyDocumentCard} />
@@ -3291,11 +3318,7 @@ function ReportingScreen({
               <div className="report-focus-columns">
                 <section className="report-focus-panel" aria-label="핵심 근거">
                   <div className="report-focus-header">
-                    <div>
-                      <span className="eyebrow">Grounds</span>
-                      <strong>핵심 근거</strong>
-                    </div>
-                    <span className="tag">{groundsSections.length}개</span>
+                    <strong>판단 근거</strong>
                   </div>
                   <div className="report-section-list">
                     {groundsSections.length > 0 ? (
@@ -3313,11 +3336,7 @@ function ReportingScreen({
 
                 <section className="report-focus-panel" aria-label="다음 작업">
                   <div className="report-focus-header">
-                    <div>
-                      <span className="eyebrow">Next</span>
-                      <strong>다음 작업</strong>
-                    </div>
-                    <span className="tag">{actionSections.length}개</span>
+                    <strong>다음 단계</strong>
                   </div>
                   <div className="report-section-list">
                     {actionSections.length > 0 ? (
