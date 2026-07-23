@@ -4372,3 +4372,94 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(response["X-Execution-Mode"], "mock")
         self.assertNotIn("X-Report-Persistence", response)
 
+
+class AttachmentClassificationPersistenceTests(TestCase):
+    def setUp(self):
+        self.session = ChatSession.objects.create(
+            session_id="ses_attachment_classification",
+            owner_id="usr_attachment_classification",
+        )
+        self.upload = UploadedFile.objects.create(
+            attachment_id="att_attachment_classification",
+            owner_id="usr_attachment_classification",
+            session=self.session,
+            purpose="unknown",
+            file_type="image",
+            original_filename="attachment.png",
+            content_type="image/png",
+            storage_uri="s3://clean-bucket/canonical/att_attachment_classification.png",
+            status=UploadedFileStatus.READY,
+            scan_status="clean",
+            metadata={
+                "object_storage_write": {"snapshot_sha256": "snapshot-current"},
+            },
+        )
+
+    def test_classification_record_uses_current_scan_snapshot_and_excludes_sensitive_fields(self):
+        try:
+            from chatbot.attachment_classification_service import (
+                persist_attachment_document_classification,
+            )
+        except ModuleNotFoundError:
+            self.fail("attachment classification persistence service must exist")
+
+        record = persist_attachment_document_classification(
+            attachment_id=self.upload.attachment_id,
+            storage_uri=self.upload.storage_uri,
+            execution_id="exec_classification",
+            structured_result={
+                "classification": "accident_evidence",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+                "ocr_text": "must not persist",
+                "storage_uri": "s3://must-not-persist",
+            },
+        )
+
+        self.upload.refresh_from_db()
+        stored = self.upload.metadata["attachment_document_classification"]
+        self.assertEqual(record["classification"], "accident_evidence")
+        self.assertEqual(stored["scan_snapshot_sha256"], "snapshot-current")
+        self.assertNotIn("ocr_text", stored)
+        self.assertNotIn("storage_uri", stored)
+        self.assertEqual(stored["execution_id"], "exec_classification")
+
+    def test_confirmation_rejects_stale_scan_record_and_resolves_only_server_record(self):
+        try:
+            from chatbot.attachment_classification_service import (
+                AttachmentClassificationConfirmationError,
+                persist_attachment_document_classification,
+                resolve_confirmed_attachment_classification,
+            )
+        except ModuleNotFoundError:
+            self.fail("attachment classification persistence service must exist")
+
+        persist_attachment_document_classification(
+            attachment_id=self.upload.attachment_id,
+            storage_uri=self.upload.storage_uri,
+            execution_id="exec_classification",
+            structured_result={
+                "classification": "fine_notice",
+                "confidence_band": "medium",
+                "requires_confirmation": True,
+            },
+        )
+        resolved = resolve_confirmed_attachment_classification(
+            session_id=self.session.session_id,
+            attachment_id=self.upload.attachment_id,
+        )
+        self.assertEqual(resolved, {
+            "attachment_id": self.upload.attachment_id,
+            "classification": "fine_notice",
+            "confidence_band": "medium",
+        })
+
+        self.upload.metadata["object_storage_write"] = {"snapshot_sha256": "snapshot-next"}
+        self.upload.save(update_fields=["metadata", "updated_at"])
+        with self.assertRaises(AttachmentClassificationConfirmationError) as raised:
+            resolve_confirmed_attachment_classification(
+                session_id=self.session.session_id,
+                attachment_id=self.upload.attachment_id,
+            )
+        self.assertEqual(raised.exception.code, "classification_stale_or_unavailable")
+

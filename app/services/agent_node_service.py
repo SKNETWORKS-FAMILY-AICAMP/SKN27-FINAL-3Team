@@ -1338,6 +1338,19 @@ def _run_attachment_document_classification_adapter(
         raw_output,
         attachment_id=str(attachment.get("attachment_id") or "") if attachment else "",
     )
+    if attachment is not None and raw_output["status"] == "success":
+        try:
+            _persist_attachment_document_classification(
+                attachment_id=str(attachment["attachment_id"]),
+                storage_uri=str(attachment["storage_uri"]),
+                execution_id=str(adapter_context["execution_id"]),
+                structured_result=raw_output["structured_result"],
+            )
+        except Exception:
+            raw_output = _safe_document_classification_output(
+                _document_classification_failure("document_classification_failed"),
+                attachment_id=str(attachment.get("attachment_id") or ""),
+            )
     adapter_trace["source_status"] = raw_output["status"]
     return _complete_adapter_output(
         raw_output,
@@ -1345,6 +1358,14 @@ def _run_attachment_document_classification_adapter(
         agent_input=agent_input,
         adapter_trace=adapter_trace,
     )
+
+
+def _persist_attachment_document_classification(**kwargs: Any) -> dict[str, Any]:
+    from chatbot.attachment_classification_service import (
+        persist_attachment_document_classification,
+    )
+
+    return persist_attachment_document_classification(**kwargs)
 
 
 def _is_scan_ready_classification_attachment(attachment: dict[str, Any]) -> bool:

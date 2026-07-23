@@ -109,6 +109,7 @@ def test_public_agent_registry_includes_every_sync_runtime_agent():
 def test_document_classification_node_reads_only_canonical_attachment_and_keeps_output_safe(monkeypatch):
     from app.services import attachment_document_classification_adapter as adapter
 
+    persisted = []
     storage_uri = "s3://clean-bucket/canonical/uploads/usr/ses_document/att_document/notice.png"
     monkeypatch.setattr(
         agent_node_service,
@@ -132,6 +133,12 @@ def test_document_classification_node_reads_only_canonical_attachment_and_keeps_
             "next_actions": ["confirm_classification"],
             "limitations": [],
         },
+    )
+    monkeypatch.setattr(
+        agent_node_service,
+        "_persist_attachment_document_classification",
+        lambda **kwargs: persisted.append(kwargs),
+        raising=False,
     )
 
     execution = execute_agent_node(
@@ -167,6 +174,20 @@ def test_document_classification_node_reads_only_canonical_attachment_and_keeps_
         "canonical_scan_ready_image_or_pdf"
     )
     assert "s3://" not in str(output)
+    assert persisted == [
+        {
+            "attachment_id": "att_document",
+            "storage_uri": storage_uri,
+            "execution_id": execution["execution_id"],
+            "structured_result": {
+                "classification": "accident_evidence",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+                "next_action": "confirm_classification",
+                "attachment_id": "att_document",
+            },
+        }
+    ]
     assert validate_agent_output_envelope(
         output,
         expected_node_code="attachment_document_classification",

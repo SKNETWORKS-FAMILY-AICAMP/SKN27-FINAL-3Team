@@ -42,7 +42,8 @@ Issue #294 / PR #295의 첨부자료 처리 설계, 선택 근거, 구현 범위
 | 구현 계획 | 완료 · 사용자 승인 | `01-implementation-plan.md` |
 | Task 1: canonical 문서 1차 분류 라우팅·공개 확인 계약 | 완료 · 테스트 통과 | clean 이미지/PDF만 분류 노드를 우선하고, 클라이언트 category는 계약에서 거부 |
 | Task 2: 기존 OpenAI 경계 기반 문서 분류 adapter | 완료 · 테스트 통과 | PDF/이미지의 좁은 분류 결과만 반환하고 OCR 전문·저장 URI를 제거 |
-| P1 사고 사진 OCR·분류 후 자동 handoff | 진행 중 | 서버 소유 분류 저장·확인, 기존 사고 사실확인 handoff, UI·E2E가 남아 상위 체크리스트 E-6 `[!]` 유지 |
+| Task 3a: 서버 소유 분류 저장·stale 확인 차단 | 완료 · 테스트 통과 | 현재 clean scan snapshot과 storage URI를 검증하고, 허용 필드만 `UploadedFile.metadata`에 저장 |
+| P1 사고 사진 OCR·분류 후 자동 handoff | 진행 중 | 채팅 확인 요청의 기존 고지서·사고 사실확인 handoff, UI·E2E가 남아 상위 체크리스트 E-6 `[!]` 유지 |
 | 새 PR 생성 | 하지 않음 | 기존 PR #295만 갱신 |
 | PR 머지 | 하지 않음 | P1 구현·E2E·병합 전 검토 전에는 금지 |
 
