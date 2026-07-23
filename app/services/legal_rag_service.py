@@ -186,6 +186,7 @@ def _search_pgvector(
             started_at=started_at,
             error_code="vector_disabled",
             latency_breakdown_ms=latency_breakdown,
+            effective_at=effective_at.isoformat() if effective_at else None,
         )
     if not allowed_source_types or effective_at is None:
         return _search_response(
@@ -197,6 +198,7 @@ def _search_pgvector(
             started_at=started_at,
             error_code="source_type_not_supported",
             latency_breakdown_ms=latency_breakdown,
+            effective_at=effective_at.isoformat() if effective_at else None,
         )
 
     try:
@@ -252,6 +254,7 @@ def _search_pgvector(
             embedding=embedding_metadata,
             sql_tables=["law_chunks", "law_embeddings"],
             latency_breakdown_ms=latency_breakdown,
+            effective_at=effective_at.isoformat(),
         )
     except Exception as exc:  # pragma: no cover - depends on configured PostgreSQL runtime.
         return _search_response(
@@ -263,6 +266,7 @@ def _search_pgvector(
             started_at=started_at,
             error_code=str(exc)[:120],
             latency_breakdown_ms=latency_breakdown,
+            effective_at=effective_at.isoformat() if effective_at else None,
         )
 
 
@@ -589,6 +593,7 @@ def _search_response(
         "top_k": top_k,
         "result_count": len(results),
         "latency_ms": max(0, round((time.perf_counter() - started_at) * 1000)),
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "results": results,
         "error_code": error_code,
     }

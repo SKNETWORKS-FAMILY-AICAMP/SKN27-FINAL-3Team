@@ -54,6 +54,13 @@
       "agent_result_validation",
       "final_response_merge"
     ],
+    "accident_photo_evidence_analysis": [
+      "input_context_validation",
+      "text_ml_case_search",
+      "law_ground_search",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
     "attachment_document_classification": [
       "input_context_validation",
       "attachment_document_classification",
@@ -99,7 +106,8 @@
   },
   "agent_result_validation_policy": {
     "partial_result_intents": [
-      "accident_evidence_analysis"
+      "accident_evidence_analysis",
+      "accident_photo_evidence_analysis"
     ],
     "evidence_required_node_codes": [
       "appeal_decision_flow",

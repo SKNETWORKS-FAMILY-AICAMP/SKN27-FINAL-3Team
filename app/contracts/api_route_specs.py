@@ -753,7 +753,10 @@ CHAT_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
             OutcomeResponseSpec(
                 status=409,
                 semantic="partial_result",
-                description="Attachment scan blocked; safe partial guidance is available.",
+                description=(
+                    "Attachment scan blocked or a server-owned classification confirmation "
+                    "is stale; safe partial guidance is available."
+                ),
                 response_model=ChatMessageResponse,
             ),
             OutcomeResponseSpec(

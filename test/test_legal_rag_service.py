@@ -125,6 +125,8 @@ def test_legal_rag_uses_pgvector_when_enabled(monkeypatch):
     assert result["results"][0]["source_reference"] == "law_chunk_001"
     assert result["results"][0]["score"] == 0.91
     assert result["results"][0]["effective_date"] == "2026-01-01"
+    assert result["effective_at"] == service.current_legal_date().isoformat()
+    assert datetime.fromisoformat(result["retrieved_at"]).tzinfo is not None
     assert cursor.params[-1] == 2
     assert "law_embeddings" in cursor.sql
     assert "btrim(c.source_url) <> ''" in cursor.sql

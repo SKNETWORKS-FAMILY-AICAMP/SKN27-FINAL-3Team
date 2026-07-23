@@ -169,6 +169,7 @@ def load_analysis_result(
             "attachments": deepcopy(job.get("attachments") or []),
             "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
             "supervisor_state": _project_supervisor_state(job.get("supervisor_state")),
+            "user_claims": _project_user_claims(job.get("supervisor_state")),
             "supervisor_execution": _project_supervisor_execution(
                 job.get("supervisor_execution")
             ),
@@ -202,6 +203,42 @@ def _project_supervisor_state(value: Any) -> dict[str, Any] | None:
             for item in packages
             if isinstance(item, dict) and isinstance(item.get("node_code"), str)
         ]
+    return projected
+
+
+def _project_user_claims(value: Any) -> list[dict[str, str | None]]:
+    if not isinstance(value, dict):
+        return []
+    case_evidence = value.get("case_evidence")
+    if not isinstance(case_evidence, dict):
+        return []
+    claims = case_evidence.get("claims")
+    if not isinstance(claims, dict):
+        return []
+
+    projected: list[dict[str, str | None]] = []
+    for field in sorted(claims):
+        claim = claims.get(field)
+        if not isinstance(field, str) or not field.strip() or not isinstance(claim, dict):
+            continue
+        value = claim.get("value")
+        if not isinstance(value, str) or not value.strip():
+            continue
+        evidence_source = claim.get("evidence_source")
+        source_type = (
+            evidence_source["source_type"].strip()
+            if isinstance(evidence_source, dict)
+            and isinstance(evidence_source.get("source_type"), str)
+            and evidence_source["source_type"].strip()
+            else None
+        )
+        projected.append(
+            {
+                "field": field.strip(),
+                "value": value.strip(),
+                "source_type": source_type,
+            }
+        )
     return projected
 
 

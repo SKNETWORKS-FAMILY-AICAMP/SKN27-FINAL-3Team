@@ -385,6 +385,16 @@ def test_analysis_job_routes_document_async_owner_scoped_contract() -> None:
     assert result["responses"]["202"]["x-response-semantics"] == "pending"
     assert result["responses"]["404"]["x-error-codes"] == ["analysis_result_not_found"]
 
+    schema = generator.build_openapi_document()["components"]["schemas"]["AnalysisResult"]
+    assert schema["properties"]["user_claims"] == {
+        "items": {"$ref": "#/components/schemas/AnalysisUserClaim"},
+        "title": "User Claims",
+        "type": "array",
+    }
+    assert schema["properties"]["user_claims"]["items"] == {
+        "$ref": "#/components/schemas/AnalysisUserClaim"
+    }
+
 
 def test_report_download_openapi_uses_binary_docx_and_public_attachment_headers() -> None:
     generator = importlib.import_module("app.contracts.openapi_v1")
