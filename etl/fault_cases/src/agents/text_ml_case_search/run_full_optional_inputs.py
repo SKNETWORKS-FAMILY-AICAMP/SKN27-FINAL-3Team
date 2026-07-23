@@ -9,11 +9,7 @@ from typing import Any
 
 from etl.fault_cases.src.agents.text_ml_case_search.agent import run_text_ml_case_search
 from etl.fault_cases.src.agents.text_ml_case_search.config import PROJECT_ROOT
-from etl.fault_cases.src.agents.text_ml_case_search.rag.es_client import (
-    get_elasticsearch_client,
-    ping_elasticsearch,
-)
-from etl.fault_cases.src.agents.text_ml_case_search.rag.retrieval_pipeline import (
+from etl.fault_cases.src.agents.text_ml_case_search.rag.pgvector_unified_retriever import (
     DEFAULT_SEARCH_VARIANT,
 )
 
@@ -63,16 +59,9 @@ def run_full_optional_inputs(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     limit: int | None = 10,
     search_variant: str = DEFAULT_SEARCH_VARIANT,
-    skip_ping: bool = False,
 ) -> dict[str, Any]:
     agent_inputs = load_active_agent_inputs(input_path, limit=limit)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    client = get_elasticsearch_client()
-    if not skip_ping and not ping_elasticsearch(client):
-        raise RuntimeError(
-            "Elasticsearch ping failed. Check docker compose, host, username, and password."
-        )
 
     started_at = datetime.now().isoformat(timespec="seconds")
     output_path = output_dir / "text_ml_case_search_full_optional_agent_outputs.jsonl"
@@ -83,7 +72,6 @@ def run_full_optional_inputs(
         for index, agent_input in enumerate(agent_inputs, start=1):
             result = run_text_ml_case_search(
                 agent_input,
-                es_client=client,
                 search_variant=search_variant,
             )
             structured_result = result.get("structured_result", {})
@@ -199,7 +187,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--search-variant", default=DEFAULT_SEARCH_VARIANT)
-    parser.add_argument("--skip-ping", action="store_true")
     return parser.parse_args()
 
 
@@ -213,7 +200,6 @@ def main() -> None:
         output_dir=Path(args.output_dir),
         limit=args.limit,
         search_variant=args.search_variant,
-        skip_ping=args.skip_ping,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

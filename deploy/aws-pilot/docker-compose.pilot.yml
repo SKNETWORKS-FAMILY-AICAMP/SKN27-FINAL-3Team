@@ -20,7 +20,7 @@ x-backend-environment: &backend-environment
   SUPERVISOR_LLM_ENABLED: "1"
   SUPERVISOR_LLM_PROVIDER: openai
   SUPERVISOR_LLM_TIMEOUT_SECONDS: "20"
-  LEGAL_RAG_VECTOR_ENABLED: "0"
+  LEGAL_RAG_VECTOR_ENABLED: "1"
   LEGAL_PROVISION_DB_ENABLED: "1"
   LEGAL_RAG_QUERY_EMBEDDING_PROVIDER: sentence-transformers
   LEGAL_RAG_QUERY_EMBEDDING_MODEL: intfloat/multilingual-e5-large
@@ -28,12 +28,6 @@ x-backend-environment: &backend-environment
   LEGAL_RAG_QUERY_EMBEDDING_DEVICE: cpu
   LEGAL_RAG_QUERY_EMBEDDING_TIMEOUT_SECONDS: "30"
   LAW_GROUND_SEARCH_ENABLE_NEO4J: "0"
-  TEXT_ML_CASE_SEARCH_SYNC_USE_ES: "1"
-  TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST: http://elasticsearch:9200
-  TEXT_ML_CASE_SEARCH_ELASTICSEARCH_USER: elastic
-  TEXT_ML_CASE_SEARCH_ELASTICSEARCH_REQUEST_TIMEOUT: "120"
-  REVIEW_CASE_ES_BM25_INDEX: review_case_chunks_bm25_nori_v1
-  FAULT_RATIO_PRECEDENT_ES_BM25_INDEX: precedent_fault_ratio_chunks_bm25_nori_v1
 
 x-runtime-env-file: &runtime-env-file
   - path: .runtime.env
@@ -41,10 +35,6 @@ x-runtime-env-file: &runtime-env-file
 
 x-edge-env-file: &edge-env-file
   - path: .edge.env
-    format: raw
-
-x-elasticsearch-env-file: &elasticsearch-env-file
-  - path: .elasticsearch.env
     format: raw
 
 x-default-logging: &default-logging
@@ -136,8 +126,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
       clamav:
         condition: service_healthy
     healthcheck:
@@ -206,37 +194,6 @@ services:
       pilot:
         ipv4_address: ${PILOT_REDIS_IP:-172.31.0.8}
 
-  elasticsearch:
-    image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:elasticsearch-nori-${RELEASE_TAG:?RELEASE_TAG is required}
-    restart: unless-stopped
-    env_file: *elasticsearch-env-file
-    environment:
-      discovery.type: single-node
-      xpack.security.enabled: "true"
-      xpack.security.http.ssl.enabled: "false"
-      xpack.security.transport.ssl.enabled: "false"
-      ES_JAVA_OPTS: -Xms384m -Xmx384m
-    mem_limit: 704m
-    logging: *default-logging
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    tmpfs: [/tmp]
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -u elastic:$${ELASTIC_PASSWORD} http://127.0.0.1:9200/_cluster/health >/dev/null || exit 1"]
-      interval: 20s
-      timeout: 5s
-      start_period: 60s
-      retries: 10
-    networks:
-      pilot:
-        ipv4_address: ${PILOT_ELASTICSEARCH_IP:-172.31.0.9}
-
   clamav:
     image: ${CLAMAV_IMAGE_REF:-clamav/clamav:1.4}
     restart: unless-stopped
@@ -265,8 +222,6 @@ volumes:
   caddy_logs:
   redis_data:
     name: ${PILOT_REDIS_VOLUME_NAME:-skn27-pilot_redis_data}
-  elasticsearch_data:
-    name: ${PILOT_ELASTICSEARCH_VOLUME_NAME:-skn27-pilot_elasticsearch_data}
   clamav_data:
     name: ${PILOT_CLAMAV_VOLUME_NAME:-skn27-pilot_clamav_data}
 

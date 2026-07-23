@@ -33,10 +33,10 @@ def test_map_review_case_hit_to_evidence_maps_core_fields() -> None:
     evidence = map_review_case_hit_to_evidence(
         {
             "rank": 1,
-            "retriever": "bm25_nori",
-            "score_type": "bm25_score",
+            "retriever": "review_case_pgvector",
+            "score_type": "cosine_similarity",
             "retriever_score": 11.7,
-            "index": "review_case_chunks_bm25_nori_v1",
+            "index": None,
             "review_case_id": "rc_001",
             "review_no": "2017-032889",
             "chunk_id": "rc_001:case_overview",
@@ -64,7 +64,7 @@ def test_map_review_case_hit_to_evidence_maps_core_fields() -> None:
     assert evidence["chunk_text"] == "중앙선 침범 역주행 사고"
     assert evidence["confidence"] is None
     assert metadata["score"] == 11.7
-    assert metadata["score_type"] == "bm25_score"
+    assert metadata["score_type"] == "cosine_similarity"
     assert metadata["reference_chart_key"] == "249"
     assert metadata["decision_fault_ratio"] == "A 0 : B 100"
     assert metadata["standard_context"]["signal_condition"] == "신호등 없음"
@@ -90,8 +90,8 @@ def test_map_review_case_hit_to_evidence_falls_back_to_source() -> None:
     assert evidence["title"] == "신호위반사고"
     assert evidence["source_reference"] == "review_case_db:rc_002#rc_002:decision_reason"
     assert evidence["chunk_text"] == "적색 신호 진입 사고"
-    assert evidence["metadata"]["retriever"] == "bm25_nori"
-    assert evidence["metadata"]["score_type"] == "bm25_score"
+    assert evidence["metadata"]["retriever"] == "review_case_pgvector"
+    assert evidence["metadata"]["score_type"] == "cosine_similarity"
 
 
 def test_map_review_case_hits_to_evidence_maps_list() -> None:

@@ -238,7 +238,7 @@ def build_markdown_report(report: dict[str, Any]) -> str:
         "",
         "## 목적",
         "",
-        "active 10개 full optional input을 실제 Elasticsearch RAG와 연결해 실행하고, "
+        "active 10개 full optional input을 unified pgvector RAG와 연결해 실행하고, "
         "Agent V2 출력 JSON이 Supervisor가 받을 수 있는 형태로 안정적으로 생성되는지 확인한다.",
         "",
         "이번 확인의 핵심은 `review_case` 심의사례 근거와 "
@@ -364,7 +364,7 @@ def build_markdown_report(report: dict[str, Any]) -> str:
         "",
         "- `review_case`와 `fault_ratio_precedent`가 모두 1개 이상이면 V2 통합 RAG가 실제 Agent 출력에 반영된 것이다.",
         "- `evidence_count`는 최종 병합 결과이며, 기본 전략은 5+5 source quota, final_top_k=10이다.",
-        "- 검색기 내부 BM25 점수는 source 간 직접 비교 기준이 아니다. V2는 source별 quota로 병합해 두 근거 유형을 함께 노출한다.",
+        "- cosine similarity는 source 간 직접 비교 기준이 아니다. V2는 source별 quota로 병합해 두 근거 유형을 함께 노출한다.",
         "- 특정 run에서 한쪽 source가 0개라면 검색 실패라기보다 해당 질의에서 해당 source의 후보가 부족했거나 validator에서 제거됐을 수 있다.",
         "",
         "## 다음 단계",

@@ -19,7 +19,7 @@ resource "aws_ecr_lifecycle_policy" "backend" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Keep the ten newest backend and Nori runtime images"
+      description  = "Keep the ten newest backend runtime images"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"

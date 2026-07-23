@@ -38,8 +38,8 @@ python backend/manage.py smoke_non_dl_analysis_reporting_pipeline `
   --format json
 ```
 
-Do not put API keys on the command line. Configure provider, PostgreSQL, RAG,
-Elasticsearch, and object-storage settings through the deployment secret/runtime
+Do not put API keys on the command line. Configure provider, PostgreSQL,
+pgvector RAG, and object-storage settings through the deployment secret/runtime
 environment before running it.
 
 ## What strict mode proves
@@ -66,8 +66,8 @@ not print prompts, provider responses, report bodies, or credentials.
 ## Failure interpretation
 
 - `real_agent_results`: an adapter failed, a non-sync/mock adapter was used, or the
-  result was partial, the text case-search path declared a heuristic fallback, or
-  a non-production adapter ran. Check the production RAG and Elasticsearch
+  result was partial, the text case-search path reported a pgvector source as
+  unavailable, or a non-production adapter ran. Check the production RAG
   seed/readiness before retrying with a **new** smoke job.
 - `job_success` or `all_agent_results_success`: at least one real pipeline phase
   completed only partially; do not accept a draft as an operating success.

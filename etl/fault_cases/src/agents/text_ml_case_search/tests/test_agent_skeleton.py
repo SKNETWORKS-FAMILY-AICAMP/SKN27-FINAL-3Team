@@ -1,59 +1,8 @@
 from __future__ import annotations
 
+from etl.fault_cases.src.agents.text_ml_case_search import agent as text_ml_agent
 from etl.fault_cases.src.agents.text_ml_case_search.agent import run_text_ml_case_search
 from etl.fault_cases.src.agents.text_ml_case_search.input.context_builder import build_context
-
-
-class FakeElasticsearch:
-    def __init__(self) -> None:
-        self.calls = []
-
-    def search(self, *, index, body):
-        self.calls.append({"index": index, "body": body})
-        if index == "precedent_fault_ratio_chunks_bm25_nori_v1":
-            return {
-                "hits": {
-                    "hits": [
-                        {
-                            "_index": "precedent_fault_ratio_chunks_bm25_nori_v1",
-                            "_score": 31.5,
-                            "_source": {
-                                "case_id": "616249",
-                                "chunk_id": "616249:structured_1500_250:0001",
-                                "chunk_type": "fault_ratio_evidence",
-                                "case_name": "precedent title",
-                                "case_number": "2022da287284",
-                                "court_name": "Supreme Court",
-                                "decision_date": "2025-05-15",
-                                "chunk_text": "valid precedent evidence text " * 5,
-                                "search_text": "sample search text",
-                            },
-                        }
-                    ]
-                }
-            }
-        return {
-            "hits": {
-                "hits": [
-                    {
-                        "_index": "review_case_chunks_bm25_nori_v1",
-                        "_score": 10.1,
-                        "_source": {
-                            "review_case_id": "rc_001",
-                            "review_no": "2017-032889",
-                            "chunk_id": "rc_001:case_overview",
-                            "chunk_type": "case_overview",
-                            "case_title": "sample case",
-                            "decision_fault_ratio": "A 70 : B 30",
-                            "claimant_final_ratio": "70",
-                            "respondent_final_ratio": "30",
-                            "chunk_text": "valid review case evidence text " * 4,
-                            "search_text": "sample search text",
-                        },
-                    }
-                ]
-            }
-        }
 
 
 def test_agent_skeleton_partial_without_rag() -> None:
@@ -77,6 +26,68 @@ def test_agent_skeleton_partial_without_rag() -> None:
     assert result["structured_result"]["normalized_description"]
     assert "신호 없는 교차로" in result["structured_result"]["issue_tags"]
     assert result["structured_result"]["recommended_evidence"]
+
+
+def test_agent_uses_pgvector_pipeline(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_pgvector_pipeline(*, search_text, search_variant):
+        calls.append({"search_text": search_text, "search_variant": search_variant})
+        return {
+            "retriever": "unified_pgvector",
+            "requested_search_variant": search_variant,
+            "search_variant": "schema_search_text",
+            "top_k": 5,
+            "final_top_k": 10,
+            "active_sources": ["review_case", "fault_ratio_precedent"],
+            "standby_sources": ["traffic_precedent"],
+            "excluded_sources": ["standard"],
+            "source_results": {},
+            "merge_result": {
+                "merge_strategy": "source_quota",
+                "review_case_quota": 5,
+                "fault_ratio_precedent_quota": 5,
+                "final_top_k": 10,
+                "source_counts": {
+                    "review_case": 0,
+                    "fault_ratio_precedent": 0,
+                },
+                "input_counts": {
+                    "review_case": 0,
+                    "fault_ratio_precedent": 0,
+                },
+                "output_count": 0,
+            },
+            "source_summary": {
+                "active_sources": ["review_case", "fault_ratio_precedent"],
+                "source_counts": {
+                    "review_case": 0,
+                    "fault_ratio_precedent": 0,
+                },
+            },
+            "evidence": [],
+        }
+
+    monkeypatch.setattr(
+        text_ml_agent,
+        "run_unified_pgvector_pipeline",
+        fake_pgvector_pipeline,
+        raising=False,
+    )
+
+    result = text_ml_agent.run_text_ml_case_search(
+        {
+            "session_id": "s1",
+            "message_id": "m1",
+            "job_id": "j1",
+            "node_code": "text_ml_case_search",
+            "query_text": "신호 없는 교차로 직진 차량과 우측 진입 차량 충돌 사고",
+        }
+    )
+
+    assert len(calls) == 1
+    assert result["contract_version"] == "text_ml_case_search_v2"
+    assert result["structured_result"]["rag_debug"]["retriever"] == "unified_pgvector"
 
 
 def test_agent_skeleton_failed_without_query_text() -> None:
@@ -191,38 +202,3 @@ def test_agent_builds_search_text_variants_without_search_call() -> None:
     assert search_text["input_sections"]["has_vision_evidence"] is True
     assert search_text["input_sections"]["has_ocr_evidence"] is True
     assert search_text["input_sections"]["has_insurer_claim"] is True
-
-
-def test_agent_uses_retrieval_pipeline_when_es_client_is_provided() -> None:
-    fake_es = FakeElasticsearch()
-
-    result = run_text_ml_case_search(
-        {
-            "session_id": "s1",
-            "message_id": "m1",
-            "job_id": "j1",
-            "node_code": "text_ml_case_search",
-            "query_text": "signal intersection crash",
-        },
-        es_client=fake_es,
-    )
-
-    rag_debug = result["structured_result"]["rag_debug"]
-    assert len(fake_es.calls) == 2
-    assert result["status"] == "success"
-    assert len(result["evidence"]) == 2
-    assert result["evidence"][0]["source_reference"] == "review_case_db:rc_001#rc_001:case_overview"
-    assert result["evidence"][1]["source_reference"] == (
-        "fault_ratio_precedent_db:616249#616249:structured_1500_250:0001"
-    )
-    assert result["structured_result"]["similar_cases"][0]["source_reference"] == "review_case_db:rc_001#rc_001:case_overview"
-    assert result["structured_result"]["ratio_range_label"] == "A 70 : B 30"
-    assert result["structured_result"]["display_evidence"][0]["source_reference"] == "review_case_db:rc_001#rc_001:case_overview"
-    assert result["structured_result"]["display_evidence"][0]["ratio_label"] == "A 70 : B 30"
-    assert result["structured_result"]["source_summary"]["source_counts"] == {
-        "review_case": 1,
-        "fault_ratio_precedent": 1,
-    }
-    assert rag_debug["retriever"] == "unified_bm25_nori"
-    assert rag_debug["source_results"]["review_case"]["valid_evidence_count"] == 1
-    assert rag_debug["source_results"]["fault_ratio_precedent"]["valid_evidence_count"] == 1

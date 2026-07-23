@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from etl.fault_cases.src.agents.text_ml_case_search.agent import run_text_ml_case_search
-from etl.fault_cases.src.agents.text_ml_case_search.config import CONTRACT_VERSION, NODE_CODE
+from etl.fault_cases.src.agents.text_ml_case_search.config import CONTRACT_VERSION_V2, NODE_CODE
 
 
 def test_agent_output_contains_supervisor_contract_fields() -> None:
@@ -17,7 +17,7 @@ def test_agent_output_contains_supervisor_contract_fields() -> None:
 
     structured = result["structured_result"]
 
-    assert result["contract_version"] == CONTRACT_VERSION
+    assert result["contract_version"] == CONTRACT_VERSION_V2
     assert result["node_code"] == NODE_CODE
     assert result["status"] in {"success", "partial", "failed"}
     assert "normalized_description" in structured

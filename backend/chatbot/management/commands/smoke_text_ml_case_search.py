@@ -1,4 +1,4 @@
-"""Smoke test the text_ml_case_search sync adapter and optional ES RAG path."""
+"""Smoke test the text_ml_case_search sync adapter and pgvector retrieval path."""
 
 from __future__ import annotations
 
@@ -25,14 +25,14 @@ class Command(BaseCommand):
         parser.add_argument("--message-id", default="msg_text_ml_case_search_smoke", help="Smoke message id.")
         parser.add_argument("--job-id", default="job_text_ml_case_search_smoke", help="Smoke job id.")
         parser.add_argument(
-            "--require-es",
+            "--require-pgvector",
             action="store_true",
-            help="Fail unless the adapter reports that Elasticsearch RAG was enabled.",
+            help="Fail unless the adapter reports unified pgvector retrieval.",
         )
         parser.add_argument(
             "--require-results",
             action="store_true",
-            help="Fail unless Elasticsearch-backed similar cases and recommended evidence are returned.",
+            help="Fail unless pgvector-backed similar cases and recommended evidence are returned.",
         )
         parser.add_argument("--format", choices=["json", "text"], default="json", help="Output format.")
 
@@ -55,16 +55,10 @@ class Command(BaseCommand):
         )
         retrieval = structured_result.get("retrieval") if isinstance(structured_result.get("retrieval"), dict) else {}
         limitations = [str(item) for item in agent_output.get("limitations") or [] if str(item)]
-        es_rag_enabled = any("Elasticsearch RAG was enabled" in item for item in limitations)
-        es_rag_fallback = any(
-            marker in item
+        pgvector_rag_enabled = retrieval.get("backend") == "unified_pgvector"
+        pgvector_rag_unavailable = any(
+            "pgvector" in item.lower() and "unavailable" in item.lower()
             for item in limitations
-            for marker in (
-                "without Elasticsearch RAG",
-                "Elasticsearch RAG unavailable",
-                "Elasticsearch ping failed",
-                "No review_case RAG chunks were available",
-            )
         )
         similar_cases = structured_result.get("similar_cases")
         recommended_evidence = structured_result.get("recommended_evidence")
@@ -79,8 +73,8 @@ class Command(BaseCommand):
             "ratio_range_label": structured_result.get("ratio_range_label"),
             "similar_case_count": len(similar_cases) if isinstance(similar_cases, list) else 0,
             "recommended_evidence_count": len(recommended_evidence) if isinstance(recommended_evidence, list) else 0,
-            "es_rag_enabled": es_rag_enabled,
-            "es_rag_fallback": es_rag_fallback,
+            "pgvector_rag_enabled": pgvector_rag_enabled,
+            "pgvector_rag_unavailable": pgvector_rag_unavailable,
             "limitations": limitations[:5],
         }
 
@@ -90,7 +84,7 @@ class Command(BaseCommand):
             result["status"] = "fail"
         if retrieval.get("adapter_source") != "fault_ratio_knowledge_agent":
             result["status"] = "fail"
-        if options["require_es"] and not es_rag_enabled:
+        if options.get("require_pgvector", False) and not pgvector_rag_enabled:
             result["status"] = "fail"
         if options.get("require_results") and (
             result["similar_case_count"] < 1 or result["recommended_evidence_count"] < 1
@@ -118,7 +112,7 @@ def _text_result(result: dict) -> str:
             f"- ratio_range_label: {result.get('ratio_range_label')}",
             f"- similar_case_count: {result.get('similar_case_count')}",
             f"- recommended_evidence_count: {result.get('recommended_evidence_count')}",
-            f"- es_rag_enabled: {result.get('es_rag_enabled')}",
-            f"- es_rag_fallback: {result.get('es_rag_fallback')}",
+            f"- pgvector_rag_enabled: {result.get('pgvector_rag_enabled')}",
+            f"- pgvector_rag_unavailable: {result.get('pgvector_rag_unavailable')}",
         ]
     )

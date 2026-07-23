@@ -82,26 +82,25 @@ def test_production_env_template_contains_readiness_keys():
         "AGENT_WORKER_RETRY_BACKOFF_SECONDS=",
         "AGENT_WORKER_LOOP_SLEEP_SECONDS=",
         "SUPERVISOR_LLM_ENABLED=",
-        "LEGAL_RAG_VECTOR_ENABLED=",
-        "TEXT_ML_CASE_SEARCH_SYNC_USE_ES=1",
-        "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_HOST=",
-        "TEXT_ML_CASE_SEARCH_ELASTICSEARCH_PASSWORD=",
-        "REVIEW_CASE_ES_BM25_INDEX=",
-        "FAULT_RATIO_PRECEDENT_ES_BM25_INDEX=",
+        "LEGAL_RAG_VECTOR_ENABLED=1",
+        "TEXT_ML_CASE_SEARCH_PGVECTOR_TOP_K=5",
+        "TEXT_ML_CASE_SEARCH_V2_REVIEW_CASE_QUOTA=5",
+        "TEXT_ML_CASE_SEARCH_V2_FAULT_RATIO_PRECEDENT_QUOTA=5",
+        "TEXT_ML_CASE_SEARCH_V2_FINAL_TOP_K=10",
         "OBJECT_STORAGE_PROVIDER=s3",
     ]
     missing = [key for key in required_keys if key not in content]
     assert missing == []
 
 
-def test_low_cost_seed_and_production_defaults_avoid_paid_vector_calls():
+def test_production_defaults_enable_local_pgvector_retrieval():
     compose = read_text(ROOT / "docker-compose.yml")
     production_env = read_text(ROOT / ".env.production.example")
 
     assert "--provider sentence-transformers" in compose
     assert "--provider openai" not in compose
     assert 'profiles: ["seed"]' in compose
-    assert "LEGAL_RAG_VECTOR_ENABLED=0" in production_env
+    assert "LEGAL_RAG_VECTOR_ENABLED=1" in production_env
 
 
 def test_production_env_doc_references_readiness_command_and_secret_rules():
@@ -113,12 +112,13 @@ def test_production_env_doc_references_readiness_command_and_secret_rules():
     assert "law_chunks" in content
     assert "law_embeddings" in content
     assert "load_legal_rag_pgvector" in content
-    assert "load_legal_rag_smoke_fixture" in content
-    assert "legal_rag_smoke_chunks.jsonl" in content
-    assert "text_ml_case_search_rag" in content
+    assert "load_legal_rag_smoke_fixture" not in content
+    assert "legal_rag_smoke_chunks.jsonl" not in content
+    assert "verify_pgvector_rag_readiness" in content
     assert "smoke_text_ml_case_search" in content
-    assert "TEXT_ML_CASE_SEARCH_SYNC_USE_ES" in content
-    assert "FAULT_RATIO_PRECEDENT_ES_BM25_INDEX" in content
+    assert "TEXT_ML_CASE_SEARCH_PGVECTOR_TOP_K" in content
+    assert "TEXT_ML_CASE_SEARCH_SYNC_USE_ES" not in content
+    assert "FAULT_RATIO_PRECEDENT_ES_BM25_INDEX" not in content
     assert "process_agent_work_items --loop" in content
     assert "smoke_supervisor_llm" in content
     assert "smoke_google_oauth_code" in content

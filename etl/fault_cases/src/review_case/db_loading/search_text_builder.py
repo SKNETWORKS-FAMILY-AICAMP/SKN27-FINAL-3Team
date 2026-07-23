@@ -54,7 +54,7 @@ def _append_type_specific(lines: list[str], row: dict[str, Any], document: dict[
 
 
 def build_search_text(row: dict[str, Any], document: dict[str, Any]) -> str:
-    """Build BM25/Nori-oriented text while preserving chunk_text as the answer context."""
+    """Build embedding-oriented text while preserving chunk_text as the answer context."""
 
     lines: list[str] = []
     _append_common(lines, row, document)

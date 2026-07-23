@@ -135,8 +135,6 @@ CREATE TABLE IF NOT EXISTS review_case_chunks (
     claimant_final_ratio INTEGER,
     respondent_final_ratio INTEGER,
     embedding_status TEXT DEFAULT 'pending',
-    indexed_to_elasticsearch BOOLEAN DEFAULT false,
-    elasticsearch_index_name TEXT,
     source_ref TEXT,
     source_type TEXT DEFAULT 'review_case',
     source_reliability_score INTEGER DEFAULT 3,
@@ -216,18 +214,16 @@ CREATE TABLE IF NOT EXISTS review_case_chunk_embeddings (
     chunk_id TEXT NOT NULL REFERENCES review_case_chunks(chunk_id) ON DELETE CASCADE,
     embedding_model TEXT NOT NULL,
     embedding_version TEXT NOT NULL,
-    -- Current baseline dimension is 1536 for text-embedding-3-small.
-    -- If a later experiment stores native 3072-dimensional vectors, create a new
-    -- embedding table or migrate this column intentionally instead of mixing dims.
-    embedding_dim INTEGER NOT NULL DEFAULT 1536,
+    -- Shared law/review-case embedding space: text-embedding-3-large, 1024 dimensions.
+    embedding_dim INTEGER NOT NULL DEFAULT 1024,
     embedding_provider TEXT,
     input_field TEXT DEFAULT 'chunk_text',
-    embedding_vector vector(1536),
+    embedding_vector vector(1024),
     embedding_meta JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (chunk_id, embedding_model, embedding_version),
-    CHECK (embedding_dim = 1536)
+    CHECK (embedding_dim = 1024)
 );
 
 CREATE TABLE IF NOT EXISTS review_case_embedding_jobs (
@@ -241,25 +237,6 @@ CREATE TABLE IF NOT EXISTS review_case_embedding_jobs (
     success_count INTEGER,
     failed_count INTEGER,
     skipped_count INTEGER,
-    status TEXT,
-    error_summary JSONB DEFAULT '{}'::jsonb,
-    started_at TIMESTAMPTZ,
-    finished_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS review_case_elasticsearch_index_jobs (
-    index_job_id TEXT PRIMARY KEY,
-    run_id TEXT REFERENCES review_case_preprocess_runs(run_id),
-    index_name TEXT,
-    alias_name TEXT,
-    index_mode TEXT,
-    analyzer TEXT,
-    embedding_model TEXT,
-    embedding_version TEXT,
-    target_chunk_count INTEGER,
-    indexed_chunk_count INTEGER,
-    failed_count INTEGER,
     status TEXT,
     error_summary JSONB DEFAULT '{}'::jsonb,
     started_at TIMESTAMPTZ,

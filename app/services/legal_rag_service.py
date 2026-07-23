@@ -17,8 +17,6 @@ from django.db import transaction
 
 
 PGVECTOR_BACKEND = "postgres_pgvector"
-POSTGRES_LEXICAL_BACKEND = "postgres_lexical"
-DJANGO_RAG_BACKEND = "django_rag_tables"
 DEFAULT_SENTENCE_TRANSFORMER_MODEL = "intfloat/multilingual-e5-large"
 LEGAL_SOURCE_TYPES = (
     "law",
@@ -27,7 +25,6 @@ LEGAL_SOURCE_TYPES = (
     "administrative_rule",
     "notice",
 )
-DJANGO_ONLY_SOURCE_TYPES = {"review_case"}
 USABLE_LEGAL_EVIDENCE_SQL = (
     "c.source_url IS NOT NULL AND btrim(c.source_url) <> '' "
     "AND c.provision_text IS NOT NULL AND btrim(c.provision_text) <> ''"
@@ -55,7 +52,7 @@ def search_legal_rag(
     if not normalized_query or top_k <= 0:
         return _search_response(
             status="empty_query",
-            backend=DJANGO_RAG_BACKEND,
+            backend=PGVECTOR_BACKEND,
             query=normalized_query,
             top_k=top_k,
             results=[],
@@ -70,7 +67,7 @@ def search_legal_rag(
     if filter_error:
         return _search_response(
             status="invalid_filter",
-            backend=DJANGO_RAG_BACKEND,
+            backend=PGVECTOR_BACKEND,
             query=normalized_query,
             top_k=top_k,
             results=[],
@@ -78,55 +75,13 @@ def search_legal_rag(
             error_code=filter_error,
         )
 
-    vector_response = _search_pgvector(
+    return _search_pgvector(
         normalized_query,
         top_k=top_k,
         source_type=source_type,
         allowed_source_types=allowed_source_types,
         effective_at=effective_at,
     )
-    vector_attempt = _attempt_summary(vector_response)
-    if vector_response["status"] == "ready" and vector_response["results"]:
-        vector_response["attempted_backends"] = [vector_attempt]
-        return vector_response
-
-    lexical_response = _search_law_chunks_lexical(
-        normalized_query,
-        top_k=top_k,
-        source_type=source_type,
-        allowed_source_types=allowed_source_types,
-        effective_at=effective_at,
-    )
-    lexical_attempt = _attempt_summary(lexical_response)
-    if lexical_response["status"] == "ready" and lexical_response["results"]:
-        lexical_response["attempted_backends"] = [vector_attempt, lexical_attempt]
-        if vector_response["status"] not in {"disabled", "empty_query"}:
-            lexical_response["fallback_from"] = {
-                "backend": vector_response["backend"],
-                "status": vector_response["status"],
-                "error_code": vector_response.get("error_code", ""),
-            }
-        return lexical_response
-
-    django_response = _search_django_rag_tables(
-        normalized_query,
-        top_k=top_k,
-        source_type=source_type,
-        allowed_source_types=allowed_source_types,
-        effective_at=effective_at,
-    )
-    django_response["attempted_backends"] = [
-        vector_attempt,
-        lexical_attempt,
-        _attempt_summary(django_response),
-    ]
-    if vector_response["status"] not in {"disabled", "empty_query"}:
-        django_response["fallback_from"] = {
-            "backend": vector_response["backend"],
-            "status": vector_response["status"],
-            "error_code": vector_response.get("error_code", ""),
-        }
-    return django_response
 
 
 def resolve_legal_search_filters(
@@ -136,8 +91,6 @@ def resolve_legal_search_filters(
     scope: dict[str, Any] | None,
 ) -> tuple[tuple[str, ...], date | None, str]:
     normalized_source_type = _text(source_type)
-    if normalized_source_type in DJANGO_ONLY_SOURCE_TYPES:
-        return (), None, ""
     if normalized_source_type not in LEGAL_SOURCE_TYPES:
         return (), None, "unsupported_source_type"
     if scope is not None and not isinstance(scope, dict):
@@ -313,68 +266,6 @@ def _search_pgvector(
         )
 
 
-def _search_django_rag_tables(
-    query: str,
-    *,
-    top_k: int,
-    source_type: str,
-    allowed_source_types: tuple[str, ...],
-    effective_at: date | None,
-) -> dict[str, Any]:
-    started_at = time.perf_counter()
-    try:
-        connection = _django_connection()
-
-        from chatbot.models import RagChunk
-
-        if RagChunk._meta.db_table not in connection.introspection.table_names():
-            raise RuntimeError("rag_chunks_table_missing")
-
-        queryset = RagChunk.objects.filter(is_searchable=True)
-        if allowed_source_types:
-            from django.db.models import Q
-
-            queryset = queryset.filter(source_type__in=allowed_source_types)
-            queryset = queryset.filter(source_document__isnull=False)
-            queryset = queryset.filter(source_document__status="active")
-            queryset = queryset.filter(source_document__source_type__in=allowed_source_types)
-            queryset = queryset.filter(source_document__jurisdiction="KR")
-            queryset = queryset.filter(content__regex=r"\S")
-            queryset = queryset.filter(source_document__source_url__regex=r"\S")
-            queryset = queryset.filter(source_document__effective_date__isnull=False)
-            queryset = queryset.filter(source_document__effective_date__lte=effective_at)
-            queryset = queryset.filter(
-                Q(source_document__expire_date__isnull=True)
-                | Q(source_document__expire_date__gte=effective_at)
-            )
-        elif source_type:
-            queryset = queryset.filter(source_type=source_type)
-
-        candidates = list(queryset.select_related("source_document").order_by("-updated_at")[:1000])
-        results = _rank_chunks(query, candidates, top_k=top_k)
-        return _search_response(
-            status="ready" if results else "empty",
-            backend=DJANGO_RAG_BACKEND,
-            query=query,
-            top_k=top_k,
-            results=results,
-            started_at=started_at,
-            sql_tables=["rag_chunks", "source_documents"],
-            score_kind="token_coverage",
-            query_token_count=len(_unique_tokens(_tokens(query))),
-        )
-    except Exception as exc:  # pragma: no cover - depends on configured Django runtime.
-        return _search_response(
-            status="unavailable",
-            backend=DJANGO_RAG_BACKEND,
-            query=query,
-            top_k=top_k,
-            results=[],
-            started_at=started_at,
-            error_code=str(exc)[:120],
-        )
-
-
 @contextmanager
 def _atomic_for_connection(connection: Any):
     alias = getattr(connection, "alias", "")
@@ -487,115 +378,8 @@ def _pgvector_seed_space_has_eligible_row(
         return cursor.fetchone() is not None
 
 
-def _search_law_chunks_lexical(
-    query: str,
-    *,
-    top_k: int,
-    source_type: str,
-    allowed_source_types: tuple[str, ...],
-    effective_at: date | None,
-) -> dict[str, Any]:
-    """Search the production-seeded law_chunks table without a query embedding call."""
-
-    started_at = time.perf_counter()
-    if not allowed_source_types or effective_at is None:
-        return _search_response(
-            status="disabled",
-            backend=POSTGRES_LEXICAL_BACKEND,
-            query=query,
-            top_k=top_k,
-            results=[],
-            started_at=started_at,
-            error_code="source_type_not_supported",
-        )
-    try:
-        connection = _django_connection()
-        if getattr(connection, "vendor", "") != "postgresql":
-            raise RuntimeError("postgresql_connection_required")
-        if "law_chunks" not in set(connection.introspection.table_names()):
-            raise RuntimeError("missing_tables:law_chunks")
-
-        tokens = _unique_tokens(_tokens(query))[:8]
-        if not tokens:
-            raise RuntimeError("no_search_tokens")
-        search_document = (
-            "lower(concat_ws(' ', c.source_name, coalesce(c.article_no, ''), "
-            "coalesce(c.appendix_no, ''), coalesce(c.form_no, ''), "
-            "c.normalized_text, c.provision_text))"
-        )
-        score_fragments = [f"CASE WHEN {search_document} LIKE %s THEN 1 ELSE 0 END" for _ in tokens]
-        score_expression = " + ".join(score_fragments)
-        match_fragments = [f"{search_document} LIKE %s" for _ in tokens]
-        patterns = [f"%{token.lower()}%" for token in tokens]
-        sql = f"""
-            SELECT
-                c.chunk_id,
-                c.source_id,
-                c.source_name,
-                c.source_type,
-                c.chunk_type,
-                c.article_no,
-                c.appendix_no,
-                c.form_no,
-                c.provision_text,
-                c.normalized_text,
-                c.source_url,
-                c.enforce_date,
-                c.expire_date,
-                c.domain_tags,
-                ({score_expression})::int AS matched_token_count,
-                {len(tokens)}::int AS query_token_count,
-                (({score_expression})::float / {len(tokens)}.0) AS score
-            FROM law_chunks c
-            WHERE c.is_searchable = TRUE
-              AND c.source_type = ANY(%s)
-              AND c.enforce_date IS NOT NULL
-              AND c.enforce_date <= %s
-              AND (c.expire_date IS NULL OR c.expire_date >= %s)
-              AND {USABLE_LEGAL_EVIDENCE_SQL}
-              AND ({' OR '.join(match_fragments)})
-            ORDER BY score DESC, c.chunk_id
-            LIMIT %s
-        """
-        params: list[Any] = [
-            *patterns,
-            *patterns,
-            list(allowed_source_types),
-            effective_at,
-            effective_at,
-            *patterns,
-            top_k,
-        ]
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params)
-            columns = [column[0] for column in cursor.description]
-            rows = [dict(zip(columns, row, strict=False)) for row in cursor.fetchall()]
-        results = [_law_chunk_row_result(row) for row in rows]
-        return _search_response(
-            status="ready" if results else "empty",
-            backend=POSTGRES_LEXICAL_BACKEND,
-            query=query,
-            top_k=top_k,
-            results=results,
-            started_at=started_at,
-            sql_tables=["law_chunks"],
-            score_kind="token_coverage",
-            query_token_count=len(tokens),
-        )
-    except Exception as exc:  # pragma: no cover - depends on configured PostgreSQL runtime.
-        return _search_response(
-            status="unavailable",
-            backend=POSTGRES_LEXICAL_BACKEND,
-            query=query,
-            top_k=top_k,
-            results=[],
-            started_at=started_at,
-            error_code=str(exc)[:120],
-        )
-
-
 def _build_query_embedding(query: str) -> tuple[list[float], dict[str, Any]]:
-    provider = _text(_setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "sentence-transformers")).lower()
+    provider = _text(_setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "openai")).lower()
     if provider in {"", "disabled", "none"}:
         raise RuntimeError("query_embedding_disabled")
     if provider == "hash":
@@ -656,10 +440,10 @@ def _validate_configured_embedding_space() -> dict[str, Any]:
         raise RuntimeError("query_embedding_space_not_configured")
 
     query_provider = _text(
-        _setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "sentence-transformers")
+        _setting("LEGAL_RAG_QUERY_EMBEDDING_PROVIDER", "openai")
     ).lower()
     query_model = _text(
-        _setting("LEGAL_RAG_QUERY_EMBEDDING_MODEL", DEFAULT_SENTENCE_TRANSFORMER_MODEL)
+        _setting("LEGAL_RAG_QUERY_EMBEDDING_MODEL", "text-embedding-3-large")
     )
     query_dimensions = _int_setting("LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS", 0)
 
@@ -732,13 +516,21 @@ def _openai_embedding(query: str, *, model_id: str, dimensions: int) -> list[flo
 def _hash_embedding(query: str, *, dimensions: int) -> list[float]:
     dimensions = max(1, dimensions)
     vector = [0.0] * dimensions
-    tokens = _tokens(query) or [query.lower()]
+    tokens = _hash_tokens(query) or [query.lower()]
     for token in tokens:
         digest = hashlib.sha256(token.encode("utf-8")).digest()
         index = int.from_bytes(digest[:4], "big") % dimensions
         sign = 1.0 if digest[4] % 2 == 0 else -1.0
         vector[index] += sign
     return _normalize_l2(vector)
+
+
+def _hash_tokens(value: str) -> list[str]:
+    return [
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9\uac00-\ud7a3]+", value)
+        if len(token) >= 2
+    ]
 
 
 def _normalize_l2(vector: list[float]) -> list[float]:
@@ -750,78 +542,6 @@ def _normalize_l2(vector: list[float]) -> list[float]:
 
 def _pgvector_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{item:.9f}" for item in vector) + "]"
-
-
-def _rank_chunks(query: str, chunks: list[Any], *, top_k: int) -> list[dict[str, Any]]:
-    query_tokens = _unique_tokens(_tokens(query))
-    if not query_tokens:
-        return []
-    ranked = []
-    for chunk in chunks:
-        haystack = " ".join(
-            [
-                _text(getattr(chunk, "title", "")),
-                _text(getattr(chunk, "article_no", "")),
-                _text(getattr(chunk, "section_ref", "")),
-                _text(getattr(chunk, "normalized_text", "")),
-                _text(getattr(chunk, "content", "")),
-            ]
-        ).lower()
-        if not haystack:
-            continue
-        matched_token_count = sum(1 for token in query_tokens if token in haystack)
-        if matched_token_count == 0:
-            continue
-        score = matched_token_count / len(query_tokens)
-        ranked.append((score, matched_token_count, chunk))
-
-    ranked.sort(key=lambda item: item[0], reverse=True)
-    return [
-        _chunk_result(
-            chunk,
-            score,
-            matched_token_count=matched_token_count,
-            query_token_count=len(query_tokens),
-        )
-        for score, matched_token_count, chunk in ranked[:top_k]
-    ]
-
-
-def _chunk_result(
-    chunk: Any,
-    score: float,
-    *,
-    matched_token_count: int,
-    query_token_count: int,
-) -> dict[str, Any]:
-    source_document = getattr(chunk, "source_document", None)
-    source_name = _text(getattr(source_document, "source_name", "")) or _text(getattr(chunk, "source_id", ""))
-    source_url = _text(getattr(source_document, "source_url", ""))
-    effective_date = getattr(source_document, "effective_date", None)
-    expire_date = getattr(source_document, "expire_date", None)
-    content = _text(getattr(chunk, "content", ""))
-    article_no = _text(getattr(chunk, "article_no", ""))
-    title = _text(getattr(chunk, "title", "")) or "Legal source chunk"
-    return {
-        "source_reference": _text(getattr(chunk, "chunk_id", "")),
-        "source_document_id": _text(getattr(source_document, "source_document_id", "")),
-        "source_id": _text(getattr(chunk, "source_id", ""))
-        or _text(getattr(source_document, "source_document_id", "")),
-        "source_type": _text(getattr(chunk, "source_type", "")),
-        "source_name": source_name,
-        "title": title,
-        "article": article_no,
-        "section_ref": _text(getattr(chunk, "section_ref", "")),
-        "summary": content[:240],
-        "provision_text": content,
-        "source_url": source_url,
-        "effective_date": effective_date.isoformat() if effective_date else None,
-        "expire_date": expire_date.isoformat() if expire_date else None,
-        "domain_tags": _list(getattr(chunk, "domain_tags", [])),
-        "score": round(score, 4),
-        "matched_token_count": matched_token_count,
-        "query_token_count": query_token_count,
-    }
 
 
 def _pgvector_row_result(row: dict[str, Any]) -> dict[str, Any]:
@@ -848,16 +568,6 @@ def _pgvector_row_result(row: dict[str, Any]) -> dict[str, Any]:
         "embedding_dimensions": int(row.get("embedding_dimensions") or 0),
         "score": round(float(row.get("score") or 0.0), 6),
     }
-
-
-def _law_chunk_row_result(row: dict[str, Any]) -> dict[str, Any]:
-    result = _pgvector_row_result(row)
-    result.pop("embedding_provider", None)
-    result.pop("embedding_model", None)
-    result.pop("embedding_dimensions", None)
-    result["matched_token_count"] = int(row.get("matched_token_count") or 0)
-    result["query_token_count"] = int(row.get("query_token_count") or 0)
-    return result
 
 
 def _search_response(
@@ -894,16 +604,6 @@ def _elapsed_ms(started_at: float) -> int:
     return max(0, round((time.perf_counter() - started_at) * 1000))
 
 
-def _attempt_summary(response: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "backend": response.get("backend"),
-        "status": response.get("status"),
-        "result_count": response.get("result_count", 0),
-        "latency_ms": response.get("latency_ms", 0),
-        "error_code": response.get("error_code", ""),
-    }
-
-
 def _django_connection() -> Any:
     from django.apps import apps
     from django.db import connection
@@ -911,18 +611,6 @@ def _django_connection() -> Any:
     if not apps.ready:
         raise RuntimeError("django_apps_not_ready")
     return connection
-
-
-def _tokens(value: str) -> list[str]:
-    return [
-        token.lower()
-        for token in re.findall(r"[A-Za-z0-9\uac00-\ud7a3]+", value)
-        if len(token) >= 2
-    ]
-
-
-def _unique_tokens(tokens: list[str]) -> list[str]:
-    return list(dict.fromkeys(tokens))
 
 
 def _list(value: Any) -> list[Any]:

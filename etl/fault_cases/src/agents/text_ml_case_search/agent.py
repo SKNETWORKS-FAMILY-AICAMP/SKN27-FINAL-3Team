@@ -30,14 +30,9 @@ from etl.fault_cases.src.agents.text_ml_case_search.input.issue_tagger import ex
 from etl.fault_cases.src.agents.text_ml_case_search.input.normalizer import normalize_accident
 from etl.fault_cases.src.agents.text_ml_case_search.input.validator import validate_input
 from etl.fault_cases.src.agents.text_ml_case_search.rag.search_text_builder import build_search_text
-from etl.fault_cases.src.agents.text_ml_case_search.rag.bm25_nori_retriever import (
-    ElasticsearchLike,
-)
-from etl.fault_cases.src.agents.text_ml_case_search.rag.retrieval_pipeline import (
+from etl.fault_cases.src.agents.text_ml_case_search.rag.pgvector_unified_retriever import (
     DEFAULT_SEARCH_VARIANT,
-)
-from etl.fault_cases.src.agents.text_ml_case_search.rag.unified_retriever import (
-    run_unified_rag_pipeline,
+    run_unified_pgvector_pipeline,
 )
 from etl.fault_cases.src.agents.text_ml_case_search.schemas import AgentOutput
 
@@ -46,10 +41,9 @@ def run_text_ml_case_search(
     agent_input: dict[str, Any],
     *,
     mock_evidence: list[dict[str, Any]] | None = None,
-    es_client: ElasticsearchLike | None = None,
     search_variant: str = DEFAULT_SEARCH_VARIANT,
 ) -> AgentOutput:
-    contract_version = CONTRACT_VERSION_V2 if es_client is not None else None
+    contract_version = CONTRACT_VERSION_V2
     validation = validate_input(agent_input)
     if not validation["ok"]:
         failed_kwargs: dict[str, Any] = {
@@ -71,9 +65,8 @@ def run_text_ml_case_search(
     rag_debug: dict[str, Any] = {}
     source_summary: dict[str, Any] = {}
     evidence = mock_evidence or []
-    if mock_evidence is None and es_client is not None:
-        rag_result = run_unified_rag_pipeline(
-            es=es_client,
+    if mock_evidence is None:
+        rag_result = run_unified_pgvector_pipeline(
             search_text=search_text,
             search_variant=search_variant,
         )
@@ -90,6 +83,8 @@ def run_text_ml_case_search(
             "source_results": {
                 source_type: {
                     "retriever": source_result.get("retriever"),
+                    "status": source_result.get("status"),
+                    "error_code": source_result.get("error_code"),
                     "source_type": source_result.get("source_type"),
                     "raw_hit_count": source_result.get("raw_hit_count"),
                     "mapped_evidence_count": source_result.get("mapped_evidence_count"),
@@ -119,8 +114,8 @@ def run_text_ml_case_search(
     display_evidence = build_display_evidence(evidence=evidence)
 
     if not evidence:
-        limitations.append("아직 RAG 검색이 연결되지 않아 유사 근거는 반환하지 않습니다.")
-        next_actions.append("BM25+Nori RAG 연결 후 유사 심의사례 근거를 확인해야 합니다.")
+        limitations.append("pgvector 검색에서 유사 근거를 반환하지 않았습니다.")
+        next_actions.append("pgvector 저장소 상태와 유사 심의사례 근거를 확인해야 합니다.")
 
     recommended_evidence = build_recommended_evidence(
         context=context,
@@ -157,7 +152,7 @@ def run_text_ml_case_search(
         search_text=search_text,
         rag_debug=rag_debug,
         source_summary=source_summary,
-        **({"contract_version": contract_version} if contract_version else {}),
+        contract_version=contract_version,
     )
 
 

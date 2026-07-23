@@ -3,7 +3,7 @@
 This directory is intentionally independent from `infra/terraform`. It creates
 one public x86 EC2 host, one private Single-AZ PostgreSQL RDS instance, two
 private S3 buckets, two ECR repositories, and an AWS Budget. It does not create
-NAT Gateway, ALB, ECS/Fargate, ElastiCache, managed OpenSearch, CloudFront,
+NAT Gateway, ALB, ECS/Fargate, ElastiCache, CloudFront,
 Kibana, or Neo4j.
 
 Terraform creates infrastructure only. It does not store the application env

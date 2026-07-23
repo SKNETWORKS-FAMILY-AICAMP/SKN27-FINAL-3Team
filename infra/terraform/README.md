@@ -1,7 +1,7 @@
 # AWS production infrastructure
 
 Terraform provisions the approved two-AZ ECS, RDS PostgreSQL/pgvector, Redis,
-OpenSearch/Nori, S3, CloudFront, WAF and operations baseline for staging or
+S3, CloudFront, WAF and operations baseline for staging or
 production. Configure the remote state backend separately so credentials and
 account-specific bucket names never enter source control.
 

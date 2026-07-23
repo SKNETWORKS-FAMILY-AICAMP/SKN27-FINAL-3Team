@@ -261,51 +261,6 @@ services:
       retries: 10
       start_period: 60s
 
-  # Optional precedent RAG Elasticsearch service retained for the existing
-  # root-compose development and infrastructure contract.
-  elasticsearch:
-    build:
-      context: ./infra/elasticsearch
-      dockerfile: Dockerfile
-      args:
-        ELASTICSEARCH_VERSION: ${ELASTICSEARCH_VERSION:-8.12.1}
-    image: skn27-elasticsearch-nori:${ELASTICSEARCH_VERSION:-8.12.1}
-    container_name: skn27-elasticsearch
-    restart: unless-stopped
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=true
-      - xpack.security.http.ssl.enabled=false
-      - xpack.security.transport.ssl.enabled=false
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-change-me}
-      - ES_JAVA_OPTS=-Xms1g -Xmx1g
-    ports:
-      - "${ELASTICSEARCH_PORT:-9200}:9200"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -u elastic:${ELASTIC_PASSWORD:-change-me} -f http://localhost:9200/_cluster/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
-
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.12.1
-    container_name: skn27-kibana
-    restart: unless-stopped
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=kibana_system
-      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-change-me}
-      - SERVER_HOST=0.0.0.0
-      - I18N_LOCALE=ko-KR
-    ports:
-      - "${KIBANA_PORT:-5601}:5601"
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-
   data-seed:
     # Explicit/manual legacy ETL job. Production uses the verified manifest loader.
     profiles: ["seed"]
@@ -354,4 +309,3 @@ volumes:
   fault_standard_neo4j_operational_next_logs:
     name: ${FAULT_STANDARD_NEO4J_LOG_VOLUME:-fault_standard_neo4j_operational_next_logs}
   redis_data:
-  elasticsearch_data:

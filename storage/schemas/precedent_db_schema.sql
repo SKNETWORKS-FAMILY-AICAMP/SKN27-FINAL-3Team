@@ -87,8 +87,6 @@ CREATE TABLE IF NOT EXISTS traffic_precedent_chunks (
     source_fields JSONB DEFAULT '[]'::jsonb,
     metadata JSONB DEFAULT '{}'::jsonb,
     embedding_status TEXT DEFAULT 'pending',
-    indexed_to_elasticsearch BOOLEAN DEFAULT false,
-    elasticsearch_index_name TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE (case_id, chunk_strategy, chunk_index)
@@ -209,8 +207,6 @@ CREATE TABLE IF NOT EXISTS fault_ratio_precedent_chunks (
     contains_duty_terms BOOLEAN DEFAULT false,
     metadata JSONB DEFAULT '{}'::jsonb,
     embedding_status TEXT DEFAULT 'pending',
-    indexed_to_elasticsearch BOOLEAN DEFAULT false,
-    elasticsearch_index_name TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     UNIQUE (case_id, chunk_strategy, chunk_index)
