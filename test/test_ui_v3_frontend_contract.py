@@ -8,6 +8,10 @@ def _shell() -> str:
     return (ROOT / "app/web/FrontendAppShell.jsx").read_text(encoding="utf-8")
 
 
+def _styles() -> str:
+    return (ROOT / "app/web/styles.css").read_text(encoding="utf-8")
+
+
 def test_deadline_summary_uses_valid_user_confirmed_received_date() -> None:
     shell = _shell()
 
@@ -42,3 +46,19 @@ def test_follow_up_and_legal_sources_explain_why_and_when() -> None:
     assert "Array.isArray(structuredResult.law_provisions)" in shell
     assert "item.effective_date || item.enforce_date" in shell
     assert "retrieval.retrieved_at" in shell
+
+
+def test_quick_question_groups_render_without_undefined_legacy_reference() -> None:
+    shell = _shell()
+
+    assert "const quickQuestionGroups = [" in shell
+    assert "{quickQuestionGroups.map((group) => (" in shell
+    assert 'className="quick-examples"' in shell
+    assert "{quickQuestions.map((item) => (" not in shell
+
+
+def test_empty_chat_keeps_the_primary_composer_above_the_desktop_fold() -> None:
+    styles = _styles()
+
+    assert "min-height: clamp(220px, 28vh, 300px);" in styles
+    assert ".chat-empty-state {\n  min-height: 420px;" not in styles

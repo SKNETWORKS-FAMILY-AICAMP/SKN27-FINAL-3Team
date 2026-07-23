@@ -470,6 +470,18 @@ def test_fine_notice_procedure_question_does_not_run_ocr_appeal_or_report() -> N
     ]
 
 
+def test_enforcement_eligibility_question_routes_to_fine_notice_procedure() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_enforcement_eligibility",
+            "user_text": "어린이보호구역에서 응급상황 때문에 잠깐 정차한 경우도 단속 대상이야?",
+            "attachments": [],
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+
+
 def test_report_node_is_planned_only_when_document_generation_is_explicitly_requested() -> None:
     response = submit_message(
         {

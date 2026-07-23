@@ -2262,7 +2262,7 @@ p {
 }
 
 .chat-empty-state {
-  min-height: 420px;
+  min-height: clamp(220px, 28vh, 300px);
   display: grid;
   align-content: center;
   justify-items: center;

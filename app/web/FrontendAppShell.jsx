@@ -2563,13 +2563,28 @@ function ChatScreenV2({
             />
           )}
 
-          <div className="quick-row" aria-label="빠른 질문">
-            {quickQuestions.map((item) => (
-              <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
-                {item}
-              </button>
-            ))}
-          </div>
+          <details className="quick-examples">
+            <summary className="quick-examples-header">
+              <span>
+                <strong>서비스 예시 작동 방식</strong>
+                <small>궁금한 상황을 선택하면 질문이 입력창에 담깁니다.</small>
+              </span>
+            </summary>
+            <div className="quick-example-groups">
+              {quickQuestionGroups.map((group) => (
+                <section className="quick-example-group" aria-label={group.title} key={group.title}>
+                  <h4>{group.title}</h4>
+                  <div className="quick-row">
+                    {group.questions.map((item) => (
+                      <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </details>
 
           <div className="chat-input">
             <div className="input-stack">
