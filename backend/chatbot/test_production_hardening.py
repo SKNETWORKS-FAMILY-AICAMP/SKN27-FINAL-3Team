@@ -153,6 +153,7 @@ class ProductionApiContractTests(SimpleTestCase):
             {item["node_code"] for item in body["nodes"]},
             {
                 "appeal_decision_flow",
+                "attachment_document_classification",
                 "fine_notice_analysis",
                 "law_ground_search",
                 "objection_report_generation",
