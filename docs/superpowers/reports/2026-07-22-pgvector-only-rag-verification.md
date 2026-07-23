@@ -22,6 +22,25 @@ Date: 2026-07-22
 | active runtime/config reference scan | 0 references to Elasticsearch, OpenSearch, BM25, Nori, or lexical fallback |
 | changed-file whitespace validation | `git diff --check` passed |
 
+## Local follow-up verification (2026-07-23)
+
+| Command scope | Result |
+|---|---:|
+| focused pgvector-only pytest suites | 326 passed in 2.60s |
+| Django `chatbot.tests` suite | 38 passed in 1.723s |
+| repository pytest excluding independent `etl/fault_cases/rag_runtime` | 911 passed, 38 skipped in 68.20s |
+| root Compose config | passed |
+| Pilot Compose config with example variables and runtime env resolution disabled | passed |
+| active production-code reference scan | 0 references |
+| changed-file whitespace validation | passed |
+
+The local full-suite collection still cannot import the independent
+`etl/fault_cases/rag_runtime` tests. The shared virtual environment runs Python
+3.14.3, while the declared `pyarrow>=20,<22` range has no compatible Windows
+wheel. An attempted install fell back to a C++ source build and failed because
+the Arrow/CMake build toolchain is not installed. This is an environment
+compatibility limitation, not a failure in a collected pgvector-only test.
+
 ## Post-PR CI contract correction
 
 The initial Python 3.13 CI run found four stale deployment-contract assertions

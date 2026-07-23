@@ -2754,9 +2754,10 @@ class RemovedChatbotMockApiContract:
 
         structured_result = text_ml_result["structured_result"]
         self.assertEqual(structured_result["adapter_trace"]["execution_mode"], "sync")
-        self.assertIn(
-            structured_result["retrieval"].get("adapter_source") or structured_result["retrieval"].get("backend"),
-            {"fault_ratio_knowledge_agent", "django_rag_tables"},
+        self.assertEqual(
+            structured_result["retrieval"].get("adapter_source")
+            or structured_result["retrieval"].get("backend"),
+            "fault_ratio_knowledge_agent",
         )
         self.assertIn("similar_cases", structured_result)
         self.assertIn("top_cases", structured_result)

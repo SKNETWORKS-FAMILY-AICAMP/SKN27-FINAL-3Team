@@ -170,6 +170,30 @@ def test_legacy_mock_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypat
     assert calls[0]["attachment_resolution"]["unresolved_attachment_ids"] == []
 
 
+def test_legacy_law_result_defaults_to_pgvector_backend(monkeypatch):
+    monkeypatch.setattr(
+        agent_node_service,
+        "search_legal_rag",
+        lambda *_args, **_kwargs: {
+            "results": [
+                {
+                    "source_name": "Road Traffic Act",
+                    "article": "Article 5",
+                    "summary": "Drivers must follow traffic signals.",
+                }
+            ]
+        },
+    )
+
+    result = agent_node_service._structured_result_for_node(
+        "law_ground_search",
+        {"user_text": "traffic signal violation"},
+        "success",
+    )
+
+    assert result["retrieval_quality"] == "postgres_pgvector"
+
+
 def test_legacy_mock_entrypoint_keeps_dl_agent_as_explicit_mock():
     result = execute_mock_node(
         {
@@ -816,9 +840,9 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
                 "query_token_count": 4,
                 "match_reason": "query_term_match",
                 "_retrieval": {
-                    "backend": "django_rag_tables",
+                    "backend": "postgres_pgvector",
                     "status": "ready",
-                    "attempted_backends": ["django_rag_tables"],
+                    "attempted_backends": ["postgres_pgvector"],
                 },
             }
         ]
@@ -870,9 +894,9 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
         }
     ]
     assert structured_result["retrieval"] == {
-        "backend": "django_rag_tables",
+        "backend": "postgres_pgvector",
         "status": "ready",
-        "attempted_backends": ["django_rag_tables"],
+        "attempted_backends": ["postgres_pgvector"],
         "contract_version": "law_retrieval.v1",
     }
     assert structured_result["adapter_trace"]["execution_mode"] == "sync"

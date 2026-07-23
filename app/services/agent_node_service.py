@@ -1948,7 +1948,7 @@ def _structured_result_for_node(
                 ],
                 "applicable_conditions": ["RAG 근거는 사용자 사실관계와 처분 문구 확인 후 적용 여부를 판단해야 합니다."],
                 "exceptions": [],
-                "retrieval_quality": rag_search.get("backend") or "django_rag_tables",
+                "retrieval_quality": rag_search.get("backend") or "postgres_pgvector",
                 "retrieval": _retrieval_metadata(rag_search),
             }
         return {
