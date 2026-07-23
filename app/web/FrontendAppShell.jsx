@@ -29,9 +29,32 @@ const EXECUTION_MODE = "async_worker";
 const WORKER_POLL_INTERVAL_MS = 500;
 const WORKER_POLL_MAX_ATTEMPTS = 60;
 const WORKER_PENDING_JOB_STATUSES = new Set(["queued", "running", "retrying"]);
+const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf,video/mp4,video/quicktime";
+const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime"]);
+const DOCUMENT_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const ATTACHMENT_PURPOSE_LABELS = {
   fine_notice: "고지서",
   supporting_evidence: "보조 자료",
+  blackbox_video: "블랙박스 영상",
+  accident_scene: "사고 현장 자료",
+  evidence: "증거 자료",
+  traffic_accident_confirmation: "교통사고 사실확인원",
+};
+const OCR_CONFIRMATION_FIELDS = [
+  "fine_type",
+  "notice_stage",
+  "law_code",
+  "violation_text",
+  "opinion_deadline",
+  "issuing_authority",
+];
+const OCR_CONFIRMATION_FIELD_LABELS = {
+  fine_type: "처분 유형",
+  notice_stage: "고지 단계",
+  law_code: "법령 코드",
+  violation_text: "위반 내용",
+  opinion_deadline: "의견제출 기한",
+  issuing_authority: "발급 기관",
 };
 const DEADLINE_GUIDANCE_STATUSES = new Set(["overdue", "due_soon", "normal", "needs_confirmation"]);
 const SERVICE_INFORMATION_NOTICE = "이 서비스는 법률 자문이나 개별 사건의 확정 판단을 대신하지 않으며, 확인할 사실과 근거를 정리합니다.";
@@ -104,6 +127,13 @@ function analysisCardKey(card, index) {
   return `${card?.card_type || "analysis"}-${card?.title || "card"}-${index}`;
 }
 
+function ocrConfirmationFieldsFrom(result) {
+  return OCR_CONFIRMATION_FIELDS.reduce((fields, field) => {
+    fields[field] = String(result?.[field] || "");
+    return fields;
+  }, {});
+}
+
 export default function FrontendAppShell({
   apiBase = "/api",
   googleClientId = "",
@@ -135,6 +165,8 @@ export default function FrontendAppShell({
   const [uploadInputResetKey, setUploadInputResetKey] = useState(0);
   const [registeredAttachments, setRegisteredAttachments] = useState([]);
   const [isRegisteringAttachment, setIsRegisteringAttachment] = useState(false);
+  const [ocrConfirmationFields, setOcrConfirmationFields] = useState({});
+  const [pendingOcrConfirmation, setPendingOcrConfirmation] = useState(null);
   const [reportActionStatus, setReportActionStatus] = useState("");
   const [currentReport, setCurrentReport] = useState(null);
   const [reportList, setReportList] = useState([]);
@@ -183,6 +215,7 @@ export default function FrontendAppShell({
   const deadlineGuidance = isDeadlineGuidance(analysisResponse?.deadline_guidance)
     ? analysisResponse.deadline_guidance
     : null;
+  const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -193,8 +226,25 @@ export default function FrontendAppShell({
     ? analysisCards
     : analysisCards.filter((card) => card?.card_type !== "reporting_preview");
   const attachmentPurposes = Array.from(
-    new Set((capabilityCatalog?.capabilities || []).flatMap((capability) => capability.attachment_purposes || []))
+    new Set([
+      ...(capabilityCatalog?.capabilities || []).flatMap((capability) => capability.attachment_purposes || []),
+      "fine_notice",
+      "supporting_evidence",
+      "blackbox_video",
+      "accident_scene",
+      "evidence",
+      "traffic_accident_confirmation",
+    ])
   ).map((value) => ({ value, label: ATTACHMENT_PURPOSE_LABELS[value] || value }));
+
+  useEffect(() => {
+    if (ocrResult?.requires_confirmation === true) {
+      setOcrConfirmationFields(ocrConfirmationFieldsFrom(ocrResult));
+      return;
+    }
+    setOcrConfirmationFields({});
+    setPendingOcrConfirmation(null);
+  }, [ocrResult]);
 
   useEffect(() => {
     let active = true;
@@ -487,11 +537,40 @@ export default function FrontendAppShell({
         setStatusMessage("첨부 등록 응답을 확인하지 못했습니다.");
       }
     } catch (_error) {
-      setStatusMessage("첨부 등록에 실패했습니다.");
+      const publicMessage = _error?.publicMessage;
+      setStatusMessage(publicMessage || "첨부 등록에 실패했습니다. 다시 시도해 주세요.");
       setPendingAuthAction(null);
     } finally {
       setIsRegisteringAttachment(false);
     }
+  }
+
+  function handleAttachmentFile(file) {
+    if (!file) return;
+    const contentType = String(file.type || "").toLowerCase();
+    if (!VIDEO_MIME_TYPES.has(contentType) && !DOCUMENT_MIME_TYPES.has(contentType)) {
+      setSelectedUploadFile(null);
+      setUploadInputResetKey((value) => value + 1);
+      setStatusMessage("이미지(JPEG/PNG/WebP), PDF, MP4 또는 MOV 파일만 첨부할 수 있습니다.");
+      return;
+    }
+    if (VIDEO_MIME_TYPES.has(contentType)) {
+      setAttachmentPurpose("blackbox_video");
+      setStatusMessage(`${file.name} 영상을 Vision 분석 대기열에 연결했습니다.`);
+    } else {
+      setStatusMessage(`${file.name} 파일을 OCR 분류 대기열에 연결했습니다.`);
+    }
+    setSelectedUploadFile(file);
+  }
+
+  function handleAttachmentDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleAttachmentDrop(event) {
+    event.preventDefault();
+    handleAttachmentFile(event.dataTransfer.files?.[0] || null);
   }
 
   async function runCurrentReportAction(action = "download_objection") {
@@ -803,8 +882,30 @@ export default function FrontendAppShell({
     }
   }
 
-  async function submitServiceMessage() {
-    const trimmedQuestion = question.trim();
+  function updateOcrConfirmationField(field, value) {
+    if (!OCR_CONFIRMATION_FIELDS.includes(field)) return;
+    setOcrConfirmationFields((fields) => ({ ...fields, [field]: value }));
+  }
+
+  function submitOcrConfirmation() {
+    const fields = OCR_CONFIRMATION_FIELDS.reduce((confirmed, field) => {
+      const value = String(ocrConfirmationFields[field] || "").trim();
+      if (value) confirmed[field] = value;
+      return confirmed;
+    }, {});
+    const confirmation = { confirmed: true, fields };
+    const followUpMessage = "OCR 추출값을 확인했습니다. 후속 절차를 진행해 주세요.";
+    setPendingOcrConfirmation(confirmation);
+    setQuestion(followUpMessage);
+    void submitServiceMessage({
+      userText: followUpMessage,
+      ocrConfirmation: confirmation,
+    });
+  }
+
+  async function submitServiceMessage({ userText, ocrConfirmation } = {}) {
+    const trimmedQuestion = String(userText ?? question).trim();
+    const confirmationForRequest = ocrConfirmation || pendingOcrConfirmation;
     if (!trimmedQuestion) {
       setStatusMessage("상담 내용을 입력해 주세요.");
       return;
@@ -871,6 +972,7 @@ export default function FrontendAppShell({
           auth_context: activeAuthContext,
           conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
           user_text: trimmedQuestion,
+          ocr_confirmation: confirmationForRequest || undefined,
           execution_mode: executionMode,
           conversation_history: conversationHistory,
           attachments: registeredAttachments.map((attachment) => ({
@@ -933,6 +1035,9 @@ export default function FrontendAppShell({
       setStatusMessage("응답을 불러오지 못해 접수 상태만 표시합니다.");
     } finally {
       setIsSubmitting(false);
+      if (confirmationForRequest) {
+        setPendingOcrConfirmation(null);
+      }
     }
   }
 
@@ -1246,6 +1351,11 @@ export default function FrontendAppShell({
               isRegisteringAttachment={isRegisteringAttachment}
               isSubmitting={isSubmitting}
               isSavingConversation={isSavingConversation}
+              onAttachmentDragOver={handleAttachmentDragOver}
+              onAttachmentDrop={handleAttachmentDrop}
+              onAttachmentFile={handleAttachmentFile}
+              onConfirmOcr={submitOcrConfirmation}
+              onOcrFieldChange={updateOcrConfirmationField}
               onKeepTemporary={keepConversationTemporary}
               onRegisterAttachment={registerAttachmentMetadata}
               onOpenReporting={() => setActiveRoute("reporting")}
@@ -1254,6 +1364,8 @@ export default function FrontendAppShell({
               onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
               pendingAuthAction={pendingAuthAction}
+              ocrConfirmationFields={ocrConfirmationFields}
+              ocrResult={ocrResult}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
@@ -1263,7 +1375,6 @@ export default function FrontendAppShell({
               reportingPayload={reportingPayload}
               setAttachmentPurpose={setAttachmentPurpose}
               setQuestion={setQuestion}
-              setSelectedUploadFile={setSelectedUploadFile}
               capabilityError={capabilityError}
               submittedQuestion={submittedQuestion}
               supervisorExecution={supervisorExecution}
@@ -1949,6 +2060,11 @@ function ChatScreenV2({
   authSessionId,
   chatMessages,
   currentReport,
+  onAttachmentDragOver,
+  onAttachmentDrop,
+  onAttachmentFile,
+  onConfirmOcr,
+  onOcrFieldChange,
   onOpenCaseResult,
   isRegisteringAttachment,
   isSavingConversation,
@@ -1961,6 +2077,8 @@ function ChatScreenV2({
   onSaveConversation,
   onSubmit,
   pendingAuthAction,
+  ocrConfirmationFields,
+  ocrResult,
   question,
   registeredAttachments,
   reportActionStatus,
@@ -1970,7 +2088,6 @@ function ChatScreenV2({
   reportingPayload,
   setAttachmentPurpose,
   setQuestion,
-  setSelectedUploadFile,
   submittedQuestion,
   supervisorExecution,
   supervisorState,
@@ -2034,15 +2151,6 @@ function ChatScreenV2({
               ))}
             </select>
           </label>
-          <label className="file-picker">
-            <span>파일</span>
-            <input
-              key={uploadInputResetKey}
-              accept="image/*,application/pdf"
-              type="file"
-              onChange={(event) => setSelectedUploadFile(event.target.files?.[0] || null)}
-            />
-          </label>
           <button
             className="button"
             type="button"
@@ -2052,6 +2160,28 @@ function ChatScreenV2({
             {uploadButtonLabel}
           </button>
           <span className="tag">자료 {registeredAttachments.length}건</span>
+        </div>
+        <div
+          className="attachment-dropzone"
+          onDragOver={onAttachmentDragOver}
+          onDrop={onAttachmentDrop}
+        >
+          <strong>파일을 끌어 놓거나 선택하세요.</strong>
+          <span>영상은 Vision 분석, 이미지와 PDF는 OCR 분류로 전달됩니다.</span>
+          <label className="file-picker">
+            <span>파일 선택</span>
+            <input
+              key={uploadInputResetKey}
+              accept={ATTACHMENT_ACCEPT}
+              type="file"
+              onChange={(event) => onAttachmentFile(event.target.files?.[0] || null)}
+            />
+          </label>
+          <span role="status">
+            {selectedUploadFile
+              ? `${selectedUploadFile.name} 선택됨 · ${VIDEO_MIME_TYPES.has(selectedUploadFile.type) ? "Vision" : "OCR"} 대기`
+              : "첨부할 파일을 하나 선택하세요."}
+          </span>
         </div>
         {capabilityError && <p className="attachment-help" role="alert">{capabilityError}</p>}
         {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
@@ -2179,6 +2309,15 @@ function ChatScreenV2({
             </section>
           )}
 
+          {ocrResult?.requires_confirmation === true && (
+            <OcrConfirmationCard
+              fields={ocrConfirmationFields}
+              isSubmitting={isSubmitting}
+              onChange={onOcrFieldChange}
+              onConfirm={onConfirmOcr}
+            />
+          )}
+
           <div className="quick-row" aria-label="빠른 질문">
             {quickQuestions.map((item) => (
               <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
@@ -2202,6 +2341,33 @@ function ChatScreenV2({
           </div>
         </div>
       </div>
+    </section>
+  );
+}
+
+function OcrConfirmationCard({ fields, isSubmitting, onChange, onConfirm }) {
+  return (
+    <section className="ocr-confirmation-card" aria-label="OCR 추출값 확인">
+      <div>
+        <span className="eyebrow">OCR 확인</span>
+        <strong>추출된 고지서 정보를 확인하거나 수정해 주세요.</strong>
+        <p>확인한 값만 후속 법령 검색과 이의절차 검토에 사용됩니다.</p>
+      </div>
+      <div className="ocr-confirmation-fields">
+        {OCR_CONFIRMATION_FIELDS.map((field) => (
+          <label key={field}>
+            <span>{OCR_CONFIRMATION_FIELD_LABELS[field]}</span>
+            <input
+              type="text"
+              value={fields[field] || ""}
+              onChange={(event) => onChange(field, event.target.value)}
+            />
+          </label>
+        ))}
+      </div>
+      <button className="button primary" type="button" onClick={onConfirm} disabled={isSubmitting}>
+        OCR 추출값 확인 후 후속 절차 진행
+      </button>
     </section>
   );
 }

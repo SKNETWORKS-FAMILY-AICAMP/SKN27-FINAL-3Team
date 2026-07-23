@@ -11,6 +11,16 @@
         "사고 위치, 각 차량의 진행 방향, 충돌 위치를 확인해 주세요."
       ]
     },
+    "accident_evidence_analysis": {
+      "scope_code": "vehicle_to_vehicle_video_evidence",
+      "reason": "검사 완료된 차량 간 사고 영상에서 확인 가능한 사실과 참고 근거를 정리할 수 있습니다.",
+      "limitations": [
+        "영상 분석과 검색 결과는 과실 비율, 법적 책임, 최종 사고유형을 확정하지 않습니다."
+      ],
+      "next_actions": [
+        "사고 위치와 각 차량의 진행 방향, 확인하려는 쟁점을 함께 알려 주세요."
+      ]
+    },
     "fine_notice_analysis": {
       "scope_code": "traffic_fine_notice",
       "reason": "교통 과태료 고지서의 정보와 이의제기 관련 확인 항목을 정리할 수 있습니다.",

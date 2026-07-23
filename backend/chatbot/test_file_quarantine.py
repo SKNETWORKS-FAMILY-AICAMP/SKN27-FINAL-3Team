@@ -160,7 +160,7 @@ class FileQuarantinePipelineTests(TestCase):
                 "file": SimpleUploadedFile(
                     filename,
                     body,
-                    content_type="application/octet-stream",
+                    content_type="image/png",
                 ),
             },
         )
@@ -181,6 +181,29 @@ class FileQuarantinePipelineTests(TestCase):
         return UploadedFile.objects.get(
             attachment_id=attachment["attachment_id"]
         )
+
+    def test_unsupported_file_type_explains_how_to_retry(self) -> None:
+        response = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": "ses_unsupported_file_type",
+                "purpose": "evidence",
+                "file": SimpleUploadedFile(
+                    "unsafe.exe",
+                    b"not an allowed chat attachment",
+                    content_type="application/x-msdownload",
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        error = response.json()["error"]
+        self.assertEqual(error["code"], "unsupported_media_type")
+        self.assertEqual(
+            error["message"],
+            "This file type is not supported. Choose a JPEG, PNG, WebP, PDF, MP4, or MOV file.",
+        )
+        self.assertEqual(error["required_action"], "select_supported_file")
 
     def test_multipart_registration_writes_only_to_quarantine(self) -> None:
         payload = b"bytes awaiting malware scan"
@@ -208,8 +231,8 @@ class FileQuarantinePipelineTests(TestCase):
             data={
                 "session_id": "ses_metadata_only_quarantine",
                 "purpose": "evidence",
-                "filename": "metadata-only.txt",
-                "content_type": "text/plain",
+                "filename": "metadata-only.png",
+                "content_type": "image/png",
                 "size_bytes": 128,
             },
             content_type="application/json",
@@ -960,7 +983,7 @@ class FileQuarantinePipelineTests(TestCase):
                 "file": SimpleUploadedFile(
                     "guest-owned.bin",
                     b"guest owned clean bytes",
-                    content_type="application/octet-stream",
+                    content_type="image/png",
                 ),
             },
         )
@@ -1007,7 +1030,7 @@ class FileQuarantinePipelineTests(TestCase):
                 "file": SimpleUploadedFile(
                     "claim.bin",
                     b"must not be persisted",
-                    content_type="application/octet-stream",
+                    content_type="image/png",
                 ),
             },
         )
@@ -1065,7 +1088,7 @@ class FileQuarantinePipelineTests(TestCase):
                 "file": SimpleUploadedFile(
                     "too-large.bin",
                     b"123456789",
-                    content_type="application/octet-stream",
+                    content_type="image/png",
                 ),
             },
         )
@@ -1099,7 +1122,7 @@ class FileQuarantinePipelineTests(TestCase):
                     "file": SimpleUploadedFile(
                         "small-body.bin",
                         b"small",
-                        content_type="application/octet-stream",
+                        content_type="image/png",
                     ),
                 },
                 CONTENT_LENGTH=str(1024 + 1024 * 1024 + 1),
@@ -1127,7 +1150,7 @@ class FileQuarantinePipelineTests(TestCase):
                     "file": SimpleUploadedFile(
                         "retry-me.bin",
                         b"client must retry these bytes",
-                        content_type="application/octet-stream",
+                        content_type="image/png",
                     ),
                 },
             )
@@ -1171,7 +1194,7 @@ class FileQuarantinePipelineTests(TestCase):
                 "file": SimpleUploadedFile(
                     "missing-session.bin",
                     b"must not become an unbound upload",
-                    content_type="application/octet-stream",
+                    content_type="image/png",
                 ),
             },
         )
@@ -1248,7 +1271,7 @@ class FileQuarantinePipelineTests(TestCase):
                     "file": SimpleUploadedFile(
                         "same-bucket.bin",
                         b"raw bytes must never enter the clean namespace",
-                        content_type="application/octet-stream",
+                        content_type="image/png",
                     ),
                 },
             )

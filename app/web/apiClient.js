@@ -247,7 +247,10 @@ async function parseJsonResponse(response) {
   if (!response.ok) {
     const error = payload?.error || {};
     const reason = error?.auth?.reason || error?.reason || error?.code || response.statusText;
-    throw new Error(`Request failed: ${response.status}${reason ? ` ${reason}` : ""}`);
+    const publicMessage = typeof error?.message === "string" ? error.message.trim() : "";
+    const requestError = new Error(`Request failed: ${response.status}${reason ? ` ${reason}` : ""}`);
+    requestError.publicMessage = publicMessage;
+    throw requestError;
   }
   return payload ?? response.json();
 }

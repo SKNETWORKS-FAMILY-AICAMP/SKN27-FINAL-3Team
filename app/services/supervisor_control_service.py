@@ -22,6 +22,11 @@ SUPERVISOR_INTERNAL_NODE_CODES = {
 _VALIDATION_POLICY = agent_result_validation_policy()
 EVIDENCE_REQUIRED_NODE_CODES = _VALIDATION_POLICY["evidence_required_node_codes"]
 REPORT_REQUIRED_NODES = _VALIDATION_POLICY["report_required_nodes"]
+PARTIAL_RESULT_INTENTS = _VALIDATION_POLICY["partial_result_intents"]
+EVIDENCE_ONLY_NOTICE = (
+    "영상과 참고 근거를 증거 검토용으로 정리했습니다. "
+    "이 결과는 과실비율, 법적 책임, 최종 사고유형을 확정하지 않습니다."
+)
 
 
 def reduce_consultation_fact_state(payload: dict[str, Any]) -> dict[str, Any]:
@@ -102,6 +107,7 @@ def validate_agent_results(
     routing_intent: str,
     expected_node_codes: list[str] | tuple[str, ...],
     report_requested: bool,
+    evidence_only: bool = False,
 ) -> dict[str, Any]:
     expected = [
         code
@@ -138,6 +144,11 @@ def validate_agent_results(
     ]
     return {
         "merge_ready": bool(accepted),
+        "result_status": (
+            "partial"
+            if evidence_only or routing_intent in PARTIAL_RESULT_INTENTS
+            else "success" if accepted and not rejected else "partial"
+        ),
         "report_ready": report_ready,
         "accepted_results": accepted,
         "rejected_results": rejected,
@@ -150,6 +161,7 @@ def merge_final_response(
     upstream_results: dict[str, Any],
     *,
     pending_questions: list[dict[str, Any]] | None = None,
+    evidence_only: bool = False,
 ) -> dict[str, Any]:
     validation = _agent_output(upstream_results.get("agent_result_validation"))
     validation_result = _dict(validation.get("structured_result"))
@@ -169,7 +181,11 @@ def merge_final_response(
         limitations.extend(_string_list(output.get("limitations")))
 
     report_output = _agent_output(upstream_results.get("objection_report_generation"))
-    if report_output and _text(report_output.get("status")) in {"success", "partial"}:
+    if (
+        not evidence_only
+        and report_output
+        and _text(report_output.get("status")) in {"success", "partial"}
+    ):
         report_summary = _text(report_output.get("summary"))
         if report_summary:
             summaries.append(report_summary)
@@ -180,8 +196,8 @@ def merge_final_response(
         limitations.extend(_string_list(report_output.get("limitations")))
 
     questions = _dict_list(pending_questions)
-    deadline_guidance = _deadline_guidance(accepted, structured_results)
-    cards = _result_cards(accepted, upstream_results)
+    deadline_guidance = None if evidence_only else _deadline_guidance(accepted, structured_results)
+    cards = [] if evidence_only else _result_cards(accepted, upstream_results)
     if deadline_guidance and deadline_guidance["status"] != "normal":
         cards.insert(
             0,
@@ -197,7 +213,9 @@ def merge_final_response(
             },
         )
         limitations.extend(_string_list(deadline_guidance["limitations"]))
-    if summaries:
+    if evidence_only:
+        answer = EVIDENCE_ONLY_NOTICE
+    elif summaries:
         answer = "\n\n".join(_dedupe_strings(summaries))
     elif questions:
         answer = _text(questions[0].get("question")) or "사실관계를 추가로 알려주세요."
@@ -205,6 +223,9 @@ def merge_final_response(
         answer = "검증을 통과한 분석 결과가 없습니다. 입력 자료와 근거를 확인한 뒤 다시 시도해 주세요."
 
     next_actions = (
+        ["review_evidence_with_case_and_law_sources"]
+        if evidence_only
+        else
         _string_list(deadline_guidance["next_actions"])
         if deadline_guidance and deadline_guidance["status"] != "normal"
         else ["answer_pending_question"] if questions else ["review_verified_results"]
@@ -270,9 +291,10 @@ def run_supervisor_control_node(
             routing_intent=_text(context.get("routing_intent")),
             expected_node_codes=_string_list(context.get("expected_node_codes")),
             report_requested=bool(context.get("report_requested")),
+            evidence_only=bool(context.get("evidence_only")),
         )
         return {
-            "status": "success" if validated["merge_ready"] and not validated["rejected_results"] else "partial",
+            "status": validated["result_status"],
             "summary": "에이전트 결과의 상태, 근거, 병합 및 보고서 준비 조건을 검증했습니다.",
             "structured_result": validated,
             "limitations": validated["limitations"],
@@ -281,9 +303,10 @@ def run_supervisor_control_node(
         merged = merge_final_response(
             upstream_results,
             pending_questions=_dict_list(context.get("pending_questions")),
+            evidence_only=bool(context.get("evidence_only")),
         )
         return {
-            "status": "success" if merged["structured_results"] else "partial",
+            "status": "partial" if context.get("evidence_only") else "success" if merged["structured_results"] else "partial",
             "summary": merged["assistant_message"]["summary"],
             "structured_result": merged,
             "evidence": merged["evidence"],

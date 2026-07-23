@@ -10,6 +10,8 @@ from typing import Any
 
 
 POLICY_CONTRACT_VERSION = "supervisor_routing_policy.v1"
+DOCUMENT_CLASSIFICATION_TYPES = frozenset({"image", "pdf"})
+SPECIALIZED_DOCUMENT_PURPOSES = frozenset({"traffic_accident_confirmation"})
 DEFAULT_POLICY_PATH = (
     Path(__file__).resolve().parents[1]
     / "config"
@@ -45,6 +47,8 @@ def _validate_policy(policy: Any) -> None:
         raise ValueError("supervisor_routing_policy_requires_agent_result_validation_policy")
     if not _string_list(validation_policy.get("evidence_required_node_codes")):
         raise ValueError("supervisor_routing_policy_requires_evidence_rules")
+    if not _string_list(validation_policy.get("partial_result_intents")):
+        raise ValueError("supervisor_routing_policy_requires_partial_result_intents")
     if not isinstance(validation_policy.get("report_required_nodes"), dict):
         raise ValueError("supervisor_routing_policy_requires_report_readiness_rules")
     if not _text(policy.get("default_intent")):
@@ -72,6 +76,8 @@ def route_supervisor_input(
     """Classify input with attachment rules taking precedence over text rules."""
 
     policy = _routing_policy()
+    if requires_attachment_document_classification(attachments):
+        return "attachment_document_classification"
     attachment_purposes = {
         _text(item.get("purpose")).lower()
         for item in attachments
@@ -89,6 +95,21 @@ def route_supervisor_input(
         if keywords and any(keyword in normalized_text for keyword in keywords):
             return intent
     return _text(policy["default_intent"])
+
+
+def requires_attachment_document_classification(attachments: list[dict[str, Any]]) -> bool:
+    """Require a server-proven clean image/PDF before document classification."""
+
+    return any(
+        isinstance(item, dict)
+        and _text(item.get("metadata_source")) == "canonical_scan_gate"
+        and _text(item.get("resolution_status")) == "scan_ready"
+        and _text(item.get("status")) == "ready"
+        and _text(item.get("scan_status")) == "clean"
+        and _text(item.get("type")).lower() in DOCUMENT_CLASSIFICATION_TYPES
+        and _text(item.get("purpose")).lower() not in SPECIALIZED_DOCUMENT_PURPOSES
+        for item in attachments
+    )
 
 
 def report_generation_requested(user_text: str) -> bool:
@@ -137,6 +158,9 @@ def agent_result_validation_policy() -> dict[str, Any]:
             _text(intent): set(_string_list(node_codes))
             for intent, node_codes in policy["report_required_nodes"].items()
         },
+        "partial_result_intents": set(
+            _string_list(policy.get("partial_result_intents"))
+        ),
     }
 
 
