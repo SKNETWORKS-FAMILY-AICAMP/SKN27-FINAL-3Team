@@ -144,6 +144,35 @@ def test_legal_freshness_runbook_has_bounded_validation_and_failure_actions():
     assert "reports/run_summary.json" in content
 
 
+def test_operational_health_runtime_settings_are_documented_without_secrets():
+    setting_names = {
+        "OPERATIONAL_HEALTH_INTERVAL_SECONDS",
+        "OPERATIONAL_HEALTH_WINDOW_MINUTES",
+        "OPERATIONAL_QUEUE_AGE_WARN_SECONDS",
+        "OPERATIONAL_LEASE_STALE_SECONDS",
+        "OPERATIONAL_LEGAL_RUN_SUMMARY_PATH",
+        "OPERATIONAL_LEGAL_MAX_AGE_HOURS",
+        "OPERATIONAL_LEGAL_REQUIRED_SOURCES",
+    }
+    settings_source = read_text(ROOT / "backend" / "config" / "settings.py")
+    for name in setting_names:
+        assert name in settings_source
+
+    for relative_path in (
+        ".env.example",
+        ".env.production.example",
+        "deploy/aws-pilot/runtime.env.example",
+    ):
+        content = read_text(ROOT / relative_path)
+        keys = {
+            line.split("=", 1)[0]
+            for line in content.splitlines()
+            if line and not line.startswith("#") and "=" in line
+        }
+        assert setting_names.issubset(keys)
+        assert "OPERATIONAL_ALERT_EMAIL" not in keys
+
+
 def test_analysis_execution_provenance_is_wired_to_runtime_and_runbook():
     root_compose = read_text(ROOT / "docker-compose.yml")
     pilot_compose = read_text(ROOT / "deploy" / "aws-pilot" / "docker-compose.pilot.yml")

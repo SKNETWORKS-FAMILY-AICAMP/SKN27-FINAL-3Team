@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone as datetime_timezone
+from io import StringIO
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 
 from chatbot.models import (
@@ -229,6 +233,76 @@ class OperationalObservabilityTests(TestCase):
             ["monitor_configuration_invalid"],
         )
         self.assertNotIn("not-json", str(invalid))
+
+    def test_observe_command_prints_one_compact_json_line(self):
+        stdout = StringIO()
+
+        call_command("observe_operational_health", "--once", stdout=stdout)
+
+        lines = stdout.getvalue().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(
+            json.loads(lines[0])["contract_version"],
+            "operational_health.v1",
+        )
+
+    @mock.patch(
+        "chatbot.management.commands.observe_operational_health.time.sleep",
+        side_effect=KeyboardInterrupt,
+    )
+    def test_observe_loop_stops_cleanly_after_one_snapshot(self, _sleep):
+        stdout = StringIO()
+
+        call_command(
+            "observe_operational_health",
+            "--loop",
+            "--interval-seconds",
+            "10",
+            stdout=stdout,
+        )
+
+        self.assertEqual(len(stdout.getvalue().splitlines()), 1)
+
+    def test_observe_command_rejects_unsafe_numeric_options(self):
+        invalid_arguments = (
+            ("--interval-seconds", "9"),
+            ("--window-minutes", "0"),
+            ("--queue-age-warn-seconds", "0"),
+            ("--lease-stale-seconds", "0"),
+            ("--legal-max-age-hours", "0"),
+        )
+        for name, value in invalid_arguments:
+            with self.subTest(name=name):
+                with self.assertRaises(CommandError):
+                    call_command(
+                        "observe_operational_health",
+                        "--once",
+                        name,
+                        value,
+                    )
+
+    @mock.patch(
+        "chatbot.management.commands.observe_operational_health.build_operational_health_snapshot",
+        side_effect=RuntimeError("secret-provider-diagnostic"),
+    )
+    def test_observe_command_suppresses_unexpected_exception_text(self, _snapshot):
+        stdout = StringIO()
+
+        call_command("observe_operational_health", "--once", stdout=stdout)
+
+        rendered = stdout.getvalue()
+        payload = json.loads(rendered)
+        self.assertEqual(payload["status"], "fail")
+        self.assertEqual(
+            payload["alerts"],
+            [
+                {
+                    "code": "monitor_configuration_invalid",
+                    "severity": "critical",
+                }
+            ],
+        )
+        self.assertNotIn("secret-provider-diagnostic", rendered)
 
     def _legal_summary(self, *, last_verified_at: datetime) -> dict:
         return {
