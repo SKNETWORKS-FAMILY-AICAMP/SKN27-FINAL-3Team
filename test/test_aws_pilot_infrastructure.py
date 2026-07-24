@@ -418,6 +418,59 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
     assert "chmod 0444" in deploy
 
 
+def test_database_maintenance_applies_review_case_schema_before_app_grants() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+    schema_command = (
+        "python -m etl.fault_cases.src.review_case.db_loading.schema_manager "
+        "--apply-schema"
+    )
+    grant_command = (
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public"
+    )
+
+    assert schema_command in maintenance
+    schema_position = maintenance.index(schema_command)
+    grant_position = maintenance.index(grant_command)
+    assert "--env-file `$WORK/master.env" in maintenance[:grant_position]
+    assert schema_position < grant_position
+
+
+def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() -> None:
+    loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+
+    assert "[switch]$AllowPaidReviewCaseEmbedding" in loader
+    guard = loader.index("if (-not $AllowPaidReviewCaseEmbedding)")
+    terraform = loader.index("$terraformPath =")
+    ssm = loader.index("aws ssm send-command")
+    assert guard < terraform < ssm
+
+    review_load = (
+        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
+        "backend python backend/manage.py load_review_case_pgvector_seed "
+        "--manifest /run/production-rag-seed/$RagSeedManifestRelativePath "
+        "--replace --allow-paid-provider-call --format json"
+    )
+    legal_load = (
+        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
+        "backend python backend/manage.py load_production_rag_seed"
+    )
+    completion = (
+        "printf '%s\\n' '$RagSeedManifestSha256' > "
+        "`$RELEASE_STATE_FILE.tmp"
+    )
+    expected_steps = (
+        "verify_production_rag_seed_manifest --manifest",
+        review_load,
+        legal_load,
+        "smoke_law_ground_search --require-results",
+        "verify_pgvector_rag_readiness --format json",
+        "smoke_text_ml_case_search --require-pgvector --require-results",
+        completion,
+    )
+    positions = [loader.index(step) for step in expected_steps]
+    assert positions == sorted(positions)
+
+
 def test_deploy_fail_closed_hook_requires_real_non_dl_reporting_pipeline() -> None:
     deploy = _read_deploy("Deploy-Pilot.ps1")
     command = "smoke_non_dl_analysis_reporting_pipeline"
