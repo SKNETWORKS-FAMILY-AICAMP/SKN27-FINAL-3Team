@@ -115,6 +115,20 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
 - 롤백 절차: `docs/ops/rollback-plan.md`,
   `deploy/aws-pilot/Rollback-Pilot.ps1`
 
+### RunPod Serverless Vision 후속 검증 — 2026-07-24
+
+- RunPod client·provider adapter·worker·배포 계약 집중 회귀:
+  `186 passed in 7.96s`
+- 배포 문서·AWS pilot 회귀: `80 passed in 3.96s`
+- 전체 루트 `test/` 회귀: `960 passed, 38 skipped in 32.78s`
+- Django `chatbot` 전체 앱 회귀: `368 tests`, 성공
+- 변경 Python Ruff: 통과
+- `docker compose config`: 구성 유효
+- `deploy/runpod-vision/Dockerfile` build check: 경고 없음
+- Vite production build: `32 modules transformed`, 성공
+- 전체 저장소 자동 수집은 아래에 기록한 로컬 Python 3.14의 `pyarrow`
+  선택 의존성 부재 3건만 제외했으며, RunPod 변경 경로 실패는 없음
+
 ## 환경상 실행하지 못한 항목
 
 - 인앱 브라우저 자동 제어는 이 세션의 `127.0.0.1`을 정책상 거부했다.
@@ -139,6 +153,7 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
    - APP JWT·OAuth state secret
    - OpenAI와 법령 수집 API
    - S3·scanner·Vision checkpoint
+   - restricted RunPod API key, Endpoint ID, 승인된 S3 hostname allowlist
 2. AWS 계정·결제·도메인·DNS·OAuth 운영 소유권 승인
 3. 운영 DB backup 후 법령·심의사례를
    `openai/text-embedding-3-large/1024`로 적재·재임베딩
@@ -207,5 +222,8 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
      운영 오류 코드별 진단·재시도·비용 상한 런북을 추가
    - mock HTTP·adapter·worker 경계는 자동 검증하되 실제 Endpoint 검증 전에는
      운영 연결 완료로 표시하지 않음
+   - 로컬 검증: 집중 회귀 `186 passed`, 배포·AWS pilot `80 passed`,
+     전체 `test/` `960 passed, 38 skipped`, Django `368 passed`,
+     Ruff·Compose·Dockerfile build check·Vite production build 통과
    - restricted API key 발급, 유료 Endpoint 생성, 모델 artifact 승인과
      비식별 실제 영상 E2E는 사람이 수행

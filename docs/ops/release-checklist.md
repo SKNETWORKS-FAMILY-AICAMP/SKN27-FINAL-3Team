@@ -18,7 +18,7 @@
 
 ## 2. 배포 전 P1 확인
 
-- [x] 자동 테스트가 통과했다. — PR #300 브라우저 QA 회귀와 #299 실행 재현성 검증에 이어 `feat-299-operational-observability` 전체 `test/` 회귀 `900 passed, 38 skipped`, Django 전체 `368 passed`, Ruff와 Vite production build 통과
+- [x] 자동 테스트가 통과했다. — `feat-runpod-serverless-vision` 기준 전체 `test/` 회귀 `960 passed, 38 skipped`, Django 전체 `368 passed`, RunPod 집중 회귀 `186 passed`, 배포·AWS pilot `80 passed`, Ruff·Compose·RunPod Dockerfile build check·Vite production build 통과
 - [x] 정적 HTML 산출물이 UTF-8로 저장되어 있다. — `test_static_mvp_html_is_utf8_korean_service_screen` 및 PR #300 Vite production build 확인
 - [x] 운영 문서가 `docs/ops/`에 존재한다.
 - [~] 장애 대응 절차가 문서화되어 있다. — `operational-observability-runbook.md`에 queue·lease·Worker/provider·법령 데이터 알람별 확인·완화·복구를 연결; 실제 AWS ALARM/OK 훈련은 남음
