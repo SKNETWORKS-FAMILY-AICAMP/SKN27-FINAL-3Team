@@ -147,6 +147,38 @@ def test_operational_monitor_connects_safe_health_metrics_to_cloudwatch() -> Non
     )
 
 
+def test_pilot_runtime_declares_runpod_vision_without_secret_values() -> None:
+    compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
+    runtime_env = _read_deploy("runtime.env.example")
+    required = {
+        "VISION_RUNTIME_PROVIDER",
+        "VISION_RUNTIME_TIMEOUT_SECONDS",
+        "RUNPOD_API_KEY",
+        "RUNPOD_VISION_ENDPOINT_ID",
+        "RUNPOD_VISION_TIMEOUT_SECONDS",
+        "RUNPOD_VISION_POLL_INTERVAL_SECONDS",
+        "RUNPOD_VISION_HTTP_TIMEOUT_SECONDS",
+        "RUNPOD_VISION_MAX_RESPONSE_BYTES",
+        "RUNPOD_VISION_ALLOWED_HOSTS",
+        "RUNPOD_VISION_DOWNLOAD_TIMEOUT_SECONDS",
+        "RUNPOD_VISION_MAX_DOWNLOAD_BYTES",
+        "RUNPOD_VISION_EXECUTION_TIMEOUT_SECONDS",
+    }
+    keys = {
+        line.split("=", 1)[0]
+        for line in runtime_env.splitlines()
+        if line and not line.startswith("#") and "=" in line
+    }
+
+    assert required.issubset(keys)
+    assert "VISION_RUNTIME_PROVIDER=runpod" in runtime_env
+    assert "RUNPOD_API_KEY=\n" in runtime_env.replace("\r\n", "\n")
+    assert "replace-with-runpod" not in runtime_env.lower()
+    assert compose["services"]["agent-worker"]["env_file"] == [
+        {"path": ".runtime.env", "format": "raw"}
+    ]
+
+
 def test_database_is_private_single_az_encrypted_postgres_with_safe_defaults() -> None:
     source = _terraform_source()
     assert len(re.findall(r'resource\s+"aws_db_instance"', source)) == 1

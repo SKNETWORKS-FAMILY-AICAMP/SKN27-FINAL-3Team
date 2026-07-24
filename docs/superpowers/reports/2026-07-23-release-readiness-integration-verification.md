@@ -4,6 +4,7 @@
 대상 브랜치: `feat-release-readiness-integration`
 기준: `origin/dev`의 PR #293 병합 커밋 `d326ae8`
 후속 검증: PR #300 병합 커밋 `3fd0fcdddbc2b8e30e7993dbcfe6376535bec68a`
+운영 관측 후속: PR #303 병합 커밋 `5f3728ec92ad7c2563b5cc8c5ed88b75b992f9aa`
 
 ## 결론
 
@@ -195,11 +196,16 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
      GitHub Actions production gate에서 확인하도록 명시
    - 운영 release metadata 주입과 운영 DB smoke, 실제 AWS ALARM/OK·SNS
      수신, 실제 외부 공급자 성공·부분 실패·실패 trace는 사람 게이트
-3. RunPod Serverless Vision 후속 연결
+3. RunPod Serverless Vision 연결 구현
    - 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 검토하고
      `VISION_RUNTIME_PROVIDER=runpod`, signed URL, `/run`·`/status` polling,
      remote stable error code, worker 임시 파일 삭제를 구현 기준으로 채택
-   - 현재 `dev`의 local subprocess adapter는 유지하되 운영 연결 완료로
-     표시하지 않으며 별도 브랜치와 PR에서 구현·검증
+   - `feat-runpod-serverless-vision`에서 local subprocess 호환을 유지하면서
+     RunPod queue client, 실행별 job ID cache, S3 presigned URL provider,
+     입력 host·MIME·크기·timeout 검증과 격리형 worker를 구현
+   - worker image 정의와 local·production·AWS pilot 환경 계약,
+     운영 오류 코드별 진단·재시도·비용 상한 런북을 추가
+   - mock HTTP·adapter·worker 경계는 자동 검증하되 실제 Endpoint 검증 전에는
+     운영 연결 완료로 표시하지 않음
    - restricted API key 발급, 유료 Endpoint 생성, 모델 artifact 승인과
      비식별 실제 영상 E2E는 사람이 수행

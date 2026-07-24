@@ -13,7 +13,7 @@ from app.services.runpod_vision_client import (
 
 
 SIGNED_URL = "https://private-bucket.s3.ap-northeast-2.amazonaws.com/video.mp4?X-Amz-Signature=private"
-API_KEY = "runpod-private-key"
+API_KEY = "fixture"
 
 
 def _request() -> dict[str, str]:
