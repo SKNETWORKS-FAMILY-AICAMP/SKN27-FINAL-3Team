@@ -438,11 +438,11 @@ expected = (
     "smoke_supervisor_conversation_runtime --allow-paid-provider-call "
     "--require-llm-used --require-real-agent-results "
     "--require-persisted-handoff --require-report "
-    "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
-    "--timeout-seconds 180 --format json"
+    "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --format json"
 )
 assert expected in deploy
 assert "smoke_supervisor_llm --require-used" not in normal_promotion_segment
+assert "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call" not in normal_promotion_segment
 assert deploy.index(expected) < deploy.index("ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current")
 ```
 
@@ -463,13 +463,18 @@ python -m pytest test/test_aws_pilot_infrastructure.py backend/chatbot/test_supe
 ```
 
 Expected: deployment script and readiness still reference
-`smoke_supervisor_llm`.
+`smoke_supervisor_llm`, and normal promotion still runs the separate non-DL
+paid smoke.
 
 - [ ] **Step 3: Replace mock smoke with production runtime smoke**
 
 Update the remote normal-promotion command to use the exact expected command
-from Step 1. Reuse the already validated `FineNoticeSmokeS3Uri`; do not add a
-second fixture or second paid provider call.
+from Step 1. Remove both the mock-only Supervisor smoke and the separate
+provider-capable non-DL smoke from this segment because the production runtime
+smoke covers public chat, queue, Worker, real results, persisted handoff, and
+report in one provider-capable execution. Reuse the already validated
+`FineNoticeSmokeS3Uri`; do not add a second fixture or second paid provider
+call.
 
 Change readiness metadata key from `mock_off_smoke` to `production_smoke` and
 point it at `smoke_supervisor_conversation_runtime --require-llm-used`.

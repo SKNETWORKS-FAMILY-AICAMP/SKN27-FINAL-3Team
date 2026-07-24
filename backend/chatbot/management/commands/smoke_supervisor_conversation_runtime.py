@@ -184,7 +184,15 @@ def _run_smoke(fixture: dict) -> dict:
 
 
 SAFE_LLM_REASON_CODES = frozenset(
-    {"ok", "disabled", "missing_config", "provider_unavailable", "invalid_contract"}
+    {
+        "ok",
+        "disabled",
+        "missing_config",
+        "provider_unavailable",
+        "provider_refusal",
+        "provider_structured_output_error",
+        "invalid_contract",
+    }
 )
 
 

@@ -48,6 +48,26 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
             smoke._safe_llm({"llm": {"status": "failed", "reason": "missing_config"}}),
             {"status": "failed", "reason": "missing_config"},
         )
+        self.assertEqual(
+            smoke._safe_llm(
+                {"llm": {"status": "failed", "reason": "provider_refusal"}}
+            ),
+            {"status": "failed", "reason": "provider_refusal"},
+        )
+        self.assertEqual(
+            smoke._safe_llm(
+                {
+                    "llm": {
+                        "status": "failed",
+                        "reason": "provider_structured_output_error",
+                    }
+                }
+            ),
+            {
+                "status": "failed",
+                "reason": "provider_structured_output_error",
+            },
+        )
 
     def test_smoke_output_maps_disabled_state_to_disabled_reason(self) -> None:
         from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
