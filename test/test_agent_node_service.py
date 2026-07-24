@@ -91,6 +91,31 @@ def test_no_public_agent_advertises_mock_execution():
         assert agents[node_code]["adapter_contract"]["execution_modes"] == ["sync"]
 
 
+def test_agent_execution_records_reproducible_runtime_provenance(monkeypatch):
+    monkeypatch.setenv("APP_RELEASE_VERSION", "release-test-001")
+
+    execution = execute_mock_node(
+        {
+            "job_id": "job_provenance",
+            "node_code": "fine_notice_analysis",
+            "execution_status": "success",
+        }
+    )
+
+    provenance = execution["provenance"]
+    assert provenance == {
+        "contract_version": "agent_execution_provenance.v1",
+        "release_version": "release-test-001",
+        "agent_runtime_version": "agent_runtime.v1",
+        "agent_version": "agent_adapter.v1",
+        "adapter_contract_version": "agent_adapter.v1",
+        "job_id": "job_provenance",
+        "execution_id": execution["execution_id"],
+        "node_code": "fine_notice_analysis",
+        "execution_mode": execution["execution_mode"],
+    }
+
+
 def test_public_agent_registry_includes_every_sync_runtime_agent():
     public_codes = {node["node_code"] for node in list_public_agent_nodes()}
 

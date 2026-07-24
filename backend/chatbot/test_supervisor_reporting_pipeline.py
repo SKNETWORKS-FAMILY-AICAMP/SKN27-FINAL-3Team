@@ -34,6 +34,7 @@ from chatbot.models import (
 from chatbot.repositories import (
     authorize_report_download_metadata,
     enqueue_analysis_job_work,
+    get_analysis_job_provenance,
     get_analysis_job_record,
     get_report_access_metadata,
     get_report_download_metadata,
@@ -129,6 +130,18 @@ def _agent_output(node_code: str, *, status: str = "success") -> dict:
                 "status": "ready",
                 "backend": "postgres_pgvector",
                 "attempted_backends": ["postgres_pgvector"],
+                "embedding": {
+                    "provider": "openai",
+                    "model": "text-embedding-3-large",
+                    "dimensions": 1024,
+                },
+                "data_provenance": {
+                    "contract_version": "legal_dataset_provenance.v1",
+                    "dataset_version": "sha256:test-dataset",
+                    "verified_at": "2026-07-23T10:00:00+00:00",
+                    "effective_at": "2026-07-23",
+                    "retrieved_at": "2026-07-23T11:00:00+00:00",
+                },
             },
             "retrieval_quality": "postgres_pgvector",
         },
@@ -243,6 +256,17 @@ def _node_execution(
                     "status": "sync_adapter_ready",
                 },
                 "adapter_context": {"execution_mode": "sync"},
+                "provenance": {
+                    "contract_version": "agent_execution_provenance.v1",
+                    "release_version": "release-test-001",
+                    "agent_runtime_version": "agent_runtime.v1",
+                    "agent_version": "agent_adapter.v1",
+                    "adapter_contract_version": "agent_adapter.v1",
+                    "job_id": job_id,
+                    "execution_id": f"exec_{job_id}_{node_code}",
+                    "node_code": node_code,
+                    "execution_mode": "sync",
+                },
                 "plan_step": {"order": order, "node_code": node_code},
                 "agent_output": output,
             }
@@ -830,6 +854,37 @@ class SupervisorReportingPipelineTests(TestCase):
             retrieval_event.metadata["attempted_backends"],
             ["postgres_pgvector"],
         )
+        self.assertEqual(
+            retrieval_event.metadata["data_provenance"]["dataset_version"],
+            "sha256:test-dataset",
+        )
+        law_invocation = AgentInvocation.objects.get(
+            job=job,
+            node_code="law_ground_search",
+        )
+        self.assertEqual(
+            law_invocation.metadata["provenance"]["agent_runtime_version"],
+            "agent_runtime.v1",
+        )
+        operator_provenance = get_analysis_job_provenance(job_id)
+        self.assertEqual(operator_provenance["job_id"], job_id)
+        self.assertEqual(
+            next(
+                execution
+                for execution in operator_provenance["executions"]
+                if execution["node_code"] == "law_ground_search"
+            )["execution_id"],
+            f"exec_{job_id}_law_ground_search",
+        )
+        self.assertEqual(
+            operator_provenance["retrievals"][0]["data_provenance"]["dataset_version"],
+            "sha256:test-dataset",
+        )
+        self.assertEqual(
+            operator_provenance["retrievals"][0]["embedding"]["model"],
+            "text-embedding-3-large",
+        )
+        self.assertNotIn("query_text", operator_provenance["retrievals"][0])
         self.assertEqual(job_detail["report_links"][0]["report_id"], report.report_id)
         report_detail = get_report_record_detail(report.report_id)
         self.assertEqual(report_detail["content"]["contract_version"], "analysis_report.v1")

@@ -43,6 +43,8 @@ from app.services.supervisor_routing_service import PUBLIC_AGENT_NODE_CODES
 
 
 DL_MOCK_NODE_CODES: set[str] = set()
+AGENT_EXECUTION_PROVENANCE_VERSION = "agent_execution_provenance.v1"
+AGENT_RUNTIME_VERSION = "agent_runtime.v1"
 REPORTING_NODE_CODE = "objection_report_generation"
 ATTACHMENT_DOCUMENT_CLASSIFICATION_NODE_CODE = "attachment_document_classification"
 DOCUMENT_CLASSIFICATION_CONTENT_TYPES = frozenset(
@@ -324,7 +326,7 @@ def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
         plan_step=payload.get("plan_step"),
     )
 
-    return {
+    return _with_execution_provenance({
         "execution_id": execution_id,
         "execution_mode": "mock",
         "job_id": payload.get("job_id"),
@@ -339,7 +341,7 @@ def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
             execution_status=execution_status,
         ),
         "created_at": _now_iso(),
-    }
+    })
 
 
 def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -414,7 +416,7 @@ def execute_agent_node(payload: dict[str, Any]) -> dict[str, Any]:
         expected_execution_mode="sync",
     )
     if not input_validation["valid"] or not context_validation["valid"]:
-        return _contract_rejected_execution(
+        return _with_execution_provenance(_contract_rejected_execution(
             payload=payload,
             node=node,
             agent_input=agent_input,
@@ -425,17 +427,17 @@ def execute_agent_node(payload: dict[str, Any]) -> dict[str, Any]:
                 "agent_input": input_validation,
                 "adapter_context": context_validation,
             },
-        )
+        ))
     if node_code in SUPERVISOR_INTERNAL_NODE_CODES:
-        return _execute_supervisor_internal_node(
+        return _with_execution_provenance(_execute_supervisor_internal_node(
             payload=payload,
             node=node,
             agent_input=agent_input,
             adapter_context=adapter_context,
             execution_id=execution_id,
-        )
+        ))
     if node_code not in _sync_adapter_node_codes():
-        return {
+        return _with_execution_provenance({
             "execution_id": execution_id,
             "execution_mode": "sync",
             "job_id": payload.get("job_id"),
@@ -445,14 +447,14 @@ def execute_agent_node(payload: dict[str, Any]) -> dict[str, Any]:
             "agent_input": agent_input,
             "agent_output": _unregistered_adapter_output(node=node, agent_input=agent_input),
             "created_at": _now_iso(),
-        }
-    return _execute_sync_node(
+        })
+    return _with_execution_provenance(_execute_sync_node(
         payload=payload,
         node=node,
         agent_input=agent_input,
         adapter_context=adapter_context,
         execution_id=execution_id,
-    )
+    ))
 
 
 def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -2427,6 +2429,7 @@ def _retrieval_metadata(rag_search: dict[str, Any]) -> dict[str, Any]:
             "fallback_from",
             "attempted_backends",
             "embedding",
+            "data_provenance",
             "sql_tables",
         )
         if key in rag_search
@@ -2589,6 +2592,31 @@ def _unknown_node(node_code: str) -> dict[str, Any]:
         "handoff_to": [],
         "status": "unregistered",
     }
+
+
+def _with_execution_provenance(execution: dict[str, Any]) -> dict[str, Any]:
+    result = dict(execution)
+    node = result.get("node") if isinstance(result.get("node"), dict) else {}
+    adapter_contract = (
+        node.get("adapter_contract")
+        if isinstance(node.get("adapter_contract"), dict)
+        else {}
+    )
+    adapter_version = str(
+        adapter_contract.get("signature_version") or "agent_adapter.v1"
+    )
+    result["provenance"] = {
+        "contract_version": AGENT_EXECUTION_PROVENANCE_VERSION,
+        "release_version": str(os.environ.get("APP_RELEASE_VERSION") or "unversioned"),
+        "agent_runtime_version": AGENT_RUNTIME_VERSION,
+        "agent_version": adapter_version,
+        "adapter_contract_version": adapter_version,
+        "job_id": result.get("job_id"),
+        "execution_id": result.get("execution_id"),
+        "node_code": result.get("node_code"),
+        "execution_mode": result.get("execution_mode"),
+    }
+    return result
 
 
 def _now_iso() -> str:
