@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from urllib.parse import urlsplit
+
+from app.services.runpod_vision_client import (
+    RunPodVisionClient,
+    RunPodVisionConfig,
+    RunPodVisionError,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -16,6 +24,10 @@ VISION_NODE_CODE = "vision_media_analysis"
 VISION_CHECKPOINT_ENV = "VISION_TRAINED_CLASSIFIER_CHECKPOINT"
 DEFAULT_RUNTIME_TIMEOUT_SECONDS = 180
 HANDOFF_GLOB = "storage/vision/outputs/supervisor_handoff/*.json"
+RUNPOD_REQUEST_SCHEMA_VERSION = "vision-runpod-request-v1"
+RUNPOD_SIGNED_URL_GRACE_SECONDS = 60
+RUNPOD_JOB_CACHE_GRACE_SECONDS = 300
+RUNPOD_JOB_CACHE_PREFIX = "vision:runpod:v1"
 
 
 def run_vision_media_analysis(
@@ -28,6 +40,18 @@ def run_vision_media_analysis(
     if attachment is None:
         return _failure("attachment_not_scan_ready")
 
+    provider = os.getenv("VISION_RUNTIME_PROVIDER", "local").strip().lower() or "local"
+    if provider == "local":
+        return _run_local_provider(attachment, adapter_context)
+    if provider == "runpod":
+        return _run_runpod_provider(attachment, adapter_context)
+    return _failure("vision_remote_unavailable")
+
+
+def _run_local_provider(
+    attachment: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
     checkpoint = _configured_checkpoint()
     if checkpoint is None or not _checkpoint_is_complete(checkpoint):
         return _failure("vision_checkpoint_missing")
@@ -64,6 +88,130 @@ def run_vision_media_analysis(
             return _success(_safe_worker_handoff(worker_payload))
     except (OSError, ValueError, json.JSONDecodeError):
         return _failure("vision_execution_failed")
+
+
+def _run_runpod_provider(
+    attachment: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    execution_id = _safe_execution_id(adapter_context.get("execution_id"))
+    attachment_id = _safe_execution_id(attachment.get("attachment_id"))
+    content_type = str(
+        attachment.get("content_type") or attachment.get("mime_type") or ""
+    ).lower()
+    try:
+        config = RunPodVisionConfig.from_environment()
+        video_url = _presign_runpod_video(
+            attachment,
+            timeout_seconds=config.timeout_seconds,
+        )
+        request = {
+            "schema_version": RUNPOD_REQUEST_SCHEMA_VERSION,
+            "execution_id": execution_id,
+            "attachment_id": attachment_id,
+            "video_url": video_url,
+            "content_type": content_type,
+        }
+        existing_job_id = _cached_runpod_job_id(execution_id)
+        cache_ttl = math.ceil(
+            config.timeout_seconds + RUNPOD_JOB_CACHE_GRACE_SECONDS
+        )
+        result = _new_runpod_client(config).run(
+            request,
+            existing_job_id=existing_job_id,
+            on_job_submitted=lambda job_id: _cache_runpod_job_id(
+                execution_id,
+                job_id,
+                cache_ttl,
+            ),
+        )
+        safe_handoff = _safe_worker_handoff(result.output)
+        if safe_handoff.get("handoff_schema_version") != "vision-supervisor-handoff-v1":
+            raise RunPodVisionError("vision_remote_invalid_response")
+        return _success(safe_handoff)
+    except RunPodVisionError as exc:
+        return _failure(exc.code)
+    except Exception:
+        return _failure("vision_remote_unavailable")
+
+
+def _new_runpod_client(config: RunPodVisionConfig) -> RunPodVisionClient:
+    return RunPodVisionClient(config)
+
+
+def presign_get(
+    reference: dict[str, Any],
+    *,
+    ttl_seconds: int,
+) -> dict[str, Any]:
+    from chatbot.object_storage import presign_get as object_storage_presign_get
+
+    return object_storage_presign_get(reference, ttl_seconds=ttl_seconds)
+
+
+def _presign_runpod_video(
+    attachment: dict[str, Any],
+    *,
+    timeout_seconds: float,
+) -> str:
+    reference = attachment.get("object_storage")
+    if not isinstance(reference, dict) or reference.get("provider") != "s3":
+        raise RunPodVisionError("vision_remote_unavailable")
+    ttl_seconds = math.ceil(timeout_seconds + RUNPOD_SIGNED_URL_GRACE_SECONDS)
+    result = presign_get(reference, ttl_seconds=ttl_seconds)
+    if (
+        not isinstance(result, dict)
+        or result.get("status") != "ready"
+        or result.get("provider") != "s3"
+    ):
+        raise RunPodVisionError("vision_remote_unavailable")
+    try:
+        actual_ttl = int(result.get("ttl_seconds") or 0)
+    except (TypeError, ValueError):
+        raise RunPodVisionError("vision_remote_unavailable") from None
+    url = str(result.get("url") or "")
+    parsed = urlsplit(url)
+    if (
+        actual_ttl < math.ceil(timeout_seconds)
+        or parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or bool(parsed.fragment)
+    ):
+        raise RunPodVisionError("vision_remote_unavailable")
+    return url
+
+
+def _cached_runpod_job_id(execution_id: str) -> str:
+    try:
+        from django.core.cache import cache
+
+        value = cache.get(_runpod_job_cache_key(execution_id))
+    except Exception:
+        return ""
+    return str(value or "").strip()
+
+
+def _cache_runpod_job_id(
+    execution_id: str,
+    job_id: str,
+    ttl_seconds: int,
+) -> None:
+    try:
+        from django.core.cache import cache
+
+        cache.set(
+            _runpod_job_cache_key(execution_id),
+            str(job_id),
+            timeout=ttl_seconds,
+        )
+    except Exception:
+        return
+
+
+def _runpod_job_cache_key(execution_id: str) -> str:
+    return f"{RUNPOD_JOB_CACHE_PREFIX}:{_safe_execution_id(execution_id)}"
 
 
 def _select_scan_ready_video(attachments: list[Any]) -> dict[str, Any] | None:

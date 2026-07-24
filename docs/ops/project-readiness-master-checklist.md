@@ -157,7 +157,7 @@
 - [x] #294 / PR #295: 채팅 입력 drop zone, JPEG/PNG/WebP/PDF/MP4/MOV 허용 정책, 업로드 목적·MIME 불일치 차단, 스캔 상태 표시, 지원하지 않는 파일의 사용자용 재시도 안내와 최신 회귀·Vite build
 - [x] 고지서 PDF/이미지는 `fine_notice_analysis`의 OCR 1차 결과를 사용자 확인 카드로 표시하고, 확인 전 법령 검색·이의절차·문서 생성을 차단. 확인 후에만 `law_ground_search`와 `appeal_decision_flow`을 계획에 추가
 - [x] 블랙박스 영상은 기존 Vision pipeline adapter를 통해 `text_ml_case_search`·`law_ground_search`로 handoff. checkpoint 부재·의존성·decode·timeout은 안전한 실패 코드와 다음 행동으로 반환
-- [~] 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 운영 Vision 연결 기준으로 승인. 후속 독립 브랜치에서 `VISION_RUNTIME_PROVIDER=runpod`, 짧은 수명 HTTPS signed URL, `/run`·`/status` polling, stable remote error code와 Serverless worker를 구현한다. 현재 `dev`는 local subprocess adapter만 있으므로 RunPod Endpoint 연결 완료로 판단하지 않음. restricted key 발급·유료 Endpoint 생성·실영상 smoke는 사람 게이트
+- [~] 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 기준으로 PR #304 (`feat-runpod-serverless-vision`)에서 `VISION_RUNTIME_PROVIDER=runpod`, HTTPS signed URL, `/run`·`/status` polling, job ID 재사용, stable remote error code, 격리·정리형 Serverless worker와 배포 환경 계약을 구현. PR #303과 병합 커밋 `5f3728e`까지의 운영 관측 기반 위에서 local/mock 계약을 검증했고, 전체 `test/` `960 passed, 38 skipped`, Django `368 passed`, Dockerfile build check도 통과. restricted key 발급·유료 RunPod Endpoint 생성·모델 artifact 승인·비식별 실영상 smoke는 사람 게이트이므로 아직 운영 연결 완료로 표시하지 않음
 - [x] 사고 사진(`accident_scene`)은 서버 저장 문서 분류를 사용자가 `attachment_id`로 확인한 뒤 사진 전용 사례·법령 검색 계획으로 연결. 클라이언트 분류 주입, 오래된 분류, 사진의 Vision 영상 경로 오호출을 회귀 테스트로 차단
 - [ ] PDF 고지서, 사고 사진, 블랙박스 영상, 지원하지 않는 파일, 분류 불명 파일의 다섯 E2E 시나리오를 실제 adapter 경계까지 검증. mock fixture 통과만으로 실제 Vision 연결 완료로 판단하지 않음
 
@@ -207,7 +207,7 @@
 - [ ] OCR·검색·생성형·영상 분석 품질 지표와 결과 공개 방식
 - [~] #294 / PR #295: `job_id`·`execution_id` 기반 Agent 실행 metadata와 handoff를 보존하고 원문·OCR 전문·경로·비밀값을 raw execution metadata에서 제거. #299 두 번째 단계에서 `show_analysis_job_provenance`와 운영 runbook, invocation·retrieval 연결 및 개인정보 비노출 회귀를 구현; 실제 운영 공급자 장애 trace 실증은 남음
 - [~] 법령·판례 적재와 Agent 호출의 대표 성공·부분 실패·실패 시나리오에서 run/trace 로그가 실제 생성되고, 운영자가 관련 산출물·실패 단계·다음 조치를 추적할 수 있는 회귀 테스트와 조회 절차 제공 — Worker 성공 통합과 partial operator 조회 회귀, 안전한 오류 코드 조회는 구현. 실제 운영 법령·판례·외부 공급자 실패 증적은 남음
-- [~] 외부 서비스 장애, 데이터 갱신 실패, 큐 적체의 운영 관측 — `feat-299-operational-observability`에서 `operational_health.v1`, 단발·반복 조회 command, 개인정보 없는 queue·lease·retry·Worker/provider 실패·법령 freshness 집계, 전용 `ops-monitor`, CloudWatch metric filter·alarm과 운영 runbook 구현. 실제 AWS ALARM/OK·SNS 수신 증적은 사람 게이트
+- [~] 외부 서비스 장애, 데이터 갱신 실패, 큐 적체의 운영 관측 — PR #303으로 `dev` 병합 완료(`5f3728e`). `operational_health.v1`, 단발·반복 조회 command, 개인정보 없는 queue·lease·retry·Worker/provider 실패·법령 freshness 집계, 전용 `ops-monitor`, CloudWatch metric filter·alarm과 운영 runbook 구현. 실제 AWS ALARM/OK·SNS 수신 증적은 사람 게이트
 - [~] 분석 작업 중복 요청·멱등 재시도·Worker lease/timeout 계약과 회귀 테스트는 완료. 사용자 직접 취소 API는 파일럿 공개 범위에서 제외
 - [~] 첨부파일 보존 기간·명시 삭제·물리 purge·재시도와 HistoryEvent 접근 감사는 구현. 대화·OCR·보고서별 운영 보존 기간 최종값은 개인정보 처리방침 승인 필요
 - [~] 결과 재현을 위한 모델·프롬프트·에이전트 버전과 검색 데이터 기준일 기록 — PR #301의 법령 `run_id`·`dataset_version`·source별 `data_version`에 이어 `feat-299-execution-provenance`에서 Supervisor model·prompt version/hash, Agent runtime·adapter·release version, embedding model, 검색 dataset version·검증/기준/조회 시각 저장과 `job_id` 조회를 구현. 운영 release 값 주입과 실제 DB smoke는 남음
