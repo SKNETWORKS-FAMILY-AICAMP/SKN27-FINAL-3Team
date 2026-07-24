@@ -117,6 +117,21 @@ def test_existing_job_id_skips_submit_and_only_polls() -> None:
     assert [call["method"] for call in calls] == ["GET"]
 
 
+def test_submitted_job_callback_receives_id_before_polling() -> None:
+    submitted: list[str] = []
+    transport, calls = _sequenced_transport(
+        {"id": "job_callback"},
+        {"id": "job_callback", "status": "COMPLETED", "output": _handoff()},
+    )
+    client = RunPodVisionClient(_config(), transport=transport, sleep=lambda _: None)
+
+    result = client.run(_request(), on_job_submitted=submitted.append)
+
+    assert result.job_id == "job_callback"
+    assert submitted == ["job_callback"]
+    assert [call["method"] for call in calls] == ["POST", "GET"]
+
+
 @pytest.mark.parametrize(
     ("status", "expected_code"),
     [

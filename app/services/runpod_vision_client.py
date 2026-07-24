@@ -111,11 +111,14 @@ class RunPodVisionClient:
         request: dict[str, Any],
         *,
         existing_job_id: str = "",
+        on_job_submitted: Callable[[str], None] | None = None,
     ) -> RunPodVisionResult:
         safe_request = _validated_request(request)
         job_id = _validated_identifier(existing_job_id)
         if not job_id:
             job_id = self._submit(safe_request)
+            if on_job_submitted is not None:
+                on_job_submitted(job_id)
 
         started_at = self._clock()
         consecutive_network_failures = 0
