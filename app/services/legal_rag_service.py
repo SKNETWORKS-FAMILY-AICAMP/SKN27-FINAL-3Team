@@ -585,6 +585,7 @@ def _search_response(
     error_code: str = "",
     **extra: Any,
 ) -> dict[str, Any]:
+    retrieved_at = datetime.now(timezone.utc).isoformat()
     response = {
         "contract_version": "legal_rag_search.v1",
         "status": status,
@@ -593,11 +594,19 @@ def _search_response(
         "top_k": top_k,
         "result_count": len(results),
         "latency_ms": max(0, round((time.perf_counter() - started_at) * 1000)),
-        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        "retrieved_at": retrieved_at,
         "results": results,
         "error_code": error_code,
     }
     response.update({key: value for key, value in extra.items() if value not in (None, "", [])})
+    response["data_provenance"] = {
+        "contract_version": "legal_dataset_provenance.v1",
+        "dataset_version": _text(_setting("LEGAL_DATASET_VERSION", "unconfigured"))
+        or "unconfigured",
+        "verified_at": _text(_setting("LEGAL_DATASET_VERIFIED_AT", "")) or None,
+        "effective_at": response.get("effective_at"),
+        "retrieved_at": retrieved_at,
+    }
     return response
 
 

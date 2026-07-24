@@ -210,6 +210,8 @@ def test_supervisor_llm_is_disabled_by_default(monkeypatch):
 
     assert state["conversation_summary"] == "fallback summary"
     assert state["llm"]["status"] == "disabled"
+    assert state["llm"]["prompt_version"] == "supervisor_conversation_prompt.v1"
+    assert state["llm"]["prompt_sha256"].startswith("sha256:")
     assert state["reporting_payload"]["model_trace"]["status"] == "disabled"
 
 
@@ -225,6 +227,8 @@ def test_supervisor_llm_planner_is_disabled_by_default(monkeypatch):
     )
 
     assert plan["llm_planner"]["status"] == "disabled"
+    assert plan["llm_planner"]["prompt_version"] == "supervisor_analysis_plan_prompt.v1"
+    assert plan["llm_planner"]["prompt_sha256"].startswith("sha256:")
     assert plan["steps"][0]["node_code"] == "input_context_validation"
     assert plan["steps"][-1]["node_code"] == "agent_result_validation"
 

@@ -111,8 +111,8 @@
 - [!] P0 법령 `data-seed`는 법령 API secret 또는 검증된 seed bundle이 없으면 실제 적재 성공을 주장할 수 없음. 0건 수집은 빈 embedding·후속 단계 오류로 진행하지 않고 즉시 실패해야 함
 - [~] P0 승인 seed bundle의 해시·크기·row·embedding 공간 검증, 법령 atomic load, release marker, 배포 전 readiness는 자동화. 판례·심의사례 source별 재임베딩은 기존 #48·#50 파이프라인과 운영 데이터/비용 승인이 필요한 사람 게이트
 - [ ] P0 심의사례 1536차원 데이터 백업 후 `text-embedding-3-large/1024`로 재임베딩하고, 법령·심의사례 공통 공간 readiness와 대표 쿼리 latency를 운영 DB에서 검증 — #291
-- [~] P0 적재 전 manifest/hash/row/schema/embedding 검증, 법령 atomic load, 적재 후 count·index·대표 검색 smoke와 실패 시 release marker 미생성은 구현. #299 첫 단계에서 법령 source별 공통 `run_summary` v2와 freshness validation을 구현했으며, 판례·심의사례 통합과 운영 DB 증적 보관은 남음
-- [~] 법령·과실 기준·판례별 최신성 메타데이터 — 법령 source별 provider·적용일·수집/검증 시각·data version은 #299 첫 단계에서 구현, 과실 기준·판례는 남음
+- [~] P0 적재 전 manifest/hash/row/schema/embedding 검증, 법령 atomic load, 적재 후 count·index·대표 검색 smoke와 실패 시 release marker 미생성은 구현. #299 첫 단계의 법령 source별 공통 `run_summary` v2와 freshness validation은 PR #301로 `dev` 병합 완료(`8cc2fc8`); 판례·심의사례 통합과 운영 DB 증적 보관은 남음
+- [~] 법령·과실 기준·판례별 최신성 메타데이터 — 법령 source별 provider·적용일·수집/검증 시각·data version은 #299 첫 단계 PR #301로 병합 완료, 과실 기준·판례는 남음
 - [~] 수집 시점, 마지막 검증일, 출처, 적용 시점 저장 — 법령 `source_summaries` 계약과 결정적 `dataset_version` 구현, 운영 DB 보관은 남음
 - [~] 정기 갱신 스케줄 또는 운영 수동 갱신 절차 — 법령 수동 실행·검증·실패 후 재실행 runbook 구현, 정기 스케줄은 남음
 - [~] 갱신 실패·오래된 데이터·출처 불명 데이터 경고 — `missing_sources`·`failed_sources`·`stale_sources` 자동 차단 CLI 구현, CloudWatch 알림 연결은 남음
@@ -204,12 +204,12 @@
 - [x] 대표 사용자 흐름 E2E: 자료 입력, 사실/주장 분리, OCR, Supervisor 계획, 법령·판례 검색, 한계 표시, 리포트 생성·다운로드 — #279
 - [x] 실제 데스크톱 브라우저 상담 스모크와 런타임 회귀 보강 — PR #300, `dev` 병합 커밋 `3fd0fcdddbc2b8e30e7993dbcfe6376535bec68a`
 - [ ] OCR·검색·생성형·영상 분석 품질 지표와 결과 공개 방식
-- [~] #294 / PR #295: `job_id`·`execution_id` 기반 Agent 실행 metadata와 handoff를 보존하고 원문·OCR 전문·경로·비밀값을 raw execution metadata에서 제거. 운영자가 run/trace로 첨부 수신·분류·Agent 시작/완료/실패·소요 시간·안전한 오류 코드·다음 조치를 조회하는 절차와 회귀 테스트는 보강 필요
-- [ ] 법령·판례 적재와 Agent 호출의 대표 성공·부분 실패·실패 시나리오에서 run/trace 로그가 실제 생성되고, 운영자가 관련 산출물·실패 단계·다음 조치를 추적할 수 있는 회귀 테스트와 조회 절차 제공
+- [~] #294 / PR #295: `job_id`·`execution_id` 기반 Agent 실행 metadata와 handoff를 보존하고 원문·OCR 전문·경로·비밀값을 raw execution metadata에서 제거. #299 두 번째 단계에서 `show_analysis_job_provenance`와 운영 runbook, invocation·retrieval 연결 및 개인정보 비노출 회귀를 구현; 실제 운영 공급자 장애 trace 실증은 남음
+- [~] 법령·판례 적재와 Agent 호출의 대표 성공·부분 실패·실패 시나리오에서 run/trace 로그가 실제 생성되고, 운영자가 관련 산출물·실패 단계·다음 조치를 추적할 수 있는 회귀 테스트와 조회 절차 제공 — Worker 성공 통합과 partial operator 조회 회귀, 안전한 오류 코드 조회는 구현. 실제 운영 법령·판례·외부 공급자 실패 증적은 남음
 - [ ] 외부 서비스 장애, 데이터 갱신 실패, 큐 적체의 운영 관측
 - [~] 분석 작업 중복 요청·멱등 재시도·Worker lease/timeout 계약과 회귀 테스트는 완료. 사용자 직접 취소 API는 파일럿 공개 범위에서 제외
 - [~] 첨부파일 보존 기간·명시 삭제·물리 purge·재시도와 HistoryEvent 접근 감사는 구현. 대화·OCR·보고서별 운영 보존 기간 최종값은 개인정보 처리방침 승인 필요
-- [~] 결과 재현을 위한 모델·프롬프트·에이전트 버전과 검색 데이터 기준일 기록 — #299 첫 단계에서 법령 `run_id`·`dataset_version`·source별 `data_version` 구현, 모델·프롬프트·Agent 버전은 다음 단계
+- [~] 결과 재현을 위한 모델·프롬프트·에이전트 버전과 검색 데이터 기준일 기록 — PR #301의 법령 `run_id`·`dataset_version`·source별 `data_version`에 이어 `feat-299-execution-provenance`에서 Supervisor model·prompt version/hash, Agent runtime·adapter·release version, embedding model, 검색 dataset version·검증/기준/조회 시각 저장과 `job_id` 조회를 구현. 운영 release 값 주입과 실제 DB smoke는 남음
 - [~] Worker lease, bounded timeout, 사용량 제한, 8GiB 파일럿 capacity preflight와 회귀 테스트는 완료. 실제 부하 수치와 CloudWatch 알림 임계값은 운영 환경 검증 필요
 - [x] 배포 전 체크리스트와 롤백 절차 — `docs/ops/release-checklist.md`, `docs/ops/rollback-plan.md`, AWS pilot 자동 롤백·회귀 테스트
 - [ ] 발표자료 오타·용어·서비스 범위 최종 검수

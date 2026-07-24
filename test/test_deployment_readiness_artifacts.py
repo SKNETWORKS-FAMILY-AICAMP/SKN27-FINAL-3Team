@@ -14,6 +14,7 @@ REQUIRED_DOCS = [
     ROOT / "docs" / "ops" / "production-env.md",
     ROOT / "docs" / "ops" / "backup-and-recovery.md",
     ROOT / "docs" / "ops" / "legal-data-freshness-runbook.md",
+    ROOT / "docs" / "ops" / "analysis-execution-provenance.md",
 ]
 
 
@@ -84,6 +85,9 @@ def test_production_env_template_contains_readiness_keys():
         "AGENT_WORKER_LOOP_SLEEP_SECONDS=",
         "SUPERVISOR_LLM_ENABLED=",
         "LEGAL_RAG_VECTOR_ENABLED=1",
+        "APP_RELEASE_VERSION=",
+        "LEGAL_DATASET_VERSION=",
+        "LEGAL_DATASET_VERIFIED_AT=",
         "TEXT_ML_CASE_SEARCH_PGVECTOR_TOP_K=5",
         "TEXT_ML_CASE_SEARCH_V2_REVIEW_CASE_QUOTA=5",
         "TEXT_ML_CASE_SEARCH_V2_FAULT_RATIO_PRECEDENT_QUOTA=5",
@@ -138,6 +142,27 @@ def test_legal_freshness_runbook_has_bounded_validation_and_failure_actions():
     assert "stale_sources" in content
     assert "배포를 중단" in content
     assert "reports/run_summary.json" in content
+
+
+def test_analysis_execution_provenance_is_wired_to_runtime_and_runbook():
+    root_compose = read_text(ROOT / "docker-compose.yml")
+    pilot_compose = read_text(ROOT / "deploy" / "aws-pilot" / "docker-compose.pilot.yml")
+    pilot_env = read_text(ROOT / "deploy" / "aws-pilot" / "runtime.env.example")
+    runbook = read_text(ROOT / "docs" / "ops" / "analysis-execution-provenance.md")
+
+    for key in (
+        "APP_RELEASE_VERSION",
+        "LEGAL_DATASET_VERSION",
+        "LEGAL_DATASET_VERIFIED_AT",
+    ):
+        assert key in root_compose
+        assert key in pilot_compose
+    assert "RELEASE_TAG=INJECTED_BY_DEPLOY_SCRIPT" in pilot_env
+    assert "LEGAL_DATASET_VERSION" in pilot_env
+    assert "LEGAL_DATASET_VERIFIED_AT" in pilot_env
+    assert "show_analysis_job_provenance" in runbook
+    assert "--job-id" in runbook
+    assert "query 원문" in runbook
 
 
 def test_repository_text_files_do_not_contain_obvious_secret_assignments():

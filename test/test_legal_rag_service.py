@@ -112,6 +112,8 @@ def test_legal_rag_uses_pgvector_when_enabled(monkeypatch):
     monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_PROVIDER", "hash")
     monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_MODEL", "hashing-vectorizer")
     monkeypatch.setenv("LEGAL_RAG_SEED_EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setenv("LEGAL_DATASET_VERSION", "sha256:verified-dataset")
+    monkeypatch.setenv("LEGAL_DATASET_VERIFIED_AT", "2026-07-23T10:00:00+00:00")
     monkeypatch.setattr(service, "_django_connection", lambda: FakeConnection(cursor))
 
     result = service.search_legal_rag("school zone emergency stopping", top_k=2)
@@ -127,6 +129,13 @@ def test_legal_rag_uses_pgvector_when_enabled(monkeypatch):
     assert result["results"][0]["effective_date"] == "2026-01-01"
     assert result["effective_at"] == service.current_legal_date().isoformat()
     assert datetime.fromisoformat(result["retrieved_at"]).tzinfo is not None
+    assert result["data_provenance"] == {
+        "contract_version": "legal_dataset_provenance.v1",
+        "dataset_version": "sha256:verified-dataset",
+        "verified_at": "2026-07-23T10:00:00+00:00",
+        "effective_at": result["effective_at"],
+        "retrieved_at": result["retrieved_at"],
+    }
     assert cursor.params[-1] == 2
     assert "law_embeddings" in cursor.sql
     assert "btrim(c.source_url) <> ''" in cursor.sql
