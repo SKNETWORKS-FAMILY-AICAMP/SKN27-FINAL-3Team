@@ -153,6 +153,16 @@ data "aws_iam_policy_document" "app" {
       aws_ecr_repository.frontend.arn,
     ]
   }
+
+  statement {
+    sid    = "WriteOperationalHealthLogs"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+    resources = ["${aws_cloudwatch_log_group.operational_health.arn}:*"]
+  }
 }
 
 resource "aws_iam_role_policy" "app" {

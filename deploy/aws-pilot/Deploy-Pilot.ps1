@@ -293,6 +293,7 @@ $outputs = $outputJson | ConvertFrom-Json
 
 $instanceId = Get-TerraformValue $outputs "instance_id"
 $region = Get-TerraformValue $outputs "aws_region"
+$operationalLogGroup = Get-TerraformValue $outputs "operational_log_group_name"
 $googleCodeParameterName = if ($RequireGoogleLiveSmoke) {
     Get-TerraformValue $outputs "google_live_code_parameter_name"
 }
@@ -367,6 +368,7 @@ $generatedValues = [ordered]@{
     BACKEND_REPOSITORY_URL          = Get-TerraformValue $outputs "backend_repository_url"
     FRONTEND_REPOSITORY_URL         = Get-TerraformValue $outputs "frontend_repository_url"
     RELEASE_TAG                     = $ReleaseTag
+    OPERATIONAL_LOG_GROUP           = $operationalLogGroup
 }
 foreach ($entry in $generatedValues.GetEnumerator()) {
     $runtimeEnv = Set-EnvValue $runtimeEnv $entry.Key $entry.Value
@@ -393,7 +395,8 @@ $requiredRuntimeValues = @(
     "REDIS_IMAGE_REF",
     "CLAMAV_IMAGE_REF",
     "NGINX_IMAGE_REF",
-    "POSTGRES_MAINTENANCE_IMAGE_REF"
+    "POSTGRES_MAINTENANCE_IMAGE_REF",
+    "OPERATIONAL_LOG_GROUP"
 )
 foreach ($name in $requiredRuntimeValues) {
     if ([string]::IsNullOrWhiteSpace((Get-EnvValue $runtimeEnv $name))) {
@@ -546,6 +549,7 @@ try {
 
     $materializeCommands = @(
         "install -d -m 0750 `$RELEASE_DIR",
+        "install -d -m 0750 /opt/skn27-pilot/operational-evidence",
         "aws s3api get-object --bucket '$bucket' --key '$manifestKey' --version-id '$ManifestVersionId' --region '$region' /tmp/deployment-manifest.json >/dev/null",
         "printf '%s  %s\n' '$ManifestSha256' /tmp/deployment-manifest.json | sha256sum -c -",
         "python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m[`"ReleaseTag`"]==sys.argv[2] and m[`"BundleKey`"]==sys.argv[3] and m[`"BundleSha256`"]==sys.argv[4] and m[`"BundleVersionId`"]==sys.argv[5] and m[`"NginxImageRef`"]==sys.argv[6] and m[`"PostgresMaintenanceImageRef`"]==sys.argv[7]' /tmp/deployment-manifest.json '$ReleaseTag' '$bundleKey' '$BundleSha256' '$BundleVersionId' '$nginxImageRef' '$postgresMaintenanceImageRef'",
@@ -556,12 +560,12 @@ try {
         "aws ssm get-parameter --region '$region' --name '$parameterName' --with-decryption --query Parameter.Value --output text > `$RELEASE_DIR/.runtime.env.tmp",
         "tr -d '\r' < `$RELEASE_DIR/.runtime.env.tmp > `$RELEASE_DIR/.runtime.env",
         "rm -f `$RELEASE_DIR/.runtime.env.tmp",
-        "grep -E '^(BACKEND_REPOSITORY_URL|FRONTEND_REPOSITORY_URL|RELEASE_TAG|CADDY_IMAGE_REF|HAPROXY_IMAGE_REF|REDIS_IMAGE_REF|CLAMAV_IMAGE_REF)=' `$RELEASE_DIR/.runtime.env > `$RELEASE_DIR/.compose.env",
+        "grep -E '^(AWS_REGION|BACKEND_REPOSITORY_URL|FRONTEND_REPOSITORY_URL|RELEASE_TAG|CADDY_IMAGE_REF|HAPROXY_IMAGE_REF|REDIS_IMAGE_REF|CLAMAV_IMAGE_REF|OPERATIONAL_LOG_GROUP)=' `$RELEASE_DIR/.runtime.env > `$RELEASE_DIR/.compose.env",
         "grep -E '^(APP_DOMAIN|ACME_EMAIL)=' `$RELEASE_DIR/.runtime.env > `$RELEASE_DIR/.edge.env",
-        "grep -q '^BACKEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^FRONTEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^RELEASE_TAG=' `$RELEASE_DIR/.compose.env",
+        "grep -q '^AWS_REGION=' `$RELEASE_DIR/.compose.env && grep -q '^BACKEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^FRONTEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^RELEASE_TAG=' `$RELEASE_DIR/.compose.env && grep -q '^OPERATIONAL_LOG_GROUP=' `$RELEASE_DIR/.compose.env",
         "test `$(wc -l < `$RELEASE_DIR/.edge.env) -eq 2",
-        "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.30.0.0/24' 'PILOT_CADDY_IP=172.30.0.2' 'PILOT_EDGE_RATE_LIMIT_IP=172.30.0.3' 'PILOT_FRONTEND_IP=172.30.0.4' 'PILOT_BACKEND_IP=172.30.0.5' 'PILOT_AGENT_WORKER_IP=172.30.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.30.0.7' 'PILOT_REDIS_IP=172.30.0.8' 'PILOT_CLAMAV_IP=172.30.0.10' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' > `$RELEASE_DIR/.stage-compose.env",
-        "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.31.0.0/24' 'PILOT_CADDY_IP=172.31.0.2' 'PILOT_EDGE_RATE_LIMIT_IP=172.31.0.3' 'PILOT_FRONTEND_IP=172.31.0.4' 'PILOT_BACKEND_IP=172.31.0.5' 'PILOT_AGENT_WORKER_IP=172.31.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.31.0.7' 'PILOT_REDIS_IP=172.31.0.8' 'PILOT_CLAMAV_IP=172.31.0.10' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' > `$RELEASE_DIR/.production-compose.env",
+        "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.30.0.0/24' 'PILOT_CADDY_IP=172.30.0.2' 'PILOT_EDGE_RATE_LIMIT_IP=172.30.0.3' 'PILOT_FRONTEND_IP=172.30.0.4' 'PILOT_BACKEND_IP=172.30.0.5' 'PILOT_AGENT_WORKER_IP=172.30.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.30.0.7' 'PILOT_REDIS_IP=172.30.0.8' 'PILOT_OPS_MONITOR_IP=172.30.0.9' 'PILOT_CLAMAV_IP=172.30.0.10' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' > `$RELEASE_DIR/.stage-compose.env",
+        "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.31.0.0/24' 'PILOT_CADDY_IP=172.31.0.2' 'PILOT_EDGE_RATE_LIMIT_IP=172.31.0.3' 'PILOT_FRONTEND_IP=172.31.0.4' 'PILOT_BACKEND_IP=172.31.0.5' 'PILOT_AGENT_WORKER_IP=172.31.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.31.0.7' 'PILOT_REDIS_IP=172.31.0.8' 'PILOT_OPS_MONITOR_IP=172.31.0.9' 'PILOT_CLAMAV_IP=172.31.0.10' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' > `$RELEASE_DIR/.production-compose.env",
         "printf '%s\n' '$stageProjectName' > `$RELEASE_DIR/.stage-project-name.tmp",
         "chmod 0444 `$RELEASE_DIR/.stage-project-name.tmp && mv -f `$RELEASE_DIR/.stage-project-name.tmp `$RELEASE_DIR/.stage-project-name",
         "aws ecr get-login-password --region '$region' | docker login --username AWS --password-stdin '$registry'",
@@ -586,7 +590,7 @@ try {
             "$stageComposeCommand run --rm --no-deps backend python backend/manage.py migrate --check",
             "$stageComposeCommand up -d --wait --wait-timeout 600 --remove-orphans redis clamav backend",
             "RUNNING_SERVICES=`$($stageComposeCommand ps --services --filter status=running)",
-            "for forbidden_service in caddy edge-rate-limit frontend agent-worker file-scan-worker; do ! printf '%s\n' `"`$RUNNING_SERVICES`" | grep -qx `"`$forbidden_service`"; done",
+            "for forbidden_service in caddy edge-rate-limit frontend agent-worker file-scan-worker ops-monitor; do ! printf '%s\n' `"`$RUNNING_SERVICES`" | grep -qx `"`$forbidden_service`"; done",
             "printf '%s %s %s\n' '$ReleaseTag' '$ExpectedRagSeedManifestSha256' '$stageProjectName' > `$RELEASE_DIR/.initial-rag-bootstrap.staged.tmp",
             "chmod 0444 `$RELEASE_DIR/.initial-rag-bootstrap.staged.tmp && mv -f `$RELEASE_DIR/.initial-rag-bootstrap.staged.tmp `$RELEASE_DIR/.initial-rag-bootstrap.staged",
             "rm -f /tmp/skn27-pilot.zip /tmp/deployment-manifest.json",
@@ -603,7 +607,7 @@ try {
             "CURRENT_CONTAINER_IDS=`$($productionComposeCommand ps -q | sort)",
             "test -n `"`$CURRENT_CONTAINER_IDS`"",
             "CURRENT_RUNNING_SERVICES=`$($productionComposeCommand ps --services --filter status=running)",
-            "for required_service in caddy edge-rate-limit frontend backend agent-worker file-scan-worker redis clamav; do printf '%s\n' `"`$CURRENT_RUNNING_SERVICES`" | grep -qx `"`$required_service`"; done",
+            "for required_service in caddy edge-rate-limit frontend backend agent-worker file-scan-worker ops-monitor redis clamav; do printf '%s\n' `"`$CURRENT_RUNNING_SERVICES`" | grep -qx `"`$required_service`"; done",
             "test ! -e `$RELEASE_DIR && test ! -L `$RELEASE_DIR",
             "test -z `"`$(find /opt/skn27-pilot/releases -mindepth 2 -maxdepth 2 -type f \( -name '.initial-rag-bootstrap.staged' -o -name '.release-update.staged' \) -print -quit 2>/dev/null)`"",
             "stage_failed() { status=`$?; trap - ERR; cd `$RELEASE_DIR 2>/dev/null || true; $stageComposeCommand down --remove-orphans >/dev/null 2>&1 || true; docker volume rm '${stageProjectName}_redis_data' '${stageProjectName}_clamav_data' >/dev/null 2>&1 || true; rm -rf -- `$RELEASE_DIR; exit `$status; }",
@@ -616,7 +620,7 @@ try {
             "$stageComposeCommand up -d --wait --wait-timeout 600 --remove-orphans redis",
             "RUNNING_STAGE_SERVICES=`$($stageComposeCommand ps --services --filter status=running)",
             "for required_service in redis; do printf '%s\n' `"`$RUNNING_STAGE_SERVICES`" | grep -qx `"`$required_service`"; done",
-            "for forbidden_service in caddy edge-rate-limit frontend backend agent-worker file-scan-worker clamav; do ! printf '%s\n' `"`$RUNNING_STAGE_SERVICES`" | grep -qx `"`$forbidden_service`"; done",
+            "for forbidden_service in caddy edge-rate-limit frontend backend agent-worker file-scan-worker ops-monitor clamav; do ! printf '%s\n' `"`$RUNNING_STAGE_SERVICES`" | grep -qx `"`$forbidden_service`"; done",
             "cd `$CURRENT_RELEASE",
             "test `"`$CURRENT_CONTAINER_IDS`" = `"`$($productionComposeCommand ps -q | sort)`"",
             "cd `$RELEASE_DIR",

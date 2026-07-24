@@ -144,6 +144,63 @@ def test_legal_freshness_runbook_has_bounded_validation_and_failure_actions():
     assert "reports/run_summary.json" in content
 
 
+def test_operational_health_runtime_settings_are_documented_without_secrets():
+    setting_names = {
+        "OPERATIONAL_HEALTH_INTERVAL_SECONDS",
+        "OPERATIONAL_HEALTH_WINDOW_MINUTES",
+        "OPERATIONAL_QUEUE_AGE_WARN_SECONDS",
+        "OPERATIONAL_LEASE_STALE_SECONDS",
+        "OPERATIONAL_LEGAL_RUN_SUMMARY_PATH",
+        "OPERATIONAL_LEGAL_MAX_AGE_HOURS",
+        "OPERATIONAL_LEGAL_REQUIRED_SOURCES",
+    }
+    settings_source = read_text(ROOT / "backend" / "config" / "settings.py")
+    for name in setting_names:
+        assert name in settings_source
+
+    for relative_path in (
+        ".env.example",
+        ".env.production.example",
+        "deploy/aws-pilot/runtime.env.example",
+    ):
+        content = read_text(ROOT / relative_path)
+        keys = {
+            line.split("=", 1)[0]
+            for line in content.splitlines()
+            if line and not line.startswith("#") and "=" in line
+        }
+        assert setting_names.issubset(keys)
+        assert "OPERATIONAL_ALERT_EMAIL" not in keys
+
+
+def test_operational_observability_runbook_maps_safe_alerts_to_actions():
+    runbook = read_text(ROOT / "docs" / "ops" / "operational-observability-runbook.md")
+    for token in (
+        "observe_operational_health --once",
+        "show_analysis_job_provenance --job-id",
+        "queue_backlog",
+        "queue_oldest_age_exceeded",
+        "worker_lease_stale",
+        "worker_failure",
+        "worker_timeout",
+        "provider_failure",
+        "legal_data_missing",
+        "legal_data_stale",
+        "legal_data_refresh_failed",
+        "monitor_configuration_invalid",
+        "SNS",
+        "구독 확인",
+        "terraform.tfvars",
+        "실제 부하",
+    ):
+        assert token in runbook
+
+    checklist = read_text(ROOT / "docs" / "ops" / "project-readiness-master-checklist.md")
+    assert "2026-07-23-runpod-serverless-vision-design.md" in checklist
+    assert "VISION_RUNTIME_PROVIDER=runpod" in checklist
+    assert "RunPod Endpoint" in checklist
+
+
 def test_analysis_execution_provenance_is_wired_to_runtime_and_runbook():
     root_compose = read_text(ROOT / "docker-compose.yml")
     pilot_compose = read_text(ROOT / "deploy" / "aws-pilot" / "docker-compose.pilot.yml")
