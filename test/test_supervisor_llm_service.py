@@ -1,5 +1,8 @@
 import json
+import logging
+import sys
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
@@ -115,6 +118,203 @@ def test_normalize_candidate_packages_keeps_registry_controls_and_bounded_payloa
         "user_text": "candidate",
         "attachments": [{"attachment_id": "att_approved"}],
     }
+
+
+def test_conversation_response_format_is_strict_and_excludes_server_owned_fields():
+    fallback = {
+        "agent_input_packages": [
+            {
+                "node_code": "law_ground_search",
+                "payload": {
+                    "user_text": "fallback",
+                    "attachments": [{"attachment_id": "att_approved"}],
+                },
+            }
+        ]
+    }
+
+    response_format = service_contract.conversation_response_format(fallback)
+    json_schema = response_format["json_schema"]
+    root = json_schema["schema"]
+
+    assert response_format["type"] == "json_schema"
+    assert json_schema["name"] == "supervisor_conversation_response_v2"
+    assert json_schema["strict"] is True
+    assert root["additionalProperties"] is False
+    for server_owned in (
+        "contract_version",
+        "scenario",
+        "stage",
+        "conversation_turn_count",
+        "slot_state",
+        "reporting_payload",
+    ):
+        assert server_owned not in root["properties"]
+    package_schema = root["properties"]["agent_input_packages"]["items"]
+    assert package_schema["additionalProperties"] is False
+    assert package_schema["properties"]["node_code"]["enum"] == [
+        "law_ground_search"
+    ]
+    payload_schema = package_schema["properties"]["payload"]
+    assert payload_schema["additionalProperties"] is False
+    assert set(payload_schema["properties"]) == {"user_text", "attachments"}
+
+
+def test_conversation_response_format_allows_exact_empty_package_contract():
+    response_format = service_contract.conversation_response_format(
+        {"agent_input_packages": []}
+    )
+
+    packages = response_format["json_schema"]["schema"]["properties"][
+        "agent_input_packages"
+    ]
+
+    assert packages["minItems"] == 0
+    assert packages["maxItems"] == 0
+
+
+def test_analysis_plan_response_format_is_distinct_and_strict():
+    fallback = {
+        "routing_intent": "traffic_law_search",
+        "input_summary": {"missing_fields": []},
+        "agent_input_packages": [
+            {
+                "node_code": "law_ground_search",
+                "payload": {"search_query": "fallback"},
+            }
+        ],
+        "steps": [
+            {
+                "node_code": "law_ground_search",
+                "status": "ready",
+                "required_inputs": ["search_query"],
+                "depends_on": [],
+                "fallback": "limitations",
+            }
+        ],
+    }
+
+    response_format = service_contract.analysis_plan_response_format(fallback)
+
+    assert response_format["type"] == "json_schema"
+    assert (
+        response_format["json_schema"]["name"]
+        == "supervisor_analysis_plan_response_v2"
+    )
+    assert response_format["json_schema"]["strict"] is True
+    assert (
+        response_format["json_schema"]["schema"]["properties"]["steps"]["items"][
+            "properties"
+        ]["node_code"]["enum"]
+        == ["law_ground_search"]
+    )
+
+
+def test_request_supervisor_json_passes_strict_response_format(monkeypatch):
+    captured: dict = {}
+    message = SimpleNamespace(
+        content=json.dumps(
+            {
+                "conversation_summary": "summary",
+                "collected_facts": [],
+                "missing_fields": [],
+                "next_questions": [],
+                "agent_input_packages": [],
+            }
+        ),
+        refusal=None,
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=message)]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    response_format = service_contract.conversation_response_format(
+        {"agent_input_packages": []}
+    )
+
+    result = service._request_supervisor_json(
+        {
+            "provider": "openai",
+            "api_key": "sk-test",
+            "timeout_seconds": 10,
+            "base_url": "",
+            "model": "gpt-test",
+            "temperature": 0,
+        },
+        {"system": "Return JSON.", "user": {"contract_version": "test.v1"}},
+        response_format,
+    )
+
+    assert result["conversation_summary"] == "summary"
+    assert captured["response_format"] == response_format
+
+
+def test_request_supervisor_json_detects_structured_refusal(monkeypatch):
+    message = SimpleNamespace(content=None, refusal="private refusal text")
+
+    class FakeCompletions:
+        def create(self, **_kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=message)]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    with pytest.raises(service.SupervisorProviderError) as raised:
+        service._request_supervisor_json(
+            {
+                "provider": "openai",
+                "api_key": "sk-test",
+                "timeout_seconds": 10,
+                "base_url": "",
+                "model": "gpt-test",
+                "temperature": 0,
+            },
+            {"system": "Return JSON.", "user": {"contract_version": "test.v1"}},
+            service_contract.conversation_response_format(
+                {"agent_input_packages": []}
+            ),
+        )
+
+    assert raised.value.reason == "provider_refusal"
+    assert "private refusal text" not in str(raised.value)
+
+
+def test_provider_refusal_fails_closed_with_safe_reason_log(monkeypatch, caplog):
+    monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
+    monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
+    monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
+    secret = "sk-private-never-log"
+
+    def refuse(*_args):
+        raise service.SupervisorProviderError("provider_refusal")
+
+    monkeypatch.setattr(service, "_request_supervisor_json", refuse)
+
+    with caplog.at_level(logging.WARNING):
+        state = service.build_supervisor_state_with_optional_llm(
+            payload={"user_text": secret},
+            scenario="fine_notice",
+            fallback_builder=_fallback_builder,
+        )
+
+    assert state["llm"]["status"] == "failed"
+    assert state["llm"]["reason"] == "provider_refusal"
+    assert "reason=provider_refusal" in caplog.text
+    assert secret not in caplog.text
 
 
 def _fallback_builder(_payload, _scenario):
@@ -321,7 +521,7 @@ def test_supervisor_llm_is_disabled_by_default(monkeypatch):
 
     assert state["conversation_summary"] == "fallback summary"
     assert state["llm"]["status"] == "disabled"
-    assert state["llm"]["prompt_version"] == "supervisor_conversation_prompt.v1"
+    assert state["llm"]["prompt_version"] == "supervisor_conversation_prompt.v2"
     assert state["llm"]["prompt_sha256"].startswith("sha256:")
     assert state["reporting_payload"]["model_trace"]["status"] == "disabled"
 
@@ -338,7 +538,7 @@ def test_supervisor_llm_planner_is_disabled_by_default(monkeypatch):
     )
 
     assert plan["llm_planner"]["status"] == "disabled"
-    assert plan["llm_planner"]["prompt_version"] == "supervisor_analysis_plan_prompt.v1"
+    assert plan["llm_planner"]["prompt_version"] == "supervisor_analysis_plan_prompt.v2"
     assert plan["llm_planner"]["prompt_sha256"].startswith("sha256:")
     assert plan["steps"][0]["node_code"] == "input_context_validation"
     assert plan["steps"][-1]["node_code"] == "agent_result_validation"
@@ -661,7 +861,7 @@ def test_supervisor_llm_plan_unknown_package_does_not_expand_fallback(monkeypatc
     payload = _untrusted_injection_payload()
     captured: list[dict] = []
 
-    def fake_request(_config, request_payload):
+    def fake_request(_config, request_payload, _response_format):
         captured.append(request_payload)
         return {
             "routing_intent": "objection_request",
@@ -724,8 +924,11 @@ def test_supervisor_llm_planner_normalizes_registry_safe_steps(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
 
-    def fake_request(_config, request_payload):
-        assert request_payload["user"]["contract_version"] == "supervisor_analysis_plan.v1"
+    def fake_request(_config, request_payload, _response_format):
+        assert (
+            request_payload["user"]["contract_version"]
+            == "supervisor_analysis_plan_request.v2"
+        )
         return {
             "routing_intent": "objection_request",
             "input_summary": {"planner_hint": "llm"},
@@ -783,7 +986,7 @@ def test_supervisor_llm_does_not_promote_server_required_input_to_ready(monkeypa
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
 
-    def fake_request(_config, _request_payload):
+    def fake_request(_config, _request_payload, _response_format):
         return {
             "contract_version": "supervisor_conversation.v1",
             "stage": "agent_execution_ready",
@@ -887,7 +1090,7 @@ def test_supervisor_llm_state_keeps_malicious_context_from_changing_server_contr
     candidate = _valid_state_candidate()
     candidate["conversation_summary"] = payload["user_text"]
 
-    def fake_request(_config, request_payload):
+    def fake_request(_config, request_payload, _response_format):
         captured.append(request_payload)
         return candidate
 

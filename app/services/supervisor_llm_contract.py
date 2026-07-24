@@ -12,6 +12,138 @@ AGENT_INPUT_SCHEMA_VERSION = "agent_input_schema.v1"
 AGENT_PACKAGE_STATUSES = {"ready", "waiting_for_fields"}
 
 
+def conversation_response_format(
+    fallback_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the strict model-owned conversation response schema."""
+
+    package_schemas = _package_schemas(
+        fallback_state.get("agent_input_packages")
+    )
+    package_count = len(package_schemas)
+    properties = {
+        "conversation_summary": {"type": "string"},
+        "collected_facts": {
+            "type": "array",
+            "items": _object_schema(
+                {
+                    "field": {"type": "string"},
+                    "value": {"type": "string"},
+                }
+            ),
+        },
+        "missing_fields": {
+            "type": "array",
+            "items": _object_schema(
+                {
+                    "field": {"type": "string"},
+                    "reason": {"type": "string"},
+                }
+            ),
+        },
+        "next_questions": {
+            "type": "array",
+            "items": _object_schema(
+                {
+                    "field": {"type": "string"},
+                    "question": {"type": "string"},
+                }
+            ),
+        },
+        "agent_input_packages": {
+            "type": "array",
+            "items": _combined_item_schema(package_schemas),
+            "minItems": package_count,
+            "maxItems": package_count,
+        },
+    }
+    return _response_format(
+        "supervisor_conversation_response_v2",
+        _object_schema(properties),
+    )
+
+
+def analysis_plan_response_format(
+    fallback_plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the strict model-owned analysis-plan response schema."""
+
+    package_schemas = _package_schemas(
+        fallback_plan.get("agent_input_packages")
+    )
+    step_codes = [
+        str(step.get("node_code") or "").strip()
+        for step in fallback_plan.get("steps") or []
+        if isinstance(step, dict) and str(step.get("node_code") or "").strip()
+    ]
+    step_schema = _object_schema(
+        {
+            "node_code": {"type": "string", "enum": step_codes},
+            "status": {
+                "type": "string",
+                "enum": [
+                    "ready",
+                    "success",
+                    "partial",
+                    "running",
+                    "blocked",
+                    "failed",
+                    "skipped",
+                ],
+            },
+            "required_inputs": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "depends_on": {
+                "type": "array",
+                "items": {"type": "string", "enum": step_codes},
+            },
+            "fallback": {"type": "string"},
+        }
+    )
+    routing_intent = str(fallback_plan.get("routing_intent") or "").strip()
+    properties = {
+        "routing_intent": {
+            "type": "string",
+            "enum": [routing_intent] if routing_intent else [""],
+        },
+        "input_summary": _schema_from_value(
+            fallback_plan.get("input_summary", {})
+        ),
+        "required_inputs": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "pending_questions": {
+            "type": "array",
+            "items": _object_schema(
+                {
+                    "field": {"type": "string"},
+                    "question": {"type": "string"},
+                }
+            ),
+        },
+        "agent_input_packages": {
+            "type": "array",
+            "items": _combined_item_schema(package_schemas),
+            "minItems": 0,
+            "maxItems": len(package_schemas),
+        },
+        "steps": {
+            "type": "array",
+            "items": step_schema,
+            "minItems": 1 if step_codes else 0,
+            "maxItems": len(step_codes),
+        },
+        "blocked_reason": {"type": ["string", "null"]},
+    }
+    return _response_format(
+        "supervisor_analysis_plan_response_v2",
+        _object_schema(properties),
+    )
+
+
 def enrich_supervisor_state(
     fallback_state: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, str | None]:
@@ -137,6 +269,94 @@ def _bounded_payload(candidate: Any, fallback: Any) -> dict[str, Any]:
         else:
             bounded[key] = _bounded_value(candidate_value, fallback_value)
     return bounded
+
+
+def _response_format(name: str, schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            "strict": True,
+            "schema": schema,
+        },
+    }
+
+
+def _object_schema(properties: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties),
+        "additionalProperties": False,
+    }
+
+
+def _package_schemas(value: Any) -> list[dict[str, Any]]:
+    schemas: list[dict[str, Any]] = []
+    for package in value if isinstance(value, list) else []:
+        if not isinstance(package, dict):
+            continue
+        node_code = str(package.get("node_code") or "").strip()
+        if not node_code:
+            continue
+        schemas.append(
+            _object_schema(
+                {
+                    "node_code": {
+                        "type": "string",
+                        "enum": [node_code],
+                    },
+                    "payload": _schema_from_value(package.get("payload", {})),
+                }
+            )
+        )
+    return schemas
+
+
+def _combined_item_schema(schemas: list[dict[str, Any]]) -> dict[str, Any]:
+    if not schemas:
+        return _object_schema({})
+    if len(schemas) == 1:
+        return schemas[0]
+    return {"anyOf": schemas}
+
+
+def _schema_from_value(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return _object_schema(
+            {
+                str(key): _schema_from_value(item)
+                for key, item in value.items()
+                if isinstance(key, str)
+            }
+        )
+    if isinstance(value, list):
+        if not value:
+            return {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 0,
+            }
+        return {
+            "type": "array",
+            "items": _schema_from_value(value[0]),
+        }
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if value is None:
+        return {
+            "anyOf": [
+                {"type": "string"},
+                {"type": "number"},
+                {"type": "boolean"},
+                {"type": "null"},
+            ]
+        }
+    return {"type": "string"}
 
 
 def _bounded_value(candidate: Any, fallback: Any) -> Any:
