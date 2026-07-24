@@ -9,3 +9,4 @@ accelerate
 qwen-vl-utils[decord]
 gdown
 imageio-ffmpeg
+runpod~=1.7.6

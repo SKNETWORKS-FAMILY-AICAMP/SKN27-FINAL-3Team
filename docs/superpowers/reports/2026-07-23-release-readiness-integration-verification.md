@@ -4,6 +4,7 @@
 대상 브랜치: `feat-release-readiness-integration`
 기준: `origin/dev`의 PR #293 병합 커밋 `d326ae8`
 후속 검증: PR #300 병합 커밋 `3fd0fcdddbc2b8e30e7993dbcfe6376535bec68a`
+운영 관측 후속: PR #303 병합 커밋 `5f3728ec92ad7c2563b5cc8c5ed88b75b992f9aa`
 
 ## 결론
 
@@ -114,6 +115,20 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
 - 롤백 절차: `docs/ops/rollback-plan.md`,
   `deploy/aws-pilot/Rollback-Pilot.ps1`
 
+### RunPod Serverless Vision 후속 검증 — 2026-07-24
+
+- RunPod client·provider adapter·worker·배포 계약 집중 회귀:
+  `186 passed in 7.96s`
+- 배포 문서·AWS pilot 회귀: `80 passed in 3.96s`
+- 전체 루트 `test/` 회귀: `960 passed, 38 skipped in 32.78s`
+- Django `chatbot` 전체 앱 회귀: `368 tests`, 성공
+- 변경 Python Ruff: 통과
+- `docker compose config`: 구성 유효
+- `deploy/runpod-vision/Dockerfile` build check: 경고 없음
+- Vite production build: `32 modules transformed`, 성공
+- 전체 저장소 자동 수집은 아래에 기록한 로컬 Python 3.14의 `pyarrow`
+  선택 의존성 부재 3건만 제외했으며, RunPod 변경 경로 실패는 없음
+
 ## 환경상 실행하지 못한 항목
 
 - 인앱 브라우저 자동 제어는 이 세션의 `127.0.0.1`을 정책상 거부했다.
@@ -138,6 +153,7 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
    - APP JWT·OAuth state secret
    - OpenAI와 법령 수집 API
    - S3·scanner·Vision checkpoint
+   - restricted RunPod API key, Endpoint ID, 승인된 S3 hostname allowlist
 2. AWS 계정·결제·도메인·DNS·OAuth 운영 소유권 승인
 3. 운영 DB backup 후 법령·심의사례를
    `openai/text-embedding-3-large/1024`로 적재·재임베딩
@@ -181,5 +197,33 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
      원문 query·OCR 전문·비밀값 없이 조회
    - 로컬 검증: 전체 `test/` 회귀 `897 passed, 38 skipped`, Django
      Worker/DB·operator 조회 통합 `40 passed`, Ruff 통과
-   - 운영 release metadata 주입, 운영 DB smoke, 실제 외부 공급자
-     성공·부분 실패·실패 trace와 CloudWatch 연결은 남음
+   - `feat-299-operational-observability`에서 개인정보 없는
+     `operational_health.v1`, queue·lease·retry·Worker/provider 실패와
+     법령 freshness 집계, 반복 monitor command와 CloudWatch
+     Logs·metric filter·alarm·선택적 SNS email 구독을 구현
+   - 알람 코드별 확인·완화·복구, read-only 법령 run summary 반영,
+     실제 부하 후 임계값 승인과 SNS 구독 확인 절차를
+     `docs/ops/operational-observability-runbook.md`에 기록
+   - 로컬 검증: 전체 `test/` 회귀 `900 passed, 38 skipped`, Django 전체
+     `368 passed`, 변경 Python Ruff, PowerShell parser와 Vite production
+     build 통과
+   - 로컬 환경에는 Terraform/OpenTofu CLI가 없어 `fmt`·`validate`는
+     GitHub Actions production gate에서 확인하도록 명시
+   - 운영 release metadata 주입과 운영 DB smoke, 실제 AWS ALARM/OK·SNS
+     수신, 실제 외부 공급자 성공·부분 실패·실패 trace는 사람 게이트
+3. RunPod Serverless Vision 연결 구현 — PR #304
+   - 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 검토하고
+     `VISION_RUNTIME_PROVIDER=runpod`, signed URL, `/run`·`/status` polling,
+     remote stable error code, worker 임시 파일 삭제를 구현 기준으로 채택
+   - `feat-runpod-serverless-vision`에서 local subprocess 호환을 유지하면서
+     RunPod queue client, 실행별 job ID cache, S3 presigned URL provider,
+     입력 host·MIME·크기·timeout 검증과 격리형 worker를 구현
+   - worker image 정의와 local·production·AWS pilot 환경 계약,
+     운영 오류 코드별 진단·재시도·비용 상한 런북을 추가
+   - mock HTTP·adapter·worker 경계는 자동 검증하되 실제 Endpoint 검증 전에는
+     운영 연결 완료로 표시하지 않음
+   - 로컬 검증: 집중 회귀 `186 passed`, 배포·AWS pilot `80 passed`,
+     전체 `test/` `960 passed, 38 skipped`, Django `368 passed`,
+     Ruff·Compose·Dockerfile build check·Vite production build 통과
+   - restricted API key 발급, 유료 Endpoint 생성, 모델 artifact 승인과
+     비식별 실제 영상 E2E는 사람이 수행

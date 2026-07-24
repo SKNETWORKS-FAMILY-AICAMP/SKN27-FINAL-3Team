@@ -144,6 +144,139 @@ def test_legal_freshness_runbook_has_bounded_validation_and_failure_actions():
     assert "reports/run_summary.json" in content
 
 
+def test_operational_health_runtime_settings_are_documented_without_secrets():
+    setting_names = {
+        "OPERATIONAL_HEALTH_INTERVAL_SECONDS",
+        "OPERATIONAL_HEALTH_WINDOW_MINUTES",
+        "OPERATIONAL_QUEUE_AGE_WARN_SECONDS",
+        "OPERATIONAL_LEASE_STALE_SECONDS",
+        "OPERATIONAL_LEGAL_RUN_SUMMARY_PATH",
+        "OPERATIONAL_LEGAL_MAX_AGE_HOURS",
+        "OPERATIONAL_LEGAL_REQUIRED_SOURCES",
+    }
+    settings_source = read_text(ROOT / "backend" / "config" / "settings.py")
+    for name in setting_names:
+        assert name in settings_source
+
+    for relative_path in (
+        ".env.example",
+        ".env.production.example",
+        "deploy/aws-pilot/runtime.env.example",
+    ):
+        content = read_text(ROOT / relative_path)
+        keys = {
+            line.split("=", 1)[0]
+            for line in content.splitlines()
+            if line and not line.startswith("#") and "=" in line
+        }
+        assert setting_names.issubset(keys)
+        assert "OPERATIONAL_ALERT_EMAIL" not in keys
+
+
+def test_operational_observability_runbook_maps_safe_alerts_to_actions():
+    runbook = read_text(ROOT / "docs" / "ops" / "operational-observability-runbook.md")
+    for token in (
+        "observe_operational_health --once",
+        "show_analysis_job_provenance --job-id",
+        "queue_backlog",
+        "queue_oldest_age_exceeded",
+        "worker_lease_stale",
+        "worker_failure",
+        "worker_timeout",
+        "provider_failure",
+        "legal_data_missing",
+        "legal_data_stale",
+        "legal_data_refresh_failed",
+        "monitor_configuration_invalid",
+        "SNS",
+        "구독 확인",
+        "terraform.tfvars",
+        "실제 부하",
+    ):
+        assert token in runbook
+
+    checklist = read_text(ROOT / "docs" / "ops" / "project-readiness-master-checklist.md")
+    assert "2026-07-23-runpod-serverless-vision-design.md" in checklist
+    assert "VISION_RUNTIME_PROVIDER=runpod" in checklist
+    assert "RunPod Endpoint" in checklist
+
+
+def test_runpod_vision_runtime_is_documented_without_committed_secrets():
+    required_keys = {
+        "VISION_RUNTIME_PROVIDER",
+        "VISION_RUNTIME_TIMEOUT_SECONDS",
+        "RUNPOD_API_KEY",
+        "RUNPOD_VISION_ENDPOINT_ID",
+        "RUNPOD_VISION_TIMEOUT_SECONDS",
+        "RUNPOD_VISION_POLL_INTERVAL_SECONDS",
+        "RUNPOD_VISION_HTTP_TIMEOUT_SECONDS",
+        "RUNPOD_VISION_MAX_RESPONSE_BYTES",
+        "RUNPOD_VISION_ALLOWED_HOSTS",
+        "RUNPOD_VISION_DOWNLOAD_TIMEOUT_SECONDS",
+        "RUNPOD_VISION_MAX_DOWNLOAD_BYTES",
+        "RUNPOD_VISION_EXECUTION_TIMEOUT_SECONDS",
+    }
+    env_by_path = {}
+    for relative_path in (
+        ".env.example",
+        ".env.production.example",
+        "deploy/aws-pilot/runtime.env.example",
+    ):
+        content = read_text(ROOT / relative_path)
+        env_by_path[relative_path] = content
+        keys = {
+            line.split("=", 1)[0]
+            for line in content.splitlines()
+            if line and not line.startswith("#") and "=" in line
+        }
+        assert required_keys.issubset(keys)
+        assert "RUNPOD_API_KEY=" in content
+        assert "RUNPOD_API_KEY=replace-" not in content
+        assert "JUPYTER" not in "\n".join(
+            line for line in content.splitlines() if line.startswith("VISION_")
+        )
+
+    assert "VISION_RUNTIME_PROVIDER=local" in env_by_path[".env.example"]
+    assert (
+        "VISION_RUNTIME_PROVIDER=runpod"
+        in env_by_path[".env.production.example"]
+    )
+    assert (
+        "VISION_RUNTIME_PROVIDER=runpod"
+        in env_by_path["deploy/aws-pilot/runtime.env.example"]
+    )
+
+    compose = read_text(ROOT / "docker-compose.yml")
+    for key in required_keys:
+        assert key in compose
+    assert 'VISION_RUNTIME_PROVIDER: "${VISION_RUNTIME_PROVIDER:-local}"' in compose
+
+    runbook = read_text(ROOT / "docs" / "ops" / "vision-media-adapter-runbook.md")
+    for token in (
+        "VISION_RUNTIME_PROVIDER=runpod",
+        "vision_remote_execution_failed",
+        "vision_remote_cancelled",
+        "vision_remote_timeout",
+        "vision_remote_unavailable",
+        "vision_remote_invalid_response",
+        "restricted",
+        "workersMin=0",
+        "workersMax=1",
+        "비식별",
+        "실제 영상",
+    ):
+        assert token in runbook
+    assert "Jupyter proxy" in runbook
+    assert "운영 API로 사용하지" in runbook
+
+    checklist = read_text(ROOT / "docs" / "ops" / "project-readiness-master-checklist.md")
+    assert "PR #303" in checklist
+    assert "5f3728e" in checklist
+    assert "feat-runpod-serverless-vision" in checklist
+    assert "restricted key" in checklist
+    assert "실영상" in checklist
+
+
 def test_analysis_execution_provenance_is_wired_to_runtime_and_runbook():
     root_compose = read_text(ROOT / "docker-compose.yml")
     pilot_compose = read_text(ROOT / "deploy" / "aws-pilot" / "docker-compose.pilot.yml")

@@ -162,3 +162,94 @@ variable "extra_tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "operational_alert_email" {
+  description = "Optional email subscription for operational alarms. Confirmation is required."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      var.operational_alert_email == "" ||
+      can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.operational_alert_email))
+    )
+    error_message = "operational_alert_email must be empty or a valid email address."
+  }
+}
+
+variable "operational_log_retention_days" {
+  description = "CloudWatch retention for privacy-safe operational health snapshots."
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = contains([7, 14, 30, 60, 90], var.operational_log_retention_days)
+    error_message = "operational_log_retention_days must be 7, 14, 30, 60, or 90."
+  }
+}
+
+variable "operational_queue_age_threshold_seconds" {
+  description = "Provisional oldest queued item alarm threshold; calibrate after load testing."
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = var.operational_queue_age_threshold_seconds >= 60
+    error_message = "operational_queue_age_threshold_seconds must be at least 60."
+  }
+}
+
+variable "operational_stale_running_threshold_count" {
+  description = "Provisional stale running item alarm threshold."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.operational_stale_running_threshold_count >= 0
+    error_message = "operational_stale_running_threshold_count must not be negative."
+  }
+}
+
+variable "operational_worker_failure_threshold_count" {
+  description = "Provisional recent Worker failure alarm threshold."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.operational_worker_failure_threshold_count >= 0
+    error_message = "operational_worker_failure_threshold_count must not be negative."
+  }
+}
+
+variable "operational_provider_failure_threshold_count" {
+  description = "Provisional recent provider failure alarm threshold."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.operational_provider_failure_threshold_count >= 0
+    error_message = "operational_provider_failure_threshold_count must not be negative."
+  }
+}
+
+variable "operational_legal_failure_threshold_count" {
+  description = "Provisional legal freshness issue alarm threshold."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.operational_legal_failure_threshold_count >= 0
+    error_message = "operational_legal_failure_threshold_count must not be negative."
+  }
+}
+
+variable "operational_heartbeat_missing_periods" {
+  description = "Number of missing one-minute monitor periods before alarm."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.operational_heartbeat_missing_periods >= 2
+    error_message = "operational_heartbeat_missing_periods must be at least 2."
+  }
+}

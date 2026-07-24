@@ -7,3 +7,15 @@ database_deletion_protection = true
 # Narrow these CIDRs for an internal pilot. A public customer pilot normally
 # keeps 80/443 open and relies on TLS plus the HAProxy/app rate gates.
 http_ingress_cidrs = ["0.0.0.0/0"]
+
+# Optional. Keep empty until an operator chooses a private alert recipient.
+# AWS sends a one-time SNS confirmation email when this is set.
+operational_alert_email = ""
+
+# Provisional pilot values. Replace only after reviewing actual load evidence.
+operational_queue_age_threshold_seconds      = 300
+operational_stale_running_threshold_count    = 0
+operational_worker_failure_threshold_count   = 0
+operational_provider_failure_threshold_count = 0
+operational_legal_failure_threshold_count    = 0
+operational_heartbeat_missing_periods        = 3

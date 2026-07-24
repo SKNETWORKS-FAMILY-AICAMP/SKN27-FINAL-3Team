@@ -49,6 +49,16 @@ x-default-logging: &default-logging
     max-size: 10m
     max-file: "3"
 
+x-operational-logging: &operational-logging
+  driver: awslogs
+  options:
+    awslogs-region: ${AWS_REGION:?AWS_REGION is required}
+    awslogs-group: ${OPERATIONAL_LOG_GROUP:?OPERATIONAL_LOG_GROUP is required}
+    awslogs-stream: ops-monitor
+    awslogs-create-group: "false"
+    mode: non-blocking
+    max-buffer-size: 1m
+
 services:
   caddy:
     image: ${CADDY_IMAGE_REF:-caddy:2.11.4-alpine}
@@ -160,6 +170,33 @@ services:
     networks:
       pilot:
         ipv4_address: ${PILOT_AGENT_WORKER_IP:-172.31.0.6}
+
+  ops-monitor:
+    image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    command:
+      - python
+      - backend/manage.py
+      - observe_operational_health
+      - --loop
+      - --interval-seconds
+      - "60"
+    restart: unless-stopped
+    env_file: *runtime-env-file
+    environment: *backend-environment
+    mem_limit: 96m
+    logging: *operational-logging
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - /opt/skn27-pilot/operational-evidence:/run/operational-evidence:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_OPS_MONITOR_IP:-172.31.0.9}
 
   file-scan-worker:
     image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}

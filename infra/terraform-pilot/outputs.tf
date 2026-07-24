@@ -90,3 +90,13 @@ output "google_live_code_parameter_name" {
   description = "Name only; the one-time authorization code is never managed or output by Terraform."
   value       = var.google_live_code_parameter_name
 }
+
+output "operational_log_group_name" {
+  description = "CloudWatch Log Group used only by the privacy-safe ops monitor."
+  value       = aws_cloudwatch_log_group.operational_health.name
+}
+
+output "operational_alert_topic_arn" {
+  description = "SNS topic ARN for operational alarm and recovery notifications."
+  value       = aws_sns_topic.operational_alerts.arn
+}
