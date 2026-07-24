@@ -18,11 +18,16 @@ param(
 
     [string]$TerraformDirectory = (Join-Path $PSScriptRoot "..\..\infra\terraform-pilot"),
     [ValidateRange(600, 7200)]
-    [int]$SsmTimeoutSeconds = 1800
+    [int]$SsmTimeoutSeconds = 1800,
+    [switch]$AllowPaidReviewCaseEmbedding
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if (-not $AllowPaidReviewCaseEmbedding) {
+    throw "RAG seed maintenance requires explicit -AllowPaidReviewCaseEmbedding consent."
+}
 
 function Assert-LastExitCode([string]$Step) {
     if ($LASTEXITCODE -ne 0) { throw "$Step failed with exit code $LASTEXITCODE." }
@@ -97,6 +102,7 @@ $commands = @(
     "RUNNING_STAGE_SERVICES=`$($stageComposeCommand ps --services --filter status=running)",
     "for required_service in redis; do printf '%s\n' `"`$RUNNING_STAGE_SERVICES`" | grep -qx `"`$required_service`"; done",
     "$stageComposeCommand run --rm --no-deps backend python backend/manage.py help verify_production_rag_seed_manifest >/dev/null",
+    "$stageComposeCommand run --rm --no-deps backend python backend/manage.py help load_review_case_pgvector_seed >/dev/null",
     "$stageComposeCommand run --rm --no-deps backend python backend/manage.py help load_production_rag_seed >/dev/null",
     "RELEASE_STATE_FILE=`$TARGET_RELEASE/.production-rag-seed.complete",
     "test ! -e `$RELEASE_STATE_FILE",
@@ -113,6 +119,7 @@ $commands = @(
     "find `$RAG_DIR -type f -exec chmod 0444 {} +",
     "$stageComposeCommand run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py verify_production_rag_seed_manifest --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --format json",
     "$stageComposeCommand run --rm --no-deps backend python -c `"from pathlib import Path; production=Path('backend/chatbot/management/commands/load_production_rag_seed.py').read_text(); legal=Path('backend/chatbot/management/commands/load_legal_rag_pgvector.py').read_text(); assert 'load_and_validate_rag_seed_manifest' in production; assert 'load_legal_rag_pgvector' in production; assert 'transaction.atomic' in legal`"",
+    "$stageComposeCommand run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py load_review_case_pgvector_seed --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --replace --allow-paid-provider-call --format json",
     "$stageComposeCommand run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py load_production_rag_seed --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --replace-legal --format json",
     "cleanup_rag_seed",
     "trap - EXIT",

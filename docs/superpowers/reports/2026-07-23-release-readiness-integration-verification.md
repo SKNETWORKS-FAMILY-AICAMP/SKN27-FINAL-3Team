@@ -129,6 +129,34 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
 - 전체 저장소 자동 수집은 아래에 기록한 로컬 Python 3.14의 `pyarrow`
   선택 의존성 부재 3건만 제외했으며, RunPod 변경 경로 실패는 없음
 
+### 운영 RAG 부트스트랩 구현 검증 — 2026-07-24
+
+- 실제 비공개 production bundle을 이중 검증
+  - 법령 청크·OpenAI 1024차원 임베딩 각 `97,394`
+  - 심의사례 `904`청크/`226`문서
+  - 법제처 공식 판례 `88`건/`343`청크
+  - manifest SHA-256:
+    `279e78cf70db05156c316ddfbddff2eb4c08ea8c199fcb1df1f0f40600eeed6c`
+- 별도 RDS 없이 `law_db`에 review-case 스키마와 canonical
+  `openai/text-embedding-3-large/1024` partial HNSW를 유지보수 역할로
+  생성한 뒤 앱 역할에 최소 권한을 부여하도록 연결
+- manifest-bound UTF-8-sig loader가 전체 행을 DB 연결 전에 검증하고,
+  한 트랜잭션에서 문서·청크를 idempotent upsert하며 본문 hash가 바뀔 때만
+  `embedding_status=pending`으로 전환
+- `-AllowPaidReviewCaseEmbedding`과
+  `--allow-paid-provider-call`이 없으면 Terraform·S3·SSM·DB·OpenAI 호출 전에
+  종료하고, 승인 경로도 manifest 행 수·canonical embedding 행 수·기존 HNSW가
+  정확히 일치해야 성공
+- 로컬 검증
+  - RAG bootstrap 관련 계약: `192 passed`
+  - 전체 루트 `test/`: `979 passed, 38 skipped`
+  - Django `chatbot`: `368 tests`, 성공
+  - AWS pilot 계약: `73 passed`
+  - PowerShell parser, Vite production build(`32 modules`), 비밀값을 읽지 않는
+    Compose config 검증 통과
+- 실제 OpenAI 904청크 임베딩 호출, RDS 적재, private-stage 검색 smoke와
+  release marker 생성은 비용 승인 전이므로 실행하지 않음
+
 ## 환경상 실행하지 못한 항목
 
 - 인앱 브라우저 자동 제어는 이 세션의 `127.0.0.1`을 정책상 거부했다.
@@ -155,14 +183,18 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
    - S3·scanner·Vision checkpoint
    - restricted RunPod API key, Endpoint ID, 승인된 S3 hostname allowlist
 2. AWS 계정·결제·도메인·DNS·OAuth 운영 소유권 승인
-3. 운영 DB backup 후 법령·심의사례를
-   `openai/text-embedding-3-large/1024`로 적재·재임베딩
-4. 운영 DB readiness, 대표 검색 latency, 법령 seed와 rollback 결과 확인
-5. 실제 OCR golden set, Vision 원본 영상, 검색 평가 세트의 품질 승인
-6. 모바일과 실제 파일로 첨부 → 분류/OCR 확인 → 결과 → 리포트 다운로드
+3. 심의사례 904청크의 OpenAI 임베딩 1회 유료 호출 승인
+4. restricted RunPod API key·Endpoint ID 입력, Google OAuth 최초 live
+   smoke용 일회용 code 발급, 실제 고지서 acceptance fixture 제공
+5. 유료 non-DL/Supervisor smoke와 최종 공개 트래픽 전환 승인
+6. 실제 OCR golden set, Vision 원본 영상, 검색 평가 세트의 품질 승인
+7. 모바일과 실제 파일로 첨부 → 분류/OCR 확인 → 결과 → 리포트 다운로드
    브라우저 스모크. 데스크톱 텍스트 상담의 진입 → 예시 선택 → 전송 → 응답은
    PR #300에서 확인 완료
-7. 운영 트래픽 전환, CloudWatch 알림 확인, 사후 모니터링과 사업 승인
+
+위 승인·값 입력 뒤 RDS 유지보수, bundle S3 업로드, image build/push,
+private-stage 적재, readiness·검색 smoke, CloudWatch/SNS 증거 수집은 Codex가
+실행한다.
 
 ## 파일럿 범위 밖 후속 항목
 
@@ -207,10 +239,22 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
    - 로컬 검증: 전체 `test/` 회귀 `900 passed, 38 skipped`, Django 전체
      `368 passed`, 변경 Python Ruff, PowerShell parser와 Vite production
      build 통과
-   - 로컬 환경에는 Terraform/OpenTofu CLI가 없어 `fmt`·`validate`는
-     GitHub Actions production gate에서 확인하도록 명시
-   - 운영 release metadata 주입과 운영 DB smoke, 실제 AWS ALARM/OK·SNS
-     수신, 실제 외부 공급자 성공·부분 실패·실패 trace는 사람 게이트
+   - 2026-07-24 `feat-pilot-deployment-readiness`에서 Terraform `1.15.8`,
+     AWS CLI `2.36.7`, `manager` 임시 로그인과 서울 리전 프로필을 구성
+   - 암호화·버전 관리·공개 차단 S3 상태 버킷과 Free 플랜 허용 8 GiB x86
+     `m7i-flex.large`, 비공개·암호화 Single-AZ `db.t4g.micro` PostgreSQL,
+     S3·ECR·SSM·CloudWatch·SNS·월 $50 Budget을 실제 apply
+   - RDS 자동 백업 1일·삭제 방지·final snapshot 유지, 운영 SNS 이메일의
+     활성 ARN, EC2/RDS 상태, SSM Online과 최종 Terraform `No changes` 확인
+   - Amazon Linux 2023의 사전 설치 `curl-minimal`과 중복 `curl` 설치 충돌로
+     최초 cloud-init이 중단된 원인을 확인하고 user-data를 수정. 현재 호스트를
+     SSM으로 복구한 뒤 Docker 25, Compose `v2.35.1`, IMDS 차단 방화벽,
+     4 GiB swap과 EC2 제자리 재시작 후 자동 복구를 검증
+   - Free 플랜 인스턴스·RDS 보존기간·cloud-init·정적 DB 파라미터 계약 회귀
+     `70 passed`, Terraform `fmt -check`·`validate` 통과
+   - 운영 release metadata 주입과 운영 DB/RAG smoke, 실제 AWS ALARM/OK
+     수신 확인, 실제 외부 공급자 성공·부분 실패·실패 trace와 검증 후
+     RDS 정지/재기동은 사람 게이트
 3. RunPod Serverless Vision 연결 구현 — PR #304
    - 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 검토하고
      `VISION_RUNTIME_PROVIDER=runpod`, signed URL, `/run`·`/status` polling,
