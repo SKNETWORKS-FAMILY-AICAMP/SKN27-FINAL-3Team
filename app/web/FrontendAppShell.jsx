@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createFrontendApi } from "./apiClient.js";
+import brandLogoUrl from "./assets/brand-logo.webp";
+import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
 import {
   buildAuthContext,
   buildGoogleLoginPayload,
@@ -234,7 +236,7 @@ export default function FrontendAppShell({
 }) {
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
   const storedAuthSession = useMemo(() => readStoredAuthSession(), []);
-  const [activeRoute, setActiveRoute] = useState("chatbot");
+  const [activeRoute, setActiveRoute] = useState("entry");
   const [sessionId, setSessionId] = useState(() => storedAuthSession.session_id || "");
   const [guestId, setGuestId] = useState(() => storedAuthSession.guest_id || "");
   const [guestCredential, setGuestCredential] = useState(() => storedAuthSession.guest_credential || "");
@@ -1450,19 +1452,16 @@ export default function FrontendAppShell({
     setActiveRoute("reporting");
   }
 
-  const showSidebar = activeRoute !== "entry" && activeRoute !== "mypage" && activeRoute !== "reporting";
+  const showSidebar = !["entry", "guide", "mypage", "reporting"].includes(activeRoute);
 
   return (
     <div className="app-shell" data-auth-state={authContext.auth_state}>
-      <AppIconRail
+      <AppTopNavigation
         activeRoute={activeRoute}
         onNavigate={setActiveRoute}
         onOpenChat={() => bootstrapGuestSession("chatbot")}
-      />
-      <div className="app-shell__body">
-      {(authSessionId || !["chatbot", "history"].includes(activeRoute)) && (
-        <div className="top-float-actions" aria-label="주요 메뉴">
-          {authSessionId ? (
+        authAction={
+          authSessionId ? (
             <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
               로그아웃
             </button>
@@ -1475,9 +1474,10 @@ export default function FrontendAppShell({
             >
               {isSavingConversation ? "연결 중" : "Google 로그인"}
             </button>
-          )}
-        </div>
-      )}
+          )
+        }
+      />
+      <div className="app-shell__body">
 
       <div
         className={
@@ -1516,6 +1516,13 @@ export default function FrontendAppShell({
               onGuestStart={() => bootstrapGuestSession("chatbot")}
               onOpenChat={() => bootstrapGuestSession("chatbot")}
               onNavigate={setActiveRoute}
+            />
+          )}
+
+          {activeRoute === "guide" && (
+            <GuideScreen
+              onGuestStart={() => bootstrapGuestSession("chatbot")}
+              onOpenChat={() => bootstrapGuestSession("chatbot")}
             />
           )}
 
@@ -1872,21 +1879,21 @@ function Reveal({ children, className = "", as = "div", ...rest }) {
 
 const RAIL_ITEMS = [
   {
-    id: "entry",
-    label: "홈",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 11.5 12 4l8 7.5" />
-        <path d="M6 10v9h12v-9" />
-      </svg>
-    ),
-  },
-  {
     id: "chatbot",
     label: "AI 상담",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 5h16v11H8l-4 4V5z" />
+      </svg>
+    ),
+  },
+  {
+    id: "guide",
+    label: "사고 가이드",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+        <path d="M14 3v5h5M8 13h8M8 17h6" />
       </svg>
     ),
   },
@@ -1912,7 +1919,7 @@ const RAIL_ITEMS = [
   },
 ];
 
-function AppIconRail({ activeRoute, onNavigate, onOpenChat }) {
+function AppTopNavigation({ activeRoute, onNavigate, onOpenChat, authAction }) {
   const handleClick = (routeId) => {
     if (routeId === "chatbot" && typeof onOpenChat === "function") {
       onOpenChat();
@@ -1924,38 +1931,141 @@ function AppIconRail({ activeRoute, onNavigate, onOpenChat }) {
   };
 
   return (
-    <aside className="app-rail" aria-label="빠른 이동">
-      {RAIL_ITEMS.map((item) => (
-        <button
-          key={item.id}
-          className={activeRoute === item.id ? "rail-icon active" : "rail-icon"}
-          type="button"
-          onClick={() => handleClick(item.id)}
-          title={item.label}
-          aria-label={item.label}
-          aria-current={activeRoute === item.id ? "page" : undefined}
-        >
-          {item.icon}
-        </button>
-      ))}
-      <button
-        className={activeRoute === "history" ? "rail-icon rail-icon--bottom active" : "rail-icon rail-icon--bottom"}
-        type="button"
-        onClick={() => handleClick("history")}
-        title="과거 이력"
-        aria-label="과거 이력"
-        aria-current={activeRoute === "history" ? "page" : undefined}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="8.5" />
-          <path d="M12 7.5V12l3 2" />
-        </svg>
+    <header className="app-top-nav">
+      <button className="app-top-nav__brand" type="button" onClick={() => handleClick("entry")}>
+        <span className="app-top-nav__logo" aria-hidden="true">
+          <img src={brandLogoUrl} alt="" />
+        </span>
+        <span className="sr-only">차분해 홈</span>
       </button>
-    </aside>
+      <nav aria-label="주요 화면">
+        {RAIL_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            className={activeRoute === item.id ? "active" : ""}
+            type="button"
+            onClick={() => handleClick(item.id)}
+            aria-current={activeRoute === item.id ? "page" : undefined}
+          >
+            {item.label}
+          </button>
+        ))}
+        <button
+          className={activeRoute === "history" ? "active" : ""}
+          type="button"
+          onClick={() => handleClick("history")}
+          aria-current={activeRoute === "history" ? "page" : undefined}
+        >
+          내 사건
+        </button>
+      </nav>
+      <div className="app-top-nav__auth">{authAction}</div>
+    </header>
   );
 }
 
 function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }) {
+  return (
+    <main className="service-landing">
+      <section className="service-hero">
+        <Reveal className="service-hero__copy service-reveal--left">
+          <p className="service-eyebrow">교통사고 분석을 더 쉽고 명확하게</p>
+          <h1>복잡한 사고 분석,<br />자료 등록부터 시작하세요</h1>
+          <p>블랙박스·CCTV·현장 사진과 상황 설명을 바탕으로 사고 쟁점과 다음 행동을 정리합니다.</p>
+          <div className="hero-actions">
+            <button className="button primary large service-hero__cta" type="button" onClick={onGuestStart}>사고 접수하기</button>
+          </div>
+        </Reveal>
+        <Reveal className="service-hero__visual service-reveal--right">
+          <img className="service-hero__image" src={homeAccidentAnalysisUrl} alt="AI가 교통사고 자료를 분석하는 모습" />
+        </Reveal>
+      </section>
+
+      <section className="service-intro">
+        <Reveal className="service-intro__word" aria-hidden="true">차분해</Reveal>
+        <Reveal className="service-intro__copy">
+          <span>AI TRAFFIC ACCIDENT ANALYSIS</span>
+          <h2>사고 이후의 복잡한 판단을<br />확인 가능한 정보로 정리합니다</h2>
+          <p>차분해는 영상·사진·문서와 상황 설명을 바탕으로 사고의 주요 쟁점, 확인 근거, 필요한 다음 행동을 한 흐름으로 안내합니다.</p>
+        </Reveal>
+      </section>
+
+      <section className="service-section service-process">
+        <Reveal as="header">
+          <span>ONE STOP SOLUTION</span>
+          <h2>차분해는 이렇게 진행됩니다</h2>
+          <p>사고 상황을 입력하면 자료 정리부터 분석 결과 확인까지 한 흐름으로 안내합니다.</p>
+        </Reveal>
+        <div className="service-detail-grid">
+          <Reveal as="article" style={{ "--reveal-delay": "0ms" }}><span className="service-detail-emoji" aria-hidden="true">🚗</span><b>01</b><h3>사고 접수</h3><p>사고 상황과 기본 정보를 입력해 분석을 시작합니다.</p></Reveal>
+          <Reveal as="article" style={{ "--reveal-delay": "90ms" }}><span className="service-detail-emoji" aria-hidden="true">📎</span><b>02</b><h3>자료 등록</h3><p>영상, 사진, 문서 등 보유한 사고 자료를 한곳에 등록합니다.</p></Reveal>
+          <Reveal as="article" style={{ "--reveal-delay": "180ms" }}><span className="service-detail-emoji" aria-hidden="true">🔎</span><b>03</b><h3>AI 분석</h3><p>사고 장면과 주요 쟁점을 확인 가능한 근거와 함께 정리합니다.</p></Reveal>
+          <Reveal as="article" style={{ "--reveal-delay": "270ms" }}><span className="service-detail-emoji" aria-hidden="true">📄</span><b>04</b><h3>결과 확인</h3><p>분석 리포트와 추가 확인 사항, 후속 조치를 살펴봅니다.</p></Reveal>
+        </div>
+      </section>
+
+      <section className="service-section service-features">
+        <Reveal as="header"><span>핵심 기능</span><h2>사고 대응에 필요한 정보를 한곳에서</h2></Reveal>
+        <div className="service-card-grid">
+          <Reveal as="article" className="service-reveal--left"><h3>영상 분석</h3><p>블랙박스와 CCTV에서 사고 장면 후보와 근거 프레임을 확인합니다.</p></Reveal>
+          <Reveal as="article"><h3>AI 상담</h3><p>현재 상황을 설명하고 필요한 자료와 다음 행동을 안내받습니다.</p></Reveal>
+          <Reveal as="article" className="service-reveal--right"><h3>사건 관리</h3><p>등록 사건, 분석 상태, 생성 리포트를 이어서 확인합니다.</p></Reveal>
+        </div>
+      </section>
+
+      <section className="service-closing">
+        <Reveal className="service-reveal--left"><span>차분해와 함께 시작하세요</span><h2>사고 자료가 준비되었다면 지금 접수하세요</h2></Reveal>
+        <Reveal className="hero-actions service-reveal--right">
+          <button className="button primary large" type="button" onClick={onGuestStart}>사고 접수하기</button>
+          {isAuthenticated && (
+            <button className="button ghost large" type="button" onClick={() => onNavigate("reporting")}>내 리포트</button>
+          )}
+        </Reveal>
+      </section>
+    </main>
+  );
+}
+
+function GuideScreen({ onGuestStart, onOpenChat }) {
+  return (
+    <main className="guide-screen">
+      <section className="guide-screen__hero">
+        <Reveal className="service-reveal--left">
+          <span>사고 발생 시 가이드</span>
+          <h1>당황하지 말고<br />순서대로 대응하세요</h1>
+          <p>현장의 안전을 먼저 확보한 뒤, 필요한 신고와 기록을 차례로 진행하세요.</p>
+        </Reveal>
+      </section>
+
+      <section className="guide-screen__content">
+        <Reveal as="header">
+          <span>현장 대응 순서</span>
+          <h2>사고 직후 확인해야 할 네 가지</h2>
+        </Reveal>
+        <ol className="guide-screen__steps">
+          <Reveal as="li" style={{ "--reveal-delay": "0ms" }}><span aria-hidden="true">🦺</span><div><b>안전 확보</b><p>비상등을 켜고 추가 사고가 없도록 가능한 범위에서 안전한 위치를 확보합니다.</p></div></Reveal>
+          <Reveal as="li" style={{ "--reveal-delay": "90ms" }}><span aria-hidden="true">📞</span><div><b>인명 확인 및 신고</b><p>부상자를 확인하고 필요한 경우 119와 112에 신고합니다.</p></div></Reveal>
+          <Reveal as="li" style={{ "--reveal-delay": "180ms" }}><span aria-hidden="true">📷</span><div><b>현장 기록</b><p>차량 위치, 파손 부위, 신호와 도로 상황을 여러 방향에서 촬영합니다.</p></div></Reveal>
+          <Reveal as="li" style={{ "--reveal-delay": "270ms" }}><span aria-hidden="true">💾</span><div><b>자료 보관</b><p>블랙박스 원본과 상대방·목격자 정보를 안전하게 보관합니다.</p></div></Reveal>
+        </ol>
+      </section>
+
+      <section className="guide-screen__actions">
+        <Reveal>
+          <span>무엇부터 해야 할지 막막한가요?</span>
+          <h2>지금 상황을 AI에게 설명해 주세요</h2>
+          <p>현재 상황에 맞춰 필요한 자료와 다음 행동을 안내해 드립니다.</p>
+          <div className="hero-actions">
+            <button className="button primary large" type="button" onClick={onOpenChat}>AI 상담 시작</button>
+            <button className="button ghost large" type="button" onClick={onGuestStart}>사고 접수하기</button>
+          </div>
+        </Reveal>
+      </section>
+    </main>
+  );
+}
+
+function EntryScreenWheelLegacy({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }) {
   const [activeCard, setActiveCard] = useState(0);
   const lastWheelAt = useRef(0);
   const touchStartRef = useRef(null);
