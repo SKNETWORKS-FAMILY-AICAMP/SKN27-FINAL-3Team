@@ -199,7 +199,7 @@
 
 ## I. 검증·운영·발표 완성도
 
-- [x] AWS 저비용 파일럿 기반
+- [~] AWS 저비용 파일럿 기반 — 서울 리전 Free 플랜에서 상태 버킷과 65개 기반 리소스를 apply하고, Free 플랜 허용 8 GiB x86 `m7i-flex.large`, 비공개·암호화 Single-AZ `db.t4g.micro` PostgreSQL, S3·ECR·SSM·CloudWatch·SNS·월 $50 Budget을 실제 생성했다. RDS 자동 백업 1일·삭제 방지·최종 snapshot 유지, SNS 이메일 활성 ARN, EC2 상태검사·SSM Online, Docker Compose·IMDS 방화벽·4 GiB swap과 재시작 복구를 확인했으며 최종 `terraform plan`은 `No changes`다. Amazon Linux `curl-minimal` 충돌은 user-data에서 중복 `curl` 설치를 제거하고 계약 회귀 `70 passed`로 고정했다. 애플리케이션 release 배포·운영 DB/RAG smoke, 실제 ALARM/OK 수신 확인, 검증 후 RDS 정지/재기동 실증은 남음
 - [x] 보안·DB·OAuth·LLM·RAG·워커·파일 검사·객체 저장소 점검 기반
 - [x] PR 단위 CI 체계
 - [x] 대표 사용자 흐름 E2E: 자료 입력, 사실/주장 분리, OCR, Supervisor 계획, 법령·판례 검색, 한계 표시, 리포트 생성·다운로드 — #279
@@ -214,6 +214,57 @@
 - [~] Worker lease, bounded timeout, 사용량 제한, 8GiB 파일럿 capacity preflight와 회귀 테스트는 완료. CloudWatch 초기 임계값·heartbeat·queue age·stale lease·Worker/provider·법령 데이터 alarm을 Terraform 변수로 구현. 실제 부하 수치 기반 최종 임계값과 SNS ALARM/OK 수신은 운영 환경 검증 필요
 - [x] 배포 전 체크리스트와 롤백 절차 — `docs/ops/release-checklist.md`, `docs/ops/rollback-plan.md`, AWS pilot 자동 롤백·회귀 테스트
 - [ ] 발표자료 오타·용어·서비스 범위 최종 검수
+
+## J. 1차 운영 배포 — RAG 부트스트랩과 공개 승격
+
+- [x] 운영 RAG 시드 묶음 생성·이중 검증 — 법령 청크 97,394개, OpenAI `text-embedding-3-large` 1024차원 임베딩 97,394개, 심의사례 904개, 법제처 공식 판례 88건·343개 청크. `production_rag_seed_manifest.v1` build·verify·dry-run 통과, 승인 대상 SHA-256 `279e78cf70db05156c316ddfbddff2eb4c08ea8c199fcb1df1f0f40600eeed6c`
+- [~] 신규 RDS source-specific pgvector 부트스트랩 — 비용 절약형 A안 승인. 별도 RDS를 만들지 않고 `law_db` 안에 심의사례 전용 테이블·1024차원 임베딩·HNSW를 구성한다. 유지보수 역할 스키마 적용, 최소 권한 부여, idempotent loader, 유료 호출 fail-closed, readiness·검색 smoke, 실패 시 private stage 정리까지 구현·검증 필요
+- [ ] 심의사례 904개 OpenAI 임베딩 1회 유료 호출 승인 및 실행
+- [ ] 법령·심의사례 pgvector 실제 RDS 적재와 HNSW·행 수·공유 embedding space 확인
+- [ ] 비공개 initial stage에서 법령 검색·유사 심의사례 검색 smoke 통과 및 `.production-rag-seed.complete` 기록
+- [ ] RunPod restricted API key·Endpoint ID를 private runtime에 입력하고 비식별 실영상 success·partial·failure·timeout smoke 수행 — 사람 게이트
+- [ ] Google OAuth 최초 live smoke용 일회용 code 발급·교환·재사용 거부 확인 — 사람 게이트
+- [ ] 실제 고지서 fixture를 Clean S3 `canonical/acceptance/`에 업로드하고 유료 non-DL/Supervisor acceptance smoke 승인 — 사람 게이트
+- [ ] HTTPS 공개 승격 후 상담·OAuth·첨부·분석·리포트 조회·다운로드 실제 브라우저 QA
+- [ ] CloudWatch ALARM→OK와 SNS 이메일 수신, Budget 영향, EC2·RDS 정지/재기동 복구 확인
+
+## K. 2차 고도화 — S3 + CloudFront 정적 프런트엔드 전달
+
+### K-1. 설계·비용·Terraform
+
+- [x] 2차 목표 구조 설계 — React/Vite는 private S3 + CloudFront, `/api/*`는 기존 EC2 HTTPS origin. ALB·NAT Gateway·ECS/Fargate는 추가하지 않음
+- [ ] 계정 CloudFront Free Plan/무료 사용량, 요청 수·전송량·S3 GET·저장·Route 53/도메인·로그·선택적 WAF 비용 재확인
+- [ ] `infra/terraform-pilot`에 private frontend S3, encryption, versioning, Block Public Access, OAC, bucket policy, distribution, cache/origin request policy, outputs 구현
+- [ ] us-east-1 ACM provider alias, Route 53 alias 또는 외부 DNS용 정확한 CNAME/TXT output 구현
+- [ ] 기존 SNS·Budget 재사용과 CloudFront 4xx·5xx·origin latency·S3 AccessDenied·배포 실패 지표/알람 구현
+- [ ] Terraform fmt·validate·계약 테스트·plan 통과. 생성/변경/삭제·예상 비용·다운타임·DNS 영향·롤백 가능성을 사람이 검토한 뒤 apply
+
+### K-2. 정적 배포·캐시·SPA
+
+- [ ] 해시 asset은 1년 immutable, `index.html`은 no-cache로 분리하고 index를 마지막에 업로드
+- [ ] 전체 `/*` invalidation 대신 `/index.html`과 필요한 최소 경로만 무효화
+- [ ] `/api/*`는 managed caching-disabled/TTL 0, 실제 Authorization·Content-Type·cookie·query·guest/session header만 전달
+- [ ] CloudFront Function으로 확장자 없는 프런트 route만 `/index.html`로 rewrite하고 `/api/*` 및 누락 asset 404는 보존
+- [ ] production build, 이전 dist 보관, 안전한 S3 대상 검증, 업로드, distribution 완료 대기, smoke, 이전 artifact 복원 자동화
+- [ ] GitHub Actions 도입 시 OIDC, production environment 승인, 장기 AWS access key 금지, artifact·롤백 로그 보존
+
+### K-3. 도메인·보안·OAuth
+
+- [ ] 소유 도메인 확정 — `app.<domain>`은 CloudFront, `origin.<domain>`은 EC2+Caddy origin으로 분리 — 사람 게이트
+- [ ] CloudFront viewer 인증서 us-east-1 ACM 발급과 DNS validation — 사람 게이트
+- [ ] EC2 443을 CloudFront origin-facing prefix list로 제한하고 private origin header를 Caddy/HAProxy에서 검증
+- [ ] origin header를 Git·access log에 남기지 않고 Terraform state·S3 state bucket·SSM SecureString 접근을 최소화
+- [ ] Google OAuth origin/redirect, Django allowed hosts, CORS/CSRF, secure cookie·SameSite, trusted proxy, `X-Forwarded-Proto`를 canonical CloudFront origin으로 전환 — 사람 게이트 포함
+- [ ] 장애 관리 경로를 제외한 EC2 Elastic IP 직접 우회 접근 차단 및 Caddy 인증서 갱신 경로 확인
+
+### K-4. 2차 브라우저 QA·롤백 완료 게이트
+
+- [ ] `/`, 실제 JS/CSS, 누락 asset, React deep-link, 누락 route 응답과 Cache-Control·Age·Via·X-Cache 검증
+- [ ] API 정상·401·403·404·OPTIONS·POST가 정적 `index.html`로 변환되지 않고 cache hit가 발생하지 않는지 검증
+- [ ] 비회원 상담, 질문 전송, Google 로그인, 첨부 업로드, RunPod 진행 상태, 리포트 조회·다운로드, 새로고침, 모바일 viewport 실제 브라우저 QA
+- [ ] 사용자별 인증 응답과 리포트·첨부가 공유 캐시에 저장되지 않고 mixed-content/콘솔 오류가 없는지 확인
+- [ ] 이전 dist 복원·index invalidation·브라우저 smoke와 DNS TTL 기반 기존 EC2 진입점 복구 연습
+- [ ] CloudFront distribution은 즉시 삭제하지 않고 비활성화·관찰 후 제거하며 RDS·Clean/Quarantine S3·첨부·리포트는 보존
 
 ## 권장 실행 순서
 
