@@ -218,7 +218,8 @@
 ## J. 1차 운영 배포 — RAG 부트스트랩과 공개 승격
 
 - [x] 운영 RAG 시드 묶음 생성·이중 검증 — 법령 청크 97,394개, OpenAI `text-embedding-3-large` 1024차원 임베딩 97,394개, 심의사례 904개, 법제처 공식 판례 88건·343개 청크. `production_rag_seed_manifest.v1` build·verify·dry-run 통과, 승인 대상 SHA-256 `279e78cf70db05156c316ddfbddff2eb4c08ea8c199fcb1df1f0f40600eeed6c`
-- [~] 신규 RDS source-specific pgvector 부트스트랩 — 비용 절약형 A안 승인. 별도 RDS를 만들지 않고 `law_db` 안에 심의사례 전용 테이블·1024차원 임베딩·HNSW를 구성한다. 유지보수 역할 스키마 적용, 최소 권한 부여, idempotent loader, 유료 호출 fail-closed, readiness·검색 smoke, 실패 시 private stage 정리까지 구현·검증 필요
+- [x] 신규 RDS source-specific pgvector 부트스트랩 자동화 — 비용 절약형 A안대로 별도 RDS 없이 `law_db`에 심의사례 전용 테이블과 canonical OpenAI 1024차원 partial HNSW를 구성한다. 유지보수 역할의 스키마 적용 → 앱 최소 권한 부여, manifest-bound 904청크/226문서 idempotent loader, 본문 hash 변경 시에만 재임베딩, 유료 호출 명시 승인, 정확한 행 수·인덱스 확인과 private stage 실패 정리를 구현했다. 관련 계약 `192 passed`, 전체 `test/` `979 passed, 38 skipped`, Django `368 tests`, PowerShell parser·Vite production build·Compose config 통과
+- [x] 운영 RAG bundle 로컬 적재 전 검증 — 실제 비공개 bundle의 심의사례 904개/226문서를 DB 접속 전에 전부 파싱했고 중복 ID·필수 필드·짧은 본문·음수 순서를 차단했다. 승인 플래그가 없으면 Terraform·S3·SSM·DB·OpenAI 호출 전에 종료하도록 고정
 - [ ] 심의사례 904개 OpenAI 임베딩 1회 유료 호출 승인 및 실행
 - [ ] 법령·심의사례 pgvector 실제 RDS 적재와 HNSW·행 수·공유 embedding space 확인
 - [ ] 비공개 initial stage에서 법령 검색·유사 심의사례 검색 smoke 통과 및 `.production-rag-seed.complete` 기록

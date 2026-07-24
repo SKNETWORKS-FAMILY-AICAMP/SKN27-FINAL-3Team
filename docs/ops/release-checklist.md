@@ -15,16 +15,17 @@
 - [ ] 개인정보 수집, 보관, 삭제, 마스킹 기준이 문서화되어 있다.
 - [ ] 백업 대상과 복구 절차가 문서화되어 있다.
 - [x] 롤백 절차가 문서화되어 있다. — `docs/ops/rollback-plan.md`, `deploy/aws-pilot/Rollback-Pilot.ps1`
+- [~] production RAG seed와 비공개 적재 절차가 준비되어 있다. — 검증된 bundle(법령 97,394청크/임베딩, 심의사례 904청크, 공식 판례 343청크), `law_db` 공용 스키마·partial HNSW, manifest-bound loader, 유료 호출 fail-closed와 private stage 순서를 구현했다. 실제 904개 OpenAI 임베딩 비용 승인과 RDS 적재·smoke는 남음
 
 ## 2. 배포 전 P1 확인
 
-- [x] 자동 테스트가 통과했다. — `feat-runpod-serverless-vision` 기준 전체 `test/` 회귀 `960 passed, 38 skipped`, Django 전체 `368 passed`, RunPod 집중 회귀 `186 passed`, 배포·AWS pilot `80 passed`, Ruff·Compose·RunPod Dockerfile build check·Vite production build 통과
+- [x] 자동 테스트가 통과했다. — `feat-pilot-deployment-readiness` 기준 RAG bootstrap 집중 계약 `192 passed`, 전체 `test/` 회귀 `979 passed, 38 skipped`, Django 전체 `368 tests`, AWS pilot 계약 `73 passed`, PowerShell parser·Compose config·Vite production build(`32 modules`) 통과
 - [x] 정적 HTML 산출물이 UTF-8로 저장되어 있다. — `test_static_mvp_html_is_utf8_korean_service_screen` 및 PR #300 Vite production build 확인
 - [x] 운영 문서가 `docs/ops/`에 존재한다.
 - [~] 장애 대응 절차가 문서화되어 있다. — `operational-observability-runbook.md`에 queue·lease·Worker/provider·법령 데이터 알람별 확인·완화·복구를 연결; 실제 AWS ALARM/OK 훈련은 남음
 - [~] 외부 API 장애 시 사용자 안내와 timeout 기준이 문서화되어 있다. — RunPod Serverless의 execution failed·cancelled·timeout·unavailable·invalid response 안전 코드, bounded polling, 중복 유료 제출 방지와 운영자 조치를 `vision-media-adapter-runbook.md`에 연결. 실제 restricted key·Endpoint·모델·비식별 실영상 확인은 사람 게이트
 - [~] RunPod Vision 운영 설정이 준비되어 있다. — local/production/AWS pilot 환경 템플릿과 Compose 전달 계약, `workersMin=0`·`workersMax=1` 초기 비용 상한을 구현. private runtime에 실제 값을 입력하고 Endpoint smoke를 완료해야 운영 활성화 가능
-- [ ] 과도한 요청과 비용 증가를 제한하는 계획이 있다.
+- [~] 과도한 요청과 비용 증가를 제한하는 계획이 있다. — RunPod `workersMin=0`·`workersMax=1`, AWS 월 $50 Budget의 50%·80%·100% 알림, 배포 검증 후 EC2·RDS 정지와 필요 시 가동 원칙을 채택했다. 서울 리전 Free 플랜에 실제 이메일을 넣어 `m7i-flex.large`·Single-AZ `db.t4g.micro`·S3·ECR·CloudWatch·SNS·Budget을 apply했고, EC2 제자리 재시작 후 SSM·Docker Compose·방화벽·swap 복구와 최종 Terraform `No changes`를 확인했다. RDS 자동 백업은 Free 플랜 제한에 맞춰 1일이며 삭제 방지와 final snapshot은 유지한다. 애플리케이션 배포 후 EC2·RDS 정지/재기동과 비용 확인은 남음
 - [~] 법령 데이터 최신성 게이트가 자동화되어 있다. — source별 run summary와 stale·missing·failed 차단 CLI·runbook은 PR #301로 `dev` 병합 완료(`8cc2fc8`); `feat-299-operational-observability`에서 read-only 운영 evidence·CloudWatch `LegalDataIssueCount` alarm을 연결. 운영 DB·실제 ALARM/OK 실증은 남음
 - [~] 분석 결과의 실행 버전을 운영자가 조회할 수 있다. — model·prompt version/hash, Agent runtime·adapter·release version, embedding model, 검색 dataset version·시각을 `job_id`로 조회하는 command와 runbook 구현; 운영 release metadata 주입과 실제 DB smoke는 남음
 
