@@ -59,14 +59,14 @@ def test_enrich_supervisor_state_preserves_empty_accident_packages():
 
 
 def test_enrich_supervisor_state_rejects_unknown_node_without_payload_leak():
-    secret = "sk-private-never-log"
+    sensitive_marker = "[MASKED]"
     fallback = {
         "contract_version": "supervisor_conversation_state.v2",
         "stage": "agent_execution_ready",
         "agent_input_packages": [
             {
                 "node_code": "unknown_agent",
-                "payload": {"user_text": secret},
+                "payload": {"user_text": sensitive_marker},
             }
         ],
         "reporting_payload": None,
@@ -76,7 +76,7 @@ def test_enrich_supervisor_state_rejects_unknown_node_without_payload_leak():
 
     assert enriched is None
     assert error == "registry_node_missing"
-    assert secret not in error
+    assert sensitive_marker not in error
 
 
 def test_normalize_candidate_packages_keeps_registry_controls_and_bounded_payload():
@@ -297,7 +297,7 @@ def test_provider_refusal_fails_closed_with_safe_reason_log(monkeypatch, caplog)
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
     monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
-    secret = "sk-private-never-log"
+    sensitive_marker = "[MASKED]"
 
     def refuse(*_args):
         raise service.SupervisorProviderError("provider_refusal")
@@ -306,7 +306,7 @@ def test_provider_refusal_fails_closed_with_safe_reason_log(monkeypatch, caplog)
 
     with caplog.at_level(logging.WARNING):
         state = service.build_supervisor_state_with_optional_llm(
-            payload={"user_text": secret},
+            payload={"user_text": sensitive_marker},
             scenario="fine_notice",
             fallback_builder=_fallback_builder,
         )
@@ -314,7 +314,7 @@ def test_provider_refusal_fails_closed_with_safe_reason_log(monkeypatch, caplog)
     assert state["llm"]["status"] == "failed"
     assert state["llm"]["reason"] == "provider_refusal"
     assert "reason=provider_refusal" in caplog.text
-    assert secret not in caplog.text
+    assert sensitive_marker not in caplog.text
 
 
 def _fallback_builder(_payload, _scenario):

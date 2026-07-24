@@ -125,7 +125,11 @@ def test_production_env_doc_references_readiness_command_and_secret_rules():
     assert "TEXT_ML_CASE_SEARCH_SYNC_USE_ES" not in content
     assert "FAULT_RATIO_PRECEDENT_ES_BM25_INDEX" not in content
     assert "process_agent_work_items --loop" in content
-    assert "smoke_supervisor_llm" in content
+    assert "smoke_supervisor_conversation_runtime" in content
+    assert "--require-llm-used" in content
+    assert "--require-real-agent-results" in content
+    assert "--require-persisted-handoff" in content
+    assert "--require-report" in content
     assert "smoke_google_oauth_code" in content
     assert "smoke_object_storage" in content
     assert "smoke_persona_catalog" in content
