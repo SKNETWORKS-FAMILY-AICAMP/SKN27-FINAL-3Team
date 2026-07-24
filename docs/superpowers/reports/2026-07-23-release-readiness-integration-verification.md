@@ -181,5 +181,25 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
      원문 query·OCR 전문·비밀값 없이 조회
    - 로컬 검증: 전체 `test/` 회귀 `897 passed, 38 skipped`, Django
      Worker/DB·operator 조회 통합 `40 passed`, Ruff 통과
-   - 운영 release metadata 주입, 운영 DB smoke, 실제 외부 공급자
-     성공·부분 실패·실패 trace와 CloudWatch 연결은 남음
+   - `feat-299-operational-observability`에서 개인정보 없는
+     `operational_health.v1`, queue·lease·retry·Worker/provider 실패와
+     법령 freshness 집계, 반복 monitor command와 CloudWatch
+     Logs·metric filter·alarm·선택적 SNS email 구독을 구현
+   - 알람 코드별 확인·완화·복구, read-only 법령 run summary 반영,
+     실제 부하 후 임계값 승인과 SNS 구독 확인 절차를
+     `docs/ops/operational-observability-runbook.md`에 기록
+   - 로컬 검증: 전체 `test/` 회귀 `900 passed, 38 skipped`, Django 전체
+     `368 passed`, 변경 Python Ruff, PowerShell parser와 Vite production
+     build 통과
+   - 로컬 환경에는 Terraform/OpenTofu CLI가 없어 `fmt`·`validate`는
+     GitHub Actions production gate에서 확인하도록 명시
+   - 운영 release metadata 주입과 운영 DB smoke, 실제 AWS ALARM/OK·SNS
+     수신, 실제 외부 공급자 성공·부분 실패·실패 trace는 사람 게이트
+3. RunPod Serverless Vision 후속 연결
+   - 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 검토하고
+     `VISION_RUNTIME_PROVIDER=runpod`, signed URL, `/run`·`/status` polling,
+     remote stable error code, worker 임시 파일 삭제를 구현 기준으로 채택
+   - 현재 `dev`의 local subprocess adapter는 유지하되 운영 연결 완료로
+     표시하지 않으며 별도 브랜치와 PR에서 구현·검증
+   - restricted API key 발급, 유료 Endpoint 생성, 모델 artifact 승인과
+     비식별 실제 영상 E2E는 사람이 수행

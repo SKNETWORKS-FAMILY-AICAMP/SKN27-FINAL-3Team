@@ -173,6 +173,34 @@ def test_operational_health_runtime_settings_are_documented_without_secrets():
         assert "OPERATIONAL_ALERT_EMAIL" not in keys
 
 
+def test_operational_observability_runbook_maps_safe_alerts_to_actions():
+    runbook = read_text(ROOT / "docs" / "ops" / "operational-observability-runbook.md")
+    for token in (
+        "observe_operational_health --once",
+        "show_analysis_job_provenance --job-id",
+        "queue_backlog",
+        "queue_oldest_age_exceeded",
+        "worker_lease_stale",
+        "worker_failure",
+        "worker_timeout",
+        "provider_failure",
+        "legal_data_missing",
+        "legal_data_stale",
+        "legal_data_refresh_failed",
+        "monitor_configuration_invalid",
+        "SNS",
+        "구독 확인",
+        "terraform.tfvars",
+        "실제 부하",
+    ):
+        assert token in runbook
+
+    checklist = read_text(ROOT / "docs" / "ops" / "project-readiness-master-checklist.md")
+    assert "2026-07-23-runpod-serverless-vision-design.md" in checklist
+    assert "VISION_RUNTIME_PROVIDER=runpod" in checklist
+    assert "RunPod Endpoint" in checklist
+
+
 def test_analysis_execution_provenance_is_wired_to_runtime_and_runbook():
     root_compose = read_text(ROOT / "docker-compose.yml")
     pilot_compose = read_text(ROOT / "deploy" / "aws-pilot" / "docker-compose.pilot.yml")
