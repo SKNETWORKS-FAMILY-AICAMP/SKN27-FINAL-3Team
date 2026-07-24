@@ -120,6 +120,51 @@ def test_normalize_candidate_packages_keeps_registry_controls_and_bounded_payloa
     }
 
 
+def test_normalize_candidate_packages_never_accepts_model_slot_state():
+    server_slot_state = {
+        "contract_version": "slot_filling_state.v1",
+        "slots": {
+            "law_question": {
+                "value": "server-approved",
+                "source": "confirmed_user_fact",
+                "confidence": 1.0,
+            }
+        },
+    }
+    fallback = [
+        {
+            "node_code": "law_ground_search",
+            "payload": {
+                "user_text": "fallback",
+                "attachments": [],
+                "slot_state": server_slot_state,
+            },
+        }
+    ]
+    candidate = [
+        {
+            "node_code": "law_ground_search",
+            "payload": {
+                "user_text": "candidate",
+                "attachments": [],
+                "slot_state": {
+                    "contract_version": "attacker.v1",
+                    "slots": {"law_question": {"value": "model-overwrite"}},
+                },
+            },
+        }
+    ]
+
+    packages, error = service_contract.normalize_candidate_packages(
+        candidate,
+        fallback,
+    )
+
+    assert error is None
+    assert packages is not None
+    assert packages[0]["payload"]["slot_state"] == server_slot_state
+
+
 def test_conversation_response_format_is_strict_and_excludes_server_owned_fields():
     fallback = {
         "agent_input_packages": [
@@ -158,6 +203,33 @@ def test_conversation_response_format_is_strict_and_excludes_server_owned_fields
     payload_schema = package_schema["properties"]["payload"]
     assert payload_schema["additionalProperties"] is False
     assert set(payload_schema["properties"]) == {"user_text", "attachments"}
+
+
+def test_conversation_response_format_excludes_nested_server_owned_slot_state():
+    response_format = service_contract.conversation_response_format(
+        {
+            "agent_input_packages": [
+                {
+                    "node_code": "law_ground_search",
+                    "payload": {
+                        "user_text": "fallback",
+                        "attachments": [],
+                        "slot_state": {
+                            "contract_version": "slot_filling_state.v1",
+                            "slots": {},
+                        },
+                    },
+                }
+            ]
+        }
+    )
+
+    payload_schema = response_format["json_schema"]["schema"]["properties"][
+        "agent_input_packages"
+    ]["items"]["properties"]["payload"]
+
+    assert "slot_state" not in payload_schema["properties"]
+    assert "slot_state" not in payload_schema["required"]
 
 
 def test_conversation_response_format_allows_exact_empty_package_contract():
@@ -644,6 +716,36 @@ def test_supervisor_llm_invalid_state_contract_fails_closed(monkeypatch):
     assert state["agent_input_packages"] == []
 
 
+def test_supervisor_llm_invalid_candidate_text_is_discarded(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
+    monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
+    rejected_text = "REJECTED MODEL TEXT MUST NOT REACH USER"
+    monkeypatch.setattr(
+        service,
+        "_request_supervisor_json",
+        lambda *_args: {
+            "next_questions": [
+                {
+                    "field": "unsafe",
+                    "question": rejected_text,
+                }
+            ]
+        },
+    )
+
+    state = service.build_supervisor_state_with_optional_llm(
+        payload={"user_text": "과태료 고지서를 받았어요."},
+        scenario="fine_notice",
+        fallback_builder=_fallback_builder,
+    )
+
+    assert state["llm"]["status"] == "failed"
+    assert state["llm"]["reason"] == "invalid_contract"
+    assert state["next_questions"] == []
+    assert state["missing_fields"] == []
+    assert rejected_text not in json.dumps(state, ensure_ascii=False)
+
+
 def test_supervisor_llm_ready_state_without_agent_packages_fails_closed(monkeypatch):
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
@@ -910,6 +1012,46 @@ def test_supervisor_llm_invalid_plan_contract_fails_closed(monkeypatch):
     assert plan["agent_input_packages"] == []
 
 
+def test_supervisor_llm_plan_missing_package_node_code_fails_closed(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
+    monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
+    candidate = {
+        "routing_intent": "objection_request",
+        "input_summary": {},
+        "required_inputs": [],
+        "pending_questions": [],
+        "agent_input_packages": [{"payload": {"notice_text": "candidate"}}],
+        "steps": [
+            {
+                "node_code": "fine_notice_analysis",
+                "status": "ready",
+                "required_inputs": [],
+                "depends_on": [],
+                "fallback": "limitations",
+            }
+        ],
+        "blocked_reason": None,
+    }
+    monkeypatch.setattr(
+        service,
+        "_request_supervisor_json",
+        lambda *_args: candidate,
+    )
+
+    plan = service.build_analysis_plan_with_optional_llm(
+        payload={"user_text": "plan this"},
+        scenario="fine_notice",
+        requested_status="success",
+        fallback_plan=_fallback_plan(),
+        supervisor_state=_fallback_builder({}, "fine_notice"),
+    )
+
+    assert plan["llm_planner"]["status"] == "failed"
+    assert plan["llm_planner"]["reason"] == "invalid_contract"
+    assert plan["steps"] == []
+    assert plan["agent_input_packages"] == []
+
+
 def test_supervisor_llm_planner_normalizes_registry_safe_steps(monkeypatch):
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -927,11 +1069,7 @@ def test_supervisor_llm_planner_normalizes_registry_safe_steps(monkeypatch):
             "pending_questions": [{"field": "evidence_status", "question": "evidence?"}],
             "agent_input_packages": [
                 {
-                    "schema_version": "agent_input_schema.v1",
                     "node_code": "law_ground_search",
-                    "owner": "techshin31",
-                    "status": "ready",
-                    "missing_fields": [],
                     "payload": {"search_query": "school zone emergency stopping"},
                 },
             ],

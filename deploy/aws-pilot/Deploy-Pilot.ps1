@@ -670,7 +670,7 @@ try {
             )
         }
         $commands += @(
-            "$productionComposeCommand exec -T backend python backend/manage.py smoke_supervisor_conversation_runtime --allow-paid-provider-call --require-llm-used --require-real-agent-results --require-persisted-handoff --require-report --fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --format json",
+            "$productionComposeCommand exec -T backend python backend/manage.py smoke_supervisor_conversation_runtime --allow-paid-provider-call --require-llm-used --require-real-agent-results --require-persisted-handoff --require-report --fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --timeout-seconds 600 --format json",
             "curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve '${appDomain}:443:127.0.0.1' https://${appDomain}/api/health/live/ >/dev/null",
             "curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve '${appDomain}:443:127.0.0.1' https://${appDomain}/api/health/ready/ >/dev/null",
             "ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current",

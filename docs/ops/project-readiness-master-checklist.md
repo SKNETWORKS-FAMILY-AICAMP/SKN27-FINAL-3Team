@@ -70,7 +70,7 @@
 - [x] 주관적 진술·상충 진술·증거 없는 진술 회귀 테스트 — #221 / PR #222
 - [x] Supervisor 입력 스키마 → 역질문 → 호출 계획 → 에이전트 결과 취합 → 사용자 응답의 E2E 계약 테스트 — #229 / PR #230
 - [x] Supervisor LLM/fallback 단계에서도 에이전트 패키지의 첨부파일을 `attachment_id` 선택자로만 보관하고, 임의 메타데이터·원문을 제거하는 사전 정규화 — #231 / PR #232
-- [~] 생성형 에이전트의 실제 연결, mock/대체 모드, 실패 시 사용자 응답을 분리한 런타임 스모크 테스트 — #247. `feat-supervisor-contract-p0`에서 운영 fallback과 검증 계약을 `supervisor_conversation_state.v2`로 일치시키고, Registry 기반 owner/required input 주입, strict Structured Output, 실제 `submit_message()` 4개 라우팅 회귀, 안전한 실패 사유 로그, 단일 production runtime smoke 승격 게이트를 구현했다. 로컬 집중 회귀 `155 passed`, 전체 `test/` `996 passed, 38 skipped`, Django `368 tests`, Compose config, Vite build는 통과했으며, 실제 OpenAI/Agent/Reporting 유료 스모크는 공개 승격 직전 명시 승인 후 `smoke_supervisor_conversation_runtime` 1회로 검증해야 하므로 완료로 표시하지 않음
+- [~] 생성형 에이전트의 실제 연결, mock/대체 모드, 실패 시 사용자 응답을 분리한 런타임 스모크 테스트 — #247. `feat-supervisor-contract-p0`에서 운영 fallback과 검증 계약을 `supervisor_conversation_state.v2`로 일치시키고, Registry 기반 owner/required input 주입, strict Structured Output, 실제 `submit_message()` 4개 라우팅 회귀, 안전한 실패 사유 로그, 배포 Worker loop를 통과하는 단일 production runtime smoke 승격 게이트를 구현했다. 독립 리뷰에서 발견한 nested `slot_state` 권한 침범, inline worker 우회, malformed plan 예외, invalid candidate 재사용도 회귀 테스트와 함께 수정했다. 로컬 집중 회귀 `159 passed`, 전체 `test/` `1000 passed, 38 skipped`, Django `370 tests`, Compose config, Vite build는 통과했으며, 실제 OpenAI/Agent/Reporting 유료 스모크는 공개 승격 직전 명시 승인 후 `smoke_supervisor_conversation_runtime` 1회로 검증해야 하므로 완료로 표시하지 않음
 
 ### A-3. 권한과 소유권 경계
 

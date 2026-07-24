@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from io import StringIO
 from unittest.mock import patch
 
@@ -94,6 +95,8 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
                     "report_ready": True,
                     "analysis_display_persisted": True,
                     "public_result_loaded": True,
+                    "worker_loop_consumed": True,
+                    "worker_completed": True,
                 },
             },
             {
@@ -227,9 +230,20 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
         def run_law(_agent_input, _adapter_context):
             return {"status": "success", "summary": "Fixture law result.", "structured_result": {"matched_laws": []}, "evidence": [], "next_actions": [], "limitations": []}
 
+        def complete_from_external_worker(work_item_id, **_kwargs):
+            from chatbot import repositories
+
+            repositories.process_agent_work_item(work_item_id)
+            return AgentWorkItem.objects.get(work_item_id=work_item_id)
+
         with (
             patch("chatbot.views.submit_message", return_value=chat_response),
             patch("ai.agents.law_ground_search.run_law_ground_search", side_effect=run_law),
+            patch.object(
+                smoke,
+                "_wait_for_worker_completion",
+                side_effect=complete_from_external_worker,
+            ),
         ):
             result = smoke._run_smoke(
                 {
@@ -243,7 +257,47 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
         self.assertEqual(result["llm"]["status"], "used")
         self.assertTrue(result["checks"]["queued"])
         self.assertTrue(result["checks"]["worker_completed"])
+        self.assertTrue(result["checks"]["worker_loop_consumed"])
         self.assertTrue(result["checks"]["public_result_loaded"])
+
+    def test_runtime_does_not_process_queue_inline(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        source = inspect.getsource(smoke._run_smoke)
+
+        self.assertNotIn("process_agent_work_item(", source)
+        self.assertIn("_wait_for_worker_completion(", source)
+
+    def test_worker_wait_is_bounded_without_inline_processing(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        session = ChatSession.objects.create(
+            session_id="ses_worker_wait_timeout",
+            status=ChatSessionStatus.ACTIVE.value,
+        )
+        job = AnalysisJob.objects.create(
+            job_id="job_worker_wait_timeout",
+            session=session,
+        )
+        work_item = AgentWorkItem.objects.create(
+            work_item_id="work_worker_wait_timeout",
+            job=job,
+            status="queued",
+        )
+
+        with (
+            patch.object(smoke.time, "monotonic", side_effect=[0.0, 1.0]),
+            patch.object(smoke.time, "sleep") as sleep,
+        ):
+            result = smoke._wait_for_worker_completion(
+                work_item.work_item_id,
+                timeout_seconds=1,
+                poll_interval_seconds=0.1,
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.status, "queued")
+        sleep.assert_not_called()
 
     def test_runtime_persists_supervisor_handoff_and_ready_report(self) -> None:
         from ai.agents.appeal_decision_flow import graph as appeal_graph
@@ -388,12 +442,23 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
                 "limitations": [],
             }
 
+        def complete_from_external_worker(work_item_id, **_kwargs):
+            from chatbot import repositories
+
+            repositories.process_agent_work_item(work_item_id)
+            return AgentWorkItem.objects.get(work_item_id=work_item_id)
+
         with (
             patch("chatbot.views.submit_message", return_value=chat_response),
             patch.object(fine_notice_graph, "invoke", side_effect=run_fine_notice),
             patch("ai.agents.law_ground_search.run_law_ground_search", side_effect=run_law),
             patch.object(appeal_graph, "invoke", side_effect=run_appeal),
             patch("ai.agents.objection_report_generation.run_objection_report_generation", side_effect=run_report),
+            patch.object(
+                smoke,
+                "_wait_for_worker_completion",
+                side_effect=complete_from_external_worker,
+            ),
         ):
             result = smoke._run_smoke(
                 {
@@ -411,3 +476,4 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
         self.assertTrue(result["checks"]["report_ready"])
         self.assertTrue(result["checks"]["analysis_display_persisted"])
         self.assertTrue(result["checks"]["public_result_loaded"])
+        self.assertTrue(result["checks"]["worker_loop_consumed"])

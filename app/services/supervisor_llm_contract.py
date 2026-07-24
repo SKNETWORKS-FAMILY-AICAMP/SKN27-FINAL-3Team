@@ -10,6 +10,7 @@ from app.services.agent_node_service import NODE_REGISTRY
 
 AGENT_INPUT_SCHEMA_VERSION = "agent_input_schema.v1"
 AGENT_PACKAGE_STATUSES = {"ready", "waiting_for_fields"}
+SERVER_OWNED_PAYLOAD_FIELDS = {"slot_state"}
 
 
 def conversation_response_format(
@@ -260,6 +261,9 @@ def _bounded_payload(candidate: Any, fallback: Any) -> dict[str, Any]:
     candidate_payload = candidate if isinstance(candidate, dict) else {}
     bounded: dict[str, Any] = {}
     for key, fallback_value in fallback_payload.items():
+        if key in SERVER_OWNED_PAYLOAD_FIELDS:
+            bounded[key] = deepcopy(fallback_value)
+            continue
         candidate_value = candidate_payload.get(key, fallback_value)
         if key == "attachments":
             bounded[key] = _approved_attachment_selectors(
@@ -306,7 +310,17 @@ def _package_schemas(value: Any) -> list[dict[str, Any]]:
                         "type": "string",
                         "enum": [node_code],
                     },
-                    "payload": _schema_from_value(package.get("payload", {})),
+                    "payload": _schema_from_value(
+                        {
+                            key: value
+                            for key, value in (
+                                package.get("payload", {})
+                                if isinstance(package.get("payload"), dict)
+                                else {}
+                            ).items()
+                            if key not in SERVER_OWNED_PAYLOAD_FIELDS
+                        }
+                    ),
                 }
             )
         )

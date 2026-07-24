@@ -330,6 +330,7 @@ python backend\manage.py smoke_supervisor_conversation_runtime `
   --require-persisted-handoff `
   --require-report `
   --fine-notice-fixture-s3-uri "s3://<clean-bucket>/canonical/acceptance/<fixture>" `
+  --timeout-seconds 600 `
   --format json
 ```
 
