@@ -211,7 +211,7 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
      GitHub Actions production gate에서 확인하도록 명시
    - 운영 release metadata 주입과 운영 DB smoke, 실제 AWS ALARM/OK·SNS
      수신, 실제 외부 공급자 성공·부분 실패·실패 trace는 사람 게이트
-3. RunPod Serverless Vision 연결 구현
+3. RunPod Serverless Vision 연결 구현 — PR #304
    - 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 검토하고
      `VISION_RUNTIME_PROVIDER=runpod`, signed URL, `/run`·`/status` polling,
      remote stable error code, worker 임시 파일 삭제를 구현 기준으로 채택
