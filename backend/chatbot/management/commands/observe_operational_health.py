@@ -141,6 +141,7 @@ def _safe_failure_snapshot() -> dict:
             "missing_source_count": 0,
             "failed_source_count": 0,
             "stale_source_count": 0,
+            "issue_count": 1,
         },
         "alerts": [
             {

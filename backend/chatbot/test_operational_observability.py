@@ -183,6 +183,7 @@ class OperationalObservabilityTests(TestCase):
                 "missing_source_count": 0,
                 "failed_source_count": 0,
                 "stale_source_count": 0,
+                "issue_count": 0,
             },
         )
         self.assertEqual(snapshot["alerts"], [])
@@ -194,6 +195,7 @@ class OperationalObservabilityTests(TestCase):
             legal_run_summary_path="Z:/does-not-exist/run_summary.json",
         )
         self.assertEqual(missing["legal_data"]["status"], "missing")
+        self.assertEqual(missing["legal_data"]["issue_count"], 1)
         self.assertEqual(
             [item["code"] for item in missing["alerts"]],
             ["legal_data_missing"],
@@ -223,6 +225,7 @@ class OperationalObservabilityTests(TestCase):
             )
 
         self.assertEqual(stale["legal_data"]["stale_source_count"], 1)
+        self.assertEqual(stale["legal_data"]["issue_count"], 1)
         self.assertEqual(
             [item["code"] for item in stale["alerts"]],
             ["legal_data_stale"],

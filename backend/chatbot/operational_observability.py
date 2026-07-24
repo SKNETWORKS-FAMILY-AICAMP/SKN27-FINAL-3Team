@@ -174,12 +174,12 @@ def _legal_data_snapshot(
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     normalized_path = str(path or "").strip()
     if not normalized_path:
-        return {"status": "not_configured"}, []
+        return {"status": "not_configured", "issue_count": 0}, []
 
     summary_path = Path(normalized_path)
     if not summary_path.is_file():
         return (
-            {"status": "missing"},
+            {"status": "missing", "issue_count": 1},
             [_alert("legal_data_missing", severity="critical")],
         )
 
@@ -201,7 +201,7 @@ def _legal_data_snapshot(
         ValueError,
     ):
         return (
-            {"status": "invalid"},
+            {"status": "invalid", "issue_count": 1},
             [_alert("monitor_configuration_invalid", severity="critical")],
         )
 
@@ -215,9 +215,11 @@ def _legal_data_snapshot(
         "missing_source_count": missing_count,
         "failed_source_count": failed_count,
         "stale_source_count": stale_count,
+        "issue_count": missing_count + failed_count + stale_count,
     }
     if errors:
         legal_data["status"] = "invalid"
+        legal_data["issue_count"] = max(1, legal_data["issue_count"])
         return (
             legal_data,
             [_alert("monitor_configuration_invalid", severity="critical")],

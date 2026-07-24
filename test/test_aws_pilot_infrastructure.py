@@ -84,6 +84,69 @@ def test_compute_is_one_ssm_only_x86_instance_with_encrypted_gp3_and_eip() -> No
     assert "sha256sum --check" in user_data
 
 
+def test_operational_monitor_connects_safe_health_metrics_to_cloudwatch() -> None:
+    compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
+    services = compose["services"]
+    assert "ops-monitor" in services
+    monitor = services["ops-monitor"]
+    assert monitor["command"] == [
+        "python",
+        "backend/manage.py",
+        "observe_operational_health",
+        "--loop",
+        "--interval-seconds",
+        "60",
+    ]
+    assert monitor["logging"]["driver"] == "awslogs"
+    assert monitor["logging"]["options"]["mode"] == "non-blocking"
+    assert monitor["logging"]["options"]["max-buffer-size"] == "1m"
+    assert (
+        "/opt/skn27-pilot/operational-evidence:/run/operational-evidence:ro"
+        in monitor["volumes"]
+    )
+    assert "ports" not in monitor
+
+    source = _terraform_source()
+    assert 'resource "aws_cloudwatch_log_group" "operational_health"' in source
+    for metric_filter in (
+        "heartbeat",
+        "queue_oldest_age",
+        "stale_running",
+        "worker_failures",
+        "provider_failures",
+        "legal_data_failures",
+    ):
+        assert (
+            f'resource "aws_cloudwatch_log_metric_filter" "{metric_filter}"'
+            in source
+        )
+    assert 'resource "aws_sns_topic" "operational_alerts"' in source
+    assert 'resource "aws_sns_topic_subscription" "operational_email"' in source
+    assert 'count = var.operational_alert_email == "" ? 0 : 1' in source
+    assert 'operational_metric_namespace = "SKN27/Pilot"' in source
+
+    iam = (TERRAFORM_DIR / "iam.tf").read_text(encoding="utf-8")
+    assert '"logs:CreateLogStream"' in iam
+    assert '"logs:PutLogEvents"' in iam
+    assert "aws_cloudwatch_log_group.operational_health.arn" in iam
+    assert '"cloudwatch:PutMetricData"' not in iam
+
+    outputs = (TERRAFORM_DIR / "outputs.tf").read_text(encoding="utf-8")
+    assert 'output "operational_log_group_name"' in outputs
+    assert 'output "operational_alert_topic_arn"' in outputs
+
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+    assert 'Get-TerraformValue $outputs "operational_log_group_name"' in deploy
+    assert "OPERATIONAL_LOG_GROUP" in deploy
+    assert "PILOT_OPS_MONITOR_IP" in deploy
+    assert "install -d -m 0750 /opt/skn27-pilot/operational-evidence" in deploy
+    runtime_env = _read_deploy("runtime.env.example")
+    assert (
+        "OPERATIONAL_LEGAL_RUN_SUMMARY_PATH=/run/operational-evidence/run_summary.json"
+        in runtime_env
+    )
+
+
 def test_database_is_private_single_az_encrypted_postgres_with_safe_defaults() -> None:
     source = _terraform_source()
     assert len(re.findall(r'resource\s+"aws_db_instance"', source)) == 1
@@ -515,9 +578,14 @@ def test_eight_gib_host_has_bounded_services_logs_and_capacity_preflight() -> No
     total_mib = 0
     for name, config in services.items():
         assert "mem_limit" in config, name
-        assert config["logging"]["driver"] == "json-file", name
-        assert config["logging"]["options"]["max-size"] == "10m", name
-        assert config["logging"]["options"]["max-file"] == "3", name
+        if name == "ops-monitor":
+            assert config["logging"]["driver"] == "awslogs"
+            assert config["logging"]["options"]["mode"] == "non-blocking"
+            assert config["logging"]["options"]["max-buffer-size"] == "1m"
+        else:
+            assert config["logging"]["driver"] == "json-file", name
+            assert config["logging"]["options"]["max-size"] == "10m", name
+            assert config["logging"]["options"]["max-file"] == "3", name
         value = str(config["mem_limit"]).lower()
         assert value.endswith("m"), (name, value)
         total_mib += int(value[:-1])
