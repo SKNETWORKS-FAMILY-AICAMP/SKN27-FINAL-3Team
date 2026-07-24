@@ -198,6 +198,7 @@ try {
         "APP_PASSWORD=`$(cat `$WORK/app-password); docker run --rm --env-file `$WORK/libpq.env '$postgresMaintenanceImageRef' psql -v ON_ERROR_STOP=1 -c `"ALTER ROLE $appUsername PASSWORD '`$APP_PASSWORD'`"",
         "docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python backend/manage.py shell -c `"from django.db import connection; assert connection.vendor == 'postgresql'; cursor = connection.cursor(); cursor.execute('select current_database()'); assert cursor.fetchone()[0] == '$databaseName'`"",
         "docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python backend/manage.py migrate --noinput",
+        "docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python -m etl.fault_cases.src.review_case.db_loading.schema_manager --apply-schema",
         "docker run --rm --env-file `$WORK/libpq.env '$postgresMaintenanceImageRef' psql -v ON_ERROR_STOP=1 -c 'GRANT CONNECT ON DATABASE $databaseName TO $appUsername' -c 'GRANT USAGE ON SCHEMA public TO $appUsername' -c 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $appUsername' -c 'GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $appUsername' -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $appUsername' -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $appUsername'",
         "cleanup_db_secrets",
         "trap - EXIT"

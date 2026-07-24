@@ -132,6 +132,26 @@ def test_review_case_schema_uses_1024_dimensions() -> None:
     assert "text-embedding-3-small" not in schema
 
 
+def test_review_case_schema_creates_canonical_openai_hnsw_index() -> None:
+    schema = (ROOT / "storage/schemas/review_case_db_schema.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        "CREATE INDEX IF NOT EXISTS "
+        "idx_review_case_chunk_embeddings_cosine_hnsw"
+    ) in schema
+    assert "USING hnsw (embedding_vector vector_cosine_ops)" in schema
+    assert "WHERE embedding_provider = 'openai'" in schema
+    assert "AND embedding_model = 'text-embedding-3-large'" in schema
+    assert (
+        "AND embedding_version = "
+        "'openai_text_embedding_3_large_1024_chunk_text_v1'"
+    ) in schema
+    assert "AND embedding_dim = 1024" in schema
+    assert "AND embedding_vector IS NOT NULL;" in schema
+
+
 def test_review_case_readiness_and_index_are_scoped_to_provider() -> None:
     source = (
         ROOT

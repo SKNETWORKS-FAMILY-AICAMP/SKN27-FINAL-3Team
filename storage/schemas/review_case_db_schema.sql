@@ -1,5 +1,5 @@
 -- Review case RAG schema.
--- Apply this file to review_case_db.
+-- Apply this file to the shared law_db database.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -333,7 +333,11 @@ ON review_case_toc_items (reference_chart_key);
 CREATE INDEX IF NOT EXISTS idx_review_case_toc_case_links_review_no
 ON review_case_toc_case_links (review_no);
 
--- Create the HNSW index after embeddings are loaded.
--- CREATE INDEX IF NOT EXISTS idx_review_case_chunk_embeddings_cosine_hnsw
--- ON review_case_chunk_embeddings
--- USING hnsw (embedding_vector vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_review_case_chunk_embeddings_cosine_hnsw
+ON review_case_chunk_embeddings
+USING hnsw (embedding_vector vector_cosine_ops)
+WHERE embedding_provider = 'openai'
+  AND embedding_model = 'text-embedding-3-large'
+  AND embedding_version = 'openai_text_embedding_3_large_1024_chunk_text_v1'
+  AND embedding_dim = 1024
+  AND embedding_vector IS NOT NULL;
