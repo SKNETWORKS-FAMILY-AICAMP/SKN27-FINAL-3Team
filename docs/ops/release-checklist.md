@@ -18,13 +18,14 @@
 
 ## 2. 배포 전 P1 확인
 
-- [x] 자동 테스트가 통과했다. — PR #300 병합 전 CI 사용자 확인, 브라우저 QA 집중 회귀 `48 passed`, Ruff 통과, Vite production build 성공
+- [x] 자동 테스트가 통과했다. — PR #300 브라우저 QA 회귀에 이어 #299 실행 재현성 단계 전체 `test/` 회귀 `897 passed, 38 skipped`, Django Worker/DB 통합 `40 passed`, Ruff 통과
 - [x] 정적 HTML 산출물이 UTF-8로 저장되어 있다. — `test_static_mvp_html_is_utf8_korean_service_screen` 및 PR #300 Vite production build 확인
 - [x] 운영 문서가 `docs/ops/`에 존재한다.
 - [ ] 장애 대응 절차가 문서화되어 있다.
 - [ ] 외부 API 장애 시 사용자 안내와 timeout 기준이 문서화되어 있다.
 - [ ] 과도한 요청과 비용 증가를 제한하는 계획이 있다.
-- [~] 법령 데이터 최신성 게이트가 자동화되어 있다. — source별 run summary와 stale·missing·failed 차단 CLI·runbook 구현, 운영 승인 임계값·운영 DB 실증·CloudWatch 연결은 남음
+- [~] 법령 데이터 최신성 게이트가 자동화되어 있다. — source별 run summary와 stale·missing·failed 차단 CLI·runbook은 PR #301로 `dev` 병합 완료(`8cc2fc8`); 운영 승인 임계값·운영 DB 실증·CloudWatch 연결은 남음
+- [~] 분석 결과의 실행 버전을 운영자가 조회할 수 있다. — model·prompt version/hash, Agent runtime·adapter·release version, embedding model, 검색 dataset version·시각을 `job_id`로 조회하는 command와 runbook 구현; 운영 release metadata 주입과 실제 DB smoke는 남음
 
 ## 3. 배포 승인 기록
 

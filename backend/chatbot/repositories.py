@@ -4792,6 +4792,78 @@ def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
     }
 
 
+def get_analysis_job_provenance(job_id: str) -> dict[str, Any] | None:
+    """Return an operator-safe version trace without user or retrieved text."""
+
+    job = (
+        AnalysisJob.objects.prefetch_related("agent_invocations", "retrieval_events")
+        .filter(job_id=_text(job_id))
+        .first()
+    )
+    if job is None:
+        return None
+
+    metadata = _dict_or_empty(job.metadata)
+    supervisor_state = _dict_or_empty(metadata.get("supervisor_state"))
+    analysis_plan = _dict_or_empty(metadata.get("analysis_plan"))
+    executions = []
+    for invocation in job.agent_invocations.order_by("created_at"):
+        invocation_metadata = _dict_or_empty(invocation.metadata)
+        executions.append(
+            {
+                "invocation_id": invocation.invocation_id,
+                "execution_id": _text(invocation_metadata.get("execution_id")),
+                "node_code": invocation.node_code,
+                "status": invocation.status,
+                "attempt_no": invocation.attempt_no,
+                "execution_mode": invocation.execution_mode,
+                "started_at": invocation.started_at.isoformat() if invocation.started_at else None,
+                "completed_at": invocation.completed_at.isoformat() if invocation.completed_at else None,
+                "latency_ms": invocation.latency_ms,
+                "retryable": invocation.retryable,
+                "error_code": invocation.error_code,
+                "provenance": _safe_execution_provenance(
+                    invocation_metadata.get("provenance")
+                ),
+            }
+        )
+
+    retrievals = []
+    for event in job.retrieval_events.order_by("created_at"):
+        event_metadata = _dict_or_empty(event.metadata)
+        retrievals.append(
+            {
+                "retrieval_event_id": event.retrieval_event_id,
+                "invocation_id": event.invocation.invocation_id if event.invocation_id else None,
+                "execution_id": _text(event_metadata.get("execution_id")),
+                "status": _text(event_metadata.get("retrieval_status")),
+                "backend": _text(event_metadata.get("retrieval_backend")) or event.query_type,
+                "result_count": event.result_count,
+                "source_refs": _safe_text_list(event.source_refs),
+                "embedding": _safe_embedding_trace(event_metadata.get("embedding")),
+                "data_provenance": _safe_legal_data_provenance(
+                    event_metadata.get("data_provenance")
+                ),
+                "created_at": event.created_at.isoformat(),
+            }
+        )
+
+    return {
+        "contract_version": "analysis_job_provenance.v1",
+        "job_id": job.job_id,
+        "analysis_plan_id": job.analysis_plan_id,
+        "status": job.status,
+        "supervisor": {
+            "conversation": _safe_model_prompt_trace(supervisor_state.get("llm")),
+            "planner": _safe_model_prompt_trace(analysis_plan.get("llm_planner")),
+        },
+        "executions": executions,
+        "retrievals": retrievals,
+        "created_at": job.created_at.isoformat(),
+        "updated_at": job.updated_at.isoformat(),
+    }
+
+
 def _analysis_job_display_payload(
     job: AnalysisJob,
     display_result: AnalysisDisplayResult | None,
@@ -8085,7 +8157,7 @@ def _agent_invocation_metadata(
     final_status: str,
 ) -> dict[str, Any]:
     plan_step = execution.get("plan_step") if isinstance(execution.get("plan_step"), dict) else {}
-    return {
+    metadata = {
         "source": "canonical_analysis_job",
         "orchestration_policy": "sync_worker_progress.v1",
         "queue_runtime": "inline_sync",
@@ -8097,6 +8169,11 @@ def _agent_invocation_metadata(
         "status_timeline": _agent_invocation_status_timeline(final_status),
         "created_at": agent_output.get("created_at") or execution.get("created_at"),
     }
+    if isinstance(execution.get("provenance"), dict):
+        metadata["provenance"] = _safe_execution_provenance(
+            execution.get("provenance")
+        )
+    return metadata
 
 
 def _persist_retrieval_event_for_invocation(
@@ -8146,6 +8223,15 @@ def _persist_retrieval_event_for_invocation(
                 "fallback_from": retrieval.get("fallback_from"),
                 "attempted_backends": retrieval.get("attempted_backends") or [],
                 "embedding": retrieval.get("embedding") or {},
+                **(
+                    {
+                        "data_provenance": _safe_legal_data_provenance(
+                            retrieval.get("data_provenance")
+                        )
+                    }
+                    if isinstance(retrieval.get("data_provenance"), dict)
+                    else {}
+                ),
                 "sql_tables": retrieval.get("sql_tables") or [],
                 "agent_result_id": agent_result.result_id if agent_result else None,
                 "execution_id": execution.get("execution_id"),
@@ -8264,13 +8350,66 @@ def _agent_result_raw_output(
     agent_output: dict[str, Any],
 ) -> dict[str, Any]:
     del agent_output
-    return {
+    raw_output = {
         "source": "agent_execution_metadata.v1",
         "execution_id": _text(execution.get("execution_id")),
         "execution_mode": _text(execution.get("execution_mode")),
         "adapter_context": _safe_adapter_context(execution.get("adapter_context")),
         "plan_step": _safe_plan_step(execution.get("plan_step")),
         "created_at": _text(execution.get("created_at")),
+    }
+    if isinstance(execution.get("provenance"), dict):
+        raw_output["provenance"] = _safe_execution_provenance(
+            execution.get("provenance")
+        )
+    return raw_output
+
+
+def _safe_execution_provenance(value: Any) -> dict[str, Any]:
+    provenance = _dict_or_empty(value)
+    return {
+        "contract_version": _text(provenance.get("contract_version")),
+        "release_version": _text(provenance.get("release_version")),
+        "agent_runtime_version": _text(provenance.get("agent_runtime_version")),
+        "agent_version": _text(provenance.get("agent_version")),
+        "adapter_contract_version": _text(provenance.get("adapter_contract_version")),
+        "job_id": _text(provenance.get("job_id")),
+        "execution_id": _text(provenance.get("execution_id")),
+        "node_code": _text(provenance.get("node_code")),
+        "execution_mode": _text(provenance.get("execution_mode")),
+    }
+
+
+def _safe_legal_data_provenance(value: Any) -> dict[str, Any]:
+    provenance = _dict_or_empty(value)
+    return {
+        "contract_version": _text(provenance.get("contract_version")),
+        "dataset_version": _text(provenance.get("dataset_version")),
+        "verified_at": _text(provenance.get("verified_at")) or None,
+        "effective_at": _text(provenance.get("effective_at")) or None,
+        "retrieved_at": _text(provenance.get("retrieved_at")) or None,
+    }
+
+
+def _safe_embedding_trace(value: Any) -> dict[str, Any]:
+    embedding = _dict_or_empty(value)
+    return {
+        "provider": _text(embedding.get("provider")),
+        "model": _text(embedding.get("model")),
+        "dimensions": _positive_int_or_none(embedding.get("dimensions")),
+    }
+
+
+def _safe_model_prompt_trace(value: Any) -> dict[str, Any]:
+    trace = _dict_or_empty(value)
+    return {
+        "role": _text(trace.get("role")),
+        "status": _text(trace.get("status")),
+        "provider": _text(trace.get("provider")),
+        "model": _text(trace.get("model")),
+        "prompt_version": _text(trace.get("prompt_version")),
+        "prompt_sha256": _text(trace.get("prompt_sha256")),
+        "reason": _text(trace.get("reason")),
     }
 
 

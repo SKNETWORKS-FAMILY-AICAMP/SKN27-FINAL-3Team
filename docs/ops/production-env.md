@@ -109,10 +109,16 @@ LEGAL_RAG_VECTOR_ENABLED=1
 LEGAL_RAG_QUERY_EMBEDDING_PROVIDER=sentence-transformers
 LEGAL_RAG_QUERY_EMBEDDING_MODEL=intfloat/multilingual-e5-large
 LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS=1024
+APP_RELEASE_VERSION=<immutable-release-tag-or-commit>
+LEGAL_DATASET_VERSION=<validated-run-summary-dataset-version>
+LEGAL_DATASET_VERIFIED_AT=<validated-run-summary-finished-at>
 LAW_GROUND_SEARCH_ENABLE_NEO4J=0
 ```
 
 Load ETL output into `law_chunks` and `law_embeddings` before serving traffic.
+`LEGAL_DATASET_VERSION` and `LEGAL_DATASET_VERIFIED_AT` are non-secret release
+evidence values. Copy them only from the same `run_summary.json` that passed the
+freshness gate; never type a newer timestamp to bypass that gate.
 If pgvector is unavailable or has no result, the runtime returns a safe
 unavailable/empty result; it does not fall back to Django table search.
 Keep `LAW_GROUND_SEARCH_ENABLE_NEO4J=0` unless the Neo4j hint graph and legal

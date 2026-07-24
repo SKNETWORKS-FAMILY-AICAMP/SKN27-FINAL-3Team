@@ -169,6 +169,17 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
 2. #299 `[P1] 운영 데이터 최신성·관측·재현성 증적 보강`
    - source별 재색인 run summary, 큐·외부 장애 관측,
      모델·프롬프트·Agent·검색 데이터 버전, CloudWatch 임계값
-   - 후속 브랜치 `feat-299-operational-evidence`에서 법령 source별
-     `legal_ingestion_run_summary.v2`, 결정적 data version,
-     stale·missing·failed 검증 CLI와 운영 runbook을 첫 독립 단계로 구현
+   - PR #301에서 법령 source별 `legal_ingestion_run_summary.v2`,
+     결정적 data version, stale·missing·failed 검증 CLI와 운영 runbook을
+     첫 독립 단계로 `dev` 병합 완료(`8cc2fc8`)
+   - 후속 브랜치 `feat-299-execution-provenance`에서 모델·프롬프트·Agent·
+     검색 데이터 버전과 실행별 운영 조회 증적을 구현
+   - Supervisor model·prompt version/hash, Agent runtime·adapter·release
+     version, 검색 embedding model과 dataset version·검증/기준/조회 시각을
+     기존 JSON metadata 경계에 저장
+   - `show_analysis_job_provenance --job-id <JOB_ID> --format json`으로
+     원문 query·OCR 전문·비밀값 없이 조회
+   - 로컬 검증: 전체 `test/` 회귀 `897 passed, 38 skipped`, Django
+     Worker/DB·operator 조회 통합 `40 passed`, Ruff 통과
+   - 운영 release metadata 주입, 운영 DB smoke, 실제 외부 공급자
+     성공·부분 실패·실패 trace와 CloudWatch 연결은 남음
