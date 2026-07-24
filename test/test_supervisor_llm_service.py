@@ -4,6 +4,117 @@ from copy import deepcopy
 import pytest
 
 from app.services import supervisor_llm_service as service
+from app.services import supervisor_llm_contract as service_contract
+
+
+def test_enrich_supervisor_state_injects_registry_owner_and_package_fields():
+    fallback = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "agent_execution_ready",
+        "missing_fields": [],
+        "agent_input_packages": [
+            {
+                "schema_version": "agent_input_schema.v1",
+                "node_code": "law_ground_search",
+                "status": "ready",
+                "required_inputs": ["user_text|attachments"],
+                "payload": {"user_text": "school zone", "attachments": []},
+            }
+        ],
+        "reporting_payload": None,
+    }
+
+    enriched, error = service_contract.enrich_supervisor_state(fallback)
+
+    assert error is None
+    assert enriched is not None
+    assert enriched["contract_version"] == "supervisor_conversation_state.v2"
+    assert enriched["agent_input_packages"][0]["owner"] == "techshin31"
+    assert enriched["agent_input_packages"][0]["missing_fields"] == []
+    assert enriched["agent_input_packages"][0]["status"] == "ready"
+    assert enriched["agent_input_packages"][0]["required_inputs"] == [
+        "law_code|violation_text|search_query"
+    ]
+    assert enriched["reporting_payload"] is None
+
+
+def test_enrich_supervisor_state_preserves_empty_accident_packages():
+    fallback = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "need_fact_confirmation",
+        "missing_fields": [],
+        "agent_input_packages": [],
+        "reporting_payload": None,
+    }
+
+    enriched, error = service_contract.enrich_supervisor_state(fallback)
+
+    assert error is None
+    assert enriched is not None
+    assert enriched["stage"] == "need_fact_confirmation"
+    assert enriched["agent_input_packages"] == []
+
+
+def test_enrich_supervisor_state_rejects_unknown_node_without_payload_leak():
+    secret = "sk-private-never-log"
+    fallback = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "agent_execution_ready",
+        "agent_input_packages": [
+            {
+                "node_code": "unknown_agent",
+                "payload": {"user_text": secret},
+            }
+        ],
+        "reporting_payload": None,
+    }
+
+    enriched, error = service_contract.enrich_supervisor_state(fallback)
+
+    assert enriched is None
+    assert error == "registry_node_missing"
+    assert secret not in error
+
+
+def test_normalize_candidate_packages_keeps_registry_controls_and_bounded_payload():
+    fallback = [
+        {
+            "schema_version": "agent_input_schema.v1",
+            "node_code": "law_ground_search",
+            "status": "ready",
+            "required_inputs": ["user_text|attachments"],
+            "payload": {
+                "user_text": "fallback",
+                "attachments": [{"attachment_id": "att_approved"}],
+            },
+        }
+    ]
+    candidate = [
+        {
+            "node_code": "law_ground_search",
+            "owner": "attacker",
+            "payload": {
+                "user_text": "candidate",
+                "attachments": [
+                    {"attachment_id": "att_approved", "storage_uri": "s3://private"},
+                    {"attachment_id": "att_unknown"},
+                ],
+                "untrusted_payload_field": "drop-me",
+            },
+        }
+    ]
+
+    packages, error = service_contract.normalize_candidate_packages(candidate, fallback)
+
+    assert error is None
+    assert packages is not None
+    assert packages[0]["owner"] == "techshin31"
+    assert packages[0]["missing_fields"] == []
+    assert packages[0]["status"] == "ready"
+    assert packages[0]["payload"] == {
+        "user_text": "candidate",
+        "attachments": [{"attachment_id": "att_approved"}],
+    }
 
 
 def _fallback_builder(_payload, _scenario):
