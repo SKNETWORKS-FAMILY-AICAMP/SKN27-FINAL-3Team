@@ -196,6 +196,12 @@ def test_database_is_private_single_az_encrypted_postgres_with_safe_defaults() -
     assert re.search(r'name\s*=\s*"rds\.force_ssl"', source)
 
 
+def test_pilot_runtime_uses_law_db_for_review_case_rag() -> None:
+    runtime_env = _read_deploy("runtime.env.example")
+
+    assert "REVIEW_CASE_DB=law_db" in runtime_env
+
+
 def test_private_s3_and_ecr_resources_have_encryption_and_lifecycle_controls() -> None:
     source = _terraform_source()
     assert len(re.findall(r'resource\s+"aws_s3_bucket"\s+"(clean|quarantine)"', source)) == 2
