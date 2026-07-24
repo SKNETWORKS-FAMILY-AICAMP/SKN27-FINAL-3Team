@@ -1,17 +1,38 @@
+import ast
 import json
 import importlib
+import os
 import sys
 import types
 import unittest
+import pytest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from ai.vision.build_supervisor_handoff import build_handoff
-from ai.vision.run_to_supervisor import _checkpoint_files, run, select_yolo_model
+from ai.vision.category_vlm_config import load_experiment_config
+from ai.vision.run_to_supervisor import _checkpoint_files, infer_videomae, run, select_yolo_model
 
 
 class VisionRunToSupervisorTest(unittest.TestCase):
+    def test_shared_frame_defaults_are_32(self):
+        with patch.dict(os.environ, {}, clear=True):
+            experiment = load_experiment_config("car_vs_car")
+
+        self.assertEqual(experiment.frame_count, 32)
+        self.assertEqual(experiment.vlm_input_frame_count, 32)
+        pipeline_tree = ast.parse(
+            Path("ai/vision/pipeline.py").read_text(encoding="utf-8")
+        )
+        function = next(
+            node
+            for node in pipeline_tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "extract_keyframes"
+        )
+        self.assertEqual(ast.literal_eval(function.args.defaults[-1]), 32)
+
     def test_yolo_detection_module_is_not_empty(self):
         with patch.dict(sys.modules, {"ultralytics": types.SimpleNamespace(YOLO=object)}):
             models = importlib.import_module("ai.vision.models")
@@ -161,6 +182,33 @@ class VisionRunToSupervisorTest(unittest.TestCase):
         self.assertEqual(prediction["label"], "car_vs_pedestrian")
         self.assertEqual(prediction["raw_label"], "차대보행자")
         self.assertEqual(model, "yolo11n.pt")
+
+
+def test_auto_device_resolves_to_cpu_in_both_inference_paths(monkeypatch, tmp_path):
+    import torch
+    from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
+
+    from ai.vision.trained_category_classifier import TrainedCategoryClassifier
+
+    class DeviceResolved(Exception):
+        pass
+
+    def cpu_only_device(value):
+        assert value == "cpu"
+        raise DeviceResolved
+
+    checkpoint = tmp_path / "checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "config.json").write_text("{}", encoding="utf-8")
+    (checkpoint / "model.safetensors").write_bytes(b"x")
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch, "device", cpu_only_device)
+
+    with pytest.raises(DeviceResolved):
+        infer_videomae(tmp_path / "video.mp4", checkpoint, 32, "auto")
+    with pytest.raises(DeviceResolved):
+        TrainedCategoryClassifier(checkpoint, device_name="auto")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,4 @@
-"""Extract representative key frames from a raw accident video.
-
-This is the first Vision POC step: read one video, sample frames, and write
-metadata for later detection/schema conversion.
-"""
+"""Extract representative key frames from an accident video."""
 from pathlib import Path
 import json
 
@@ -29,7 +25,7 @@ def find_first_video() -> Path:
     return videos[0]
 
 
-def extract_keyframes(video_path: Path, frame_count_target: int = 5):
+def extract_keyframes(video_path: Path, frame_count_target: int = 32):
     FRAME_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -116,7 +112,7 @@ def extract_keyframes(video_path: Path, frame_count_target: int = 5):
 
 def main():
     video_path = find_first_video()
-    output_path, output = extract_keyframes(video_path, frame_count_target=5)
+    output_path, output = extract_keyframes(video_path, frame_count_target=32)
 
     print(f"source_video: {output['source_video']}")
     print(f"total_frames: {output['video_metadata']['total_frames']}")

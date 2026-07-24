@@ -27,9 +27,9 @@ def infer_videomae(video: Path, checkpoint: Path, frame_count: int, device_name:
     import torch
     from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
 
-    from ai.vision.train_videomae_classifier import read_video_frames
+    from ai.vision.train_videomae_classifier import choose_device, read_video_frames
 
-    device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else device_name)
+    device = choose_device(device_name)
     frames = read_video_frames(video, frame_count)
     processor = VideoMAEImageProcessor.from_pretrained(checkpoint)
     model = VideoMAEForVideoClassification.from_pretrained(checkpoint).to(device).eval()
@@ -60,10 +60,12 @@ def infer_videomae(video: Path, checkpoint: Path, frame_count: int, device_name:
 
 
 def _json_object(text: str) -> dict[str, Any]:
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end < start:
-        raise ValueError("Qwen response did not contain a JSON object")
-    return json.loads(text[start : end + 1])
+    from ai.vision.vlm_json import parse_vlm_json
+
+    value, valid, error = parse_vlm_json(text)
+    if not valid:
+        raise ValueError(error)
+    return value
 
 
 def analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, device_name: str) -> dict[str, Any]:
@@ -77,33 +79,48 @@ def analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, devic
     import torch
     from qwen_vl_utils import process_vision_info
     from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    from ai.vision.vlm_json import VLM_JSON_PROMPT, VLM_JSON_RETRY_PROMPT
 
     selected = frame_paths[:max_frames]
-    prompt = (
-        "Analyze these accident-video key frames. Return JSON only with keys: summary, "
-        "visible_objects, predicted_accident_target, accident_target_evidence, accident_visible, "
-        "collision_moment_visible, accident_situation, scene_conditions, uncertainties. "
-        "predicted_accident_target must be one of car_vs_car, pedestrian, motorcycle, bicycle, uncertain."
-    )
-    content = [{"type": "image", "image": str(Path(path).resolve()), "max_pixels": 640 * 360} for path in selected]
-    content.append({"type": "text", "text": prompt})
-    messages = [{"role": "user", "content": content}]
     processor = AutoProcessor.from_pretrained(model_name)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         model_name, torch_dtype="auto", device_map="auto" if device_name == "auto" else device_name
     ).eval()
-    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, video_inputs = process_vision_info(messages)
-    inputs = processor(text=[text], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt").to(model.device)
-    with torch.inference_mode():
-        generated = model.generate(**inputs, max_new_tokens=256, do_sample=False, use_cache=False)
-    trimmed = [output[len(source) :] for source, output in zip(inputs.input_ids, generated)]
-    raw = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    result = _json_object(raw)
-    result.update({"valid": True, "model_name": model_name, "frame_count": len(selected)})
-    del model, inputs
+    last_error = "json_incomplete:no_attempt"
+    result = None
+    for prompt in (VLM_JSON_PROMPT, VLM_JSON_RETRY_PROMPT):
+        content = [
+            {"type": "image", "image": str(Path(path).resolve()), "max_pixels": 640 * 360}
+            for path in selected
+        ]
+        content.append({"type": "text", "text": prompt})
+        messages = [{"role": "user", "content": content}]
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        image_inputs, video_inputs = process_vision_info(messages)
+        inputs = processor(
+            text=[text], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt"
+        ).to(model.device)
+        with torch.inference_mode():
+            generated = model.generate(
+                **inputs, max_new_tokens=512, do_sample=False, use_cache=False
+            )
+        trimmed = [output[len(source) :] for source, output in zip(inputs.input_ids, generated)]
+        raw = processor.batch_decode(
+            trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0]
+        try:
+            result = _json_object(raw)
+        except ValueError as exc:
+            last_error = str(exc)
+        del inputs, generated
+        if result is not None:
+            break
+    del model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if result is None:
+        raise ValueError(last_error)
+    result.update({"valid": True, "model_name": model_name, "frame_count": len(selected)})
     return result
 
 
@@ -126,19 +143,24 @@ def select_yolo_model(
         raise ValueError(f"Invalid VideoMAE confidence: {score}")
     if not 0 <= min_confidence <= 1:
         raise ValueError("min_confidence must be in [0, 1]")
-    prediction = {**prediction, "label": label, "raw_label": raw_label, "requires_review": score < min_confidence}
+    prediction = {
+        **prediction,
+        "label": label,
+        "raw_label": raw_label,
+        "requires_review": score < min_confidence,
+    }
     return prediction, override or BEST_YOLO_MODELS[label]
 
 
 def safe_analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, device_name: str) -> dict[str, Any]:
     try:
         return analyze_qwen(frame_paths, model_name, max_frames, device_name)
-    except Exception as exc:
+    except Exception:
         return {
             "valid": False,
-            "error": f"{type(exc).__name__}: {exc}",
+            "error_code": "vision_qwen_unavailable",
             "requires_review": True,
-            "limitations": ["Qwen analysis failed; VideoMAE and YOLO results remain available."],
+            "limitations": ["Qwen analysis was unavailable; VideoMAE and YOLO results remain available."],
         }
 
 

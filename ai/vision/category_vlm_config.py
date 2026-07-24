@@ -87,7 +87,7 @@ def load_experiment_config(category_key: str) -> ExperimentConfig:
     return ExperimentConfig(
         max_videos=_positive_int("VISION_MAX_VIDEOS", 100),
         analysis_sample_count=_positive_int("VISION_ANALYSIS_SAMPLE_COUNT", 100),
-        frame_count=_positive_int("VISION_FRAME_COUNT", 100),
+        frame_count=_positive_int("VISION_FRAME_COUNT", 32),
         vlm_input_frame_count=_positive_int("VISION_VLM_INPUT_FRAME_COUNT", 32),
         yolo_conf=confidence,
         yolo_imgsz=_positive_int("VISION_YOLO_IMGSZ", 960),
