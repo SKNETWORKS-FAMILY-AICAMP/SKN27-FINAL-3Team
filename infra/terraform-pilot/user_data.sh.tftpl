@@ -2,7 +2,7 @@
 set -euo pipefail
 
 dnf update -y
-dnf install -y docker curl unzip
+dnf install -y docker unzip
 systemctl enable --now docker amazon-ssm-agent
 
 install -d -m 0755 /etc/docker

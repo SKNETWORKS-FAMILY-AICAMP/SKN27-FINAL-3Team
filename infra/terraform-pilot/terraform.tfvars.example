@@ -1,6 +1,11 @@
 budget_alert_email = "owner@example.org"
 budget_limit_usd   = 50
 
+# AWS Free plan accounts can use this x86 8 GiB instance in Seoul and require
+# one-day RDS automated backup retention. Paid plans may keep the defaults.
+# instance_type                    = "m7i-flex.large"
+# database_backup_retention_days   = 1
+
 # Keep database_deletion_protection enabled except during an approved teardown.
 database_deletion_protection = true
 

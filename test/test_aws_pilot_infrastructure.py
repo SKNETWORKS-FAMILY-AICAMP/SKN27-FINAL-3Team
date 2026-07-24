@@ -84,6 +84,13 @@ def test_compute_is_one_ssm_only_x86_instance_with_encrypted_gp3_and_eip() -> No
     assert "sha256sum --check" in user_data
 
 
+def test_amazon_linux_bootstrap_keeps_preinstalled_curl_minimal() -> None:
+    user_data = (TERRAFORM_DIR / "user_data.sh.tftpl").read_text(encoding="utf-8")
+
+    assert "dnf install -y docker unzip" in user_data
+    assert "dnf install -y docker curl unzip" not in user_data
+
+
 def test_operational_monitor_connects_safe_health_metrics_to_cloudwatch() -> None:
     compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
     services = compose["services"]
@@ -187,7 +194,10 @@ def test_database_is_private_single_az_encrypted_postgres_with_safe_defaults() -
     assert re.search(r"multi_az\s*=\s*false", source)
     assert re.search(r"publicly_accessible\s*=\s*false", source)
     assert re.search(r"storage_encrypted\s*=\s*true", source)
-    assert re.search(r"backup_retention_period\s*=\s*7\b", source)
+    assert re.search(
+        r"backup_retention_period\s*=\s*var\.database_backup_retention_days",
+        source,
+    )
     assert re.search(
         r"deletion_protection\s*=\s*var\.database_deletion_protection",
         source,
@@ -200,6 +210,17 @@ def test_pilot_runtime_uses_law_db_for_review_case_rag() -> None:
     runtime_env = _read_deploy("runtime.env.example")
 
     assert "REVIEW_CASE_DB=law_db" in runtime_env
+
+
+def test_postgres_force_ssl_uses_the_static_parameter_apply_method() -> None:
+    database = (TERRAFORM_DIR / "database.tf").read_text(encoding="utf-8")
+
+    assert re.search(
+        r'parameter\s*\{[^}]*name\s*=\s*"rds\.force_ssl"'
+        r'[^}]*apply_method\s*=\s*"pending-reboot"',
+        database,
+        re.DOTALL,
+    )
 
 
 def test_private_s3_and_ecr_resources_have_encryption_and_lifecycle_controls() -> None:
@@ -1188,6 +1209,34 @@ def test_instance_type_is_an_x86_eight_gib_or_larger_allowlist() -> None:
     return
     assert "타입을 하향" in runbook
     assert "stop/destroy" in runbook
+
+
+def test_free_plan_supports_the_x86_eight_gib_m7i_flex_override() -> None:
+    variables = (TERRAFORM_DIR / "variables.tf").read_text(encoding="utf-8")
+    tfvars_example = (TERRAFORM_DIR / "terraform.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"m7i-flex.large"' in variables
+    assert "m7i-flex.large" in tfvars_example
+
+
+def test_database_backup_retention_is_configurable_for_free_plan() -> None:
+    variables = (TERRAFORM_DIR / "variables.tf").read_text(encoding="utf-8")
+    database = (TERRAFORM_DIR / "database.tf").read_text(encoding="utf-8")
+    tfvars_example = (TERRAFORM_DIR / "terraform.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'variable "database_backup_retention_days"' in variables
+    assert re.search(
+        r"backup_retention_period\s*=\s*var\.database_backup_retention_days",
+        database,
+    )
+    assert re.search(
+        r"#\s*database_backup_retention_days\s*=\s*1",
+        tfvars_example,
+    )
 
 
 def test_initial_rag_bootstrap_stages_private_services_then_requires_seed_promotion() -> None:

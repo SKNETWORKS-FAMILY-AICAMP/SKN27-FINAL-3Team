@@ -15,6 +15,8 @@ Terraform 1.11 or newer is required for the native S3 `use_lockfile` backend.
 Copy-Item terraform.tfvars.example terraform.tfvars
 Copy-Item backend.hcl.example backend.hcl
 # Edit the email; never put credentials in terraform.tfvars.
+# AWS Free plan in Seoul: set instance_type = "m7i-flex.large" and
+# database_backup_retention_days = 1. Keep deletion protection enabled.
 terraform init -backend-config=backend.hcl
 terraform fmt -check
 terraform validate
