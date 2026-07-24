@@ -652,13 +652,13 @@ try {
             "cd `$RELEASE_DIR",
             "$productionComposeCommand pull",
             "$productionComposeCommand run --rm --no-deps backend python backend/manage.py help smoke_non_dl_analysis_reporting_pipeline >/dev/null",
+            "$productionComposeCommand run --rm --no-deps backend python backend/manage.py help smoke_supervisor_conversation_runtime >/dev/null",
             "$productionComposeCommand run --rm --no-deps backend python backend/manage.py migrate --check",
             "$productionComposeCommand up -d --wait --wait-timeout 600 --remove-orphans",
             "$productionComposeCommand exec -T backend python backend/manage.py check_production_readiness --format json --fail-on-error",
             "echo 'IMDS allow smoke'; $productionComposeCommand exec -T backend python -c `"import urllib.request; request=urllib.request.Request('http://169.254.169.254/latest/api/token', method='PUT', headers={'X-aws-ec2-metadata-token-ttl-seconds':'60'}); token=urllib.request.urlopen(request, timeout=3).read(); assert token`"",
             "echo 'IMDS deny smoke'; docker run --rm --network skn27-pilot_pilot --ip 172.31.0.11 '${backendRepository}:${ReleaseTag}' python -c `"import socket; sock=socket.socket(); sock.settimeout(3); assert sock.connect_ex(('169.254.169.254', 80)) != 0`"",
-            "$productionComposeCommand exec -T backend python backend/manage.py smoke_object_storage --require-binary --format json",
-            "$productionComposeCommand exec -T backend python backend/manage.py smoke_supervisor_llm --require-used --require-slot-state --format json"
+            "$productionComposeCommand exec -T backend python backend/manage.py smoke_object_storage --require-binary --format json"
         )
         if ($RequireGoogleLiveSmoke) {
             $commands += @(
@@ -670,7 +670,7 @@ try {
             )
         }
         $commands += @(
-            "$productionComposeCommand exec -T backend python backend/manage.py smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call --require-real-agent-results --require-persisted-handoff --require-report --fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --timeout-seconds 180 --format json",
+            "$productionComposeCommand exec -T backend python backend/manage.py smoke_supervisor_conversation_runtime --allow-paid-provider-call --require-llm-used --require-real-agent-results --require-persisted-handoff --require-report --fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --timeout-seconds 600 --format json",
             "curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve '${appDomain}:443:127.0.0.1' https://${appDomain}/api/health/live/ >/dev/null",
             "curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve '${appDomain}:443:127.0.0.1' https://${appDomain}/api/health/ready/ >/dev/null",
             "ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current",

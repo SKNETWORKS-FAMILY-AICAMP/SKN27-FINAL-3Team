@@ -18,6 +18,7 @@ from app.services.supervisor_control_service import (
     reduce_consultation_fact_state,
 )
 from app.services.supervisor_llm_service import build_supervisor_state_with_optional_llm
+from app.services.supervisor_llm_contract import enrich_agent_package
 from app.services.supervisor_execution_input_service import canonical_attachment_selectors
 from app.services.supervisor_routing_service import (
     BASE_NODE_PLANS,
@@ -777,7 +778,24 @@ def _apply_ocr_confirmation_to_supervisor_state(
                 },
             }
         )
-    state["agent_input_packages"] = packages
+    enriched_packages: list[dict[str, Any]] = []
+    for package in packages:
+        enriched, error = enrich_agent_package(package)
+        if error or enriched is None:
+            state["llm"] = {
+                **(
+                    state.get("llm")
+                    if isinstance(state.get("llm"), dict)
+                    else {}
+                ),
+                "status": "failed",
+                "reason": error or "invalid_agent_package",
+            }
+            state["agent_input_packages"] = []
+            state["reporting_payload"] = None
+            return state
+        enriched_packages.append(enriched)
+    state["agent_input_packages"] = enriched_packages
     return state
 
 

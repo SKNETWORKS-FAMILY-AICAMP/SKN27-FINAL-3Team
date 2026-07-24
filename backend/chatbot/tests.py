@@ -657,6 +657,14 @@ class ProductionReadinessTests(TestCase):
 
         checks = {check["name"]: check for check in report["checks"]}
         self.assertEqual(checks["supervisor_llm"]["status"], "pass")
+        self.assertEqual(
+            checks["supervisor_llm"]["metadata"]["production_smoke"],
+            "smoke_supervisor_conversation_runtime --require-llm-used",
+        )
+        self.assertNotIn(
+            "mock_off_smoke",
+            checks["supervisor_llm"]["metadata"],
+        )
 
     @override_settings(
         OBJECT_STORAGE_PROVIDER="s3",

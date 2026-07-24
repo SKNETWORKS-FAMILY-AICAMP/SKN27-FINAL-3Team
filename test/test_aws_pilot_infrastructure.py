@@ -492,9 +492,9 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
     assert positions == sorted(positions)
 
 
-def test_deploy_fail_closed_hook_requires_real_non_dl_reporting_pipeline() -> None:
+def test_deploy_fail_closed_hook_requires_unified_production_runtime_smoke() -> None:
     deploy = _read_deploy("Deploy-Pilot.ps1")
-    command = "smoke_non_dl_analysis_reporting_pipeline"
+    command = "smoke_supervisor_conversation_runtime"
     assert "[switch]$AllowPaidNonDlSmoke" in deploy
     assert "[switch]$AllowPaidSupervisorSmoke" in deploy
     assert "if (-not $AllowPaidNonDlSmoke)" in deploy
@@ -505,6 +505,7 @@ def test_deploy_fail_closed_hook_requires_real_non_dl_reporting_pipeline() -> No
     assert "--require-persisted-handoff" in deploy
     assert "--require-report" in deploy
     assert "--allow-paid-provider-call" in deploy
+    assert "--timeout-seconds 600" in deploy
 
     runbook = _read_deploy("README.ko.md")
     assert command in runbook
@@ -1366,10 +1367,11 @@ def test_normal_promotion_requires_validated_fine_notice_fixture_and_exact_smoke
         assert deploy.index(token) < ssm_put
 
     expected = (
-        "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call "
-        "--require-real-agent-results --require-persisted-handoff --require-report "
+        "smoke_supervisor_conversation_runtime --allow-paid-provider-call "
+        "--require-llm-used --require-real-agent-results "
+        "--require-persisted-handoff --require-report "
         "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
-        "--timeout-seconds 180 --format json"
+        "--timeout-seconds 600 --format json"
     )
     assert expected in deploy
 
@@ -1390,6 +1392,32 @@ def test_normal_promotion_requires_validated_fine_notice_fixture_and_exact_smoke
     stage_segment = deploy[stage_start:normal_start]
     assert "FineNoticeSmokeS3Uri" not in stage_segment
     assert "smoke_non_dl_analysis_reporting_pipeline --allow-paid" not in stage_segment
+
+
+def test_normal_promotion_uses_one_production_supervisor_runtime_smoke() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+
+    previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")
+    promote = deploy.index(
+        "ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current",
+        previous,
+    )
+    normal_segment = deploy[previous:promote]
+    expected = (
+        "smoke_supervisor_conversation_runtime --allow-paid-provider-call "
+        "--require-llm-used --require-real-agent-results "
+        "--require-persisted-handoff --require-report "
+        "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
+        "--timeout-seconds 600 --format json"
+    )
+
+    assert normal_segment.count(expected) == 1
+    assert "help smoke_supervisor_conversation_runtime" in normal_segment
+    assert "smoke_supervisor_llm --require-used" not in normal_segment
+    assert (
+        "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call"
+        not in normal_segment
+    )
 
 
 def test_release_update_stage_is_isolated_from_the_current_compose_project() -> None:

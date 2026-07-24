@@ -395,33 +395,52 @@ class ProductionApiContractTests(SimpleTestCase):
 
     def test_supervisor_need_more_input_chat_response_is_not_enqueued(self) -> None:
         candidate = {
-            "contract_version": "supervisor_conversation.v1",
-            "stage": "need_more_input",
-            "conversation_turn_count": 1,
             "conversation_summary": "A law reference is still required.",
             "collected_facts": [],
-            "missing_fields": [{"field": "law_question"}],
+            "missing_fields": [
+                {"field": "law_question", "reason": "required_for_search"}
+            ],
             "next_questions": [
                 {"field": "law_question", "question": "Which law should be reviewed?"}
             ],
             "agent_input_packages": [
                 {
+                    "node_code": "law_ground_search",
+                    "payload": {},
+                }
+            ],
+        }
+        server_fallback = {
+            "contract_version": "supervisor_conversation_state.v2",
+            "scenario": "traffic_law_search",
+            "stage": "need_more_input",
+            "conversation_turn_count": 1,
+            "conversation_summary": "Server requires a law question.",
+            "collected_facts": [],
+            "missing_fields": [
+                {"field": "law_question", "reason": "required_for_search"}
+            ],
+            "next_questions": [
+                {
+                    "field": "law_question",
+                    "question": "Which law should be reviewed?",
+                }
+            ],
+            "slot_state": {
+                "contract_version": "slot_filling_state.v1",
+                "slots": {},
+            },
+            "agent_input_packages": [
+                {
                     "schema_version": "agent_input_schema.v1",
                     "node_code": "law_ground_search",
-                    "owner": "techshin31",
                     "status": "waiting_for_fields",
                     "missing_fields": ["law_question"],
+                    "required_inputs": ["search_query"],
                     "payload": {"user_text": "help", "attachments": []},
                 }
             ],
-            "reporting_payload": {
-                "contract_version": "reporting_payload.v1",
-                "scenario": "traffic_law_search",
-                "stage": "need_more_input",
-                "title": "Pending analysis",
-                "summary": "More input is required.",
-                "sections": [],
-            },
+            "reporting_payload": None,
         }
         request = RequestFactory().post(
             "/api/chat/messages/",
@@ -440,6 +459,10 @@ class ProductionApiContractTests(SimpleTestCase):
             patch(
                 "app.services.supervisor_llm_service._request_supervisor_json",
                 return_value=candidate,
+            ),
+            patch(
+                "app.services.chat_orchestration_service._fallback_supervisor_state",
+                return_value=server_fallback,
             ),
             patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None),
             patch("chatbot.views.get_chat_session_access_metadata", return_value=None),

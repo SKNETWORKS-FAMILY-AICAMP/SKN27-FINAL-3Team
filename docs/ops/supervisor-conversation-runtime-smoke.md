@@ -20,7 +20,8 @@ POST /api/chat/messages/
 
 로컬/CI에서는 실제 provider를 호출하지 않는다. 아래 Django 테스트가
 Supervisor와 Agent adapter 경계를 fake로 고정하고 공개 view와 Worker 경계는
-실제로 실행한다.
+실제로 실행한다. 운영 명령 자체는 큐를 직접 처리하지 않고 배포된 Worker가 DB
+lease를 획득해 terminal 상태를 저장할 때까지 bounded polling한다.
 
 ```powershell
 python backend/manage.py test chatbot.test_supervisor_conversation_runtime_smoke -v 1
@@ -49,6 +50,7 @@ python backend/manage.py smoke_supervisor_conversation_runtime `
   --require-real-agent-results `
   --require-persisted-handoff `
   --require-report `
+  --timeout-seconds 600 `
   --format json
 ```
 
@@ -66,7 +68,8 @@ strict 실행에서 다음이 모두 참이어야 통과다.
 
 - `chat.status=queued` 및 public chat의 HTTP 202
 - `llm.status=used`
-- `job_success`, `all_agent_results_success`, `worker_completed`
+- `job_success`, `all_agent_results_success`, `worker_loop_consumed`,
+  `worker_completed`
 - `persisted_handoff_consumed`
 - `report_ready`, `analysis_display_persisted`, `public_result_loaded`
 

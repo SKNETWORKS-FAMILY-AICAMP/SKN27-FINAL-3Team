@@ -1,9 +1,392 @@
 import json
+import logging
+import sys
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
 from app.services import supervisor_llm_service as service
+from app.services import supervisor_llm_contract as service_contract
+
+
+def test_enrich_supervisor_state_injects_registry_owner_and_package_fields():
+    fallback = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "agent_execution_ready",
+        "missing_fields": [],
+        "agent_input_packages": [
+            {
+                "schema_version": "agent_input_schema.v1",
+                "node_code": "law_ground_search",
+                "status": "ready",
+                "required_inputs": ["user_text|attachments"],
+                "payload": {"user_text": "school zone", "attachments": []},
+            }
+        ],
+        "reporting_payload": None,
+    }
+
+    enriched, error = service_contract.enrich_supervisor_state(fallback)
+
+    assert error is None
+    assert enriched is not None
+    assert enriched["contract_version"] == "supervisor_conversation_state.v2"
+    assert enriched["agent_input_packages"][0]["owner"] == "techshin31"
+    assert enriched["agent_input_packages"][0]["missing_fields"] == []
+    assert enriched["agent_input_packages"][0]["status"] == "ready"
+    assert enriched["agent_input_packages"][0]["required_inputs"] == [
+        "law_code|violation_text|search_query"
+    ]
+    assert enriched["reporting_payload"] is None
+
+
+def test_enrich_supervisor_state_preserves_empty_accident_packages():
+    fallback = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "need_fact_confirmation",
+        "missing_fields": [],
+        "agent_input_packages": [],
+        "reporting_payload": None,
+    }
+
+    enriched, error = service_contract.enrich_supervisor_state(fallback)
+
+    assert error is None
+    assert enriched is not None
+    assert enriched["stage"] == "need_fact_confirmation"
+    assert enriched["agent_input_packages"] == []
+
+
+def test_enrich_supervisor_state_rejects_unknown_node_without_payload_leak():
+    sensitive_marker = "[MASKED]"
+    fallback = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "agent_execution_ready",
+        "agent_input_packages": [
+            {
+                "node_code": "unknown_agent",
+                "payload": {"user_text": sensitive_marker},
+            }
+        ],
+        "reporting_payload": None,
+    }
+
+    enriched, error = service_contract.enrich_supervisor_state(fallback)
+
+    assert enriched is None
+    assert error == "registry_node_missing"
+    assert sensitive_marker not in error
+
+
+def test_normalize_candidate_packages_keeps_registry_controls_and_bounded_payload():
+    fallback = [
+        {
+            "schema_version": "agent_input_schema.v1",
+            "node_code": "law_ground_search",
+            "status": "ready",
+            "required_inputs": ["user_text|attachments"],
+            "payload": {
+                "user_text": "fallback",
+                "attachments": [{"attachment_id": "att_approved"}],
+            },
+        }
+    ]
+    candidate = [
+        {
+            "node_code": "law_ground_search",
+            "owner": "attacker",
+            "payload": {
+                "user_text": "candidate",
+                "attachments": [
+                    {"attachment_id": "att_approved", "storage_uri": "s3://private"},
+                    {"attachment_id": "att_unknown"},
+                ],
+                "untrusted_payload_field": "drop-me",
+            },
+        }
+    ]
+
+    packages, error = service_contract.normalize_candidate_packages(candidate, fallback)
+
+    assert error is None
+    assert packages is not None
+    assert packages[0]["owner"] == "techshin31"
+    assert packages[0]["missing_fields"] == []
+    assert packages[0]["status"] == "ready"
+    assert packages[0]["payload"] == {
+        "user_text": "candidate",
+        "attachments": [{"attachment_id": "att_approved"}],
+    }
+
+
+def test_normalize_candidate_packages_never_accepts_model_slot_state():
+    server_slot_state = {
+        "contract_version": "slot_filling_state.v1",
+        "slots": {
+            "law_question": {
+                "value": "server-approved",
+                "source": "confirmed_user_fact",
+                "confidence": 1.0,
+            }
+        },
+    }
+    fallback = [
+        {
+            "node_code": "law_ground_search",
+            "payload": {
+                "user_text": "fallback",
+                "attachments": [],
+                "slot_state": server_slot_state,
+            },
+        }
+    ]
+    candidate = [
+        {
+            "node_code": "law_ground_search",
+            "payload": {
+                "user_text": "candidate",
+                "attachments": [],
+                "slot_state": {
+                    "contract_version": "attacker.v1",
+                    "slots": {"law_question": {"value": "model-overwrite"}},
+                },
+            },
+        }
+    ]
+
+    packages, error = service_contract.normalize_candidate_packages(
+        candidate,
+        fallback,
+    )
+
+    assert error is None
+    assert packages is not None
+    assert packages[0]["payload"]["slot_state"] == server_slot_state
+
+
+def test_conversation_response_format_is_strict_and_excludes_server_owned_fields():
+    fallback = {
+        "agent_input_packages": [
+            {
+                "node_code": "law_ground_search",
+                "payload": {
+                    "user_text": "fallback",
+                    "attachments": [{"attachment_id": "att_approved"}],
+                },
+            }
+        ]
+    }
+
+    response_format = service_contract.conversation_response_format(fallback)
+    json_schema = response_format["json_schema"]
+    root = json_schema["schema"]
+
+    assert response_format["type"] == "json_schema"
+    assert json_schema["name"] == "supervisor_conversation_response_v2"
+    assert json_schema["strict"] is True
+    assert root["additionalProperties"] is False
+    for server_owned in (
+        "contract_version",
+        "scenario",
+        "stage",
+        "conversation_turn_count",
+        "slot_state",
+        "reporting_payload",
+    ):
+        assert server_owned not in root["properties"]
+    package_schema = root["properties"]["agent_input_packages"]["items"]
+    assert package_schema["additionalProperties"] is False
+    assert package_schema["properties"]["node_code"]["enum"] == [
+        "law_ground_search"
+    ]
+    payload_schema = package_schema["properties"]["payload"]
+    assert payload_schema["additionalProperties"] is False
+    assert set(payload_schema["properties"]) == {"user_text", "attachments"}
+
+
+def test_conversation_response_format_excludes_nested_server_owned_slot_state():
+    response_format = service_contract.conversation_response_format(
+        {
+            "agent_input_packages": [
+                {
+                    "node_code": "law_ground_search",
+                    "payload": {
+                        "user_text": "fallback",
+                        "attachments": [],
+                        "slot_state": {
+                            "contract_version": "slot_filling_state.v1",
+                            "slots": {},
+                        },
+                    },
+                }
+            ]
+        }
+    )
+
+    payload_schema = response_format["json_schema"]["schema"]["properties"][
+        "agent_input_packages"
+    ]["items"]["properties"]["payload"]
+
+    assert "slot_state" not in payload_schema["properties"]
+    assert "slot_state" not in payload_schema["required"]
+
+
+def test_conversation_response_format_allows_exact_empty_package_contract():
+    response_format = service_contract.conversation_response_format(
+        {"agent_input_packages": []}
+    )
+
+    packages = response_format["json_schema"]["schema"]["properties"][
+        "agent_input_packages"
+    ]
+
+    assert packages["minItems"] == 0
+    assert packages["maxItems"] == 0
+
+
+def test_analysis_plan_response_format_is_distinct_and_strict():
+    fallback = {
+        "routing_intent": "traffic_law_search",
+        "input_summary": {"missing_fields": []},
+        "agent_input_packages": [
+            {
+                "node_code": "law_ground_search",
+                "payload": {"search_query": "fallback"},
+            }
+        ],
+        "steps": [
+            {
+                "node_code": "law_ground_search",
+                "status": "ready",
+                "required_inputs": ["search_query"],
+                "depends_on": [],
+                "fallback": "limitations",
+            }
+        ],
+    }
+
+    response_format = service_contract.analysis_plan_response_format(fallback)
+
+    assert response_format["type"] == "json_schema"
+    assert (
+        response_format["json_schema"]["name"]
+        == "supervisor_analysis_plan_response_v2"
+    )
+    assert response_format["json_schema"]["strict"] is True
+    assert (
+        response_format["json_schema"]["schema"]["properties"]["steps"]["items"][
+            "properties"
+        ]["node_code"]["enum"]
+        == ["law_ground_search"]
+    )
+
+
+def test_request_supervisor_json_passes_strict_response_format(monkeypatch):
+    captured: dict = {}
+    message = SimpleNamespace(
+        content=json.dumps(
+            {
+                "conversation_summary": "summary",
+                "collected_facts": [],
+                "missing_fields": [],
+                "next_questions": [],
+                "agent_input_packages": [],
+            }
+        ),
+        refusal=None,
+    )
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=message)]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+    response_format = service_contract.conversation_response_format(
+        {"agent_input_packages": []}
+    )
+
+    result = service._request_supervisor_json(
+        {
+            "provider": "openai",
+            "api_key": "sk-test",
+            "timeout_seconds": 10,
+            "base_url": "",
+            "model": "gpt-test",
+            "temperature": 0,
+        },
+        {"system": "Return JSON.", "user": {"contract_version": "test.v1"}},
+        response_format,
+    )
+
+    assert result["conversation_summary"] == "summary"
+    assert captured["response_format"] == response_format
+
+
+def test_request_supervisor_json_detects_structured_refusal(monkeypatch):
+    message = SimpleNamespace(content=None, refusal="private refusal text")
+
+    class FakeCompletions:
+        def create(self, **_kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=message)]
+            )
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    with pytest.raises(service.SupervisorProviderError) as raised:
+        service._request_supervisor_json(
+            {
+                "provider": "openai",
+                "api_key": "sk-test",
+                "timeout_seconds": 10,
+                "base_url": "",
+                "model": "gpt-test",
+                "temperature": 0,
+            },
+            {"system": "Return JSON.", "user": {"contract_version": "test.v1"}},
+            service_contract.conversation_response_format(
+                {"agent_input_packages": []}
+            ),
+        )
+
+    assert raised.value.reason == "provider_refusal"
+    assert "private refusal text" not in str(raised.value)
+
+
+def test_provider_refusal_fails_closed_with_safe_reason_log(monkeypatch, caplog):
+    monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
+    monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
+    monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
+    sensitive_marker = "[MASKED]"
+
+    def refuse(*_args):
+        raise service.SupervisorProviderError("provider_refusal")
+
+    monkeypatch.setattr(service, "_request_supervisor_json", refuse)
+
+    with caplog.at_level(logging.WARNING):
+        state = service.build_supervisor_state_with_optional_llm(
+            payload={"user_text": sensitive_marker},
+            scenario="fine_notice",
+            fallback_builder=_fallback_builder,
+        )
+
+    assert state["llm"]["status"] == "failed"
+    assert state["llm"]["reason"] == "provider_refusal"
+    assert "reason=provider_refusal" in caplog.text
+    assert sensitive_marker not in caplog.text
 
 
 def _fallback_builder(_payload, _scenario):
@@ -112,27 +495,19 @@ def _fallback_plan():
 
 def _valid_state_candidate() -> dict:
     fallback = _fallback_builder({}, "fine_notice")
-    packages = deepcopy(fallback["agent_input_packages"])
-    for package in packages:
-        package["status"] = "ready"
-        package["missing_fields"] = []
+    packages = [
+        {
+            "node_code": package["node_code"],
+            "payload": deepcopy(package["payload"]),
+        }
+        for package in fallback["agent_input_packages"]
+    ]
     return {
-        "contract_version": "supervisor_conversation.v1",
-        "stage": "agent_execution_ready",
-        "conversation_turn_count": 2,
         "conversation_summary": "LLM summary",
         "collected_facts": [],
         "missing_fields": [],
         "next_questions": [],
         "agent_input_packages": packages,
-        "reporting_payload": {
-            "contract_version": "reporting_payload.v1",
-            "scenario": "fine_notice",
-            "stage": "agent_execution_ready",
-            "title": "LLM report",
-            "summary": "LLM summary",
-            "sections": [],
-        },
     }
 
 
@@ -210,7 +585,7 @@ def test_supervisor_llm_is_disabled_by_default(monkeypatch):
 
     assert state["conversation_summary"] == "fallback summary"
     assert state["llm"]["status"] == "disabled"
-    assert state["llm"]["prompt_version"] == "supervisor_conversation_prompt.v1"
+    assert state["llm"]["prompt_version"] == "supervisor_conversation_prompt.v2"
     assert state["llm"]["prompt_sha256"].startswith("sha256:")
     assert state["reporting_payload"]["model_trace"]["status"] == "disabled"
 
@@ -227,7 +602,7 @@ def test_supervisor_llm_planner_is_disabled_by_default(monkeypatch):
     )
 
     assert plan["llm_planner"]["status"] == "disabled"
-    assert plan["llm_planner"]["prompt_version"] == "supervisor_analysis_plan_prompt.v1"
+    assert plan["llm_planner"]["prompt_version"] == "supervisor_analysis_plan_prompt.v2"
     assert plan["llm_planner"]["prompt_sha256"].startswith("sha256:")
     assert plan["steps"][0]["node_code"] == "input_context_validation"
     assert plan["steps"][-1]["node_code"] == "agent_result_validation"
@@ -341,6 +716,36 @@ def test_supervisor_llm_invalid_state_contract_fails_closed(monkeypatch):
     assert state["agent_input_packages"] == []
 
 
+def test_supervisor_llm_invalid_candidate_text_is_discarded(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
+    monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
+    rejected_text = "REJECTED MODEL TEXT MUST NOT REACH USER"
+    monkeypatch.setattr(
+        service,
+        "_request_supervisor_json",
+        lambda *_args: {
+            "next_questions": [
+                {
+                    "field": "unsafe",
+                    "question": rejected_text,
+                }
+            ]
+        },
+    )
+
+    state = service.build_supervisor_state_with_optional_llm(
+        payload={"user_text": "과태료 고지서를 받았어요."},
+        scenario="fine_notice",
+        fallback_builder=_fallback_builder,
+    )
+
+    assert state["llm"]["status"] == "failed"
+    assert state["llm"]["reason"] == "invalid_contract"
+    assert state["next_questions"] == []
+    assert state["missing_fields"] == []
+    assert rejected_text not in json.dumps(state, ensure_ascii=False)
+
+
 def test_supervisor_llm_ready_state_without_agent_packages_fails_closed(monkeypatch):
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
@@ -421,7 +826,6 @@ def test_supervisor_llm_accepts_complete_exact_agent_package_contract(monkeypatc
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
     candidate = _valid_state_candidate()
-    candidate["agent_input_packages"][0]["owner"] = "wrong-owner"
     candidate["agent_input_packages"][0]["payload"]["evidence_status"] = "verified"
     monkeypatch.setattr(
         service,
@@ -550,7 +954,7 @@ def test_supervisor_llm_plan_unknown_package_does_not_expand_fallback(monkeypatc
     payload = _untrusted_injection_payload()
     captured: list[dict] = []
 
-    def fake_request(_config, request_payload):
+    def fake_request(_config, request_payload, _response_format):
         captured.append(request_payload)
         return {
             "routing_intent": "objection_request",
@@ -608,13 +1012,56 @@ def test_supervisor_llm_invalid_plan_contract_fails_closed(monkeypatch):
     assert plan["agent_input_packages"] == []
 
 
+def test_supervisor_llm_plan_missing_package_node_code_fails_closed(monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
+    monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
+    candidate = {
+        "routing_intent": "objection_request",
+        "input_summary": {},
+        "required_inputs": [],
+        "pending_questions": [],
+        "agent_input_packages": [{"payload": {"notice_text": "candidate"}}],
+        "steps": [
+            {
+                "node_code": "fine_notice_analysis",
+                "status": "ready",
+                "required_inputs": [],
+                "depends_on": [],
+                "fallback": "limitations",
+            }
+        ],
+        "blocked_reason": None,
+    }
+    monkeypatch.setattr(
+        service,
+        "_request_supervisor_json",
+        lambda *_args: candidate,
+    )
+
+    plan = service.build_analysis_plan_with_optional_llm(
+        payload={"user_text": "plan this"},
+        scenario="fine_notice",
+        requested_status="success",
+        fallback_plan=_fallback_plan(),
+        supervisor_state=_fallback_builder({}, "fine_notice"),
+    )
+
+    assert plan["llm_planner"]["status"] == "failed"
+    assert plan["llm_planner"]["reason"] == "invalid_contract"
+    assert plan["steps"] == []
+    assert plan["agent_input_packages"] == []
+
+
 def test_supervisor_llm_planner_normalizes_registry_safe_steps(monkeypatch):
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
 
-    def fake_request(_config, request_payload):
-        assert request_payload["user"]["contract_version"] == "supervisor_analysis_plan.v1"
+    def fake_request(_config, request_payload, _response_format):
+        assert (
+            request_payload["user"]["contract_version"]
+            == "supervisor_analysis_plan_request.v2"
+        )
         return {
             "routing_intent": "objection_request",
             "input_summary": {"planner_hint": "llm"},
@@ -622,11 +1069,7 @@ def test_supervisor_llm_planner_normalizes_registry_safe_steps(monkeypatch):
             "pending_questions": [{"field": "evidence_status", "question": "evidence?"}],
             "agent_input_packages": [
                 {
-                    "schema_version": "agent_input_schema.v1",
                     "node_code": "law_ground_search",
-                    "owner": "techshin31",
-                    "status": "ready",
-                    "missing_fields": [],
                     "payload": {"search_query": "school zone emergency stopping"},
                 },
             ],
@@ -672,41 +1115,24 @@ def test_supervisor_llm_does_not_promote_server_required_input_to_ready(monkeypa
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
 
-    def fake_request(_config, _request_payload):
+    def fake_request(_config, _request_payload, _response_format):
         return {
-            "contract_version": "supervisor_conversation.v1",
-            "stage": "agent_execution_ready",
-            "conversation_turn_count": 2,
             "conversation_summary": "LLM summary",
-            "collected_facts": [{"field": "evidence_status", "label": "증빙", "value": "블랙박스"}],
+            "collected_facts": [
+                {"field": "evidence_status", "value": "블랙박스"}
+            ],
             "missing_fields": [],
             "next_questions": [],
             "agent_input_packages": [
                 {
-                    "schema_version": "agent_input_schema.v1",
                     "node_code": "fine_notice_analysis",
-                    "owner": "wrong-owner",
-                    "status": "ready",
-                    "missing_fields": [],
                     "payload": {"evidence_status": "블랙박스 보유"},
                 },
                 {
-                    "schema_version": "agent_input_schema.v1",
                     "node_code": "objection_report_generation",
-                    "owner": "wrong-owner",
-                    "status": "ready",
-                    "missing_fields": [],
                     "payload": {"draft_goal": "updated"},
                 },
             ],
-            "reporting_payload": {
-                "contract_version": "reporting_payload.v1",
-                "scenario": "fine_notice",
-                "stage": "agent_execution_ready",
-                "title": "LLM 리포트",
-                "summary": "LLM summary",
-                "sections": [],
-            },
         }
 
     monkeypatch.setattr(service, "_request_supervisor_json", fake_request)
@@ -740,14 +1166,10 @@ def test_supervisor_llm_rejects_unknown_package_requested_by_untrusted_input(mon
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
 
-    candidate = _fallback_builder({}, "fine_notice")
+    candidate = _valid_state_candidate()
     candidate["agent_input_packages"].append(
         {
-            "schema_version": "agent_input_schema.v1",
             "node_code": "unknown_agent",
-            "owner": "attacker",
-            "status": "ready",
-            "missing_fields": [],
             "payload": {},
         }
     )
@@ -776,7 +1198,7 @@ def test_supervisor_llm_state_keeps_malicious_context_from_changing_server_contr
     candidate = _valid_state_candidate()
     candidate["conversation_summary"] = payload["user_text"]
 
-    def fake_request(_config, request_payload):
+    def fake_request(_config, request_payload, _response_format):
         captured.append(request_payload)
         return candidate
 
@@ -839,8 +1261,30 @@ def test_supervisor_llm_plan_allows_reference_text_without_expanding_packages(mo
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
     payload = _untrusted_injection_payload()
     fallback_plan = _fallback_plan()
-    candidate = deepcopy(fallback_plan)
-    candidate["input_summary"] = {"summary": payload["user_text"]}
+    candidate = {
+        "routing_intent": fallback_plan["routing_intent"],
+        "input_summary": {"summary": payload["user_text"]},
+        "required_inputs": deepcopy(fallback_plan["required_inputs"]),
+        "pending_questions": deepcopy(fallback_plan["pending_questions"]),
+        "agent_input_packages": [
+            {
+                "node_code": package["node_code"],
+                "payload": deepcopy(package["payload"]),
+            }
+            for package in fallback_plan["agent_input_packages"]
+        ],
+        "steps": [
+            {
+                "node_code": step["node_code"],
+                "status": step["status"],
+                "required_inputs": deepcopy(step["required_inputs"]),
+                "depends_on": deepcopy(step["depends_on"]),
+                "fallback": step["fallback"],
+            }
+            for step in fallback_plan["steps"]
+        ],
+        "blocked_reason": fallback_plan["blocked_reason"],
+    }
 
     monkeypatch.setattr(service, "_request_supervisor_json", lambda *_args: candidate)
     plan = service.build_analysis_plan_with_optional_llm(
