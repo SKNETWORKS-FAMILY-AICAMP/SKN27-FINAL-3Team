@@ -12,6 +12,8 @@ from typing import Any, Callable
 from app.services.supervisor_llm_contract import (
     analysis_plan_response_format,
     conversation_response_format,
+    enrich_supervisor_state,
+    normalize_candidate_packages,
 )
 
 
@@ -72,7 +74,16 @@ def build_supervisor_state_with_optional_llm(
 ) -> dict[str, Any]:
     """Build Supervisor state through LLM when enabled, otherwise use fallback."""
 
-    fallback_state = fallback_builder(payload, scenario)
+    raw_fallback_state = fallback_builder(payload, scenario)
+    fallback_state, fallback_error = enrich_supervisor_state(raw_fallback_state)
+    if fallback_error or fallback_state is None:
+        reason = fallback_error or "invalid_agent_packages"
+        _log_supervisor_failure(reason)
+        return _fail_closed_supervisor_state(
+            raw_fallback_state,
+            reason=reason,
+            config=_llm_config(),
+        )
     config = _llm_config()
     if not config["enabled"]:
         return _with_llm_metadata(
@@ -120,13 +131,13 @@ def build_supervisor_state_with_optional_llm(
             config=config,
         )
 
-    normalized = _normalize_llm_state(
+    normalized, validation_error = _normalize_llm_state(
         candidate,
         fallback_state=fallback_state,
         config=config,
     )
     if normalized is None:
-        _log_supervisor_failure("invalid_contract")
+        _log_supervisor_failure(validation_error or "invalid_contract")
         return _fail_closed_supervisor_state(
             fallback_state,
             reason="invalid_contract",
@@ -367,6 +378,11 @@ def _log_supervisor_failure(reason: str) -> None:
         "invalid_agent_payload",
         "unexpected_node_set",
         "duplicate_agent_node",
+        "candidate_not_object",
+        "unexpected_candidate_fields",
+        "invalid_conversation_summary",
+        "invalid_candidate_arrays",
+        "invalid_candidate_items",
     }
     safe_reason = reason if reason in safe_reasons else "provider_unavailable"
     logger.warning("supervisor_llm_failed reason=%s", safe_reason)
@@ -396,10 +412,25 @@ def _normalize_llm_plan(
     if isinstance(candidate.get("pending_questions"), list):
         plan["pending_questions"] = _list_of_dicts(candidate["pending_questions"])
     if isinstance(candidate.get("agent_input_packages"), list):
-        plan["agent_input_packages"] = _safe_plan_agent_packages(
+        candidate_codes = {
+            str(package.get("node_code") or "").strip()
+            for package in candidate["agent_input_packages"]
+            if isinstance(package, dict)
+        }
+        selected_fallback_packages = [
+            package
+            for package in _list_of_dicts(
+                fallback_plan.get("agent_input_packages", [])
+            )
+            if str(package.get("node_code") or "").strip() in candidate_codes
+        ]
+        packages, error = normalize_candidate_packages(
             candidate["agent_input_packages"],
-            fallback_plan.get("agent_input_packages", []),
+            selected_fallback_packages,
         )
+        if error or packages is None:
+            return None
+        plan["agent_input_packages"] = packages
     if "blocked_reason" in candidate:
         plan["blocked_reason"] = _safe_optional_text(candidate.get("blocked_reason"))
     plan["steps"] = steps
@@ -412,62 +443,54 @@ def _normalize_llm_state(
     *,
     fallback_state: dict[str, Any],
     config: dict[str, Any],
-) -> dict[str, Any] | None:
-    if not _valid_llm_state_candidate(candidate, fallback_state=fallback_state):
-        return None
+) -> tuple[dict[str, Any] | None, str | None]:
+    validation_error = _llm_state_candidate_error(
+        candidate,
+        fallback_state=fallback_state,
+    )
+    if validation_error:
+        return None, validation_error
 
     state = deepcopy(fallback_state)
-    if isinstance(candidate.get("conversation_summary"), str):
-        state["conversation_summary"] = candidate["conversation_summary"].strip()
-
-    if isinstance(candidate.get("collected_facts"), list):
-        state["collected_facts"] = _list_of_dicts(candidate["collected_facts"])
-
-    if isinstance(candidate.get("agent_input_packages"), list):
-        state["agent_input_packages"] = _safe_agent_input_packages(
-            candidate["agent_input_packages"],
-            fallback_state.get("agent_input_packages", []),
-        )
-
-    fallback_missing_fields = _list_of_dicts(fallback_state.get("missing_fields", []))
-    if fallback_missing_fields:
-        state["missing_fields"] = fallback_missing_fields
-        state["next_questions"] = _list_of_dicts(
-            fallback_state.get("next_questions", [])
-        )
-    else:
-        state["missing_fields"] = _list_of_dicts(candidate.get("missing_fields", []))
-        state["next_questions"] = _list_of_dicts(candidate.get("next_questions", []))
-    state["stage"] = (
-        "need_more_input"
-        if state["missing_fields"]
-        else _safe_stage(fallback_state.get("stage"), "need_more_input")
+    state["conversation_summary"] = candidate["conversation_summary"].strip()
+    state["collected_facts"] = _list_of_dicts(candidate["collected_facts"])
+    packages, error = normalize_candidate_packages(
+        candidate["agent_input_packages"],
+        fallback_state.get("agent_input_packages", []),
     )
-    state["contract_version"] = "supervisor_conversation.v1"
-    state["reporting_payload"] = _normalized_reporting_payload(
-        candidate.get("reporting_payload"),
-        fallback_state=fallback_state,
-        state=state,
+    if error or packages is None:
+        return None, error or "invalid_agent_packages"
+    state["agent_input_packages"] = packages
+    state["missing_fields"] = _list_of_dicts(
+        fallback_state.get("missing_fields", [])
     )
-    return state
+    state["next_questions"] = _list_of_dicts(
+        fallback_state.get("next_questions", [])
+    )
+    state["reporting_payload"] = deepcopy(
+        fallback_state.get("reporting_payload")
+    )
+    return state, None
 
 
-def _valid_llm_state_candidate(
+def _llm_state_candidate_error(
     candidate: Any,
     *,
     fallback_state: dict[str, Any],
-) -> bool:
+) -> str | None:
     if not isinstance(candidate, dict):
-        return False
-    if candidate.get("contract_version") != "supervisor_conversation.v1":
-        return False
-    if candidate.get("stage") not in {"need_more_input", "agent_execution_ready"}:
-        return False
-    turn_count = candidate.get("conversation_turn_count")
-    if isinstance(turn_count, bool) or not isinstance(turn_count, int) or turn_count < 1:
-        return False
+        return "candidate_not_object"
+    expected_keys = {
+        "conversation_summary",
+        "collected_facts",
+        "missing_fields",
+        "next_questions",
+        "agent_input_packages",
+    }
+    if set(candidate) != expected_keys:
+        return "unexpected_candidate_fields"
     if not isinstance(candidate.get("conversation_summary"), str):
-        return False
+        return "invalid_conversation_summary"
     list_keys = (
         "collected_facts",
         "missing_fields",
@@ -475,31 +498,17 @@ def _valid_llm_state_candidate(
         "agent_input_packages",
     )
     if any(not isinstance(candidate.get(key), list) for key in list_keys):
-        return False
+        return "invalid_candidate_arrays"
     if any(
         not all(isinstance(item, dict) for item in candidate[key])
         for key in list_keys
     ):
-        return False
-    if not _valid_exact_agent_packages(
+        return "invalid_candidate_items"
+    _, error = normalize_candidate_packages(
         candidate["agent_input_packages"],
-        fallback_state.get("agent_input_packages"),
-    ):
-        return False
-    if candidate["stage"] == "agent_execution_ready" and any(
-        package["status"] != "ready" or package["missing_fields"]
-        for package in candidate["agent_input_packages"]
-    ):
-        return False
-    if candidate["stage"] == "need_more_input" and (
-        not candidate["missing_fields"] or not candidate["next_questions"]
-    ):
-        return False
-    reporting = candidate.get("reporting_payload")
-    return (
-        isinstance(reporting, dict)
-        and reporting.get("contract_version") == "reporting_payload.v1"
+        fallback_state.get("agent_input_packages", []),
     )
+    return error
 
 
 def _valid_llm_plan_candidate(
@@ -508,6 +517,17 @@ def _valid_llm_plan_candidate(
     fallback_plan: dict[str, Any],
 ) -> bool:
     if not isinstance(candidate, dict):
+        return False
+    expected_keys = {
+        "routing_intent",
+        "input_summary",
+        "required_inputs",
+        "pending_questions",
+        "agent_input_packages",
+        "steps",
+        "blocked_reason",
+    }
+    if set(candidate) != expected_keys:
         return False
     if not isinstance(candidate.get("routing_intent"), str):
         return False
@@ -525,8 +545,6 @@ def _valid_llm_plan_candidate(
     ):
         return False
     candidate_packages = candidate["agent_input_packages"]
-    if not all(_valid_agent_package(package) for package in candidate_packages):
-        return False
     package_codes = [str(package["node_code"]) for package in candidate_packages]
     if len(package_codes) != len(set(package_codes)):
         return False
@@ -536,6 +554,19 @@ def _valid_llm_plan_candidate(
         if package.get("node_code")
     }
     if not set(package_codes).issubset(fallback_package_codes):
+        return False
+    selected_fallback_packages = [
+        package
+        for package in _list_of_dicts(
+            fallback_plan.get("agent_input_packages")
+        )
+        if str(package.get("node_code") or "") in set(package_codes)
+    ]
+    _, package_error = normalize_candidate_packages(
+        candidate_packages,
+        selected_fallback_packages,
+    )
+    if package_error:
         return False
 
     step_codes = [str(step.get("node_code") or "").strip() for step in candidate["steps"]]
@@ -549,44 +580,6 @@ def _valid_llm_plan_candidate(
     if not set(step_codes).issubset(fallback_step_codes):
         return False
     return set(package_codes) == (set(step_codes) & fallback_package_codes)
-
-
-def _valid_exact_agent_packages(candidate_packages: Any, fallback_packages: Any) -> bool:
-    if not isinstance(candidate_packages, list) or not candidate_packages:
-        return False
-    if not all(_valid_agent_package(package) for package in candidate_packages):
-        return False
-    candidate_codes = [str(package["node_code"]) for package in candidate_packages]
-    if len(candidate_codes) != len(set(candidate_codes)):
-        return False
-    expected_codes = {
-        str(package.get("node_code") or "")
-        for package in _list_of_dicts(fallback_packages)
-        if package.get("node_code")
-    }
-    return bool(expected_codes) and set(candidate_codes) == expected_codes
-
-
-def _valid_agent_package(package: Any) -> bool:
-    if not isinstance(package, dict):
-        return False
-    if package.get("schema_version") != AGENT_INPUT_SCHEMA_VERSION:
-        return False
-    if not isinstance(package.get("node_code"), str) or not package["node_code"].strip():
-        return False
-    if not isinstance(package.get("owner"), str) or not package["owner"].strip():
-        return False
-    if package.get("status") not in AGENT_PACKAGE_STATUSES:
-        return False
-    missing_fields = package.get("missing_fields")
-    if not isinstance(missing_fields, list) or not all(
-        isinstance(field, str) and field.strip() for field in missing_fields
-    ):
-        return False
-    if not isinstance(package.get("payload"), dict):
-        return False
-    expected_status = "waiting_for_fields" if missing_fields else "ready"
-    return package["status"] == expected_status
 
 
 def _safe_plan_steps(

@@ -423,27 +423,19 @@ def _fallback_plan():
 
 def _valid_state_candidate() -> dict:
     fallback = _fallback_builder({}, "fine_notice")
-    packages = deepcopy(fallback["agent_input_packages"])
-    for package in packages:
-        package["status"] = "ready"
-        package["missing_fields"] = []
+    packages = [
+        {
+            "node_code": package["node_code"],
+            "payload": deepcopy(package["payload"]),
+        }
+        for package in fallback["agent_input_packages"]
+    ]
     return {
-        "contract_version": "supervisor_conversation.v1",
-        "stage": "agent_execution_ready",
-        "conversation_turn_count": 2,
         "conversation_summary": "LLM summary",
         "collected_facts": [],
         "missing_fields": [],
         "next_questions": [],
         "agent_input_packages": packages,
-        "reporting_payload": {
-            "contract_version": "reporting_payload.v1",
-            "scenario": "fine_notice",
-            "stage": "agent_execution_ready",
-            "title": "LLM report",
-            "summary": "LLM summary",
-            "sections": [],
-        },
     }
 
 
@@ -732,7 +724,6 @@ def test_supervisor_llm_accepts_complete_exact_agent_package_contract(monkeypatc
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
     candidate = _valid_state_candidate()
-    candidate["agent_input_packages"][0]["owner"] = "wrong-owner"
     candidate["agent_input_packages"][0]["payload"]["evidence_status"] = "verified"
     monkeypatch.setattr(
         service,
@@ -988,39 +979,22 @@ def test_supervisor_llm_does_not_promote_server_required_input_to_ready(monkeypa
 
     def fake_request(_config, _request_payload, _response_format):
         return {
-            "contract_version": "supervisor_conversation.v1",
-            "stage": "agent_execution_ready",
-            "conversation_turn_count": 2,
             "conversation_summary": "LLM summary",
-            "collected_facts": [{"field": "evidence_status", "label": "증빙", "value": "블랙박스"}],
+            "collected_facts": [
+                {"field": "evidence_status", "value": "블랙박스"}
+            ],
             "missing_fields": [],
             "next_questions": [],
             "agent_input_packages": [
                 {
-                    "schema_version": "agent_input_schema.v1",
                     "node_code": "fine_notice_analysis",
-                    "owner": "wrong-owner",
-                    "status": "ready",
-                    "missing_fields": [],
                     "payload": {"evidence_status": "블랙박스 보유"},
                 },
                 {
-                    "schema_version": "agent_input_schema.v1",
                     "node_code": "objection_report_generation",
-                    "owner": "wrong-owner",
-                    "status": "ready",
-                    "missing_fields": [],
                     "payload": {"draft_goal": "updated"},
                 },
             ],
-            "reporting_payload": {
-                "contract_version": "reporting_payload.v1",
-                "scenario": "fine_notice",
-                "stage": "agent_execution_ready",
-                "title": "LLM 리포트",
-                "summary": "LLM summary",
-                "sections": [],
-            },
         }
 
     monkeypatch.setattr(service, "_request_supervisor_json", fake_request)
@@ -1054,14 +1028,10 @@ def test_supervisor_llm_rejects_unknown_package_requested_by_untrusted_input(mon
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
 
-    candidate = _fallback_builder({}, "fine_notice")
+    candidate = _valid_state_candidate()
     candidate["agent_input_packages"].append(
         {
-            "schema_version": "agent_input_schema.v1",
             "node_code": "unknown_agent",
-            "owner": "attacker",
-            "status": "ready",
-            "missing_fields": [],
             "payload": {},
         }
     )
@@ -1153,8 +1123,30 @@ def test_supervisor_llm_plan_allows_reference_text_without_expanding_packages(mo
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
     payload = _untrusted_injection_payload()
     fallback_plan = _fallback_plan()
-    candidate = deepcopy(fallback_plan)
-    candidate["input_summary"] = {"summary": payload["user_text"]}
+    candidate = {
+        "routing_intent": fallback_plan["routing_intent"],
+        "input_summary": {"summary": payload["user_text"]},
+        "required_inputs": deepcopy(fallback_plan["required_inputs"]),
+        "pending_questions": deepcopy(fallback_plan["pending_questions"]),
+        "agent_input_packages": [
+            {
+                "node_code": package["node_code"],
+                "payload": deepcopy(package["payload"]),
+            }
+            for package in fallback_plan["agent_input_packages"]
+        ],
+        "steps": [
+            {
+                "node_code": step["node_code"],
+                "status": step["status"],
+                "required_inputs": deepcopy(step["required_inputs"]),
+                "depends_on": deepcopy(step["depends_on"]),
+                "fallback": step["fallback"],
+            }
+            for step in fallback_plan["steps"]
+        ],
+        "blocked_reason": fallback_plan["blocked_reason"],
+    }
 
     monkeypatch.setattr(service, "_request_supervisor_json", lambda *_args: candidate)
     plan = service.build_analysis_plan_with_optional_llm(
