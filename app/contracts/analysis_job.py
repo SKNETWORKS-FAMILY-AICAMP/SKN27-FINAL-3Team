@@ -46,8 +46,17 @@ class AnalysisJobDetailResponse(AnalysisJobContractModel):
     job: AnalysisJobSummary
 
 
+class AnalysisUserClaim(AnalysisJobContractModel):
+    """A user-provided statement kept separate from confirmed facts."""
+
+    field: str = Field(min_length=1, max_length=120)
+    value: str = Field(min_length=1, max_length=2000)
+    source_type: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 class AnalysisResult(AnalysisJobSummary):
     contract_version: str = Field(min_length=1, max_length=64)
+    user_claims: list[AnalysisUserClaim] = Field(default_factory=list)
 
 
 class AnalysisResultResponse(AnalysisJobContractModel):

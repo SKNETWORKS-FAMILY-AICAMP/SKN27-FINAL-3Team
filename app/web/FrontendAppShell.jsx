@@ -29,6 +29,7 @@ const EXECUTION_MODE = "async_worker";
 const WORKER_POLL_INTERVAL_MS = 500;
 const WORKER_POLL_MAX_ATTEMPTS = 60;
 const WORKER_PENDING_JOB_STATUSES = new Set(["queued", "running", "retrying"]);
+const FINE_NOTICE_DEADLINE_DAYS = 60;
 const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf,video/mp4,video/quicktime";
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime"]);
 const DOCUMENT_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
@@ -40,6 +41,26 @@ const ATTACHMENT_PURPOSE_LABELS = {
   evidence: "증거 자료",
   traffic_accident_confirmation: "교통사고 사실확인원",
 };
+const CHAT_ATTACHMENT_OPTIONS = [
+  {
+    label: "고지서·문서",
+    description: "고지서, 사실확인원 또는 보조 문서",
+    purpose: "fine_notice",
+    accept: "image/jpeg,image/png,image/webp,application/pdf",
+  },
+  {
+    label: "사고 현장 사진",
+    description: "사고 현장, 차량 파손 또는 도로 사진",
+    purpose: "accident_scene",
+    accept: "image/jpeg,image/png,image/webp",
+  },
+  {
+    label: "블랙박스 영상",
+    description: "MP4 또는 MOV 영상",
+    purpose: "blackbox_video",
+    accept: "video/mp4,video/quicktime",
+  },
+];
 const OCR_CONFIRMATION_FIELDS = [
   "fine_type",
   "notice_stage",
@@ -63,8 +84,68 @@ const USER_FACING_NEXT_ACTION_LABELS = {
   review_verified_results: "확인된 결과와 근거를 검토해 주세요.",
 };
 
+function upcomingDeadlineSummary(cases, windowDays = 7) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const upcoming = cases
+    .map((item) => {
+      if (!isFineNoticeCase(item)) return null;
+      const raw = item?.notice_received_at || item?.notice_received_date;
+      if (!raw || item?.notice_received_source !== "user") return null;
+      const receivedAt = parseISODateOnly(raw);
+      if (!receivedAt) return null;
+      const deadline = new Date(receivedAt);
+      deadline.setDate(deadline.getDate() + FINE_NOTICE_DEADLINE_DAYS);
+      const days = Math.ceil((deadline.getTime() - today.getTime()) / 86400000);
+      return { days, deadline };
+    })
+    .filter((item) => item && item.days >= 0 && item.days <= windowDays)
+    .sort((left, right) => left.days - right.days);
+  return {
+    count: upcoming.length,
+    nearestLabel: upcoming.length
+      ? (upcoming[0].days === 0 ? "과태료 이의제기 오늘 마감" : `과태료 이의제기 마감 D-${upcoming[0].days}`)
+      : "7일 이내 과태료 이의제기 마감 없음",
+  };
+}
+
+function parseISODateOnly(value) {
+  const normalized = String(value || "").trim().slice(0, 10);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+  if (!match) return null;
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const parsed = new Date(year, month - 1, day);
+  parsed.setHours(0, 0, 0, 0);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+function isFineNoticeCase(item) {
+  const caseType = [
+    item?.type,
+    item?.report_type,
+    item?.case_type,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return /과태료|fine_notice/.test(caseType);
+}
+
 function waitForWorkerPoll() {
   return new Promise((resolve) => window.setTimeout(resolve, WORKER_POLL_INTERVAL_MS));
+}
+
+function waitForAssistantToken() {
+  return new Promise((resolve) => window.setTimeout(resolve, 20));
 }
 
 function assistantMessageText(value, fallback = "") {
@@ -93,6 +174,19 @@ function userFacingNextActions(value) {
   });
 }
 
+function userFacingLimitations(value) {
+  const normalized = stringList(value).flatMap((item) => {
+    if (/lexical|token coverage|검색 토큰/i.test(item)) {
+      return ["검색 결과의 일치도가 낮아 추가 확인이 필요합니다."];
+    }
+    if (/sync adapter|supervisor|postgres|execution mode|adapter/i.test(item)) {
+      return [];
+    }
+    return [item];
+  });
+  return [...new Set(normalized)];
+}
+
 function isDeadlineGuidance(value) {
   return Boolean(
     value &&
@@ -106,11 +200,11 @@ function buildSafetyGuidance({ serviceScope = null, limitations = [], nextAction
     return {
       title: serviceScope.decision === "expert_handoff" ? "전문가 확인이 필요한 요청입니다" : "서비스 범위 안내",
       reason: String(serviceScope.reason || "").trim(),
-      limitations: stringList(serviceScope.limitations),
-      nextActions: stringList(serviceScope.next_actions),
+      limitations: userFacingLimitations(serviceScope.limitations),
+      nextActions: userFacingNextActions(serviceScope.next_actions),
     };
   }
-  const safeLimitations = stringList(limitations);
+  const safeLimitations = userFacingLimitations(limitations);
   const safeNextActions = userFacingNextActions(nextActions);
   if (!safeLimitations.length && !safeNextActions.length) {
     return null;
@@ -173,8 +267,16 @@ export default function FrontendAppShell({
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const isMountedRef = useRef(false);
   const authRefreshContextRef = useRef({ guestId, guestCredential, sessionId });
   authRefreshContextRef.current = { guestId, guestCredential, sessionId };
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const effectiveAuthToken = activeAuthToken || "";
   const identity = {
@@ -191,8 +293,15 @@ export default function FrontendAppShell({
     userId: null,
   });
   const isGuestReady = Boolean(guestId && guestCredential);
-  const sessionLabel = authSessionId ? "Google 계정 상담" : isGuestReady ? "비회원 상담" : "상담 준비";
-  const cases = mypageSummary?.cases || [];
+  const sessionLabel = authSessionId
+    ? "Google 계정 상담"
+    : isGuestReady
+      ? "비회원 상담"
+      : "상담 준비";
+  const cases = mypageSummary?.cases?.length ? mypageSummary.cases : [];
+  const effectiveReportList = reportList;
+  const effectiveCurrentReport = currentReport || effectiveReportList[0] || null;
+  const effectiveMypageSummary = mypageSummary;
   const history = historyEvents?.events || [];
   const analysisCards = analysisResponse?.cards?.length
     ? normalizeAnalysisCards(analysisResponse.cards)
@@ -216,6 +325,8 @@ export default function FrontendAppShell({
     ? analysisResponse.deadline_guidance
     : null;
   const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
+  const attachmentClassificationResult =
+    analysisResponse?.structured_results?.attachment_document_classification || null;
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -225,18 +336,22 @@ export default function FrontendAppShell({
   const visibleAnalysisCards = isLiveReportingReady
     ? analysisCards
     : analysisCards.filter((card) => card?.card_type !== "reporting_preview");
-  const attachmentPurposes = Array.from(
+  const attachmentOptions = Array.from(
     new Set([
-      ...(capabilityCatalog?.capabilities || []).flatMap((capability) => capability.attachment_purposes || []),
-      "fine_notice",
-      "supporting_evidence",
-      "blackbox_video",
-      "accident_scene",
-      "evidence",
-      "traffic_accident_confirmation",
+      ...(capabilityCatalog?.capabilities || []).flatMap(
+        (capability) => capability.attachment_purposes || []
+      ),
+      ...CHAT_ATTACHMENT_OPTIONS.map((option) => option.purpose),
     ])
-  ).map((value) => ({ value, label: ATTACHMENT_PURPOSE_LABELS[value] || value }));
-
+  ).map((purpose) => {
+    const configured = CHAT_ATTACHMENT_OPTIONS.find((option) => option.purpose === purpose);
+    return configured || {
+      label: ATTACHMENT_PURPOSE_LABELS[purpose] || purpose,
+      description: "상담 근거로 사용할 지원 자료",
+      purpose,
+      accept: ATTACHMENT_ACCEPT,
+    };
+  });
   useEffect(() => {
     if (ocrResult?.requires_confirmation === true) {
       setOcrConfirmationFields(ocrConfirmationFieldsFrom(ocrResult));
@@ -546,7 +661,11 @@ export default function FrontendAppShell({
   }
 
   function handleAttachmentFile(file) {
-    if (!file) return;
+    if (!file) {
+      setSelectedUploadFile(null);
+      setUploadInputResetKey((value) => value + 1);
+      return;
+    }
     const contentType = String(file.type || "").toLowerCase();
     if (!VIDEO_MIME_TYPES.has(contentType) && !DOCUMENT_MIME_TYPES.has(contentType)) {
       setSelectedUploadFile(null);
@@ -903,7 +1022,28 @@ export default function FrontendAppShell({
     });
   }
 
-  async function submitServiceMessage({ userText, ocrConfirmation } = {}) {
+  function submitAttachmentClassificationConfirmation() {
+    const attachmentId = String(attachmentClassificationResult?.attachment_id || "").trim();
+    if (!attachmentId) {
+      setStatusMessage("확인할 자료 분류를 찾지 못했습니다. 자료를 다시 첨부해 주세요.");
+      return;
+    }
+    const followUpMessage = "자료 분류를 확인했습니다. 다음 분석을 진행해 주세요.";
+    setQuestion(followUpMessage);
+    void submitServiceMessage({
+      userText: followUpMessage,
+      attachmentClassificationConfirmation: {
+        confirmed: true,
+        attachment_id: attachmentId,
+      },
+    });
+  }
+
+  async function submitServiceMessage({
+    userText,
+    ocrConfirmation,
+    attachmentClassificationConfirmation,
+  } = {}) {
     const trimmedQuestion = String(userText ?? question).trim();
     const confirmationForRequest = ocrConfirmation || pendingOcrConfirmation;
     if (!trimmedQuestion) {
@@ -973,6 +1113,8 @@ export default function FrontendAppShell({
           conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
           user_text: trimmedQuestion,
           ocr_confirmation: confirmationForRequest || undefined,
+          attachment_classification_confirmation:
+            attachmentClassificationConfirmation || undefined,
           execution_mode: executionMode,
           conversation_history: conversationHistory,
           attachments: registeredAttachments.map((attachment) => ({
@@ -986,18 +1128,16 @@ export default function FrontendAppShell({
       );
       const workerResult = await pollQueuedWorkerResult(result, submitIdentity);
       logDeveloperDiagnostic("chat.result", buildDeveloperDiagnostic(workerResult));
-      setChatMessages([
-        ...conversationHistory,
-        {
-          role: "assistant",
-          content:
-            workerResult?.assistant_message?.core_answer ||
-            assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
-          status: workerResult?.status || "partial",
-          pending_questions: workerResult?.pending_questions || [],
-          followUp: workerResult?.assistant_message?.follow_up || null,
-        },
-      ]);
+      const assistantMessage = {
+        role: "assistant",
+        content:
+          workerResult?.assistant_message?.core_answer ||
+          assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
+        status: workerResult?.status || "partial",
+        pending_questions: workerResult?.pending_questions || [],
+        followUp: workerResult?.assistant_message?.follow_up || null,
+      };
+      await streamAssistantMessage(conversationHistory, assistantMessage);
       setAnalysisResponse(workerResult);
       setQuestion("");
       const canSaveGuestConversation = !effectiveAuthSessionId && Boolean(
@@ -1019,24 +1159,64 @@ export default function FrontendAppShell({
       logDeveloperDiagnostic("chat.error", {
         message: _error?.message || "unknown error",
       });
+      const isRateLimitExceeded = _error?.status === 429 || _error?.code === "rate_limit_exceeded";
+      const errorMessage = isRateLimitExceeded
+        ? effectiveAuthSessionId
+          ? "오늘의 상담 가능 횟수를 모두 사용했습니다. 잠시 후 다시 시도해 주세요."
+          : "비회원 상담 가능 횟수를 모두 사용했습니다. 계속 상담하려면 Google 로그인해 주세요."
+        : "응답을 불러오지 못해 접수 상태만 표시합니다.";
       setChatMessages([
         ...conversationHistory,
         {
           role: "assistant",
-          content: "응답을 불러오지 못해 접수 상태만 표시합니다.",
+          content: errorMessage,
           status: "partial",
           pending_questions: [],
         },
       ]);
-      setAnalysisResponse({
-        cards: FALLBACK_ANALYSIS_CARDS,
-      });
-      setSavePromptVisible(!authSessionId);
-      setStatusMessage("응답을 불러오지 못해 접수 상태만 표시합니다.");
+      setAnalysisResponse(isRateLimitExceeded ? null : { cards: FALLBACK_ANALYSIS_CARDS });
+      setSavePromptVisible(!isRateLimitExceeded && !authSessionId);
+      setStatusMessage(errorMessage);
     } finally {
       setIsSubmitting(false);
       if (confirmationForRequest) {
         setPendingOcrConfirmation(null);
+      }
+    }
+  }
+
+  async function streamAssistantMessage(conversationHistory, assistantMessage) {
+    const tokens = String(assistantMessage.content || "").match(/\S+\s*/g) || [];
+    const batchSize = Math.max(1, Math.ceil(tokens.length / 160));
+    let renderedContent = "";
+
+    if (!isMountedRef.current) return;
+    if (!tokens.length) {
+      setChatMessages([
+        ...conversationHistory,
+        { ...assistantMessage, content: "", streaming: false },
+      ]);
+      return;
+    }
+
+    setChatMessages([
+      ...conversationHistory,
+      { ...assistantMessage, content: "", streaming: true },
+    ]);
+
+    for (let index = 0; index < tokens.length; index += batchSize) {
+      if (!isMountedRef.current) return;
+      renderedContent += tokens.slice(index, index + batchSize).join("");
+      setChatMessages([
+        ...conversationHistory,
+        {
+          ...assistantMessage,
+          content: renderedContent,
+          streaming: index + batchSize < tokens.length,
+        },
+      ]);
+      if (index + batchSize < tokens.length) {
+        await waitForAssistantToken();
       }
     }
   }
@@ -1280,22 +1460,24 @@ export default function FrontendAppShell({
         onOpenChat={() => bootstrapGuestSession("chatbot")}
       />
       <div className="app-shell__body">
-      <div className="top-float-actions" aria-label="주요 메뉴">
-        {authSessionId ? (
-          <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
-            로그아웃
-          </button>
-        ) : (
-          <button
-            className="button primary small"
-            type="button"
-            onClick={saveConversationAfterLogin}
-            disabled={isSavingConversation}
-          >
-            {isSavingConversation ? "연결 중" : "Google 로그인"}
-          </button>
-        )}
-      </div>
+      {(authSessionId || !["chatbot", "history"].includes(activeRoute)) && (
+        <div className="top-float-actions" aria-label="주요 메뉴">
+          {authSessionId ? (
+            <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
+              로그아웃
+            </button>
+          ) : (
+            <button
+              className="button primary small"
+              type="button"
+              onClick={saveConversationAfterLogin}
+              disabled={isSavingConversation}
+            >
+              {isSavingConversation ? "연결 중" : "Google 로그인"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div
         className={
@@ -1330,6 +1512,7 @@ export default function FrontendAppShell({
         <main className="workspace" aria-live="polite">
           {activeRoute === "entry" && (
             <EntryScreenV2
+              isAuthenticated={Boolean(authSessionId)}
               onGuestStart={() => bootstrapGuestSession("chatbot")}
               onOpenChat={() => bootstrapGuestSession("chatbot")}
               onNavigate={setActiveRoute}
@@ -1339,8 +1522,7 @@ export default function FrontendAppShell({
           {activeRoute === "chatbot" && (
             <ChatScreenV2
               analysisCards={visibleAnalysisCards}
-              attachmentPurpose={attachmentPurpose}
-              attachmentPurposes={attachmentPurposes}
+              attachmentOptions={attachmentOptions}
               assistantAnswer={assistantAnswer}
               assistantFollowUp={assistantFollowUp}
               chatSafetyGuidance={chatSafetyGuidance}
@@ -1355,6 +1537,7 @@ export default function FrontendAppShell({
               onAttachmentDrop={handleAttachmentDrop}
               onAttachmentFile={handleAttachmentFile}
               onConfirmOcr={submitOcrConfirmation}
+              onConfirmAttachmentClassification={submitAttachmentClassificationConfirmation}
               onOcrFieldChange={updateOcrConfirmationField}
               onKeepTemporary={keepConversationTemporary}
               onRegisterAttachment={registerAttachmentMetadata}
@@ -1366,6 +1549,7 @@ export default function FrontendAppShell({
               pendingAuthAction={pendingAuthAction}
               ocrConfirmationFields={ocrConfirmationFields}
               ocrResult={ocrResult}
+              attachmentClassificationResult={attachmentClassificationResult}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
@@ -1402,6 +1586,7 @@ export default function FrontendAppShell({
               reportActionStatus={reportActionStatus}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
+              userClaims={analysisResponse?.user_claims || []}
             />
           )}
 
@@ -1411,7 +1596,7 @@ export default function FrontendAppShell({
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenCase={openSavedCase}
               onRefresh={loadMyPageSummary}
-              summary={mypageSummary}
+              summary={effectiveMypageSummary}
             />
           )}
 
@@ -1422,7 +1607,7 @@ export default function FrontendAppShell({
           {activeRoute === "reporting" && (
             <ReportingScreen
               analysisCards={visibleAnalysisCards}
-              currentReport={currentReport}
+              currentReport={effectiveCurrentReport}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenReport={openReportDetail}
@@ -1436,7 +1621,7 @@ export default function FrontendAppShell({
               onCopyDocumentCard={copyReportDocumentCard}
               onRunReportAction={runCurrentReportAction}
               reportActionStatus={reportActionStatus}
-              reportList={reportList}
+              reportList={effectiveReportList}
               reportingPayload={visibleReportingPayload}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
@@ -1770,26 +1955,108 @@ function AppIconRail({ activeRoute, onNavigate, onOpenChat }) {
   );
 }
 
-function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
+function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }) {
+  const [activeCard, setActiveCard] = useState(0);
+  const lastWheelAt = useRef(0);
+  const touchStartRef = useRef(null);
+  const wheelCards = ["상황과 자료", "서비스 안내", "진행 순서", "주요 기능"];
   const goToRoute = (route) => {
     if (typeof onNavigate === "function") {
       onNavigate(route);
     }
   };
+  const rotateWheel = (direction) => {
+    setActiveCard((current) => (current + direction + 4) % 4);
+  };
+  const handleWheel = (event) => {
+    const now = Date.now();
+    if (now - lastWheelAt.current < 420 || Math.abs(event.deltaY) < 8) return;
+    lastWheelAt.current = now;
+    rotateWheel(event.deltaY > 0 ? 1 : -1);
+  };
 
   return (
-    <section className="entry-screen insurance-layout entry-dashboard">
-      <div className="entry-dashboard__main">
-        <div className="entry-dashboard__grid entry-dashboard__grid--photo">
-          <div className="entry-card entry-card--photo">
+    <section className="entry-screen insurance-layout entry-dashboard entry-wheel">
+      <div className="entry-wheel__shell">
+        <div
+          className="entry-wheel__viewport"
+          tabIndex={0}
+          onWheel={handleWheel}
+          onTouchStart={(event) => {
+            const touch = event.touches[0];
+            touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+          }}
+          onTouchEnd={(event) => {
+            const start = touchStartRef.current;
+            const touch = event.changedTouches[0];
+            touchStartRef.current = null;
+            if (!start || !touch) return;
+            const deltaX = touch.clientX - start.x;
+            const deltaY = touch.clientY - start.y;
+            const primaryDelta = Math.abs(deltaY) >= Math.abs(deltaX) ? deltaY : deltaX;
+            if (Math.abs(primaryDelta) < 46) return;
+            rotateWheel(primaryDelta < 0 ? 1 : -1);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") rotateWheel(-1);
+            if (event.key === "ArrowRight") rotateWheel(1);
+          }}
+          aria-label="홈 화면 기능 카드 캐러셀"
+        >
+          <nav className="entry-wheel__radial-nav" aria-label="홈 화면 카드 선택">
+            <div className="entry-wheel__orbit" aria-hidden="true" />
+            {wheelCards.map((label, index) => {
+              let offset = (index - activeCard + wheelCards.length) % wheelCards.length;
+              if (offset > 1) offset -= wheelCards.length;
+              const radialPosition = {
+                "-2": { x: 6, y: -205 },
+                "-1": { x: 74, y: -112 },
+                "0": { x: 118, y: 0 },
+                "1": { x: 78, y: 132 },
+              }[String(offset)];
+              return (
+                <button
+                  className={activeCard === index ? "entry-wheel__radial-item is-active" : "entry-wheel__radial-item"}
+                  type="button"
+                  key={label}
+                  style={{
+                    "--radial-x": `${radialPosition.x}px`,
+                    "--radial-y": `${radialPosition.y}px`,
+                  }}
+                  onClick={() => setActiveCard(index)}
+                  aria-current={activeCard === index ? "true" : undefined}
+                >
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <strong>{label}</strong>
+                </button>
+              );
+            })}
+          </nav>
+          <div
+            className="entry-wheel__rotor"
+          >
+          <article
+            className={`entry-card entry-card--photo entry-wheel__card ${activeCard === 0 ? "is-active" : ""}`}
+            style={{ "--wheel-index": 0 }}
+            onClick={() => setActiveCard(0)}
+          >
             <img
               src="/design-references/02-consultation-desk.jpg"
               alt="차량 관련 서류를 검토하는 상담 장면"
               loading="lazy"
             />
-          </div>
+            <div className="entry-wheel__photo-label">
+              <span>01</span>
+              <strong>당신의 편리한 교통사고 서포트 앱</strong>
+            </div>
+          </article>
 
-          <div className="entry-card entry-card--intro">
+          <article
+            className={`entry-card entry-card--intro entry-wheel__card ${activeCard === 1 ? "is-active" : ""}`}
+            style={{ "--wheel-index": 1 }}
+            onClick={() => setActiveCard(1)}
+          >
+            <span className="entry-wheel__number">02 · 서비스 안내</span>
             <p>
               과실비율 예측과 과태료 이의신청 지원까지, 상황과 자료를 바탕으로
               쟁점과 다음 행동을 정리해 드리는 서비스입니다.
@@ -1798,14 +2065,21 @@ function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
               <button className="button primary" type="button" onClick={onOpenChat}>
                 바로 상담 시작
               </button>
-              <button className="button on-dark" type="button" onClick={() => goToRoute("reporting")}>
-                지난 리포트
-              </button>
+              {isAuthenticated && (
+                <button className="button on-dark" type="button" onClick={() => goToRoute("reporting")}>
+                  지난 리포트
+                </button>
+              )}
             </div>
-          </div>
+          </article>
 
-          <div className="entry-card entry-card--steps">
+          <article
+            className={`entry-card entry-card--steps entry-wheel__card ${activeCard === 2 ? "is-active" : ""}`}
+            style={{ "--wheel-index": 2 }}
+            onClick={() => setActiveCard(2)}
+          >
             <div className="entry-card__head">
+              <span className="entry-wheel__number">03 · 이용 과정</span>
               <strong>진행 순서</strong>
               <p>이렇게 도와드립니다</p>
             </div>
@@ -1863,10 +2137,15 @@ function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
                 </div>
               </div>
             </div>
-          </div>
+          </article>
 
-          <div className="entry-card entry-card--features">
+          <article
+            className={`entry-card entry-card--features entry-wheel__card ${activeCard === 3 ? "is-active" : ""}`}
+            style={{ "--wheel-index": 3 }}
+            onClick={() => setActiveCard(3)}
+          >
             <div className="entry-card__head">
+              <span className="entry-wheel__number">04 · 주요 기능</span>
               <strong>우리 기능들</strong>
             </div>
             <div className="entry-quick-list entry-quick-list--light">
@@ -1914,8 +2193,10 @@ function EntryScreenV2({ onGuestStart, onOpenChat, onNavigate }) {
                 </span>
               </button>
             </div>
+          </article>
           </div>
         </div>
+
       </div>
     </section>
   );
@@ -1958,6 +2239,7 @@ function ConversationSidebar({
           >
             {isCollapsed ? "»" : "«"}
           </button>
+          {!isCollapsed && <span className="sidebar-collapse-label">접기</span>}
         </div>
 
       {!isCollapsed && (
@@ -1975,7 +2257,7 @@ function ConversationSidebar({
       <section className="conversation-section" aria-label="현재 대화">
         <div className="section-label">현재</div>
         <button
-          className={activeRoute === "chatbot" ? "conversation-card active" : "conversation-card"}
+          className="conversation-card active"
           type="button"
           onClick={() => onNavigate("chatbot")}
         >
@@ -2051,8 +2333,8 @@ function ConversationSidebar({
 
 function ChatScreenV2({
   analysisCards,
-  attachmentPurpose,
-  attachmentPurposes,
+  attachmentClassificationResult,
+  attachmentOptions,
   assistantAnswer,
   assistantFollowUp,
   capabilityError,
@@ -2063,6 +2345,7 @@ function ChatScreenV2({
   onAttachmentDragOver,
   onAttachmentDrop,
   onAttachmentFile,
+  onConfirmAttachmentClassification,
   onConfirmOcr,
   onOcrFieldChange,
   onOpenCaseResult,
@@ -2093,6 +2376,8 @@ function ChatScreenV2({
   supervisorState,
   uploadInputResetKey,
 }) {
+  const attachmentInputRef = useRef(null);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const visibleMessages = chatMessages.length
     ? chatMessages
     : submittedQuestion
@@ -2110,18 +2395,44 @@ function ChatScreenV2({
   const isAuthenticated = Boolean(authSessionId);
   const visibleReportingPayload = isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;
   const canGenerateReport = hasReportGenerationNode(supervisorState);
-  const uploadButtonLabel = isRegisteringAttachment
-    ? "등록 중"
-    : selectedUploadFile
-      ? isAuthenticated
-        ? "파일 업로드"
-        : "Google 로그인 후 업로드"
-      : "파일 선택 필요";
-  const quickQuestions = [
-    "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
-    "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했어",
-    "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어",
-    "보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘",
+  const openAttachmentPicker = (option) => {
+    setAttachmentPurpose(option.purpose);
+    setAttachmentMenuOpen(false);
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.accept = option.accept;
+      attachmentInputRef.current.click();
+    }
+  };
+  const quickQuestionGroups = [
+    {
+      title: "과태료·범칙금",
+      questions: [
+        "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
+        "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했어",
+        "과태료와 범칙금은 어떤 차이가 있고 벌점은 언제 붙어?",
+        "무인 단속 고지서를 받았는데 실제 운전자가 내가 아니면 어떻게 해야 해?",
+        "과태료 의견제출 기한이 지났는데 이의를 제기할 방법이 있을까?",
+        "어린이보호구역에서 응급상황 때문에 잠깐 정차한 경우도 단속 대상이야?",
+      ],
+    },
+    {
+      title: "과실비율",
+      questions: [
+        "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어",
+        "보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘",
+        "차선을 바꾸던 중 뒤차와 부딪혔는데 과실비율은 무엇을 기준으로 정해?",
+        "앞차가 갑자기 급정거해서 추돌했는데 뒤차가 항상 100% 책임이야?",
+        "불법 주정차 차량 때문에 시야가 가려져 사고가 나면 그 차량에도 책임이 있어?",
+        "보험사가 제시한 과실비율에 동의하지 않을 때 어떤 자료를 준비해야 해?",
+      ],
+    },
+    {
+      title: "법령 관련 질문",
+      questions: [
+        "황색 신호에 교차로에 진입했다가 사고가 났는데 신호위반으로 볼 수 있어?",
+        "교통사고 사실확인원과 경찰 조사 결과는 과실비율 판단에 어떤 영향을 줘?",
+      ],
+    },
   ];
   return (
     <section className="screen">
@@ -2129,82 +2440,7 @@ function ChatScreenV2({
         <div className="screen-title">
           <h2>AI 교통 상담</h2>
         </div>
-        <div className="screen-actions">
-          <button className="button" type="button" onClick={onKeepTemporary}>
-            저장하지 않고 계속하기
-          </button>
-          <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
-            {isSavingConversation ? "연결 중" : "Google 로그인 후 저장"}
-          </button>
-        </div>
       </div>
-
-      <section className="chat-attachment-bar" aria-label="상담 자료 첨부">
-        <div className="attachment-tools">
-          <label>
-            <span>첨부 목적</span>
-            <select value={attachmentPurpose} onChange={(event) => setAttachmentPurpose(event.target.value)}>
-              {attachmentPurposes.map((item) => (
-                <option value={item.value} key={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="button"
-            type="button"
-            onClick={onRegisterAttachment}
-            disabled={isRegisteringAttachment || !selectedUploadFile || Boolean(capabilityError)}
-          >
-            {uploadButtonLabel}
-          </button>
-          <span className="tag">자료 {registeredAttachments.length}건</span>
-        </div>
-        <div
-          className="attachment-dropzone"
-          onDragOver={onAttachmentDragOver}
-          onDrop={onAttachmentDrop}
-        >
-          <strong>파일을 끌어 놓거나 선택하세요.</strong>
-          <span>영상은 Vision 분석, 이미지와 PDF는 OCR 분류로 전달됩니다.</span>
-          <label className="file-picker">
-            <span>파일 선택</span>
-            <input
-              key={uploadInputResetKey}
-              accept={ATTACHMENT_ACCEPT}
-              type="file"
-              onChange={(event) => onAttachmentFile(event.target.files?.[0] || null)}
-            />
-          </label>
-          <span role="status">
-            {selectedUploadFile
-              ? `${selectedUploadFile.name} 선택됨 · ${VIDEO_MIME_TYPES.has(selectedUploadFile.type) ? "Vision" : "OCR"} 대기`
-              : "첨부할 파일을 하나 선택하세요."}
-          </span>
-        </div>
-        {capabilityError && <p className="attachment-help" role="alert">{capabilityError}</p>}
-        {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
-          <p className="attachment-help" role="status">
-            자료 분석은 Google 로그인 후 현재 상담에 그대로 연결됩니다.
-          </p>
-        )}
-        {pendingAuthAction && (
-          <p className="attachment-help" role="status">
-            로그인 후 요청한 작업을 같은 상담에서 이어갑니다.
-          </p>
-        )}
-        {registeredAttachments.length > 0 && (
-          <div className="attachment-list" aria-label="상담 연결 자료">
-            {registeredAttachments.slice(-3).map((attachment) => (
-              <span key={attachment.attachment_id}>
-                {attachment.original_filename || attachment.filename || attachment.purpose}
-                <em>{attachmentStatusLabel(attachment.scan_status || attachment.status)}</em>
-              </span>
-            ))}
-          </div>
-        )}
-      </section>
 
       <div className="chat-shell">
         <div className="conversation-list">
@@ -2222,7 +2458,7 @@ function ChatScreenV2({
           <div className="messages">
             {!hasConversation && (
               <section className="chat-empty-state" aria-label="상담 시작">
-                <span className="eyebrow">비회원 상담</span>
+                <span className="chat-session-status">비회원으로 상담 중</span>
                 <h3>지금 가장 급한 상황부터 적어 주세요.</h3>
                 <p>
                   사고 직후라면 장소, 시간, 상대방 주장, 고지서 내용처럼 기억나는 것만 적어도 됩니다.
@@ -2239,10 +2475,10 @@ function ChatScreenV2({
                   return (
                     <article className={isUser ? "message user" : "message"} key={`${message.role}-${index}`}>
                       <span className="message-avatar">{isUser ? "나" : "AI"}</span>
-                      <div className={isUser ? "bubble" : "bubble wide"}>
+                      <div className={`${isUser ? "bubble" : "bubble wide"}${message.streaming ? " is-streaming" : ""}`}>
                         <p>{message.content}</p>
-                        {!isUser && message.followUp && <FollowUpNote followUp={message.followUp} />}
-                        {!isUser && isLatestAssistant && (
+                        {!isUser && !message.streaming && message.followUp && <FollowUpNote followUp={message.followUp} />}
+                        {!isUser && !message.streaming && isLatestAssistant && (
                           <>
                             {chatSafetyGuidance && <SafetyGuidancePanel guidance={chatSafetyGuidance} />}
                             <MissingFieldsPrompt supervisorState={supervisorState} />
@@ -2271,7 +2507,7 @@ function ChatScreenV2({
                     </article>
                   );
                 })}
-                {isSubmitting && (
+                {isSubmitting && visibleMessages[visibleMessages.length - 1]?.role !== "assistant" && (
                   <article className="message" aria-live="polite">
                     <span className="message-avatar">AI</span>
                     <div className="bubble wide bubble-loading">
@@ -2287,9 +2523,9 @@ function ChatScreenV2({
           {savePromptVisible && (
             <section className="save-choice-panel" aria-label="상담 저장 선택">
               <div>
-                <span className="eyebrow">저장 선택</span>
-                <strong>이 상담을 마이페이지 이력에 저장할까요?</strong>
-                <p>저장하면 Google 계정에 연결하고, 저장하지 않으면 PostgreSQL 이력 전환 없이 임시 상담으로 유지합니다.</p>
+                <span className="save-choice-label">상담 저장</span>
+                <strong>이 상담을 내 상담 기록에 저장하시겠어요?</strong>
+                <p>로그인하면 나중에 다시 확인할 수 있습니다. 저장하지 않은 상담은 현재 접속 중에만 유지됩니다.</p>
               </div>
               <div className="save-choice-actions">
                 <button className="button" type="button" onClick={onKeepTemporary}>
@@ -2318,13 +2554,37 @@ function ChatScreenV2({
             />
           )}
 
-          <div className="quick-row" aria-label="빠른 질문">
-            {quickQuestions.map((item) => (
-              <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
-                {item}
-              </button>
-            ))}
-          </div>
+          {attachmentClassificationResult?.requires_confirmation === true && (
+            <AttachmentClassificationConfirmationCard
+              classification={attachmentClassificationResult?.classification}
+              confidenceBand={attachmentClassificationResult?.confidence_band}
+              isSubmitting={isSubmitting}
+              onConfirm={onConfirmAttachmentClassification}
+            />
+          )}
+
+          <details className="quick-examples">
+            <summary className="quick-examples-header">
+              <span>
+                <strong>서비스 예시 작동 방식</strong>
+                <small>궁금한 상황을 선택하면 질문이 입력창에 담깁니다.</small>
+              </span>
+            </summary>
+            <div className="quick-example-groups">
+              {quickQuestionGroups.map((group) => (
+                <section className="quick-example-group" aria-label={group.title} key={group.title}>
+                  <h4>{group.title}</h4>
+                  <div className="quick-row">
+                    {group.questions.map((item) => (
+                      <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </details>
 
           <div className="chat-input">
             <div className="input-stack">
@@ -2334,10 +2594,81 @@ function ChatScreenV2({
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
               />
+              <div className="chat-attachment-bar">
+              <div
+                className="attachment-dropzone"
+                onDragOver={onAttachmentDragOver}
+                onDrop={onAttachmentDrop}
+              >
+                <strong>파일을 끌어 놓거나 + 메뉴에서 선택하세요.</strong>
+                <span>영상은 Vision 분석, 이미지와 PDF는 OCR 분류로 전달됩니다.</span>
+              <div className="composer-toolbar">
+                <div className="attachment-menu-wrap">
+                  <button
+                    className="attachment-plus"
+                    type="button"
+                    aria-label="자료 첨부"
+                    aria-expanded={attachmentMenuOpen}
+                    onClick={() => setAttachmentMenuOpen((open) => !open)}
+                  >
+                    +
+                  </button>
+                  {attachmentMenuOpen && (
+                    <div className="attachment-menu" role="menu">
+                      {attachmentOptions.map((option) => (
+                        <button type="button" role="menuitem" key={option.label} onClick={() => openAttachmentPicker(option)}>
+                          <strong>{option.label}</strong>
+                          <span>{option.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <input
+                    ref={attachmentInputRef}
+                    key={uploadInputResetKey}
+                    className="attachment-file-input"
+                    type="file"
+                    accept={ATTACHMENT_ACCEPT}
+                    onChange={(event) => onAttachmentFile(event.target.files?.[0] || null)}
+                  />
+                </div>
+
+                {selectedUploadFile && (
+                  <div className="selected-attachment">
+                    <span>{selectedUploadFile.name}</span>
+                    <button
+                      type="button"
+                      onClick={onRegisterAttachment}
+                      disabled={isRegisteringAttachment || Boolean(capabilityError)}
+                    >
+                      {isRegisteringAttachment ? "첨부 중" : isAuthenticated ? "첨부" : "로그인 후 첨부"}
+                    </button>
+                    <button type="button" aria-label="선택한 파일 제거" onClick={() => onAttachmentFile(null)}>×</button>
+                  </div>
+                )}
+
+                {!selectedUploadFile && registeredAttachments.length > 0 && (
+                  <span className="attachment-count">첨부 {registeredAttachments.length}개</span>
+                )}
+
+                <button className="button primary composer-send" type="button" onClick={onSubmit} disabled={isSubmitting}>
+                  {isSubmitting ? "정리 중" : "전송"}
+                </button>
+              </div>
+                <span role="status">
+                  {selectedUploadFile
+                    ? `${selectedUploadFile.name} 선택됨 · ${VIDEO_MIME_TYPES.has(selectedUploadFile.type) ? "Vision" : "OCR"} 대기`
+                    : "첨부할 파일을 하나 선택하세요."}
+                </span>
+              </div>
+
+              {capabilityError && <p className="attachment-help" role="alert">{capabilityError}</p>}
+              {!isAuthenticated && selectedUploadFile && !pendingAuthAction && (
+                <p className="attachment-help" role="status">자료 첨부는 Google 로그인 후 현재 상담에 연결됩니다.</p>
+              )}
+              {pendingAuthAction && <p className="attachment-help" role="status">로그인 후 같은 상담에서 첨부를 이어갑니다.</p>}
+              </div>
             </div>
-            <button className="button primary" type="button" onClick={onSubmit} disabled={isSubmitting}>
-              {isSubmitting ? "정리 중" : "전송"}
-            </button>
           </div>
         </div>
       </div>
@@ -2367,6 +2698,32 @@ function OcrConfirmationCard({ fields, isSubmitting, onChange, onConfirm }) {
       </div>
       <button className="button primary" type="button" onClick={onConfirm} disabled={isSubmitting}>
         OCR 추출값 확인 후 후속 절차 진행
+      </button>
+    </section>
+  );
+}
+
+function AttachmentClassificationConfirmationCard({
+  classification,
+  confidenceBand,
+  isSubmitting,
+  onConfirm,
+}) {
+  const classificationLabel =
+    classification === "fine_notice" ? "고지서·행정 문서" : "사고 현장·증거 사진";
+  const confidenceLabel = confidenceBand === "high" ? "높음" : "보통";
+  return (
+    <section className="ocr-confirmation-card" aria-label="자료 분류 확인">
+      <div>
+        <span className="eyebrow">자료 분류 확인</span>
+        <strong>{classificationLabel}(으)로 분류했습니다.</strong>
+        <p>
+          분류 신뢰도 {confidenceLabel} · 확인 후에만 자료 종류에 맞는 OCR 또는 근거 검색을
+          진행합니다.
+        </p>
+      </div>
+      <button className="button primary" type="button" onClick={onConfirm} disabled={isSubmitting}>
+        자료 분류 확인 후 다음 분석 진행
       </button>
     </section>
   );
@@ -2406,7 +2763,10 @@ function FollowUpNote({ followUp }) {
           <span className="follow-up-group-label">꼭 필요해요</span>
           <ul>
             {requiredItems.map((item, index) => (
-              <li key={item.label || index}>{item.label}</li>
+              <li key={item.label || index}>
+                {item.label}
+                {item.reason && <small>{item.reason}</small>}
+              </li>
             ))}
           </ul>
         </div>
@@ -2416,7 +2776,10 @@ function FollowUpNote({ followUp }) {
           <span className="follow-up-group-label">알려주시면 더 좋아요</span>
           <ul>
             {optionalItems.map((item, index) => (
-              <li key={item.label || index}>{item.label}</li>
+              <li key={item.label || index}>
+                {item.label}
+                {item.reason && <small>{item.reason}</small>}
+              </li>
             ))}
           </ul>
         </div>
@@ -2505,7 +2868,9 @@ function LawGroundInsightPanel({ node, compact = false }) {
   const retrieval = structuredResult.retrieval || {};
   const matchedLaws = Array.isArray(structuredResult.matched_laws)
     ? structuredResult.matched_laws
-    : [];
+    : Array.isArray(structuredResult.law_provisions)
+      ? structuredResult.law_provisions
+      : [];
   const attemptedBackends = Array.isArray(retrieval.attempted_backends)
     ? retrieval.attempted_backends
     : [];
@@ -2535,14 +2900,34 @@ function LawGroundInsightPanel({ node, compact = false }) {
           <strong>{matchedLaws.length}건</strong>
         </p>
       </div>
+      {retrieval.retrieved_at && (
+        <p className="agent-insight-timestamp">
+          조회 시각: {formatDateTime(retrieval.retrieved_at)}
+          {retrieval.effective_at ? ` · 적용 기준일: ${formatDate(retrieval.effective_at)}` : ""}
+        </p>
+      )}
       {matchedLaws.length > 0 && (
         <div className="agent-insight-section">
           <strong>관련 법령 후보</strong>
           {matchedLaws.slice(0, compact ? 2 : 4).map((item, index) => (
             <p key={item.source_reference || `law-ground-${index}`}>
-              <strong>{compactValue([item.law_name || item.title, item.article].filter(Boolean).join(" "))}</strong>
-              {item.summary && <span>{compactValue(item.summary)}</span>}
+              <strong>
+                {compactValue(
+                  [
+                    item.law_name || item.source_name || item.title || item.article_title,
+                    item.article || item.article_no,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                )}
+              </strong>
+              {(item.summary || item.provision_text) && (
+                <span>{compactValue(item.summary || item.provision_text)}</span>
+              )}
               <small>출처: {compactValue(item.source_reference)}</small>
+              {(item.effective_date || item.enforce_date) && (
+                <small>시행 기준일: {formatDate(item.effective_date || item.enforce_date)}</small>
+              )}
             </p>
           ))}
         </div>
@@ -2576,7 +2961,7 @@ function ReportingPreviewPanel({ reportingPayload }) {
     <section className="reporting-preview" aria-label="리포팅 미리보기">
       <div className="flow-panel-head">
         <div>
-          <span className="eyebrow">리포트 미리보기</span>
+          <span className="report-document-label">리포트 미리보기</span>
           <strong>{reportingPayload.title || "상담 분석 리포트"}</strong>
           <p>{reportingPayload.summary}</p>
         </div>
@@ -2614,6 +2999,14 @@ function ReportingPreviewPanel({ reportingPayload }) {
 function isSubmissionDocumentSection(section) {
   const title = String(section?.title || "");
   return /이의신청서|의견제출서|제출 가이드라인|제출 가이드|초안/.test(title);
+}
+
+function shouldShowDocumentConfirmation({
+  documentConfirmation,
+  isAuthenticated,
+}) {
+  if (!isAuthenticated) return false;
+  return documentConfirmation?.required === true;
 }
 
 function ReportReadyNotice({ isAuthenticated, onOpenReporting, onRunReportAction, reportingPayload, reportActionStatus }) {
@@ -2676,10 +3069,10 @@ function DocumentConfirmationPanel({ confirmation, isAuthenticated, onConfirm })
       <legend>이의신청서 최종 확인</legend>
       <p>{confirmation.stale ? "문서 내용이 변경되어 다시 확인해야 합니다." : "다운로드 전 아래 항목을 확인해 주세요."}</p>
       {[
-        ["facts_confirmed", "사실관계"],
-        ["agency_confirmed", "관할기관"],
-        ["deadline_confirmed", "제출기한"],
-        ["attachments_confirmed", "첨부자료"],
+        ["facts_confirmed", "사실관계를 확인했습니다."],
+        ["agency_confirmed", "관할 기관을 확인했습니다."],
+        ["deadline_confirmed", "제출 기한을 확인했습니다."],
+        ["attachments_confirmed", "첨부 자료를 확인했습니다."],
       ].map(([key, label]) => (
         <label key={key} className="document-confirmation-check">
           <input
@@ -2687,7 +3080,7 @@ function DocumentConfirmationPanel({ confirmation, isAuthenticated, onConfirm })
             checked={checks[key]}
             onChange={(event) => setChecks((current) => ({ ...current, [key]: event.target.checked }))}
           />
-          {label}을(를) 확인했습니다.
+          {label}
         </label>
       ))}
       <button
@@ -2711,7 +3104,10 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
     ["fine_notice", "traffic_accident"].includes(activeReportingPayload?.document_variant) ||
     ["fine_notice_objection", "fault_ratio_analysis"].includes(activeReportingPayload?.report_type);
   const confirmation = {
-    required: hasOfficialDocument,
+    required: shouldShowDocumentConfirmation({
+      documentConfirmation,
+      isAuthenticated,
+    }),
     confirmed: documentConfirmation?.confirmed === true,
     stale: documentConfirmation?.stale === true,
     appealBlocked: appealDownloadBlocked,
@@ -2781,21 +3177,27 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
 }
 
 function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
+  const pageSize = 5;
   const activeCases = summary?.active_cases ?? cases.length;
   const savedReports = summary?.saved_reports ?? 0;
   const recentCount = summary?.recent_analysis_count ?? cases.length;
+  const deadlineSummary = upcomingDeadlineSummary(cases);
   const hasCases = cases.length > 0;
   const [showActionableOnly, setShowActionableOnly] = useState(false);
   const [selectedCaseKey, setSelectedCaseKey] = useState(null);
+  const [historyPage, setHistoryPage] = useState(1);
   const visibleCases = showActionableOnly
     ? cases.filter((item) => {
         const status = String(item.case_status || item.status || "").toLowerCase();
         return /partial|pending|queued|running|draft|review|기한|추가|확인|대기|진행|작성/.test(status);
       })
     : cases;
+  const pageCount = Math.max(1, Math.ceil(visibleCases.length / pageSize));
+  const currentPage = Math.min(historyPage, pageCount);
+  const pagedCases = visibleCases.slice((currentPage - 1) * pageSize, currentPage * pageSize);
   const caseKey = (item) => item.case_id || item.job_id || item.title;
   const selectedCase =
-    visibleCases.find((item) => caseKey(item) === selectedCaseKey) || visibleCases[0] || null;
+    pagedCases.find((item) => caseKey(item) === selectedCaseKey) || pagedCases[0] || null;
 
   return (
     <section className="screen">
@@ -2815,7 +3217,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
       <div className="dashboard">
         <div className="summary-grid">
           <MetricCard label="등록 사건" value={`${activeCases}건`} detail="최근 30일 기준" />
-          <MetricCard label="기한 임박" value="1건" detail="의견제출 D-3" />
+          <MetricCard label="과태료 이의제기 기한 임박" value={`${deadlineSummary.count}건`} detail={deadlineSummary.nearestLabel} />
           <MetricCard label="저장 리포트" value={`${savedReports}건`} detail="DOCX 다운로드 가능" />
           <MetricCard label="최근 분석" value={`${recentCount}건`} detail="상담/리포트 포함" />
         </div>
@@ -2829,9 +3231,12 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                 type="button"
                 disabled={!hasCases}
                 aria-pressed={showActionableOnly}
-                onClick={() => setShowActionableOnly((value) => !value)}
+                onClick={() => {
+                  setShowActionableOnly((value) => !value);
+                  setHistoryPage(1);
+                }}
               >
-                {showActionableOnly ? "전체 보기" : "필터"}
+                {showActionableOnly ? "✓ 조치가 필요한 항목들 표시 중" : "조치가 필요한 항목들 보기"}
               </button>
             </div>
             <div className="table-scroll">
@@ -2856,7 +3261,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                       </td>
                     </tr>
                   ) : (
-                    visibleCases.map((item) => (
+                    pagedCases.map((item) => (
                       <tr
                         key={caseKey(item)}
                         className={selectedCase && caseKey(item) === caseKey(selectedCase) ? "is-selected" : undefined}
@@ -2864,7 +3269,11 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                       >
                         <td><span className="tag">{item.type || "상담"}</span></td>
                         <td>{item.title || item.case_id}</td>
-                        <td>{item.case_status || item.status || "확인 필요"}</td>
+                        <td>
+                          <span className={`report-list-status ${caseStatusTone(item.case_status || item.status)}`}>
+                            {item.case_status || item.status || "확인 필요"}
+                          </span>
+                        </td>
                         <td>{item.updated_at || item.created_at || "-"}</td>
                         <td>
                           <button
@@ -2884,6 +3293,27 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                 </tbody>
               </table>
             </div>
+            {visibleCases.length > pageSize && (
+              <nav className="table-pagination" aria-label="최근 분석 이력 페이지">
+                <button
+                  className="button"
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setHistoryPage((page) => Math.max(1, page - 1))}
+                >
+                  이전
+                </button>
+                <span>{currentPage} / {pageCount}</span>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={currentPage === pageCount}
+                  onClick={() => setHistoryPage((page) => Math.min(pageCount, page + 1))}
+                >
+                  다음
+                </button>
+              </nav>
+            )}
           </article>
 
           <aside className="case-detail-panel" aria-label="사건 상세">
@@ -2896,7 +3326,14 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                 <div className="case-detail-body">
                   <h3>{selectedCase.title || selectedCase.case_id}</h3>
                   <dl>
-                    <div><dt>상태</dt><dd>{selectedCase.case_status || selectedCase.status || "확인 필요"}</dd></div>
+                    <div>
+                      <dt>상태</dt>
+                      <dd>
+                        <span className={`report-list-status ${caseStatusTone(selectedCase.case_status || selectedCase.status)}`}>
+                          {selectedCase.case_status || selectedCase.status || "확인 필요"}
+                        </span>
+                      </dd>
+                    </div>
                     <div><dt>최근 작업</dt><dd>{selectedCase.updated_at || selectedCase.created_at || "-"}</dd></div>
                     <div><dt>사건 ID</dt><dd>{selectedCase.case_id || selectedCase.job_id || "-"}</dd></div>
                   </dl>
@@ -3049,6 +3486,43 @@ function ServiceInformationNotice() {
   return <aside className="service-information-notice" role="note">{SERVICE_INFORMATION_NOTICE}</aside>;
 }
 
+function EvidenceBoundaryPanel({ facts = [], userClaims = [] }) {
+  if (!facts.length && !userClaims.length) {
+    return null;
+  }
+  return (
+    <section className="evidence-boundary-panel" aria-label="사실과 사용자 진술 구분">
+      <div>
+        <span className="eyebrow">현재 확인된 사실</span>
+        {facts.length > 0 ? (
+          facts.slice(0, 5).map((fact, index) => (
+            <p key={`${fact.field || fact.label || "fact"}-${index}`}>
+              <strong>{fact.field || fact.label || "확인 항목"}</strong>
+              <span>{compactValue(fact.value || fact.description || fact)}</span>
+            </p>
+          ))
+        ) : (
+          <p>첨부 자료나 추가 확인을 통해 사실관계를 보완해야 합니다.</p>
+        )}
+      </div>
+      <div>
+        <span className="eyebrow">사용자 진술 · 추가 확인 필요</span>
+        {userClaims.length > 0 ? (
+          userClaims.slice(0, 5).map((claim, index) => (
+            <p key={`${claim.field || "claim"}-${index}`}>
+              <strong>{claim.field || "사용자 진술"}</strong>
+              <span>{compactValue(claim.value)}</span>
+              {claim.source_type && <small>출처 유형: {claim.source_type}</small>}
+            </p>
+          ))
+        ) : (
+          <p>별도로 분리해 표시할 사용자 진술이 없습니다.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 
 function CaseResultScreen({
   analysisCards = [],
@@ -3067,6 +3541,7 @@ function CaseResultScreen({
   reportActionStatus = "",
   supervisorExecution = null,
   supervisorState = null,
+  userClaims = [],
 }) {
   const isFault = caseType === "fault";
   const appealDownloadBlocked = reportingPayload?.appeal_gate?.blocked === true;
@@ -3143,10 +3618,11 @@ function CaseResultScreen({
                 <strong>{isFault ? "진입 순서와 충돌 위치를 먼저 고정해야 합니다." : "처분 내용과 제출기한을 확인한 뒤 추가 자료를 보완해야 합니다."}</strong>
                 <p>{reportingPayload?.summary || supervisorState?.conversation_summary || "현재 상담에서 확인된 사실과 다음 행동을 정리했습니다."}</p>
               </div>
+              <EvidenceBoundaryPanel facts={facts} userClaims={userClaims} />
 
               {isFault && faultRatioNode ? (
                 <FaultRatioInsightPanel node={faultRatioNode} />
-              ) : (
+              ) : facts.length === 0 && userClaims.length === 0 ? (
                 <div className="case-result-facts">
                   {(facts.length > 0 ? facts.slice(0, 4) : [
                     { field: "확인된 사실", value: "상담 내용과 첨부 자료를 기준으로 정리 중" },
@@ -3158,7 +3634,7 @@ function CaseResultScreen({
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
               {lawGroundNode && <LawGroundInsightPanel node={lawGroundNode} />}
 
               {analysisCards.length > 0 && (
@@ -3225,6 +3701,15 @@ function reportStatusLabel(value) {
     metadata_saved: "저장 완료",
   };
   return labels[String(value || "").toLowerCase()] || value || "상태 확인";
+}
+
+function reportStatusTone(value) {
+  const status = String(value || "").toLowerCase();
+  if (["success", "ready", "report_saved", "metadata_saved"].includes(status)) return "complete";
+  if (status === "downloaded") return "downloaded";
+  if (status === "partial") return "attention";
+  if (status === "agent_execution_ready") return "ready";
+  return "progress";
 }
 
 function reportQualityLabel(report = {}) {
@@ -3358,6 +3843,7 @@ function ReportingScreen({
   supervisorExecution = null,
   supervisorState = null,
 }) {
+  const [isReportListCollapsed, setIsReportListCollapsed] = useState(false);
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
   const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
   const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
@@ -3367,7 +3853,10 @@ function ReportingScreen({
     ["fine_notice", "traffic_accident"].includes(activeReportingPayload?.document_variant) ||
     ["fine_notice_objection", "fault_ratio_analysis"].includes(activeReportingPayload?.report_type);
   const confirmation = {
-    required: hasOfficialDocument,
+    required: shouldShowDocumentConfirmation({
+      documentConfirmation,
+      isAuthenticated,
+    }),
     confirmed: documentConfirmation?.confirmed === true,
     stale: documentConfirmation?.stale === true,
     appealBlocked: appealDownloadBlocked,
@@ -3394,7 +3883,8 @@ function ReportingScreen({
   const activeReportTitle = activeReportingPayload?.title || currentReport?.title || reportTitle;
   const activeReportType = activeReportingPayload?.report_type || currentReport?.report_type || "general";
   const activeReportTypeLabel = reportTypeLabel(activeReportType);
-  const savedReportCountLabel = hasSavedReports ? `${reportList.length}건` : hasReport ? "1건" : "0건";
+  const reportDisplayLabel = activeReportType === "general" ? "상담 리포트" : activeReportTypeLabel;
+  const savedReportCountLabel = hasSavedReports ? `${reportList.length}건` : hasReport ? "1건" : "리포트 없음";
   const reportTagClass = currentReport || reportStatus === "agent_execution_ready" ? "tag green" : "tag amber";
   const groupedSections = groupReportSections(sections);
   const overviewSections = (groupedSections.overview.length ? groupedSections.overview : groupedSections.remainder).slice(0, 4);
@@ -3415,26 +3905,62 @@ function ReportingScreen({
         </div>
       </div>
 
-      <div className="report-workbench">
-        <aside className="report-list" aria-label="리포트 목록">
+      <div className={isReportListCollapsed ? "report-workbench is-list-collapsed" : "report-workbench"}>
+        <aside className={isReportListCollapsed ? "report-list is-collapsed" : "report-list"} aria-label="리포트 목록">
           <div className="panel-head compact">
-            <strong>리포트 목록</strong>
-            <span className="tag">{savedReportCountLabel}</span>
+            {!isReportListCollapsed && <strong>리포트 목록</strong>}
+            <div className="report-list-head-actions">
+              {!isReportListCollapsed && <span className="report-list-count">{savedReportCountLabel}</span>}
+              <button
+                className="report-list-collapse-toggle"
+                type="button"
+                onClick={() => setIsReportListCollapsed((value) => !value)}
+                aria-label={isReportListCollapsed ? "리포트 목록 펼치기" : "리포트 목록 접기"}
+                title={isReportListCollapsed ? "리포트 목록 펼치기" : "리포트 목록 접기"}
+              >
+                <span>{isReportListCollapsed ? "»" : "«"}</span>
+                {!isReportListCollapsed && <strong>접기</strong>}
+              </button>
+            </div>
           </div>
-          <ServiceInformationNotice />
+          {!isReportListCollapsed && !hasSavedReports && <ServiceInformationNotice />}
+          {!isReportListCollapsed && hasSavedReports && (
+            <div className="report-saved-list">
+              {reportList.map((report) => {
+                const isActive = report?.report_id === currentReport?.report_id;
+                const payload = report?.content?.reporting_payload || {};
+                return (
+                  <button
+                    className={isActive ? "report-list-card active" : "report-list-card"}
+                    type="button"
+                    key={report?.report_id || report?.title}
+                    onClick={() => onOpenReport?.(report)}
+                  >
+                    <span className={`report-list-status ${reportStatusTone(payload.stage || report?.status)}`}>
+                      {reportStatusLabel(payload.stage || report?.status)}
+                    </span>
+                    <strong>{payload.title || report?.title || "상담 리포트"}</strong>
+                    <p>{report?.metadata?.updated_at || "최근 작업 시간 없음"}</p>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {!isReportListCollapsed && hasSavedReports && <ServiceInformationNotice />}
         </aside>
 
         <article className="report-canvas" aria-label="리포트 미리보기">
           {hasReport ? (
             <div className="report-page">
-              <span className="eyebrow">{activeReportTypeLabel}</span>
+              <span className="report-document-label">{reportDisplayLabel}</span>
               <h3>{activeReportTitle}</h3>
               <p>{reportSummary}</p>
-              <div className="summary-grid">
-                <MetricCard detail={activeReportTypeLabel} label="리포트 상태" value={reportStatusLabel(reportStatus)} />
-                <MetricCard detail="표시 가능한 주요 섹션" label="리포트 섹션" value={`${sections.length}개`} />
-                <MetricCard detail="법령·증거·판례 중심" label="근거 묶음" value={`${groundsSections.length}개`} />
-                <MetricCard detail="제출·보완·재생성 중심" label="다음 작업" value={`${actionSections.length}개`} />
+              <div className="report-status-strip">
+                <span>작성 상태</span>
+                <strong className={`report-status-badge ${reportStatusTone(reportStatus)}`}>
+                  {reportStatusLabel(reportStatus)}
+                </strong>
+                <p>상담 내용을 바탕으로 확인된 내용을 정리하고 있습니다.</p>
               </div>
 
               <DocumentTypeCards cards={documentCards} onCopy={onCopyDocumentCard} />
@@ -3457,11 +3983,7 @@ function ReportingScreen({
               <div className="report-focus-columns">
                 <section className="report-focus-panel" aria-label="핵심 근거">
                   <div className="report-focus-header">
-                    <div>
-                      <span className="eyebrow">Grounds</span>
-                      <strong>핵심 근거</strong>
-                    </div>
-                    <span className="tag">{groundsSections.length}개</span>
+                    <strong>판단 근거</strong>
                   </div>
                   <div className="report-section-list">
                     {groundsSections.length > 0 ? (
@@ -3479,11 +4001,7 @@ function ReportingScreen({
 
                 <section className="report-focus-panel" aria-label="다음 작업">
                   <div className="report-focus-header">
-                    <div>
-                      <span className="eyebrow">Next</span>
-                      <strong>다음 작업</strong>
-                    </div>
-                    <span className="tag">{actionSections.length}개</span>
+                    <strong>다음 단계</strong>
                   </div>
                   <div className="report-section-list">
                     {actionSections.length > 0 ? (
@@ -3515,15 +4033,8 @@ function ReportingScreen({
             </div>
           ) : (
             <div className="report-page-empty">
-              <span className="eyebrow">리포트 미리보기</span>
               <h3>사고 리포트를 선택하면 문서가 열립니다.</h3>
               <p>저장된 사고 리포트의 개요, 근거, 후속 행동을 문서 형태로 검토할 수 있습니다.</p>
-              <div className="report-placeholder-grid">
-                <div />
-                <div />
-                <div />
-                <div />
-              </div>
             </div>
           )}
         </article>
@@ -3796,6 +4307,14 @@ function caseStatusLabel(value) {
     failed: "확인 필요",
   };
   return labels[String(value || "").toLowerCase()] || value || "상태 확인";
+}
+
+function caseStatusTone(value) {
+  const status = String(value || "").toLowerCase();
+  if (/완료|success|ready|저장/.test(status)) return "complete";
+  if (/다운로드|downloaded/.test(status)) return "downloaded";
+  if (/보완|확인|기한 임박|기한 경과|partial|failed/.test(status)) return "attention";
+  return "ready";
 }
 
 function isReportingPayloadReady(reportingPayload, supervisorState) {

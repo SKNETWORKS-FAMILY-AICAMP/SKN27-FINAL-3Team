@@ -4,6 +4,8 @@ from contextlib import ExitStack, contextmanager
 from datetime import timedelta
 import hashlib
 import json
+import os
+import tempfile
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -297,6 +299,27 @@ def _patched_report_ready_agents():
     GOOGLE_USERINFO_ENDPOINT="https://openidconnect.googleapis.com/v1/userinfo",
 )
 class GuestLoginSessionOwnershipE2ETests(TestCase):
+    def setUp(self) -> None:
+        self.object_root = tempfile.TemporaryDirectory()
+        self.upload_root = tempfile.TemporaryDirectory()
+        self.addCleanup(self.object_root.cleanup)
+        self.addCleanup(self.upload_root.cleanup)
+        self.storage_override = override_settings(
+            OBJECT_STORAGE_PROVIDER="mock_s3",
+            OBJECT_STORAGE_BUCKET="guest-ownership-clean",
+            OBJECT_STORAGE_QUARANTINE_BUCKET="guest-ownership-quarantine",
+            OBJECT_STORAGE_LOCAL_ROOT=self.object_root.name,
+            MOCK_UPLOAD_ROOT=self.upload_root.name,
+        )
+        self.storage_override.enable()
+        self.addCleanup(self.storage_override.disable)
+        self.upload_root_override = patch.dict(
+            os.environ,
+            {"MOCK_UPLOAD_ROOT": self.upload_root.name},
+        )
+        self.upload_root_override.start()
+        self.addCleanup(self.upload_root_override.stop)
+
     def _successful_google_exchange(self, request, timeout=0):
         self.assertEqual(timeout, 10)
         if request.full_url == "https://oauth2.googleapis.com/token":

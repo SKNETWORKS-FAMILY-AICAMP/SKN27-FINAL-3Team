@@ -146,10 +146,53 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
         "attachments": [{"attachment_id": "attachment_1"}],
         "reporting_payload": {"report_id": "report_1"},
         "supervisor_state": {"stage": "finalize"},
+        "user_claims": [],
         "supervisor_execution": {"status": "success", "node_results": []},
         "work_item": {},
         "progress_state": {},
     }
+
+
+def test_completed_result_exposes_sanitized_user_claims_only() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_claims",
+        load_job=lambda _job_id: {
+            "job_id": "job_claims",
+            "status": "success",
+            "supervisor_state": {
+                "collected_facts": {"accident_date": "2026-07-20"},
+                "case_evidence": {
+                    "claims": {
+                        "driver_statement": {
+                            "value": "The signal was yellow.",
+                            "evidence_source": {
+                                "source_type": "user_statement",
+                                "source_ref": "attachment/private-image.png",
+                                "source_message_id": "message_private",
+                            },
+                        }
+                    }
+                },
+            },
+        },
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "job_id": "job_claims",
+            "status": "success",
+        },
+    )
+
+    assert outcome.payload["user_claims"] == [
+        {
+            "field": "driver_statement",
+            "value": "The signal was yellow.",
+            "source_type": "user_statement",
+        }
+    ]
+    assert "attachment/private-image.png" not in repr(outcome.payload)
+    assert "message_private" not in repr(outcome.payload)
 
 
 def test_completed_result_projects_only_public_agent_display_fields() -> None:

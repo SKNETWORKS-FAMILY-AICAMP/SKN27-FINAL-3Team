@@ -191,6 +191,79 @@ def test_final_response_merge_uses_only_validation_accepted_results() -> None:
     assert merged["evidence"] == [{"source_reference": "law:1"}]
 
 
+def test_fine_notice_procedure_without_verified_results_still_gives_safe_next_steps() -> None:
+    merged = merge_final_response(
+        {
+            "agent_result_validation": {
+                "status": "partial",
+                "structured_result": {
+                    "merge_ready": False,
+                    "report_ready": False,
+                    "accepted_results": [],
+                    "rejected_results": [
+                        {
+                            "node_code": "law_ground_search",
+                            "reason": "required_evidence_missing",
+                        }
+                    ],
+                    "missing_fields": [],
+                    "limitations": [],
+                },
+            },
+        },
+        routing_intent="fine_notice_procedure",
+        user_text="어린이보호구역에서 응급상황 때문에 잠깐 정차한 경우도 단속 대상이야?",
+    )
+
+    answer = merged["assistant_message"]["answer"]
+    assert "단속 여부를 지금 확정할 수 없습니다" in answer
+    assert "발급기관" in answer
+    assert "응급상황을 확인할 자료" in answer
+    assert merged["pending_questions"] == [
+        {
+            "field": "notice_received",
+            "question": "실제로 고지서나 단속 통지를 받으셨나요?",
+        },
+        {
+            "field": "emergency_evidence",
+            "question": "응급상황을 확인할 수 있는 진료기록이나 영수증이 있나요?",
+        },
+    ]
+    assert "verified_law_evidence_unavailable" in merged["next_actions"]
+    assert merged["limitations"]
+
+
+def test_fine_notice_procedure_with_verified_result_does_not_use_fallback_guidance() -> None:
+    merged = merge_final_response(
+        {
+            "law_ground_search": {
+                "status": "success",
+                "summary": "검증된 법령 근거를 확인했습니다.",
+                "structured_result": {"matched_laws": [{"law_name": "도로교통법"}]},
+                "evidence": [{"source_reference": "law:verified"}],
+                "limitations": [],
+            },
+            "agent_result_validation": {
+                "status": "success",
+                "structured_result": {
+                    "merge_ready": True,
+                    "report_ready": False,
+                    "accepted_results": ["law_ground_search"],
+                    "rejected_results": [],
+                    "missing_fields": [],
+                    "limitations": [],
+                },
+            },
+        },
+        routing_intent="fine_notice_procedure",
+        user_text="과태료 의견제출 절차를 알려줘.",
+    )
+
+    assert merged["assistant_message"]["answer"] == "검증된 법령 근거를 확인했습니다."
+    assert merged["pending_questions"] == []
+    assert merged["next_actions"] == ["review_verified_results"]
+
+
 def test_final_response_merge_prepends_deadline_guidance_card() -> None:
     deadline = (date.today() + timedelta(days=2)).isoformat()
     merged = merge_final_response(

@@ -19,7 +19,7 @@
     {
       "intent": "fine_notice_procedure",
       "attachment_purposes": [],
-      "keywords": ["과태료", "고지서", "범칙금", "의견제출", "이의신청"]
+      "keywords": ["과태료", "고지서", "범칙금", "의견제출", "이의신청", "단속 대상"]
     },
     {
       "intent": "traffic_law_search",
@@ -49,6 +49,13 @@
     "accident_evidence_analysis": [
       "input_context_validation",
       "vision_media_analysis",
+      "text_ml_case_search",
+      "law_ground_search",
+      "agent_result_validation",
+      "final_response_merge"
+    ],
+    "accident_photo_evidence_analysis": [
+      "input_context_validation",
       "text_ml_case_search",
       "law_ground_search",
       "agent_result_validation",
@@ -99,7 +106,8 @@
   },
   "agent_result_validation_policy": {
     "partial_result_intents": [
-      "accident_evidence_analysis"
+      "accident_evidence_analysis",
+      "accident_photo_evidence_analysis"
     ],
     "evidence_required_node_codes": [
       "appeal_decision_flow",

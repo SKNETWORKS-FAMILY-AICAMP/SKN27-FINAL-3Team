@@ -132,6 +132,21 @@ def test_review_case_schema_uses_1024_dimensions() -> None:
     assert "text-embedding-3-small" not in schema
 
 
+def test_review_case_readiness_and_index_are_scoped_to_provider() -> None:
+    source = (
+        ROOT
+        / "etl/fault_cases/src/review_case/search/pgvector/create_index.py"
+    ).read_text(encoding="utf-8")
+
+    assert "WHERE embedding_provider = %s" in source
+    assert "WHERE embedding_provider = {embedding_provider}" in source
+    assert "embedding_provider=sql.Literal(EMBEDDING_SETTINGS.provider)" in source
+    assert (
+        "EMBEDDING_SETTINGS.provider,\n"
+        "                    EMBEDDING_SETTINGS.model,"
+    ) in source
+
+
 def test_review_case_search_rejects_a_vector_from_another_embedding_space(
     monkeypatch,
 ) -> None:
@@ -155,6 +170,22 @@ def test_deployment_examples_use_the_shared_law_review_case_space() -> None:
         assert "RAG_EMBEDDING_MODEL=text-embedding-3-large" in example
         assert "RAG_EMBEDDING_DIMENSIONS=1024" in example
         assert "LEGAL_RAG_QUERY_EMBEDDING_PROVIDER=sentence-transformers" not in example
+
+
+def test_compose_runtime_uses_the_shared_law_review_case_space() -> None:
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    pilot_compose = (ROOT / "deploy/aws-pilot/docker-compose.pilot.yml").read_text(
+        encoding="utf-8"
+    )
+
+    for content in (compose, pilot_compose):
+        assert "LEGAL_RAG_QUERY_EMBEDDING_PROVIDER: sentence-transformers" not in content
+        assert "LEGAL_RAG_QUERY_EMBEDDING_MODEL: intfloat/multilingual-e5-large" not in content
+        assert "LEGAL_RAG_QUERY_EMBEDDING_PROVIDER" in content
+        assert "LEGAL_RAG_QUERY_EMBEDDING_MODEL" in content
+        assert "RAG_EMBEDDING_PROVIDER" in content
+        assert "RAG_EMBEDDING_MODEL" in content
+        assert "RAG_EMBEDDING_DIMENSIONS" in content
 
 
 def test_review_case_dimension_migration_is_backup_gated() -> None:

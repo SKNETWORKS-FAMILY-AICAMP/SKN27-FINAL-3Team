@@ -160,7 +160,8 @@ def submit_message(
     ocr_follow_up_allowed = _has_valid_ocr_confirmation(ocr_confirmation)
     report_requested = (
         report_generation_requested(user_text)
-        and routing_intent != "accident_evidence_analysis"
+        and routing_intent
+        not in {"accident_evidence_analysis", "accident_photo_evidence_analysis"}
     )
     if routing_intent == "fine_notice_analysis" and not ocr_follow_up_allowed:
         report_requested = False
@@ -904,7 +905,10 @@ def _analysis_plan(
             "appeal_decision_flow",
         ]
     expected_node_codes = [code for code in node_codes if code in PUBLIC_AGENT_NODE_CODES]
-    evidence_only = routing_intent == "accident_evidence_analysis"
+    evidence_only = routing_intent in {
+        "accident_evidence_analysis",
+        "accident_photo_evidence_analysis",
+    }
     steps = []
     previous_node: str | None = None
     for order, node_code in enumerate(node_codes, start=1):

@@ -7926,7 +7926,13 @@ def _ensure_usage_policy_code_item(plan_code: str) -> CodeItem:
     metadata = dict(code_item.metadata or {})
     metadata.setdefault("source", "canonical_usage_policy")
     metadata.setdefault("policy_status", "seeded_default")
-    metadata.setdefault("limits", defaults)
+    if (
+        metadata.get("source") == "canonical_usage_policy"
+        and metadata.get("policy_status") == "seeded_default"
+    ):
+        metadata["limits"] = defaults
+    else:
+        metadata.setdefault("limits", defaults)
     if metadata != code_item.metadata:
         code_item.metadata = metadata
         code_item.save(update_fields=["metadata", "updated_at"])

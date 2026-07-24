@@ -13,6 +13,7 @@ REQUIRED_DOCS = [
     ROOT / "docs" / "ops" / "secret-management.md",
     ROOT / "docs" / "ops" / "production-env.md",
     ROOT / "docs" / "ops" / "backup-and-recovery.md",
+    ROOT / "docs" / "ops" / "legal-data-freshness-runbook.md",
 ]
 
 
@@ -124,6 +125,19 @@ def test_production_env_doc_references_readiness_command_and_secret_rules():
     assert "smoke_google_oauth_code" in content
     assert "smoke_object_storage" in content
     assert "smoke_persona_catalog" in content
+
+
+def test_legal_freshness_runbook_has_bounded_validation_and_failure_actions():
+    content = read_text(ROOT / "docs" / "ops" / "legal-data-freshness-runbook.md")
+
+    assert "python -m etl.legal.ingestion.run" in content
+    assert "validate_run_summary.py" in content
+    assert "--max-age-hours" in content
+    assert "missing_sources" in content
+    assert "failed_sources" in content
+    assert "stale_sources" in content
+    assert "배포를 중단" in content
+    assert "reports/run_summary.json" in content
 
 
 def test_repository_text_files_do_not_contain_obvious_secret_assignments():
