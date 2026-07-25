@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+DEFAULT_QWEN_MODEL = "Qwen/Qwen2.5-VL-3B-Instruct"
+DEFAULT_QWEN_REVISION = "66285546d2b821cf421d4f5eb2576359d3770cd3"
 
 
 def _checkpoint_files(checkpoint: Path) -> tuple[Path, Path]:
@@ -86,6 +90,7 @@ def analyze_qwen(
     model_name: str,
     max_frames: int,
     device_name: str,
+    qwen_revision: str = DEFAULT_QWEN_REVISION,
 ) -> dict[str, Any]:
     if not frame_paths:
         return {
@@ -104,9 +109,12 @@ def analyze_qwen(
         retry_token_limit,
     )
 
-    processor = AutoProcessor.from_pretrained(model_name)
+    processor = AutoProcessor.from_pretrained(model_name, revision=qwen_revision)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        model_name, torch_dtype="auto", device_map="auto" if device_name == "auto" else device_name
+        model_name,
+        revision=qwen_revision,
+        torch_dtype="auto",
+        device_map="auto" if device_name == "auto" else device_name,
     ).eval()
     last_error = "json_incomplete:no_attempt"
     result = None
@@ -186,9 +194,17 @@ def safe_analyze_qwen(
     model_name: str,
     max_frames: int,
     device_name: str,
+    qwen_revision: str = DEFAULT_QWEN_REVISION,
 ) -> dict[str, Any]:
     try:
-        return analyze_qwen(frame_paths, frame_metadata, model_name, max_frames, device_name)
+        return analyze_qwen(
+            frame_paths,
+            frame_metadata,
+            model_name,
+            max_frames,
+            device_name,
+            qwen_revision,
+        )
     except Exception as exc:
         return {
             "valid": False,
@@ -234,7 +250,8 @@ def run(
     videomae_frame_count: int = 32,
     yolo_model: str | None = None,
     confidence: float = 0.25,
-    qwen_model: str = "Qwen/Qwen2.5-VL-3B-Instruct",
+    qwen_model: str = DEFAULT_QWEN_MODEL,
+    qwen_revision: str = DEFAULT_QWEN_REVISION,
     qwen_frame_count: int = 32,
     device: str = "auto",
     skip_qwen: bool = False,
@@ -268,7 +285,12 @@ def run(
         "requires_review": True,
         "error_code": "vision_qwen_skipped",
     } if skip_qwen else safe_analyze_qwen(
-        qwen_paths, qwen_metadata, qwen_model, qwen_frame_count, device
+        qwen_paths,
+        qwen_metadata,
+        qwen_model,
+        qwen_frame_count,
+        device,
+        qwen_revision,
     )
 
     agent = agent_output.get("agent_output", agent_output)
@@ -303,7 +325,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--videomae-frame-count", type=int, default=32)
     parser.add_argument("--yolo-model", default=None, help="Optional explicit override for category-selected YOLO")
     parser.add_argument("--confidence", type=float, default=0.25)
-    parser.add_argument("--qwen-model", default="Qwen/Qwen2.5-VL-3B-Instruct")
+    parser.add_argument(
+        "--qwen-model",
+        default=os.getenv("VISION_QWEN_MODEL_ID", DEFAULT_QWEN_MODEL),
+    )
+    parser.add_argument(
+        "--qwen-revision",
+        default=os.getenv("VISION_QWEN_MODEL_REVISION", DEFAULT_QWEN_REVISION),
+    )
     parser.add_argument("--qwen-frame-count", type=int, default=32)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--skip-qwen", action="store_true", help="Troubleshooting only")
@@ -316,6 +345,7 @@ def main() -> None:
     output = run(args.input, checkpoint=args.checkpoint, frame_count=args.frame_count,
                  videomae_frame_count=args.videomae_frame_count, yolo_model=args.yolo_model,
                  confidence=args.confidence, qwen_model=args.qwen_model,
+                 qwen_revision=args.qwen_revision,
                  qwen_frame_count=args.qwen_frame_count, device=args.device, skip_qwen=args.skip_qwen,
                  min_category_confidence=args.min_category_confidence)
     print(f"supervisor_handoff_path: {output}")

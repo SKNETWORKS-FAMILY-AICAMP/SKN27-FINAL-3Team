@@ -22,6 +22,7 @@ class ExperimentConfig:
     yolo_imgsz: int
     yolo_models: tuple[str, ...]
     qwen_model_id: str
+    qwen_model_revision: str
     llava_model_id: str
     qwen_yolo_model: str | None
     drive_folder_url: str
@@ -93,6 +94,10 @@ def load_experiment_config(category_key: str) -> ExperimentConfig:
         yolo_imgsz=_positive_int("VISION_YOLO_IMGSZ", 960),
         yolo_models=models,
         qwen_model_id=os.getenv("VISION_QWEN_MODEL_ID", "Qwen/Qwen2.5-VL-3B-Instruct"),
+        qwen_model_revision=os.getenv(
+            "VISION_QWEN_MODEL_REVISION",
+            "66285546d2b821cf421d4f5eb2576359d3770cd3",
+        ),
         llava_model_id=os.getenv(
             "VISION_LLAVA_MODEL_ID", "llava-hf/llava-onevision-qwen2-7b-ov-hf"
         ),

@@ -41,6 +41,10 @@ class VisionRunToSupervisorTest(unittest.TestCase):
 
         self.assertIn("adaptive_retry_prompt(last_error)", source)
         self.assertIn("retry_token_limit(last_error)", source)
+        self.assertEqual(
+            source.count("revision=qwen_revision"),
+            2,
+        )
 
     def test_qwen_errors_have_stable_handoff_codes(self):
         self.assertEqual(
@@ -63,6 +67,10 @@ class VisionRunToSupervisorTest(unittest.TestCase):
 
         self.assertEqual(experiment.frame_count, 32)
         self.assertEqual(experiment.vlm_input_frame_count, 32)
+        self.assertEqual(
+            experiment.qwen_model_revision,
+            "66285546d2b821cf421d4f5eb2576359d3770cd3",
+        )
         pipeline_tree = ast.parse(
             Path("ai/vision/pipeline.py").read_text(encoding="utf-8")
         )
@@ -121,7 +129,7 @@ class VisionRunToSupervisorTest(unittest.TestCase):
                  patch("ai.vision.merge_analysis.FINAL_OUTPUT_DIR", final_dir), \
                  patch("ai.vision.build_supervisor_handoff.OUTPUT_DIR", handoff_dir), \
                  patch("ai.vision.run_to_supervisor.infer_videomae", side_effect=lambda *_: calls.append("videomae") or video_result), \
-                 patch("ai.vision.run_to_supervisor.analyze_qwen", side_effect=lambda _, __, ___, count, ____: (
+                 patch("ai.vision.run_to_supervisor.analyze_qwen", side_effect=lambda _paths, _metadata, _model, count, _device, _revision: (
                      calls.append(("qwen", count)) or {
                          "valid": True, "summary": "collision", "collision_moment_visible": True,
                          "uncertainties": ["occlusion"],

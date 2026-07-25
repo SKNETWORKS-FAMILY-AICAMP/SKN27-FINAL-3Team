@@ -28,6 +28,7 @@ RUNPOD_REQUEST_SCHEMA_VERSION = "vision-runpod-request-v1"
 RUNPOD_SIGNED_URL_GRACE_SECONDS = 60
 RUNPOD_JOB_CACHE_GRACE_SECONDS = 300
 RUNPOD_JOB_CACHE_PREFIX = "vision:runpod:v1"
+HANDOFF_STATUSES = {"complete", "partial", "failed"}
 
 
 def run_vision_media_analysis(
@@ -126,7 +127,11 @@ def _run_runpod_provider(
             ),
         )
         safe_handoff = _safe_worker_handoff(result.output)
-        if safe_handoff.get("handoff_schema_version") != "vision-supervisor-handoff-v1":
+        if (
+            safe_handoff.get("handoff_schema_version")
+            != "vision-supervisor-handoff-v1"
+            or safe_handoff.get("status") not in HANDOFF_STATUSES
+        ):
             raise RunPodVisionError("vision_remote_invalid_response")
         return _success(safe_handoff)
     except RunPodVisionError as exc:
@@ -335,7 +340,7 @@ def _safe_worker_handoff(worker_payload: Any) -> dict[str, Any]:
     return {
         "analysis_kind": "accident_evidence",
         "handoff_schema_version": handoff.get("schema_version"),
-        "status": "partial",
+        "status": handoff.get("status"),
         "media_summary": _allow_fields(media_summary, ("media_type", "summary", "field_summary")),
         "event_candidates": _safe_event_candidates(handoff.get("event_candidates")),
         "key_frames": _safe_key_frames(visual.get("key_frames")),
@@ -433,9 +438,15 @@ def _safe_execution_id(value: Any) -> str:
 
 def _success(handoff: dict[str, Any]) -> dict[str, Any]:
     evidence = list(handoff.get("evidence") or [])
+    handoff_status = str(handoff.get("status") or "")
+    result_status, execution_status = {
+        "complete": ("success", "success"),
+        "partial": ("partial", "completed_with_review_required"),
+        "failed": ("failed", "degraded"),
+    }.get(handoff_status, ("failed", "degraded"))
     return {
-        "status": "partial",
-        "execution_status": "completed_with_review_required",
+        "status": result_status,
+        "execution_status": execution_status,
         "summary": "영상에서 확인 가능한 증거와 제한사항을 정리했습니다.",
         "structured_result": handoff,
         "evidence": evidence,

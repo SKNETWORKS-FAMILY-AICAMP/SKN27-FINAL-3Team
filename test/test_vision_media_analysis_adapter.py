@@ -170,11 +170,11 @@ def test_subprocess_video_decode_failure_uses_a_stable_failure(monkeypatch) -> N
     assert "C:/" not in repr(result)
 
 
-def _remote_worker_output() -> dict:
+def _remote_worker_output(*, status: str = "partial") -> dict:
     return {
         "vision_supervisor_handoff": {
             "schema_version": "vision-supervisor-handoff-v1",
-            "status": "partial",
+            "status": status,
             "source": {"source_video": "C:/private/video.mp4"},
             "media_summary": {
                 "media_type": "video",
@@ -333,6 +333,30 @@ def test_runpod_provider_reuses_cached_job_id(monkeypatch) -> None:
     assert result["status"] == "partial"
     assert captured["existing_job_id"] == "job_existing"
     assert captured["callback"] is not None
+
+
+@pytest.mark.parametrize(
+    ("handoff_status", "result_status", "execution_status"),
+    [
+        ("complete", "success", "success"),
+        ("partial", "partial", "completed_with_review_required"),
+        ("failed", "failed", "degraded"),
+    ],
+)
+def test_adapter_preserves_handoff_status(
+    handoff_status: str,
+    result_status: str,
+    execution_status: str,
+) -> None:
+    handoff = adapter._safe_worker_handoff(
+        _remote_worker_output(status=handoff_status)
+    )
+
+    result = adapter._success(handoff)
+
+    assert handoff["status"] == handoff_status
+    assert result["status"] == result_status
+    assert result["execution_status"] == execution_status
 
 
 @pytest.mark.parametrize(

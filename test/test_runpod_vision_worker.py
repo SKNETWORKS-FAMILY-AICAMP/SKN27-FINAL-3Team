@@ -27,11 +27,11 @@ def _request(**overrides: Any) -> dict[str, Any]:
     return request
 
 
-def _raw_handoff() -> dict[str, Any]:
+def _raw_handoff(*, status: str = "partial") -> dict[str, Any]:
     return {
         "vision_supervisor_handoff": {
             "schema_version": "vision-supervisor-handoff-v1",
-            "status": "partial",
+            "status": status,
             "source": {
                 "source_video": "C:/private/video.mp4",
                 "video_url": SIGNED_URL,
@@ -139,6 +139,13 @@ def test_worker_downloads_runs_pipeline_sanitizes_and_deletes_workspace(
     assert "X-Amz-Signature" not in repr(result)
     assert "checkpoint" not in repr(result).lower()
     assert workspaces and not workspaces[0].exists()
+
+
+@pytest.mark.parametrize("status", ["complete", "partial", "failed"])
+def test_worker_preserves_valid_handoff_status(status: str) -> None:
+    result = worker._safe_remote_worker_output(_raw_handoff(status=status))
+
+    assert result["vision_supervisor_handoff"]["status"] == status
 
 
 def test_worker_failure_returns_safe_code_and_deletes_workspace(
