@@ -157,6 +157,42 @@ PR #300은 병합 전 CI를 사용자가 확인한 뒤 `dev`에 병합되었다.
 - 실제 OpenAI 904청크 임베딩 호출, RDS 적재, private-stage 검색 smoke와
   release marker 생성은 비용 승인 전이므로 실행하지 않음
 
+### Supervisor LLM 운영 계약 P0 복구 검증 — 2026-07-24
+
+- 운영 fallback과 validator의 모순을 제거했다.
+  - 서버가 `contract_version`, `stage`, Agent owner/required input,
+    `reporting_payload`를 소유한다.
+  - 모델은 요약·수집 사실·누락 필드·다음 질문·Agent payload 후보만 반환한다.
+  - Agent Registry가 owner와 required input을 주입하고 모든 패키지를
+    `missing_fields` list 및 `ready`/`waiting_for_fields` 상태로 정규화한다.
+- OpenAI 응답 계약을 `json_object`에서 strict JSON Schema Structured Output으로
+  변경하고 prompt v2, provider refusal 감지, 개인정보 없는 실패 reason 로그를
+  추가했다.
+- 실제 production `submit_message()` 경로에서 일반 상담, 법령 검색, 고지서
+  절차·분석, 사고 초기 상담과 OCR 확인 후 패키지 추가를 검증했다.
+- 배포 승격은 mock smoke 대신
+  `smoke_supervisor_conversation_runtime --require-llm-used
+  --require-real-agent-results --require-persisted-handoff --require-report`를
+  공개 symlink 전 한 번만 실행한다. 이 명령은 queue를 inline 처리하지 않고
+  배포된 Worker의 lease·attempt·terminal persistence를 최대 600초 polling한다.
+  명시적 유료 호출 승인과
+  `canonical/acceptance/`의 검토된 fixture 없이는 fail-closed한다.
+- 머지 전 독립 리뷰에서 확인한 nested `slot_state` 모델 덮어쓰기,
+  runtime smoke의 Worker loop 우회, malformed analysis-plan package의 `KeyError`,
+  invalid candidate 질문 재사용을 각각 서버 고정 복사·strict payload schema,
+  bounded Worker polling, 안전한 validator, rejected candidate 완전 폐기로 수정했다.
+- 로컬 검증:
+  - Supervisor·chat·execution·production·AWS 집중 회귀: `159 passed`
+  - Django runtime/readiness/production hardening: `71 passed`
+  - AWS pilot 계약 단독 회귀: `74 passed`
+  - 전체 루트 `test/`: `1000 passed, 38 skipped`
+  - Django `chatbot` 전체 앱: `370 tests`, 성공
+  - Vite production build: `32 modules transformed`, 성공
+  - 비밀값을 읽지 않는 더미 환경 Compose config: exit `0`
+- 실제 OpenAI provider, 실제 Agent/Reporting 및 운영 데이터 품질 성공은
+  주장하지 않는다. 이번 복구 중 유료 provider 호출은 실행하지 않았고,
+  공개 승격 직전 승인형 production smoke 결과를 release evidence에 남겨야 한다.
+
 ## 환경상 실행하지 못한 항목
 
 - 인앱 브라우저 자동 제어는 이 세션의 `127.0.0.1`을 정책상 거부했다.

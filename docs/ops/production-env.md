@@ -317,25 +317,32 @@ access key fields empty and provide `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and `AWS_DEFAULT_REGION` through
 the deployment platform as needed.
 
-After enabling Supervisor LLM, run a real planner smoke:
+After enabling Supervisor LLM, run the production conversation smoke. This is
+the promotion gate because it exercises the public chat entry point, production
+Supervisor orchestration, real non-DL Agent results, persisted handoff, and
+Reporting in one bounded run:
 
 ```powershell
-python backend\manage.py smoke_supervisor_llm --require-used --require-slot-state --format text
+python backend\manage.py smoke_supervisor_conversation_runtime `
+  --allow-paid-provider-call `
+  --require-llm-used `
+  --require-real-agent-results `
+  --require-persisted-handoff `
+  --require-report `
+  --fine-notice-fixture-s3-uri "s3://<clean-bucket>/canonical/acceptance/<fixture>" `
+  --timeout-seconds 600 `
+  --format json
 ```
 
-For the persisted non-DL analysis-to-Reporting boundary, run the separate strict
-paid-call-gated smoke described in
-[`non-dl-analysis-reporting-smoke.md`](non-dl-analysis-reporting-smoke.md). It
-excludes Vision/DL and verifies the real fine-notice, law-ground, text/case-search,
-and appeal-decision adapters, persisted analysis rows, Supervisor handoff
-provenance, Reporting consumption, final report/display rows, and safe terminal
-retry behavior. The command requires an operator-reviewed clean S3 acceptance
-fixture under `canonical/acceptance/`; see the runbook for the exact invocation.
-
-Without `--require-used`, the command reports whether the LLM path was
-`used`, `fallback`, or `disabled` without printing secrets. `--require-slot-state`
-also verifies that `slot_filling_state.v1` is present in ready Agent input
-packages.
+The command refuses provider-capable work without both
+`--allow-paid-provider-call` and an operator-reviewed clean S3 fixture under
+`canonical/acceptance/`. Normal promotion runs this unified command once; do not
+also invoke `smoke_supervisor_llm` or
+`smoke_non_dl_analysis_reporting_pipeline` during the same promotion, because
+that would duplicate paid provider work. The separate
+[`non-dl-analysis-reporting-smoke.md`](non-dl-analysis-reporting-smoke.md)
+runbook remains available for explicitly approved diagnostic execution outside
+the normal promotion path.
 
 After Google Cloud OAuth settings are registered, verify code-flow settings:
 

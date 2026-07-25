@@ -401,39 +401,26 @@ def test_enabled_supervisor_failure_blocks_analysis_plan_and_reporting(monkeypat
     assert response["reporting_payload"] is None
 
 
-def test_enabled_supervisor_need_more_input_does_not_queue_or_report(monkeypatch) -> None:
+def test_enabled_supervisor_cannot_override_server_ready_stage(monkeypatch) -> None:
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
     monkeypatch.setattr(
         "app.services.supervisor_llm_service._request_supervisor_json",
         lambda *_args: {
-            "contract_version": "supervisor_conversation.v1",
-            "stage": "need_more_input",
-            "conversation_turn_count": 1,
             "conversation_summary": "A law reference is still required.",
             "collected_facts": [],
-            "missing_fields": [{"field": "law_question"}],
+            "missing_fields": [
+                {"field": "law_question", "reason": "model_requested"}
+            ],
             "next_questions": [
                 {"field": "law_question", "question": "Which law should be reviewed?"}
             ],
             "agent_input_packages": [
                 {
-                    "schema_version": "agent_input_schema.v1",
                     "node_code": "law_ground_search",
-                    "owner": "techshin31",
-                    "status": "waiting_for_fields",
-                    "missing_fields": ["law_question"],
-                    "payload": {"user_text": "help", "attachments": []},
+                    "payload": {},
                 }
             ],
-            "reporting_payload": {
-                "contract_version": "reporting_payload.v1",
-                "scenario": "traffic_law_search",
-                "stage": "need_more_input",
-                "title": "Pending analysis",
-                "summary": "More input is required.",
-                "sections": [],
-            },
         },
     )
 
@@ -441,15 +428,14 @@ def test_enabled_supervisor_need_more_input_does_not_queue_or_report(monkeypatch
         {"session_id": "ses_need_more_input", "user_text": "help"}
     )
 
-    assert response["status"] == "needs_input"
-    assert response["progress"]["status"] == "needs_input"
-    assert response["pending_questions"] == [
-        {"field": "law_question", "question": "Which law should be reviewed?"}
-    ]
-    assert response["analysis_plan"]["steps"] == []
+    assert response["status"] == "queued"
+    assert response["progress"]["status"] == "queued"
+    assert response["pending_questions"] == []
+    assert response["analysis_plan"]["steps"]
     assert response["reporting_payload"] is None
     assert response["report_links"] == []
-    assert response["supervisor_state"]["stage"] == "need_more_input"
+    assert response["supervisor_state"]["stage"] == "agent_execution_ready"
+    assert response["supervisor_state"]["missing_fields"] == []
 
 
 def test_fine_notice_procedure_question_does_not_run_ocr_appeal_or_report() -> None:
@@ -480,6 +466,45 @@ def test_enforcement_eligibility_question_routes_to_fine_notice_procedure() -> N
     )
 
     assert response["routing_intent"] == "fine_notice_procedure"
+
+
+def test_emergency_stop_quick_question_routes_to_fine_notice_procedure() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_emergency_stop_quick_question",
+            "user_text": "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했어",
+            "attachments": [],
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+
+
+def test_rear_end_quick_question_routes_to_accident_consultation() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_rear_end_quick_question",
+            "user_text": "앞차가 갑자기 급정거해서 추돌했는데 뒤차가 항상 100% 책임이야?",
+            "attachments": [],
+        }
+    )
+
+    assert response["routing_intent"] == "accident_initial_consultation"
+    assert response["status"] == "needs_input"
+    assert response["pending_questions"]
+
+
+def test_illegal_parking_accident_quick_question_stays_in_accident_consultation() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_illegal_parking_accident_quick_question",
+            "user_text": "불법 주정차 차량 때문에 시야가 가려져 사고가 나면 그 차량에도 책임이 있어?",
+            "attachments": [],
+        }
+    )
+
+    assert response["routing_intent"] == "accident_initial_consultation"
+    assert response["status"] == "needs_input"
 
 
 def test_report_node_is_planned_only_when_document_generation_is_explicitly_requested() -> None:

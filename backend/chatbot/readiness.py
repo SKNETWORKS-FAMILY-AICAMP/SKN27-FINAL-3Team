@@ -228,7 +228,9 @@ def _supervisor_llm_check() -> dict[str, Any]:
             "enabled": enabled,
             "model": model or None,
             "slot_state_contract": "slot_filling_state.v1",
-            "mock_off_smoke": "smoke_supervisor_llm --require-used --require-slot-state",
+            "production_smoke": (
+                "smoke_supervisor_conversation_runtime --require-llm-used"
+            ),
         },
     )
 

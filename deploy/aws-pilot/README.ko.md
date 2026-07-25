@@ -45,8 +45,8 @@ fault-ratio precedent 모두 PostgreSQL pgvector로만 수행한다.
 - `Terraform 1.11`의 native S3 lockfile을 사용한다. PostgreSQL maintenance image는
   `postgres:16.14-alpine3.24`의 검토된 digest여야 한다.
 - 통합 gate #173과 Google OAuth live exchange gate #192를 포함하며, normal promotion은
-  `smoke_non_dl_analysis_reporting_pipeline`까지 통과해야 한다.
-- reporting handoff gate #193도 promotion 전에 검증한다.
+  단일 `smoke_supervisor_conversation_runtime`으로 public chat, 배포된 Worker loop,
+  실제 non-DL Agent 결과와 reporting handoff gate #193을 promotion 전에 검증한다.
 - 모든 외부 이미지 주소는 `@sha256:` digest여야 하며, PostgreSQL maintenance에는
   `POSTGRES_MAINTENANCE_IMAGE_REF`를 사용한다. Docker volume은 release 전환 동안 유지한다.
 - image cleanup은 latest 3 releases와 rollback tag를 보존한다.
@@ -54,6 +54,7 @@ fault-ratio precedent 모두 PostgreSQL pgvector로만 수행한다.
   application secret은 `.runtime.env`에서만 주입한다.
 - acceptance window 동안에는 pgvector readiness와 서비스 health를 확인하고, 승인된 경우에만
   stop/destroy 또는 teardown을 수행한다.
-- 비용이 발생하는 non-DL reporting smoke는 승인된 경우에만 `-AllowPaidNonDlSmoke`를 지정해
-  실행한다. supervisor 유료 smoke는 별도 승인 플래그 `-AllowPaidSupervisorSmoke`가 필요하며,
-  승인자·실행 시각·결과를 release evidence에 남긴다.
+- 단일 production runtime smoke 안의 non-DL provider 실행과 Supervisor provider 실행은
+  각각 `-AllowPaidNonDlSmoke`, `-AllowPaidSupervisorSmoke`로 명시 승인해야 한다.
+  같은 promotion에서 별도 유료 smoke를 중복 실행하지 않으며 승인자·실행 시각·결과를
+  release evidence에 남긴다.
