@@ -12,10 +12,51 @@ from unittest.mock import patch
 
 from ai.vision.build_supervisor_handoff import build_handoff
 from ai.vision.category_vlm_config import load_experiment_config
-from ai.vision.run_to_supervisor import _checkpoint_files, infer_videomae, run, select_yolo_model
+from ai.vision.run_to_supervisor import (
+    _checkpoint_files,
+    infer_videomae,
+    qwen_error_code,
+    run,
+    select_yolo_model,
+)
 
 
 class VisionRunToSupervisorTest(unittest.TestCase):
+    def test_handoff_status_contract_is_complete_partial_or_failed(self):
+        for source, expected in (
+            ("success", "complete"),
+            ("complete", "complete"),
+            ("partial", "partial"),
+            ("failed", "failed"),
+        ):
+            with self.subTest(source=source):
+                payload = build_handoff({"status": source})[
+                    "vision_supervisor_handoff"
+                ]
+                self.assertEqual(payload["schema_version"], "vision-supervisor-handoff-v1")
+                self.assertEqual(payload["status"], expected)
+
+    def test_service_qwen_path_uses_shared_adaptive_retry(self):
+        source = Path("ai/vision/run_to_supervisor.py").read_text(encoding="utf-8")
+
+        self.assertIn("adaptive_retry_prompt(last_error)", source)
+        self.assertIn("retry_token_limit(last_error)", source)
+
+    def test_qwen_errors_have_stable_handoff_codes(self):
+        self.assertEqual(
+            qwen_error_code("json_incomplete:Unterminated string"),
+            "vision_qwen_json_incomplete",
+        )
+        self.assertEqual(
+            qwen_error_code("schema_invalid:missing:accident_situation"),
+            "vision_qwen_schema_invalid",
+        )
+        self.assertEqual(
+            qwen_error_code("vlm_input_contract:frame_count"),
+            "vision_qwen_input_contract",
+        )
+        self.assertEqual(qwen_error_code("CUDA out of memory"), "vision_qwen_unavailable")
+
     def test_shared_frame_defaults_are_32(self):
         with patch.dict(os.environ, {}, clear=True):
             experiment = load_experiment_config("car_vs_car")
@@ -51,7 +92,12 @@ class VisionRunToSupervisorTest(unittest.TestCase):
             (checkpoint / "config.json").write_text("{}")
             (checkpoint / "model.safetensors").touch()
             agent_output = {"agent_output": {"status": "success", "summary": "old", "structured_result": {
-                "key_frames": [{"frame_path": "frame.jpg"}]
+                "key_frames": [{
+                    "frame_id": "frame_1",
+                    "frame_order": 1,
+                    "frame_path": "frame.jpg",
+                    "timestamp_sec": 0.0,
+                }]
             }}}
             final_dir, handoff_dir = root / "final", root / "handoff"
             calls = []
@@ -63,13 +109,19 @@ class VisionRunToSupervisorTest(unittest.TestCase):
                     calls.append(("detect", model, confidence)) or (root / "detections.json", {})
                 )),
                 "ai.vision.schemas": types.SimpleNamespace(convert_detection_to_agent_output=lambda *_: (root / "agent.json", agent_output)),
+                "ai.vision.visualize": types.SimpleNamespace(
+                    create_visualizations=lambda *_: (
+                        root / "visualizations.json",
+                        {"visualizations": []},
+                    )
+                ),
             }
             video_result = {"clips": [{"top_predictions": [{"label": "car_vs_car", "score": .9}]}]}
             with patch.dict(sys.modules, modules), \
                  patch("ai.vision.merge_analysis.FINAL_OUTPUT_DIR", final_dir), \
                  patch("ai.vision.build_supervisor_handoff.OUTPUT_DIR", handoff_dir), \
                  patch("ai.vision.run_to_supervisor.infer_videomae", side_effect=lambda *_: calls.append("videomae") or video_result), \
-                 patch("ai.vision.run_to_supervisor.analyze_qwen", side_effect=lambda _, __, count, ___: (
+                 patch("ai.vision.run_to_supervisor.analyze_qwen", side_effect=lambda _, __, ___, count, ____: (
                      calls.append(("qwen", count)) or {
                          "valid": True, "summary": "collision", "collision_moment_visible": True,
                          "uncertainties": ["occlusion"],
@@ -102,12 +154,23 @@ class VisionRunToSupervisorTest(unittest.TestCase):
             (checkpoint / "config.json").write_text("{}")
             (checkpoint / "model.safetensors").touch()
             agent_output = {"agent_output": {"status": "success", "summary": "objects detected", "structured_result": {
-                "key_frames": [{"frame_path": "frame.jpg"}]
+                "key_frames": [{
+                    "frame_id": "frame_1",
+                    "frame_order": 1,
+                    "frame_path": "frame.jpg",
+                    "timestamp_sec": 0.0,
+                }]
             }}}
             modules = {
                 "ai.vision.pipeline": types.SimpleNamespace(extract_keyframes=lambda *_: (root / "keys.json", {})),
                 "ai.vision.models": types.SimpleNamespace(detect_keyframes=lambda *_: (root / "detections.json", {})),
                 "ai.vision.schemas": types.SimpleNamespace(convert_detection_to_agent_output=lambda *_: (root / "agent.json", agent_output)),
+                "ai.vision.visualize": types.SimpleNamespace(
+                    create_visualizations=lambda *_: (
+                        root / "visualizations.json",
+                        {"visualizations": []},
+                    )
+                ),
             }
             video_result = {"model_name": "checkpoint", "clips": [{"top_predictions": [{"label": "car_vs_bicycle", "score": .8}]}]}
             with patch.dict(sys.modules, modules), \

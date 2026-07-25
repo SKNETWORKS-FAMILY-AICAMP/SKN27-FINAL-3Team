@@ -52,6 +52,27 @@ ENUMS = {
 SCENE_FIELDS = {"weather", "visibility", "road_surface", "lighting", "evidence"}
 
 
+def completed_vlm_asset_ids(rows: list[dict[str, Any]]) -> set[str]:
+    """Resume after every persisted result; invalid rows stay available for review."""
+    return {row["asset_id"] for row in rows}
+
+
+def adaptive_retry_prompt(error: str) -> str:
+    instruction = "Return the complete JSON object again."
+    if error.startswith("schema_invalid:missing:"):
+        instruction = f"Include the missing required field {error.removeprefix('schema_invalid:missing:')}."
+    elif error.startswith("schema_invalid:enum:"):
+        field = error.removeprefix("schema_invalid:enum:")
+        instruction = f"Use one allowed value for {field}: {' | '.join(sorted(ENUMS[field]))}."
+    elif error.startswith("json_incomplete:"):
+        instruction = "Use short strings, double quotes, and close every array and object."
+    return f"{VLM_JSON_PROMPT}\nPrevious validation error: {error}\n{instruction}"
+
+
+def retry_token_limit(error: str) -> int:
+    return 1024 if error.startswith("json_incomplete:") else 512
+
+
 def _schema_error(value: Any) -> str:
     if not isinstance(value, dict):
         return "schema_invalid:not_object"

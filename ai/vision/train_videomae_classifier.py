@@ -95,16 +95,22 @@ def sample_indices(frame_count: int, target_count: int) -> list[int]:
 
 
 def read_video_frames(path: Path, frame_count: int) -> list[np.ndarray]:
-    capture = cv2.VideoCapture(path.as_posix())
-    total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     frames = []
-    for index in sample_indices(total, frame_count):
-        capture.set(cv2.CAP_PROP_POS_FRAMES, index)
-        ok, frame = capture.read()
-        if not ok:
-            continue
-        frames.append(cv2.cvtColor(enhance_frame_adaptive(frame), cv2.COLOR_BGR2RGB))
-    capture.release()
+    if path.is_dir():
+        images = sorted(path.glob("frame_*.jpg"))
+        for index in sample_indices(len(images), frame_count):
+            frame = cv2.imread(images[index].as_posix()) if images else None
+            if frame is not None:
+                frames.append(cv2.cvtColor(enhance_frame_adaptive(frame), cv2.COLOR_BGR2RGB))
+    else:
+        capture = cv2.VideoCapture(path.as_posix())
+        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        for index in sample_indices(total, frame_count):
+            capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+            ok, frame = capture.read()
+            if ok:
+                frames.append(cv2.cvtColor(enhance_frame_adaptive(frame), cv2.COLOR_BGR2RGB))
+        capture.release()
 
     if not frames:
         frames = [np.zeros((224, 224, 3), dtype=np.uint8)]

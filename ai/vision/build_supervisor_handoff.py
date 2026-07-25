@@ -12,6 +12,7 @@ from typing import Any
 FINAL_ANALYSIS_DIR = Path("storage/vision/outputs/final_analysis")
 OUTPUT_DIR = Path("storage/vision/outputs/supervisor_handoff")
 SCHEMA_VERSION = "vision-supervisor-handoff-v1"
+HANDOFF_STATUSES = {"complete", "partial", "failed"}
 NOT_DETERMINED_BY_VISION = [
     "fault_ratio",
     "liable_party",
@@ -135,6 +136,11 @@ def compact_qwen_analysis(qwen: Any) -> dict[str, Any]:
     }
 
 
+def handoff_status(value: Any) -> str:
+    status = "complete" if value == "success" else value
+    return status if status in HANDOFF_STATUSES else "failed"
+
+
 def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
     agent = final_analysis.get("vision_agent_output", {}).get("agent_output", {})
     structured = agent.get("structured_result", {})
@@ -150,7 +156,9 @@ def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
                 "vision_node_code": agent.get("node_code"),
                 "analysis_scope": final_analysis.get("analysis_scope"),
             },
-            "status": final_analysis.get("status") or agent.get("status"),
+            "status": handoff_status(
+                final_analysis.get("status") or agent.get("status")
+            ),
             "media_summary": {
                 "media_type": structured.get("media_type"),
                 "summary": agent.get("summary"),
