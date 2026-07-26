@@ -4030,6 +4030,22 @@ function ReportingScreen({
   const groundsSections = groupedSections.grounds;
   const actionSections = groupedSections.actions;
   const supportCards = analysisCards.slice(0, 3);
+  const ratioRangeLabel =
+    faultRatioNode?.structured_result?.ratio_range_label ||
+    findReportText(sections, /과실비율|과실 비율|%/, "확인된 자료 없음");
+  const visionSections = sections.filter((section) =>
+    /영상|비전|블랙박스|CCTV|프레임|사고 장면/.test(String(section?.title || ""))
+  );
+  const visionCards = analysisCards.filter((card) =>
+    /영상|비전|블랙박스|CCTV|프레임|사고 장면/.test(
+      [card?.card_type, card?.title, card?.summary].filter(Boolean).join(" ")
+    )
+  );
+  const reportUpdatedAt =
+    reportMetadata.updated_at ||
+    currentReport?.updated_at ||
+    activeReportingPayload?.updated_at ||
+    "확인된 자료 없음";
 
   return (
     <section className="screen">
@@ -4090,72 +4106,115 @@ function ReportingScreen({
 
         <article className="report-canvas" aria-label="리포트 미리보기">
           {hasReport ? (
-            <div className="report-page">
-              <span className="report-document-label">{reportDisplayLabel}</span>
-              <h3>{activeReportTitle}</h3>
-              <p>{reportSummary}</p>
+            <div className="report-page case-report-detail">
+              <header className="case-report-detail__header">
+                <div>
+                  <span className="report-document-label">{reportDisplayLabel}</span>
+                  <h3>{activeReportTitle}</h3>
+                  <p>{reportSummary}</p>
+                </div>
+                <dl>
+                  <div><dt>리포트 ID</dt><dd>{currentReport?.report_id || "확인된 자료 없음"}</dd></div>
+                  <div><dt>사건 ID</dt><dd>{reportMetadata.case_id || "확인된 자료 없음"}</dd></div>
+                  <div><dt>최근 분석</dt><dd>{reportUpdatedAt}</dd></div>
+                </dl>
+              </header>
               <div className="report-status-strip">
                 <span>작성 상태</span>
                 <strong className={`report-status-badge ${reportStatusTone(reportStatus)}`}>
                   {reportStatusLabel(reportStatus)}
                 </strong>
-                <p>상담 내용을 바탕으로 확인된 내용을 정리하고 있습니다.</p>
+                <p>확인된 상담과 제출 자료를 기준으로 정리한 결과이며 최종 법적 판단을 대신하지 않습니다.</p>
               </div>
 
-              <DocumentTypeCards cards={documentCards} onCopy={onCopyDocumentCard} />
+              <section className="case-report-ratio" aria-label="AI 추정 과실비율">
+                <div className="case-report-section-title">
+                  <span>01</span>
+                  <div>
+                    <strong>AI 추정 과실비율</strong>
+                    <p>현재 확인된 자료를 기준으로 한 검토 범위입니다.</p>
+                  </div>
+                </div>
+                <div className="case-report-ratio__value">
+                  <span>과실 검토 범위</span>
+                  <strong>{compactValue(ratioRangeLabel)}</strong>
+                  <div className="case-report-ratio__track"><span /></div>
+                </div>
+              </section>
 
-              <div className="report-story-grid">
-                {overviewSections.map((section) => (
-                  <ReportSectionPreview compact detailLimit={2} key={`overview-${section.title}`} section={section} />
-                ))}
-                {overviewSections.length === 0 && currentReport && (
-                  <article className="report-empty-hint">
-                    <strong>저장 리포트</strong>
-                    <p>
-                      리포트 ID {currentReport.report_id}
-                      {reportMetadata.updated_at ? ` · 최근 작업 ${reportMetadata.updated_at}` : ""}
-                    </p>
-                  </article>
-                )}
-              </div>
-
-              <div className="report-focus-columns">
-                <section className="report-focus-panel" aria-label="핵심 근거">
-                  <div className="report-focus-header">
-                    <strong>판단 근거</strong>
+              <div className="case-report-grid">
+                <section className="case-report-card case-report-facts" aria-label="사고 정황 요약">
+                  <div className="case-report-section-title">
+                    <span>02</span>
+                    <div><strong>사고 정황 요약</strong><p>진술·OCR·분석 결과에서 확인된 사실입니다.</p></div>
                   </div>
                   <div className="report-section-list">
-                    {groundsSections.length > 0 ? (
+                    {overviewSections.length ? (
+                      overviewSections.map((section) => (
+                        <ReportSectionPreview detailLimit={3} key={`overview-${section.title}`} section={section} />
+                      ))
+                    ) : <p className="case-report-missing">확인된 자료 없음</p>}
+                  </div>
+                </section>
+
+                <section className="case-report-card case-report-references" aria-label="판단 근거">
+                  <div className="case-report-section-title">
+                    <span>03</span>
+                    <div><strong>판단 근거</strong><p>관련 법령과 유사 사례 등 적용 후보입니다.</p></div>
+                  </div>
+                  <div className="report-section-list">
+                    {groundsSections.length ? (
                       groundsSections.map((section) => (
                         <ReportSectionPreview detailLimit={3} key={`grounds-${section.title}`} section={section} />
                       ))
-                    ) : (
-                      <div className="report-empty-hint">
-                        <strong>근거 항목이 아직 정리되지 않았습니다.</strong>
-                        <p>역질문이 더 필요하거나 Agent 결과가 도착하면 이 영역을 채웁니다.</p>
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <section className="report-focus-panel" aria-label="다음 작업">
-                  <div className="report-focus-header">
-                    <strong>다음 단계</strong>
-                  </div>
-                  <div className="report-section-list">
-                    {actionSections.length > 0 ? (
-                      actionSections.map((section) => (
-                        <ReportSectionPreview detailLimit={3} key={`actions-${section.title}`} section={section} />
-                      ))
-                    ) : (
-                      <div className="report-empty-hint">
-                        <strong>다음 작업 항목이 아직 없습니다.</strong>
-                        <p>리포트 저장 전까지는 제출 단계 대신 상담 요약만 유지합니다.</p>
-                      </div>
-                    )}
+                    ) : !faultRatioNode && !lawGroundNode ? (
+                      <p className="case-report-missing">확인된 자료 없음</p>
+                    ) : null}
+                    {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
+                    {lawGroundNode && <LawGroundInsightPanel compact node={lawGroundNode} />}
                   </div>
                 </section>
               </div>
+
+              <section className="case-report-card case-report-vision" aria-label="영상 분석 결과">
+                <div className="case-report-section-title">
+                  <span>04</span>
+                  <div><strong>영상 분석 결과</strong><p>블랙박스·CCTV에서 확인된 장면과 시점입니다.</p></div>
+                </div>
+                <div className="case-report-vision__content">
+                  {visionSections.length ? (
+                    visionSections.map((section) => (
+                      <ReportSectionPreview detailLimit={5} key={`vision-${section.title}`} section={section} />
+                    ))
+                  ) : visionCards.length ? (
+                    visionCards.map((card, index) => (
+                      <article className="case-report-vision__event" key={analysisCardKey(card, index)}>
+                        <span className="tag">{card.card_type || "영상 분석"}</span>
+                        <strong>{card.title || "사고 장면 분석"}</strong>
+                        <p>{card.summary || "확인된 자료 없음"}</p>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="case-report-missing">확인된 영상 분석 자료 없음</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="case-report-card case-report-actions" aria-label="다음 단계">
+                <div className="case-report-section-title">
+                  <span>05</span>
+                  <div><strong>다음 단계</strong><p>추가 자료와 후속 행동을 확인합니다.</p></div>
+                </div>
+                <div className="report-section-list">
+                  {actionSections.length ? (
+                    actionSections.map((section) => (
+                      <ReportSectionPreview detailLimit={3} key={`actions-${section.title}`} section={section} />
+                    ))
+                  ) : <p className="case-report-missing">확인된 자료 없음</p>}
+                </div>
+              </section>
+
+              <DocumentTypeCards cards={documentCards} onCopy={onCopyDocumentCard} />
 
               {supportCards.length > 0 && (
                 <div className="report-support-strip">
