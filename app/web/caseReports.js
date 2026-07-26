@@ -1,4 +1,6 @@
 export function reportsForCase(item = {}, reports = []) {
+  if (!item) return [];
+
   const caseId = item.case_id || item.job_id || "";
   const directIds = new Set([item.latest_report_id, item.report_id].filter(Boolean));
 

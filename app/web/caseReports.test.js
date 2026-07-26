@@ -16,3 +16,7 @@ test("returns only reports linked to the selected case", () => {
 test("returns no report when the case has no report link", () => {
   assert.deepEqual(reportsForCase({ case_id: "C-3" }, [{ report_id: "R-1" }]), []);
 });
+
+test("returns no report when no case is selected", () => {
+  assert.deepEqual(reportsForCase(null, [{ report_id: "R-1" }]), []);
+});
