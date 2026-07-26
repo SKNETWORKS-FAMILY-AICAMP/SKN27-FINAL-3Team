@@ -22,12 +22,13 @@ variable "instance_type" {
 
   validation {
     condition = contains([
+      "m7i-flex.large",
       "t3a.large",
       "t3.large",
       "t3a.xlarge",
       "t3.xlarge",
     ], var.instance_type)
-    error_message = "Use a validated x86 instance with at least 8 GiB: t3a.large, t3.large, t3a.xlarge, or t3.xlarge."
+    error_message = "Use a validated x86 instance with at least 8 GiB: m7i-flex.large, t3a.large, t3.large, t3a.xlarge, or t3.xlarge."
   }
 }
 
@@ -88,6 +89,17 @@ variable "database_max_allocated_storage_gib" {
   description = "RDS autoscaling ceiling used as a cost guardrail."
   type        = number
   default     = 50
+}
+
+variable "database_backup_retention_days" {
+  description = "RDS automated backup retention. AWS Free plan accounts require 1 day."
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = var.database_backup_retention_days >= 1 && var.database_backup_retention_days <= 35
+    error_message = "database_backup_retention_days must be between 1 and 35."
+  }
 }
 
 variable "database_deletion_protection" {

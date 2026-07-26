@@ -15,7 +15,7 @@ resource "aws_db_parameter_group" "postgres" {
   parameter {
     name         = "rds.force_ssl"
     value        = "1"
-    apply_method = "immediate"
+    apply_method = "pending-reboot"
   }
 }
 
@@ -52,7 +52,7 @@ resource "aws_db_instance" "postgres" {
   publicly_accessible    = false
   multi_az               = false
 
-  backup_retention_period = 7
+  backup_retention_period = var.database_backup_retention_days
   backup_window           = "17:00-17:30"
   maintenance_window      = "sun:18:00-sun:18:30"
 

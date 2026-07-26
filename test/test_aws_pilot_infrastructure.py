@@ -84,6 +84,13 @@ def test_compute_is_one_ssm_only_x86_instance_with_encrypted_gp3_and_eip() -> No
     assert "sha256sum --check" in user_data
 
 
+def test_amazon_linux_bootstrap_keeps_preinstalled_curl_minimal() -> None:
+    user_data = (TERRAFORM_DIR / "user_data.sh.tftpl").read_text(encoding="utf-8")
+
+    assert "dnf install -y docker unzip" in user_data
+    assert "dnf install -y docker curl unzip" not in user_data
+
+
 def test_operational_monitor_connects_safe_health_metrics_to_cloudwatch() -> None:
     compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
     services = compose["services"]
@@ -187,13 +194,33 @@ def test_database_is_private_single_az_encrypted_postgres_with_safe_defaults() -
     assert re.search(r"multi_az\s*=\s*false", source)
     assert re.search(r"publicly_accessible\s*=\s*false", source)
     assert re.search(r"storage_encrypted\s*=\s*true", source)
-    assert re.search(r"backup_retention_period\s*=\s*7\b", source)
+    assert re.search(
+        r"backup_retention_period\s*=\s*var\.database_backup_retention_days",
+        source,
+    )
     assert re.search(
         r"deletion_protection\s*=\s*var\.database_deletion_protection",
         source,
     )
     assert "aws_db_subnet_group" in source
     assert re.search(r'name\s*=\s*"rds\.force_ssl"', source)
+
+
+def test_pilot_runtime_uses_law_db_for_review_case_rag() -> None:
+    runtime_env = _read_deploy("runtime.env.example")
+
+    assert "REVIEW_CASE_DB=law_db" in runtime_env
+
+
+def test_postgres_force_ssl_uses_the_static_parameter_apply_method() -> None:
+    database = (TERRAFORM_DIR / "database.tf").read_text(encoding="utf-8")
+
+    assert re.search(
+        r'parameter\s*\{[^}]*name\s*=\s*"rds\.force_ssl"'
+        r'[^}]*apply_method\s*=\s*"pending-reboot"',
+        database,
+        re.DOTALL,
+    )
 
 
 def test_private_s3_and_ecr_resources_have_encryption_and_lifecycle_controls() -> None:
@@ -412,9 +439,62 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
     assert "chmod 0444" in deploy
 
 
-def test_deploy_fail_closed_hook_requires_real_non_dl_reporting_pipeline() -> None:
+def test_database_maintenance_applies_review_case_schema_before_app_grants() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+    schema_command = (
+        "python -m etl.fault_cases.src.review_case.db_loading.schema_manager "
+        "--apply-schema"
+    )
+    grant_command = (
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public"
+    )
+
+    assert schema_command in maintenance
+    schema_position = maintenance.index(schema_command)
+    grant_position = maintenance.index(grant_command)
+    assert "--env-file `$WORK/master.env" in maintenance[:grant_position]
+    assert schema_position < grant_position
+
+
+def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() -> None:
+    loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+
+    assert "[switch]$AllowPaidReviewCaseEmbedding" in loader
+    guard = loader.index("if (-not $AllowPaidReviewCaseEmbedding)")
+    terraform = loader.index("$terraformPath =")
+    ssm = loader.index("aws ssm send-command")
+    assert guard < terraform < ssm
+
+    review_load = (
+        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
+        "backend python backend/manage.py load_review_case_pgvector_seed "
+        "--manifest /run/production-rag-seed/$RagSeedManifestRelativePath "
+        "--replace --allow-paid-provider-call --format json"
+    )
+    legal_load = (
+        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
+        "backend python backend/manage.py load_production_rag_seed"
+    )
+    completion = (
+        "printf '%s\\n' '$RagSeedManifestSha256' > "
+        "`$RELEASE_STATE_FILE.tmp"
+    )
+    expected_steps = (
+        "verify_production_rag_seed_manifest --manifest",
+        review_load,
+        legal_load,
+        "smoke_law_ground_search --require-results",
+        "verify_pgvector_rag_readiness --format json",
+        "smoke_text_ml_case_search --require-pgvector --require-results",
+        completion,
+    )
+    positions = [loader.index(step) for step in expected_steps]
+    assert positions == sorted(positions)
+
+
+def test_deploy_fail_closed_hook_requires_unified_production_runtime_smoke() -> None:
     deploy = _read_deploy("Deploy-Pilot.ps1")
-    command = "smoke_non_dl_analysis_reporting_pipeline"
+    command = "smoke_supervisor_conversation_runtime"
     assert "[switch]$AllowPaidNonDlSmoke" in deploy
     assert "[switch]$AllowPaidSupervisorSmoke" in deploy
     assert "if (-not $AllowPaidNonDlSmoke)" in deploy
@@ -425,6 +505,7 @@ def test_deploy_fail_closed_hook_requires_real_non_dl_reporting_pipeline() -> No
     assert "--require-persisted-handoff" in deploy
     assert "--require-report" in deploy
     assert "--allow-paid-provider-call" in deploy
+    assert "--timeout-seconds 600" in deploy
 
     runbook = _read_deploy("README.ko.md")
     assert command in runbook
@@ -1131,6 +1212,34 @@ def test_instance_type_is_an_x86_eight_gib_or_larger_allowlist() -> None:
     assert "stop/destroy" in runbook
 
 
+def test_free_plan_supports_the_x86_eight_gib_m7i_flex_override() -> None:
+    variables = (TERRAFORM_DIR / "variables.tf").read_text(encoding="utf-8")
+    tfvars_example = (TERRAFORM_DIR / "terraform.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"m7i-flex.large"' in variables
+    assert "m7i-flex.large" in tfvars_example
+
+
+def test_database_backup_retention_is_configurable_for_free_plan() -> None:
+    variables = (TERRAFORM_DIR / "variables.tf").read_text(encoding="utf-8")
+    database = (TERRAFORM_DIR / "database.tf").read_text(encoding="utf-8")
+    tfvars_example = (TERRAFORM_DIR / "terraform.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'variable "database_backup_retention_days"' in variables
+    assert re.search(
+        r"backup_retention_period\s*=\s*var\.database_backup_retention_days",
+        database,
+    )
+    assert re.search(
+        r"#\s*database_backup_retention_days\s*=\s*1",
+        tfvars_example,
+    )
+
+
 def test_initial_rag_bootstrap_stages_private_services_then_requires_seed_promotion() -> None:
     deploy = _read_deploy("Deploy-Pilot.ps1")
     loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
@@ -1258,10 +1367,11 @@ def test_normal_promotion_requires_validated_fine_notice_fixture_and_exact_smoke
         assert deploy.index(token) < ssm_put
 
     expected = (
-        "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call "
-        "--require-real-agent-results --require-persisted-handoff --require-report "
+        "smoke_supervisor_conversation_runtime --allow-paid-provider-call "
+        "--require-llm-used --require-real-agent-results "
+        "--require-persisted-handoff --require-report "
         "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
-        "--timeout-seconds 180 --format json"
+        "--timeout-seconds 600 --format json"
     )
     assert expected in deploy
 
@@ -1282,6 +1392,32 @@ def test_normal_promotion_requires_validated_fine_notice_fixture_and_exact_smoke
     stage_segment = deploy[stage_start:normal_start]
     assert "FineNoticeSmokeS3Uri" not in stage_segment
     assert "smoke_non_dl_analysis_reporting_pipeline --allow-paid" not in stage_segment
+
+
+def test_normal_promotion_uses_one_production_supervisor_runtime_smoke() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+
+    previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")
+    promote = deploy.index(
+        "ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current",
+        previous,
+    )
+    normal_segment = deploy[previous:promote]
+    expected = (
+        "smoke_supervisor_conversation_runtime --allow-paid-provider-call "
+        "--require-llm-used --require-real-agent-results "
+        "--require-persisted-handoff --require-report "
+        "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
+        "--timeout-seconds 600 --format json"
+    )
+
+    assert normal_segment.count(expected) == 1
+    assert "help smoke_supervisor_conversation_runtime" in normal_segment
+    assert "smoke_supervisor_llm --require-used" not in normal_segment
+    assert (
+        "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call"
+        not in normal_segment
+    )
 
 
 def test_release_update_stage_is_isolated_from_the_current_compose_project() -> None:

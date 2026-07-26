@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from uuid import uuid4
 
 from django.core.management.base import BaseCommand, CommandError
@@ -12,10 +13,10 @@ from app.services.guest_credential_service import issue_guest_credential
 from chatbot.management.commands.smoke_non_dl_analysis_reporting_pipeline import (
     _fine_notice_fixture,
 )
-from chatbot import repositories
 from chatbot.models import (
     AgentResult,
     AgentWorkItem,
+    AgentWorkItemStatus,
     AnalysisDisplayResult,
     AnalysisJob,
     ChatSession,
@@ -61,6 +62,12 @@ class Command(BaseCommand):
         parser.add_argument("--require-real-agent-results", action="store_true")
         parser.add_argument("--require-persisted-handoff", action="store_true")
         parser.add_argument("--require-report", action="store_true")
+        parser.add_argument(
+            "--timeout-seconds",
+            type=int,
+            default=600,
+            help="Bounded wait for the deployed Agent worker to finish.",
+        )
         parser.add_argument("--format", choices=("json", "text"), default="json")
 
     def handle(self, *args, **options) -> None:
@@ -69,7 +76,10 @@ class Command(BaseCommand):
                 "Refusing provider-capable smoke run without --allow-paid-provider-call."
             )
         fixture = _fine_notice_fixture(str(options["fine_notice_fixture_s3_uri"] or ""))
-        result = _run_smoke(fixture)
+        result = _run_smoke(
+            fixture,
+            timeout_seconds=max(30, min(int(options["timeout_seconds"]), 1800)),
+        )
         failed_checks = _failed_checks(result, options)
         result["failed_checks"] = failed_checks
         result["status"] = "pass" if not failed_checks else "fail"
@@ -81,7 +91,7 @@ class Command(BaseCommand):
             raise CommandError("Supervisor conversation runtime smoke failed: " + ", ".join(failed_checks))
 
 
-def _run_smoke(fixture: dict) -> dict:
+def _run_smoke(fixture: dict, *, timeout_seconds: int = 600) -> dict:
     suffix = uuid4().hex[:12]
     guest_id = f"gst_supervisor_smoke_{suffix}"
     guest_credential, _guest_credential_claims = issue_guest_credential(guest_id)
@@ -145,7 +155,10 @@ def _run_smoke(fixture: dict) -> dict:
     work_item_id = str((chat.get("work_item") or {}).get("work_item_id") or "")
     job_id = str((chat.get("work_item") or {}).get("job_id") or "")
     result["identifiers"] = {"job_id": job_id, "work_item_id": work_item_id}
-    worker_result = repositories.process_agent_work_item(work_item_id)
+    _wait_for_worker_completion(
+        work_item_id,
+        timeout_seconds=timeout_seconds,
+    )
     result_request = RequestFactory().get(
         f"/api/analysis/results/{job_id}/",
         HTTP_X_GUEST_ID=guest_id,
@@ -178,13 +191,57 @@ def _run_smoke(fixture: dict) -> dict:
         "report_ready": bool(report and report.status == "ready"),
         "analysis_display_persisted": display is not None,
         "public_result_loaded": public_result.status_code == 200,
-        "worker_completed": worker_result.get("status") in {"success", "skipped"},
+        "worker_completed": bool(
+            work_item and work_item.status == AgentWorkItemStatus.SUCCESS.value
+        ),
+        "worker_loop_consumed": bool(
+            work_item
+            and work_item.attempt_no >= 1
+            and work_item.started_at is not None
+            and work_item.completed_at is not None
+            and work_item.status
+            in {
+                AgentWorkItemStatus.SUCCESS.value,
+                AgentWorkItemStatus.FAILED.value,
+                AgentWorkItemStatus.CANCELED.value,
+            }
+        ),
     }
     return result
 
 
+def _wait_for_worker_completion(
+    work_item_id: str,
+    *,
+    timeout_seconds: int,
+    poll_interval_seconds: float = 2.0,
+) -> AgentWorkItem | None:
+    deadline = time.monotonic() + max(1, timeout_seconds)
+    terminal_statuses = {
+        AgentWorkItemStatus.SUCCESS.value,
+        AgentWorkItemStatus.FAILED.value,
+        AgentWorkItemStatus.CANCELED.value,
+    }
+    latest: AgentWorkItem | None = None
+    while True:
+        latest = AgentWorkItem.objects.filter(work_item_id=work_item_id).first()
+        if latest is not None and latest.status in terminal_statuses:
+            return latest
+        if time.monotonic() >= deadline:
+            return latest
+        time.sleep(max(0.1, poll_interval_seconds))
+
+
 SAFE_LLM_REASON_CODES = frozenset(
-    {"ok", "disabled", "missing_config", "provider_unavailable", "invalid_contract"}
+    {
+        "ok",
+        "disabled",
+        "missing_config",
+        "provider_unavailable",
+        "provider_refusal",
+        "provider_structured_output_error",
+        "invalid_contract",
+    }
 )
 
 
@@ -278,6 +335,11 @@ def _failed_checks(result: dict, options: dict) -> list[str]:
     failed = []
     if result["chat"]["status"] != "queued":
         return ["chat_queued"]
+    failed.extend(
+        name
+        for name in ("worker_loop_consumed", "worker_completed")
+        if not checks.get(name)
+    )
     if options["require_llm_used"] and result["llm"].get("status") != "used":
         failed.append("llm_used")
     requirement_checks = {
