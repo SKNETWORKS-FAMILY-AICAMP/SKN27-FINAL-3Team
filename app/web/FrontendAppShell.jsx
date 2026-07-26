@@ -1888,15 +1888,6 @@ function Reveal({ children, className = "", as = "div", ...rest }) {
 
 const RAIL_ITEMS = [
   {
-    id: "chatbot",
-    label: "AI 상담",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 5h16v11H8l-4 4V5z" />
-      </svg>
-    ),
-  },
-  {
     id: "guide",
     label: "사고 가이드",
     icon: (
@@ -1907,12 +1898,11 @@ const RAIL_ITEMS = [
     ),
   },
   {
-    id: "reporting",
-    label: "리포트",
+    id: "chatbot",
+    label: "AI 상담",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
-        <path d="M14 3v5h5" />
+        <path d="M4 5h16v11H8l-4 4V5z" />
       </svg>
     ),
   },
@@ -1959,14 +1949,6 @@ function AppTopNavigation({ activeRoute, onNavigate, onOpenChat, authAction }) {
             {item.label}
           </button>
         ))}
-        <button
-          className={activeRoute === "history" ? "active" : ""}
-          type="button"
-          onClick={() => handleClick("history")}
-          aria-current={activeRoute === "history" ? "page" : undefined}
-        >
-          내 사건
-        </button>
       </nav>
       <div className="app-top-nav__auth">{authAction}</div>
     </header>
@@ -2438,12 +2420,12 @@ function ConversationSidebar({
           <strong>내 사건</strong>
         </button>
         <button
-          className={activeRoute === "reporting" || activeRoute === "fineResult" || activeRoute === "faultResult" ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
+          className={activeRoute === "guide" ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
           type="button"
-          onClick={() => onNavigate("reporting")}
+          onClick={() => onNavigate("guide")}
         >
-          <span aria-hidden="true">▤</span>
-          <strong>리포트</strong>
+          <span aria-hidden="true">!</span>
+          <strong>사고 가이드</strong>
         </button>
       </nav>
     </>
@@ -3343,9 +3325,12 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onOpenReport, onRefresh, 
         </div>
 
         <div className="mypage-split">
-          <article className="table-panel">
+          <article className="table-panel mypage-case-list-panel">
             <div className="panel-head">
-              <strong>최근 분석 이력</strong>
+              <div>
+                <strong>내 사건</strong>
+                <p>사건을 선택하면 저장된 리포트와 진행 상태를 확인할 수 있습니다.</p>
+              </div>
               <button
                 className={showActionableOnly ? "button active" : "button"}
                 type="button"
@@ -3359,59 +3344,35 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onOpenReport, onRefresh, 
                 {showActionableOnly ? "✓ 조치가 필요한 항목들 표시 중" : "조치가 필요한 항목들 보기"}
               </button>
             </div>
-            <div className="table-scroll">
-              <table className="history-table">
-                <thead>
-                  <tr>
-                    <th>유형</th>
-                    <th>사건명</th>
-                    <th>상태</th>
-                    <th>최근 작업</th>
-                    <th>이동</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleCases.length === 0 ? (
-                    <tr>
-                      <td colSpan="5">
-                        <div className="table-empty">
-                          <strong>아직 저장된 사건이 없습니다.</strong>
-                          <p>상담을 시작하거나 리포트를 저장하면 이곳에 표시됩니다.</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    pagedCases.map((item) => (
-                      <tr
-                        key={caseKey(item)}
-                        className={selectedCase && caseKey(item) === caseKey(selectedCase) ? "is-selected" : undefined}
-                        onClick={() => setSelectedCaseKey(caseKey(item))}
-                      >
-                        <td><span className="tag">{item.type || "상담"}</span></td>
-                        <td>{item.title || item.case_id}</td>
-                        <td>
-                          <span className={`report-list-status ${caseStatusTone(item.case_status || item.status)}`}>
-                            {item.case_status || item.status || "확인 필요"}
-                          </span>
-                        </td>
-                        <td>{item.updated_at || item.created_at || "-"}</td>
-                        <td>
-                          <button
-                            className="button"
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onOpenCase(item);
-                            }}
-                          >
-                            열기
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            <div className="mypage-case-list">
+              {visibleCases.length === 0 ? (
+                <div className="table-empty">
+                  <strong>아직 저장된 사건이 없습니다.</strong>
+                  <p>상담을 시작하거나 리포트를 저장하면 이곳에 표시됩니다.</p>
+                </div>
+              ) : (
+                pagedCases.map((item) => (
+                  <button
+                    className={selectedCase && caseKey(item) === caseKey(selectedCase) ? "mypage-case-card is-selected" : "mypage-case-card"}
+                    key={caseKey(item)}
+                    type="button"
+                    onClick={() => setSelectedCaseKey(caseKey(item))}
+                  >
+                    <span className="tag">{item.type || "상담"}</span>
+                    <span className="mypage-case-card__content">
+                      <strong>{item.title || item.case_id}</strong>
+                      <span>
+                        {item.case_id || item.job_id || "사건 ID 없음"}
+                        <i aria-hidden="true">·</i>
+                        {item.updated_at || item.created_at || "최근 작업 없음"}
+                      </span>
+                    </span>
+                    <span className={`report-list-status ${caseStatusTone(item.case_status || item.status)}`}>
+                      {item.case_status || item.status || "확인 필요"}
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
             {visibleCases.length > pageSize && (
               <nav className="table-pagination" aria-label="최근 분석 이력 페이지">
@@ -3440,11 +3401,14 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onOpenReport, onRefresh, 
             {selectedCase ? (
               <>
                 <div className="panel-head">
-                  <strong>사건 상세</strong>
+                  <strong>선택한 사건</strong>
                   <span className="tag">{selectedCase.type || "상담"}</span>
                 </div>
                 <div className="case-detail-body">
                   <h3>{selectedCase.title || selectedCase.case_id}</h3>
+                  <p className="case-detail-summary">
+                    사건별 상담 내용과 저장된 분석 리포트를 이어서 확인합니다.
+                  </p>
                   <dl>
                     <div>
                       <dt>상태</dt>
@@ -3456,6 +3420,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onOpenReport, onRefresh, 
                     </div>
                     <div><dt>최근 작업</dt><dd>{selectedCase.updated_at || selectedCase.created_at || "-"}</dd></div>
                     <div><dt>사건 ID</dt><dd>{selectedCase.case_id || selectedCase.job_id || "-"}</dd></div>
+                    <div><dt>저장 리포트</dt><dd>{selectedCaseReports.length ? `${selectedCaseReports.length}건` : "없음"}</dd></div>
                   </dl>
                   <div className="case-report-actions">
                     {selectedCaseReports.length ? (
@@ -4046,6 +4011,26 @@ function ReportingScreen({
     currentReport?.updated_at ||
     activeReportingPayload?.updated_at ||
     "확인된 자료 없음";
+  const isFineReport =
+    activeReportType === "fine_notice_objection" ||
+    activeReportingPayload?.document_variant === "fine_notice" ||
+    /과태료|범칙금|고지서|이의/.test([activeReportTitle, reportSummary].join(" "));
+  const fineSummary = [
+    {
+      label: "현재 단계",
+      value: findReportText(sections, /현재 단계|처분 단계|사전통지|의견제출/, reportStatusLabel(reportStatus)),
+    },
+    {
+      label: "과태료",
+      value: findReportText(sections, /예상 과태료|과태료 금액|부과 금액|[0-9,]+원/, "확인된 자료 없음"),
+    },
+    {
+      label: "제출·납부기한",
+      value:
+        activeReportingPayload?.appeal_gate?.deadline ||
+        findReportText(sections, /제출 기한|납부 기한|의견제출|마감|D-/, "확인된 자료 없음"),
+    },
+  ];
 
   return (
     <section className="screen">
@@ -4127,26 +4112,49 @@ function ReportingScreen({
                 <p>확인된 상담과 제출 자료를 기준으로 정리한 결과이며 최종 법적 판단을 대신하지 않습니다.</p>
               </div>
 
-              <section className="case-report-ratio" aria-label="AI 추정 과실비율">
-                <div className="case-report-section-title">
-                  <span>01</span>
-                  <div>
-                    <strong>AI 추정 과실비율</strong>
-                    <p>현재 확인된 자료를 기준으로 한 검토 범위입니다.</p>
+              {isFineReport ? (
+                <section className="case-report-ratio case-report-fine-summary" aria-label="과태료 처분 현황">
+                  <div className="case-report-section-title">
+                    <span>01</span>
+                    <div>
+                      <strong>처분 현황</strong>
+                      <p>고지서와 상담에서 확인된 처분 내용과 기한입니다.</p>
+                    </div>
                   </div>
-                </div>
-                <div className="case-report-ratio__value">
-                  <span>과실 검토 범위</span>
-                  <strong>{compactValue(ratioRangeLabel)}</strong>
-                  <div className="case-report-ratio__track"><span /></div>
-                </div>
-              </section>
+                  <div className="case-report-fine-grid">
+                    {fineSummary.map((item) => (
+                      <div key={item.label}>
+                        <span>{item.label}</span>
+                        <strong>{compactValue(item.value)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : (
+                <section className="case-report-ratio" aria-label="AI 추정 과실비율">
+                  <div className="case-report-section-title">
+                    <span>01</span>
+                    <div>
+                      <strong>AI 추정 과실비율</strong>
+                      <p>현재 확인된 자료를 기준으로 한 검토 범위입니다.</p>
+                    </div>
+                  </div>
+                  <div className="case-report-ratio__value">
+                    <span>과실 검토 범위</span>
+                    <strong>{compactValue(ratioRangeLabel)}</strong>
+                    <div className="case-report-ratio__track"><span /></div>
+                  </div>
+                </section>
+              )}
 
               <div className="case-report-grid">
-                <section className="case-report-card case-report-facts" aria-label="사고 정황 요약">
+                <section className="case-report-card case-report-facts" aria-label={isFineReport ? "위반 사실 요약" : "사고 정황 요약"}>
                   <div className="case-report-section-title">
                     <span>02</span>
-                    <div><strong>사고 정황 요약</strong><p>진술·OCR·분석 결과에서 확인된 사실입니다.</p></div>
+                    <div>
+                      <strong>{isFineReport ? "위반 사실 요약" : "사고 정황 요약"}</strong>
+                      <p>{isFineReport ? "고지서·OCR·상담에서 확인된 사실입니다." : "진술·OCR·분석 결과에서 확인된 사실입니다."}</p>
+                    </div>
                   </div>
                   <div className="report-section-list">
                     {overviewSections.length ? (
@@ -4160,7 +4168,10 @@ function ReportingScreen({
                 <section className="case-report-card case-report-references" aria-label="판단 근거">
                   <div className="case-report-section-title">
                     <span>03</span>
-                    <div><strong>판단 근거</strong><p>관련 법령과 유사 사례 등 적용 후보입니다.</p></div>
+                    <div>
+                      <strong>{isFineReport ? "이의제기 검토 근거" : "판단 근거"}</strong>
+                      <p>{isFineReport ? "처분 내용과 의견제출에 적용할 수 있는 근거입니다." : "관련 법령과 유사 사례 등 적용 후보입니다."}</p>
+                    </div>
                   </div>
                   <div className="report-section-list">
                     {groundsSections.length ? (
@@ -4179,7 +4190,10 @@ function ReportingScreen({
               <section className="case-report-card case-report-vision" aria-label="영상 분석 결과">
                 <div className="case-report-section-title">
                   <span>04</span>
-                  <div><strong>영상 분석 결과</strong><p>블랙박스·CCTV에서 확인된 장면과 시점입니다.</p></div>
+                  <div>
+                    <strong>{isFineReport ? "제출 자료 분석" : "영상 분석 결과"}</strong>
+                    <p>{isFineReport ? "고지서와 첨부 자료에서 확인된 내용입니다." : "블랙박스·CCTV에서 확인된 장면과 시점입니다."}</p>
+                  </div>
                 </div>
                 <div className="case-report-vision__content">
                   {visionSections.length ? (

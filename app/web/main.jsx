@@ -1,8 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 
-import FrontendAppShell from "./FrontendAppShell.jsx?mockup-v17";
-import "./styles.css?mockup-v17";
+import FrontendAppShell from "./FrontendAppShell.jsx?mockup-v18";
+import "./styles.css?mockup-v18";
 
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>

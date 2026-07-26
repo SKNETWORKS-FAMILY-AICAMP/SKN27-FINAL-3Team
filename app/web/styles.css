@@ -3896,6 +3896,66 @@ button.report-list-card.active {
   min-width: 0;
 }
 
+.mypage-case-list-panel .panel-head > div {
+  min-width: 0;
+}
+
+.mypage-case-list-panel .panel-head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.mypage-case-list {
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.mypage-case-card {
+  width: 100%;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mypage-case-card:hover,
+.mypage-case-card.is-selected {
+  border-color: var(--brand-soft-border);
+  background: var(--brand-soft);
+}
+
+.mypage-case-card__content {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.mypage-case-card__content strong {
+  overflow-wrap: anywhere;
+}
+
+.mypage-case-card__content > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mypage-case-card__content i {
+  font-style: normal;
+}
+
 .history-table tbody tr {
   cursor: pointer;
 }
@@ -3921,6 +3981,13 @@ button.report-list-card.active {
 .case-detail-body h3 {
   font-size: 17px;
   margin: 0;
+}
+
+.case-detail-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .case-detail-body dl {
@@ -3974,6 +4041,15 @@ button.report-list-card.active {
 @media (max-width: 860px) {
   .mypage-split {
     grid-template-columns: 1fr;
+  }
+
+  .mypage-case-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .mypage-case-card > .report-list-status {
+    grid-column: 2;
+    width: fit-content;
   }
 }
 
@@ -4568,6 +4644,34 @@ button.report-list-card.active {
   background: linear-gradient(90deg, var(--brand-dark), var(--brand));
 }
 
+.case-report-fine-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.case-report-fine-grid > div {
+  min-height: 96px;
+  padding: 18px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  border-radius: 14px;
+  background: var(--page-bg);
+}
+
+.case-report-fine-grid span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.case-report-fine-grid strong {
+  color: var(--brand);
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
 .case-report-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4619,6 +4723,10 @@ button.report-list-card.active {
   }
 
   .case-report-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .case-report-fine-grid {
     grid-template-columns: 1fr;
   }
 }
