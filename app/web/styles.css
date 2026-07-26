@@ -3946,6 +3946,31 @@ button.report-list-card.active {
   text-align: right;
 }
 
+.case-report-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.case-report-action {
+  justify-content: center;
+}
+
+.case-report-empty {
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--page-bg);
+}
+
+.case-report-empty p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 @media (max-width: 860px) {
   .mypage-split {
     grid-template-columns: 1fr;

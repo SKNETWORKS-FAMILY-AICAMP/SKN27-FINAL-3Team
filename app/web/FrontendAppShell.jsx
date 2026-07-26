@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createFrontendApi } from "./apiClient.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
 import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
+import { reportsForCase } from "./caseReports.js";
 import {
   buildAuthContext,
   buildGoogleLoginPayload,
@@ -1602,7 +1603,15 @@ export default function FrontendAppShell({
               cases={cases}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenCase={openSavedCase}
-              onRefresh={loadMyPageSummary}
+              onOpenReport={async (report) => {
+                await openReportDetail(report);
+                setActiveRoute("reporting");
+              }}
+              onRefresh={async () => {
+                await loadMyPageSummary();
+                await loadReports();
+              }}
+              reports={effectiveReportList}
               summary={effectiveMypageSummary}
             />
           )}
@@ -3286,7 +3295,7 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
   );
 }
 
-function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
+function MyPageScreen({ cases, onOpenCase, onOpenChat, onOpenReport, onRefresh, reports = [], summary }) {
   const pageSize = 5;
   const activeCases = summary?.active_cases ?? cases.length;
   const savedReports = summary?.saved_reports ?? 0;
@@ -3308,6 +3317,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
   const caseKey = (item) => item.case_id || item.job_id || item.title;
   const selectedCase =
     pagedCases.find((item) => caseKey(item) === selectedCaseKey) || pagedCases[0] || null;
+  const selectedCaseReports = reportsForCase(selectedCase, reports);
 
   return (
     <section className="screen">
@@ -3447,9 +3457,28 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                     <div><dt>최근 작업</dt><dd>{selectedCase.updated_at || selectedCase.created_at || "-"}</dd></div>
                     <div><dt>사건 ID</dt><dd>{selectedCase.case_id || selectedCase.job_id || "-"}</dd></div>
                   </dl>
-                  <button className="button primary full" type="button" onClick={() => onOpenCase(selectedCase)}>
-                    이어서 보기
-                  </button>
+                  <div className="case-report-actions">
+                    {selectedCaseReports.length ? (
+                      selectedCaseReports.map((report, index) => (
+                        <button
+                          className="button primary full case-report-action"
+                          key={report.report_id || index}
+                          type="button"
+                          onClick={() => onOpenReport(report)}
+                        >
+                          {selectedCaseReports.length > 1 ? `리포트 ${index + 1} 자세히 보기` : "리포트 자세히 보기"}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="case-report-empty">
+                        <strong>리포트 생성 필요</strong>
+                        <p>상담을 이어서 진행하면 사건 분석 리포트를 생성할 수 있습니다.</p>
+                        <button className="button primary full" type="button" onClick={() => onOpenCase(selectedCase)}>
+                          AI 상담 이어가기
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             ) : (
