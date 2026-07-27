@@ -110,6 +110,24 @@ class ReportApiContractTests(TestCase):
                     "limitation_count": 1,
                     "limitations": ["Verify facts"],
                     "agent_status_counts": {"success": 1},
+                    "public_quality_summary": {
+                        "status": "partial",
+                        "partial_result": True,
+                        "review_required": True,
+                        "freshness": {
+                            "effective_at": "2026-07-20",
+                            "retrieved_at": "2026-07-27T09:00:00+09:00",
+                            "limitation": "Latest revision may not be reflected.",
+                        },
+                        "retrieval": {
+                            "backend_label": "legal_ground_search",
+                            "result_count": 1,
+                            "used_fallback": False,
+                        },
+                        "limitation_count": 1,
+                        "limitations": ["Latest revision may not be reflected."],
+                        "dataset_version": "sha256:must-not-leak",
+                    },
                 },
                 "limitations": ["Verify facts"],
                 "object_storage": {
@@ -146,6 +164,37 @@ class ReportApiContractTests(TestCase):
             detail["content"]["reporting_payload"]["sections"],
             [{"title": "Facts", "body": "Confirmed facts", "items": ["Verified"]}],
         )
+
+    def test_report_detail_exposes_only_public_quality_summary_fields(self) -> None:
+        response = self.owner_client.get(f"/api/reports/{self.report.report_id}/")
+        detail = response.json()["report"]
+
+        quality = detail["metadata"]["report_quality"]
+        self.assertEqual(quality["limitation_count"], 1)
+        self.assertEqual(quality["limitations"], ["Verify facts"])
+        self.assertEqual(
+            quality["public_quality_summary"],
+            {
+                "status": "partial",
+                "partial_result": True,
+                "review_required": True,
+                "freshness": {
+                    "effective_at": "2026-07-20",
+                    "retrieved_at": "2026-07-27T09:00:00+09:00",
+                    "limitation": "Latest revision may not be reflected.",
+                },
+                "retrieval": {
+                    "backend_label": "legal_ground_search",
+                    "result_count": 1,
+                    "used_fallback": False,
+                },
+                "limitation_count": 1,
+                "limitations": ["Latest revision may not be reflected."],
+            },
+        )
+        self.assertNotIn("agent_status_counts", quality)
+        self.assertNotIn("dataset_version", json.dumps(detail))
+        self.assertNotIn("storage_uri", json.dumps(detail))
 
     def test_other_user_is_denied_before_report_document_resolution(self) -> None:
         with patch("chatbot.views.get_report_download_metadata") as resolve_download:

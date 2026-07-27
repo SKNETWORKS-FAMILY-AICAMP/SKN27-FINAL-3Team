@@ -43,6 +43,7 @@ PUBLIC_REPORT_QUALITY_KEYS = (
     "limitation_count",
     "limitations",
     "confidence_label",
+    "public_quality_summary",
 )
 PUBLIC_REPORT_ERROR_KEYS = (
     "contract_version",
@@ -282,9 +283,41 @@ def _public_report_quality(value: object) -> dict[str, Any]:
     for key in PUBLIC_REPORT_QUALITY_KEYS:
         if key == "limitations":
             public[key] = _text_list(quality.get(key))
+        elif key == "public_quality_summary":
+            summary = _public_quality_summary(quality.get(key))
+            if summary is not None:
+                public[key] = summary
         elif key in quality:
             public[key] = deepcopy(quality[key])
     return public
+
+
+def _public_quality_summary(value: object) -> dict[str, Any] | None:
+    summary = _mapping(value)
+    if not summary:
+        return None
+    freshness = _mapping(summary.get("freshness"))
+    retrieval = _mapping(summary.get("retrieval"))
+    return {
+        "status": _optional_text(summary.get("status")) or "unavailable",
+        "partial_result": bool(summary.get("partial_result")),
+        "review_required": bool(summary.get("review_required")),
+        "freshness": {
+            key: _optional_text(freshness.get(key))
+            for key in ("effective_at", "retrieved_at", "limitation")
+            if _optional_text(freshness.get(key)) is not None
+        },
+        "retrieval": {
+            "backend_label": _optional_text(retrieval.get("backend_label")),
+            "result_count": retrieval.get("result_count")
+            if isinstance(retrieval.get("result_count"), int)
+            and not isinstance(retrieval.get("result_count"), bool)
+            else None,
+            "used_fallback": bool(retrieval.get("used_fallback")),
+        },
+        "limitation_count": int(summary.get("limitation_count") or 0),
+        "limitations": _text_list(summary.get("limitations")),
+    }
 
 
 def _public_error_auth(auth: Mapping[str, Any]) -> dict[str, Any]:

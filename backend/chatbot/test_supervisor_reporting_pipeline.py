@@ -888,10 +888,7 @@ class SupervisorReportingPipelineTests(TestCase):
         self.assertEqual(job_detail["report_links"][0]["report_id"], report.report_id)
         report_detail = get_report_record_detail(report.report_id)
         self.assertEqual(report_detail["content"]["contract_version"], "analysis_report.v1")
-        self.assertEqual(
-            report_detail["content"]["source"]["reporting_result_id"],
-            reporting_result.result_id,
-        )
+        self.assertNotIn("source", report_detail["content"])
         self.assertEqual(
             report_detail["content"]["reporting_payload"].get("document_variant"),
             "fine_notice",

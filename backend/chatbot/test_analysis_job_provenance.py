@@ -112,6 +112,18 @@ class AnalysisJobProvenanceTests(TestCase):
         self.assertNotIn("query_text", result["retrievals"][0])
         self.assertNotIn("secret user query", json.dumps(result))
 
+    def test_operator_provenance_keeps_private_dataset_and_embedding_details(self) -> None:
+        result = get_analysis_job_provenance(self.job.job_id)
+
+        self.assertEqual(
+            result["retrievals"][0]["data_provenance"]["dataset_version"],
+            "sha256:verified-dataset",
+        )
+        self.assertEqual(
+            result["retrievals"][0]["embedding"]["model"],
+            "text-embedding-3-large",
+        )
+
     def test_management_command_emits_json_operator_evidence(self):
         output = StringIO()
 

@@ -194,6 +194,28 @@ REPORT_SENSITIVE_FIELD_FRAGMENTS = (
     "transcript",
     "usertext",
 )
+_REPORTING_PAYLOAD_FIELDS = (
+    "report_type",
+    "screen_id",
+    "stage",
+    "title",
+    "summary",
+    "document_variant",
+    "document_readiness",
+    "report_actions",
+    "appeal_gate",
+    "document_cards",
+    "sections",
+)
+_PUBLIC_QUALITY_SUMMARY_FIELDS = (
+    "status",
+    "partial_result",
+    "review_required",
+    "freshness",
+    "retrieval",
+    "limitation_count",
+    "limitations",
+)
 
 
 class ReportReferenceError(ValueError):
@@ -4397,10 +4419,8 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
     content = _dict_or_empty(report.content)
     metadata = _dict_or_empty(report.metadata)
     reporting_payload = _dict_or_empty(content.get("reporting_payload"))
-    public_reporting_payload = {
-        **reporting_payload,
-        "document_confirmation": get_report_document_confirmation_state(report),
-    }
+    public_reporting_payload = _public_reporting_payload(reporting_payload)
+    public_reporting_payload["document_confirmation"] = get_report_document_confirmation_state(report)
     job = report.job
     return {
         **_report_record_summary(report),
@@ -4409,13 +4429,12 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
             "reporting_payload": public_reporting_payload,
             "format": _text(content.get("format")),
             "action": _text(content.get("action")),
-            "source": _dict_or_empty(content.get("source")),
-            "quality": _dict_or_empty(content.get("quality")),
         },
         "metadata": {
-            "report_quality": _dict_or_empty(metadata.get("report_quality")),
-            "limitations": _list_or_empty(metadata.get("limitations")),
-            "object_storage": _dict_or_empty(metadata.get("object_storage")),
+            "report_quality": _public_report_quality(
+                _dict_or_empty(metadata.get("report_quality"))
+            ),
+            "limitations": _safe_public_limitations(metadata.get("limitations")),
         },
         "job": {
             "job_id": job.job_id,
@@ -4426,6 +4445,169 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
         if job
         else None,
     }
+
+
+def _public_report_quality(value: dict[str, Any]) -> dict[str, Any]:
+    """Project report quality into the same public contract used by analysis results."""
+
+    return {
+        "contract_version": _text(value.get("contract_version")) or "report_quality.v2",
+        "partial_report": bool(value.get("partial_report")),
+        "review_required": bool(value.get("review_required")),
+        "limitation_count": int(value.get("limitation_count") or 0),
+        "limitations": _safe_public_limitations(value.get("limitations")),
+        "confidence_label": _text(value.get("confidence_label")) or None,
+        "public_quality_summary": _public_quality_summary(
+            value.get("public_quality_summary")
+        ),
+    }
+
+
+def _public_quality_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    summary = _project_mapping(value, _PUBLIC_QUALITY_SUMMARY_FIELDS)
+    summary["status"] = _text(summary.get("status")) or "unavailable"
+    summary["partial_result"] = bool(summary.get("partial_result"))
+    summary["review_required"] = bool(summary.get("review_required"))
+    summary["freshness"] = _project_mapping(
+        _dict_or_empty(summary.get("freshness")),
+        ("effective_at", "retrieved_at", "limitation"),
+    )
+    summary["retrieval"] = _project_mapping(
+        _dict_or_empty(summary.get("retrieval")),
+        ("backend_label", "result_count", "used_fallback"),
+    )
+    summary["limitation_count"] = int(summary.get("limitation_count") or 0)
+    summary["limitations"] = _safe_public_limitations(summary.get("limitations"))
+    return summary
+
+
+def _public_reporting_payload(value: dict[str, Any]) -> dict[str, Any]:
+    payload = _project_mapping(value, _REPORTING_PAYLOAD_FIELDS)
+    if isinstance(payload.get("sections"), list):
+        payload["sections"] = [
+            _public_report_section(section)
+            for section in payload["sections"]
+            if isinstance(section, dict)
+        ]
+    if isinstance(payload.get("document_readiness"), dict):
+        readiness = payload["document_readiness"]
+        payload["document_readiness"] = {
+            "ready_for_docx": bool(readiness.get("ready_for_docx")),
+            "missing_field_details": _public_document_fields(
+                readiness.get("missing_field_details")
+            ),
+            "next_questions": _public_document_fields(readiness.get("next_questions")),
+        }
+    if isinstance(payload.get("report_actions"), list):
+        payload["report_actions"] = _public_report_actions(payload["report_actions"])
+    if isinstance(payload.get("appeal_gate"), dict):
+        appeal_gate = payload["appeal_gate"]
+        payload["appeal_gate"] = {
+            "blocked": bool(appeal_gate.get("blocked")),
+            "reason": _text(appeal_gate.get("reason")),
+        }
+    if isinstance(payload.get("document_cards"), list):
+        payload["document_cards"] = _public_document_cards(payload["document_cards"])
+    return payload
+
+
+def _public_report_section(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": _text(value.get("title")) or None,
+        "body": _text(value.get("body")) or None,
+        "items": _safe_public_limitations(value.get("items")),
+    }
+
+
+def _public_document_fields(value: Any) -> list[dict[str, str]]:
+    fields: list[dict[str, str]] = []
+    for item in _list_or_empty(value):
+        if not isinstance(item, dict):
+            continue
+        field = _text(item.get("field"))
+        label = _text(item.get("label"))
+        question = _text(item.get("question"))
+        public = {
+            key: item_value
+            for key, item_value in (
+                ("field", field),
+                ("label", label),
+                ("question", question),
+            )
+            if item_value
+        }
+        if public:
+            fields.append(public)
+    return fields
+
+
+def _public_report_actions(value: list[Any]) -> list[dict[str, str]]:
+    actions: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        action_type = _text(item.get("type"))
+        label = _text(item.get("label"))
+        document_type = _text(item.get("document_type"))
+        if not all((action_type, label, document_type)):
+            continue
+        action = {
+            "type": action_type,
+            "label": label,
+            "document_type": document_type,
+        }
+        if _text(item.get("document_format")) == "docx":
+            action["document_format"] = "docx"
+        actions.append(action)
+    return actions
+
+
+def _public_document_cards(value: list[Any]) -> list[dict[str, Any]]:
+    cards: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        card_type = _text(item.get("type"))
+        status = _text(item.get("status"))
+        title = _text(item.get("title"))
+        description = _text(item.get("description"))
+        if (
+            card_type not in {"objection_draft", "fact_summary", "insurance_submission"}
+            or status not in {"ready", "partial", "unavailable"}
+            or not title
+            or not description
+        ):
+            continue
+        card: dict[str, Any] = {
+            "type": card_type,
+            "title": title,
+            "description": description,
+            "status": status,
+            "sections": [
+                _public_report_section(section)
+                for section in _list_or_empty(item.get("sections"))
+                if isinstance(section, dict)
+            ],
+        }
+        for key in ("copy_text", "notice"):
+            if text := _text(item.get(key)):
+                card[key] = text
+        cards.append(card)
+    return cards
+
+
+def _project_mapping(value: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+    return {field: deepcopy(value[field]) for field in fields if field in value}
+
+
+def _safe_public_limitations(value: Any) -> list[str]:
+    return [
+        text
+        for item in _list_or_empty(value)
+        if (text := _sanitize_report_text(item))
+    ]
 
 
 def _report_record_summary(report: Report) -> dict[str, Any]:
