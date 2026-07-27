@@ -1,0 +1,43 @@
+name: regression-signal
+
+on:
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression-signal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Full offline pytest
+        id: offline_pytest
+        continue-on-error: true
+        run: python -m pytest -q --timeout=30
+
+      - name: Django chatbot regression suite
+        id: django_chatbot
+        continue-on-error: true
+        run: python backend/manage.py test chatbot -v 1
+
+      - name: Regression summary
+        run: |
+          echo "## Regression signal" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- full offline pytest: ${{ steps.offline_pytest.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- django chatbot suite: ${{ steps.django_chatbot.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow is non-blocking and exists to surface broader regressions outside the production contract gate." >> "$GITHUB_STEP_SUMMARY"
