@@ -159,7 +159,7 @@
 - [x] 블랙박스 영상은 기존 Vision pipeline adapter를 통해 `text_ml_case_search`·`law_ground_search`로 handoff. checkpoint 부재·의존성·decode·timeout은 안전한 실패 코드와 다음 행동으로 반환
 - [~] 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 기준으로 PR #304 (`feat-runpod-serverless-vision`)에서 `VISION_RUNTIME_PROVIDER=runpod`, HTTPS signed URL, `/run`·`/status` polling, job ID 재사용, stable remote error code, 격리·정리형 Serverless worker와 배포 환경 계약을 구현. PR #303과 병합 커밋 `5f3728e`까지의 운영 관측 기반 위에서 local/mock 계약을 검증했고, 전체 `test/` `960 passed, 38 skipped`, Django `368 passed`, Dockerfile build check도 통과. restricted key 발급·유료 RunPod Endpoint 생성·모델 artifact 승인·비식별 실영상 smoke는 사람 게이트이므로 아직 운영 연결 완료로 표시하지 않음
 - [x] 사고 사진(`accident_scene`)은 서버 저장 문서 분류를 사용자가 `attachment_id`로 확인한 뒤 사진 전용 사례·법령 검색 계획으로 연결. 클라이언트 분류 주입, 오래된 분류, 사진의 Vision 영상 경로 오호출을 회귀 테스트로 차단
-- [ ] PDF 고지서, 사고 사진, 블랙박스 영상, 지원하지 않는 파일, 분류 불명 파일의 다섯 E2E 시나리오를 실제 adapter 경계까지 검증. mock fixture 통과만으로 실제 Vision 연결 완료로 판단하지 않음
+- [x] PDF 고지서, 사고 사진, 블랙박스 영상, 지원하지 않는 파일, 분류 불명 파일의 다섯 E2E 시나리오를 실제 adapter 경계까지 검증. `submit_message -> execute_agent_plan` 통합 테스트에서 문서 분류, 사고 사진의 사례·법령 검색, 블랙박스 Vision handoff, unsupported retry, unknown `change_purpose`를 각각 고정했고, 이것만으로 외부 Vision 런타임 연결 완료를 주장하지는 않음
 
 ## F. P1 — 채팅 맥락·사건 상태 관리
 

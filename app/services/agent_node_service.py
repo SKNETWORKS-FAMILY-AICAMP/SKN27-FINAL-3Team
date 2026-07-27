@@ -54,6 +54,7 @@ DOCUMENT_CLASSIFICATION_ERROR_CODES = frozenset(
     {
         "attachment_not_scan_ready",
         "attachment_unavailable",
+        "unsupported_document_classification_input",
         "document_classification_failed",
     }
 )
