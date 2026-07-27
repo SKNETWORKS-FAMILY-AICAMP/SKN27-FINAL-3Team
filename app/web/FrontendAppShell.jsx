@@ -10,6 +10,14 @@ import {
   readStoredAuthToken,
   scheduleAppJwtRefresh,
 } from "./authSession.js";
+import {
+  CONSULTATION_FACT_FIELDS,
+  CONSULTATION_TYPE_OPTIONS,
+  buildStructuredConsultationMessage,
+  createEmptyConsultationIntake,
+  hasConsultationIntakeData,
+  listConsultationIntakeMissingFields,
+} from "./consultationIntake.js";
 
 const TAB_ROUTES = [
   { id: "chatbot", label: "사고·과태료 상담" },
@@ -244,6 +252,7 @@ export default function FrontendAppShell({
   const [question, setQuestion] = useState("");
   const [submittedQuestion, setSubmittedQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
+  const [consultationIntake, setConsultationIntake] = useState(() => createEmptyConsultationIntake());
   const [analysisResponse, setAnalysisResponse] = useState(null);
   const [activeAuthToken, setActiveAuthToken] = useState(() => readStoredAuthToken());
   const [savePromptVisible, setSavePromptVisible] = useState(false);
@@ -583,6 +592,7 @@ export default function FrontendAppShell({
     setGuestDetailedReportUsed(false);
     setSubmittedQuestion("");
     setQuestion("");
+    setConsultationIntake(createEmptyConsultationIntake());
     setActiveRoute("entry");
     setStatusMessage("로그아웃했습니다. 새 Google 계정으로 다시 진행할 수 있습니다.");
   }
@@ -1045,15 +1055,19 @@ export default function FrontendAppShell({
     attachmentClassificationConfirmation,
   } = {}) {
     const trimmedQuestion = String(userText ?? question).trim();
+    const composedQuestion = buildStructuredConsultationMessage({
+      freeText: trimmedQuestion,
+      intake: consultationIntake,
+    });
     const confirmationForRequest = ocrConfirmation || pendingOcrConfirmation;
-    if (!trimmedQuestion) {
-      setStatusMessage("상담 내용을 입력해 주세요.");
+    if (!composedQuestion) {
+      setStatusMessage("상담 내용을 입력하거나 구조화 입력 항목을 작성해 주세요.");
       return;
     }
 
     setIsSubmitting(true);
     setStatusMessage("상담 내용을 정리하고 있습니다.");
-    setSubmittedQuestion(trimmedQuestion);
+    setSubmittedQuestion(composedQuestion);
 
     let followupLoginState = null;
     if (!authSessionId && guestDetailedReportUsed) {
@@ -1077,7 +1091,7 @@ export default function FrontendAppShell({
     const activeGuestCredential = followupLoginState
       ? followupLoginState.guestCredential || ""
       : guestCredential || guestSessionResult?.guestCredential || "";
-    const nextUserMessage = { role: "user", content: trimmedQuestion };
+    const nextUserMessage = { role: "user", content: composedQuestion };
     const conversationHistory = [...chatMessages, nextUserMessage].map((message) => ({
       role: message.role,
       content: message.content,
@@ -1111,7 +1125,7 @@ export default function FrontendAppShell({
           session_id: activeSession,
           auth_context: activeAuthContext,
           conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
-          user_text: trimmedQuestion,
+          user_text: composedQuestion,
           ocr_confirmation: confirmationForRequest || undefined,
           attachment_classification_confirmation:
             attachmentClassificationConfirmation || undefined,
@@ -1140,6 +1154,7 @@ export default function FrontendAppShell({
       await streamAssistantMessage(conversationHistory, assistantMessage);
       setAnalysisResponse(workerResult);
       setQuestion("");
+      setConsultationIntake(createEmptyConsultationIntake());
       const canSaveGuestConversation = !effectiveAuthSessionId && Boolean(
         workerResult?.persistence?.job_id || workerResult?.session_id || workerResult?.message_id
       );
@@ -1294,6 +1309,7 @@ export default function FrontendAppShell({
     setQuestion("");
     setSubmittedQuestion("");
     setChatMessages([]);
+    setConsultationIntake(createEmptyConsultationIntake());
     setAnalysisResponse(null);
     setCurrentReport(null);
     setReportActionStatus("");
@@ -1558,7 +1574,9 @@ export default function FrontendAppShell({
               savePromptVisible={savePromptVisible}
               selectedUploadFile={selectedUploadFile}
               reportingPayload={reportingPayload}
+              consultationIntake={consultationIntake}
               setAttachmentPurpose={setAttachmentPurpose}
+              setConsultationIntake={setConsultationIntake}
               setQuestion={setQuestion}
               capabilityError={capabilityError}
               submittedQuestion={submittedQuestion}
@@ -2370,7 +2388,9 @@ function ChatScreenV2({
   savePromptVisible,
   selectedUploadFile,
   reportingPayload,
+  consultationIntake,
   setAttachmentPurpose,
+  setConsultationIntake,
   setQuestion,
   submittedQuestion,
   supervisorExecution,
@@ -2379,6 +2399,8 @@ function ChatScreenV2({
 }) {
   const attachmentInputRef = useRef(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const missingIntakeFields = listConsultationIntakeMissingFields(consultationIntake);
+  const hasStructuredIntake = hasConsultationIntakeData(consultationIntake);
   const visibleMessages = chatMessages.length
     ? chatMessages
     : submittedQuestion
@@ -2589,6 +2611,16 @@ function ChatScreenV2({
 
           <div className="chat-input">
             <div className="input-stack">
+              <ConsultationIntakePanel
+                hasStructuredIntake={hasStructuredIntake}
+                missingFields={missingIntakeFields}
+                registeredAttachments={registeredAttachments}
+                value={consultationIntake}
+                onChange={(field, nextValue) =>
+                  setConsultationIntake((current) => ({ ...current, [field]: nextValue }))
+                }
+                onReset={() => setConsultationIntake(createEmptyConsultationIntake())}
+              />
               <textarea
                 aria-label="상담 메시지 입력"
                 placeholder="사고 상황, 고지서 내용, 보험사 설명처럼 지금 기억나는 내용을 입력해 주세요."
@@ -2745,6 +2777,118 @@ function MissingFieldsPrompt({ supervisorState }) {
       </ul>
       <p>위 항목을 알고 계신 만큼만 이어서 입력해 주세요.</p>
     </div>
+  );
+}
+
+function ConsultationIntakePanel({
+  hasStructuredIntake,
+  missingFields,
+  onChange,
+  onReset,
+  registeredAttachments,
+  value,
+}) {
+  const selectedType = value?.consultationType || "";
+  const isFineNotice = selectedType === "fine_notice";
+  return (
+    <section className="consultation-intake-card" aria-label="구조화 입력 단계">
+      <div className="consultation-intake-card__head">
+        <div>
+          <span className="eyebrow">입력 단계</span>
+          <strong>사고 내용을 사실과 주장으로 나눠 적을 수 있습니다.</strong>
+          <p>여기 적은 내용은 전송 시 현재 메시지와 함께 상담 입력으로 정리됩니다.</p>
+        </div>
+        {hasStructuredIntake && (
+          <button className="button" type="button" onClick={onReset}>
+            입력 초기화
+          </button>
+        )}
+      </div>
+
+      <div className="consultation-intake-grid">
+        <label className="consultation-intake-field consultation-intake-field--wide">
+          <span>사건 유형</span>
+          <select
+            value={selectedType}
+            onChange={(event) => onChange("consultationType", event.target.value)}
+          >
+            {CONSULTATION_TYPE_OPTIONS.map((option) => (
+              <option key={option.value || "empty"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {CONSULTATION_FACT_FIELDS.map((field) => (
+          <label className="consultation-intake-field" key={field.key}>
+            <span>{field.label}</span>
+            <input
+              type="text"
+              value={value?.[field.key] || ""}
+              onChange={(event) => onChange(field.key, event.target.value)}
+              placeholder={field.question}
+            />
+          </label>
+        ))}
+
+        <label className="consultation-intake-field consultation-intake-field--wide">
+          <span>확인된 사실</span>
+          <textarea
+            rows={3}
+            value={value?.confirmedFacts || ""}
+            onChange={(event) => onChange("confirmedFacts", event.target.value)}
+            placeholder="사고 시각, 장소, 첨부자료로 확인된 내용처럼 검증 가능한 사실을 적어 주세요."
+          />
+        </label>
+
+        <label className="consultation-intake-field consultation-intake-field--wide">
+          <span>사용자 주장·상대방 주장</span>
+          <textarea
+            rows={3}
+            value={value?.userClaims || ""}
+            onChange={(event) => onChange("userClaims", event.target.value)}
+            placeholder="상대가 주장하는 내용이나 아직 확인되지 않은 진술을 따로 적어 주세요."
+          />
+        </label>
+
+        <label className="consultation-intake-field consultation-intake-field--wide">
+          <span>추가 확인이 필요한 점</span>
+          <textarea
+            rows={2}
+            value={value?.missingDetails || ""}
+            onChange={(event) => onChange("missingDetails", event.target.value)}
+            placeholder="목격자 연락처, 블랙박스 확보 여부처럼 아직 모르는 항목을 적어 주세요."
+          />
+        </label>
+      </div>
+
+      <div className="consultation-intake-footer">
+        {registeredAttachments.length > 0 && (
+          <span className="consultation-intake-badge">첨부 자료 {registeredAttachments.length}개 연결됨</span>
+        )}
+        {isFineNotice ? (
+          <p className="consultation-intake-help">
+            과태료·범칙금 상담은 고지서 OCR 확인 카드와 자유 입력을 함께 사용하면 됩니다.
+          </p>
+        ) : missingFields.length > 0 ? (
+          <div className="consultation-intake-missing" role="status">
+            <strong>아직 비어 있는 핵심 사실</strong>
+            <div className="consultation-intake-chip-list">
+              {missingFields.map((field) => (
+                <span className="consultation-intake-chip" key={field.key}>
+                  {field.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="consultation-intake-help">
+            핵심 사실 4개가 채워졌습니다. 자유 입력에는 추가 상황이나 질문만 적어도 됩니다.
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
