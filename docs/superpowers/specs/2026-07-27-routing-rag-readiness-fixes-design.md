@@ -9,6 +9,9 @@
 - `law_ground_search` LLM fallback은 구현체가 존재하지만 `app/services/agent_node_service.py`의 `_run_law_ground_search_adapter()`가 추출기를 주입하지 않아 런타임에서 실행되지 않는다.
 - pgvector 검색은 `score`를 계산하지만 최소 유사도 기준이 없어, 관련성이 낮은 top-k 결과도 그대로 근거처럼 노출될 수 있다.
 - `app/web/FrontendAppShell.jsx`의 `startNewConversation()`은 새 상담 시작 시 `sessionId`를 초기화하지 않아 이전 follow-up routing intent가 다음 질문에 재사용될 수 있다.
+- `app/web/authSession.js`는 `auth_session_id`·`user_id`가 저장돼도 읽는 시점에 제거하고 `readStoredAuthToken()`이 항상 빈 문자열을 반환해, 로그인 후 새로고침·리포트 진입·동일 상담 재개 시 “로그인했는데 다시 로그인 필요” 상태를 만든다.
+- `app/web/apiClient.js`는 서버 오류 envelope의 `status`·`code`·`required_action`을 `Error` 객체에 보존하지 않아, 프런트가 `auth_required`와 `guest_session_invalid`를 구분하지 못하고 모두 “응답을 불러오지 못해 접수 상태만 표시합니다.”로 뭉개고 있다.
+- 프런트의 guest bootstrap은 `/api/auth/guest-session/`을 1회만 호출하지만, 백엔드 소유권 E2E는 “guest 발급 -> credential 포함 재호출로 `session_id` 바인딩” 2단계를 전제로 검증하고 있다. 이 불일치가 로그인 후 같은 상담·리포트 흐름을 불안정하게 만든다.
 - `app/services/supervisor_routing_service.py`와 `app/config/supervisor_routing_policy.v1.json`의 키워드 매칭은 단순 부분 문자열 OR 규칙이라 `"벌금 걱정"` 같은 표현이 사고 상담 문맥에서도 `fine_notice_procedure`로 오분류될 수 있다.
 - `appeal_decision_flow`는 “어느 plan에도 연결되지 않는다”는 과거 메모와 달리, 현재 코드는 `fine_notice_analysis`에서 OCR 확인이 완료되면 `law_ground_search`, `appeal_decision_flow`를 동적으로 삽입한다. 따라서 이 항목은 순수 런타임 결함이 아니라 정책·문서·테스트 정합화 문제로 다뤄야 한다.
 - 마스터 체크리스트에는 이미 구현이 일부 반영된 `[~]` 항목과, 아직 코드 레벨 작업이 시작되지 않은 `[ ]` 항목이 혼재해 있다. 이 둘을 사람 게이트 여부 기준으로 재분류해 실행 순서를 만든다.
@@ -33,6 +36,7 @@
 
 1. 실제 미해결 런타임 결함 4개를 우선 수정한다.
 2. `appeal_decision_flow`는 현재 런타임 동작을 기준으로 정책, 테스트, 체크리스트 설명을 정합화한다.
+3. 인증·게스트 세션 경계는 새 설계를 도입하기보다, 이미 백엔드가 기대하던 세션 바인딩·오류 계약에 프런트 구현을 다시 맞춘다.
 
 그 다음 레이어로, 사람 게이트를 제외한 체크리스트 미완료 항목을 우선순위 트랙으로 순차 구현한다. 기존 구현 또는 기존 설계와 충돌하지 않는 한 사용자 확인 없이 진행하고, 충돌하는 경우에만 확인을 받는다.
 
@@ -45,6 +49,7 @@
 - 새 상담 시작 시 `sessionId` 초기화
 - `"벌금 걱정"` 라우팅 오분류 방지
 - `appeal_decision_flow`의 현재 동적 연결 상태를 테스트와 체크리스트에 정합화
+- app JWT 영속화·guest 세션 재바인딩·인증 오류 공개 메시지 복구
 
 ### Track 2. 장기 대화 맥락과 사건 메모리
 
@@ -85,6 +90,15 @@
 - `fine_notice_procedure`의 `"벌금 걱정"` 단일 문자열은 AND 그룹으로 바꿔 사고 상담 문맥 오분류를 줄인다.
 
 이 변경은 기존 attachment 우선 규칙과 기본 라우팅 순서를 바꾸지 않는다.
+
+### A-2. 인증·게스트 세션 경계
+
+- `authSession.js`는 guest 전용 저장소가 아니라 “guest/session/auth token 최소 복구 저장소”로 취급한다. 저장 필드는 `guest_id`, `guest_credential`, `session_id`, `auth_session_id`, `user_id`, `access_token`으로 제한하고, Google profile은 별도 key에 둔다.
+- guest bootstrap은 “1차 guest 발급 -> 2차 credential 포함 재호출로 `session_id` 바인딩” 순서로 맞춘다. 이는 백엔드 E2E와 동일한 계약이며, 새 권한 모델을 추가하지 않는다.
+- `apiClient.js`는 서버 envelope의 `status`, `code`, `reason`, `required_action`, `payload`를 프런트 예외에 보존해 UI가 rate limit, login required, guest refresh required를 구분할 수 있게 한다.
+- `FrontendAppShell.jsx`의 제출 오류 처리는 `login`과 `refresh_guest_session`을 분기해, guest/session을 보존할 수 있는 경우는 보존하고 만료된 guest 세션은 명시적으로 재시작하게 안내한다.
+
+이 변경은 백엔드 auth contract(`auth_error.v1`, guest credential header, `guest_session_invalid`)를 바꾸지 않고, 프런트 구현이 그 계약을 누락 없이 소비하도록 복구하는 범위다.
 
 ### B. law_ground_search 런타임 보강
 

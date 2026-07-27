@@ -204,6 +204,7 @@
 - [x] PR 단위 CI 체계
 - [x] 대표 사용자 흐름 E2E: 자료 입력, 사실/주장 분리, OCR, Supervisor 계획, 법령·판례 검색, 한계 표시, 리포트 생성·다운로드 — #279
 - [x] 실제 데스크톱 브라우저 상담 스모크와 런타임 회귀 보강 — PR #300, `dev` 병합 커밋 `3fd0fcdddbc2b8e30e7993dbcfe6376535bec68a`
+- [~] 게스트 세션·Google 로그인·동일 상담 재진입 런타임 정합성: 프런트가 app JWT·`auth_session_id`·`session_id`를 localStorage에 복구 가능하게 보존하고, guest bootstrap을 백엔드가 기대하는 2단계 세션 바인딩으로 재정렬했으며, `auth_required`/`guest_session_invalid`/rate limit을 공개 메시지와 재시작 액션으로 분기하도록 오류 메타 전파를 보강했다. 프런트 계약 회귀(`17 passed`)는 고정했고, 실제 운영 OAuth·브라우저·리포트 산출물 smoke는 사람 게이트로 남음
 - [ ] OCR·검색·생성형·영상 분석 품질 지표와 결과 공개 방식
 - [~] #294 / PR #295: `job_id`·`execution_id` 기반 Agent 실행 metadata와 handoff를 보존하고 원문·OCR 전문·경로·비밀값을 raw execution metadata에서 제거. #299 두 번째 단계에서 `show_analysis_job_provenance`와 운영 runbook, invocation·retrieval 연결 및 개인정보 비노출 회귀를 구현; 실제 운영 공급자 장애 trace 실증은 남음
 - [~] 법령·판례 적재와 Agent 호출의 대표 성공·부분 실패·실패 시나리오에서 run/trace 로그가 실제 생성되고, 운영자가 관련 산출물·실패 단계·다음 조치를 추적할 수 있는 회귀 테스트와 조회 절차 제공 — Worker 성공 통합과 partial operator 조회 회귀, 안전한 오류 코드 조회는 구현. 실제 운영 법령·판례·외부 공급자 실패 증적은 남음

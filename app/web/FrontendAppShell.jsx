@@ -6,6 +6,7 @@ import {
   buildGoogleLoginPayload,
   clearStoredAuthSession,
   persistAuthSession,
+  readStoredGoogleProfile,
   readStoredAuthSession,
   readStoredAuthToken,
   scheduleAppJwtRefresh,
@@ -420,22 +421,34 @@ export default function FrontendAppShell({
             throw new Error("Auth refresh response is incomplete.");
           }
           const nextGuestId = refreshResult?.subject?.guest_id || refreshContext.guestId || "";
+          const nextUserId = refreshResult?.subject?.user_id || readStoredAuthSession().user_id || "";
           setActiveAuthToken(nextToken);
           setAuthSessionId(nextAuthSessionId);
           setGuestId(nextGuestId);
           persistAuthSession({
+            accessToken: nextToken,
+            authSessionId: nextAuthSessionId,
             guestId: nextGuestId,
             guestCredential: refreshContext.guestCredential,
+            googleProfile: readStoredGoogleProfile(),
+            sessionId: refreshContext.sessionId,
+            userId: nextUserId,
           });
         } catch (_error) {
           if (!refreshEffectActive) {
             return;
           }
           clearStoredAuthSession();
+          persistAuthSession({
+            guestId: refreshContext.guestId || "",
+            guestCredential: refreshContext.guestCredential || "",
+            sessionId: refreshContext.sessionId || "",
+          });
           setActiveAuthToken("");
           setAuthSessionId("");
-          setGuestId("");
-          setGuestCredential("");
+          setGuestId(refreshContext.guestId || "");
+          setGuestCredential(refreshContext.guestCredential || "");
+          setSessionId(refreshContext.sessionId || "");
           setMypageSummary(null);
           setHistoryEvents(null);
           setCurrentReport(null);
@@ -455,25 +468,36 @@ export default function FrontendAppShell({
   async function bootstrapGuestSession(nextRoute = "chatbot") {
     setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 준비하고 있습니다.");
     try {
-      const guest = await api.createGuestSession(
+      const initialGuest = await api.createGuestSession(
         {
           guest_id: guestId || undefined,
           session_id: sessionId || undefined,
         },
         { guestId, guestCredential }
       );
-      const nextGuestId = guest?.guest?.guest_id || guestId;
-      const nextGuestCredential = guest?.guest_credential || "";
-      const nextSessionId = guest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;
-      if (!nextGuestId || !nextGuestCredential) {
+      const initialGuestId = initialGuest?.guest?.guest_id || guestId;
+      const initialGuestCredential = initialGuest?.guest_credential || "";
+      const ensuredSessionId = initialGuest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;
+      if (!initialGuestId || !initialGuestCredential) {
         throw new Error("Guest session response is incomplete.");
       }
+      const reboundGuest = await api.createGuestSession(
+        {
+          guest_id: initialGuestId,
+          session_id: ensuredSessionId,
+        },
+        { guestId: initialGuestId, guestCredential: initialGuestCredential }
+      );
+      const nextGuestId = reboundGuest?.guest?.guest_id || initialGuestId;
+      const nextGuestCredential = reboundGuest?.guest_credential || initialGuestCredential;
+      const nextSessionId = reboundGuest?.session_binding?.session_id || ensuredSessionId;
       setGuestId(nextGuestId);
       setGuestCredential(nextGuestCredential);
       setSessionId(nextSessionId);
       persistAuthSession({
         guestId: nextGuestId,
         guestCredential: nextGuestCredential,
+        sessionId: nextSessionId,
       });
       setStatusMessage("임시 상담을 시작했습니다. 상세 분석이나 이력 저장이 필요해질 때 Google 로그인을 안내합니다.");
       setActiveRoute(nextRoute);
@@ -1175,11 +1199,37 @@ export default function FrontendAppShell({
         message: _error?.message || "unknown error",
       });
       const isRateLimitExceeded = _error?.status === 429 || _error?.code === "rate_limit_exceeded";
-      const errorMessage = isRateLimitExceeded
-        ? effectiveAuthSessionId
+      const requiresLogin =
+        _error?.requiredAction === "login" ||
+        ["auth_required", "token_invalid", "token_expired", "login_required"].includes(_error?.code);
+      const requiresGuestSessionRefresh =
+        _error?.requiredAction === "refresh_guest_session" || _error?.code === "guest_session_invalid";
+      let errorMessage = "응답을 불러오지 못해 접수 상태만 표시합니다.";
+      if (isRateLimitExceeded) {
+        errorMessage = effectiveAuthSessionId
           ? "오늘의 상담 가능 횟수를 모두 사용했습니다. 잠시 후 다시 시도해 주세요."
-          : "비회원 상담 가능 횟수를 모두 사용했습니다. 계속 상담하려면 Google 로그인해 주세요."
-        : "응답을 불러오지 못해 접수 상태만 표시합니다.";
+          : "비회원 상담 가능 횟수를 모두 사용했습니다. 계속 상담하려면 Google 로그인해 주세요.";
+      } else if (requiresGuestSessionRefresh) {
+        clearStoredAuthSession();
+        setActiveAuthToken("");
+        setAuthSessionId("");
+        setGuestId("");
+        setGuestCredential("");
+        setSessionId("");
+        errorMessage = _error?.publicMessage || "임시 상담 세션이 만료되었습니다. 다시 시작해 주세요.";
+      } else if (requiresLogin) {
+        clearStoredAuthSession();
+        persistAuthSession({
+          guestId: guestId || "",
+          guestCredential: guestCredential || "",
+          sessionId: activeSession || sessionId || "",
+        });
+        setActiveAuthToken("");
+        setAuthSessionId("");
+        errorMessage = effectiveAuthSessionId
+          ? _error?.publicMessage || "로그인이 만료되었습니다. 다시 로그인한 뒤 같은 상담을 이어가 주세요."
+          : _error?.publicMessage || "로그인이 필요합니다. Google 로그인 후 같은 상담을 이어가 주세요.";
+      }
       setChatMessages([
         ...conversationHistory,
         {
