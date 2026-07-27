@@ -209,8 +209,24 @@ def merge_final_response(
     if not accepted and not questions and unavailable_guidance:
         questions = _dict_list(unavailable_guidance.get("pending_questions"))
         limitations.extend(_string_list(unavailable_guidance.get("limitations")))
-    deadline_guidance = None if evidence_only else _deadline_guidance(accepted, structured_results)
-    cards = [] if evidence_only else _result_cards(accepted, upstream_results)
+    deadline_guidance = None
+    if evidence_only:
+        cards = []
+    else:
+        try:
+            cards = _result_cards(accepted, upstream_results)
+        except Exception:
+            cards = []
+            limitations.append(
+                "Verified result cards are temporarily unavailable; review persisted agent results."
+            )
+        try:
+            deadline_guidance = _deadline_guidance(accepted, structured_results)
+        except Exception:
+            deadline_guidance = None
+            limitations.append(
+                "Verified deadline guidance is temporarily unavailable; review persisted agent results."
+            )
     if deadline_guidance and deadline_guidance["status"] != "normal":
         cards.insert(
             0,

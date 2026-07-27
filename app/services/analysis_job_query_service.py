@@ -515,11 +515,16 @@ def _project_public_law_ground_structured_result(value: Any) -> dict[str, Any]:
     retrieval = _project_public_retrieval(source.get("retrieval"))
     if retrieval:
         structured["retrieval"] = retrieval
-    quality_source = source.get("public_quality_summary")
-    quality_source = dict(quality_source) if isinstance(quality_source, dict) else {}
-    quality_source["_fallback_retrieval"] = retrieval
-    quality_source["_fallback_freshness"] = structured.get("freshness")
-    structured["public_quality_summary"] = _project_public_quality_summary(quality_source)
+    quality_source_raw = source.get("public_quality_summary")
+    has_quality_source = isinstance(quality_source_raw, dict)
+    freshness = structured.get("freshness")
+    if has_quality_source or retrieval or freshness:
+        quality_source = dict(quality_source_raw) if has_quality_source else {}
+        quality_source["_fallback_retrieval"] = retrieval
+        quality_source["_fallback_freshness"] = freshness
+        summary = _project_public_quality_summary(quality_source)
+        if isinstance(summary, dict):
+            structured["public_quality_summary"] = summary
     return structured
 
 

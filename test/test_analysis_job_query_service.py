@@ -316,10 +316,6 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
         "conversation_summary": "신청 사유를 확인했습니다.",
         "agent_input_packages": [{"node_code": "objection_report_generation"}],
     }
-    assert "public_quality_summary" in outcome.payload["supervisor_execution"]["node_results"][0]["structured_result"]
-    outcome.payload["supervisor_execution"]["node_results"][0]["structured_result"].pop(
-        "public_quality_summary"
-    )
     assert outcome.payload["supervisor_execution"] == {
         "contract_version": "supervisor_execution.v1",
         "execution_mode": "async_worker",
@@ -690,6 +686,33 @@ def test_law_public_projection_preserves_scalar_source_references() -> None:
 
     node = outcome.payload["supervisor_execution"]["node_results"][0]
     assert node["structured_result"]["matched_laws"] == ["law:server"]
+
+
+def test_law_public_projection_does_not_invent_quality_summary_without_public_signals() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_scalar_law_refs_without_summary",
+        load_job=lambda _job_id: {
+            "job_id": "job_scalar_law_refs_without_summary",
+            "status": "success",
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                        "structured_result": {
+                            "matched_laws": ["law:server"],
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda payload: payload,
+    )
+
+    node = outcome.payload["supervisor_execution"]["node_results"][0]
+    assert node["structured_result"] == {"matched_laws": ["law:server"]}
 
 
 def test_law_public_projection_builds_summary_when_missing() -> None:
