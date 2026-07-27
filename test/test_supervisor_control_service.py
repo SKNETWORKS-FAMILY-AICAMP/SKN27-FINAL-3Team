@@ -331,3 +331,44 @@ def test_final_response_merge_falls_back_when_deadline_guidance_helper_raises() 
         "Verified deadline guidance is temporarily unavailable; review persisted agent results."
         in merged["limitations"]
     )
+
+
+def test_final_response_merge_falls_back_when_post_processing_raises() -> None:
+    with patch(
+        "app.services.supervisor_control_service._dedupe_evidence",
+        side_effect=RuntimeError("boom"),
+    ):
+        merged = merge_final_response(
+            {
+                "law_ground_search": {
+                    "status": "success",
+                    "summary": "Verified law search completed.",
+                    "structured_result": {
+                        "matched_laws": [{"law_name": "Road Traffic Act"}],
+                    },
+                    "evidence": [{"source_reference": "law:verified"}],
+                    "limitations": [],
+                },
+                "agent_result_validation": {
+                    "structured_result": {
+                        "accepted_results": ["law_ground_search"],
+                    },
+                },
+            }
+        )
+
+    assert merged["assistant_message"]["answer"] == "Verified law search completed."
+    assert merged["assistant_message"]["summary"] == "Verified law search completed."
+    assert merged["structured_results"] == {
+        "law_ground_search": {
+            "matched_laws": [{"law_name": "Road Traffic Act"}],
+        }
+    }
+    assert merged["evidence"] == [{"source_reference": "law:verified"}]
+    assert merged["cards"] == []
+    assert merged["deadline_guidance"] is None
+    assert merged["next_actions"] == ["review_verified_results"]
+    assert (
+        "Verified response aggregation is temporarily unavailable; review persisted agent results."
+        in merged["limitations"]
+    )

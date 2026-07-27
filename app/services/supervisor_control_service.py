@@ -265,17 +265,23 @@ def merge_final_response(
         if unavailable_guidance
         else ["answer_pending_question"] if questions else ["review_verified_results"]
     )
-    return {
-        "assistant_message": {"answer": answer, "summary": answer},
-        "structured_results": structured_results,
-        "evidence": _dedupe_evidence(evidence),
-        "limitations": _dedupe_strings(limitations),
-        "deadline_guidance": deadline_guidance,
-        "pending_questions": questions,
-        "cards": cards,
-        "report_links": [],
-        "next_actions": next_actions,
-    }
+    return _build_final_response_payload(
+        answer=answer,
+        structured_results=structured_results,
+        evidence=evidence,
+        limitations=limitations,
+        deadline_guidance=deadline_guidance,
+        pending_questions=questions,
+        cards=cards,
+        next_actions=next_actions,
+        fallback_answer=(
+            EVIDENCE_ONLY_NOTICE
+            if evidence_only
+            else "\n\n".join(_dedupe_strings(summaries))
+            if summaries
+            else "Verified response aggregation is temporarily unavailable; review persisted agent results."
+        ),
+    )
 
 
 def _verified_result_unavailable_guidance(
@@ -554,6 +560,51 @@ def _deadline_guidance(
         structured_results.get("appeal_decision_flow") or {},
         source_node_code="appeal_decision_flow",
     )
+
+
+def _build_final_response_payload(
+    *,
+    answer: str,
+    structured_results: dict[str, dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    limitations: list[str],
+    deadline_guidance: dict[str, Any] | None,
+    pending_questions: list[dict[str, Any]],
+    cards: list[dict[str, Any]],
+    next_actions: list[str],
+    fallback_answer: str,
+) -> dict[str, Any]:
+    try:
+        return {
+            "assistant_message": {"answer": answer, "summary": answer},
+            "structured_results": structured_results,
+            "evidence": _dedupe_evidence(evidence),
+            "limitations": _dedupe_strings(limitations),
+            "deadline_guidance": deadline_guidance,
+            "pending_questions": pending_questions,
+            "cards": cards,
+            "report_links": [],
+            "next_actions": next_actions,
+        }
+    except Exception:
+        fallback_limitations = list(limitations)
+        fallback_limitations.append(
+            "Verified response aggregation is temporarily unavailable; review persisted agent results."
+        )
+        return {
+            "assistant_message": {
+                "answer": fallback_answer,
+                "summary": fallback_answer,
+            },
+            "structured_results": structured_results,
+            "evidence": _dict_list(evidence),
+            "limitations": _dedupe_strings(fallback_limitations),
+            "deadline_guidance": None,
+            "pending_questions": pending_questions,
+            "cards": [],
+            "report_links": [],
+            "next_actions": next_actions or ["review_verified_results"],
+        }
 
 
 def _source_by_field(value: Any) -> dict[str, dict[str, Any]]:
