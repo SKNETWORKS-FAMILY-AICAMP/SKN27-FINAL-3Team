@@ -195,6 +195,7 @@ REPORT_SENSITIVE_FIELD_FRAGMENTS = (
     "usertext",
 )
 from app.services.analysis_job_query_service import (
+    project_public_law_quality_summary,
     project_public_quality_summary,
     safe_public_confidence_label,
     safe_public_limitations,
@@ -3380,14 +3381,21 @@ def _worker_report_quality(
         for result in agent_results
         for limitation in _list_or_empty(result.limitations)
     )
+    partial_report = report_status != ReportStatus.READY.value
+    public_quality_summary = _report_public_quality_summary(
+        partial_report=partial_report,
+        limitations=limitations,
+        quality_source=_law_result_public_quality_summary(agent_results),
+    )
     return {
         "contract_version": "report_quality.v2",
         "analysis_job_status": final_status,
         "agent_status_counts": _agent_status_counts(agent_results),
-        "partial_report": report_status != ReportStatus.READY.value,
-        "review_required": True,
+        "partial_report": partial_report,
+        "review_required": partial_report or bool(limitations),
         "limitation_count": len(limitations),
         "limitations": limitations[:12],
+        "public_quality_summary": public_quality_summary,
     }
 
 
@@ -5135,18 +5143,21 @@ def _analysis_job_supervisor_execution(
 
 def _analysis_job_report_summary(report: Report) -> dict[str, Any]:
     metadata = _dict_or_empty(report.metadata)
-    return {
+    summary = {
         "report_id": report.report_id,
         "report_type": report.report_type,
         "status": report.status,
         "title": report.title,
         "content_summary": report.content_summary,
-        "storage_uri": report.storage_uri,
-        "object_storage": _dict_or_empty(metadata.get("object_storage")),
-        "report_quality": _dict_or_empty(metadata.get("report_quality")),
         "created_at": report.created_at.isoformat(),
         "updated_at": report.updated_at.isoformat(),
     }
+    summary["report_quality"] = {
+        "public_quality_summary": project_public_quality_summary(
+            _dict_or_empty(metadata.get("report_quality")).get("public_quality_summary")
+        )
+    }
+    return summary
 
 
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
@@ -9875,6 +9886,11 @@ def _report_quality_snapshot(
         AnalysisJobStatus.FAILED.value,
     }
     deduped_limitations = _dedupe_safe_report_text_values(limitations)
+    public_quality_summary = _report_public_quality_summary(
+        partial_report=partial_report,
+        limitations=deduped_limitations,
+        quality_source=_law_result_public_quality_summary(agent_results),
+    )
     return {
         "contract_version": "report_quality.v1",
         "analysis_job_status": analysis_job_status or None,
@@ -9882,7 +9898,37 @@ def _report_quality_snapshot(
         "partial_report": partial_report,
         "limitation_count": len(deduped_limitations),
         "limitations": deduped_limitations[:12],
+        "public_quality_summary": public_quality_summary,
     }
+
+
+def _law_result_public_quality_summary(
+    agent_results: list[AgentResult],
+) -> dict[str, Any] | None:
+    for result in agent_results:
+        if result.node_code != "law_ground_search":
+            continue
+        summary = project_public_law_quality_summary(result.structured_result or {})
+        if summary:
+            return summary
+    return None
+
+
+def _report_public_quality_summary(
+    *,
+    partial_report: bool,
+    limitations: list[str],
+    quality_source: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    source = dict(quality_source or {})
+    source["status"] = "partial" if partial_report else source.get("status") or "ready"
+    source["partial_result"] = partial_report or bool(source.get("partial_result"))
+    source["review_required"] = (
+        partial_report or bool(limitations) or bool(source.get("review_required"))
+    )
+    if limitations:
+        source["limitations"] = limitations
+    return project_public_quality_summary(source)
 
 
 def _report_object_body_for_write(

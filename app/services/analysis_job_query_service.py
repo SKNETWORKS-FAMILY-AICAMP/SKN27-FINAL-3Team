@@ -83,6 +83,40 @@ _PROGRESS_STATE_FIELDS = (
     "retry_after_seconds",
     "next_run_at",
 )
+_DETAIL_SCALAR_FIELDS = (
+    "contract_version",
+    "job_id",
+    "session_id",
+    "message_id",
+    "status",
+    "active_node",
+    "progress_message",
+    "status_counts",
+    "assistant_message",
+    "assistant_message_payload",
+    "cards",
+    "pending_questions",
+    "conversation_messages",
+    "agent_result_count",
+    "agent_status_counts",
+    "report_count",
+    "latest_report_id",
+    "latest_report_status",
+    "last_event_at",
+    "created_at",
+    "updated_at",
+)
+_PUBLIC_ATTACHMENT_FIELDS = ("attachment_id", "purpose", "filename", "scan_status")
+_PUBLIC_REPORT_LINK_FIELDS = ("report_id", "action")
+_PUBLIC_REPORT_SUMMARY_FIELDS = (
+    "report_id",
+    "report_type",
+    "status",
+    "title",
+    "content_summary",
+    "created_at",
+    "updated_at",
+)
 _PUBLIC_LAW_ITEM_FIELDS = (
     "law_name",
     "source_name",
@@ -130,9 +164,10 @@ def load_analysis_job_detail(
     if stored_job is None:
         return AnalysisJobQueryOutcome(kind="not_found", payload={})
 
-    job = deepcopy(stored_job)
-    job["progress_cache"] = deepcopy(load_progress(job_id))
-    return AnalysisJobQueryOutcome(kind="detail", payload=job)
+    return AnalysisJobQueryOutcome(
+        kind="detail",
+        payload=_project_analysis_job_detail(stored_job, load_progress(job_id)),
+    )
 
 
 def load_analysis_result(
@@ -193,8 +228,8 @@ def load_analysis_result(
         {
             "cards": cards,
             "pending_questions": deepcopy(job.get("pending_questions") or []),
-            "report_links": deepcopy(job.get("report_links") or []),
-            "attachments": deepcopy(job.get("attachments") or []),
+            "report_links": _project_report_links(job.get("report_links")),
+            "attachments": _project_attachments(job.get("attachments")),
             "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
             "supervisor_state": _project_supervisor_state(job.get("supervisor_state")),
             "user_claims": _project_user_claims(job.get("supervisor_state")),
@@ -212,6 +247,70 @@ def _project_mapping(value: Any, fields: tuple[str, ...]) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     return {field: deepcopy(value[field]) for field in fields if field in value}
+
+
+def _project_analysis_job_detail(
+    job: dict[str, Any],
+    progress_cache: Any,
+) -> dict[str, Any]:
+    """Expose only the persisted fields the public restore flow consumes."""
+
+    projected = _project_mapping(job, _DETAIL_SCALAR_FIELDS)
+    projected.update(
+        {
+            "progress_state": _project_progress_state(job.get("progress_state")),
+            "progress_cache": _project_progress_state(progress_cache),
+            "work_item": _project_work_item(job.get("work_item")),
+            "attachments": _project_attachments(job.get("attachments")),
+            "report_links": _project_report_links(job.get("report_links")),
+            "limitations": _safe_public_limitations(job.get("limitations")),
+            "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
+            "supervisor_state": _project_supervisor_state(job.get("supervisor_state")),
+            "supervisor_execution": _project_supervisor_execution(
+                job.get("supervisor_execution")
+            ),
+            "reports": _project_report_summaries(job.get("reports")),
+        }
+    )
+    return projected
+
+
+def _project_attachments(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [
+        _project_public_scalar_mapping(item, _PUBLIC_ATTACHMENT_FIELDS)
+        for item in value
+        if isinstance(item, dict)
+    ]
+
+
+def _project_report_links(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [
+        projected
+        for item in value
+        if isinstance(item, dict)
+        and (projected := _project_public_scalar_mapping(item, _PUBLIC_REPORT_LINK_FIELDS))
+    ]
+
+
+def _project_report_summaries(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    reports = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        report = _project_public_scalar_mapping(item, _PUBLIC_REPORT_SUMMARY_FIELDS)
+        report["report_quality"] = {
+            "public_quality_summary": _project_public_quality_summary(
+                _dict_or_empty(item.get("report_quality")).get("public_quality_summary")
+            )
+        }
+        reports.append(report)
+    return reports
 
 
 def _project_reporting_payload(value: Any) -> dict[str, Any] | None:
@@ -288,6 +387,9 @@ def _project_supervisor_execution(value: Any) -> dict[str, Any] | None:
             node["structured_result"] = _project_public_law_ground_structured_result(
                 item.get("structured_result")
             )
+        else:
+            node.pop("structured_result", None)
+            node.pop("limitations", None)
         projected["node_results"].append(node)
     return projected
 
@@ -343,6 +445,14 @@ def project_public_quality_summary(value: Any) -> dict[str, Any] | None:
     """Expose the canonical public quality contract to report DTO projections."""
 
     return _project_public_quality_summary(value)
+
+
+def project_public_law_quality_summary(value: Any) -> dict[str, Any] | None:
+    """Build the public quality summary from a raw law-ground structured result."""
+
+    structured = _project_public_law_ground_structured_result(value)
+    summary = structured.get("public_quality_summary")
+    return summary if isinstance(summary, dict) else None
 
 
 def _project_public_law_ground_structured_result(value: Any) -> dict[str, Any]:

@@ -3329,7 +3329,7 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
     reportQualitySummary?.retrieval?.used_fallback ||
     (reportQualitySummary?.limitation_count || 0) > 0 ||
     reportQualitySummary?.freshness?.limitation;
-  const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
+  const reportLimitations = Array.isArray(reportQualitySummary?.limitations) ? reportQualitySummary.limitations.slice(0, 3) : [];
   const reportQualityTitle = reportQualitySummary?.partial_result ? "일부 자료가 부족한 리포트" : "검토 준비가 완료된 리포트";
   const helperText = isAuthenticated
     ? reportActionStatus || activeReportingPayload?.appeal_gate?.reason || "상담 결과를 저장하거나 제출용 이의신청서 DOCX를 준비할 수 있습니다."

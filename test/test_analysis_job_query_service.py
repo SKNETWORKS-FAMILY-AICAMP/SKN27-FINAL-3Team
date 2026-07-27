@@ -33,7 +33,7 @@ def test_detail_adds_progress_without_mutating_repository_record() -> None:
 
     assert outcome.kind == "detail"
     assert outcome.payload["job_id"] == "job_1"
-    assert outcome.payload["progress_cache"] == {"state": "running", "progress": 40}
+    assert outcome.payload["progress_cache"] == {"state": "running"}
     assert stored == original
 
 
@@ -142,7 +142,7 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
         **composed,
         "cards": [{"title": "next step"}],
         "pending_questions": [{"question": "confirm facts"}],
-        "report_links": [{"url": "/reports/report_1"}],
+        "report_links": [],
         "attachments": [{"attachment_id": "attachment_1"}],
         "reporting_payload": {"report_id": "report_1"},
         "supervisor_state": {"stage": "finalize"},
@@ -332,6 +332,113 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
     ):
         assert field not in outcome.payload
     assert stored == original
+
+
+def test_detail_projects_only_public_restore_fields() -> None:
+    from app.services.analysis_job_query_service import load_analysis_job_detail
+
+    stored = {
+        "job_id": "job_public_detail",
+        "session_id": "ses_public_detail",
+        "message_id": "msg_public_detail",
+        "status": "partial",
+        "assistant_message": "A safe summary.",
+        "cards": [{"title": "Safe card"}],
+        "pending_questions": [{"field": "incident_date", "question": "When?"}],
+        "attachments": [{
+            "attachment_id": "att_public",
+            "filename": "notice.pdf",
+            "storage_uri": "s3://private-bucket/notice.pdf",
+        }],
+        "report_links": [{
+            "report_id": "rep_public",
+            "action": "detail",
+            "signed_url": "https://storage.example/report?sig=secret",
+        }],
+        "reporting_payload": {"report_id": "rep_public", "title": "Safe report"},
+        "supervisor_state": {"stage": "finalize", "trace_id": "trace-private"},
+        "supervisor_execution": {
+            "status": "success",
+            "node_results": [{
+                "node_code": "fine_notice_analysis",
+                "status": "success",
+                "structured_result": {"storage_uri": "s3://private-bucket/raw.json"},
+                "limitations": ["RuntimeError: raw exception"],
+            }],
+        },
+        "reports": [{
+            "report_id": "rep_public",
+            "status": "ready",
+            "title": "Safe report",
+            "content_summary": "Safe report summary",
+            "storage_uri": "s3://private-bucket/report.pdf",
+            "object_storage": {"bucket": "private-bucket", "key": "report.pdf"},
+            "report_quality": {
+                "trace_id": "trace-private",
+                "public_quality_summary": {
+                    "status": "partial",
+                    "limitations": ["Latest revision may not be reflected."],
+                },
+            },
+        }],
+        "report_count": 1,
+        "latest_report_id": "rep_public",
+        "created_at": "2026-07-27T10:00:00+09:00",
+        "updated_at": "2026-07-27T10:01:00+09:00",
+        "owner_id": "usr_private",
+        "metadata": {"debug_blob": "private"},
+        "agent_results": [{"raw_exception": "private"}],
+        "storage_uri": "s3://private-bucket/job.json",
+    }
+
+    outcome = load_analysis_job_detail(
+        "job_public_detail",
+        load_job=lambda _job_id: stored,
+        load_progress=lambda _job_id: {"state": "running", "debug_blob": "private"},
+    )
+
+    assert outcome.kind == "detail"
+    assert outcome.payload["job_id"] == "job_public_detail"
+    assert outcome.payload["attachments"] == [
+        {"attachment_id": "att_public", "filename": "notice.pdf"}
+    ]
+    assert outcome.payload["report_links"] == [
+        {"report_id": "rep_public", "action": "detail"}
+    ]
+    assert outcome.payload["supervisor_execution"]["node_results"] == [
+        {"node_code": "fine_notice_analysis", "status": "success"}
+    ]
+    assert outcome.payload["reports"] == [{
+        "report_id": "rep_public",
+        "status": "ready",
+        "title": "Safe report",
+        "content_summary": "Safe report summary",
+        "report_quality": {
+            "public_quality_summary": {
+                "status": "partial",
+                "partial_result": True,
+                "review_required": True,
+                "freshness": {},
+                "retrieval": {
+                    "backend_label": None,
+                    "result_count": None,
+                    "used_fallback": False,
+                },
+                "limitation_count": 1,
+                "limitations": ["Latest revision may not be reflected."],
+            }
+        },
+    }]
+    public_json = repr(outcome.payload)
+    for private_value in (
+        "private-bucket",
+        "sig=secret",
+        "trace-private",
+        "debug_blob",
+        "RuntimeError",
+        "usr_private",
+    ):
+        assert private_value not in public_json
 
 
 def test_completed_result_projects_only_safe_public_quality_summary() -> None:
@@ -591,6 +698,50 @@ def test_law_node_projection_sanitizes_node_level_limitations() -> None:
     assert projected["node_results"][0]["limitations"] == [
         "Latest revision may not be reflected."
     ]
+
+
+def test_completed_result_projects_safe_attachments_links_and_non_law_nodes() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_public_result",
+        load_job=lambda _job_id: {
+            "job_id": "job_public_result",
+            "status": "success",
+            "attachments": [{
+                "attachment_id": "att_public",
+                "purpose": "fine_notice",
+                "storage_uri": "s3://private-bucket/notice.pdf",
+            }],
+            "report_links": [{
+                "report_id": "rep_public",
+                "action": "detail",
+                "signed_url": "https://storage.example/report?sig=secret",
+            }],
+            "supervisor_execution": {
+                "node_results": [{
+                    "node_code": "fine_notice_analysis",
+                    "status": "success",
+                    "structured_result": {"storage_uri": "s3://private-bucket/raw.json"},
+                    "limitations": ["RuntimeError: raw exception"],
+                }],
+            },
+        },
+        compose_response=lambda _payload: {"contract_version": "analysis_result.v2"},
+    )
+
+    assert outcome.payload["attachments"] == [
+        {"attachment_id": "att_public", "purpose": "fine_notice"}
+    ]
+    assert outcome.payload["report_links"] == [
+        {"report_id": "rep_public", "action": "detail"}
+    ]
+    assert outcome.payload["supervisor_execution"]["node_results"] == [
+        {"node_code": "fine_notice_analysis", "status": "success"}
+    ]
+    assert "private-bucket" not in repr(outcome.payload)
+    assert "sig=secret" not in repr(outcome.payload)
+    assert "RuntimeError" not in repr(outcome.payload)
 
 
 def test_pending_result_projects_only_worker_polling_fields() -> None:

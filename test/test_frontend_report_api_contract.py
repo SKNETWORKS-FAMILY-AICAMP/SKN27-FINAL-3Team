@@ -55,3 +55,10 @@ def test_frontend_report_views_consume_public_quality_summary_only() -> None:
     assert "retrieval.backend" not in shell
     assert "retrieval.attempted_backends" not in shell
     assert "data_provenance" not in shell
+
+
+def test_frontend_report_limitations_use_the_public_quality_summary() -> None:
+    shell = (ROOT / "app" / "web" / "FrontendAppShell.jsx").read_text(encoding="utf-8")
+
+    assert "reportQualitySummary?.limitations" in shell
+    assert "reportQuality?.limitations" not in shell
