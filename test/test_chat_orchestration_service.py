@@ -480,6 +480,20 @@ def test_emergency_stop_quick_question_routes_to_fine_notice_procedure() -> None
     assert response["routing_intent"] == "fine_notice_procedure"
 
 
+def test_accident_context_with_burden_phrase_stays_in_accident_consultation() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_accident_burden_phrase",
+            "user_text": "고속도로에서 벌금 걱정이 되는데 사고가 나서 과실비율이 어떻게 되는지 궁금합니다.",
+            "attachments": [],
+        }
+    )
+
+    assert response["routing_intent"] == "accident_initial_consultation"
+    assert response["status"] == "needs_input"
+    assert response["analysis_plan"]["steps"] == []
+
+
 def test_rear_end_quick_question_routes_to_accident_consultation() -> None:
     response = submit_message(
         {
@@ -628,6 +642,30 @@ def test_accident_initial_message_uses_llm_only_for_fact_candidates(build_superv
     assert response["pending_questions"][0]["field"] == "material_evidence"
     assert response["consultation_state"]["promotion_gate"]["requirements"][0] == "fact_confirmation"
     assert response["analysis_plan"]["steps"] == []
+
+
+def test_accident_consultation_exposes_structured_case_memory() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_case_memory",
+            "message_id": "msg_case_memory",
+            "user_text": "신호등 있는 교차로에서 직진 중이었는데 상대 차량이 좌회전으로 들어왔습니다.",
+            "case_memory": {
+                "schema_version": "case_memory.v1",
+                "conversation_summary": "이전 대화에서 블랙박스 보유 여부를 확인했습니다.",
+                "evidence_refs": ["att_blackbox_1"],
+                "progress_steps": ["collect_missing_facts"],
+            },
+        }
+    )
+
+    case_memory = response["consultation_state"]["case_memory"]
+    assert case_memory["schema_version"] == "case_memory.v1"
+    assert case_memory["incident_types"] == ["accident_initial_consultation"]
+    assert case_memory["evidence_refs"] == ["att_blackbox_1"]
+    assert case_memory["progress_steps"][-1] in {"collect_missing_facts", "confirm_facts"}
+    assert "블랙박스 보유 여부" in case_memory["conversation_summary"]
+    assert "신호등 있는 교차로" in case_memory["conversation_summary"]
 
 
 def test_agent_response_is_composed_from_execution_results() -> None:

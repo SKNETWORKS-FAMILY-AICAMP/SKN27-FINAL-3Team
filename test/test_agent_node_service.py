@@ -1133,6 +1133,42 @@ def test_law_ground_agent_emits_canonical_provision_source_reference(monkeypatch
     assert output["evidence"][0]["source_reference"] == "law:road-traffic:5"
 
 
+def test_law_ground_search_adapter_passes_llm_extractor(monkeypatch):
+    from ai.agents import law_ground_search as law_ground_package
+
+    call = {}
+
+    def fake_run_law_ground_search(agent_input, adapter_context, llm_extractor=None):
+        call["agent_input"] = agent_input
+        call["adapter_context"] = adapter_context
+        call["llm_extractor"] = llm_extractor
+        return {
+            "status": "success",
+            "summary": "ok",
+            "structured_result": {"law_provisions": [], "matched_laws": []},
+            "evidence": [],
+            "next_actions": [],
+            "limitations": [],
+        }
+
+    monkeypatch.setattr(law_ground_package, "run_law_ground_search", fake_run_law_ground_search)
+
+    execution = execute_mock_node(
+        {
+            "node_code": "law_ground_search",
+            "session_id": "ses_law_adapter_extractor",
+            "message_id": "msg_law_adapter_extractor",
+            "user_text": "신호위반 관련 법 조항 알려줘",
+        }
+    )
+
+    assert execution["agent_output"]["status"] == "success"
+    assert call["agent_input"]["node_code"] == "law_ground_search"
+    assert call["adapter_context"]["execution_mode"] == "sync"
+    assert call["llm_extractor"] is not None
+    assert hasattr(call["llm_extractor"], "extract_legal_keywords")
+
+
 def test_law_ground_search_uses_pgvector_legal_rag(monkeypatch):
     from ai.agents.law_ground_search import search as law_search
     from app.services import legal_rag_service

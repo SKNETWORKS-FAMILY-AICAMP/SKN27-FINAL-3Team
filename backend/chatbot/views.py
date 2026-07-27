@@ -200,7 +200,15 @@ def guest_session(request: HttpRequest) -> JsonResponse:
         body,
         guest_credential=request.headers.get("X-Guest-Credential"),
     )
-    payload["persistence"] = persist_guest_session_identity(payload, raw_payload=body)
+    try:
+        payload["persistence"] = persist_guest_session_identity(payload, raw_payload=body)
+    except DatabaseError:
+        unavailable = build_auth_error(
+            "provider_unavailable",
+            reason="guest_session_store_unavailable",
+        )
+        unavailable["error"]["required_action"] = "retry"
+        return _json_response(request, unavailable, status=503)
     _record_history_safely(
         request,
         event_type="guest_session_created",

@@ -41,6 +41,8 @@ def merge_chat_followup_payload(
         client_conflicts=merged.get("fact_conflicts"),
         server_fact_fields=set(server_facts),
     )
+    if isinstance(state.get("case_memory"), dict) and not isinstance(merged.get("case_memory"), dict):
+        merged["case_memory"] = deepcopy(state["case_memory"])
     merged["conversation_history"] = _history_with_current_user_turn(state, merged)
     return merged
 
@@ -53,6 +55,10 @@ def build_chat_followup_snapshot(
 
     consultation_state = _dict(chat_response.get("consultation_state"))
     fact_state = _dict(consultation_state.get("fact_state"))
+    case_memory = _dict(
+        consultation_state.get("case_memory")
+        or _dict(_dict(consultation_state.get("v2")).get("case_memory"))
+    )
     history = _history(payload.get("conversation_history"))
     history = _append_user_turn(history, payload)
     history = _append_assistant_turn(history, chat_response)
@@ -64,6 +70,7 @@ def build_chat_followup_snapshot(
         "fact_sources": _dict_list(payload.get("fact_sources")),
         "fact_conflicts": deepcopy(fact_state.get("conflicts") or _dict_list(payload.get("fact_conflicts"))),
         "pending_questions": _dict_list(chat_response.get("pending_questions")),
+        "case_memory": deepcopy(case_memory),
         "consultation_state": _safe_consultation_state(consultation_state),
         "conversation_history": history[-MAX_FOLLOWUP_HISTORY_TURNS:],
     }
@@ -159,7 +166,7 @@ def _merge_conflicts(
 def _safe_consultation_state(value: dict[str, Any]) -> dict[str, Any]:
     return {
         key: deepcopy(value[key])
-        for key in ("v2", "promotion_gate")
+        for key in ("v2", "promotion_gate", "case_memory")
         if key in value
     }
 

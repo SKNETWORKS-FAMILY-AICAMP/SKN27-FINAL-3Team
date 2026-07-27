@@ -89,6 +89,28 @@ class ReportReportingPayload(ReportApiContractModel):
     sections: list[ReportSection] = Field(default_factory=list)
 
 
+class PublicQualityFreshness(ReportApiContractModel):
+    effective_at: str | None = None
+    retrieved_at: str | None = None
+    limitation: str | None = None
+
+
+class PublicQualityRetrieval(ReportApiContractModel):
+    backend_label: str | None = None
+    result_count: int | None = None
+    used_fallback: bool = False
+
+
+class PublicQualitySummary(ReportApiContractModel):
+    status: str = "unavailable"
+    partial_result: bool = False
+    review_required: bool = False
+    freshness: PublicQualityFreshness = Field(default_factory=PublicQualityFreshness)
+    retrieval: PublicQualityRetrieval = Field(default_factory=PublicQualityRetrieval)
+    limitation_count: int = Field(default=0, ge=0)
+    limitations: list[str] = Field(default_factory=list)
+
+
 class ReportQuality(ReportApiContractModel):
     contract_version: str | None = None
     partial_report: bool = False
@@ -96,6 +118,7 @@ class ReportQuality(ReportApiContractModel):
     limitation_count: int = Field(default=0, ge=0)
     limitations: list[str] = Field(default_factory=list)
     confidence_label: str | None = None
+    public_quality_summary: PublicQualitySummary | None = None
 
 
 class ReportSummary(ReportApiContractModel):
