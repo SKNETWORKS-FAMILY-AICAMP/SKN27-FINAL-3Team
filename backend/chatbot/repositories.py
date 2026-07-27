@@ -194,6 +194,11 @@ REPORT_SENSITIVE_FIELD_FRAGMENTS = (
     "transcript",
     "usertext",
 )
+from app.services.analysis_job_query_service import (
+    project_public_quality_summary,
+    safe_public_confidence_label,
+    safe_public_limitations,
+)
 _REPORTING_PAYLOAD_FIELDS = (
     "report_type",
     "screen_id",
@@ -206,15 +211,6 @@ _REPORTING_PAYLOAD_FIELDS = (
     "appeal_gate",
     "document_cards",
     "sections",
-)
-_PUBLIC_QUALITY_SUMMARY_FIELDS = (
-    "status",
-    "partial_result",
-    "review_required",
-    "freshness",
-    "retrieval",
-    "limitation_count",
-    "limitations",
 )
 
 
@@ -4434,7 +4430,7 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
             "report_quality": _public_report_quality(
                 _dict_or_empty(metadata.get("report_quality"))
             ),
-            "limitations": _safe_public_limitations(metadata.get("limitations")),
+            "limitations": safe_public_limitations(metadata.get("limitations")),
         },
         "job": {
             "job_id": job.job_id,
@@ -4450,37 +4446,16 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
 def _public_report_quality(value: dict[str, Any]) -> dict[str, Any]:
     """Project report quality into the same public contract used by analysis results."""
 
+    limitations = safe_public_limitations(value.get("limitations"))
     return {
-        "contract_version": _text(value.get("contract_version")) or "report_quality.v2",
+        "contract_version": "report_quality.v2",
         "partial_report": bool(value.get("partial_report")),
         "review_required": bool(value.get("review_required")),
-        "limitation_count": int(value.get("limitation_count") or 0),
-        "limitations": _safe_public_limitations(value.get("limitations")),
-        "confidence_label": _text(value.get("confidence_label")) or None,
-        "public_quality_summary": _public_quality_summary(
-            value.get("public_quality_summary")
-        ),
+        "limitation_count": len(limitations),
+        "limitations": limitations,
+        "confidence_label": safe_public_confidence_label(value.get("confidence_label")),
+        "public_quality_summary": project_public_quality_summary(value.get("public_quality_summary")),
     }
-
-
-def _public_quality_summary(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    summary = _project_mapping(value, _PUBLIC_QUALITY_SUMMARY_FIELDS)
-    summary["status"] = _text(summary.get("status")) or "unavailable"
-    summary["partial_result"] = bool(summary.get("partial_result"))
-    summary["review_required"] = bool(summary.get("review_required"))
-    summary["freshness"] = _project_mapping(
-        _dict_or_empty(summary.get("freshness")),
-        ("effective_at", "retrieved_at", "limitation"),
-    )
-    summary["retrieval"] = _project_mapping(
-        _dict_or_empty(summary.get("retrieval")),
-        ("backend_label", "result_count", "used_fallback"),
-    )
-    summary["limitation_count"] = int(summary.get("limitation_count") or 0)
-    summary["limitations"] = _safe_public_limitations(summary.get("limitations"))
-    return summary
 
 
 def _public_reporting_payload(value: dict[str, Any]) -> dict[str, Any]:
@@ -4517,7 +4492,7 @@ def _public_report_section(value: dict[str, Any]) -> dict[str, Any]:
     return {
         "title": _text(value.get("title")) or None,
         "body": _text(value.get("body")) or None,
-        "items": _safe_public_limitations(value.get("items")),
+        "items": _safe_public_text_values(value.get("items")),
     }
 
 
@@ -4602,7 +4577,7 @@ def _project_mapping(value: dict[str, Any], fields: tuple[str, ...]) -> dict[str
     return {field: deepcopy(value[field]) for field in fields if field in value}
 
 
-def _safe_public_limitations(value: Any) -> list[str]:
+def _safe_public_text_values(value: Any) -> list[str]:
     return [
         text
         for item in _list_or_empty(value)

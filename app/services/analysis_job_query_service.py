@@ -103,7 +103,13 @@ _SAFE_PUBLIC_LIMITATIONS = frozenset(
         "Final legal review and user confirmation are still required.",
     }
 )
-_SAFE_BACKEND_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SAFE_PUBLIC_STATUSES = frozenset({"ready", "partial", "empty", "blocked", "failed", "unavailable"})
+_SAFE_PUBLIC_BACKENDS = frozenset({"postgres_pgvector", "law retrieval", "legal_ground_search"})
+_SAFE_PUBLIC_CONFIDENCE_LABELS = frozenset({"high", "medium", "low", "검토 가능", "추가 자료 필요"})
+_SAFE_PUBLIC_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_SAFE_PUBLIC_DATETIME_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,7 +302,7 @@ def _project_public_quality_summary(value: Any) -> dict[str, Any] | None:
     if isinstance(source_retrieval, dict):
         retrieval.update(source_retrieval)
     limitations = _safe_public_limitations(source.get("limitations"))
-    status = _safe_public_text(source.get("status")) or _safe_public_text(retrieval.get("status")) or "unavailable"
+    status = _safe_public_status(source.get("status")) or _safe_public_status(retrieval.get("status")) or "unavailable"
     partial_result = (
         bool(source["partial_result"])
         if "partial_result" in source
@@ -331,6 +337,12 @@ def _project_public_quality_summary(value: Any) -> dict[str, Any] | None:
         "limitation_count": len(limitations),
         "limitations": limitations,
     }
+
+
+def project_public_quality_summary(value: Any) -> dict[str, Any] | None:
+    """Expose the canonical public quality contract to report DTO projections."""
+
+    return _project_public_quality_summary(value)
 
 
 def _project_public_law_ground_structured_result(value: Any) -> dict[str, Any]:
@@ -382,7 +394,11 @@ def _is_public_scalar(value: Any) -> bool:
 def _project_public_freshness(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
-    projected = _project_public_scalar_mapping(value, ("effective_at", "retrieved_at"))
+    projected = {
+        field: freshness
+        for field in ("effective_at", "retrieved_at")
+        if (freshness := _safe_public_freshness(value.get(field))) is not None
+    }
     limitation = _safe_public_limitation(value.get("limitation"))
     if limitation:
         projected["limitation"] = limitation
@@ -412,15 +428,28 @@ def _public_backend_attempt_status(value: Any) -> str:
 
 
 def _safe_backend(value: Any) -> str | None:
-    if not isinstance(value, str) or not value.strip() or len(value) > 100:
+    if not isinstance(value, str):
         return None
-    if "://" in value or any(marker in value for marker in ("/", "\\", "?", "&")):
-        return None
-    return value.strip() if _SAFE_BACKEND_RE.fullmatch(value.strip()) or " " in value.strip() else None
+    backend = value.strip()
+    return backend if backend in _SAFE_PUBLIC_BACKENDS else None
 
 
 def _safe_public_text(value: Any) -> str | None:
     return value.strip() if isinstance(value, str) and _is_public_scalar(value) else None
+
+
+def safe_public_confidence_label(value: Any) -> str | None:
+    return value if isinstance(value, str) and value in _SAFE_PUBLIC_CONFIDENCE_LABELS else None
+
+
+def _safe_public_status(value: Any) -> str | None:
+    return value if isinstance(value, str) and value in _SAFE_PUBLIC_STATUSES else None
+
+
+def _safe_public_freshness(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if _SAFE_PUBLIC_DATE_RE.fullmatch(value) or _SAFE_PUBLIC_DATETIME_RE.fullmatch(value) else None
 
 
 def _safe_public_limitation(value: Any) -> str | None:
@@ -431,6 +460,10 @@ def _safe_public_limitations(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [limitation for item in value if (limitation := _safe_public_limitation(item))]
+
+
+def safe_public_limitations(value: Any) -> list[str]:
+    return _safe_public_limitations(value)
 
 
 def _project_work_item(value: Any) -> dict[str, Any] | None:

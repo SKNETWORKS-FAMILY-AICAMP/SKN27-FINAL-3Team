@@ -108,7 +108,7 @@ class ReportApiContractTests(TestCase):
                     "partial_report": False,
                     "review_required": True,
                     "limitation_count": 1,
-                    "limitations": ["Verify facts"],
+                    "limitations": ["Latest revision may not be reflected."],
                     "agent_status_counts": {"success": 1},
                     "public_quality_summary": {
                         "status": "partial",
@@ -129,7 +129,7 @@ class ReportApiContractTests(TestCase):
                         "dataset_version": "sha256:must-not-leak",
                     },
                 },
-                "limitations": ["Verify facts"],
+                "limitations": ["Latest revision may not be reflected."],
                 "object_storage": {
                     "policy_version": "object_storage.v1",
                     "backend": "s3",
@@ -171,7 +171,9 @@ class ReportApiContractTests(TestCase):
 
         quality = detail["metadata"]["report_quality"]
         self.assertEqual(quality["limitation_count"], 1)
-        self.assertEqual(quality["limitations"], ["Verify facts"])
+        self.assertEqual(
+            quality["limitations"], ["Latest revision may not be reflected."]
+        )
         self.assertEqual(
             quality["public_quality_summary"],
             {
@@ -195,6 +197,70 @@ class ReportApiContractTests(TestCase):
         self.assertNotIn("agent_status_counts", quality)
         self.assertNotIn("dataset_version", json.dumps(detail))
         self.assertNotIn("storage_uri", json.dumps(detail))
+
+    def test_report_detail_rejects_private_values_in_quality_allowlist_fields(self) -> None:
+        self.report.metadata["report_quality"] = {
+            "contract_version": "s3://private-bucket/report_quality.v2",
+            "confidence_label": "C:\\private\\report.json",
+            "limitation_count": 99,
+            "limitations": ["raw query: secret user question"],
+            "public_quality_summary": {
+                "status": "raw query: secret user question",
+                "partial_result": True,
+                "review_required": True,
+                "freshness": {
+                    "effective_at": "s3://private-bucket/effective_at",
+                    "retrieved_at": "C:\\private\\retrieved_at",
+                    "limitation": "RuntimeError: embedding model text-embedding-3-large",
+                },
+                "retrieval": {
+                    "backend_label": "text-embedding-3-large",
+                    "result_count": 1,
+                    "used_fallback": False,
+                },
+                "limitation_count": 99,
+                "limitations": ["raw query: secret user question"],
+            },
+        }
+        self.report.save(update_fields=["metadata", "updated_at"])
+
+        response = self.owner_client.get(f"/api/reports/{self.report.report_id}/")
+
+        self.assertEqual(response.status_code, 200)
+        detail = response.json()["report"]
+        quality = detail["metadata"]["report_quality"]
+        self.assertEqual(quality["limitation_count"], 0)
+        self.assertEqual(quality["limitations"], [])
+        self.assertIsNone(quality["confidence_label"])
+        self.assertEqual(
+            quality["public_quality_summary"],
+            {
+                "status": "unavailable",
+                "partial_result": True,
+                "review_required": True,
+                "freshness": {
+                    "effective_at": None,
+                    "retrieved_at": None,
+                    "limitation": None,
+                },
+                "retrieval": {
+                    "backend_label": None,
+                    "result_count": 1,
+                    "used_fallback": False,
+                },
+                "limitation_count": 0,
+                "limitations": [],
+            },
+        )
+        public_json = json.dumps(detail, sort_keys=True)
+        for private_value in (
+            "private-bucket",
+            "private\\\\report.json",
+            "secret user question",
+            "text-embedding-3-large",
+            "RuntimeError",
+        ):
+            self.assertNotIn(private_value, public_json)
 
     def test_other_user_is_denied_before_report_document_resolution(self) -> None:
         with patch("chatbot.views.get_report_download_metadata") as resolve_download:
