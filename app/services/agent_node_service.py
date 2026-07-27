@@ -1799,8 +1799,13 @@ def _run_law_ground_search_adapter(
     adapter_context: dict[str, Any],
 ) -> dict[str, Any]:
     from ai.agents.law_ground_search import run_law_ground_search
+    from ai.agents.law_ground_search.llm_extractor import OpenAILawKeywordExtractor
 
-    raw_output = run_law_ground_search(agent_input, adapter_context)
+    raw_output = run_law_ground_search(
+        agent_input,
+        adapter_context,
+        llm_extractor=OpenAILawKeywordExtractor(),
+    )
     if not isinstance(raw_output, dict):
         raw_output = {
             "status": "partial",
