@@ -3060,6 +3060,13 @@ function FaultRatioInsightPanel({ node, compact = false }) {
 
 function LawGroundInsightPanel({ node, compact = false }) {
   const structuredResult = node?.structured_result || {};
+  const qualitySummary = structuredResult.public_quality_summary || null;
+  const shouldShowQualityDetails =
+    qualitySummary?.partial_result ||
+    qualitySummary?.review_required ||
+    ["partial", "blocked", "failed", "empty"].includes(String(qualitySummary?.status || "").toLowerCase()) ||
+    (qualitySummary?.limitation_count || 0) > 0 ||
+    qualitySummary?.freshness?.limitation;
   const retrieval = structuredResult.retrieval || {};
   const matchedLaws = Array.isArray(structuredResult.matched_laws)
     ? structuredResult.matched_laws
@@ -3085,7 +3092,7 @@ function LawGroundInsightPanel({ node, compact = false }) {
       <div className="agent-insight-grid">
         <p>
           <span>검색 상태</span>
-          <strong>{compactValue(retrieval.status || (matchedLaws.length > 0 ? "ready" : "empty"))}</strong>
+          <strong>{compactValue(qualitySummary?.status || retrieval.status || (matchedLaws.length > 0 ? "ready" : "empty"))}</strong>
         </p>
         <p>
           <span>검색 저장소</span>
@@ -3096,15 +3103,17 @@ function LawGroundInsightPanel({ node, compact = false }) {
           <strong>{matchedLaws.length}건</strong>
         </p>
       </div>
-      {retrieval.retrieved_at && (
+      {(qualitySummary?.freshness?.retrieved_at || retrieval.retrieved_at) && (
         <p className="agent-insight-timestamp">
-          조회 시각: {formatDateTime(retrieval.retrieved_at)}
-          {retrieval.effective_at ? ` · 적용 기준일: ${formatDate(retrieval.effective_at)}` : ""}
+          조회 시각: {formatDateTime(qualitySummary?.freshness?.retrieved_at || retrieval.retrieved_at)}
+          {(qualitySummary?.freshness?.effective_at || retrieval.effective_at)
+            ? ` · 적용 기준일: ${formatDate(qualitySummary?.freshness?.effective_at || retrieval.effective_at)}`
+            : ""}
         </p>
       )}
-      {freshness.limitation && (
+      {shouldShowQualityDetails && (qualitySummary?.freshness?.limitation || freshness.limitation) && (
         <p className="agent-insight-timestamp">
-          최신성 안내: {compactValue(freshness.limitation)}
+          최신성 안내: {compactValue(qualitySummary?.freshness?.limitation || freshness.limitation)}
         </p>
       )}
       {matchedLaws.length > 0 && (
@@ -3139,7 +3148,7 @@ function LawGroundInsightPanel({ node, compact = false }) {
           <p>{compactValue(retrieval.attempted_backends)}</p>
         </div>
       )}
-      {limitations.length > 0 && (
+      {shouldShowQualityDetails && limitations.length > 0 && (
         <div className="agent-insight-section">
           <strong>적용 전 확인사항</strong>
           <ul>
@@ -3319,9 +3328,16 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
     currentReport?.report_quality ||
     currentReport?.metadata?.report_quality ||
     null;
-  const hasReportQuality = Boolean(reportQuality);
+  const reportQualitySummary = reportQuality?.public_quality_summary || null;
+  const hasReportQuality = Boolean(reportQualitySummary);
+  const shouldShowReportQualityDetails =
+    reportQualitySummary?.partial_result ||
+    reportQualitySummary?.review_required ||
+    ["partial", "blocked", "failed", "empty"].includes(String(reportQualitySummary?.status || "").toLowerCase()) ||
+    (reportQualitySummary?.limitation_count || 0) > 0 ||
+    reportQualitySummary?.freshness?.limitation;
   const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
-  const reportQualityTitle = reportQuality?.partial_report ? "일부 자료가 부족한 리포트" : "검토 준비가 완료된 리포트";
+  const reportQualityTitle = reportQualitySummary?.partial_result ? "일부 자료가 부족한 리포트" : "검토 준비가 완료된 리포트";
   const helperText = isAuthenticated
     ? reportActionStatus || activeReportingPayload?.appeal_gate?.reason || "상담 결과를 저장하거나 제출용 이의신청서 DOCX를 준비할 수 있습니다."
     : reportActionStatus || "리포트 저장과 DOCX 다운로드는 Google 로그인 후 사용할 수 있습니다.";
@@ -3333,17 +3349,23 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
         <strong>{currentReport?.report_id || "리포트 준비 중"}</strong>
         <p>{helperText}</p>
         {hasReportQuality && (
-          <div className="report-quality-panel" data-partial-report={String(Boolean(reportQuality.partial_report))}>
-            <span className={reportQuality.partial_report ? "tag amber" : "tag green"}>
-              {reportQuality.partial_report ? "일부 자료 부족" : "검토 준비 완료"}
+          <div className="report-quality-panel" data-partial-report={String(Boolean(reportQualitySummary.partial_result))}>
+            <span className={reportQualitySummary.partial_result ? "tag amber" : "tag green"}>
+              {reportQualitySummary.partial_result ? "일부 자료 부족" : "검토 준비 완료"}
             </span>
             <strong className="report-quality-title">{reportQualityTitle}</strong>
-            <span className="tag">분석 상태 · {caseStatusLabel(reportQuality.analysis_job_status)}</span>
-            <span className="tag">확인할 한계 · {reportQuality.limitation_count ?? 0}건</span>
-            {reportQuality.partial_report && (
+            <span className="tag">분석 상태 · {caseStatusLabel(reportQualitySummary.status)}</span>
+            <span className="tag">확인할 한계 · {reportQualitySummary.limitation_count ?? 0}건</span>
+            {reportQualitySummary?.freshness?.effective_at && (
+              <span className="tag">기준일 {formatDate(reportQualitySummary.freshness.effective_at)}</span>
+            )}
+            {reportQualitySummary?.freshness?.retrieved_at && (
+              <span className="tag">조회 시각 {formatDateTime(reportQualitySummary.freshness.retrieved_at)}</span>
+            )}
+            {shouldShowReportQualityDetails && reportQualitySummary.partial_result && (
               <p className="report-quality-warning">최종 제출 전에 부족한 자료와 사실관계를 확인해 주세요.</p>
             )}
-            {reportLimitations.length > 0 && (
+            {shouldShowReportQualityDetails && reportLimitations.length > 0 && (
               <ul className="report-quality-limitations" aria-label="report quality limitations">
                 {reportLimitations.map((item, index) => (
                   <li key={`report-quality-limitation-${index}`}>{compactValue(item)}</li>
