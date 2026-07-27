@@ -480,6 +480,20 @@ def test_emergency_stop_quick_question_routes_to_fine_notice_procedure() -> None
     assert response["routing_intent"] == "fine_notice_procedure"
 
 
+def test_accident_context_with_burden_phrase_stays_in_accident_consultation() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_accident_burden_phrase",
+            "user_text": "고속도로에서 벌금 걱정이 되는데 사고가 나서 과실비율이 어떻게 되는지 궁금합니다.",
+            "attachments": [],
+        }
+    )
+
+    assert response["routing_intent"] == "accident_initial_consultation"
+    assert response["status"] == "needs_input"
+    assert response["analysis_plan"]["steps"] == []
+
+
 def test_rear_end_quick_question_routes_to_accident_consultation() -> None:
     response = submit_message(
         {

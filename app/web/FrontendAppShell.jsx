@@ -1300,6 +1300,7 @@ export default function FrontendAppShell({
     setSaveDecision("undecided");
     setSavePromptVisible(false);
     setGuestDetailedReportUsed(false);
+    setSessionId("");
     setStatusMessage("새 상담을 시작할 수 있습니다.");
     setActiveRoute("chatbot");
   }

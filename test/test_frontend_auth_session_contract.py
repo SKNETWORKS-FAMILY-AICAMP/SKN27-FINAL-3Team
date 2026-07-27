@@ -122,6 +122,24 @@ def test_frontend_renders_editable_ocr_confirmation_before_follow_up() -> None:
     assert "notice_stage" in shell
 
 
+def test_start_new_conversation_clears_the_previous_session_id() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    start = shell.index("function startNewConversation() {")
+    end = shell.index("async function loadMyPageSummary", start)
+    block = shell[start:end]
+
+    assert 'setSessionId("");' in block
+
+
+def test_prepare_missing_evidence_upload_keeps_the_current_session_binding() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    start = shell.index("function prepareMissingEvidenceUpload() {")
+    end = shell.index("function prepareDraftRegeneration()", start)
+    block = shell[start:end]
+
+    assert 'setSessionId("");' not in block
+
+
 def test_vite_proxy_does_not_capture_frontend_api_client_module() -> None:
     config = read_text(ROOT / "app" / "web" / "vite.config.js")
 
