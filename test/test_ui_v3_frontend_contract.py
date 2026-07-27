@@ -44,8 +44,10 @@ def test_follow_up_and_legal_sources_explain_why_and_when() -> None:
 
     assert "item.reason && <small>{item.reason}</small>" in shell
     assert "Array.isArray(structuredResult.law_provisions)" in shell
+    assert "const freshness = structuredResult.freshness || {};" in shell
     assert "item.effective_date || item.enforce_date" in shell
     assert "retrieval.retrieved_at" in shell
+    assert "freshness.limitation" in shell
 
 
 def test_quick_question_groups_render_without_undefined_legacy_reference() -> None:

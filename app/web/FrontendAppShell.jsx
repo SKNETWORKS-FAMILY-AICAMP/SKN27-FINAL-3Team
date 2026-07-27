@@ -2872,6 +2872,7 @@ function LawGroundInsightPanel({ node, compact = false }) {
     : Array.isArray(structuredResult.law_provisions)
       ? structuredResult.law_provisions
       : [];
+  const freshness = structuredResult.freshness || {};
   const attemptedBackends = Array.isArray(retrieval.attempted_backends)
     ? retrieval.attempted_backends
     : [];
@@ -2905,6 +2906,11 @@ function LawGroundInsightPanel({ node, compact = false }) {
         <p className="agent-insight-timestamp">
           조회 시각: {formatDateTime(retrieval.retrieved_at)}
           {retrieval.effective_at ? ` · 적용 기준일: ${formatDate(retrieval.effective_at)}` : ""}
+        </p>
+      )}
+      {freshness.limitation && (
+        <p className="agent-insight-timestamp">
+          최신성 안내: {compactValue(freshness.limitation)}
         </p>
       )}
       {matchedLaws.length > 0 && (

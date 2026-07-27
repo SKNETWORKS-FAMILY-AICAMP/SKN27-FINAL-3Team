@@ -52,6 +52,9 @@ def normalize_law_structured_result(value: Any) -> dict[str, Any]:
     structured["retrieval_quality"] = (
         _text(structured.get("retrieval_quality")) or backend or "unavailable"
     )
+    freshness = _freshness_metadata(structured, retrieval)
+    if freshness:
+        structured["freshness"] = freshness
     return structured
 
 
@@ -145,6 +148,53 @@ def _backend_from_provisions(provisions: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _freshness_metadata(
+    structured: dict[str, Any],
+    retrieval: dict[str, Any],
+) -> dict[str, Any]:
+    existing = deepcopy(structured.get("freshness")) if isinstance(structured.get("freshness"), dict) else {}
+    provenance = (
+        deepcopy(retrieval.get("data_provenance"))
+        if isinstance(retrieval.get("data_provenance"), dict)
+        else {}
+    )
+    effective_at = (
+        _text(existing.get("effective_at"))
+        or _text(retrieval.get("effective_at"))
+        or _text(provenance.get("effective_at"))
+    )
+    retrieved_at = (
+        _text(existing.get("retrieved_at"))
+        or _text(retrieval.get("retrieved_at"))
+        or _text(provenance.get("retrieved_at"))
+    )
+    dataset_version = _text(existing.get("dataset_version")) or _text(provenance.get("dataset_version"))
+    verified_at = _text(existing.get("verified_at")) or _text(provenance.get("verified_at"))
+    stale_sources = _string_list(existing.get("stale_sources"))
+    limitation = _text(existing.get("limitation")) or _freshness_limitation(effective_at)
+
+    if not any([effective_at, retrieved_at, dataset_version, verified_at, stale_sources, limitation]):
+        return {}
+
+    return {
+        "effective_at": effective_at or None,
+        "retrieved_at": retrieved_at or None,
+        "dataset_version": dataset_version or None,
+        "verified_at": verified_at or None,
+        "limitation": limitation or None,
+        "stale_sources": stale_sources,
+    }
+
+
+def _freshness_limitation(effective_at: str) -> str:
+    if effective_at:
+        return (
+            f"{effective_at} 기준 법령으로 조회했습니다. "
+            "조회 이후 법령이나 기준이 변경되었을 수 있어 최신 여부를 다시 확인해야 합니다."
+        )
+    return "법령 기준일을 확인하지 못했습니다. 최신 여부를 다시 확인해야 합니다."
+
+
 def _source_reference(item: dict[str, Any]) -> str:
     return (
         _text(item.get("source_reference"))
@@ -161,3 +211,9 @@ def _attempted_backends(value: Any) -> list[Any]:
     if not isinstance(value, list):
         return []
     return deepcopy(value)
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [_text(item) for item in value if _text(item)]
