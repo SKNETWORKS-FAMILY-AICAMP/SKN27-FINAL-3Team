@@ -44,10 +44,9 @@ def test_follow_up_and_legal_sources_explain_why_and_when() -> None:
 
     assert "item.reason && <small>{item.reason}</small>" in shell
     assert "Array.isArray(structuredResult.law_provisions)" in shell
-    assert "const freshness = structuredResult.freshness || {};" in shell
     assert "item.effective_date || item.enforce_date" in shell
-    assert "retrieval.retrieved_at" in shell
-    assert "freshness.limitation" in shell
+    assert "qualitySummary?.freshness?.retrieved_at" in shell
+    assert "qualitySummary?.freshness?.limitation" in shell
 
 
 def test_result_screen_always_shows_minimum_quality_summary_and_conditionally_expands_limitations() -> None:
@@ -56,6 +55,10 @@ def test_result_screen_always_shows_minimum_quality_summary_and_conditionally_ex
     assert "qualitySummary?.freshness?.effective_at" in shell
     assert "qualitySummary?.freshness?.retrieved_at" in shell
     assert "qualitySummary?.limitation_count" in shell
+    assert "qualitySummary?.retrieval?.backend_label" in shell
+    assert "qualitySummary?.retrieval?.used_fallback" in shell
+    assert '"stale"' in shell
+    assert '"fallback"' in shell
     assert "shouldShowQualityDetails" in shell
 
 

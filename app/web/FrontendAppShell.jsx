@@ -3064,20 +3064,16 @@ function LawGroundInsightPanel({ node, compact = false }) {
   const shouldShowQualityDetails =
     qualitySummary?.partial_result ||
     qualitySummary?.review_required ||
-    ["partial", "blocked", "failed", "empty"].includes(String(qualitySummary?.status || "").toLowerCase()) ||
+    ["partial", "blocked", "failed", "empty", "stale", "fallback", "limited"].includes(String(qualitySummary?.status || "").toLowerCase()) ||
+    qualitySummary?.retrieval?.used_fallback ||
     (qualitySummary?.limitation_count || 0) > 0 ||
     qualitySummary?.freshness?.limitation;
-  const retrieval = structuredResult.retrieval || {};
   const matchedLaws = Array.isArray(structuredResult.matched_laws)
     ? structuredResult.matched_laws
     : Array.isArray(structuredResult.law_provisions)
       ? structuredResult.law_provisions
       : [];
-  const freshness = structuredResult.freshness || {};
-  const attemptedBackends = Array.isArray(retrieval.attempted_backends)
-    ? retrieval.attempted_backends
-    : [];
-  const limitations = Array.isArray(node?.limitations) ? node.limitations : [];
+  const limitations = Array.isArray(qualitySummary?.limitations) ? qualitySummary.limitations : [];
 
   if (!node || node?.node_code !== "law_ground_search") {
     return null;
@@ -3092,28 +3088,30 @@ function LawGroundInsightPanel({ node, compact = false }) {
       <div className="agent-insight-grid">
         <p>
           <span>검색 상태</span>
-          <strong>{compactValue(qualitySummary?.status || retrieval.status || (matchedLaws.length > 0 ? "ready" : "empty"))}</strong>
+          <strong>{compactValue(qualitySummary?.status || "unavailable")}</strong>
         </p>
         <p>
           <span>검색 저장소</span>
-          <strong>{compactValue(retrieval.backend || "unavailable")}</strong>
+          <strong>{compactValue(qualitySummary?.retrieval?.backend_label || "unavailable")}</strong>
         </p>
         <p>
           <span>확인된 근거</span>
           <strong>{matchedLaws.length}건</strong>
         </p>
       </div>
-      {(qualitySummary?.freshness?.retrieved_at || retrieval.retrieved_at) && (
+      {(qualitySummary?.freshness?.retrieved_at || qualitySummary?.freshness?.effective_at) && (
         <p className="agent-insight-timestamp">
-          조회 시각: {formatDateTime(qualitySummary?.freshness?.retrieved_at || retrieval.retrieved_at)}
-          {(qualitySummary?.freshness?.effective_at || retrieval.effective_at)
-            ? ` · 적용 기준일: ${formatDate(qualitySummary?.freshness?.effective_at || retrieval.effective_at)}`
+          {qualitySummary?.freshness?.retrieved_at
+            ? `조회 시각: ${formatDateTime(qualitySummary.freshness.retrieved_at)}`
+            : ""}
+          {qualitySummary?.freshness?.effective_at
+            ? ` · 적용 기준일: ${formatDate(qualitySummary.freshness.effective_at)}`
             : ""}
         </p>
       )}
-      {shouldShowQualityDetails && (qualitySummary?.freshness?.limitation || freshness.limitation) && (
+      {shouldShowQualityDetails && qualitySummary?.freshness?.limitation && (
         <p className="agent-insight-timestamp">
-          최신성 안내: {compactValue(qualitySummary?.freshness?.limitation || freshness.limitation)}
+          최신성 안내: {compactValue(qualitySummary.freshness.limitation)}
         </p>
       )}
       {matchedLaws.length > 0 && (
@@ -3140,12 +3138,6 @@ function LawGroundInsightPanel({ node, compact = false }) {
               )}
             </p>
           ))}
-        </div>
-      )}
-      {attemptedBackends.length > 0 && (
-        <div className="agent-insight-section">
-          <strong>검색 시도 경로</strong>
-          <p>{compactValue(retrieval.attempted_backends)}</p>
         </div>
       )}
       {shouldShowQualityDetails && limitations.length > 0 && (
@@ -3333,7 +3325,8 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
   const shouldShowReportQualityDetails =
     reportQualitySummary?.partial_result ||
     reportQualitySummary?.review_required ||
-    ["partial", "blocked", "failed", "empty"].includes(String(reportQualitySummary?.status || "").toLowerCase()) ||
+    ["partial", "blocked", "failed", "empty", "stale", "fallback", "limited"].includes(String(reportQualitySummary?.status || "").toLowerCase()) ||
+    reportQualitySummary?.retrieval?.used_fallback ||
     (reportQualitySummary?.limitation_count || 0) > 0 ||
     reportQualitySummary?.freshness?.limitation;
   const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
