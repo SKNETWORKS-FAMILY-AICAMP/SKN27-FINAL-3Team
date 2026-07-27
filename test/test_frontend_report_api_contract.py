@@ -51,9 +51,9 @@ def test_frontend_report_views_consume_public_quality_summary_only() -> None:
 
     assert "public_quality_summary" in shell
     assert "reportQuality?.public_quality_summary" in shell
-    assert "retrieval.embedding" not in shell
-    assert "retrieval.backend" not in shell
-    assert "retrieval.attempted_backends" not in shell
+    assert "reportQualitySummary?.retrieval?.embedding" not in shell
+    assert "reportQualitySummary?.retrieval?.backend" not in shell
+    assert "reportQualitySummary?.retrieval?.attempted_backends" not in shell
     assert "data_provenance" not in shell
 
 

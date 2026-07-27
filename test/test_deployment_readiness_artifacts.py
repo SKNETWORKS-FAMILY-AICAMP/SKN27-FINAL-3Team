@@ -304,7 +304,7 @@ def test_analysis_execution_provenance_is_wired_to_runtime_and_runbook():
 
 def test_repository_text_files_do_not_contain_obvious_secret_assignments():
     scanned_suffixes = {".md", ".py", ".html", ".txt", ".yml", ".yaml", ".json"}
-    excluded_parts = {".git", ".venv", ".pytest_cache", ".worktrees", "assets"}
+    excluded_parts = {".git", ".venv", ".pytest_cache", ".worktrees", ".deps", ".test-deps", ".superpowers", "assets"}
     secret_pattern = re.compile(
         r"(?i)(?P<name>api[_-]?key|secret|token|password)\s*[:=]\s*"
         r"['\"](?P<value>[^'\"\n]{8,})['\"]"

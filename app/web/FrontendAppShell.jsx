@@ -3061,6 +3061,13 @@ function FaultRatioInsightPanel({ node, compact = false }) {
 function LawGroundInsightPanel({ node, compact = false }) {
   const structuredResult = node?.structured_result || {};
   const qualitySummary = structuredResult.public_quality_summary || null;
+  const retrieval = structuredResult.retrieval || qualitySummary?.retrieval || {};
+  const retrievalBackend =
+    qualitySummary?.retrieval?.backend_label || retrieval.backend || "unavailable";
+  const retrievalStatus = retrieval.status || qualitySummary?.status || "unavailable";
+  const attemptedBackends = Array.isArray(retrieval.attempted_backends)
+    ? retrieval.attempted_backends
+    : [];
   const shouldShowQualityDetails =
     qualitySummary?.partial_result ||
     qualitySummary?.review_required ||
@@ -3092,13 +3099,21 @@ function LawGroundInsightPanel({ node, compact = false }) {
         </p>
         <p>
           <span>검색 저장소</span>
-          <strong>{compactValue(qualitySummary?.retrieval?.backend_label || "unavailable")}</strong>
+          <strong>{compactValue(retrievalBackend)}</strong>
         </p>
         <p>
           <span>확인된 근거</span>
           <strong>{matchedLaws.length}건</strong>
         </p>
       </div>
+      {shouldShowQualityDetails && (
+        <p className="agent-insight-timestamp">
+          검색 처리 상태: {compactValue(retrievalStatus)}
+          {attemptedBackends.length > 0
+            ? ` / 시도 백엔드: ${compactValue(attemptedBackends.join(", "))}`
+            : ""}
+        </p>
+      )}
       {(qualitySummary?.freshness?.retrieved_at || qualitySummary?.freshness?.effective_at) && (
         <p className="agent-insight-timestamp">
           {qualitySummary?.freshness?.retrieved_at

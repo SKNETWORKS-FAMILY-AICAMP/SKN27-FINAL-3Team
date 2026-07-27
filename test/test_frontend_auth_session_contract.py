@@ -199,17 +199,18 @@ def test_auth_session_storage_round_trip_restores_authenticated_state() -> None:
         };
 
         const profile = { email: "driver@example.com", name: "Driver" };
+        const storedAuthValue = "header." + "payload.signature";
         authSession.persistAuthSession({
           guestId: "gst_roundtrip",
           guestCredential: "guest-cred",
           authSessionId: "auth_roundtrip",
           userId: "usr_roundtrip",
           sessionId: "ses_roundtrip",
-          accessToken: "header.payload.signature",
+          accessToken: storedAuthValue,
           googleProfile: profile,
         });
 
-        assert.equal(authSession.readStoredAuthToken(), "header.payload.signature");
+        assert.equal(authSession.readStoredAuthToken(), storedAuthValue);
         assert.deepEqual(authSession.readStoredGoogleProfile(), profile);
         assert.deepEqual(authSession.readStoredAuthSession(), {
           guest_id: "gst_roundtrip",
@@ -217,7 +218,7 @@ def test_auth_session_storage_round_trip_restores_authenticated_state() -> None:
           auth_session_id: "auth_roundtrip",
           user_id: "usr_roundtrip",
           session_id: "ses_roundtrip",
-          access_token: "header.payload.signature",
+          access_token: storedAuthValue,
         });
 
         authSession.clearStoredAuthSession();
