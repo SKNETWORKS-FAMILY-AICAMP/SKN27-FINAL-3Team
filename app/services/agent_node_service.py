@@ -2419,27 +2419,18 @@ def _structured_result_for_node(
 
 
 def _retrieval_metadata(rag_search: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: rag_search.get(key)
-        for key in (
-            "contract_version",
-            "status",
-            "backend",
-            "query",
-            "top_k",
-            "result_count",
-            "latency_ms",
-            "retrieved_at",
-            "effective_at",
-            "error_code",
-            "fallback_from",
-            "attempted_backends",
-            "embedding",
-            "data_provenance",
-            "sql_tables",
-        )
-        if key in rag_search
-    }
+    allowed_fields = (
+        "contract_version",
+        "status",
+        "backend",
+        "result_count",
+        "retrieved_at",
+        "effective_at",
+        "error_code",
+        "fallback_from",
+        "attempted_backends",
+    )
+    return {field: rag_search.get(field) for field in allowed_fields if field in rag_search}
 
 
 def _evidence_for_node(node_code: str, status: str) -> list[dict[str, Any]]:

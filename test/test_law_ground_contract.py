@@ -5,6 +5,32 @@ from app.services.law_ground_contract import (
 )
 
 
+def test_law_ground_contract_excludes_private_retrieval_fields_from_public_metadata() -> None:
+    from app.services.agent_node_service import _retrieval_metadata
+
+    retrieval = _retrieval_metadata(
+        {
+            "status": "ready",
+            "backend": "postgres_pgvector",
+            "result_count": 2,
+            "retrieved_at": "2026-07-27T09:00:00+09:00",
+            "effective_at": "2026-07-20",
+            "query": "private query",
+            "embedding": {"model": "text-embedding-3-large"},
+            "data_provenance": {"dataset_version": "sha256:private"},
+            "sql_tables": ["law_embeddings"],
+        }
+    )
+
+    assert retrieval == {
+        "status": "ready",
+        "backend": "postgres_pgvector",
+        "result_count": 2,
+        "retrieved_at": "2026-07-27T09:00:00+09:00",
+        "effective_at": "2026-07-20",
+    }
+
+
 def test_failed_retrieval_removes_preexisting_source_backed_law_matches() -> None:
     structured = normalize_law_structured_result(
         {

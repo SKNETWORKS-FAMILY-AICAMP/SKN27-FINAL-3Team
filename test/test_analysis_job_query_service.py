@@ -330,6 +330,115 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
     assert stored == original
 
 
+def test_completed_result_projects_only_safe_public_quality_summary() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_quality",
+        load_job=lambda _job_id: {
+            "job_id": "job_quality",
+            "status": "partial",
+            "agent_results": [
+                {
+                    "node_code": "law_ground_search",
+                    "status": "partial",
+                    "structured_result": {
+                        "matched_laws": [{"law_name": "Road Traffic Act", "source_reference": "law:1"}],
+                        "retrieval": {
+                            "status": "partial",
+                            "backend": "postgres_pgvector",
+                            "result_count": 1,
+                            "retrieved_at": "2026-07-27T09:00:00+09:00",
+                            "effective_at": "2026-07-20",
+                            "query": "must-not-leak",
+                            "embedding": {"model": "text-embedding-3-large"},
+                            "sql_tables": ["law_embeddings"],
+                        },
+                        "public_quality_summary": {
+                            "status": "partial",
+                            "partial_result": True,
+                            "review_required": True,
+                            "freshness": {
+                                "effective_at": "2026-07-20",
+                                "retrieved_at": "2026-07-27T09:00:00+09:00",
+                                "limitation": "Latest revision may not be reflected.",
+                            },
+                            "retrieval": {
+                                "backend_label": "law retrieval",
+                                "result_count": 1,
+                                "used_fallback": False,
+                            },
+                            "limitation_count": 1,
+                            "limitations": ["Latest revision may not be reflected."],
+                        },
+                    },
+                    "limitations": ["Latest revision may not be reflected."],
+                }
+            ],
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "partial",
+                        "structured_result": {
+                            "matched_laws": [{"law_name": "Road Traffic Act", "source_reference": "law:1"}],
+                            "retrieval": {
+                                "status": "partial",
+                                "backend": "postgres_pgvector",
+                                "result_count": 1,
+                                "retrieved_at": "2026-07-27T09:00:00+09:00",
+                                "effective_at": "2026-07-20",
+                                "query": "must-not-leak",
+                                "embedding": {"model": "text-embedding-3-large"},
+                                "sql_tables": ["law_embeddings"],
+                            },
+                            "public_quality_summary": {
+                                "status": "partial",
+                                "partial_result": True,
+                                "review_required": True,
+                                "freshness": {
+                                    "effective_at": "2026-07-20",
+                                    "retrieved_at": "2026-07-27T09:00:00+09:00",
+                                    "limitation": "Latest revision may not be reflected.",
+                                },
+                                "retrieval": {
+                                    "backend_label": "law retrieval",
+                                    "result_count": 1,
+                                    "used_fallback": False,
+                                },
+                                "limitation_count": 1,
+                                "limitations": ["Latest revision may not be reflected."],
+                            },
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "job_id": "job_quality",
+            "status": "partial",
+        },
+    )
+
+    node = outcome.payload["supervisor_execution"]["node_results"][0]
+    assert node["structured_result"]["public_quality_summary"]["retrieval"] == {
+        "backend_label": "law retrieval",
+        "result_count": 1,
+        "used_fallback": False,
+    }
+    assert node["structured_result"]["retrieval"] == {
+        "status": "partial",
+        "backend": "postgres_pgvector",
+        "result_count": 1,
+        "retrieved_at": "2026-07-27T09:00:00+09:00",
+        "effective_at": "2026-07-20",
+    }
+    assert "query" not in repr(node)
+    assert "law_embeddings" not in repr(node)
+    assert "text-embedding-3-large" not in repr(node)
+
+
 def test_pending_result_projects_only_worker_polling_fields() -> None:
     from app.services.analysis_job_query_service import load_analysis_result
 

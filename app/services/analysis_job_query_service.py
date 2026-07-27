@@ -249,12 +249,64 @@ def _project_supervisor_execution(value: Any) -> dict[str, Any] | None:
     work_item = _project_work_item(value.get("work_item"))
     if work_item is not None:
         projected["work_item"] = work_item
-    projected["node_results"] = [
-        _project_mapping(item, _NODE_RESULT_FIELDS)
-        for item in value.get("node_results", [])
-        if isinstance(item, dict)
-    ]
+    projected["node_results"] = []
+    for item in value.get("node_results", []):
+        if not isinstance(item, dict):
+            continue
+        node = _project_mapping(item, _NODE_RESULT_FIELDS)
+        if item.get("node_code") == "law_ground_search":
+            node["structured_result"] = _project_public_law_ground_structured_result(
+                item.get("structured_result")
+            )
+        projected["node_results"].append(node)
     return projected
+
+
+def _project_public_quality_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "status": value.get("status"),
+        "partial_result": bool(value.get("partial_result")),
+        "review_required": bool(value.get("review_required")),
+        "freshness": _project_mapping(
+            value.get("freshness"), ("effective_at", "retrieved_at", "limitation")
+        ),
+        "retrieval": _project_mapping(
+            value.get("retrieval"), ("backend_label", "result_count", "used_fallback")
+        ),
+        "limitation_count": int(value.get("limitation_count") or 0),
+        "limitations": list(value.get("limitations") or []),
+    }
+
+
+def _project_public_law_ground_structured_result(value: Any) -> dict[str, Any]:
+    structured = _project_mapping(
+        value, ("matched_laws", "law_provisions", "freshness", "public_quality_summary")
+    )
+    if "public_quality_summary" in structured:
+        structured["public_quality_summary"] = _project_public_quality_summary(
+            structured["public_quality_summary"]
+        )
+    retrieval = _project_mapping(
+        _dict_or_empty(value).get("retrieval"),
+        (
+            "status",
+            "backend",
+            "result_count",
+            "retrieved_at",
+            "effective_at",
+            "fallback_from",
+            "attempted_backends",
+        ),
+    )
+    if retrieval:
+        structured["retrieval"] = retrieval
+    return structured
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _project_work_item(value: Any) -> dict[str, Any] | None:
