@@ -295,6 +295,10 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
         "conversation_summary": "신청 사유를 확인했습니다.",
         "agent_input_packages": [{"node_code": "objection_report_generation"}],
     }
+    assert "public_quality_summary" in outcome.payload["supervisor_execution"]["node_results"][0]["structured_result"]
+    outcome.payload["supervisor_execution"]["node_results"][0]["structured_result"].pop(
+        "public_quality_summary"
+    )
     assert outcome.payload["supervisor_execution"] == {
         "contract_version": "supervisor_execution.v1",
         "execution_mode": "async_worker",
@@ -437,6 +441,131 @@ def test_completed_result_projects_only_safe_public_quality_summary() -> None:
     assert "query" not in repr(node)
     assert "law_embeddings" not in repr(node)
     assert "text-embedding-3-large" not in repr(node)
+
+
+def test_law_public_projection_drops_nested_private_metadata_and_unsafe_limitations() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    private = {
+        "source_url": "https://storage.example/signed?sig=secret",
+        "storage_uri": "s3://private-bucket/law.json",
+        "provenance": {"bucket": "private-bucket", "key": "law.json"},
+        "source_reference": "https://storage.example/signed?sig=secret",
+        "law_name": "Road Traffic Act",
+    }
+    outcome = load_analysis_result(
+        "job_private_law_metadata",
+        load_job=lambda _job_id: {
+            "job_id": "job_private_law_metadata",
+            "status": "partial",
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "partial",
+                        "structured_result": {
+                            "matched_laws": [private],
+                            "law_provisions": [
+                                {
+                                    "source_name": "Road Traffic Act",
+                                    "provision_text": "Safe public text",
+                                    "source_url": "https://storage.example/signed?sig=secret",
+                                    "provenance": {"bucket": "private-bucket"},
+                                }
+                            ],
+                            "freshness": {
+                                "effective_at": "2026-07-20",
+                                "retrieved_at": "2026-07-27T09:00:00+09:00",
+                                "dataset_version": "sha256:private",
+                                "storage_uri": "s3://private-bucket/law.json",
+                                "limitation": "Latest revision may not be reflected.",
+                            },
+                            "retrieval": {
+                                "status": "partial",
+                                "backend": "postgres_pgvector",
+                                "attempted_backends": [
+                                    {"backend": "postgres_pgvector", "error": "RuntimeError: raw exception"},
+                                    {"storage_uri": "https://storage.example/signed?sig=secret"},
+                                ],
+                            },
+                            "public_quality_summary": {
+                                "status": "partial",
+                                "partial_result": True,
+                                "review_required": True,
+                                "limitations": ["RuntimeError: raw exception", "Latest revision may not be reflected."],
+                            },
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda _payload: {"contract_version": "analysis_result.v2"},
+    )
+
+    node = outcome.payload["supervisor_execution"]["node_results"][0]
+    structured = node["structured_result"]
+    assert structured["matched_laws"] == [{"law_name": "Road Traffic Act"}]
+    assert structured["law_provisions"] == [
+        {"source_name": "Road Traffic Act", "provision_text": "Safe public text"}
+    ]
+    assert structured["freshness"] == {
+        "effective_at": "2026-07-20",
+        "retrieved_at": "2026-07-27T09:00:00+09:00",
+        "limitation": "Latest revision may not be reflected.",
+    }
+    assert structured["retrieval"]["attempted_backends"] == "multiple"
+    assert structured["public_quality_summary"]["limitations"] == [
+        "Latest revision may not be reflected."
+    ]
+    assert "private-bucket" not in repr(node)
+    assert "signed?sig=secret" not in repr(node)
+    assert "RuntimeError: raw exception" not in repr(node)
+
+
+def test_law_public_projection_builds_summary_when_missing() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_missing_quality_summary",
+        load_job=lambda _job_id: {
+            "job_id": "job_missing_quality_summary",
+            "status": "success",
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                        "structured_result": {
+                            "matched_laws": [{"law_name": "Road Traffic Act"}],
+                            "retrieval": {
+                                "status": "ready",
+                                "backend": "postgres_pgvector",
+                                "result_count": 1,
+                            },
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda _payload: {"contract_version": "analysis_result.v2"},
+    )
+
+    summary = outcome.payload["supervisor_execution"]["node_results"][0]["structured_result"][
+        "public_quality_summary"
+    ]
+    assert summary == {
+        "status": "ready",
+        "partial_result": False,
+        "review_required": False,
+        "freshness": {},
+        "retrieval": {
+            "backend_label": "postgres_pgvector",
+            "result_count": 1,
+            "used_fallback": False,
+        },
+        "limitation_count": 0,
+        "limitations": [],
+    }
 
 
 def test_pending_result_projects_only_worker_polling_fields() -> None:

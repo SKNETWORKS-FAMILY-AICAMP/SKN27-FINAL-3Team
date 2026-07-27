@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import re
 from typing import Any, Callable, Literal
 
 
@@ -82,6 +83,27 @@ _PROGRESS_STATE_FIELDS = (
     "retry_after_seconds",
     "next_run_at",
 )
+_PUBLIC_LAW_ITEM_FIELDS = (
+    "law_name",
+    "source_name",
+    "article",
+    "article_no",
+    "title",
+    "article_title",
+    "summary",
+    "provision_text",
+    "source_reference",
+    "effective_date",
+    "score",
+    "retrieval_score",
+)
+_SAFE_PUBLIC_LIMITATIONS = frozenset(
+    {
+        "Latest revision may not be reflected.",
+        "Final legal review and user confirmation are still required.",
+    }
+)
+_SAFE_BACKEND_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,50 +285,150 @@ def _project_supervisor_execution(value: Any) -> dict[str, Any] | None:
 
 
 def _project_public_quality_summary(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
+    source = value if isinstance(value, dict) else {}
+    source_retrieval = source.get("retrieval")
+    fallback_retrieval = source.get("_fallback_retrieval")
+    retrieval = {}
+    if isinstance(fallback_retrieval, dict):
+        retrieval.update(fallback_retrieval)
+    if isinstance(source_retrieval, dict):
+        retrieval.update(source_retrieval)
+    limitations = _safe_public_limitations(source.get("limitations"))
+    status = _safe_public_text(source.get("status")) or _safe_public_text(retrieval.get("status")) or "unavailable"
+    partial_result = (
+        bool(source["partial_result"])
+        if "partial_result" in source
+        else status == "partial"
+    )
+    review_required = (
+        bool(source["review_required"])
+        if "review_required" in source
+        else partial_result or bool(limitations)
+    )
+    result_count = source.get("retrieval", {}).get("result_count") if isinstance(source.get("retrieval"), dict) else None
+    if result_count is None:
+        result_count = retrieval.get("result_count")
+    if not isinstance(result_count, int) or isinstance(result_count, bool):
+        result_count = None
+    backend = _safe_backend(retrieval.get("backend_label") or retrieval.get("backend"))
+    used_fallback = source.get("retrieval", {}).get("used_fallback") if isinstance(source.get("retrieval"), dict) else None
+    if used_fallback is None:
+        used_fallback = bool(retrieval.get("fallback_from")) or retrieval.get("attempted_backends") == "multiple"
     return {
-        "status": value.get("status"),
-        "partial_result": bool(value.get("partial_result")),
-        "review_required": bool(value.get("review_required")),
-        "freshness": _project_mapping(
-            value.get("freshness"), ("effective_at", "retrieved_at", "limitation")
+        "status": status,
+        "partial_result": partial_result,
+        "review_required": review_required,
+        "freshness": _project_public_freshness(
+            source.get("freshness") or source.get("_fallback_freshness")
         ),
-        "retrieval": _project_mapping(
-            value.get("retrieval"), ("backend_label", "result_count", "used_fallback")
-        ),
-        "limitation_count": int(value.get("limitation_count") or 0),
-        "limitations": list(value.get("limitations") or []),
+        "retrieval": {
+            "backend_label": backend,
+            "result_count": result_count,
+            "used_fallback": bool(used_fallback),
+        },
+        "limitation_count": len(limitations),
+        "limitations": limitations,
     }
 
 
 def _project_public_law_ground_structured_result(value: Any) -> dict[str, Any]:
-    structured = _project_mapping(
-        value, ("matched_laws", "law_provisions", "freshness", "public_quality_summary")
-    )
-    if "public_quality_summary" in structured:
-        structured["public_quality_summary"] = _project_public_quality_summary(
-            structured["public_quality_summary"]
-        )
-    retrieval = _project_mapping(
-        _dict_or_empty(value).get("retrieval"),
-        (
-            "status",
-            "backend",
-            "result_count",
-            "retrieved_at",
-            "effective_at",
-            "fallback_from",
-            "attempted_backends",
-        ),
-    )
+    source = _dict_or_empty(value)
+    structured: dict[str, Any] = {}
+    for field in ("matched_laws", "law_provisions"):
+        if field in source:
+            structured[field] = _project_public_law_items(source[field])
+    if "freshness" in source:
+        structured["freshness"] = _project_public_freshness(source.get("freshness"))
+
+    retrieval = _project_public_retrieval(source.get("retrieval"))
     if retrieval:
         structured["retrieval"] = retrieval
+    quality_source = source.get("public_quality_summary")
+    quality_source = dict(quality_source) if isinstance(quality_source, dict) else {}
+    quality_source["_fallback_retrieval"] = retrieval
+    quality_source["_fallback_freshness"] = structured.get("freshness")
+    structured["public_quality_summary"] = _project_public_quality_summary(quality_source)
     return structured
 
 
 def _dict_or_empty(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _project_public_law_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_project_public_scalar_mapping(item, _PUBLIC_LAW_ITEM_FIELDS) for item in value if isinstance(item, dict)]
+
+
+def _project_public_scalar_mapping(value: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        field: deepcopy(value[field])
+        for field in fields
+        if field in value and _is_public_scalar(value[field])
+    }
+
+
+def _is_public_scalar(value: Any) -> bool:
+    if value is None or isinstance(value, (bool, int, float)):
+        return True
+    if not isinstance(value, str) or not value.strip() or "\n" in value or "\r" in value:
+        return False
+    return not any(marker in value for marker in ("://", "\\", "/", "?", "&"))
+
+
+def _project_public_freshness(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    projected = _project_public_scalar_mapping(value, ("effective_at", "retrieved_at"))
+    limitation = _safe_public_limitation(value.get("limitation"))
+    if limitation:
+        projected["limitation"] = limitation
+    return projected
+
+
+def _project_public_retrieval(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    projected = _project_public_scalar_mapping(
+        value, ("status", "result_count", "retrieved_at", "effective_at")
+    )
+    backend = _safe_backend(value.get("backend"))
+    if backend:
+        projected["backend"] = backend
+    if "fallback_from" in value:
+        projected["fallback_from"] = bool(value.get("fallback_from"))
+    if "attempted_backends" in value:
+        projected["attempted_backends"] = _public_backend_attempt_status(value.get("attempted_backends"))
+    return projected
+
+
+def _public_backend_attempt_status(value: Any) -> str:
+    if not isinstance(value, list):
+        return "none"
+    return "multiple" if len(value) > 1 else "single" if value else "none"
+
+
+def _safe_backend(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip() or len(value) > 100:
+        return None
+    if "://" in value or any(marker in value for marker in ("/", "\\", "?", "&")):
+        return None
+    return value.strip() if _SAFE_BACKEND_RE.fullmatch(value.strip()) or " " in value.strip() else None
+
+
+def _safe_public_text(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and _is_public_scalar(value) else None
+
+
+def _safe_public_limitation(value: Any) -> str | None:
+    return value if isinstance(value, str) and value in _SAFE_PUBLIC_LIMITATIONS else None
+
+
+def _safe_public_limitations(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [limitation for item in value if (limitation := _safe_public_limitation(item))]
 
 
 def _project_work_item(value: Any) -> dict[str, Any] | None:
