@@ -93,7 +93,6 @@ _DETAIL_SCALAR_FIELDS = (
     "progress_message",
     "status_counts",
     "assistant_message",
-    "assistant_message_payload",
     "cards",
     "pending_questions",
     "conversation_messages",
@@ -105,6 +104,34 @@ _DETAIL_SCALAR_FIELDS = (
     "last_event_at",
     "created_at",
     "updated_at",
+)
+_ASSISTANT_MESSAGE_PAYLOAD_FIELDS = (
+    "answer",
+    "summary",
+    "report_id",
+    "report_status",
+)
+_PUBLIC_PROGRESS_CACHE_FIELDS = (
+    "policy_version",
+    "backend",
+    "key",
+    "ttl_seconds",
+    "fallback",
+    "status",
+)
+_PUBLIC_PROGRESS_SNAPSHOT_FIELDS = (
+    "policy_version",
+    "key",
+    "cache_role",
+    "fallback",
+    "job_id",
+    "session_id",
+    "status",
+    "active_node",
+    "progress_message",
+    "status_counts",
+    "updated_at",
+    "source_tables",
 )
 _PUBLIC_ATTACHMENT_FIELDS = ("attachment_id", "purpose", "filename", "scan_status")
 _PUBLIC_REPORT_LINK_FIELDS = ("report_id", "action")
@@ -259,8 +286,11 @@ def _project_analysis_job_detail(
     projected.update(
         {
             "progress_state": _project_progress_state(job.get("progress_state")),
-            "progress_cache": _project_progress_state(progress_cache),
+            "progress_cache": _project_public_progress_cache(progress_cache),
             "work_item": _project_work_item(job.get("work_item")),
+            "assistant_message_payload": _project_assistant_message_payload(
+                job.get("assistant_message_payload")
+            ),
             "attachments": _project_attachments(job.get("attachments")),
             "report_links": _project_report_links(job.get("report_links")),
             "limitations": _safe_public_limitations(job.get("limitations")),
@@ -272,6 +302,24 @@ def _project_analysis_job_detail(
             "reports": _project_report_summaries(job.get("reports")),
         }
     )
+    return projected
+
+
+def _project_assistant_message_payload(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return _project_mapping(value, _ASSISTANT_MESSAGE_PAYLOAD_FIELDS)
+
+
+def _project_public_progress_cache(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    projected = _project_mapping(value, _PUBLIC_PROGRESS_CACHE_FIELDS)
+    snapshot = value.get("snapshot")
+    if isinstance(snapshot, dict):
+        projected["snapshot"] = _project_mapping(
+            snapshot, _PUBLIC_PROGRESS_SNAPSHOT_FIELDS
+        )
     return projected
 
 

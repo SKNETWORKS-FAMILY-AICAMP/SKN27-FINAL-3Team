@@ -28,12 +28,33 @@ def test_detail_adds_progress_without_mutating_repository_record() -> None:
     outcome = load_analysis_job_detail(
         "job_1",
         load_job=lambda _job_id: stored,
-        load_progress=lambda _job_id: {"state": "running", "progress": 40},
+        load_progress=lambda _job_id: {
+            "policy_version": "progress_cache.v1",
+            "backend": "locmem",
+            "key": "analysis_job_progress:job_1",
+            "ttl_seconds": 300,
+            "fallback": "postgresql",
+            "status": "hit",
+            "snapshot": {
+                "job_id": "job_1",
+                "status": "running",
+                "owner_id": "usr_private",
+                "analysis_plan_id": "plan_private",
+            },
+        },
     )
 
     assert outcome.kind == "detail"
     assert outcome.payload["job_id"] == "job_1"
-    assert outcome.payload["progress_cache"] == {"state": "running"}
+    assert outcome.payload["progress_cache"] == {
+        "policy_version": "progress_cache.v1",
+        "backend": "locmem",
+        "key": "analysis_job_progress:job_1",
+        "ttl_seconds": 300,
+        "fallback": "postgresql",
+        "status": "hit",
+        "snapshot": {"job_id": "job_1", "status": "running"},
+    }
     assert stored == original
 
 
@@ -343,6 +364,13 @@ def test_detail_projects_only_public_restore_fields() -> None:
         "message_id": "msg_public_detail",
         "status": "partial",
         "assistant_message": "A safe summary.",
+        "assistant_message_payload": {
+            "answer": "A safe answer.",
+            "summary": "A safe summary.",
+            "report_id": "rep_public",
+            "report_status": "ready",
+            "source_fingerprint": "must-not-leak",
+        },
         "cards": [{"title": "Safe card"}],
         "pending_questions": [{"field": "incident_date", "question": "When?"}],
         "attachments": [{
@@ -399,6 +427,12 @@ def test_detail_projects_only_public_restore_fields() -> None:
 
     assert outcome.kind == "detail"
     assert outcome.payload["job_id"] == "job_public_detail"
+    assert outcome.payload["assistant_message_payload"] == {
+        "answer": "A safe answer.",
+        "summary": "A safe summary.",
+        "report_id": "rep_public",
+        "report_status": "ready",
+    }
     assert outcome.payload["attachments"] == [
         {"attachment_id": "att_public", "filename": "notice.pdf"}
     ]
@@ -437,6 +471,7 @@ def test_detail_projects_only_public_restore_fields() -> None:
         "debug_blob",
         "RuntimeError",
         "usr_private",
+        "must-not-leak",
     ):
         assert private_value not in public_json
 
