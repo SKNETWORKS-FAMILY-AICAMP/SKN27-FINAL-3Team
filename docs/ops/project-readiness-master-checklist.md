@@ -116,7 +116,7 @@
 - [~] 수집 시점, 마지막 검증일, 출처, 적용 시점 저장 — 법령 `source_summaries` 계약과 결정적 `dataset_version` 구현, 운영 DB 보관은 남음
 - [~] 정기 갱신 스케줄 또는 운영 수동 갱신 절차 — 법령 수동 실행·검증·실패 후 재실행 runbook 구현, 정기 스케줄은 남음
 - [~] 갱신 실패·오래된 데이터·출처 불명 데이터 경고 — `missing_sources`·`failed_sources`·`stale_sources` 자동 차단 CLI 구현, CloudWatch 알림 연결은 남음
-- [x] 사용자 결과에 기준일과 최신성 제한사항 표시 — `law_ground_search` 결과 정규화에서 `freshness`(기준일, 조회 시각, dataset version, 최신성 경고)를 노출하고 프런트 법령 카드에 사용자용 안내 문구를 렌더링
+- [x] 사용자 결과에 기준일과 최신성 제한사항 표시 — 공개 품질 요약 DTO 계약으로 `freshness`(기준일, 수집/조회 시각, `dataset_version`, 최신성 경고)를 안전한 범위에서 노출하고 프런트 법령 카드에 사용자용 안내 문구를 렌더링
 - [x] 변경된 법령·과실 기준 회귀 테스트 — 과거 `effective_at` 기준 조회와 `stale_sources` fixture를 정규화 계약 테스트로 고정해, 이후 기준 변경 가능성 경고가 사라지지 않도록 회귀 방지
 
 ## D. P1 — 자료 분석 정확도
@@ -206,6 +206,7 @@
 - [x] 실제 데스크톱 브라우저 상담 스모크와 런타임 회귀 보강 — PR #300, `dev` 병합 커밋 `3fd0fcdddbc2b8e30e7993dbcfe6376535bec68a`
 - [~] 게스트 세션·Google 로그인·동일 상담 재진입 런타임 정합성: 프런트가 app JWT·`auth_session_id`·`session_id`를 localStorage에 복구 가능하게 보존하고, guest bootstrap을 백엔드가 기대하는 2단계 세션 바인딩으로 재정렬했으며, `auth_required`/`guest_session_invalid`/rate limit을 공개 메시지와 재시작 액션으로 분기하도록 오류 메타 전파를 보강했다. 프런트 계약 회귀(`17 passed`)는 고정했고, 실제 운영 OAuth·브라우저·리포트 산출물 smoke는 사람 게이트로 남음
 - [ ] OCR·검색·생성형·영상 분석 품질 지표와 결과 공개 방식
+- [~] 사용자 응답/리포트에 보이는 공개 품질 정보와 operator provenance 분리 — `public_quality_summary` 공개 DTO만 노출하고, 내부 실행 provenance·메타데이터·비밀값은 비노출한다. 권한 있는 owner의 목록·상세 계약과 조건부 제한사항 노출까지 구현했으며, live 사람 smoke는 남음
 - [~] #294 / PR #295: `job_id`·`execution_id` 기반 Agent 실행 metadata와 handoff를 보존하고 원문·OCR 전문·경로·비밀값을 raw execution metadata에서 제거. #299 두 번째 단계에서 `show_analysis_job_provenance`와 운영 runbook, invocation·retrieval 연결 및 개인정보 비노출 회귀를 구현; 실제 운영 공급자 장애 trace 실증은 남음
 - [~] 법령·판례 적재와 Agent 호출의 대표 성공·부분 실패·실패 시나리오에서 run/trace 로그가 실제 생성되고, 운영자가 관련 산출물·실패 단계·다음 조치를 추적할 수 있는 회귀 테스트와 조회 절차 제공 — Worker 성공 통합과 partial operator 조회 회귀, 안전한 오류 코드 조회는 구현. 실제 운영 법령·판례·외부 공급자 실패 증적은 남음
 - [~] 외부 서비스 장애, 데이터 갱신 실패, 큐 적체의 운영 관측 — PR #303으로 `dev` 병합 완료(`5f3728e`). `operational_health.v1`, 단발·반복 조회 command, 개인정보 없는 queue·lease·retry·Worker/provider 실패·법령 freshness 집계, 전용 `ops-monitor`, CloudWatch metric filter·alarm과 운영 runbook 구현. 실제 AWS ALARM/OK·SNS 수신 증적은 사람 게이트
