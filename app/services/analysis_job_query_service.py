@@ -527,10 +527,17 @@ def _dict_or_empty(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _project_public_law_items(value: Any) -> list[dict[str, Any]]:
+def _project_public_law_items(value: Any) -> list[Any]:
     if not isinstance(value, list):
         return []
-    return [_project_public_scalar_mapping(item, _PUBLIC_LAW_ITEM_FIELDS) for item in value if isinstance(item, dict)]
+    projected: list[Any] = []
+    for item in value:
+        if isinstance(item, dict):
+            projected.append(_project_public_scalar_mapping(item, _PUBLIC_LAW_ITEM_FIELDS))
+            continue
+        if _is_public_scalar(item):
+            projected.append(deepcopy(item))
+    return projected
 
 
 def _project_public_scalar_mapping(value: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:

@@ -8363,6 +8363,11 @@ def _persist_retrieval_event_for_invocation(
         for item in matched_laws
         if isinstance(item, dict) and _text(item.get("source_reference"))
     ]
+    source_refs.extend(
+        _text(item)
+        for item in matched_laws
+        if isinstance(item, str) and _text(item)
+    )
     if not source_refs:
         source_refs = [
             _text(item.get("source_reference"))

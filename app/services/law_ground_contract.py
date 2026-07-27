@@ -94,11 +94,14 @@ def _canonical_provisions(value: Any) -> list[dict[str, Any]]:
     return provisions
 
 
-def _canonical_matches(value: Any) -> list[dict[str, Any]]:
+def _canonical_matches(value: Any) -> list[Any]:
     if not isinstance(value, list):
         return []
-    matches: list[dict[str, Any]] = []
+    matches: list[Any] = []
     for item in value:
+        if isinstance(item, str) and _text(item):
+            matches.append(_text(item))
+            continue
         if not isinstance(item, dict):
             continue
         source_reference = _source_reference(item)

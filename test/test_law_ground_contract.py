@@ -88,6 +88,18 @@ def test_legacy_source_alias_is_accepted_only_at_the_contract_boundary() -> None
     ]
 
 
+def test_scalar_matched_law_source_references_are_preserved() -> None:
+    structured = normalize_law_structured_result(
+        {
+            "matched_laws": ["law:road-traffic:32"],
+            "retrieval": {"backend": "postgres_pgvector", "status": "ready"},
+        }
+    )
+
+    assert structured["matched_laws"] == ["law:road-traffic:32"]
+    assert structured["retrieval"]["status"] == "ready"
+
+
 def test_unproven_law_hits_are_removed_and_ready_status_is_closed_to_empty() -> None:
     structured = normalize_law_structured_result(
         {

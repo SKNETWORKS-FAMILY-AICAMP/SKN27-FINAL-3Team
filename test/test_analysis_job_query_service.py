@@ -664,6 +664,34 @@ def test_law_public_projection_drops_nested_private_metadata_and_unsafe_limitati
     assert "RuntimeError: raw exception" not in repr(node)
 
 
+def test_law_public_projection_preserves_scalar_source_references() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_scalar_law_refs",
+        load_job=lambda _job_id: {
+            "job_id": "job_scalar_law_refs",
+            "status": "success",
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                        "structured_result": {
+                            "matched_laws": ["law:server"],
+                            "public_quality_summary": {"status": "ready"},
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda payload: payload,
+    )
+
+    node = outcome.payload["supervisor_execution"]["node_results"][0]
+    assert node["structured_result"]["matched_laws"] == ["law:server"]
+
+
 def test_law_public_projection_builds_summary_when_missing() -> None:
     from app.services.analysis_job_query_service import load_analysis_result
 
