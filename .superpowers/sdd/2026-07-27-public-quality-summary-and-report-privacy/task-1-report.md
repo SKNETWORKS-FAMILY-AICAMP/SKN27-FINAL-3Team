@@ -83,6 +83,35 @@ Result: `21 passed in 0.21s`
 
 None identified within Task 1 scope.
 
+## Round 2 Fix Report
+
+### Finding Addressed
+
+- `law_ground_search` node-level `limitations` are now projected through the
+  same approved user-facing limitation allowlist as the quality summary.
+  Unsafe exception/debug text is removed, while an absent field remains
+  absent. Other node types are unchanged.
+
+### TDD Evidence
+
+1. Added a regression test with an unsafe raw exception and an approved
+   limitation in node-level `limitations`.
+2. Confirmed the expected RED state: 1 test failed and 21 passed.
+3. Applied the law-node-only limitation projection.
+4. Re-ran the covering suite successfully.
+
+### Verification
+
+```text
+python -m pytest test/test_analysis_job_query_service.py test/test_law_ground_contract.py -q
+```
+
+Result: `22 passed in 0.19s`
+
+### Round 2 Concerns
+
+None identified within Task 1 scope.
+
 None identified within Task 1 scope. The projection intentionally operates at
 the existing `supervisor_execution.node_results` public boundary; deriving that
 projection directly from `agent_results` would be cross-task behavior and was

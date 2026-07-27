@@ -568,6 +568,31 @@ def test_law_public_projection_builds_summary_when_missing() -> None:
     }
 
 
+def test_law_node_projection_sanitizes_node_level_limitations() -> None:
+    from app.services.analysis_job_query_service import _project_supervisor_execution
+
+    projected = _project_supervisor_execution(
+        {
+            "node_results": [
+                {
+                    "node_code": "law_ground_search",
+                    "status": "partial",
+                    "limitations": [
+                        "RuntimeError: raw exception",
+                        "Latest revision may not be reflected.",
+                    ],
+                    "structured_result": {},
+                }
+            ]
+        }
+    )
+
+    assert projected is not None
+    assert projected["node_results"][0]["limitations"] == [
+        "Latest revision may not be reflected."
+    ]
+
+
 def test_pending_result_projects_only_worker_polling_fields() -> None:
     from app.services.analysis_job_query_service import load_analysis_result
 

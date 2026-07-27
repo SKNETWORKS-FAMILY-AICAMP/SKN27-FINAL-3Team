@@ -277,6 +277,8 @@ def _project_supervisor_execution(value: Any) -> dict[str, Any] | None:
             continue
         node = _project_mapping(item, _NODE_RESULT_FIELDS)
         if item.get("node_code") == "law_ground_search":
+            if "limitations" in item:
+                node["limitations"] = _safe_public_limitations(item.get("limitations"))
             node["structured_result"] = _project_public_law_ground_structured_result(
                 item.get("structured_result")
             )
