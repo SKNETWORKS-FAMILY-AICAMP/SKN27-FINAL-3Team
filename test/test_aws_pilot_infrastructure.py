@@ -267,6 +267,7 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
         "edge-rate-limit",
         "frontend",
         "backend",
+        "rag-loader",
         "agent-worker",
         "file-scan-worker",
         "redis",
@@ -278,6 +279,8 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     assert "ports" not in services["law-neo4j"]
     assert "healthcheck" in services["law-neo4j"]
     assert services["backend"]["depends_on"]["law-neo4j"]["condition"] == "service_healthy"
+    assert services["rag-loader"]["networks"]["pilot"] == {}
+    assert "ipv4_address" not in services["rag-loader"]["networks"]["pilot"]
     assert set(services["caddy"]["ports"]) == {"80:80", "443:443"}
     for name, config in services.items():
         if name != "caddy":
@@ -308,9 +311,23 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
         assert services[name]["env_file"] == [
             {"path": ".runtime.env", "format": "raw"}
         ]
-    assert services["law-neo4j"]["env_file"] == [
-        {"path": ".runtime.env", "format": "raw"}
-    ]
+    assert "env_file" not in services["law-neo4j"]
+    assert set(services["law-neo4j"]["environment"]) == {
+        "NEO4J_AUTH",
+        "NEO4J_server_memory_heap_initial__size",
+        "NEO4J_server_memory_heap_max__size",
+        "NEO4J_server_memory_pagecache_size",
+    }
+    assert "$${NEO4J_AUTH%%/*}" in services["law-neo4j"]["healthcheck"]["test"][1]
+    assert "$${NEO4J_AUTH#*/}" in services["law-neo4j"]["healthcheck"]["test"][1]
+    assert set(services["redis"]["cap_add"]) == {"SETGID", "SETUID"}
+    assert set(services["clamav"]["cap_add"]) == {
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "SETGID",
+        "SETUID",
+    }
     assert services["caddy"]["env_file"] == [
         {"path": ".edge.env", "format": "raw"}
     ]
@@ -320,6 +337,22 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     assert ".compose.env" in deploy
     assert ".edge.env" in deploy
     assert ".elasticsearch.env" not in deploy
+    compose_env_extraction = next(
+        line for line in deploy.splitlines() if "> `$RELEASE_DIR/.compose.env" in line
+    )
+    for name in (
+        "LAW_NEO4J_IMAGE_REF",
+        "LEGAL_DATASET_VERSION",
+        "LEGAL_DATASET_VERIFIED_AT",
+        "NEO4J_USER",
+        "NEO4J_PASSWORD",
+    ):
+        assert name in compose_env_extraction
+    assert "initial RAG stage service states" in deploy
+    assert "logs --tail 80 `$stage_service" in deploy
+    loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+    assert "run --rm --no-deps rag-loader" in loader
+    assert "run --rm --no-deps backend" not in loader
 
 
 def test_caddy_preserves_auth_headers_and_haproxy_enforces_per_ip_rate_limit() -> None:
@@ -440,13 +473,13 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
     expected_steps = (
         "aws s3 cp '$RagSeedS3Uri'",
         "sha256sum -c -",
-        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py verify_production_rag_seed_manifest",
-        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py load_production_rag_seed",
-        "backend python backend/manage.py load_legal_graph_seed",
-        "backend python backend/manage.py verify_legal_graph_readiness --format json",
-        "run --rm --no-deps backend python backend/manage.py smoke_law_ground_search --require-results",
-        "run --rm --no-deps backend python backend/manage.py verify_pgvector_rag_readiness --format json",
-        "run --rm --no-deps backend python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
+        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py verify_production_rag_seed_manifest",
+        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_production_rag_seed",
+        "rag-loader python backend/manage.py load_legal_graph_seed",
+        "rag-loader python backend/manage.py verify_legal_graph_readiness --format json",
+        "run --rm --no-deps rag-loader python backend/manage.py smoke_law_ground_search --require-results",
+        "run --rm --no-deps rag-loader python backend/manage.py verify_pgvector_rag_readiness --format json",
+        "run --rm --no-deps rag-loader python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
     )
     positions = [deploy.index(step) for step in expected_steps]
     assert positions == sorted(positions)
@@ -486,13 +519,13 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
 
     review_load = (
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
-        "backend python backend/manage.py load_review_case_pgvector_seed "
+        "rag-loader python backend/manage.py load_review_case_pgvector_seed "
         "--manifest /run/production-rag-seed/$RagSeedManifestRelativePath "
         "--replace --allow-paid-provider-call --format json"
     )
     legal_load = (
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
-        "backend python backend/manage.py load_production_rag_seed"
+        "rag-loader python backend/manage.py load_production_rag_seed"
     )
     completion = (
         "printf '%s\\n' '$RagSeedManifestSha256' > "
@@ -502,8 +535,8 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
         "verify_production_rag_seed_manifest --manifest",
         review_load,
         legal_load,
-        "backend python backend/manage.py load_legal_graph_seed",
-        "backend python backend/manage.py verify_legal_graph_readiness --format json",
+        "rag-loader python backend/manage.py load_legal_graph_seed",
+        "rag-loader python backend/manage.py verify_legal_graph_readiness --format json",
         "smoke_law_ground_search --require-results",
         "verify_pgvector_rag_readiness --format json",
         "smoke_text_ml_case_search --require-pgvector --require-results",
@@ -819,6 +852,16 @@ def test_database_maintenance_uses_libpq_env_file_without_secret_cli_values() ->
     assert "postgres:16-alpine" not in maintenance
 
 
+def test_database_maintenance_builds_python_env_without_nested_f_string_quotes() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+
+    assert 'u=m[`"username`"]; p=m[`"password`"]' in maintenance
+    assert 'f`"POSTGRES_USER={u}`"' in maintenance
+    assert 'f`"POSTGRES_PASSWORD={p}`"' in maintenance
+    assert 'f`"PGUSER={u}`"' in maintenance
+    assert 'f`"PGPASSWORD={p}`"' in maintenance
+
+
 def test_native_s3_lockfile_requires_terraform_1_11_or_newer() -> None:
     versions = (TERRAFORM_DIR / "versions.tf").read_text(encoding="utf-8")
     runbook = _read_deploy("README.ko.md")
@@ -943,6 +986,16 @@ def test_database_migration_env_forces_postgres_ssl_and_asserts_rds_target() -> 
     target_check = maintenance.index("select current_database()")
     migrate = maintenance.index("migrate --noinput")
     assert target_check < migrate
+
+
+def test_database_maintenance_restores_runtime_profile_with_replacement_association_id() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+
+    assert '--query "IamInstanceProfileAssociation.AssociationId"' in maintenance
+    assert "$associationId = (" in maintenance
+    activate = maintenance.index('"Name=$maintenanceProfile"')
+    restore = maintenance.index('"Name=$runtimeProfile"')
+    assert activate < restore
 
 
 def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services() -> None:
@@ -1352,6 +1405,18 @@ def test_public_origin_contract_fails_fast_before_remote_or_paid_work() -> None:
         assert token in deploy
         assert deploy.index(token) < ssm_put
         assert deploy.index(token) < build
+
+
+def test_deploy_placeholder_validation_preserves_a_single_match_as_a_collection() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+
+    assert re.search(
+        r"\$nonGenerated\s*=\s*@\(\s*\$runtimeEnv\s+-split\s+\"`r\?`n\"\s*"
+        r"\|\s*Where-Object",
+        deploy,
+        re.DOTALL,
+    )
+    assert "$nonGenerated.Count -gt 0" in deploy
 
 
 def test_first_normal_promotion_requires_google_live_smoke_remotely() -> None:

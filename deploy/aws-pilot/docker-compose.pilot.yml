@@ -157,6 +157,19 @@ services:
       pilot:
         ipv4_address: ${PILOT_BACKEND_IP:-172.31.0.5}
 
+  rag-loader:
+    image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    env_file: *runtime-env-file
+    environment: *backend-environment
+    mem_limit: 768m
+    logging: *default-logging
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    networks:
+      pilot: {}
+
   agent-worker:
     image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
     command: python backend/manage.py process_agent_work_items --loop --limit 5
@@ -227,6 +240,7 @@ services:
     mem_limit: 160m
     logging: *default-logging
     cap_drop: [ALL]
+    cap_add: [SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     tmpfs: [/tmp]
     volumes:
@@ -246,7 +260,7 @@ services:
     mem_limit: 2048m
     logging: *default-logging
     cap_drop: [ALL]
-    cap_add: [CHOWN, SETGID, SETUID]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     environment:
       CLAMD_CONF_ConcurrentDatabaseReload: "no"
@@ -267,7 +281,6 @@ services:
     restart: unless-stopped
     mem_limit: 768m
     logging: *default-logging
-    env_file: *runtime-env-file
     environment:
       NEO4J_AUTH: ${NEO4J_USER:?NEO4J_USER is required}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
       NEO4J_server_memory_heap_initial__size: 256m
@@ -277,7 +290,7 @@ services:
       - law_neo4j_data:/data
       - law_neo4j_logs:/logs
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u \"$$NEO4J_USER\" -p \"$$NEO4J_PASSWORD\" \"RETURN 1\""]
+      test: ["CMD-SHELL", "cypher-shell -u \"$${NEO4J_AUTH%%/*}\" -p \"$${NEO4J_AUTH#*/}\" \"RETURN 1\""]
       interval: 30s
       timeout: 10s
       start_period: 60s

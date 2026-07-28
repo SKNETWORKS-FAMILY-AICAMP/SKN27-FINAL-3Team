@@ -276,9 +276,11 @@ else {
 }
 
 if ($runtimeEnv -match "(?m)=REPLACE_|(?m)=INJECTED_") {
-    $nonGenerated = $runtimeEnv -split "`r?`n" | Where-Object {
-        $_ -match "=REPLACE_"
-    }
+    $nonGenerated = @(
+        $runtimeEnv -split "`r?`n" | Where-Object {
+            $_ -match "=REPLACE_"
+        }
+    )
     if ($nonGenerated.Count -gt 0) {
         throw "Replace all REPLACE_ values in the runtime env file before deployment."
     }
@@ -571,9 +573,9 @@ try {
         "aws ssm get-parameter --region '$region' --name '$parameterName' --with-decryption --query Parameter.Value --output text > `$RELEASE_DIR/.runtime.env.tmp",
         "tr -d '\r' < `$RELEASE_DIR/.runtime.env.tmp > `$RELEASE_DIR/.runtime.env",
         "rm -f `$RELEASE_DIR/.runtime.env.tmp",
-        "grep -E '^(AWS_REGION|BACKEND_REPOSITORY_URL|FRONTEND_REPOSITORY_URL|RELEASE_TAG|CADDY_IMAGE_REF|HAPROXY_IMAGE_REF|REDIS_IMAGE_REF|CLAMAV_IMAGE_REF|OPERATIONAL_LOG_GROUP)=' `$RELEASE_DIR/.runtime.env > `$RELEASE_DIR/.compose.env",
+        "grep -E '^(AWS_REGION|BACKEND_REPOSITORY_URL|FRONTEND_REPOSITORY_URL|RELEASE_TAG|CADDY_IMAGE_REF|HAPROXY_IMAGE_REF|REDIS_IMAGE_REF|CLAMAV_IMAGE_REF|LAW_NEO4J_IMAGE_REF|LEGAL_DATASET_VERSION|LEGAL_DATASET_VERIFIED_AT|NEO4J_USER|NEO4J_PASSWORD|OPERATIONAL_LOG_GROUP)=' `$RELEASE_DIR/.runtime.env > `$RELEASE_DIR/.compose.env",
         "grep -E '^(APP_DOMAIN|ACME_EMAIL)=' `$RELEASE_DIR/.runtime.env > `$RELEASE_DIR/.edge.env",
-        "grep -q '^AWS_REGION=' `$RELEASE_DIR/.compose.env && grep -q '^BACKEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^FRONTEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^RELEASE_TAG=' `$RELEASE_DIR/.compose.env && grep -q '^OPERATIONAL_LOG_GROUP=' `$RELEASE_DIR/.compose.env",
+        "grep -q '^AWS_REGION=' `$RELEASE_DIR/.compose.env && grep -q '^BACKEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^FRONTEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^RELEASE_TAG=' `$RELEASE_DIR/.compose.env && grep -q '^LAW_NEO4J_IMAGE_REF=' `$RELEASE_DIR/.compose.env && grep -q '^LEGAL_DATASET_VERSION=' `$RELEASE_DIR/.compose.env && grep -q '^LEGAL_DATASET_VERIFIED_AT=' `$RELEASE_DIR/.compose.env && grep -q '^NEO4J_USER=' `$RELEASE_DIR/.compose.env && grep -q '^NEO4J_PASSWORD=' `$RELEASE_DIR/.compose.env && grep -q '^OPERATIONAL_LOG_GROUP=' `$RELEASE_DIR/.compose.env",
         "test `$(wc -l < `$RELEASE_DIR/.edge.env) -eq 2",
         "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.30.0.0/24' 'PILOT_CADDY_IP=172.30.0.2' 'PILOT_EDGE_RATE_LIMIT_IP=172.30.0.3' 'PILOT_FRONTEND_IP=172.30.0.4' 'PILOT_BACKEND_IP=172.30.0.5' 'PILOT_AGENT_WORKER_IP=172.30.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.30.0.7' 'PILOT_REDIS_IP=172.30.0.8' 'PILOT_OPS_MONITOR_IP=172.30.0.9' 'PILOT_CLAMAV_IP=172.30.0.10' 'PILOT_LAW_NEO4J_IP=172.30.0.12' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' 'PILOT_LAW_NEO4J_VOLUME_NAME=${stageProjectName}_law_neo4j_data' 'PILOT_LAW_NEO4J_LOG_VOLUME_NAME=${stageProjectName}_law_neo4j_logs' > `$RELEASE_DIR/.stage-compose.env",
         "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.31.0.0/24' 'PILOT_CADDY_IP=172.31.0.2' 'PILOT_EDGE_RATE_LIMIT_IP=172.31.0.3' 'PILOT_FRONTEND_IP=172.31.0.4' 'PILOT_BACKEND_IP=172.31.0.5' 'PILOT_AGENT_WORKER_IP=172.31.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.31.0.7' 'PILOT_REDIS_IP=172.31.0.8' 'PILOT_OPS_MONITOR_IP=172.31.0.9' 'PILOT_CLAMAV_IP=172.31.0.10' 'PILOT_LAW_NEO4J_IP=172.31.0.12' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' 'PILOT_LAW_NEO4J_VOLUME_NAME=${stageProjectName}_law_neo4j_data' 'PILOT_LAW_NEO4J_LOG_VOLUME_NAME=${stageProjectName}_law_neo4j_logs' > `$RELEASE_DIR/.production-compose.env",
@@ -592,7 +594,7 @@ try {
             "test ! -e /opt/skn27-pilot/current && test ! -L /opt/skn27-pilot/current",
             "test ! -e `$RELEASE_DIR && test ! -L `$RELEASE_DIR",
             "test -z `"`$(find /opt/skn27-pilot/releases -mindepth 2 -maxdepth 2 -type f \( -name '.initial-rag-bootstrap.staged' -o -name '.release-update.staged' \) -print -quit 2>/dev/null)`"",
-            "stage_failed() { status=`$?; trap - ERR; cd `$RELEASE_DIR 2>/dev/null || true; $stageComposeCommand down --remove-orphans >/dev/null 2>&1 || true; docker volume rm '${stageProjectName}_redis_data' '${stageProjectName}_clamav_data' '${stageProjectName}_law_neo4j_data' '${stageProjectName}_law_neo4j_logs' >/dev/null 2>&1 || true; rm -rf -- `$RELEASE_DIR; exit `$status; }",
+            "stage_failed() { status=`$?; trap - ERR; cd `$RELEASE_DIR 2>/dev/null || true; echo '=== initial RAG stage service states ===' >&2; $stageComposeCommand ps -a >&2 || true; for stage_service in redis law-neo4j clamav backend; do echo `"=== `$stage_service logs ===`" >&2; $stageComposeCommand logs --tail 80 `$stage_service >&2 || true; done; $stageComposeCommand down --remove-orphans >/dev/null 2>&1 || true; docker volume rm '${stageProjectName}_redis_data' '${stageProjectName}_clamav_data' '${stageProjectName}_law_neo4j_data' '${stageProjectName}_law_neo4j_logs' >/dev/null 2>&1 || true; rm -rf -- `$RELEASE_DIR; exit `$status; }",
             "trap stage_failed ERR"
         )
         $commands += $materializeCommands
