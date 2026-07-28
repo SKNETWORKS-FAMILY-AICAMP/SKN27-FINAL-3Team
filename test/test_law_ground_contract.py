@@ -5,6 +5,32 @@ from app.services.law_ground_contract import (
 )
 
 
+def test_law_ground_contract_excludes_private_retrieval_fields_from_public_metadata() -> None:
+    from app.services.agent_node_service import _retrieval_metadata
+
+    retrieval = _retrieval_metadata(
+        {
+            "status": "ready",
+            "backend": "postgres_pgvector",
+            "result_count": 2,
+            "retrieved_at": "2026-07-27T09:00:00+09:00",
+            "effective_at": "2026-07-20",
+            "query": "private query",
+            "embedding": {"model": "text-embedding-3-large"},
+            "data_provenance": {"dataset_version": "sha256:private"},
+            "sql_tables": ["law_embeddings"],
+        }
+    )
+
+    assert retrieval == {
+        "status": "ready",
+        "backend": "postgres_pgvector",
+        "result_count": 2,
+        "retrieved_at": "2026-07-27T09:00:00+09:00",
+        "effective_at": "2026-07-20",
+    }
+
+
 def test_failed_retrieval_removes_preexisting_source_backed_law_matches() -> None:
     structured = normalize_law_structured_result(
         {
@@ -62,6 +88,18 @@ def test_legacy_source_alias_is_accepted_only_at_the_contract_boundary() -> None
     ]
 
 
+def test_scalar_matched_law_source_references_are_preserved() -> None:
+    structured = normalize_law_structured_result(
+        {
+            "matched_laws": ["law:road-traffic:32"],
+            "retrieval": {"backend": "postgres_pgvector", "status": "ready"},
+        }
+    )
+
+    assert structured["matched_laws"] == ["law:road-traffic:32"]
+    assert structured["retrieval"]["status"] == "ready"
+
+
 def test_unproven_law_hits_are_removed_and_ready_status_is_closed_to_empty() -> None:
     structured = normalize_law_structured_result(
         {
@@ -108,3 +146,62 @@ def test_internal_retrieval_metadata_is_lifted_out_of_law_provisions() -> None:
     assert structured["law_provisions"][0]["source_reference"] == "law:road-traffic:32"
     assert "source_ref" not in structured["law_provisions"][0]
     assert "_retrieval" not in structured["law_provisions"][0]
+
+
+def test_law_structured_result_exposes_freshness_metadata() -> None:
+    structured = normalize_law_structured_result(
+        {
+            "law_provisions": [
+                {
+                    "source_ref": "law:road-traffic:32",
+                    "source_name": "Road Traffic Act",
+                    "article_no": "Article 32",
+                    "provision_text": "Stopping restrictions.",
+                    "_retrieval": {
+                        "backend": "postgres_pgvector",
+                        "status": "ready",
+                        "effective_at": "2026-07-27",
+                        "retrieved_at": "2026-07-27T09:00:00+00:00",
+                        "data_provenance": {
+                            "dataset_version": "sha256:verified-dataset",
+                            "verified_at": "2026-07-27T08:55:00+00:00",
+                        },
+                    },
+                }
+            ]
+        }
+    )
+
+    assert structured["freshness"] == {
+        "effective_at": "2026-07-27",
+        "retrieved_at": "2026-07-27T09:00:00+00:00",
+        "dataset_version": "sha256:verified-dataset",
+        "verified_at": "2026-07-27T08:55:00+00:00",
+        "limitation": "2026-07-27 기준 법령으로 조회했습니다. 조회 이후 법령이나 기준이 변경되었을 수 있어 최신 여부를 다시 확인해야 합니다.",
+        "stale_sources": [],
+    }
+
+
+def test_historical_law_basis_marks_changed_law_risk() -> None:
+    structured = normalize_law_structured_result(
+        {
+            "retrieval": {
+                "backend": "postgres_pgvector",
+                "status": "ready",
+                "effective_at": "2020-01-01",
+                "retrieved_at": "2026-07-27T09:00:00+00:00",
+                "data_provenance": {
+                    "dataset_version": "sha256:verified-dataset",
+                    "verified_at": "2026-07-27T08:55:00+00:00",
+                },
+            },
+            "freshness": {
+                "stale_sources": ["road_traffic_act:article_32"],
+            },
+        }
+    )
+
+    assert structured["freshness"]["effective_at"] == "2020-01-01"
+    assert structured["freshness"]["stale_sources"] == ["road_traffic_act:article_32"]
+    assert "2020-01-01 기준 법령으로 조회했습니다." in structured["freshness"]["limitation"]
+    assert "변경되었을 수 있어 최신 여부를 다시 확인해야 합니다." in structured["freshness"]["limitation"]

@@ -40,7 +40,7 @@
 - [~] 법령·과실 기준·판례 데이터의 최신성과 갱신 파이프라인 — 승인 seed manifest·법령 적재·readiness·수동 갱신 절차는 구현, source별 운영 재색인과 실DB 증적은 사람 게이트
 - [~] 긴급하고 당황한 사용자를 위한 단계형 UX와 명확한 다음 행동 — PR #296 결과·기한·다음 행동 화면과 역질문 사유 표시 완료. PR #300에서 데스크톱 실제 브라우저의 진입·예시 선택·질문 전송·안전한 응답 확인까지 완료했으며, 모바일·첨부·리포트 다운로드 실사용성 검증은 남음
 - [~] OCR·영상·검색·생성형 결과의 정확도 검증 지표와 테스트셋 — 법령 RAG 평가 완료, OCR/Vision 실데이터 품질은 #28·#39·#170
-- [ ] 채팅이 길어져도 사건 맥락을 잃지 않는 요약·압축·상태 관리
+- [x] 채팅이 길어져도 사건 맥락을 잃지 않는 요약·압축·상태 관리 — 2026-07-27 `case_memory.v1` 구조화 메모리와 `conversation_summary` 압축을 상담 상태·follow-up snapshot에 함께 저장하고, 서버 우선 복원 및 회귀 테스트로 장기 멀티턴 문맥 보존을 고정
 - [x] 서비스 범위, 판단 불가 사례 처리, 법률 서비스 경계의 명문화 — #264
 - [x] JSON/DB 구조가 아닌 사용자용 판단 카드·근거·주의사항 중심의 결과 화면 — PR #296 통합, UI 계약 테스트·Vite build
 - [x] 리포트/이의신청 문서와 보험사 제출 자료까지 연결하는 실사용 가치 — #238, #279
@@ -103,7 +103,7 @@
   - 전체 A/B 수치, phase·RAGAS latency, 실행환경, 자동화 테스트 증적: `docs/tech-validation-reports/legal-rag/2026-07-22-legal-rag-ab-execution-report.md`의 `legal-ab-018-pgvector-gates-20260722` 섹션
 - [x] 대표 사고 시나리오별 검색 정확도 평가 세트 — `etl/fault_cases/evaluation`의 complete30·qrels·공식 평가자산 manifest
 - [x] 검색 결과의 근거 출처·적용 시점·조회 시각·한계 표시 — 공개 결과 계약, #279 E2E, 법령 `effective_at`·`retrieved_at`과 결과 화면
-- [x] 유사도 점수만으로 결론을 내리지 않도록 하는 근거 검토 기준 — 저점수 차단, 필수 근거 검증, 유사사례 advisory 계약 테스트
+- [x] 유사도 점수만으로 결론을 내리지 않도록 하는 근거 검토 기준 — 저점수 차단, 필수 근거 검증, 유사사례 advisory 계약 테스트. 2026-07-27 점검에서 `law_ground_search` adapter의 LLM fallback extractor 주입과 `LEGAL_RAG_MIN_SIMILARITY_SCORE` 기반 pgvector 최소 score 차단을 런타임·회귀 테스트로 보강
 
 ### C-2. 데이터 최신성
 
@@ -116,8 +116,8 @@
 - [~] 수집 시점, 마지막 검증일, 출처, 적용 시점 저장 — 법령 `source_summaries` 계약과 결정적 `dataset_version` 구현, 운영 DB 보관은 남음
 - [~] 정기 갱신 스케줄 또는 운영 수동 갱신 절차 — 법령 수동 실행·검증·실패 후 재실행 runbook 구현, 정기 스케줄은 남음
 - [~] 갱신 실패·오래된 데이터·출처 불명 데이터 경고 — `missing_sources`·`failed_sources`·`stale_sources` 자동 차단 CLI 구현, CloudWatch 알림 연결은 남음
-- [ ] 사용자 결과에 기준일과 최신성 제한사항 표시
-- [ ] 변경된 법령·과실 기준 회귀 테스트
+- [x] 사용자 결과에 기준일과 최신성 제한사항 표시 — 공개 품질 요약 DTO 계약으로 `freshness`의 기준일, 수집/조회 시각, 최신성 경고만 안전한 범위에서 노출하고 프런트 법령 카드에 사용자용 안내 문구를 렌더링. `dataset_version`은 운영 provenance 전용이다.
+- [x] 변경된 법령·과실 기준 회귀 테스트 — 과거 `effective_at` 기준 조회와 `stale_sources` fixture를 정규화 계약 테스트로 고정해, 이후 기준 변경 가능성 경고가 사라지지 않도록 회귀 방지
 
 ## D. P1 — 자료 분석 정확도
 
@@ -145,8 +145,8 @@
 - [x] 비회원 상담, Google 로그인, 파일 첨부, 분석 진행, 내 사건, 이력, 리포트 흐름의 기반
 - [~] 긴급 상황에서 UI가 충분히 단순하고 직관적인지 검증 필요 — 2026-07-23 PR #300 실제 데스크톱 브라우저 점검에서 초기 화면, 입력창 노출, 예시 질문 선택, 질문 전송, 응답 표시를 확인. 정량적 사용성·모바일·키보드·스크린리더 검증은 아직 미실시
 - [x] DB/JSON 중심 노출을 사용자용 단계형 화면으로 정리 — PR #296의 상담·결과·마이페이지·히스토리·리포트 화면과 Vite build·UI 계약 검증
-- [x] 상담 화면 병합 회귀와 무근거 응답 품질 보강 — PR #300: 정의되지 않은 빠른 질문 변수로 인한 흰 화면 제거, 입력창을 첫 화면 안에 배치, 과태료 질문 라우팅 보강, 검증된 법령 검색이 없을 때 확정 판단 대신 기관·기한·증빙·다음 행동을 안내하는 안전한 fallback 적용. 병합 전 CI 사용자 확인, 집중 회귀 `48 passed`, Ruff 통과, Vite production build 성공
-- [ ] 입력 단계 UI: 사고 유형 선택, 사실관계 입력, 주장 입력, 첨부자료 업로드, 누락 정보 확인 — 2026-07-22 점검: 첨부자료 업로드(첨부 목적 select)만 구현. 사고 유형 선택, 사실관계·주장 입력은 구조화된 화면 없이 자유 텍스트 채팅에 의존
+- [x] 상담 화면 병합 회귀와 무근거 응답 품질 보강 — PR #300: 정의되지 않은 빠른 질문 변수로 인한 흰 화면 제거, 입력창을 첫 화면 안에 배치, 과태료 질문 라우팅 보강, 검증된 법령 검색이 없을 때 확정 판단 대신 기관·기한·증빙·다음 행동을 안내하는 안전한 fallback 적용. 병합 전 CI 사용자 확인, 집중 회귀 `48 passed`, Ruff 통과, Vite production build 성공. 2026-07-27 점검에서 사고 문맥에 `벌금` 표현이 섞인 입력이 현재도 `accident_initial_consultation`으로 유지되는 회귀 테스트를 추가해 과태료 오분기 재발을 고정
+- [x] 입력 단계 UI: 사고 유형 선택, 사실관계 입력, 주장 입력, 첨부자료 업로드, 누락 정보 확인 — 2026-07-27 `app/web`에 사고 유형 select, 핵심 사실 4필드, 확인된 사실/사용자 주장/미확인 항목 분리 입력, 첨부 현황 표시, 누락 핵심 사실 안내를 추가했고 `consultationIntake` helper Node 테스트와 Vite production build로 검증
 - [x] 결과 화면 UI: 검토 상태, 판단 근거, 참고 법령·사례, 진술/확인 사실 구분, 주의사항, 제출기한, 다음 행동 — #279 `user_claims`와 확인 사실을 별도 패널로 표시
 - [x] 역질문 UX에서 부족한 정보와 필요한 이유를 짧고 명확하게 표시 — `FollowUpNote`의 필수·선택 그룹과 항목별 `reason` 렌더링
 - [x] 분석 진행·대기·부분 완료·실패 상태를 사용자 언어로 표시 — 2026-07-22 점검: `reportStatusLabel`/`caseStatusLabel`/`attachmentStatusLabel` 함수가 draft·running·partial·success·failed를 "작성 중"/"분석 중"/"보완 필요"/"분석 완료"/"확인 필요" 등으로 변환. 모든 노출 지점이 이 함수를 거치는지 전수 조사는 하지 않음
@@ -155,20 +155,20 @@
 ### E-6. 채팅창 drag-and-drop 첨부 분류와 실제 Agent handoff — P0
 
 - [x] #294 / PR #295: 채팅 입력 drop zone, JPEG/PNG/WebP/PDF/MP4/MOV 허용 정책, 업로드 목적·MIME 불일치 차단, 스캔 상태 표시, 지원하지 않는 파일의 사용자용 재시도 안내와 최신 회귀·Vite build
-- [x] 고지서 PDF/이미지는 `fine_notice_analysis`의 OCR 1차 결과를 사용자 확인 카드로 표시하고, 확인 전 법령 검색·이의절차·문서 생성을 차단. 확인 후에만 `law_ground_search`와 `appeal_decision_flow`을 계획에 추가
+- [x] 고지서 PDF/이미지는 `fine_notice_analysis`의 OCR 1차 결과를 사용자 확인 카드로 표시하고, 확인 전 법령 검색·이의절차·문서 생성을 차단. 확인 후에만 `law_ground_search`와 `appeal_decision_flow`을 계획에 추가. 2026-07-27 점검에서 `appeal_decision_flow` 미연결 제보 문서는 현재 `dev` 기준 재현되지 않았고, 이슈는 미배선이 아니라 확인 전 차단 정책과 계획 삽입 계약을 계속 보존하는지의 회귀 검증 대상으로 정리
 - [x] 블랙박스 영상은 기존 Vision pipeline adapter를 통해 `text_ml_case_search`·`law_ground_search`로 handoff. checkpoint 부재·의존성·decode·timeout은 안전한 실패 코드와 다음 행동으로 반환
 - [~] 제공된 `2026-07-23-runpod-serverless-vision-design.md`를 기준으로 PR #304 (`feat-runpod-serverless-vision`)에서 `VISION_RUNTIME_PROVIDER=runpod`, HTTPS signed URL, `/run`·`/status` polling, job ID 재사용, stable remote error code, 격리·정리형 Serverless worker와 배포 환경 계약을 구현. PR #303과 병합 커밋 `5f3728e`까지의 운영 관측 기반 위에서 local/mock 계약을 검증했고, 전체 `test/` `960 passed, 38 skipped`, Django `368 passed`, Dockerfile build check도 통과. restricted key 발급·유료 RunPod Endpoint 생성·모델 artifact 승인·비식별 실영상 smoke는 사람 게이트이므로 아직 운영 연결 완료로 표시하지 않음
 - [x] 사고 사진(`accident_scene`)은 서버 저장 문서 분류를 사용자가 `attachment_id`로 확인한 뒤 사진 전용 사례·법령 검색 계획으로 연결. 클라이언트 분류 주입, 오래된 분류, 사진의 Vision 영상 경로 오호출을 회귀 테스트로 차단
-- [ ] PDF 고지서, 사고 사진, 블랙박스 영상, 지원하지 않는 파일, 분류 불명 파일의 다섯 E2E 시나리오를 실제 adapter 경계까지 검증. mock fixture 통과만으로 실제 Vision 연결 완료로 판단하지 않음
+- [x] PDF 고지서, 사고 사진, 블랙박스 영상, 지원하지 않는 파일, 분류 불명 파일의 다섯 E2E 시나리오를 실제 adapter 경계까지 검증. `submit_message -> execute_agent_plan` 통합 테스트에서 문서 분류, 사고 사진의 사례·법령 검색, 블랙박스 Vision handoff, unsupported retry, unknown `change_purpose`를 각각 고정했고, 이것만으로 외부 Vision 런타임 연결 완료를 주장하지는 않음
 
 ## F. P1 — 채팅 맥락·사건 상태 관리
 
 - [x] `conversation_summary` 필드와 상담 요약 기반 존재
-- [?] 장기 멀티턴 사건 상태를 안전하게 압축하는 체계는 미검증
-- [x] #224 채팅 세션 기반 역질문 상태 저장·서버 우선 복원 계약 / PR #225
-- [ ] 당사자·차량, 일시·장소, 사고 유형, 확인 사실, 사용자 주장, 첨부자료, 검색 근거, 미확인 항목, 기한, 진행 단계를 담는 구조화된 사건 메모리
-- [ ] 오래된 대화 압축 시 판단 근거·출처·미확인 사실 보존
-- [ ] 요약 과정의 정보 변경·소실 회귀 테스트
+- [x] 장기 멀티턴 사건 상태를 안전하게 압축하는 체계 — 2026-07-27 `case_memory.v1` compaction이 당사자/차량, 일시·장소, 확인 사실, 사용자 주장, 첨부자료, 근거 참조, 미확인 항목, 기한, 진행 단계를 구조적으로 유지하도록 검증
+- [x] #224 채팅 세션 기반 역질문 상태 저장·서버 우선 복원 계약 / PR #225. 2026-07-27 점검에서 새 상담 시작 시 이전 `session_id`를 명시적으로 비우고, 누락 자료 업로드 준비 경로는 현재 세션 바인딩을 유지하도록 프런트엔드 계약 테스트와 함께 보강
+- [x] 당사자·차량, 일시·장소, 사고 유형, 확인 사실, 사용자 주장, 첨부자료, 검색 근거, 미확인 항목, 기한, 진행 단계를 담는 구조화된 사건 메모리 — `app/services/case_memory_service.py`에서 `case_memory.v1` 생성·병합·압축을 담당하고 `submit_message()`/follow-up snapshot에 연결
+- [x] 오래된 대화 압축 시 판단 근거·출처·미확인 사실 보존 — 압축 결과가 `evidence_refs`, `search_grounds`, `unknowns`, `deadlines`, `progress_steps`를 유지한 채 `conversation_summary`만 축약하도록 서비스·snapshot 계약 테스트로 고정
+- [x] 요약 과정의 정보 변경·소실 회귀 테스트 — `test/test_case_memory_service.py`, `test/test_chat_session_followup_service.py`, `test/test_chat_orchestration_service.py`에 장기 대화 메모리 보존·서버 우선 복원·상담 응답 노출 회귀 추가
 - [x] 사건별 채팅 세션·분석·리포트 연결 — canonical 소유권·대표 흐름 E2E #279
 - [x] 채팅 세션/히스토리 API 공식 OpenAPI 계약화 — #270, #274
 
@@ -204,7 +204,9 @@
 - [x] PR 단위 CI 체계
 - [x] 대표 사용자 흐름 E2E: 자료 입력, 사실/주장 분리, OCR, Supervisor 계획, 법령·판례 검색, 한계 표시, 리포트 생성·다운로드 — #279
 - [x] 실제 데스크톱 브라우저 상담 스모크와 런타임 회귀 보강 — PR #300, `dev` 병합 커밋 `3fd0fcdddbc2b8e30e7993dbcfe6376535bec68a`
+- [~] 게스트 세션·Google 로그인·동일 상담 재진입 런타임 정합성: 프런트가 app JWT·`auth_session_id`·`session_id`를 localStorage에 복구 가능하게 보존하고, guest bootstrap을 백엔드가 기대하는 2단계 세션 바인딩으로 재정렬했으며, `auth_required`/`guest_session_invalid`/rate limit을 공개 메시지와 재시작 액션으로 분기하도록 오류 메타 전파를 보강했다. 프런트 계약 회귀(`17 passed`)는 고정했고, 실제 운영 OAuth·브라우저·리포트 산출물 smoke는 사람 게이트로 남음
 - [ ] OCR·검색·생성형·영상 분석 품질 지표와 결과 공개 방식
+- [~] 사용자 응답/리포트에 보이는 공개 품질 정보와 operator provenance 분리 — `public_quality_summary` 공개 DTO만 노출하고, 내부 실행 provenance·메타데이터·비밀값은 비노출한다. 권한 있는 owner의 목록·상세 계약과 조건부 제한사항 노출까지 구현했으며, live 사람 smoke는 남음
 - [~] #294 / PR #295: `job_id`·`execution_id` 기반 Agent 실행 metadata와 handoff를 보존하고 원문·OCR 전문·경로·비밀값을 raw execution metadata에서 제거. #299 두 번째 단계에서 `show_analysis_job_provenance`와 운영 runbook, invocation·retrieval 연결 및 개인정보 비노출 회귀를 구현; 실제 운영 공급자 장애 trace 실증은 남음
 - [~] 법령·판례 적재와 Agent 호출의 대표 성공·부분 실패·실패 시나리오에서 run/trace 로그가 실제 생성되고, 운영자가 관련 산출물·실패 단계·다음 조치를 추적할 수 있는 회귀 테스트와 조회 절차 제공 — Worker 성공 통합과 partial operator 조회 회귀, 안전한 오류 코드 조회는 구현. 실제 운영 법령·판례·외부 공급자 실패 증적은 남음
 - [~] 외부 서비스 장애, 데이터 갱신 실패, 큐 적체의 운영 관측 — PR #303으로 `dev` 병합 완료(`5f3728e`). `operational_health.v1`, 단발·반복 조회 command, 개인정보 없는 queue·lease·retry·Worker/provider 실패·법령 freshness 집계, 전용 `ops-monitor`, CloudWatch metric filter·alarm과 운영 runbook 구현. 실제 AWS ALARM/OK·SNS 수신 증적은 사람 게이트

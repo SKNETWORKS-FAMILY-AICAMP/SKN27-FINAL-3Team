@@ -19,6 +19,11 @@ from app.contracts.report import (
     ReportSection,
     ReportSummary,
 )
+from app.services.analysis_job_query_service import (
+    project_public_quality_summary,
+    safe_public_confidence_label,
+    safe_public_limitations,
+)
 
 
 WORKER_REPORT_SOURCE = "analysis_worker_reporting"
@@ -43,6 +48,7 @@ PUBLIC_REPORT_QUALITY_KEYS = (
     "limitation_count",
     "limitations",
     "confidence_label",
+    "public_quality_summary",
 )
 PUBLIC_REPORT_ERROR_KEYS = (
     "contract_version",
@@ -280,8 +286,18 @@ def _public_report_quality(value: object) -> dict[str, Any]:
     quality = _mapping(value)
     public: dict[str, Any] = {}
     for key in PUBLIC_REPORT_QUALITY_KEYS:
-        if key == "limitations":
-            public[key] = _text_list(quality.get(key))
+        if key == "contract_version":
+            public[key] = "report_quality.v2"
+        elif key == "limitations":
+            public[key] = safe_public_limitations(quality.get(key))
+        elif key == "public_quality_summary":
+            summary = project_public_quality_summary(quality.get(key))
+            if summary is not None:
+                public[key] = summary
+        elif key == "limitation_count":
+            public[key] = len(safe_public_limitations(quality.get("limitations")))
+        elif key == "confidence_label":
+            public[key] = safe_public_confidence_label(quality.get(key))
         elif key in quality:
             public[key] = deepcopy(quality[key])
     return public

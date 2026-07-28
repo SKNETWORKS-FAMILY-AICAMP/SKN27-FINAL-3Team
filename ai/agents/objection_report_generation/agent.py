@@ -579,6 +579,18 @@ def _legal_grounds(law_result: dict[str, Any]) -> list[dict[str, Any]]:
 
     grounds = []
     for item in raw_items:
+        if isinstance(item, str):
+            grounds.append(
+                {
+                    "law_name": "관련 법령",
+                    "article": "",
+                    "summary": "세부 조항은 별도 확인이 필요합니다.",
+                    "source_reference": _text(item),
+                    "source_url": "",
+                    "score": None,
+                }
+            )
+            continue
         if not isinstance(item, dict):
             continue
         law_name = _text(item.get("source_name")) or _text(item.get("law_name")) or "관련 법령"

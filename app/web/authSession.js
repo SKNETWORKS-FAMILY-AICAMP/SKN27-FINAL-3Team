@@ -244,35 +244,45 @@ export function browserOrigin() {
 }
 
 export function readStoredAuthToken() {
-  return "";
+  const storedSession = readStoredJson(AUTH_SESSION_STORAGE_KEY) || {};
+  return String(storedSession.access_token || "");
 }
 
 export function readStoredAuthSession() {
   const storedSession = readStoredJson(AUTH_SESSION_STORAGE_KEY) || {};
-  if (storedSession.auth_session_id || storedSession.user_id) {
-    removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
-    writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
-      guest_id: storedSession.guest_id || null,
-      guest_credential: storedSession.guest_credential || null,
-    });
-    return {
-      guest_id: storedSession.guest_id || null,
-      guest_credential: storedSession.guest_credential || null,
-    };
-  }
-  return storedSession;
+  const normalizedSession = {
+    guest_id: storedSession.guest_id || null,
+    guest_credential: storedSession.guest_credential || null,
+    auth_session_id: storedSession.auth_session_id || null,
+    user_id: storedSession.user_id || null,
+    session_id: storedSession.session_id || null,
+    access_token: storedSession.access_token || null,
+  };
+  return Object.values(normalizedSession).some((value) => Boolean(value)) ? normalizedSession : {};
 }
 
 export function readStoredGoogleProfile() {
   return readStoredJson(GOOGLE_PROFILE_STORAGE_KEY);
 }
 
-export function persistAuthSession({ guestId, guestCredential }) {
-  removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY);
+export function persistAuthSession({
+  accessToken,
+  authSessionId,
+  guestId,
+  guestCredential,
+  googleProfile,
+  sessionId,
+  userId,
+}) {
   writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
     guest_id: guestId || null,
     guest_credential: guestCredential || null,
+    auth_session_id: authSessionId || null,
+    user_id: userId || null,
+    session_id: sessionId || null,
+    access_token: accessToken || null,
   });
+  writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null);
 }
 
 export function clearStoredAuthSession() {

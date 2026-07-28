@@ -11,6 +11,7 @@ from django.test import RequestFactory, TestCase, TransactionTestCase
 from django.utils import timezone
 
 from chatbot.case_repository import confirm_case_facts, start_case_analysis
+from app.services.analysis_job_query_service import project_public_law_quality_summary
 from chatbot.models import (
     AgentInvocation,
     AgentResult,
@@ -820,6 +821,10 @@ class SupervisorReportingPipelineTests(TestCase):
         self.assertEqual(job_detail["latest_report_id"], report.report_id)
         law_result = AgentResult.objects.get(job=job, node_code="law_ground_search")
         self.assertEqual(
+            report.metadata["report_quality"]["public_quality_summary"],
+            project_public_law_quality_summary(law_result.structured_result),
+        )
+        self.assertEqual(
             law_result.structured_result["retrieval"]["attempted_backends"],
             ["postgres_pgvector"],
         )
@@ -888,10 +893,7 @@ class SupervisorReportingPipelineTests(TestCase):
         self.assertEqual(job_detail["report_links"][0]["report_id"], report.report_id)
         report_detail = get_report_record_detail(report.report_id)
         self.assertEqual(report_detail["content"]["contract_version"], "analysis_report.v1")
-        self.assertEqual(
-            report_detail["content"]["source"]["reporting_result_id"],
-            reporting_result.result_id,
-        )
+        self.assertNotIn("source", report_detail["content"])
         self.assertEqual(
             report_detail["content"]["reporting_payload"].get("document_variant"),
             "fine_notice",

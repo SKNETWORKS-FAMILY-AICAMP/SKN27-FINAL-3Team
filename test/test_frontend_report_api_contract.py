@@ -44,3 +44,21 @@ def test_frontend_report_views_consume_only_public_report_detail_fields() -> Non
         "X-Report-Access-Decision",
     ):
         assert internal_header not in shell
+
+
+def test_frontend_report_views_consume_public_quality_summary_only() -> None:
+    shell = (ROOT / "app" / "web" / "FrontendAppShell.jsx").read_text(encoding="utf-8")
+
+    assert "public_quality_summary" in shell
+    assert "reportQuality?.public_quality_summary" in shell
+    assert "reportQualitySummary?.retrieval?.embedding" not in shell
+    assert "reportQualitySummary?.retrieval?.backend" not in shell
+    assert "reportQualitySummary?.retrieval?.attempted_backends" not in shell
+    assert "data_provenance" not in shell
+
+
+def test_frontend_report_limitations_use_the_public_quality_summary() -> None:
+    shell = (ROOT / "app" / "web" / "FrontendAppShell.jsx").read_text(encoding="utf-8")
+
+    assert "reportQualitySummary?.limitations" in shell
+    assert "reportQuality?.limitations" not in shell

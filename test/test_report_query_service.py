@@ -171,9 +171,10 @@ def test_detail_projection_preserves_display_fields_and_drops_internal_fields() 
         "partial_report",
         "review_required",
         "limitation_count",
-        "limitations",
-        "confidence_label",
-    }
+            "limitations",
+            "confidence_label",
+            "public_quality_summary",
+        }
     assert "owner_id" not in report
     assert "source" not in report
     assert "storage_uri" not in report

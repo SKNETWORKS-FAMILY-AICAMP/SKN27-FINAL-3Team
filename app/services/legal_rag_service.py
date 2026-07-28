@@ -291,6 +291,7 @@ def _query_pgvector_rows(
     embedding_space: dict[str, Any],
 ) -> list[dict[str, Any]]:
     vector_literal = _pgvector_literal(query_vector)
+    min_similarity_score = _float_setting("LEGAL_RAG_MIN_SIMILARITY_SCORE", 0.4)
     params: list[Any] = [
         vector_literal,
         list(allowed_source_types),
@@ -300,7 +301,7 @@ def _query_pgvector_rows(
         embedding_space["model"],
         embedding_space["dimensions"],
     ]
-    params.extend([vector_literal, top_k])
+    params.extend([vector_literal, min_similarity_score, vector_literal, top_k])
 
     sql = f"""
         SELECT
@@ -334,6 +335,7 @@ def _query_pgvector_rows(
           AND e.embedding_provider = %s
           AND e.embedding_model = %s
           AND e.embedding_dimensions = %s
+          AND 1 - (e.embedding_vector <=> %s::vector) >= %s
         ORDER BY e.embedding_vector <=> %s::vector
         LIMIT %s
     """
@@ -649,6 +651,14 @@ def _truthy(value: Any) -> bool:
 def _int_setting(name: str, default: int) -> int:
     try:
         value = int(_setting(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+def _float_setting(name: str, default: float) -> float:
+    try:
+        value = float(_setting(name, str(default)))
     except (TypeError, ValueError):
         return default
     return value if value >= 0 else default
