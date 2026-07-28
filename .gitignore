@@ -90,3 +90,6 @@ models/
 docs/presentation/
 
 etl/fault_cases/artifacts/
+
+# Local Git worktrees
+.worktrees/
