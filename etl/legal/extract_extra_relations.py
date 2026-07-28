@@ -59,12 +59,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def build_extra_relations(chunks: Iterable[dict]) -> list[dict]:
+def build_extra_relations(
+    chunks: Iterable[dict],
+    *,
+    created_at: str | None = None,
+) -> list[dict]:
     chunk_rows = [chunk for chunk in chunks if chunk.get("chunk_id") and chunk.get("source_version_id")]
     article_map, appendix_map = build_chunk_indexes(chunk_rows)
 
     relations: dict[str, dict] = {}
-    created_at = datetime.now(timezone.utc).isoformat()
+    relation_created_at = created_at or datetime.now(timezone.utc).isoformat()
 
     for chunk in chunk_rows:
         current_chunk_id = chunk["chunk_id"]
@@ -85,7 +89,7 @@ def build_extra_relations(chunks: Iterable[dict]) -> list[dict]:
                     to_chunk_id=current_chunk_id,
                     confidence=0.9,
                     evidence_text="Text-derived penalty reference",
-                    created_at=created_at,
+                    created_at=relation_created_at,
                 )
 
         if any(keyword in text for keyword in EXCEPTION_KEYWORDS):
@@ -97,7 +101,7 @@ def build_extra_relations(chunks: Iterable[dict]) -> list[dict]:
                     to_chunk_id=current_chunk_id,
                     confidence=0.75,
                     evidence_text="Text-derived exception reference",
-                    created_at=created_at,
+                    created_at=relation_created_at,
                 )
 
         for target_id in resolve_refs(article_map, source_version_id, article_refs):
@@ -108,7 +112,7 @@ def build_extra_relations(chunks: Iterable[dict]) -> list[dict]:
                 to_chunk_id=target_id,
                 confidence=0.6,
                 evidence_text="Text-derived article reference",
-                created_at=created_at,
+                created_at=relation_created_at,
             )
 
         for target_id in resolve_refs(appendix_map, source_version_id, appendix_refs):
@@ -119,7 +123,7 @@ def build_extra_relations(chunks: Iterable[dict]) -> list[dict]:
                 to_chunk_id=target_id,
                 confidence=0.9,
                 evidence_text="Text-derived appendix reference",
-                created_at=created_at,
+                created_at=relation_created_at,
             )
 
     return sorted(relations.values(), key=lambda row: row["relation_id"])

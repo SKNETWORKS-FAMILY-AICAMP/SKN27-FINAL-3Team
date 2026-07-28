@@ -259,7 +259,7 @@ def test_budget_and_ssm_secret_contract_are_present_without_secret_outputs() -> 
     assert "Unresolved template value" in deploy
 
 
-def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None:
+def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
     services = compose["services"]
     assert {
@@ -271,8 +271,13 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
         "file-scan-worker",
         "redis",
         "clamav",
+        "law-neo4j",
     }.issubset(services)
     assert {"postgres", "neo4j", "kibana", "elasticsearch"}.isdisjoint(services)
+    assert "law_neo4j_data" in compose["volumes"]
+    assert "ports" not in services["law-neo4j"]
+    assert "healthcheck" in services["law-neo4j"]
+    assert services["backend"]["depends_on"]["law-neo4j"]["condition"] == "service_healthy"
     assert set(services["caddy"]["ports"]) == {"80:80", "443:443"}
     for name, config in services.items():
         if name != "caddy":
@@ -281,9 +286,18 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
     serialized = yaml.safe_dump(compose).lower()
     assert "object_storage_provider: s3" in serialized
     assert "pgsslmode: require" in serialized
-    assert "law_ground_search_enable_neo4j: '0'" in serialized
+    assert "law_ground_search_enable_neo4j: '1'" in serialized
     assert "legal_rag_vector_enabled: '1'" in serialized
     runtime_env = _read_deploy("runtime.env.example").lower()
+    for name in (
+        "law_neo4j_image_ref",
+        "neo4j_uri",
+        "neo4j_user",
+        "neo4j_password",
+        "neo4j_database",
+        "law_graph_required",
+    ):
+        assert name in runtime_env
     assert "google_oauth_code_exchange_daily_limit" in runtime_env
     assert "google_oauth_trusted_proxy_cidrs" in runtime_env
     assert "mock_require_auth" not in serialized
@@ -294,6 +308,9 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
         assert services[name]["env_file"] == [
             {"path": ".runtime.env", "format": "raw"}
         ]
+    assert services["law-neo4j"]["env_file"] == [
+        {"path": ".runtime.env", "format": "raw"}
+    ]
     assert services["caddy"]["env_file"] == [
         {"path": ".edge.env", "format": "raw"}
     ]
@@ -425,6 +442,8 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
         "sha256sum -c -",
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py verify_production_rag_seed_manifest",
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py load_production_rag_seed",
+        "backend python backend/manage.py load_legal_graph_seed",
+        "backend python backend/manage.py verify_legal_graph_readiness --format json",
         "run --rm --no-deps backend python backend/manage.py smoke_law_ground_search --require-results",
         "run --rm --no-deps backend python backend/manage.py verify_pgvector_rag_readiness --format json",
         "run --rm --no-deps backend python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
@@ -483,6 +502,8 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
         "verify_production_rag_seed_manifest --manifest",
         review_load,
         legal_load,
+        "backend python backend/manage.py load_legal_graph_seed",
+        "backend python backend/manage.py verify_legal_graph_readiness --format json",
         "smoke_law_ground_search --require-results",
         "verify_pgvector_rag_readiness --format json",
         "smoke_text_ml_case_search --require-pgvector --require-results",
@@ -1251,7 +1272,7 @@ def test_initial_rag_bootstrap_stages_private_services_then_requires_seed_promot
         line for line in deploy.splitlines()
         if "up -d --wait --wait-timeout 600" in line
     )
-    for service in ("redis", "clamav", "backend"):
+    for service in ("redis", "clamav", "law-neo4j", "backend"):
         assert service in stage_up
     for public_service in (
         "caddy",
