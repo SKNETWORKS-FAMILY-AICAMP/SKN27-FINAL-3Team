@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS review_case_chunks (
     claimant_final_ratio INTEGER,
     respondent_final_ratio INTEGER,
     embedding_status TEXT DEFAULT 'pending',
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     source_ref TEXT,
     source_type TEXT DEFAULT 'review_case',
     source_reliability_score INTEGER DEFAULT 3,
@@ -218,11 +219,12 @@ CREATE TABLE IF NOT EXISTS review_case_chunk_embeddings (
     embedding_dim INTEGER NOT NULL DEFAULT 1024,
     embedding_provider TEXT,
     input_field TEXT DEFAULT 'chunk_text',
+    source_text_hash TEXT NOT NULL,
     embedding_vector vector(1024),
     embedding_meta JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
-    PRIMARY KEY (chunk_id, embedding_model, embedding_version),
+    PRIMARY KEY (chunk_id, embedding_model, embedding_version, source_text_hash),
     CHECK (embedding_dim = 1024)
 );
 
@@ -317,6 +319,10 @@ ON review_case_chunks (review_no);
 
 CREATE INDEX IF NOT EXISTS idx_review_case_chunks_type
 ON review_case_chunks (chunk_type);
+
+CREATE INDEX IF NOT EXISTS idx_review_case_chunks_active
+ON review_case_chunks (is_active)
+WHERE is_active;
 
 CREATE INDEX IF NOT EXISTS idx_review_case_chunks_chart
 ON review_case_chunks (reference_chart_key);

@@ -48,10 +48,14 @@ def count_embeddings(settings: EmbeddingSettings = EMBEDDING_SETTINGS) -> int:
             cur.execute(
                 """
                 SELECT COUNT(*)
-                FROM review_case_chunk_embeddings
-                WHERE embedding_model = %s
-                  AND embedding_version = %s
-                  AND embedding_dim = %s
+                FROM review_case_chunk_embeddings AS embedding
+                JOIN review_case_chunks AS chunk
+                  ON chunk.chunk_id = embedding.chunk_id
+                WHERE embedding.embedding_model = %s
+                  AND embedding.embedding_version = %s
+                  AND embedding.embedding_dim = %s
+                  AND chunk.is_active IS TRUE
+                  AND embedding.source_text_hash = chunk.text_hash
                 """,
                 (settings.model, settings.version, settings.dim),
             )
@@ -63,7 +67,12 @@ def fetch_pending_chunks(settings: EmbeddingSettings, limit: int | None = None) 
         raise ValueError("OPENAI_EMBEDDING_INPUT_FIELD must be chunk_text or search_text")
 
     limit_sql = "LIMIT %s" if limit is not None else ""
-    params: list[Any] = [settings.model, settings.version]
+    params: list[Any] = [
+        settings.provider,
+        settings.model,
+        settings.version,
+        settings.dim,
+    ]
     if limit is not None:
         params.append(limit)
 
@@ -78,14 +87,18 @@ def fetch_pending_chunks(settings: EmbeddingSettings, limit: int | None = None) 
             c.token_count,
             c.text_hash
         FROM review_case_chunks c
-        WHERE c.{settings.input_field} IS NOT NULL
+        WHERE c.is_active IS TRUE
+          AND c.{settings.input_field} IS NOT NULL
           AND btrim(c.{settings.input_field}) <> ''
           AND NOT EXISTS (
               SELECT 1
               FROM review_case_chunk_embeddings e
               WHERE e.chunk_id = c.chunk_id
+                AND e.embedding_provider = %s
                 AND e.embedding_model = %s
                 AND e.embedding_version = %s
+                AND e.embedding_dim = %s
+                AND e.source_text_hash = c.text_hash
           )
         ORDER BY c.review_no, c.sequence_no
         {limit_sql}
@@ -170,6 +183,7 @@ def upsert_embedding_batch(
                 settings.dim,
                 settings.provider,
                 settings.input_field,
+                row["text_hash"],
                 vector_literal(vector),
                 Json(meta, dumps=lambda obj: json.dumps(obj, ensure_ascii=False)),
             )
@@ -183,17 +197,13 @@ def upsert_embedding_batch(
             embedding_dim,
             embedding_provider,
             input_field,
+            source_text_hash,
             embedding_vector,
             embedding_meta
         )
         VALUES %s
-        ON CONFLICT (chunk_id, embedding_model, embedding_version) DO UPDATE SET
-            embedding_dim = EXCLUDED.embedding_dim,
-            embedding_provider = EXCLUDED.embedding_provider,
-            input_field = EXCLUDED.input_field,
-            embedding_vector = EXCLUDED.embedding_vector,
-            embedding_meta = EXCLUDED.embedding_meta,
-            updated_at = now()
+        ON CONFLICT (chunk_id, embedding_model, embedding_version, source_text_hash)
+        DO NOTHING
     """
     update_sql = """
         UPDATE review_case_chunks

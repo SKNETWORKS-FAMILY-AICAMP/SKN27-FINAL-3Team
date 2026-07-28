@@ -206,6 +206,28 @@ TEXT_ML_CASE_SEARCH_V2_FINAL_TOP_K=10
 The readiness report includes `text_ml_case_search_rag` and validates the
 three pgvector domains, their embedding counts, and HNSW indexes.
 
+### Review-case embedding retention
+
+Apply the review-case schema maintenance before loading a new manifest. It adds
+the non-destructive embedding revision contract and preserves existing vectors:
+
+```powershell
+python -m etl.fault_cases.src.review_case.db_loading.schema_manager --apply-schema
+```
+
+Then load the approved manifest with `--replace`. In this retention mode,
+`--replace` does not delete documents, chunks, or embeddings: chunks missing
+from the new manifest become inactive, while matching current text hashes reuse
+their existing embeddings without another provider request. Changed text creates
+a new retained embedding revision; the earlier revision stays stored but is not
+used for current retrieval.
+
+After a failed embedding run, rerun the same seed command. Successfully stored
+batches are reused and only pending current-hash chunks call the provider. A
+model or embedding-version change intentionally creates a separate retained
+embedding space and therefore requires embedding the active chunks once in that
+new space.
+
 Run the safe smoke:
 
 ```powershell

@@ -69,6 +69,8 @@ def search_by_vector(query_vector: list[float], top_k: int | None = None) -> lis
           AND e.embedding_version = %s
           AND e.embedding_dim = %s
           AND e.embedding_vector IS NOT NULL
+          AND c.is_active IS TRUE
+          AND e.source_text_hash = c.text_hash
         ORDER BY e.embedding_vector <=> %s::vector
         LIMIT %s
     """
