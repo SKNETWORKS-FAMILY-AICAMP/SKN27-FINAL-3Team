@@ -213,7 +213,12 @@ def upsert_embedding_batch(
     """
     with get_connection(SETTINGS.review_case_db) as conn:
         with conn.cursor() as cur:
-            execute_values(cur, embedding_sql, values, template="(%s,%s,%s,%s,%s,%s,%s::vector,%s)")
+            execute_values(
+                cur,
+                embedding_sql,
+                values,
+                template="(%s,%s,%s,%s,%s,%s,%s,%s::vector,%s)",
+            )
             cur.execute(update_sql, ([row["chunk_id"] for row in rows],))
     return len(values)
 

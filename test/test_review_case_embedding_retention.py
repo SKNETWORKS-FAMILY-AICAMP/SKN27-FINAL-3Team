@@ -69,12 +69,14 @@ def test_pending_selection_requires_an_active_chunk_without_matching_hash(
 
 def test_embedding_write_keeps_an_existing_hash_revision_immutable(monkeypatch) -> None:
     connection = _record_connection(monkeypatch, run_embedding)
-    monkeypatch.setattr(
-        run_embedding,
-        "execute_values",
-        lambda cursor, statement, values, **_kwargs: cursor.execute(statement)
-        or connection.values.extend(values),
-    )
+    captured: dict[str, object] = {}
+
+    def record_execute_values(cursor, statement, values, **kwargs) -> None:
+        captured.update(kwargs)
+        cursor.execute(statement)
+        connection.values.extend(values)
+
+    monkeypatch.setattr(run_embedding, "execute_values", record_execute_values)
     settings = EmbeddingSettings()
     row = {
         "chunk_id": "chunk-1",
@@ -104,6 +106,7 @@ def test_embedding_write_keeps_an_existing_hash_revision_immutable(monkeypatch) 
         in " ".join(embedding_statement.split())
     )
     assert "embedding_vector = EXCLUDED.embedding_vector" not in embedding_statement
+    assert captured["template"] == "(%s,%s,%s,%s,%s,%s,%s,%s::vector,%s)"
 
 
 def test_retrieval_uses_only_active_current_hash_revisions(monkeypatch) -> None:
