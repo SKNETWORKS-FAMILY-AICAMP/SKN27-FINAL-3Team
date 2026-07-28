@@ -239,6 +239,18 @@ def test_review_case_embedding_retention_schema_and_migration_are_non_destructiv
     assert "legacy-unverified:" in migration
 
 
+def test_review_case_base_schema_defers_active_index_to_retention_migration() -> None:
+    schema = (ROOT / "storage/schemas/review_case_db_schema.sql").read_text(
+        encoding="utf-8"
+    )
+    migration = (
+        ROOT / "storage/migrations/20260728_review_case_embedding_retention.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE INDEX IF NOT EXISTS idx_review_case_chunks_active" not in schema
+    assert "CREATE INDEX IF NOT EXISTS idx_review_case_chunks_active" in migration
+
+
 def test_text_ml_smoke_exposes_pgvector_requirement_flag() -> None:
     from backend.chatbot.management.commands import smoke_text_ml_case_search
 

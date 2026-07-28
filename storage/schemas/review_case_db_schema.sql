@@ -320,10 +320,6 @@ ON review_case_chunks (review_no);
 CREATE INDEX IF NOT EXISTS idx_review_case_chunks_type
 ON review_case_chunks (chunk_type);
 
-CREATE INDEX IF NOT EXISTS idx_review_case_chunks_active
-ON review_case_chunks (is_active)
-WHERE is_active;
-
 CREATE INDEX IF NOT EXISTS idx_review_case_chunks_chart
 ON review_case_chunks (reference_chart_key);
 
