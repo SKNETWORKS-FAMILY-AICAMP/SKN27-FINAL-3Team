@@ -862,6 +862,12 @@ def test_database_maintenance_builds_python_env_without_nested_f_string_quotes()
     assert 'f`"PGPASSWORD={p}`"' in maintenance
 
 
+def test_database_maintenance_writes_env_files_with_real_newlines() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+
+    assert r'`"\\n`".join(out)' not in maintenance
+
+
 def test_native_s3_lockfile_requires_terraform_1_11_or_newer() -> None:
     versions = (TERRAFORM_DIR / "versions.tf").read_text(encoding="utf-8")
     runbook = _read_deploy("README.ko.md")
