@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Iterator
 
+from etl.fault_cases.src.review_case.db_loading import db_config
 from etl.fault_cases.src.review_case.db_loading.db_config import EmbeddingSettings
 from etl.fault_cases.src.review_case.embedding import run_embedding
 from etl.fault_cases.src.review_case.search.pgvector import retriever
@@ -65,6 +67,12 @@ def test_pending_selection_requires_an_active_chunk_without_matching_hash(
     assert "c.is_active IS TRUE" in statement
     assert "e.source_text_hash = c.text_hash" in statement
     assert "e.embedding_dim = %s" in statement
+
+
+def test_export_root_can_be_configured_for_a_read_only_runtime() -> None:
+    assert db_config.resolve_postgres_export_root(
+        {"REVIEW_CASE_POSTGRES_EXPORT_ROOT": "/tmp/review-case-reports"}
+    ) == Path("/tmp/review-case-reports")
 
 
 def test_embedding_write_keeps_an_existing_hash_revision_immutable(monkeypatch) -> None:

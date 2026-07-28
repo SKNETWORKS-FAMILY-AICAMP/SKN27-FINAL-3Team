@@ -281,6 +281,10 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     assert services["backend"]["depends_on"]["law-neo4j"]["condition"] == "service_healthy"
     assert services["rag-loader"]["networks"]["pilot"] == {}
     assert "ipv4_address" not in services["rag-loader"]["networks"]["pilot"]
+    assert (
+        services["rag-loader"]["environment"]["REVIEW_CASE_POSTGRES_EXPORT_ROOT"]
+        == "/tmp/review-case-postgres-exports"
+    )
     assert set(services["caddy"]["ports"]) == {"80:80", "443:443"}
     for name, config in services.items():
         if name != "caddy":

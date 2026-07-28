@@ -160,7 +160,9 @@ services:
   rag-loader:
     image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
     env_file: *runtime-env-file
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      REVIEW_CASE_POSTGRES_EXPORT_ROOT: /tmp/review-case-postgres-exports
     mem_limit: 768m
     logging: *default-logging
     cap_drop: [ALL]
