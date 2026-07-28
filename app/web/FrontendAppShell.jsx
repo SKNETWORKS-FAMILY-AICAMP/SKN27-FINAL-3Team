@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createFrontendApi } from "./apiClient.js";
+import brandLogoUrl from "./assets/brand-logo.webp";
+import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
+import { reportsForCase } from "./caseReports.js?null-case-v1";
 import {
   buildAuthContext,
   buildGoogleLoginPayload,
@@ -243,7 +246,7 @@ export default function FrontendAppShell({
 }) {
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
   const storedAuthSession = useMemo(() => readStoredAuthSession(), []);
-  const [activeRoute, setActiveRoute] = useState("chatbot");
+  const [activeRoute, setActiveRoute] = useState("entry");
   const [sessionId, setSessionId] = useState(() => storedAuthSession.session_id || "");
   const [guestId, setGuestId] = useState(() => storedAuthSession.guest_id || "");
   const [guestCredential, setGuestCredential] = useState(() => storedAuthSession.guest_credential || "");
@@ -1517,19 +1520,16 @@ export default function FrontendAppShell({
     setActiveRoute("reporting");
   }
 
-  const showSidebar = activeRoute !== "entry" && activeRoute !== "mypage" && activeRoute !== "reporting";
+  const showSidebar = !["entry", "guide", "mypage", "reporting"].includes(activeRoute);
 
   return (
     <div className="app-shell" data-auth-state={authContext.auth_state}>
-      <AppIconRail
+      <AppTopNavigation
         activeRoute={activeRoute}
         onNavigate={setActiveRoute}
         onOpenChat={() => bootstrapGuestSession("chatbot")}
-      />
-      <div className="app-shell__body">
-      {(authSessionId || !["chatbot", "history"].includes(activeRoute)) && (
-        <div className="top-float-actions" aria-label="주요 메뉴">
-          {authSessionId ? (
+        authAction={
+          authSessionId ? (
             <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
               로그아웃
             </button>
@@ -1542,9 +1542,10 @@ export default function FrontendAppShell({
             >
               {isSavingConversation ? "연결 중" : "Google 로그인"}
             </button>
-          )}
-        </div>
-      )}
+          )
+        }
+      />
+      <div className="app-shell__body">
 
       <div
         className={
@@ -1583,6 +1584,13 @@ export default function FrontendAppShell({
               onGuestStart={() => bootstrapGuestSession("chatbot")}
               onOpenChat={() => bootstrapGuestSession("chatbot")}
               onNavigate={setActiveRoute}
+            />
+          )}
+
+          {activeRoute === "guide" && (
+            <GuideScreen
+              onGuestStart={() => bootstrapGuestSession("chatbot")}
+              onOpenChat={() => bootstrapGuestSession("chatbot")}
             />
           )}
 
@@ -1664,7 +1672,15 @@ export default function FrontendAppShell({
               cases={cases}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenCase={openSavedCase}
-              onRefresh={loadMyPageSummary}
+              onOpenReport={async (report) => {
+                await openReportDetail(report);
+                setActiveRoute("reporting");
+              }}
+              onRefresh={async () => {
+                await loadMyPageSummary();
+                await loadReports();
+              }}
+              reports={effectiveReportList}
               summary={effectiveMypageSummary}
             />
           )}
@@ -1941,12 +1957,12 @@ function Reveal({ children, className = "", as = "div", ...rest }) {
 
 const RAIL_ITEMS = [
   {
-    id: "entry",
-    label: "홈",
+    id: "guide",
+    label: "사고 가이드",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 11.5 12 4l8 7.5" />
-        <path d="M6 10v9h12v-9" />
+        <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+        <path d="M14 3v5h5M8 13h8M8 17h6" />
       </svg>
     ),
   },
@@ -1956,16 +1972,6 @@ const RAIL_ITEMS = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 5h16v11H8l-4 4V5z" />
-      </svg>
-    ),
-  },
-  {
-    id: "reporting",
-    label: "리포트",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
-        <path d="M14 3v5h5" />
       </svg>
     ),
   },
@@ -1981,7 +1987,7 @@ const RAIL_ITEMS = [
   },
 ];
 
-function AppIconRail({ activeRoute, onNavigate, onOpenChat }) {
+function AppTopNavigation({ activeRoute, onNavigate, onOpenChat, authAction }) {
   const handleClick = (routeId) => {
     if (routeId === "chatbot" && typeof onOpenChat === "function") {
       onOpenChat();
@@ -1993,38 +1999,133 @@ function AppIconRail({ activeRoute, onNavigate, onOpenChat }) {
   };
 
   return (
-    <aside className="app-rail" aria-label="빠른 이동">
-      {RAIL_ITEMS.map((item) => (
-        <button
-          key={item.id}
-          className={activeRoute === item.id ? "rail-icon active" : "rail-icon"}
-          type="button"
-          onClick={() => handleClick(item.id)}
-          title={item.label}
-          aria-label={item.label}
-          aria-current={activeRoute === item.id ? "page" : undefined}
-        >
-          {item.icon}
-        </button>
-      ))}
-      <button
-        className={activeRoute === "history" ? "rail-icon rail-icon--bottom active" : "rail-icon rail-icon--bottom"}
-        type="button"
-        onClick={() => handleClick("history")}
-        title="과거 이력"
-        aria-label="과거 이력"
-        aria-current={activeRoute === "history" ? "page" : undefined}
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="8.5" />
-          <path d="M12 7.5V12l3 2" />
-        </svg>
+    <header className="app-top-nav">
+      <button className="app-top-nav__brand" type="button" onClick={() => handleClick("entry")}>
+        <span className="app-top-nav__logo" aria-hidden="true">
+          <img src={brandLogoUrl} alt="" />
+        </span>
+        <span className="sr-only">차분해 홈</span>
       </button>
-    </aside>
+      <nav aria-label="주요 화면">
+        {RAIL_ITEMS.map((item) => (
+          <button
+            key={item.id}
+            className={activeRoute === item.id ? "active" : ""}
+            type="button"
+            onClick={() => handleClick(item.id)}
+            aria-current={activeRoute === item.id ? "page" : undefined}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <div className="app-top-nav__auth">{authAction}</div>
+    </header>
   );
 }
 
 function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }) {
+  return (
+    <main className="service-landing">
+      <section className="service-hero">
+        <Reveal className="service-hero__copy service-reveal--left">
+          <p className="service-eyebrow">교통사고 분석을 더 쉽고 명확하게</p>
+          <h1>복잡한 사고 분석,<br />자료 등록부터 시작하세요</h1>
+          <p>블랙박스·CCTV·현장 사진과 상황 설명을 바탕으로 사고 쟁점과 다음 행동을 정리합니다.</p>
+          <div className="hero-actions">
+            <button className="button primary large service-hero__cta" type="button" onClick={onGuestStart}>사고 접수하기</button>
+          </div>
+        </Reveal>
+        <Reveal className="service-hero__visual service-reveal--right">
+          <img className="service-hero__image" src={homeAccidentAnalysisUrl} alt="AI가 교통사고 자료를 분석하는 모습" />
+        </Reveal>
+      </section>
+
+      <section className="service-intro">
+        <Reveal className="service-intro__word" aria-hidden="true">차분해</Reveal>
+        <Reveal className="service-intro__copy">
+          <span>AI TRAFFIC ACCIDENT ANALYSIS</span>
+          <h2>사고 이후의 복잡한 판단을<br />확인 가능한 정보로 정리합니다</h2>
+          <p>차분해는 영상·사진·문서와 상황 설명을 바탕으로 사고의 주요 쟁점, 확인 근거, 필요한 다음 행동을 한 흐름으로 안내합니다.</p>
+        </Reveal>
+      </section>
+
+      <section className="service-section service-process">
+        <Reveal as="header">
+          <span>ONE STOP SOLUTION</span>
+          <h2>차분해는 이렇게 진행됩니다</h2>
+          <p>사고 상황을 입력하면 자료 정리부터 분석 결과 확인까지 한 흐름으로 안내합니다.</p>
+        </Reveal>
+        <div className="service-detail-grid">
+          <Reveal as="article" style={{ "--reveal-delay": "0ms" }}><span className="service-detail-emoji" aria-hidden="true">🚗</span><b>01</b><h3>사고 접수</h3><p>사고 상황과 기본 정보를 입력해 분석을 시작합니다.</p></Reveal>
+          <Reveal as="article" style={{ "--reveal-delay": "90ms" }}><span className="service-detail-emoji" aria-hidden="true">📎</span><b>02</b><h3>자료 등록</h3><p>영상, 사진, 문서 등 보유한 사고 자료를 한곳에 등록합니다.</p></Reveal>
+          <Reveal as="article" style={{ "--reveal-delay": "180ms" }}><span className="service-detail-emoji" aria-hidden="true">🔎</span><b>03</b><h3>AI 분석</h3><p>사고 장면과 주요 쟁점을 확인 가능한 근거와 함께 정리합니다.</p></Reveal>
+          <Reveal as="article" style={{ "--reveal-delay": "270ms" }}><span className="service-detail-emoji" aria-hidden="true">📄</span><b>04</b><h3>결과 확인</h3><p>분석 리포트와 추가 확인 사항, 후속 조치를 살펴봅니다.</p></Reveal>
+        </div>
+      </section>
+
+      <section className="service-section service-features">
+        <Reveal as="header"><span>핵심 기능</span><h2>사고 대응에 필요한 정보를 한곳에서</h2></Reveal>
+        <div className="service-card-grid">
+          <Reveal as="article" className="service-reveal--left"><h3>영상 분석</h3><p>블랙박스와 CCTV에서 사고 장면 후보와 근거 프레임을 확인합니다.</p></Reveal>
+          <Reveal as="article"><h3>AI 상담</h3><p>현재 상황을 설명하고 필요한 자료와 다음 행동을 안내받습니다.</p></Reveal>
+          <Reveal as="article" className="service-reveal--right"><h3>사건 관리</h3><p>등록 사건, 분석 상태, 생성 리포트를 이어서 확인합니다.</p></Reveal>
+        </div>
+      </section>
+
+      <section className="service-closing">
+        <Reveal className="service-reveal--left"><span>차분해와 함께 시작하세요</span><h2>사고 자료가 준비되었다면 지금 접수하세요</h2></Reveal>
+        <Reveal className="hero-actions service-reveal--right">
+          <button className="button primary large" type="button" onClick={onGuestStart}>사고 접수하기</button>
+          {isAuthenticated && (
+            <button className="button ghost large" type="button" onClick={() => onNavigate("reporting")}>내 리포트</button>
+          )}
+        </Reveal>
+      </section>
+    </main>
+  );
+}
+
+function GuideScreen({ onGuestStart, onOpenChat }) {
+  return (
+    <main className="guide-screen">
+      <section className="guide-screen__hero">
+        <Reveal className="service-reveal--left">
+          <span>사고 발생 시 가이드</span>
+          <h1>당황하지 말고<br />순서대로 대응하세요</h1>
+          <p>현장의 안전을 먼저 확보한 뒤, 필요한 신고와 기록을 차례로 진행하세요.</p>
+        </Reveal>
+      </section>
+
+      <section className="guide-screen__content">
+        <Reveal as="header">
+          <span>현장 대응 순서</span>
+          <h2>사고 직후 확인해야 할 네 가지</h2>
+        </Reveal>
+        <ol className="guide-screen__steps">
+          <Reveal as="li" style={{ "--reveal-delay": "0ms" }}><span aria-hidden="true">🦺</span><div><b>안전 확보</b><p>비상등을 켜고 추가 사고가 없도록 가능한 범위에서 안전한 위치를 확보합니다.</p></div></Reveal>
+          <Reveal as="li" style={{ "--reveal-delay": "90ms" }}><span aria-hidden="true">📞</span><div><b>인명 확인 및 신고</b><p>부상자를 확인하고 필요한 경우 119와 112에 신고합니다.</p></div></Reveal>
+          <Reveal as="li" style={{ "--reveal-delay": "180ms" }}><span aria-hidden="true">📷</span><div><b>현장 기록</b><p>차량 위치, 파손 부위, 신호와 도로 상황을 여러 방향에서 촬영합니다.</p></div></Reveal>
+          <Reveal as="li" style={{ "--reveal-delay": "270ms" }}><span aria-hidden="true">💾</span><div><b>자료 보관</b><p>블랙박스 원본과 상대방·목격자 정보를 안전하게 보관합니다.</p></div></Reveal>
+        </ol>
+      </section>
+
+      <section className="guide-screen__actions">
+        <Reveal>
+          <span>무엇부터 해야 할지 막막한가요?</span>
+          <h2>지금 상황을 AI에게 설명해 주세요</h2>
+          <p>현재 상황에 맞춰 필요한 자료와 다음 행동을 안내해 드립니다.</p>
+          <div className="hero-actions">
+            <button className="button primary large" type="button" onClick={onOpenChat}>AI 상담 시작</button>
+            <button className="button ghost large" type="button" onClick={onGuestStart}>사고 접수하기</button>
+          </div>
+        </Reveal>
+      </section>
+    </main>
+  );
+}
+
+function EntryScreenWheelLegacy({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }) {
   const [activeCard, setActiveCard] = useState(0);
   const lastWheelAt = useRef(0);
   const touchStartRef = useRef(null);
@@ -2388,12 +2489,12 @@ function ConversationSidebar({
           <strong>내 사건</strong>
         </button>
         <button
-          className={activeRoute === "reporting" || activeRoute === "fineResult" || activeRoute === "faultResult" ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
+          className={activeRoute === "guide" ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
           type="button"
-          onClick={() => onNavigate("reporting")}
+          onClick={() => onNavigate("guide")}
         >
-          <span aria-hidden="true">▤</span>
-          <strong>리포트</strong>
+          <span aria-hidden="true">!</span>
+          <strong>사고 가이드</strong>
         </button>
       </nav>
     </>
@@ -3407,7 +3508,7 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
   );
 }
 
-function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
+function MyPageScreen({ cases, onOpenCase, onOpenChat, onOpenReport, onRefresh, reports = [], summary }) {
   const pageSize = 5;
   const activeCases = summary?.active_cases ?? cases.length;
   const savedReports = summary?.saved_reports ?? 0;
@@ -3429,6 +3530,7 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
   const caseKey = (item) => item.case_id || item.job_id || item.title;
   const selectedCase =
     pagedCases.find((item) => caseKey(item) === selectedCaseKey) || pagedCases[0] || null;
+  const selectedCaseReports = reportsForCase(selectedCase, reports);
 
   return (
     <section className="screen">
@@ -3454,9 +3556,12 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
         </div>
 
         <div className="mypage-split">
-          <article className="table-panel">
+          <article className="table-panel mypage-case-list-panel">
             <div className="panel-head">
-              <strong>최근 분석 이력</strong>
+              <div>
+                <strong>내 사건</strong>
+                <p>사건을 선택하면 저장된 리포트와 진행 상태를 확인할 수 있습니다.</p>
+              </div>
               <button
                 className={showActionableOnly ? "button active" : "button"}
                 type="button"
@@ -3470,59 +3575,35 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                 {showActionableOnly ? "✓ 조치가 필요한 항목들 표시 중" : "조치가 필요한 항목들 보기"}
               </button>
             </div>
-            <div className="table-scroll">
-              <table className="history-table">
-                <thead>
-                  <tr>
-                    <th>유형</th>
-                    <th>사건명</th>
-                    <th>상태</th>
-                    <th>최근 작업</th>
-                    <th>이동</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleCases.length === 0 ? (
-                    <tr>
-                      <td colSpan="5">
-                        <div className="table-empty">
-                          <strong>아직 저장된 사건이 없습니다.</strong>
-                          <p>상담을 시작하거나 리포트를 저장하면 이곳에 표시됩니다.</p>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    pagedCases.map((item) => (
-                      <tr
-                        key={caseKey(item)}
-                        className={selectedCase && caseKey(item) === caseKey(selectedCase) ? "is-selected" : undefined}
-                        onClick={() => setSelectedCaseKey(caseKey(item))}
-                      >
-                        <td><span className="tag">{item.type || "상담"}</span></td>
-                        <td>{item.title || item.case_id}</td>
-                        <td>
-                          <span className={`report-list-status ${caseStatusTone(item.case_status || item.status)}`}>
-                            {item.case_status || item.status || "확인 필요"}
-                          </span>
-                        </td>
-                        <td>{item.updated_at || item.created_at || "-"}</td>
-                        <td>
-                          <button
-                            className="button"
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onOpenCase(item);
-                            }}
-                          >
-                            열기
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+            <div className="mypage-case-list">
+              {visibleCases.length === 0 ? (
+                <div className="table-empty">
+                  <strong>아직 저장된 사건이 없습니다.</strong>
+                  <p>상담을 시작하거나 리포트를 저장하면 이곳에 표시됩니다.</p>
+                </div>
+              ) : (
+                pagedCases.map((item) => (
+                  <button
+                    className={selectedCase && caseKey(item) === caseKey(selectedCase) ? "mypage-case-card is-selected" : "mypage-case-card"}
+                    key={caseKey(item)}
+                    type="button"
+                    onClick={() => setSelectedCaseKey(caseKey(item))}
+                  >
+                    <span className="tag">{item.type || "상담"}</span>
+                    <span className="mypage-case-card__content">
+                      <strong>{item.title || item.case_id}</strong>
+                      <span>
+                        {item.case_id || item.job_id || "사건 ID 없음"}
+                        <i aria-hidden="true">·</i>
+                        {item.updated_at || item.created_at || "최근 작업 없음"}
+                      </span>
+                    </span>
+                    <span className={`report-list-status ${caseStatusTone(item.case_status || item.status)}`}>
+                      {item.case_status || item.status || "확인 필요"}
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
             {visibleCases.length > pageSize && (
               <nav className="table-pagination" aria-label="최근 분석 이력 페이지">
@@ -3551,11 +3632,14 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
             {selectedCase ? (
               <>
                 <div className="panel-head">
-                  <strong>사건 상세</strong>
+                  <strong>선택한 사건</strong>
                   <span className="tag">{selectedCase.type || "상담"}</span>
                 </div>
                 <div className="case-detail-body">
                   <h3>{selectedCase.title || selectedCase.case_id}</h3>
+                  <p className="case-detail-summary">
+                    사건별 상담 내용과 저장된 분석 리포트를 이어서 확인합니다.
+                  </p>
                   <dl>
                     <div>
                       <dt>상태</dt>
@@ -3567,10 +3651,30 @@ function MyPageScreen({ cases, onOpenCase, onOpenChat, onRefresh, summary }) {
                     </div>
                     <div><dt>최근 작업</dt><dd>{selectedCase.updated_at || selectedCase.created_at || "-"}</dd></div>
                     <div><dt>사건 ID</dt><dd>{selectedCase.case_id || selectedCase.job_id || "-"}</dd></div>
+                    <div><dt>저장 리포트</dt><dd>{selectedCaseReports.length ? `${selectedCaseReports.length}건` : "없음"}</dd></div>
                   </dl>
-                  <button className="button primary full" type="button" onClick={() => onOpenCase(selectedCase)}>
-                    이어서 보기
-                  </button>
+                  <div className="case-report-actions">
+                    {selectedCaseReports.length ? (
+                      selectedCaseReports.map((report, index) => (
+                        <button
+                          className="button primary full case-report-action"
+                          key={report.report_id || index}
+                          type="button"
+                          onClick={() => onOpenReport(report)}
+                        >
+                          {selectedCaseReports.length > 1 ? `리포트 ${index + 1} 자세히 보기` : "리포트 자세히 보기"}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="case-report-empty">
+                        <strong>리포트 생성 필요</strong>
+                        <p>상담을 이어서 진행하면 사건 분석 리포트를 생성할 수 있습니다.</p>
+                        <button className="button primary full" type="button" onClick={() => onOpenCase(selectedCase)}>
+                          AI 상담 이어가기
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             ) : (
@@ -4122,6 +4226,42 @@ function ReportingScreen({
   const groundsSections = groupedSections.grounds;
   const actionSections = groupedSections.actions;
   const supportCards = analysisCards.slice(0, 3);
+  const ratioRangeLabel =
+    faultRatioNode?.structured_result?.ratio_range_label ||
+    findReportText(sections, /과실비율|과실 비율|%/, "확인된 자료 없음");
+  const visionSections = sections.filter((section) =>
+    /영상|비전|블랙박스|CCTV|프레임|사고 장면/.test(String(section?.title || ""))
+  );
+  const visionCards = analysisCards.filter((card) =>
+    /영상|비전|블랙박스|CCTV|프레임|사고 장면/.test(
+      [card?.card_type, card?.title, card?.summary].filter(Boolean).join(" ")
+    )
+  );
+  const reportUpdatedAt =
+    reportMetadata.updated_at ||
+    currentReport?.updated_at ||
+    activeReportingPayload?.updated_at ||
+    "확인된 자료 없음";
+  const isFineReport =
+    activeReportType === "fine_notice_objection" ||
+    activeReportingPayload?.document_variant === "fine_notice" ||
+    /과태료|범칙금|고지서|이의/.test([activeReportTitle, reportSummary].join(" "));
+  const fineSummary = [
+    {
+      label: "현재 단계",
+      value: findReportText(sections, /현재 단계|처분 단계|사전통지|의견제출/, reportStatusLabel(reportStatus)),
+    },
+    {
+      label: "과태료",
+      value: findReportText(sections, /예상 과태료|과태료 금액|부과 금액|[0-9,]+원/, "확인된 자료 없음"),
+    },
+    {
+      label: "제출·납부기한",
+      value:
+        activeReportingPayload?.appeal_gate?.deadline ||
+        findReportText(sections, /제출 기한|납부 기한|의견제출|마감|D-/, "확인된 자료 없음"),
+    },
+  ];
 
   return (
     <section className="screen">
@@ -4182,72 +4322,144 @@ function ReportingScreen({
 
         <article className="report-canvas" aria-label="리포트 미리보기">
           {hasReport ? (
-            <div className="report-page">
-              <span className="report-document-label">{reportDisplayLabel}</span>
-              <h3>{activeReportTitle}</h3>
-              <p>{reportSummary}</p>
+            <div className="report-page case-report-detail">
+              <header className="case-report-detail__header">
+                <div>
+                  <span className="report-document-label">{reportDisplayLabel}</span>
+                  <h3>{activeReportTitle}</h3>
+                  <p>{reportSummary}</p>
+                </div>
+                <dl>
+                  <div><dt>리포트 ID</dt><dd>{currentReport?.report_id || "확인된 자료 없음"}</dd></div>
+                  <div><dt>사건 ID</dt><dd>{reportMetadata.case_id || "확인된 자료 없음"}</dd></div>
+                  <div><dt>최근 분석</dt><dd>{reportUpdatedAt}</dd></div>
+                </dl>
+              </header>
               <div className="report-status-strip">
                 <span>작성 상태</span>
                 <strong className={`report-status-badge ${reportStatusTone(reportStatus)}`}>
                   {reportStatusLabel(reportStatus)}
                 </strong>
-                <p>상담 내용을 바탕으로 확인된 내용을 정리하고 있습니다.</p>
+                <p>확인된 상담과 제출 자료를 기준으로 정리한 결과이며 최종 법적 판단을 대신하지 않습니다.</p>
               </div>
 
-              <DocumentTypeCards cards={documentCards} onCopy={onCopyDocumentCard} />
+              {isFineReport ? (
+                <section className="case-report-ratio case-report-fine-summary" aria-label="과태료 처분 현황">
+                  <div className="case-report-section-title">
+                    <span>01</span>
+                    <div>
+                      <strong>처분 현황</strong>
+                      <p>고지서와 상담에서 확인된 처분 내용과 기한입니다.</p>
+                    </div>
+                  </div>
+                  <div className="case-report-fine-grid">
+                    {fineSummary.map((item) => (
+                      <div key={item.label}>
+                        <span>{item.label}</span>
+                        <strong>{compactValue(item.value)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : (
+                <section className="case-report-ratio" aria-label="AI 추정 과실비율">
+                  <div className="case-report-section-title">
+                    <span>01</span>
+                    <div>
+                      <strong>AI 추정 과실비율</strong>
+                      <p>현재 확인된 자료를 기준으로 한 검토 범위입니다.</p>
+                    </div>
+                  </div>
+                  <div className="case-report-ratio__value">
+                    <span>과실 검토 범위</span>
+                    <strong>{compactValue(ratioRangeLabel)}</strong>
+                    <div className="case-report-ratio__track"><span /></div>
+                  </div>
+                </section>
+              )}
 
-              <div className="report-story-grid">
-                {overviewSections.map((section) => (
-                  <ReportSectionPreview compact detailLimit={2} key={`overview-${section.title}`} section={section} />
-                ))}
-                {overviewSections.length === 0 && currentReport && (
-                  <article className="report-empty-hint">
-                    <strong>저장 리포트</strong>
-                    <p>
-                      리포트 ID {currentReport.report_id}
-                      {reportMetadata.updated_at ? ` · 최근 작업 ${reportMetadata.updated_at}` : ""}
-                    </p>
-                  </article>
-                )}
-              </div>
-
-              <div className="report-focus-columns">
-                <section className="report-focus-panel" aria-label="핵심 근거">
-                  <div className="report-focus-header">
-                    <strong>판단 근거</strong>
+              <div className="case-report-grid">
+                <section className="case-report-card case-report-facts" aria-label={isFineReport ? "위반 사실 요약" : "사고 정황 요약"}>
+                  <div className="case-report-section-title">
+                    <span>02</span>
+                    <div>
+                      <strong>{isFineReport ? "위반 사실 요약" : "사고 정황 요약"}</strong>
+                      <p>{isFineReport ? "고지서·OCR·상담에서 확인된 사실입니다." : "진술·OCR·분석 결과에서 확인된 사실입니다."}</p>
+                    </div>
                   </div>
                   <div className="report-section-list">
-                    {groundsSections.length > 0 ? (
+                    {overviewSections.length ? (
+                      overviewSections.map((section) => (
+                        <ReportSectionPreview detailLimit={3} key={`overview-${section.title}`} section={section} />
+                      ))
+                    ) : <p className="case-report-missing">확인된 자료 없음</p>}
+                  </div>
+                </section>
+
+                <section className="case-report-card case-report-references" aria-label="판단 근거">
+                  <div className="case-report-section-title">
+                    <span>03</span>
+                    <div>
+                      <strong>{isFineReport ? "이의제기 검토 근거" : "판단 근거"}</strong>
+                      <p>{isFineReport ? "처분 내용과 의견제출에 적용할 수 있는 근거입니다." : "관련 법령과 유사 사례 등 적용 후보입니다."}</p>
+                    </div>
+                  </div>
+                  <div className="report-section-list">
+                    {groundsSections.length ? (
                       groundsSections.map((section) => (
                         <ReportSectionPreview detailLimit={3} key={`grounds-${section.title}`} section={section} />
                       ))
-                    ) : (
-                      <div className="report-empty-hint">
-                        <strong>근거 항목이 아직 정리되지 않았습니다.</strong>
-                        <p>역질문이 더 필요하거나 Agent 결과가 도착하면 이 영역을 채웁니다.</p>
-                      </div>
-                    )}
-                  </div>
-                </section>
-
-                <section className="report-focus-panel" aria-label="다음 작업">
-                  <div className="report-focus-header">
-                    <strong>다음 단계</strong>
-                  </div>
-                  <div className="report-section-list">
-                    {actionSections.length > 0 ? (
-                      actionSections.map((section) => (
-                        <ReportSectionPreview detailLimit={3} key={`actions-${section.title}`} section={section} />
-                      ))
-                    ) : (
-                      <div className="report-empty-hint">
-                        <strong>다음 작업 항목이 아직 없습니다.</strong>
-                        <p>리포트 저장 전까지는 제출 단계 대신 상담 요약만 유지합니다.</p>
-                      </div>
-                    )}
+                    ) : !faultRatioNode && !lawGroundNode ? (
+                      <p className="case-report-missing">확인된 자료 없음</p>
+                    ) : null}
+                    {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
+                    {lawGroundNode && <LawGroundInsightPanel compact node={lawGroundNode} />}
                   </div>
                 </section>
               </div>
+
+              <section className="case-report-card case-report-vision" aria-label="영상 분석 결과">
+                <div className="case-report-section-title">
+                  <span>04</span>
+                  <div>
+                    <strong>{isFineReport ? "제출 자료 분석" : "영상 분석 결과"}</strong>
+                    <p>{isFineReport ? "고지서와 첨부 자료에서 확인된 내용입니다." : "블랙박스·CCTV에서 확인된 장면과 시점입니다."}</p>
+                  </div>
+                </div>
+                <div className="case-report-vision__content">
+                  {visionSections.length ? (
+                    visionSections.map((section) => (
+                      <ReportSectionPreview detailLimit={5} key={`vision-${section.title}`} section={section} />
+                    ))
+                  ) : visionCards.length ? (
+                    visionCards.map((card, index) => (
+                      <article className="case-report-vision__event" key={analysisCardKey(card, index)}>
+                        <span className="tag">{card.card_type || "영상 분석"}</span>
+                        <strong>{card.title || "사고 장면 분석"}</strong>
+                        <p>{card.summary || "확인된 자료 없음"}</p>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="case-report-missing">확인된 영상 분석 자료 없음</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="case-report-card case-report-actions" aria-label="다음 단계">
+                <div className="case-report-section-title">
+                  <span>05</span>
+                  <div><strong>다음 단계</strong><p>추가 자료와 후속 행동을 확인합니다.</p></div>
+                </div>
+                <div className="report-section-list">
+                  {actionSections.length ? (
+                    actionSections.map((section) => (
+                      <ReportSectionPreview detailLimit={3} key={`actions-${section.title}`} section={section} />
+                    ))
+                  ) : <p className="case-report-missing">확인된 자료 없음</p>}
+                </div>
+              </section>
+
+              <DocumentTypeCards cards={documentCards} onCopy={onCopyDocumentCard} />
 
               {supportCards.length > 0 && (
                 <div className="report-support-strip">
