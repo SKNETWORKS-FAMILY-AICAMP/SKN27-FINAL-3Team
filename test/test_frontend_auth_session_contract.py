@@ -122,6 +122,24 @@ def test_frontend_renders_editable_ocr_confirmation_before_follow_up() -> None:
     assert "notice_stage" in shell
 
 
+def test_start_new_conversation_clears_the_previous_session_id() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    start = shell.index("function startNewConversation() {")
+    end = shell.index("async function loadMyPageSummary", start)
+    block = shell[start:end]
+
+    assert 'setSessionId("");' in block
+
+
+def test_prepare_missing_evidence_upload_keeps_the_current_session_binding() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    start = shell.index("function prepareMissingEvidenceUpload() {")
+    end = shell.index("function prepareDraftRegeneration()", start)
+    block = shell[start:end]
+
+    assert 'setSessionId("");' not in block
+
+
 def test_vite_proxy_does_not_capture_frontend_api_client_module() -> None:
     config = read_text(ROOT / "app" / "web" / "vite.config.js")
 
@@ -145,16 +163,113 @@ def test_production_auth_document_requires_real_google_code_flow() -> None:
     assert "APP_AUTH_ALLOW_MOCK_BEARER" not in content
 
 
-def test_memory_only_app_jwt_does_not_restore_stale_authenticated_ui() -> None:
+def test_app_auth_session_persists_authenticated_identity_for_reload_and_report_flows() -> None:
     auth_session = read_text(ROOT / "app" / "web" / "authSession.js")
     persistence = auth_session.split("export function persistAuthSession", 1)[1].split(
         "export function clearStoredAuthSession", 1
     )[0]
 
-    assert "auth_session_id: authSessionId || null" not in persistence
-    assert "user_id: userId || null" not in persistence
-    assert "writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null)" not in persistence
-    assert "removeStoredValue(GOOGLE_PROFILE_STORAGE_KEY)" in auth_session
+    for required in (
+        "auth_session_id: authSessionId || null",
+        "user_id: userId || null",
+        "session_id: sessionId || null",
+        "access_token: accessToken || null",
+        "writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null)",
+    ):
+        assert required in persistence
+
+
+def test_auth_session_storage_round_trip_restores_authenticated_state() -> None:
+    run_auth_session_node_contract(
+        r"""
+        const assert = (await import("node:assert/strict")).default;
+        const storage = new Map();
+        global.window = {
+          localStorage: {
+            getItem(key) {
+              return storage.has(key) ? storage.get(key) : null;
+            },
+            setItem(key, value) {
+              storage.set(key, String(value));
+            },
+            removeItem(key) {
+              storage.delete(key);
+            },
+          },
+        };
+
+        const profile = { email: "driver@example.com", name: "Driver" };
+        const storedAuthValue = "header." + "payload.signature";
+        authSession.persistAuthSession({
+          guestId: "gst_roundtrip",
+          guestCredential: "guest-cred",
+          authSessionId: "auth_roundtrip",
+          userId: "usr_roundtrip",
+          sessionId: "ses_roundtrip",
+          accessToken: storedAuthValue,
+          googleProfile: profile,
+        });
+
+        assert.equal(authSession.readStoredAuthToken(), storedAuthValue);
+        assert.deepEqual(authSession.readStoredGoogleProfile(), profile);
+        assert.deepEqual(authSession.readStoredAuthSession(), {
+          guest_id: "gst_roundtrip",
+          guest_credential: "guest-cred",
+          auth_session_id: "auth_roundtrip",
+          user_id: "usr_roundtrip",
+          session_id: "ses_roundtrip",
+          access_token: storedAuthValue,
+        });
+
+        authSession.clearStoredAuthSession();
+        assert.equal(authSession.readStoredAuthToken(), "");
+        assert.equal(authSession.readStoredGoogleProfile(), null);
+        assert.deepEqual(authSession.readStoredAuthSession(), {});
+        """
+    )
+
+
+def test_api_client_preserves_auth_error_metadata_for_frontend_recovery() -> None:
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+
+    for required in (
+        "requestError.status = response.status;",
+        "requestError.code = error?.code || null;",
+        "requestError.reason = reason || null;",
+        "requestError.requiredAction = error?.required_action || null;",
+        "requestError.payload = payload;",
+        "requestError.publicMessage = publicMessage;",
+    ):
+        assert required in api_client
+
+
+def test_guest_bootstrap_rebinds_server_session_before_follow_up_workflows() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    start = shell.index("async function bootstrapGuestSession")
+    end = shell.index("async function ensureGuestSession", start)
+    block = shell[start:end]
+
+    assert block.count("api.createGuestSession(") >= 2
+    assert "const ensuredSessionId = initialGuest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;" in block
+    assert "const reboundGuest = await api.createGuestSession(" in block
+    assert "guest_id: initialGuestId," in block
+    assert "session_id: ensuredSessionId," in block
+    assert "{ guestId: initialGuestId, guestCredential: initialGuestCredential }" in block
+
+
+def test_chat_submit_recovery_uses_structured_auth_error_metadata() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    submit_start = shell.index("async function submitServiceMessage({")
+    submit_end = shell.index("async function streamAssistantMessage", submit_start)
+    block = shell[submit_start:submit_end]
+
+    for required in (
+        '_error?.requiredAction === "login"',
+        '_error?.requiredAction === "refresh_guest_session"',
+        '_error?.code === "guest_session_invalid"',
+        'setAnalysisResponse(isRateLimitExceeded ? null : { cards: FALLBACK_ANALYSIS_CARDS })',
+    ):
+        assert required in block
 
 
 def test_app_jwt_refresh_scheduler_uses_exp_for_timing_and_cleans_up() -> None:

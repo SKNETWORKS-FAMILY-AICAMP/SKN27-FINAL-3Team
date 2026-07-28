@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from app.security.chat_input_privacy import protect_chat_input_payload
 from app.services.attachment_mock_service import resolve_attachment_references
+from app.services.case_memory_service import update_case_memory
 from app.services.case_evidence_service import build_case_evidence
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS, build_consultation_state_v2
 from app.services.law_ground_contract import normalize_law_evidence
@@ -202,9 +203,19 @@ def submit_message(
             conflicts=fact_state["conflicts"],
             material_source_refs=set(),
         )
+        case_memory = update_case_memory(
+            payload.get("case_memory") if isinstance(payload.get("case_memory"), dict) else {},
+            user_text=user_text,
+            routing_intent=routing_intent,
+            fact_state=fact_state,
+            case_evidence=case_evidence,
+            attachments=attachments,
+            consultation_state=consultation_state,
+        )
         consultation_state = {
             **consultation_state,
             "case_evidence": case_evidence,
+            "case_memory": case_memory,
             "next_questions": [
                 *list(consultation_state.get("next_questions") or []),
                 *(
@@ -217,6 +228,9 @@ def submit_message(
         accident_supervisor_state = {
             **accident_supervisor_state,
             "case_evidence": case_evidence,
+            "case_memory": case_memory,
+            "conversation_summary": case_memory.get("conversation_summary")
+            or accident_supervisor_state.get("conversation_summary"),
         }
         auth_context = payload.get("auth_context") if isinstance(payload.get("auth_context"), dict) else {}
         promotion_gate = evaluate_case_promotion(
@@ -683,6 +697,7 @@ def _consultation_hold_response(
             "v2": consultation_state,
             "fact_state": fact_state,
             "promotion_gate": promotion_gate,
+            "case_memory": dict(consultation_state.get("case_memory") or {}),
         },
         "analysis_plan": {
             "contract_version": "analysis_plan.v2",

@@ -194,6 +194,25 @@ REPORT_SENSITIVE_FIELD_FRAGMENTS = (
     "transcript",
     "usertext",
 )
+from app.services.analysis_job_query_service import (
+    project_public_law_quality_summary,
+    project_public_quality_summary,
+    safe_public_confidence_label,
+    safe_public_limitations,
+)
+_REPORTING_PAYLOAD_FIELDS = (
+    "report_type",
+    "screen_id",
+    "stage",
+    "title",
+    "summary",
+    "document_variant",
+    "document_readiness",
+    "report_actions",
+    "appeal_gate",
+    "document_cards",
+    "sections",
+)
 
 
 class ReportReferenceError(ValueError):
@@ -3362,14 +3381,21 @@ def _worker_report_quality(
         for result in agent_results
         for limitation in _list_or_empty(result.limitations)
     )
+    partial_report = report_status != ReportStatus.READY.value
+    public_quality_summary = _report_public_quality_summary(
+        partial_report=partial_report,
+        limitations=limitations,
+        quality_source=_law_result_public_quality_summary(agent_results),
+    )
     return {
         "contract_version": "report_quality.v2",
         "analysis_job_status": final_status,
         "agent_status_counts": _agent_status_counts(agent_results),
-        "partial_report": report_status != ReportStatus.READY.value,
-        "review_required": True,
+        "partial_report": partial_report,
+        "review_required": partial_report or bool(limitations),
         "limitation_count": len(limitations),
         "limitations": limitations[:12],
+        "public_quality_summary": public_quality_summary,
     }
 
 
@@ -4397,10 +4423,8 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
     content = _dict_or_empty(report.content)
     metadata = _dict_or_empty(report.metadata)
     reporting_payload = _dict_or_empty(content.get("reporting_payload"))
-    public_reporting_payload = {
-        **reporting_payload,
-        "document_confirmation": get_report_document_confirmation_state(report),
-    }
+    public_reporting_payload = _public_reporting_payload(reporting_payload)
+    public_reporting_payload["document_confirmation"] = get_report_document_confirmation_state(report)
     job = report.job
     return {
         **_report_record_summary(report),
@@ -4409,13 +4433,12 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
             "reporting_payload": public_reporting_payload,
             "format": _text(content.get("format")),
             "action": _text(content.get("action")),
-            "source": _dict_or_empty(content.get("source")),
-            "quality": _dict_or_empty(content.get("quality")),
         },
         "metadata": {
-            "report_quality": _dict_or_empty(metadata.get("report_quality")),
-            "limitations": _list_or_empty(metadata.get("limitations")),
-            "object_storage": _dict_or_empty(metadata.get("object_storage")),
+            "report_quality": _public_report_quality(
+                _dict_or_empty(metadata.get("report_quality"))
+            ),
+            "limitations": safe_public_limitations(metadata.get("limitations")),
         },
         "job": {
             "job_id": job.job_id,
@@ -4426,6 +4449,148 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
         if job
         else None,
     }
+
+
+def _public_report_quality(value: dict[str, Any]) -> dict[str, Any]:
+    """Project report quality into the same public contract used by analysis results."""
+
+    limitations = safe_public_limitations(value.get("limitations"))
+    return {
+        "contract_version": "report_quality.v2",
+        "partial_report": bool(value.get("partial_report")),
+        "review_required": bool(value.get("review_required")),
+        "limitation_count": len(limitations),
+        "limitations": limitations,
+        "confidence_label": safe_public_confidence_label(value.get("confidence_label")),
+        "public_quality_summary": project_public_quality_summary(value.get("public_quality_summary")),
+    }
+
+
+def _public_reporting_payload(value: dict[str, Any]) -> dict[str, Any]:
+    payload = _project_mapping(value, _REPORTING_PAYLOAD_FIELDS)
+    if isinstance(payload.get("sections"), list):
+        payload["sections"] = [
+            _public_report_section(section)
+            for section in payload["sections"]
+            if isinstance(section, dict)
+        ]
+    if isinstance(payload.get("document_readiness"), dict):
+        readiness = payload["document_readiness"]
+        payload["document_readiness"] = {
+            "ready_for_docx": bool(readiness.get("ready_for_docx")),
+            "missing_field_details": _public_document_fields(
+                readiness.get("missing_field_details")
+            ),
+            "next_questions": _public_document_fields(readiness.get("next_questions")),
+        }
+    if isinstance(payload.get("report_actions"), list):
+        payload["report_actions"] = _public_report_actions(payload["report_actions"])
+    if isinstance(payload.get("appeal_gate"), dict):
+        appeal_gate = payload["appeal_gate"]
+        payload["appeal_gate"] = {
+            "blocked": bool(appeal_gate.get("blocked")),
+            "reason": _text(appeal_gate.get("reason")),
+        }
+    if isinstance(payload.get("document_cards"), list):
+        payload["document_cards"] = _public_document_cards(payload["document_cards"])
+    return payload
+
+
+def _public_report_section(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": _text(value.get("title")) or None,
+        "body": _text(value.get("body")) or None,
+        "items": _safe_public_text_values(value.get("items")),
+    }
+
+
+def _public_document_fields(value: Any) -> list[dict[str, str]]:
+    fields: list[dict[str, str]] = []
+    for item in _list_or_empty(value):
+        if not isinstance(item, dict):
+            continue
+        field = _text(item.get("field"))
+        label = _text(item.get("label"))
+        question = _text(item.get("question"))
+        public = {
+            key: item_value
+            for key, item_value in (
+                ("field", field),
+                ("label", label),
+                ("question", question),
+            )
+            if item_value
+        }
+        if public:
+            fields.append(public)
+    return fields
+
+
+def _public_report_actions(value: list[Any]) -> list[dict[str, str]]:
+    actions: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        action_type = _text(item.get("type"))
+        label = _text(item.get("label"))
+        document_type = _text(item.get("document_type"))
+        if not all((action_type, label, document_type)):
+            continue
+        action = {
+            "type": action_type,
+            "label": label,
+            "document_type": document_type,
+        }
+        if _text(item.get("document_format")) == "docx":
+            action["document_format"] = "docx"
+        actions.append(action)
+    return actions
+
+
+def _public_document_cards(value: list[Any]) -> list[dict[str, Any]]:
+    cards: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        card_type = _text(item.get("type"))
+        status = _text(item.get("status"))
+        title = _text(item.get("title"))
+        description = _text(item.get("description"))
+        if (
+            card_type not in {"objection_draft", "fact_summary", "insurance_submission"}
+            or status not in {"ready", "partial", "unavailable"}
+            or not title
+            or not description
+        ):
+            continue
+        card: dict[str, Any] = {
+            "type": card_type,
+            "title": title,
+            "description": description,
+            "status": status,
+            "sections": [
+                _public_report_section(section)
+                for section in _list_or_empty(item.get("sections"))
+                if isinstance(section, dict)
+            ],
+        }
+        for key in ("copy_text", "notice"):
+            if text := _text(item.get(key)):
+                card[key] = text
+        cards.append(card)
+    return cards
+
+
+def _project_mapping(value: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+    return {field: deepcopy(value[field]) for field in fields if field in value}
+
+
+def _safe_public_text_values(value: Any) -> list[str]:
+    return [
+        text
+        for item in _list_or_empty(value)
+        if (text := _sanitize_report_text(item))
+    ]
 
 
 def _report_record_summary(report: Report) -> dict[str, Any]:
@@ -4978,18 +5143,21 @@ def _analysis_job_supervisor_execution(
 
 def _analysis_job_report_summary(report: Report) -> dict[str, Any]:
     metadata = _dict_or_empty(report.metadata)
-    return {
+    summary = {
         "report_id": report.report_id,
         "report_type": report.report_type,
         "status": report.status,
         "title": report.title,
         "content_summary": report.content_summary,
-        "storage_uri": report.storage_uri,
-        "object_storage": _dict_or_empty(metadata.get("object_storage")),
-        "report_quality": _dict_or_empty(metadata.get("report_quality")),
         "created_at": report.created_at.isoformat(),
         "updated_at": report.updated_at.isoformat(),
     }
+    summary["report_quality"] = {
+        "public_quality_summary": project_public_quality_summary(
+            _dict_or_empty(metadata.get("report_quality")).get("public_quality_summary")
+        )
+    }
+    return summary
 
 
 def uploaded_file_to_api(uploaded_file: UploadedFile) -> dict[str, Any]:
@@ -8195,6 +8363,11 @@ def _persist_retrieval_event_for_invocation(
         for item in matched_laws
         if isinstance(item, dict) and _text(item.get("source_reference"))
     ]
+    source_refs.extend(
+        _text(item)
+        for item in matched_laws
+        if isinstance(item, str) and _text(item)
+    )
     if not source_refs:
         source_refs = [
             _text(item.get("source_reference"))
@@ -9718,6 +9891,11 @@ def _report_quality_snapshot(
         AnalysisJobStatus.FAILED.value,
     }
     deduped_limitations = _dedupe_safe_report_text_values(limitations)
+    public_quality_summary = _report_public_quality_summary(
+        partial_report=partial_report,
+        limitations=deduped_limitations,
+        quality_source=_law_result_public_quality_summary(agent_results),
+    )
     return {
         "contract_version": "report_quality.v1",
         "analysis_job_status": analysis_job_status or None,
@@ -9725,7 +9903,37 @@ def _report_quality_snapshot(
         "partial_report": partial_report,
         "limitation_count": len(deduped_limitations),
         "limitations": deduped_limitations[:12],
+        "public_quality_summary": public_quality_summary,
     }
+
+
+def _law_result_public_quality_summary(
+    agent_results: list[AgentResult],
+) -> dict[str, Any] | None:
+    for result in agent_results:
+        if result.node_code != "law_ground_search":
+            continue
+        summary = project_public_law_quality_summary(result.structured_result or {})
+        if summary:
+            return summary
+    return None
+
+
+def _report_public_quality_summary(
+    *,
+    partial_report: bool,
+    limitations: list[str],
+    quality_source: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    source = dict(quality_source or {})
+    source["status"] = "partial" if partial_report else source.get("status") or "ready"
+    source["partial_result"] = partial_report or bool(source.get("partial_result"))
+    source["review_required"] = (
+        partial_report or bool(limitations) or bool(source.get("review_required"))
+    )
+    if limitations:
+        source["limitations"] = limitations
+    return project_public_quality_summary(source)
 
 
 def _report_object_body_for_write(

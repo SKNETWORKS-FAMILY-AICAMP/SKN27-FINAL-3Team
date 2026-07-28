@@ -314,6 +314,34 @@ def test_pgvector_sets_local_hnsw_options_before_vector_select(monkeypatch):
     assert atomic_calls == ["legal-rag"]
 
 
+def test_pgvector_applies_minimum_similarity_threshold(monkeypatch):
+    cursor = FakeCursor([])
+    connection = FakeConnection(cursor)
+    monkeypatch.setenv("LEGAL_RAG_MIN_SIMILARITY_SCORE", "0.65")
+
+    service._query_pgvector_rows(
+        connection,
+        query_vector=[1.0] + [0.0] * 1023,
+        top_k=5,
+        source_type="law",
+        allowed_source_types=("law",),
+        effective_at=date(2026, 7, 21),
+        embedding_space={
+            "provider": "hash",
+            "model": "hashing-vectorizer",
+            "dimensions": 1024,
+        },
+    )
+
+    query_sql, query_params = cursor.executions[2]
+
+    assert "1 - (e.embedding_vector <=> %s::vector) >= %s" in query_sql
+    assert query_params[-4] == service._pgvector_literal([1.0] + [0.0] * 1023)
+    assert query_params[-3] == pytest.approx(0.65)
+    assert query_params[-2] == service._pgvector_literal([1.0] + [0.0] * 1023)
+    assert query_params[-1] == 5
+
+
 def test_vector_disabled_does_not_emit_token_coverage_metadata(monkeypatch):
     lexical_description = [
         item

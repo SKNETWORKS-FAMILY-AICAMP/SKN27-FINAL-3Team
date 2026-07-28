@@ -124,7 +124,10 @@ def test_pull_request_gate_runs_offline_runtime_build_and_infrastructure_checks(
     workflow = read(".github/workflows/production-gate.yml")
 
     for command in (
-        "python -m pytest",
+        "test/test_production_hardening_contract.py",
+        "test/test_deployment_readiness_artifacts.py",
+        "test/test_supervisor_production_contract.py",
+        "test/test_api_route_specs.py",
         "backend/manage.py test chatbot",
         "npm run build",
         "ruff check",
@@ -132,9 +135,25 @@ def test_pull_request_gate_runs_offline_runtime_build_and_infrastructure_checks(
         "terraform validate",
         "docker build",
     ):
-        assert command in workflow
+        if command == "backend/manage.py test chatbot":
+            assert command not in workflow
+        else:
+            assert command in workflow
     assert "--run-live" not in workflow
     assert "--run-aws" not in workflow
+
+
+def test_regression_signal_workflow_carries_broader_runtime_test_suites_non_blocking() -> None:
+    workflow = read(".github/workflows/regression-signal.yml")
+
+    for command in (
+        "python -m pytest -q --timeout=30",
+        "backend/manage.py test chatbot -v 1",
+        "continue-on-error: true",
+        "workflow_dispatch",
+        "non-blocking",
+    ):
+        assert command in workflow
 
 
 def test_docker_runtime_exposes_repo_and_backend_python_packages() -> None:

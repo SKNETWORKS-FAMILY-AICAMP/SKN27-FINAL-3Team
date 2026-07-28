@@ -4941,6 +4941,81 @@ components:
       - error
       title: ReportApiErrorResponse
       type: object
+    PublicQualityFreshness:
+      additionalProperties: false
+      properties:
+        effective_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Effective At
+        retrieved_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Retrieved At
+        limitation:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Limitation
+      title: PublicQualityFreshness
+      type: object
+    PublicQualityRetrieval:
+      additionalProperties: false
+      properties:
+        backend_label:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Backend Label
+        result_count:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          default: null
+          title: Result Count
+        used_fallback:
+          default: false
+          title: Used Fallback
+          type: boolean
+      title: PublicQualityRetrieval
+      type: object
+    PublicQualitySummary:
+      additionalProperties: false
+      properties:
+        status:
+          default: unavailable
+          title: Status
+          type: string
+        partial_result:
+          default: false
+          title: Partial Result
+          type: boolean
+        review_required:
+          default: false
+          title: Review Required
+          type: boolean
+        freshness:
+          $ref: '#/components/schemas/PublicQualityFreshness'
+        retrieval:
+          $ref: '#/components/schemas/PublicQualityRetrieval'
+        limitation_count:
+          default: 0
+          minimum: 0
+          title: Limitation Count
+          type: integer
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+      title: PublicQualitySummary
+      type: object
     ReportAppealGate:
       additionalProperties: false
       properties:
@@ -5217,6 +5292,11 @@ components:
           - type: 'null'
           default: null
           title: Confidence Label
+        public_quality_summary:
+          anyOf:
+          - $ref: '#/components/schemas/PublicQualitySummary'
+          - type: 'null'
+          default: null
       title: ReportQuality
       type: object
     ReportReportingPayload:

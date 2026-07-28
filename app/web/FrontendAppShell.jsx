@@ -6,10 +6,19 @@ import {
   buildGoogleLoginPayload,
   clearStoredAuthSession,
   persistAuthSession,
+  readStoredGoogleProfile,
   readStoredAuthSession,
   readStoredAuthToken,
   scheduleAppJwtRefresh,
 } from "./authSession.js";
+import {
+  CONSULTATION_FACT_FIELDS,
+  CONSULTATION_TYPE_OPTIONS,
+  buildStructuredConsultationMessage,
+  createEmptyConsultationIntake,
+  hasConsultationIntakeData,
+  listConsultationIntakeMissingFields,
+} from "./consultationIntake.js";
 
 const TAB_ROUTES = [
   { id: "chatbot", label: "사고·과태료 상담" },
@@ -244,6 +253,7 @@ export default function FrontendAppShell({
   const [question, setQuestion] = useState("");
   const [submittedQuestion, setSubmittedQuestion] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
+  const [consultationIntake, setConsultationIntake] = useState(() => createEmptyConsultationIntake());
   const [analysisResponse, setAnalysisResponse] = useState(null);
   const [activeAuthToken, setActiveAuthToken] = useState(() => readStoredAuthToken());
   const [savePromptVisible, setSavePromptVisible] = useState(false);
@@ -411,22 +421,34 @@ export default function FrontendAppShell({
             throw new Error("Auth refresh response is incomplete.");
           }
           const nextGuestId = refreshResult?.subject?.guest_id || refreshContext.guestId || "";
+          const nextUserId = refreshResult?.subject?.user_id || readStoredAuthSession().user_id || "";
           setActiveAuthToken(nextToken);
           setAuthSessionId(nextAuthSessionId);
           setGuestId(nextGuestId);
           persistAuthSession({
+            accessToken: nextToken,
+            authSessionId: nextAuthSessionId,
             guestId: nextGuestId,
             guestCredential: refreshContext.guestCredential,
+            googleProfile: readStoredGoogleProfile(),
+            sessionId: refreshContext.sessionId,
+            userId: nextUserId,
           });
         } catch (_error) {
           if (!refreshEffectActive) {
             return;
           }
           clearStoredAuthSession();
+          persistAuthSession({
+            guestId: refreshContext.guestId || "",
+            guestCredential: refreshContext.guestCredential || "",
+            sessionId: refreshContext.sessionId || "",
+          });
           setActiveAuthToken("");
           setAuthSessionId("");
-          setGuestId("");
-          setGuestCredential("");
+          setGuestId(refreshContext.guestId || "");
+          setGuestCredential(refreshContext.guestCredential || "");
+          setSessionId(refreshContext.sessionId || "");
           setMypageSummary(null);
           setHistoryEvents(null);
           setCurrentReport(null);
@@ -446,25 +468,36 @@ export default function FrontendAppShell({
   async function bootstrapGuestSession(nextRoute = "chatbot") {
     setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 준비하고 있습니다.");
     try {
-      const guest = await api.createGuestSession(
+      const initialGuest = await api.createGuestSession(
         {
           guest_id: guestId || undefined,
           session_id: sessionId || undefined,
         },
         { guestId, guestCredential }
       );
-      const nextGuestId = guest?.guest?.guest_id || guestId;
-      const nextGuestCredential = guest?.guest_credential || "";
-      const nextSessionId = guest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;
-      if (!nextGuestId || !nextGuestCredential) {
+      const initialGuestId = initialGuest?.guest?.guest_id || guestId;
+      const initialGuestCredential = initialGuest?.guest_credential || "";
+      const ensuredSessionId = initialGuest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;
+      if (!initialGuestId || !initialGuestCredential) {
         throw new Error("Guest session response is incomplete.");
       }
+      const reboundGuest = await api.createGuestSession(
+        {
+          guest_id: initialGuestId,
+          session_id: ensuredSessionId,
+        },
+        { guestId: initialGuestId, guestCredential: initialGuestCredential }
+      );
+      const nextGuestId = reboundGuest?.guest?.guest_id || initialGuestId;
+      const nextGuestCredential = reboundGuest?.guest_credential || initialGuestCredential;
+      const nextSessionId = reboundGuest?.session_binding?.session_id || ensuredSessionId;
       setGuestId(nextGuestId);
       setGuestCredential(nextGuestCredential);
       setSessionId(nextSessionId);
       persistAuthSession({
         guestId: nextGuestId,
         guestCredential: nextGuestCredential,
+        sessionId: nextSessionId,
       });
       setStatusMessage("임시 상담을 시작했습니다. 상세 분석이나 이력 저장이 필요해질 때 Google 로그인을 안내합니다.");
       setActiveRoute(nextRoute);
@@ -583,6 +616,7 @@ export default function FrontendAppShell({
     setGuestDetailedReportUsed(false);
     setSubmittedQuestion("");
     setQuestion("");
+    setConsultationIntake(createEmptyConsultationIntake());
     setActiveRoute("entry");
     setStatusMessage("로그아웃했습니다. 새 Google 계정으로 다시 진행할 수 있습니다.");
   }
@@ -1045,15 +1079,19 @@ export default function FrontendAppShell({
     attachmentClassificationConfirmation,
   } = {}) {
     const trimmedQuestion = String(userText ?? question).trim();
+    const composedQuestion = buildStructuredConsultationMessage({
+      freeText: trimmedQuestion,
+      intake: consultationIntake,
+    });
     const confirmationForRequest = ocrConfirmation || pendingOcrConfirmation;
-    if (!trimmedQuestion) {
-      setStatusMessage("상담 내용을 입력해 주세요.");
+    if (!composedQuestion) {
+      setStatusMessage("상담 내용을 입력하거나 구조화 입력 항목을 작성해 주세요.");
       return;
     }
 
     setIsSubmitting(true);
     setStatusMessage("상담 내용을 정리하고 있습니다.");
-    setSubmittedQuestion(trimmedQuestion);
+    setSubmittedQuestion(composedQuestion);
 
     let followupLoginState = null;
     if (!authSessionId && guestDetailedReportUsed) {
@@ -1077,7 +1115,7 @@ export default function FrontendAppShell({
     const activeGuestCredential = followupLoginState
       ? followupLoginState.guestCredential || ""
       : guestCredential || guestSessionResult?.guestCredential || "";
-    const nextUserMessage = { role: "user", content: trimmedQuestion };
+    const nextUserMessage = { role: "user", content: composedQuestion };
     const conversationHistory = [...chatMessages, nextUserMessage].map((message) => ({
       role: message.role,
       content: message.content,
@@ -1111,7 +1149,7 @@ export default function FrontendAppShell({
           session_id: activeSession,
           auth_context: activeAuthContext,
           conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
-          user_text: trimmedQuestion,
+          user_text: composedQuestion,
           ocr_confirmation: confirmationForRequest || undefined,
           attachment_classification_confirmation:
             attachmentClassificationConfirmation || undefined,
@@ -1140,6 +1178,7 @@ export default function FrontendAppShell({
       await streamAssistantMessage(conversationHistory, assistantMessage);
       setAnalysisResponse(workerResult);
       setQuestion("");
+      setConsultationIntake(createEmptyConsultationIntake());
       const canSaveGuestConversation = !effectiveAuthSessionId && Boolean(
         workerResult?.persistence?.job_id || workerResult?.session_id || workerResult?.message_id
       );
@@ -1160,11 +1199,37 @@ export default function FrontendAppShell({
         message: _error?.message || "unknown error",
       });
       const isRateLimitExceeded = _error?.status === 429 || _error?.code === "rate_limit_exceeded";
-      const errorMessage = isRateLimitExceeded
-        ? effectiveAuthSessionId
+      const requiresLogin =
+        _error?.requiredAction === "login" ||
+        ["auth_required", "token_invalid", "token_expired", "login_required"].includes(_error?.code);
+      const requiresGuestSessionRefresh =
+        _error?.requiredAction === "refresh_guest_session" || _error?.code === "guest_session_invalid";
+      let errorMessage = "응답을 불러오지 못해 접수 상태만 표시합니다.";
+      if (isRateLimitExceeded) {
+        errorMessage = effectiveAuthSessionId
           ? "오늘의 상담 가능 횟수를 모두 사용했습니다. 잠시 후 다시 시도해 주세요."
-          : "비회원 상담 가능 횟수를 모두 사용했습니다. 계속 상담하려면 Google 로그인해 주세요."
-        : "응답을 불러오지 못해 접수 상태만 표시합니다.";
+          : "비회원 상담 가능 횟수를 모두 사용했습니다. 계속 상담하려면 Google 로그인해 주세요.";
+      } else if (requiresGuestSessionRefresh) {
+        clearStoredAuthSession();
+        setActiveAuthToken("");
+        setAuthSessionId("");
+        setGuestId("");
+        setGuestCredential("");
+        setSessionId("");
+        errorMessage = _error?.publicMessage || "임시 상담 세션이 만료되었습니다. 다시 시작해 주세요.";
+      } else if (requiresLogin) {
+        clearStoredAuthSession();
+        persistAuthSession({
+          guestId: guestId || "",
+          guestCredential: guestCredential || "",
+          sessionId: activeSession || sessionId || "",
+        });
+        setActiveAuthToken("");
+        setAuthSessionId("");
+        errorMessage = effectiveAuthSessionId
+          ? _error?.publicMessage || "로그인이 만료되었습니다. 다시 로그인한 뒤 같은 상담을 이어가 주세요."
+          : _error?.publicMessage || "로그인이 필요합니다. Google 로그인 후 같은 상담을 이어가 주세요.";
+      }
       setChatMessages([
         ...conversationHistory,
         {
@@ -1294,12 +1359,14 @@ export default function FrontendAppShell({
     setQuestion("");
     setSubmittedQuestion("");
     setChatMessages([]);
+    setConsultationIntake(createEmptyConsultationIntake());
     setAnalysisResponse(null);
     setCurrentReport(null);
     setReportActionStatus("");
     setSaveDecision("undecided");
     setSavePromptVisible(false);
     setGuestDetailedReportUsed(false);
+    setSessionId("");
     setStatusMessage("새 상담을 시작할 수 있습니다.");
     setActiveRoute("chatbot");
   }
@@ -1557,7 +1624,9 @@ export default function FrontendAppShell({
               savePromptVisible={savePromptVisible}
               selectedUploadFile={selectedUploadFile}
               reportingPayload={reportingPayload}
+              consultationIntake={consultationIntake}
               setAttachmentPurpose={setAttachmentPurpose}
+              setConsultationIntake={setConsultationIntake}
               setQuestion={setQuestion}
               capabilityError={capabilityError}
               submittedQuestion={submittedQuestion}
@@ -2369,7 +2438,9 @@ function ChatScreenV2({
   savePromptVisible,
   selectedUploadFile,
   reportingPayload,
+  consultationIntake,
   setAttachmentPurpose,
+  setConsultationIntake,
   setQuestion,
   submittedQuestion,
   supervisorExecution,
@@ -2378,6 +2449,8 @@ function ChatScreenV2({
 }) {
   const attachmentInputRef = useRef(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const missingIntakeFields = listConsultationIntakeMissingFields(consultationIntake);
+  const hasStructuredIntake = hasConsultationIntakeData(consultationIntake);
   const visibleMessages = chatMessages.length
     ? chatMessages
     : submittedQuestion
@@ -2588,6 +2661,16 @@ function ChatScreenV2({
 
           <div className="chat-input">
             <div className="input-stack">
+              <ConsultationIntakePanel
+                hasStructuredIntake={hasStructuredIntake}
+                missingFields={missingIntakeFields}
+                registeredAttachments={registeredAttachments}
+                value={consultationIntake}
+                onChange={(field, nextValue) =>
+                  setConsultationIntake((current) => ({ ...current, [field]: nextValue }))
+                }
+                onReset={() => setConsultationIntake(createEmptyConsultationIntake())}
+              />
               <textarea
                 aria-label="상담 메시지 입력"
                 placeholder="사고 상황, 고지서 내용, 보험사 설명처럼 지금 기억나는 내용을 입력해 주세요."
@@ -2747,6 +2830,118 @@ function MissingFieldsPrompt({ supervisorState }) {
   );
 }
 
+function ConsultationIntakePanel({
+  hasStructuredIntake,
+  missingFields,
+  onChange,
+  onReset,
+  registeredAttachments,
+  value,
+}) {
+  const selectedType = value?.consultationType || "";
+  const isFineNotice = selectedType === "fine_notice";
+  return (
+    <section className="consultation-intake-card" aria-label="구조화 입력 단계">
+      <div className="consultation-intake-card__head">
+        <div>
+          <span className="eyebrow">입력 단계</span>
+          <strong>사고 내용을 사실과 주장으로 나눠 적을 수 있습니다.</strong>
+          <p>여기 적은 내용은 전송 시 현재 메시지와 함께 상담 입력으로 정리됩니다.</p>
+        </div>
+        {hasStructuredIntake && (
+          <button className="button" type="button" onClick={onReset}>
+            입력 초기화
+          </button>
+        )}
+      </div>
+
+      <div className="consultation-intake-grid">
+        <label className="consultation-intake-field consultation-intake-field--wide">
+          <span>사건 유형</span>
+          <select
+            value={selectedType}
+            onChange={(event) => onChange("consultationType", event.target.value)}
+          >
+            {CONSULTATION_TYPE_OPTIONS.map((option) => (
+              <option key={option.value || "empty"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {CONSULTATION_FACT_FIELDS.map((field) => (
+          <label className="consultation-intake-field" key={field.key}>
+            <span>{field.label}</span>
+            <input
+              type="text"
+              value={value?.[field.key] || ""}
+              onChange={(event) => onChange(field.key, event.target.value)}
+              placeholder={field.question}
+            />
+          </label>
+        ))}
+
+        <label className="consultation-intake-field consultation-intake-field--wide">
+          <span>확인된 사실</span>
+          <textarea
+            rows={3}
+            value={value?.confirmedFacts || ""}
+            onChange={(event) => onChange("confirmedFacts", event.target.value)}
+            placeholder="사고 시각, 장소, 첨부자료로 확인된 내용처럼 검증 가능한 사실을 적어 주세요."
+          />
+        </label>
+
+        <label className="consultation-intake-field consultation-intake-field--wide">
+          <span>사용자 주장·상대방 주장</span>
+          <textarea
+            rows={3}
+            value={value?.userClaims || ""}
+            onChange={(event) => onChange("userClaims", event.target.value)}
+            placeholder="상대가 주장하는 내용이나 아직 확인되지 않은 진술을 따로 적어 주세요."
+          />
+        </label>
+
+        <label className="consultation-intake-field consultation-intake-field--wide">
+          <span>추가 확인이 필요한 점</span>
+          <textarea
+            rows={2}
+            value={value?.missingDetails || ""}
+            onChange={(event) => onChange("missingDetails", event.target.value)}
+            placeholder="목격자 연락처, 블랙박스 확보 여부처럼 아직 모르는 항목을 적어 주세요."
+          />
+        </label>
+      </div>
+
+      <div className="consultation-intake-footer">
+        {registeredAttachments.length > 0 && (
+          <span className="consultation-intake-badge">첨부 자료 {registeredAttachments.length}개 연결됨</span>
+        )}
+        {isFineNotice ? (
+          <p className="consultation-intake-help">
+            과태료·범칙금 상담은 고지서 OCR 확인 카드와 자유 입력을 함께 사용하면 됩니다.
+          </p>
+        ) : missingFields.length > 0 ? (
+          <div className="consultation-intake-missing" role="status">
+            <strong>아직 비어 있는 핵심 사실</strong>
+            <div className="consultation-intake-chip-list">
+              {missingFields.map((field) => (
+                <span className="consultation-intake-chip" key={field.key}>
+                  {field.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="consultation-intake-help">
+            핵심 사실 4개가 채워졌습니다. 자유 입력에는 추가 상황이나 질문만 적어도 됩니다.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function FollowUpNote({ followUp }) {
   const message = String(followUp?.message || "").trim();
   const items = Array.isArray(followUp?.items) ? followUp.items : [];
@@ -2865,16 +3060,27 @@ function FaultRatioInsightPanel({ node, compact = false }) {
 
 function LawGroundInsightPanel({ node, compact = false }) {
   const structuredResult = node?.structured_result || {};
-  const retrieval = structuredResult.retrieval || {};
+  const qualitySummary = structuredResult.public_quality_summary || null;
+  const retrieval = structuredResult.retrieval || qualitySummary?.retrieval || {};
+  const retrievalBackend =
+    qualitySummary?.retrieval?.backend_label || retrieval.backend || "unavailable";
+  const retrievalStatus = retrieval.status || qualitySummary?.status || "unavailable";
+  const attemptedBackends = Array.isArray(retrieval.attempted_backends)
+    ? retrieval.attempted_backends
+    : [];
+  const shouldShowQualityDetails =
+    qualitySummary?.partial_result ||
+    qualitySummary?.review_required ||
+    ["partial", "blocked", "failed", "empty", "stale", "fallback", "limited"].includes(String(qualitySummary?.status || "").toLowerCase()) ||
+    qualitySummary?.retrieval?.used_fallback ||
+    (qualitySummary?.limitation_count || 0) > 0 ||
+    qualitySummary?.freshness?.limitation;
   const matchedLaws = Array.isArray(structuredResult.matched_laws)
     ? structuredResult.matched_laws
     : Array.isArray(structuredResult.law_provisions)
       ? structuredResult.law_provisions
       : [];
-  const attemptedBackends = Array.isArray(retrieval.attempted_backends)
-    ? retrieval.attempted_backends
-    : [];
-  const limitations = Array.isArray(node?.limitations) ? node.limitations : [];
+  const limitations = Array.isArray(qualitySummary?.limitations) ? qualitySummary.limitations : [];
 
   if (!node || node?.node_code !== "law_ground_search") {
     return null;
@@ -2889,21 +3095,38 @@ function LawGroundInsightPanel({ node, compact = false }) {
       <div className="agent-insight-grid">
         <p>
           <span>검색 상태</span>
-          <strong>{compactValue(retrieval.status || (matchedLaws.length > 0 ? "ready" : "empty"))}</strong>
+          <strong>{compactValue(qualitySummary?.status || "unavailable")}</strong>
         </p>
         <p>
           <span>검색 저장소</span>
-          <strong>{compactValue(retrieval.backend || "unavailable")}</strong>
+          <strong>{compactValue(retrievalBackend)}</strong>
         </p>
         <p>
           <span>확인된 근거</span>
           <strong>{matchedLaws.length}건</strong>
         </p>
       </div>
-      {retrieval.retrieved_at && (
+      {shouldShowQualityDetails && (
         <p className="agent-insight-timestamp">
-          조회 시각: {formatDateTime(retrieval.retrieved_at)}
-          {retrieval.effective_at ? ` · 적용 기준일: ${formatDate(retrieval.effective_at)}` : ""}
+          검색 처리 상태: {compactValue(retrievalStatus)}
+          {attemptedBackends.length > 0
+            ? ` / 시도 백엔드: ${compactValue(attemptedBackends.join(", "))}`
+            : ""}
+        </p>
+      )}
+      {(qualitySummary?.freshness?.retrieved_at || qualitySummary?.freshness?.effective_at) && (
+        <p className="agent-insight-timestamp">
+          {qualitySummary?.freshness?.retrieved_at
+            ? `조회 시각: ${formatDateTime(qualitySummary.freshness.retrieved_at)}`
+            : ""}
+          {qualitySummary?.freshness?.effective_at
+            ? ` · 적용 기준일: ${formatDate(qualitySummary.freshness.effective_at)}`
+            : ""}
+        </p>
+      )}
+      {shouldShowQualityDetails && qualitySummary?.freshness?.limitation && (
+        <p className="agent-insight-timestamp">
+          최신성 안내: {compactValue(qualitySummary.freshness.limitation)}
         </p>
       )}
       {matchedLaws.length > 0 && (
@@ -2932,13 +3155,7 @@ function LawGroundInsightPanel({ node, compact = false }) {
           ))}
         </div>
       )}
-      {attemptedBackends.length > 0 && (
-        <div className="agent-insight-section">
-          <strong>검색 시도 경로</strong>
-          <p>{compactValue(retrieval.attempted_backends)}</p>
-        </div>
-      )}
-      {limitations.length > 0 && (
+      {shouldShowQualityDetails && limitations.length > 0 && (
         <div className="agent-insight-section">
           <strong>적용 전 확인사항</strong>
           <ul>
@@ -3118,9 +3335,17 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
     currentReport?.report_quality ||
     currentReport?.metadata?.report_quality ||
     null;
-  const hasReportQuality = Boolean(reportQuality);
-  const reportLimitations = Array.isArray(reportQuality?.limitations) ? reportQuality.limitations.slice(0, 3) : [];
-  const reportQualityTitle = reportQuality?.partial_report ? "일부 자료가 부족한 리포트" : "검토 준비가 완료된 리포트";
+  const reportQualitySummary = reportQuality?.public_quality_summary || null;
+  const hasReportQuality = Boolean(reportQualitySummary);
+  const shouldShowReportQualityDetails =
+    reportQualitySummary?.partial_result ||
+    reportQualitySummary?.review_required ||
+    ["partial", "blocked", "failed", "empty", "stale", "fallback", "limited"].includes(String(reportQualitySummary?.status || "").toLowerCase()) ||
+    reportQualitySummary?.retrieval?.used_fallback ||
+    (reportQualitySummary?.limitation_count || 0) > 0 ||
+    reportQualitySummary?.freshness?.limitation;
+  const reportLimitations = Array.isArray(reportQualitySummary?.limitations) ? reportQualitySummary.limitations.slice(0, 3) : [];
+  const reportQualityTitle = reportQualitySummary?.partial_result ? "일부 자료가 부족한 리포트" : "검토 준비가 완료된 리포트";
   const helperText = isAuthenticated
     ? reportActionStatus || activeReportingPayload?.appeal_gate?.reason || "상담 결과를 저장하거나 제출용 이의신청서 DOCX를 준비할 수 있습니다."
     : reportActionStatus || "리포트 저장과 DOCX 다운로드는 Google 로그인 후 사용할 수 있습니다.";
@@ -3132,17 +3357,23 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
         <strong>{currentReport?.report_id || "리포트 준비 중"}</strong>
         <p>{helperText}</p>
         {hasReportQuality && (
-          <div className="report-quality-panel" data-partial-report={String(Boolean(reportQuality.partial_report))}>
-            <span className={reportQuality.partial_report ? "tag amber" : "tag green"}>
-              {reportQuality.partial_report ? "일부 자료 부족" : "검토 준비 완료"}
+          <div className="report-quality-panel" data-partial-report={String(Boolean(reportQualitySummary.partial_result))}>
+            <span className={reportQualitySummary.partial_result ? "tag amber" : "tag green"}>
+              {reportQualitySummary.partial_result ? "일부 자료 부족" : "검토 준비 완료"}
             </span>
             <strong className="report-quality-title">{reportQualityTitle}</strong>
-            <span className="tag">분석 상태 · {caseStatusLabel(reportQuality.analysis_job_status)}</span>
-            <span className="tag">확인할 한계 · {reportQuality.limitation_count ?? 0}건</span>
-            {reportQuality.partial_report && (
+            <span className="tag">분석 상태 · {caseStatusLabel(reportQualitySummary.status)}</span>
+            <span className="tag">확인할 한계 · {reportQualitySummary.limitation_count ?? 0}건</span>
+            {reportQualitySummary?.freshness?.effective_at && (
+              <span className="tag">기준일 {formatDate(reportQualitySummary.freshness.effective_at)}</span>
+            )}
+            {reportQualitySummary?.freshness?.retrieved_at && (
+              <span className="tag">조회 시각 {formatDateTime(reportQualitySummary.freshness.retrieved_at)}</span>
+            )}
+            {shouldShowReportQualityDetails && reportQualitySummary.partial_result && (
               <p className="report-quality-warning">최종 제출 전에 부족한 자료와 사실관계를 확인해 주세요.</p>
             )}
-            {reportLimitations.length > 0 && (
+            {shouldShowReportQualityDetails && reportLimitations.length > 0 && (
               <ul className="report-quality-limitations" aria-label="report quality limitations">
                 {reportLimitations.map((item, index) => (
                   <li key={`report-quality-limitation-${index}`}>{compactValue(item)}</li>

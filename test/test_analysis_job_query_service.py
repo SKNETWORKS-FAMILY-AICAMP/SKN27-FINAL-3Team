@@ -28,12 +28,33 @@ def test_detail_adds_progress_without_mutating_repository_record() -> None:
     outcome = load_analysis_job_detail(
         "job_1",
         load_job=lambda _job_id: stored,
-        load_progress=lambda _job_id: {"state": "running", "progress": 40},
+        load_progress=lambda _job_id: {
+            "policy_version": "progress_cache.v1",
+            "backend": "locmem",
+            "key": "analysis_job_progress:job_1",
+            "ttl_seconds": 300,
+            "fallback": "postgresql",
+            "status": "hit",
+            "snapshot": {
+                "job_id": "job_1",
+                "status": "running",
+                "owner_id": "usr_private",
+                "analysis_plan_id": "plan_private",
+            },
+        },
     )
 
     assert outcome.kind == "detail"
     assert outcome.payload["job_id"] == "job_1"
-    assert outcome.payload["progress_cache"] == {"state": "running", "progress": 40}
+    assert outcome.payload["progress_cache"] == {
+        "policy_version": "progress_cache.v1",
+        "backend": "locmem",
+        "key": "analysis_job_progress:job_1",
+        "ttl_seconds": 300,
+        "fallback": "postgresql",
+        "status": "hit",
+        "snapshot": {"job_id": "job_1", "status": "running"},
+    }
     assert stored == original
 
 
@@ -142,7 +163,7 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
         **composed,
         "cards": [{"title": "next step"}],
         "pending_questions": [{"question": "confirm facts"}],
-        "report_links": [{"url": "/reports/report_1"}],
+        "report_links": [],
         "attachments": [{"attachment_id": "attachment_1"}],
         "reporting_payload": {"report_id": "report_1"},
         "supervisor_state": {"stage": "finalize"},
@@ -328,6 +349,485 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
     ):
         assert field not in outcome.payload
     assert stored == original
+
+
+def test_detail_projects_only_public_restore_fields() -> None:
+    from app.services.analysis_job_query_service import load_analysis_job_detail
+
+    stored = {
+        "job_id": "job_public_detail",
+        "session_id": "ses_public_detail",
+        "message_id": "msg_public_detail",
+        "status": "partial",
+        "assistant_message": "A safe summary.",
+        "assistant_message_payload": {
+            "answer": "A safe answer.",
+            "summary": "A safe summary.",
+            "report_id": "rep_public",
+            "report_status": "ready",
+            "source_fingerprint": "must-not-leak",
+        },
+        "cards": [{"title": "Safe card"}],
+        "pending_questions": [{"field": "incident_date", "question": "When?"}],
+        "attachments": [{
+            "attachment_id": "att_public",
+            "filename": "notice.pdf",
+            "storage_uri": "s3://private-bucket/notice.pdf",
+        }],
+        "report_links": [{
+            "report_id": "rep_public",
+            "action": "detail",
+            "signed_url": "https://storage.example/report?sig=secret",
+        }],
+        "reporting_payload": {"report_id": "rep_public", "title": "Safe report"},
+        "supervisor_state": {"stage": "finalize", "trace_id": "trace-private"},
+        "supervisor_execution": {
+            "status": "success",
+            "node_results": [{
+                "node_code": "fine_notice_analysis",
+                "status": "success",
+                "structured_result": {"storage_uri": "s3://private-bucket/raw.json"},
+                "limitations": ["RuntimeError: raw exception"],
+            }],
+        },
+        "reports": [{
+            "report_id": "rep_public",
+            "status": "ready",
+            "title": "Safe report",
+            "content_summary": "Safe report summary",
+            "storage_uri": "s3://private-bucket/report.pdf",
+            "object_storage": {"bucket": "private-bucket", "key": "report.pdf"},
+            "report_quality": {
+                "trace_id": "trace-private",
+                "public_quality_summary": {
+                    "status": "partial",
+                    "limitations": ["Latest revision may not be reflected."],
+                },
+            },
+        }],
+        "report_count": 1,
+        "latest_report_id": "rep_public",
+        "created_at": "2026-07-27T10:00:00+09:00",
+        "updated_at": "2026-07-27T10:01:00+09:00",
+        "owner_id": "usr_private",
+        "metadata": {"debug_blob": "private"},
+        "agent_results": [{"raw_exception": "private"}],
+        "storage_uri": "s3://private-bucket/job.json",
+    }
+
+    outcome = load_analysis_job_detail(
+        "job_public_detail",
+        load_job=lambda _job_id: stored,
+        load_progress=lambda _job_id: {"state": "running", "debug_blob": "private"},
+    )
+
+    assert outcome.kind == "detail"
+    assert outcome.payload["job_id"] == "job_public_detail"
+    assert outcome.payload["assistant_message_payload"] == {
+        "answer": "A safe answer.",
+        "summary": "A safe summary.",
+        "report_id": "rep_public",
+        "report_status": "ready",
+    }
+    assert outcome.payload["attachments"] == [
+        {"attachment_id": "att_public", "filename": "notice.pdf"}
+    ]
+    assert outcome.payload["report_links"] == [
+        {"report_id": "rep_public", "action": "detail"}
+    ]
+    assert outcome.payload["supervisor_execution"]["node_results"] == [
+        {"node_code": "fine_notice_analysis", "status": "success"}
+    ]
+    assert outcome.payload["reports"] == [{
+        "report_id": "rep_public",
+        "status": "ready",
+        "title": "Safe report",
+        "content_summary": "Safe report summary",
+        "report_quality": {
+            "public_quality_summary": {
+                "status": "partial",
+                "partial_result": True,
+                "review_required": True,
+                "freshness": {},
+                "retrieval": {
+                    "backend_label": None,
+                    "result_count": None,
+                    "used_fallback": False,
+                },
+                "limitation_count": 1,
+                "limitations": ["Latest revision may not be reflected."],
+            }
+        },
+    }]
+    public_json = repr(outcome.payload)
+    for private_value in (
+        "private-bucket",
+        "sig=secret",
+        "trace-private",
+        "debug_blob",
+        "RuntimeError",
+        "usr_private",
+        "must-not-leak",
+    ):
+        assert private_value not in public_json
+
+
+def test_completed_result_projects_only_safe_public_quality_summary() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_quality",
+        load_job=lambda _job_id: {
+            "job_id": "job_quality",
+            "status": "partial",
+            "agent_results": [
+                {
+                    "node_code": "law_ground_search",
+                    "status": "partial",
+                    "structured_result": {
+                        "matched_laws": [{"law_name": "Road Traffic Act", "source_reference": "law:1"}],
+                        "retrieval": {
+                            "status": "partial",
+                            "backend": "postgres_pgvector",
+                            "result_count": 1,
+                            "retrieved_at": "2026-07-27T09:00:00+09:00",
+                            "effective_at": "2026-07-20",
+                            "query": "must-not-leak",
+                            "embedding": {"model": "text-embedding-3-large"},
+                            "sql_tables": ["law_embeddings"],
+                        },
+                        "public_quality_summary": {
+                            "status": "partial",
+                            "partial_result": True,
+                            "review_required": True,
+                            "freshness": {
+                                "effective_at": "2026-07-20",
+                                "retrieved_at": "2026-07-27T09:00:00+09:00",
+                                "limitation": "Latest revision may not be reflected.",
+                            },
+                            "retrieval": {
+                                "backend_label": "law retrieval",
+                                "result_count": 1,
+                                "used_fallback": False,
+                            },
+                            "limitation_count": 1,
+                            "limitations": ["Latest revision may not be reflected."],
+                        },
+                    },
+                    "limitations": ["Latest revision may not be reflected."],
+                }
+            ],
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "partial",
+                        "structured_result": {
+                            "matched_laws": [{"law_name": "Road Traffic Act", "source_reference": "law:1"}],
+                            "retrieval": {
+                                "status": "partial",
+                                "backend": "postgres_pgvector",
+                                "result_count": 1,
+                                "retrieved_at": "2026-07-27T09:00:00+09:00",
+                                "effective_at": "2026-07-20",
+                                "query": "must-not-leak",
+                                "embedding": {"model": "text-embedding-3-large"},
+                                "sql_tables": ["law_embeddings"],
+                            },
+                            "public_quality_summary": {
+                                "status": "partial",
+                                "partial_result": True,
+                                "review_required": True,
+                                "freshness": {
+                                    "effective_at": "2026-07-20",
+                                    "retrieved_at": "2026-07-27T09:00:00+09:00",
+                                    "limitation": "Latest revision may not be reflected.",
+                                },
+                                "retrieval": {
+                                    "backend_label": "law retrieval",
+                                    "result_count": 1,
+                                    "used_fallback": False,
+                                },
+                                "limitation_count": 1,
+                                "limitations": ["Latest revision may not be reflected."],
+                            },
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "job_id": "job_quality",
+            "status": "partial",
+        },
+    )
+
+    node = outcome.payload["supervisor_execution"]["node_results"][0]
+    assert node["structured_result"]["public_quality_summary"]["retrieval"] == {
+        "backend_label": "law retrieval",
+        "result_count": 1,
+        "used_fallback": False,
+    }
+    assert node["structured_result"]["retrieval"] == {
+        "status": "partial",
+        "backend": "postgres_pgvector",
+        "result_count": 1,
+        "retrieved_at": "2026-07-27T09:00:00+09:00",
+        "effective_at": "2026-07-20",
+    }
+    assert "query" not in repr(node)
+    assert "law_embeddings" not in repr(node)
+    assert "text-embedding-3-large" not in repr(node)
+
+
+def test_law_public_projection_drops_nested_private_metadata_and_unsafe_limitations() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    private = {
+        "source_url": "https://storage.example/signed?sig=secret",
+        "storage_uri": "s3://private-bucket/law.json",
+        "provenance": {"bucket": "private-bucket", "key": "law.json"},
+        "source_reference": "https://storage.example/signed?sig=secret",
+        "law_name": "Road Traffic Act",
+    }
+    outcome = load_analysis_result(
+        "job_private_law_metadata",
+        load_job=lambda _job_id: {
+            "job_id": "job_private_law_metadata",
+            "status": "partial",
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "partial",
+                        "structured_result": {
+                            "matched_laws": [private],
+                            "law_provisions": [
+                                {
+                                    "source_name": "Road Traffic Act",
+                                    "provision_text": "Safe public text",
+                                    "source_url": "https://storage.example/signed?sig=secret",
+                                    "provenance": {"bucket": "private-bucket"},
+                                }
+                            ],
+                            "freshness": {
+                                "effective_at": "2026-07-20",
+                                "retrieved_at": "2026-07-27T09:00:00+09:00",
+                                "dataset_version": "sha256:private",
+                                "storage_uri": "s3://private-bucket/law.json",
+                                "limitation": "Latest revision may not be reflected.",
+                            },
+                            "retrieval": {
+                                "status": "partial",
+                                "backend": "postgres_pgvector",
+                                "attempted_backends": [
+                                    {"backend": "postgres_pgvector", "error": "RuntimeError: raw exception"},
+                                    {"storage_uri": "https://storage.example/signed?sig=secret"},
+                                ],
+                            },
+                            "public_quality_summary": {
+                                "status": "partial",
+                                "partial_result": True,
+                                "review_required": True,
+                                "limitations": ["RuntimeError: raw exception", "Latest revision may not be reflected."],
+                            },
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda _payload: {"contract_version": "analysis_result.v2"},
+    )
+
+    node = outcome.payload["supervisor_execution"]["node_results"][0]
+    structured = node["structured_result"]
+    assert structured["matched_laws"] == [{"law_name": "Road Traffic Act"}]
+    assert structured["law_provisions"] == [
+        {"source_name": "Road Traffic Act", "provision_text": "Safe public text"}
+    ]
+    assert structured["freshness"] == {
+        "effective_at": "2026-07-20",
+        "retrieved_at": "2026-07-27T09:00:00+09:00",
+        "limitation": "Latest revision may not be reflected.",
+    }
+    assert structured["retrieval"]["attempted_backends"] == "multiple"
+    assert structured["public_quality_summary"]["limitations"] == [
+        "Latest revision may not be reflected."
+    ]
+    assert "private-bucket" not in repr(node)
+    assert "signed?sig=secret" not in repr(node)
+    assert "RuntimeError: raw exception" not in repr(node)
+
+
+def test_law_public_projection_preserves_scalar_source_references() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_scalar_law_refs",
+        load_job=lambda _job_id: {
+            "job_id": "job_scalar_law_refs",
+            "status": "success",
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                        "structured_result": {
+                            "matched_laws": ["law:server"],
+                            "public_quality_summary": {"status": "ready"},
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda payload: payload,
+    )
+
+    node = outcome.payload["supervisor_execution"]["node_results"][0]
+    assert node["structured_result"]["matched_laws"] == ["law:server"]
+
+
+def test_law_public_projection_does_not_invent_quality_summary_without_public_signals() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_scalar_law_refs_without_summary",
+        load_job=lambda _job_id: {
+            "job_id": "job_scalar_law_refs_without_summary",
+            "status": "success",
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                        "structured_result": {
+                            "matched_laws": ["law:server"],
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda payload: payload,
+    )
+
+    node = outcome.payload["supervisor_execution"]["node_results"][0]
+    assert node["structured_result"] == {"matched_laws": ["law:server"]}
+
+
+def test_law_public_projection_builds_summary_when_missing() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_missing_quality_summary",
+        load_job=lambda _job_id: {
+            "job_id": "job_missing_quality_summary",
+            "status": "success",
+            "supervisor_execution": {
+                "node_results": [
+                    {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                        "structured_result": {
+                            "matched_laws": [{"law_name": "Road Traffic Act"}],
+                            "retrieval": {
+                                "status": "ready",
+                                "backend": "postgres_pgvector",
+                                "result_count": 1,
+                            },
+                        },
+                    }
+                ]
+            },
+        },
+        compose_response=lambda _payload: {"contract_version": "analysis_result.v2"},
+    )
+
+    summary = outcome.payload["supervisor_execution"]["node_results"][0]["structured_result"][
+        "public_quality_summary"
+    ]
+    assert summary == {
+        "status": "ready",
+        "partial_result": False,
+        "review_required": False,
+        "freshness": {},
+        "retrieval": {
+            "backend_label": "postgres_pgvector",
+            "result_count": 1,
+            "used_fallback": False,
+        },
+        "limitation_count": 0,
+        "limitations": [],
+    }
+
+
+def test_law_node_projection_sanitizes_node_level_limitations() -> None:
+    from app.services.analysis_job_query_service import _project_supervisor_execution
+
+    projected = _project_supervisor_execution(
+        {
+            "node_results": [
+                {
+                    "node_code": "law_ground_search",
+                    "status": "partial",
+                    "limitations": [
+                        "RuntimeError: raw exception",
+                        "Latest revision may not be reflected.",
+                    ],
+                    "structured_result": {},
+                }
+            ]
+        }
+    )
+
+    assert projected is not None
+    assert projected["node_results"][0]["limitations"] == [
+        "Latest revision may not be reflected."
+    ]
+
+
+def test_completed_result_projects_safe_attachments_links_and_non_law_nodes() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_public_result",
+        load_job=lambda _job_id: {
+            "job_id": "job_public_result",
+            "status": "success",
+            "attachments": [{
+                "attachment_id": "att_public",
+                "purpose": "fine_notice",
+                "storage_uri": "s3://private-bucket/notice.pdf",
+            }],
+            "report_links": [{
+                "report_id": "rep_public",
+                "action": "detail",
+                "signed_url": "https://storage.example/report?sig=secret",
+            }],
+            "supervisor_execution": {
+                "node_results": [{
+                    "node_code": "fine_notice_analysis",
+                    "status": "success",
+                    "structured_result": {"storage_uri": "s3://private-bucket/raw.json"},
+                    "limitations": ["RuntimeError: raw exception"],
+                }],
+            },
+        },
+        compose_response=lambda _payload: {"contract_version": "analysis_result.v2"},
+    )
+
+    assert outcome.payload["attachments"] == [
+        {"attachment_id": "att_public", "purpose": "fine_notice"}
+    ]
+    assert outcome.payload["report_links"] == [
+        {"report_id": "rep_public", "action": "detail"}
+    ]
+    assert outcome.payload["supervisor_execution"]["node_results"] == [
+        {"node_code": "fine_notice_analysis", "status": "success"}
+    ]
+    assert "private-bucket" not in repr(outcome.payload)
+    assert "sig=secret" not in repr(outcome.payload)
+    assert "RuntimeError" not in repr(outcome.payload)
 
 
 def test_pending_result_projects_only_worker_polling_fields() -> None:
