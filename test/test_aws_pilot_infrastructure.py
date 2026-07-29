@@ -1063,6 +1063,11 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
     assert "RemainAfterExit=yes" in user_data
     assert "/usr/local/sbin/skn27-imds-firewall.sh" in deploy
     assert "configure-imds-firewall.sh" in deploy
+    assert (
+        "install -m 0755 `$RELEASE_DIR/configure-imds-firewall.sh "
+        "/usr/local/sbin/skn27-imds-firewall.sh"
+    ) in deploy
+    assert "`$RELEASE_DIR/deploy/aws-pilot/configure-imds-firewall.sh" not in deploy
     assert "IMDS allow smoke" in deploy
     assert "IMDS deny smoke" in deploy
     assert "credential proxy" in runbook.lower()
