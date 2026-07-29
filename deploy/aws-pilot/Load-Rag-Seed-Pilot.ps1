@@ -143,6 +143,7 @@ try {
         DocumentName = "AWS-RunShellScript"
         InstanceIds  = @($instanceId)
         Comment      = "Load verified SKN27 production RAG seed for $ReleaseTag"
+        TimeoutSeconds = $SsmTimeoutSeconds
         Parameters   = @{ commands = $commands }
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $request -Encoding utf8NoBOM
 

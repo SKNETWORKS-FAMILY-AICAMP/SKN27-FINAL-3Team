@@ -719,6 +719,9 @@ def test_ssm_jobs_have_configurable_timeout_cancel_and_terminal_confirmation() -
         assert "TimedOut" in script
         assert "Get-SsmCommandResult" in script
 
+    rag_seed_loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+    assert "TimeoutSeconds = $SsmTimeoutSeconds" in rag_seed_loader
+
 
 def test_remote_state_is_precreated_versioned_encrypted_and_lockfile_based() -> None:
     versions = (TERRAFORM_DIR / "versions.tf").read_text(encoding="utf-8")
