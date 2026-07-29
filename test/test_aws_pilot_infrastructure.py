@@ -544,7 +544,7 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
         "rag-loader python backend/manage.py load_production_rag_seed "
         "--manifest /run/production-rag-seed/$RagSeedManifestRelativePath "
-        "--format json"
+        "--skip-legal-schema --format json"
     )
     completion = (
         "printf '%s\\n' '$RagSeedManifestSha256' > "

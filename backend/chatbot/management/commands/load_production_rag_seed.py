@@ -35,6 +35,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Truncate legal pgvector tables before loading. Omit for an idempotent upsert.",
         )
+        parser.add_argument(
+            "--skip-legal-schema",
+            action="store_true",
+            help="Use an already maintained legal pgvector schema without DDL.",
+        )
         parser.add_argument("--batch-size", type=int, default=500, help="PostgreSQL legal-load batch size.")
         parser.add_argument("--format", choices=["json", "text"], default="json")
 
@@ -46,6 +51,7 @@ class Command(BaseCommand):
                 dry_run=bool(options["dry_run"]),
                 replace_legal=bool(options["replace_legal"]),
                 batch_size=max(1, int(options["batch_size"] or 500)),
+                skip_legal_schema=bool(options["skip_legal_schema"]),
             )
         except (RagSeedValidationError, SeedLoadError) as exc:
             raise CommandError(str(exc)) from None
@@ -62,6 +68,7 @@ def execute_rag_seed_load(
     dry_run: bool,
     replace_legal: bool,
     batch_size: int,
+    skip_legal_schema: bool = False,
 ) -> dict[str, Any]:
     """Load only legal data; other corpus loaders require full source artifacts."""
 
@@ -88,6 +95,7 @@ def execute_rag_seed_load(
         },
         "options": {
             "replace_legal": replace_legal,
+            "skip_legal_schema": skip_legal_schema,
             "batch_size": batch_size,
         },
         "preconditions": [
@@ -99,18 +107,26 @@ def execute_rag_seed_load(
     if dry_run:
         return result
 
+    legal_load_options: dict[str, Any] = {
+        "replace": replace_legal,
+        "batch_size": batch_size,
+    }
+    if skip_legal_schema:
+        legal_load_options["skip_schema"] = True
     loads = {
-        "legal": _load_legal_pgvector(
-            bundle,
-            replace=replace_legal,
-            batch_size=batch_size,
-        ),
+        "legal": _load_legal_pgvector(bundle, **legal_load_options),
     }
     result["loads"] = loads
     return result
 
 
-def _load_legal_pgvector(bundle: RagSeedBundle, *, replace: bool, batch_size: int) -> dict[str, Any]:
+def _load_legal_pgvector(
+    bundle: RagSeedBundle,
+    *,
+    replace: bool,
+    skip_schema: bool = False,
+    batch_size: int,
+) -> dict[str, Any]:
     output = StringIO()
     try:
         call_command(
@@ -118,6 +134,7 @@ def _load_legal_pgvector(bundle: RagSeedBundle, *, replace: bool, batch_size: in
             chunks=str(bundle.artifacts["legal_chunks"].path),
             embeddings=str(bundle.artifacts["legal_embeddings"].path),
             replace=replace,
+            skip_schema=skip_schema,
             batch_size=batch_size,
             format="json",
             stdout=output,
