@@ -194,4 +194,3 @@ RunPod `output`에는 기존 `vision_supervisor_handoff` 객체를 반환한다.
 - 결과가 기존 Supervisor handoff schema를 통과
 - timeout·partial·failed 경로가 stable error code를 반환
 - API 키·서명 URL·내부 경로가 사용자 payload와 로그에 노출되지 않음
-
