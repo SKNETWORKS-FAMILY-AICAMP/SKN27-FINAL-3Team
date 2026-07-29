@@ -76,3 +76,14 @@ def test_empty_chat_keeps_the_primary_composer_above_the_desktop_fold() -> None:
 
     assert "min-height: clamp(220px, 28vh, 300px);" in styles
     assert ".chat-empty-state {\n  min-height: 420px;" not in styles
+
+
+def test_chat_entry_reuses_the_existing_session_and_guide_has_one_cta() -> None:
+    shell = _shell()
+
+    assert shell.count('onOpenChat={() => ensureGuestSession("chatbot")}') >= 3
+
+    guide_start = shell.index("function GuideScreen")
+    guide_end = shell.index("function EntryScreenWheelLegacy")
+    guide = shell[guide_start:guide_end]
+    assert guide.count("onClick={onOpenChat}") == 1

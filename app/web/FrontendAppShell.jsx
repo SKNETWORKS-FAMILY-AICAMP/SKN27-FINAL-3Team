@@ -1527,7 +1527,7 @@ export default function FrontendAppShell({
       <AppTopNavigation
         activeRoute={activeRoute}
         onNavigate={setActiveRoute}
-        onOpenChat={() => bootstrapGuestSession("chatbot")}
+        onOpenChat={() => ensureGuestSession("chatbot")}
         authAction={
           authSessionId ? (
             <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
@@ -1581,16 +1581,16 @@ export default function FrontendAppShell({
           {activeRoute === "entry" && (
             <EntryScreenV2
               isAuthenticated={Boolean(authSessionId)}
-              onGuestStart={() => bootstrapGuestSession("chatbot")}
-              onOpenChat={() => bootstrapGuestSession("chatbot")}
+              onGuestStart={() => ensureGuestSession("chatbot")}
+              onOpenChat={() => ensureGuestSession("chatbot")}
               onNavigate={setActiveRoute}
             />
           )}
 
           {activeRoute === "guide" && (
             <GuideScreen
-              onGuestStart={() => bootstrapGuestSession("chatbot")}
-              onOpenChat={() => bootstrapGuestSession("chatbot")}
+              onGuestStart={() => ensureGuestSession("chatbot")}
+              onOpenChat={() => ensureGuestSession("chatbot")}
             />
           )}
 
@@ -2117,7 +2117,6 @@ function GuideScreen({ onGuestStart, onOpenChat }) {
           <p>현재 상황에 맞춰 필요한 자료와 다음 행동을 안내해 드립니다.</p>
           <div className="hero-actions">
             <button className="button primary large" type="button" onClick={onOpenChat}>AI 상담 시작</button>
-            <button className="button ghost large" type="button" onClick={onGuestStart}>사고 접수하기</button>
           </div>
         </Reveal>
       </section>
