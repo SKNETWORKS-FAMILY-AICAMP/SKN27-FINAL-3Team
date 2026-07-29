@@ -7726,3 +7726,14 @@ body,
     grid-template-columns: 1fr;
   }
 }
+
+.message.user .bubble p {
+  color: #111844;
+}
+
+.service-closing .button.primary,
+.guide-screen__actions .button.primary,
+.service-closing .button.primary:hover,
+.guide-screen__actions .button.primary:hover {
+  box-shadow: none;
+}

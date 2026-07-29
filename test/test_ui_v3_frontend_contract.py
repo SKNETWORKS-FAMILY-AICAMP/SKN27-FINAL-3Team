@@ -87,3 +87,22 @@ def test_chat_entry_reuses_the_existing_session_and_guide_has_one_cta() -> None:
     guide_end = shell.index("function EntryScreenWheelLegacy")
     guide = shell[guide_start:guide_end]
     assert guide.count("onClick={onOpenChat}") == 1
+    assert "onClick={onGuestStart}" not in guide
+
+
+def test_consultation_intake_renders_only_the_selected_case_type_fields() -> None:
+    shell = _shell()
+
+    assert "ACCIDENT_TYPE_OPTIONS" in shell
+    assert "FINE_NOTICE_FIELDS" in shell
+    assert 'selectedType === "fine_notice"' in shell
+    assert 'selectedType === "fault_ratio"' in shell
+    assert "{isFineNotice && (" in shell
+    assert "{isFaultRatio && (" in shell
+
+
+def test_user_message_and_primary_ctas_have_final_light_theme_overrides() -> None:
+    styles = _styles()
+
+    assert ".message.user .bubble p {\n  color: #111844;" in styles
+    assert ".service-closing .button.primary,\n.guide-screen__actions .button.primary" in styles

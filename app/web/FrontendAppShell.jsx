@@ -15,8 +15,10 @@ import {
   scheduleAppJwtRefresh,
 } from "./authSession.js";
 import {
+  ACCIDENT_TYPE_OPTIONS,
   CONSULTATION_FACT_FIELDS,
   CONSULTATION_TYPE_OPTIONS,
+  FINE_NOTICE_FIELDS,
   buildStructuredConsultationMessage,
   createEmptyConsultationIntake,
   hasConsultationIntakeData,
@@ -2938,15 +2940,20 @@ function ConsultationIntakePanel({
   registeredAttachments,
   value,
 }) {
-  const selectedType = value?.consultationType || "";
+  const rawSelectedType = value?.consultationType || "";
+  const legacyAccidentType = ACCIDENT_TYPE_OPTIONS.some((option) => option.value === rawSelectedType)
+    ? rawSelectedType
+    : "";
+  const selectedType = legacyAccidentType ? "fault_ratio" : rawSelectedType;
   const isFineNotice = selectedType === "fine_notice";
+  const isFaultRatio = selectedType === "fault_ratio";
   return (
     <section className="consultation-intake-card" aria-label="구조화 입력 단계">
       <div className="consultation-intake-card__head">
         <div>
           <span className="eyebrow">입력 단계</span>
-          <strong>사고 내용을 사실과 주장으로 나눠 적을 수 있습니다.</strong>
-          <p>여기 적은 내용은 전송 시 현재 메시지와 함께 상담 입력으로 정리됩니다.</p>
+          <strong>먼저 상담 유형을 선택해 주세요.</strong>
+          <p>선택한 유형에 필요한 내용만 순서대로 입력할 수 있습니다.</p>
         </div>
         {hasStructuredIntake && (
           <button className="button" type="button" onClick={onReset}>
@@ -2970,47 +2977,95 @@ function ConsultationIntakePanel({
           </select>
         </label>
 
-        {CONSULTATION_FACT_FIELDS.map((field) => (
-          <label className="consultation-intake-field" key={field.key}>
-            <span>{field.label}</span>
-            <input
-              type="text"
-              value={value?.[field.key] || ""}
-              onChange={(event) => onChange(field.key, event.target.value)}
-              placeholder={field.question}
-            />
-          </label>
-        ))}
+        {isFineNotice && (
+          <>
+            {FINE_NOTICE_FIELDS.map((field) => (
+              <label
+                className={`consultation-intake-field${
+                  field.key === "fineQuestion" ? " consultation-intake-field--wide" : ""
+                }`}
+                key={field.key}
+              >
+                <span>{field.label}</span>
+                {field.key === "fineQuestion" ? (
+                  <textarea
+                    rows={2}
+                    value={value?.[field.key] || ""}
+                    onChange={(event) => onChange(field.key, event.target.value)}
+                    placeholder={field.question}
+                  />
+                ) : (
+                  <input
+                    type={field.key === "violationDate" ? "date" : "text"}
+                    value={value?.[field.key] || ""}
+                    onChange={(event) => onChange(field.key, event.target.value)}
+                    placeholder={field.question}
+                  />
+                )}
+              </label>
+            ))}
+          </>
+        )}
 
-        <label className="consultation-intake-field consultation-intake-field--wide">
-          <span>확인된 사실</span>
-          <textarea
-            rows={3}
-            value={value?.confirmedFacts || ""}
-            onChange={(event) => onChange("confirmedFacts", event.target.value)}
-            placeholder="사고 시각, 장소, 첨부자료로 확인된 내용처럼 검증 가능한 사실을 적어 주세요."
-          />
-        </label>
+        {isFaultRatio && (
+          <>
+            <label className="consultation-intake-field consultation-intake-field--wide">
+              <span>사고 유형</span>
+              <select
+                value={value?.accidentType || legacyAccidentType}
+                onChange={(event) => onChange("accidentType", event.target.value)}
+              >
+                {ACCIDENT_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value || "empty"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <label className="consultation-intake-field consultation-intake-field--wide">
-          <span>사용자 주장·상대방 주장</span>
-          <textarea
-            rows={3}
-            value={value?.userClaims || ""}
-            onChange={(event) => onChange("userClaims", event.target.value)}
-            placeholder="상대가 주장하는 내용이나 아직 확인되지 않은 진술을 따로 적어 주세요."
-          />
-        </label>
+            {CONSULTATION_FACT_FIELDS.map((field) => (
+              <label className="consultation-intake-field" key={field.key}>
+                <span>{field.label}</span>
+                <input
+                  type="text"
+                  value={value?.[field.key] || ""}
+                  onChange={(event) => onChange(field.key, event.target.value)}
+                  placeholder={field.question}
+                />
+              </label>
+            ))}
 
-        <label className="consultation-intake-field consultation-intake-field--wide">
-          <span>추가 확인이 필요한 점</span>
-          <textarea
-            rows={2}
-            value={value?.missingDetails || ""}
-            onChange={(event) => onChange("missingDetails", event.target.value)}
-            placeholder="목격자 연락처, 블랙박스 확보 여부처럼 아직 모르는 항목을 적어 주세요."
-          />
-        </label>
+            <label className="consultation-intake-field consultation-intake-field--wide">
+              <span>확인된 사실</span>
+              <textarea
+                rows={3}
+                value={value?.confirmedFacts || ""}
+                onChange={(event) => onChange("confirmedFacts", event.target.value)}
+                placeholder="사고 시각, 장소, 첨부자료로 확인된 내용처럼 검증 가능한 사실을 적어 주세요."
+              />
+            </label>
+
+            <label className="consultation-intake-field consultation-intake-field--wide">
+              <span>사용자 주장·상대방 주장</span>
+              <textarea
+                rows={3}
+                value={value?.userClaims || ""}
+                onChange={(event) => onChange("userClaims", event.target.value)}
+                placeholder="상대가 주장하는 내용이나 아직 확인되지 않은 진술을 따로 적어 주세요."
+              />
+            </label>
+
+            <label className="consultation-intake-field consultation-intake-field--wide">
+              <span>추가 확인이 필요한 점</span>
+              <textarea
+                rows={2}
+                value={value?.missingDetails || ""}
+                onChange={(event) => onChange("missingDetails", event.target.value)}
+                placeholder="목격자 연락처, 블랙박스 확보 여부처럼 아직 모르는 항목을 적어 주세요."
+              />
+            </label>
+          </>
+        )}
       </div>
 
       <div className="consultation-intake-footer">
@@ -3019,9 +3074,9 @@ function ConsultationIntakePanel({
         )}
         {isFineNotice ? (
           <p className="consultation-intake-help">
-            과태료·범칙금 상담은 고지서 OCR 확인 카드와 자유 입력을 함께 사용하면 됩니다.
+            고지서는 아래 첨부 버튼으로 등록하고, 고지서 내용과 궁금한 점을 함께 적어 주세요.
           </p>
-        ) : missingFields.length > 0 ? (
+        ) : isFaultRatio && missingFields.length > 0 ? (
           <div className="consultation-intake-missing" role="status">
             <strong>아직 비어 있는 핵심 사실</strong>
             <div className="consultation-intake-chip-list">
@@ -3032,10 +3087,12 @@ function ConsultationIntakePanel({
               ))}
             </div>
           </div>
-        ) : (
+        ) : isFaultRatio ? (
           <p className="consultation-intake-help">
             핵심 사실 4개가 채워졌습니다. 자유 입력에는 추가 상황이나 질문만 적어도 됩니다.
           </p>
+        ) : (
+          <p className="consultation-intake-help">상담 유형을 선택하면 필요한 입력 항목이 표시됩니다.</p>
         )}
       </div>
     </section>
