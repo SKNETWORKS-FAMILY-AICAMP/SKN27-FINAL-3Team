@@ -20,10 +20,8 @@ import {
   CONSULTATION_FACT_FIELDS,
   CONSULTATION_TYPE_OPTIONS,
   FINE_NOTICE_FIELDS,
-  buildStructuredConsultationMessage,
+  buildConsultationMessagePair,
   createEmptyConsultationIntake,
-  hasConsultationIntakeData,
-  listConsultationIntakeMissingFields,
 } from "./consultationIntake.js";
 
 const TAB_ROUTES = [
@@ -1111,7 +1109,7 @@ export default function FrontendAppShell({
     attachmentClassificationConfirmation,
   } = {}) {
     const trimmedQuestion = String(userText ?? question).trim();
-    const composedQuestion = buildStructuredConsultationMessage({
+    const { displayText, requestText: composedQuestion } = buildConsultationMessagePair({
       freeText: trimmedQuestion,
       intake: consultationIntake,
     });
@@ -1124,7 +1122,7 @@ export default function FrontendAppShell({
     setQuestion("");
     setIsSubmitting(true);
     setStatusMessage("상담 내용을 정리하고 있습니다.");
-    setSubmittedQuestion(composedQuestion);
+    setSubmittedQuestion(displayText);
 
     let followupLoginState = null;
     if (!authSessionId && guestDetailedReportUsed) {
@@ -1148,11 +1146,15 @@ export default function FrontendAppShell({
     const activeGuestCredential = followupLoginState
       ? followupLoginState.guestCredential || ""
       : guestCredential || guestSessionResult?.guestCredential || "";
-    const nextUserMessage = { role: "user", content: composedQuestion };
+    const nextUserMessage = { role: "user", content: displayText };
     const conversationHistory = [...chatMessages, nextUserMessage].map((message) => ({
       role: message.role,
       content: message.content,
     }));
+    const requestConversationHistory = [
+      ...conversationHistory.slice(0, -1),
+      { role: "user", content: composedQuestion },
+    ];
     const activeAuthContext = buildAuthContext({
       authState: effectiveAuthSessionId ? "authenticated" : activeGuestId ? "guest" : "anonymous",
       guestId: activeGuestId,
@@ -1187,7 +1189,7 @@ export default function FrontendAppShell({
           attachment_classification_confirmation:
             attachmentClassificationConfirmation || undefined,
           execution_mode: executionMode,
-          conversation_history: conversationHistory,
+          conversation_history: requestConversationHistory,
           attachments: registeredAttachments.map((attachment) => ({
             attachment_id: attachment.attachment_id,
             purpose: attachment.purpose,
@@ -2590,8 +2592,6 @@ function ChatScreenV2({
 }) {
   const attachmentInputRef = useRef(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
-  const missingIntakeFields = listConsultationIntakeMissingFields(consultationIntake);
-  const hasStructuredIntake = hasConsultationIntakeData(consultationIntake);
   const visibleMessages = chatMessages.length
     ? chatMessages
     : submittedQuestion
@@ -2605,6 +2605,12 @@ function ChatScreenV2({
         ]
       : [];
   const hasConversation = visibleMessages.length > 0;
+  const composerPlaceholder =
+    consultationIntake?.consultationType === "fine_notice"
+      ? "이의신청 이유와 위반일자의 상황을 자세히 입력해 주세요."
+      : consultationIntake?.consultationType === "fault_ratio"
+        ? "사고상황, 보험사 설명처럼 사고 발생 후 기억나는 내용을 입력해주세요."
+        : "사고 상황, 고지서 내용, 보험사 설명처럼 지금 기억나는 내용을 입력해 주세요.";
   const latestAssistantIndex = latestMessageIndex(visibleMessages, "assistant");
   const isAuthenticated = Boolean(authSessionId);
   const visibleReportingPayload = isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;
@@ -2797,8 +2803,6 @@ function ChatScreenV2({
           <div className="chat-input">
             <div className="input-stack">
               <ConsultationIntakePanel
-                hasStructuredIntake={hasStructuredIntake}
-                missingFields={missingIntakeFields}
                 registeredAttachments={registeredAttachments}
                 value={consultationIntake}
                 onChange={(field, nextValue) =>
@@ -2806,18 +2810,18 @@ function ChatScreenV2({
                 }
                 onReset={() => setConsultationIntake(createEmptyConsultationIntake())}
               />
-              <textarea
-                aria-label="상담 메시지 입력"
-                placeholder="사고 상황, 고지서 내용, 보험사 설명처럼 지금 기억나는 내용을 입력해 주세요."
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-              />
               <div className="chat-attachment-bar">
               <div
                 className="attachment-dropzone"
                 onDragOver={onAttachmentDragOver}
                 onDrop={onAttachmentDrop}
               >
+                <textarea
+                  aria-label="상담 메시지 입력"
+                  placeholder={composerPlaceholder}
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                />
                 <strong>파일을 끌어 놓거나 + 메뉴에서 선택하세요.</strong>
                 <span>영상은 Vision 분석, 이미지와 PDF는 OCR 분류로 전달됩니다.</span>
               <div className="composer-toolbar">
@@ -2966,13 +2970,12 @@ function MissingFieldsPrompt({ supervisorState }) {
 }
 
 function ConsultationIntakePanel({
-  hasStructuredIntake,
-  missingFields,
   onChange,
   onReset,
   registeredAttachments,
   value,
 }) {
+  const [isIntakeOpen, setIsIntakeOpen] = useState(true);
   const rawSelectedType = value?.consultationType || "";
   const legacyAccidentType = ACCIDENT_TYPE_OPTIONS.some((option) => option.value === rawSelectedType)
     ? rawSelectedType
@@ -2980,22 +2983,31 @@ function ConsultationIntakePanel({
   const selectedType = legacyAccidentType ? "fault_ratio" : rawSelectedType;
   const isFineNotice = selectedType === "fine_notice";
   const isFaultRatio = selectedType === "fault_ratio";
+  const requiresStructuredDetails = isFineNotice || isFaultRatio;
+  useEffect(() => setIsIntakeOpen(true), [selectedType]);
   return (
-    <section className="consultation-intake-card" aria-label="구조화 입력 단계">
-      <div className="consultation-intake-card__head">
-        <div>
-          <span className="eyebrow">입력 단계</span>
-          <strong>먼저 상담 유형을 선택해 주세요.</strong>
-          <p>선택한 유형에 필요한 내용만 순서대로 입력할 수 있습니다.</p>
-        </div>
-        {hasStructuredIntake && (
+    <details
+      className="consultation-intake-card"
+      aria-label="구조화 입력 단계"
+      open={isIntakeOpen}
+      onToggle={(event) => setIsIntakeOpen(event.currentTarget.open)}
+    >
+      <summary className="consultation-intake-card__summary">
+        <span>
+          <strong>
+            {requiresStructuredDetails ? "필수 입력 조건" : selectedType ? "상담 유형" : "먼저 상담 유형을 선택해 주세요."}
+          </strong>
+        </span>
+      </summary>
+      {requiresStructuredDetails && (
+        <div className="consultation-intake-card__head">
           <button className="button" type="button" onClick={onReset}>
             입력 초기화
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="consultation-intake-grid">
+      <div className={`consultation-intake-grid${isFineNotice ? " is-fine-notice" : ""}`}>
         <label className="consultation-intake-field consultation-intake-field--wide">
           <span>사건 유형</span>
           <select
@@ -3013,28 +3025,14 @@ function ConsultationIntakePanel({
         {isFineNotice && (
           <>
             {FINE_NOTICE_FIELDS.map((field) => (
-              <label
-                className={`consultation-intake-field${
-                  field.key === "fineQuestion" ? " consultation-intake-field--wide" : ""
-                }`}
-                key={field.key}
-              >
+              <label className="consultation-intake-field" key={field.key}>
                 <span>{field.label}</span>
-                {field.key === "fineQuestion" ? (
-                  <textarea
-                    rows={2}
-                    value={value?.[field.key] || ""}
-                    onChange={(event) => onChange(field.key, event.target.value)}
-                    placeholder={field.question}
-                  />
-                ) : (
-                  <input
-                    type={field.key === "violationDate" ? "date" : "text"}
-                    value={value?.[field.key] || ""}
-                    onChange={(event) => onChange(field.key, event.target.value)}
-                    placeholder={field.question}
-                  />
-                )}
+                <input
+                  type={field.key === "violationDate" ? "date" : "text"}
+                  value={value?.[field.key] || ""}
+                  onChange={(event) => onChange(field.key, event.target.value)}
+                  placeholder={field.question}
+                />
               </label>
             ))}
           </>
@@ -3088,15 +3086,6 @@ function ConsultationIntakePanel({
               />
             </label>
 
-            <label className="consultation-intake-field consultation-intake-field--wide">
-              <span>추가 확인이 필요한 점</span>
-              <textarea
-                rows={2}
-                value={value?.missingDetails || ""}
-                onChange={(event) => onChange("missingDetails", event.target.value)}
-                placeholder="목격자 연락처, 블랙박스 확보 여부처럼 아직 모르는 항목을 적어 주세요."
-              />
-            </label>
           </>
         )}
       </div>
@@ -3109,26 +3098,11 @@ function ConsultationIntakePanel({
           <p className="consultation-intake-help">
             고지서는 아래 첨부 버튼으로 등록하고, 고지서 내용과 궁금한 점을 함께 적어 주세요.
           </p>
-        ) : isFaultRatio && missingFields.length > 0 ? (
-          <div className="consultation-intake-missing" role="status">
-            <strong>아직 비어 있는 핵심 사실</strong>
-            <div className="consultation-intake-chip-list">
-              {missingFields.map((field) => (
-                <span className="consultation-intake-chip" key={field.key}>
-                  {field.label}
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : isFaultRatio ? (
-          <p className="consultation-intake-help">
-            핵심 사실 4개가 채워졌습니다. 자유 입력에는 추가 상황이나 질문만 적어도 됩니다.
-          </p>
-        ) : (
+        ) : !selectedType ? (
           <p className="consultation-intake-help">상담 유형을 선택하면 필요한 입력 항목이 표시됩니다.</p>
-        )}
+        ) : null}
       </div>
-    </section>
+    </details>
   );
 }
 

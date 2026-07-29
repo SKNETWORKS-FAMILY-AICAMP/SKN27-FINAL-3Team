@@ -1,5 +1,6 @@
 export const CONSULTATION_TYPE_OPTIONS = [
   { value: "", label: "선택 안 함" },
+  { value: "general", label: "일반 상담" },
   { value: "fine_notice", label: "과태료·범칙금" },
   { value: "fault_ratio", label: "사고 과실비율" },
 ];
@@ -18,11 +19,6 @@ export const FINE_NOTICE_FIELDS = [
   { key: "violationDate", label: "위반 일시", question: "고지서에 적힌 위반 일시" },
   { key: "violationLocation", label: "위반 장소", question: "고지서에 적힌 위반 장소" },
   { key: "violationType", label: "위반 유형", question: "신호 위반, 속도 위반 등" },
-  {
-    key: "fineQuestion",
-    label: "상담 질문",
-    question: "이의신청 가능 여부 등 확인하고 싶은 내용을 적어 주세요.",
-  },
 ];
 
 export const CONSULTATION_FACT_FIELDS = [
@@ -139,6 +135,12 @@ export function buildStructuredConsultationMessage({ freeText = "", intake } = {
     sections.push(`[자유 입력]\n${normalizedFreeText}`);
   }
   return sections.join("\n\n").trim();
+}
+
+export function buildConsultationMessagePair({ freeText = "", intake } = {}) {
+  const displayText = normalizeText(freeText);
+  const requestText = buildStructuredConsultationMessage({ freeText, intake });
+  return { displayText: displayText || requestText, requestText };
 }
 
 function shouldCollectAccidentFacts(intake) {
