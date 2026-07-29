@@ -593,7 +593,7 @@ try {
         "chmod 0444 `$RELEASE_DIR/.stage-project-name.tmp && mv -f `$RELEASE_DIR/.stage-project-name.tmp `$RELEASE_DIR/.stage-project-name",
         "aws ecr get-login-password --region '$region' | docker login --username AWS --password-stdin '$registry'",
         "cd `$RELEASE_DIR",
-        "install -m 0755 `$RELEASE_DIR/deploy/aws-pilot/configure-imds-firewall.sh /usr/local/sbin/skn27-imds-firewall.sh",
+        "install -m 0755 `$RELEASE_DIR/configure-imds-firewall.sh /usr/local/sbin/skn27-imds-firewall.sh",
         "/usr/local/sbin/skn27-imds-firewall.sh",
         "MEM_TOTAL_KB=`$(awk '/MemTotal/ {print `$2}' /proc/meminfo); test `$MEM_TOTAL_KB -ge 7600000",
         "MEM_AVAILABLE_KB=`$(awk '/MemAvailable/ {print `$2}' /proc/meminfo); test `$MEM_AVAILABLE_KB -ge 3000000",
