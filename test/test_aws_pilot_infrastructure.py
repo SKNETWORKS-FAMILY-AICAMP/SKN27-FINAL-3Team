@@ -259,7 +259,7 @@ def test_budget_and_ssm_secret_contract_are_present_without_secret_outputs() -> 
     assert "Unresolved template value" in deploy
 
 
-def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None:
+def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
     services = compose["services"]
     assert {
@@ -267,13 +267,38 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
         "edge-rate-limit",
         "frontend",
         "backend",
+        "rag-loader",
         "agent-worker",
         "file-scan-worker",
         "redis",
         "clamav",
+        "law-neo4j",
     }.issubset(services)
     assert {"postgres", "neo4j", "kibana", "elasticsearch"}.isdisjoint(services)
-    assert set(services["caddy"]["ports"]) == {"80:80", "443:443"}
+    assert "law_neo4j_data" in compose["volumes"]
+    assert "ports" not in services["law-neo4j"]
+    assert "healthcheck" in services["law-neo4j"]
+    assert services["backend"]["depends_on"]["law-neo4j"]["condition"] == "service_healthy"
+    assert services["rag-loader"]["networks"]["pilot"] == {}
+    assert "ipv4_address" not in services["rag-loader"]["networks"]["pilot"]
+    assert (
+        services["rag-loader"]["environment"]["REVIEW_CASE_POSTGRES_EXPORT_ROOT"]
+        == "/tmp/review-case-postgres-exports"
+    )
+    caddy = services["caddy"]
+    assert caddy["network_mode"] == "host"
+    assert "ports" not in caddy
+    assert "networks" not in caddy
+    assert caddy["extra_hosts"] == [
+        "edge-rate-limit:${PILOT_EDGE_RATE_LIMIT_IP:-172.31.0.3}"
+    ]
+    assert caddy["user"] == "10001:10001"
+    initializer = services["caddy-volume-init"]
+    assert initializer["network_mode"] == "none"
+    assert initializer["user"] == "0:0"
+    assert initializer["cap_drop"] == ["ALL"]
+    assert initializer["cap_add"] == ["CHOWN"]
+    assert caddy["depends_on"]["caddy-volume-init"]["condition"] == "service_completed_successfully"
     for name, config in services.items():
         if name != "caddy":
             assert "ports" not in config, name
@@ -281,9 +306,18 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
     serialized = yaml.safe_dump(compose).lower()
     assert "object_storage_provider: s3" in serialized
     assert "pgsslmode: require" in serialized
-    assert "law_ground_search_enable_neo4j: '0'" in serialized
+    assert "law_ground_search_enable_neo4j: '1'" in serialized
     assert "legal_rag_vector_enabled: '1'" in serialized
     runtime_env = _read_deploy("runtime.env.example").lower()
+    for name in (
+        "law_neo4j_image_ref",
+        "neo4j_uri",
+        "neo4j_user",
+        "neo4j_password",
+        "neo4j_database",
+        "law_graph_required",
+    ):
+        assert name in runtime_env
     assert "google_oauth_code_exchange_daily_limit" in runtime_env
     assert "google_oauth_trusted_proxy_cidrs" in runtime_env
     assert "mock_require_auth" not in serialized
@@ -294,6 +328,23 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
         assert services[name]["env_file"] == [
             {"path": ".runtime.env", "format": "raw"}
         ]
+    assert "env_file" not in services["law-neo4j"]
+    assert set(services["law-neo4j"]["environment"]) == {
+        "NEO4J_AUTH",
+        "NEO4J_server_memory_heap_initial__size",
+        "NEO4J_server_memory_heap_max__size",
+        "NEO4J_server_memory_pagecache_size",
+    }
+    assert "$${NEO4J_AUTH%%/*}" in services["law-neo4j"]["healthcheck"]["test"][1]
+    assert "$${NEO4J_AUTH#*/}" in services["law-neo4j"]["healthcheck"]["test"][1]
+    assert set(services["redis"]["cap_add"]) == {"SETGID", "SETUID"}
+    assert set(services["clamav"]["cap_add"]) == {
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "SETGID",
+        "SETUID",
+    }
     assert services["caddy"]["env_file"] == [
         {"path": ".edge.env", "format": "raw"}
     ]
@@ -303,6 +354,22 @@ def test_compose_runs_only_the_low_cost_runtime_and_exposes_only_caddy() -> None
     assert ".compose.env" in deploy
     assert ".edge.env" in deploy
     assert ".elasticsearch.env" not in deploy
+    compose_env_extraction = next(
+        line for line in deploy.splitlines() if "> `$RELEASE_DIR/.compose.env" in line
+    )
+    for name in (
+        "LAW_NEO4J_IMAGE_REF",
+        "LEGAL_DATASET_VERSION",
+        "LEGAL_DATASET_VERIFIED_AT",
+        "NEO4J_USER",
+        "NEO4J_PASSWORD",
+    ):
+        assert name in compose_env_extraction
+    assert "initial RAG stage service states" in deploy
+    assert "logs --tail 80 `$stage_service" in deploy
+    loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+    assert "run --rm --no-deps rag-loader" in loader
+    assert "run --rm --no-deps backend" not in loader
 
 
 def test_caddy_preserves_auth_headers_and_haproxy_enforces_per_ip_rate_limit() -> None:
@@ -423,11 +490,13 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
     expected_steps = (
         "aws s3 cp '$RagSeedS3Uri'",
         "sha256sum -c -",
-        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py verify_production_rag_seed_manifest",
-        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro backend python backend/manage.py load_production_rag_seed",
-        "run --rm --no-deps backend python backend/manage.py smoke_law_ground_search --require-results",
-        "run --rm --no-deps backend python backend/manage.py verify_pgvector_rag_readiness --format json",
-        "run --rm --no-deps backend python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
+        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py verify_production_rag_seed_manifest",
+        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_production_rag_seed",
+        "rag-loader python backend/manage.py load_legal_graph_seed",
+        "rag-loader python backend/manage.py verify_legal_graph_readiness --format json",
+        "run --rm --no-deps rag-loader python backend/manage.py smoke_law_ground_search --require-results",
+        "run --rm --no-deps rag-loader python backend/manage.py verify_pgvector_rag_readiness --format json",
+        "run --rm --no-deps rag-loader python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
     )
     positions = [deploy.index(step) for step in expected_steps]
     assert positions == sorted(positions)
@@ -467,13 +536,15 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
 
     review_load = (
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
-        "backend python backend/manage.py load_review_case_pgvector_seed "
+        "rag-loader python backend/manage.py load_review_case_pgvector_seed "
         "--manifest /run/production-rag-seed/$RagSeedManifestRelativePath "
         "--replace --allow-paid-provider-call --format json"
     )
     legal_load = (
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
-        "backend python backend/manage.py load_production_rag_seed"
+        "rag-loader python backend/manage.py load_production_rag_seed "
+        "--manifest /run/production-rag-seed/$RagSeedManifestRelativePath "
+        "--skip-legal-schema --format json"
     )
     completion = (
         "printf '%s\\n' '$RagSeedManifestSha256' > "
@@ -483,6 +554,8 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
         "verify_production_rag_seed_manifest --manifest",
         review_load,
         legal_load,
+        "rag-loader python backend/manage.py load_legal_graph_seed",
+        "rag-loader python backend/manage.py verify_legal_graph_readiness --format json",
         "smoke_law_ground_search --require-results",
         "verify_pgvector_rag_readiness --format json",
         "smoke_text_ml_case_search --require-pgvector --require-results",
@@ -646,6 +719,9 @@ def test_ssm_jobs_have_configurable_timeout_cancel_and_terminal_confirmation() -
         assert "TimedOut" in script
         assert "Get-SsmCommandResult" in script
 
+    rag_seed_loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+    assert "TimeoutSeconds = $SsmTimeoutSeconds" in rag_seed_loader
+
 
 def test_remote_state_is_precreated_versioned_encrypted_and_lockfile_based() -> None:
     versions = (TERRAFORM_DIR / "versions.tf").read_text(encoding="utf-8")
@@ -798,6 +874,22 @@ def test_database_maintenance_uses_libpq_env_file_without_secret_cli_values() ->
     assert "postgres:16-alpine" not in maintenance
 
 
+def test_database_maintenance_builds_python_env_without_nested_f_string_quotes() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+
+    assert 'u=m[`"username`"]; p=m[`"password`"]' in maintenance
+    assert 'f`"POSTGRES_USER={u}`"' in maintenance
+    assert 'f`"POSTGRES_PASSWORD={p}`"' in maintenance
+    assert 'f`"PGUSER={u}`"' in maintenance
+    assert 'f`"PGPASSWORD={p}`"' in maintenance
+
+
+def test_database_maintenance_writes_env_files_with_real_newlines() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+
+    assert r'`"\\n`".join(out)' not in maintenance
+
+
 def test_native_s3_lockfile_requires_terraform_1_11_or_newer() -> None:
     versions = (TERRAFORM_DIR / "versions.tf").read_text(encoding="utf-8")
     runbook = _read_deploy("README.ko.md")
@@ -924,12 +1016,26 @@ def test_database_migration_env_forces_postgres_ssl_and_asserts_rds_target() -> 
     assert target_check < migrate
 
 
+def test_database_maintenance_restores_runtime_profile_with_replacement_association_id() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+
+    assert '--query "IamInstanceProfileAssociation.AssociationId"' in maintenance
+    assert "$associationId = (" in maintenance
+    activate = maintenance.index('"Name=$maintenanceProfile"')
+    restore = maintenance.index('"Name=$runtimeProfile"')
+    assert activate < restore
+
+
 def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services() -> None:
     compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
     services = compose["services"]
     user_data = (TERRAFORM_DIR / "user_data.sh.tftpl").read_text(encoding="utf-8")
     deploy = _read_deploy("Deploy-Pilot.ps1")
+    firewall_script = _read_deploy("configure-imds-firewall.sh")
     runbook = _read_deploy("README.ko.md")
+    bundle_start = deploy.index("$staging = Join-Path")
+    bundle_end = deploy.index("Compress-Archive", bundle_start)
+    bundle_copy_segment = deploy[bundle_start:bundle_end]
 
     allowed = {
         "backend": "172.31.0.5",
@@ -942,7 +1048,6 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
         )
         assert f"{address}/32" in user_data
     for name in (
-        "caddy",
         "edge-rate-limit",
         "frontend",
         "redis",
@@ -952,11 +1057,29 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
         assert services[name]["cap_drop"] == ["ALL"]
         assert "no-new-privileges:true" in services[name]["security_opt"]
 
+    assert services["caddy"]["network_mode"] == "host"
+    assert services["caddy"]["user"] == "10001:10001"
     assert "DOCKER-USER" in user_data
     assert "169.254.169.254/32" in user_data
+    assert "OUTPUT" in user_data
+    assert 'caddy_uid="10001"' in user_data
+    assert '--uid-owner "$caddy_uid"' in user_data
+    assert "OUTPUT" in firewall_script
+    assert 'caddy_uid="10001"' in firewall_script
+    assert '--uid-owner "$caddy_uid"' in firewall_script
     assert "skn27-imds-firewall.service" in user_data
     assert "RemainAfterExit=yes" in user_data
     assert "/usr/local/sbin/skn27-imds-firewall.sh" in deploy
+    assert "configure-imds-firewall.sh" in deploy
+    assert '"configure-imds-firewall.sh"' in bundle_copy_segment
+    assert (
+        r"tr -d '\r' < `$RELEASE_DIR/configure-imds-firewall.sh "
+        "> /tmp/skn27-imds-firewall.sh"
+    ) in deploy
+    assert (
+        "install -m 0755 /tmp/skn27-imds-firewall.sh "
+        "/usr/local/sbin/skn27-imds-firewall.sh"
+    ) in deploy
     assert "IMDS allow smoke" in deploy
     assert "IMDS deny smoke" in deploy
     assert "credential proxy" in runbook.lower()
@@ -1251,7 +1374,7 @@ def test_initial_rag_bootstrap_stages_private_services_then_requires_seed_promot
         line for line in deploy.splitlines()
         if "up -d --wait --wait-timeout 600" in line
     )
-    for service in ("redis", "clamav", "backend"):
+    for service in ("redis", "clamav", "law-neo4j", "backend"):
         assert service in stage_up
     for public_service in (
         "caddy",
@@ -1331,6 +1454,18 @@ def test_public_origin_contract_fails_fast_before_remote_or_paid_work() -> None:
         assert token in deploy
         assert deploy.index(token) < ssm_put
         assert deploy.index(token) < build
+
+
+def test_deploy_placeholder_validation_preserves_a_single_match_as_a_collection() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+
+    assert re.search(
+        r"\$nonGenerated\s*=\s*@\(\s*\$runtimeEnv\s+-split\s+\"`r\?`n\"\s*"
+        r"\|\s*Where-Object",
+        deploy,
+        re.DOTALL,
+    )
+    assert "$nonGenerated.Count -gt 0" in deploy
 
 
 def test_first_normal_promotion_requires_google_live_smoke_remotely() -> None:
@@ -1426,7 +1561,12 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
     compose = yaml.safe_load(compose_text)
 
     assert "[switch]$StageForReleaseUpdate" in deploy
+    assert "[switch]$AllowCaddyOfflineForHostNetworkCutover" in deploy
     assert "Initial RAG bootstrap and release update staging are mutually exclusive" in deploy
+    assert (
+        "if ($AllowCaddyOfflineForHostNetworkCutover -and -not $StageForReleaseUpdate)"
+        in deploy
+    )
     assert '[ValidatePattern("^[a-z0-9][a-z0-9-]{0,31}$")]' in deploy
     assert '$stageProjectName = "skn27-stage-$ReleaseTag"' in deploy
     assert "--project-name '$stageProjectName'" in deploy
@@ -1435,7 +1575,6 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
     assert "--env-file .production-compose.env" in deploy
 
     expected_addresses = {
-        "caddy": "${PILOT_CADDY_IP:-172.31.0.2}",
         "edge-rate-limit": "${PILOT_EDGE_RATE_LIMIT_IP:-172.31.0.3}",
         "frontend": "${PILOT_FRONTEND_IP:-172.31.0.4}",
         "backend": "${PILOT_BACKEND_IP:-172.31.0.5}",
@@ -1467,11 +1606,15 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
         volume_name = f"${{stageProjectName}}_{suffix}"
         assert volume_name in stage_env_line
         assert volume_name in production_env_line
+    assert "PILOT_CADDY_IP=" not in deploy
+    assert "PILOT_EDGE_RATE_LIMIT_IP=172.31.0.3" in production_env_line
 
     remote = deploy.index("$commands = @(")
     update = deploy.index("if ($StageForReleaseUpdate) {", remote)
     update_end = deploy.index("else {", update)
     update_segment = deploy[update:update_end]
+    assert "$currentReleaseRequiredServices = if ($AllowCaddyOfflineForHostNetworkCutover)" in deploy
+    assert "for required_service in $currentReleaseRequiredServices" in update_segment
     for required in (
         "CURRENT_RELEASE=`$(readlink -f /opt/skn27-pilot/current)",
         r'test `"`$CURRENT_RELEASE`" != `"`$RELEASE_DIR`"',

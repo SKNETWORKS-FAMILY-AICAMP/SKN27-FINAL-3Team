@@ -1,12 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as consultationIntakeModule from "./consultationIntake.js";
 
 import {
+  CONSULTATION_TYPE_OPTIONS,
   buildStructuredConsultationMessage,
   createEmptyConsultationIntake,
   hasConsultationIntakeData,
   listConsultationIntakeMissingFields,
 } from "./consultationIntake.js";
+
+test("keeps structured context in the request but shows only the user's free text", () => {
+  assert.equal(typeof consultationIntakeModule.buildConsultationMessagePair, "function");
+  assert.deepEqual(
+    consultationIntakeModule.buildConsultationMessagePair({
+      freeText: "안녕하십니까 혹시 과실비율 측정은 어떻게 진행되는지요",
+      intake: { consultationType: "general" },
+    }),
+    {
+      displayText: "안녕하십니까 혹시 과실비율 측정은 어떻게 진행되는지요",
+      requestText:
+        "[상담 유형]\n일반 상담\n\n[자유 입력]\n안녕하십니까 혹시 과실비율 측정은 어떻게 진행되는지요",
+    }
+  );
+});
+
+test("supports general consultation without extra structured fields", () => {
+  assert.ok(
+    CONSULTATION_TYPE_OPTIONS.some(
+      (option) => option.value === "general" && option.label === "일반 상담"
+    )
+  );
+  assert.equal(
+    buildStructuredConsultationMessage({
+      freeText: "비보호 좌회전 관련 판례를 알려줘.",
+      intake: { consultationType: "general" },
+    }),
+    "[상담 유형]\n일반 상담\n\n[자유 입력]\n비보호 좌회전 관련 판례를 알려줘."
+  );
+  assert.deepEqual(listConsultationIntakeMissingFields({ consultationType: "general" }), []);
+});
 
 test("returns plain free text when structured intake is empty", () => {
   assert.equal(
@@ -60,6 +93,40 @@ test("lists only unresolved accident facts as missing", () => {
       consultationType: "fine_notice",
       confirmedFacts: "",
       userClaims: "",
+    }),
+    []
+  );
+});
+
+test("builds fine notice details without requesting accident facts", () => {
+  const intake = createEmptyConsultationIntake();
+  intake.consultationType = "fine_notice";
+  intake.violationDate = "2026-07-29";
+  intake.violationLocation = "서울시 강남구";
+  intake.violationType = "신호 위반";
+
+  const message = buildStructuredConsultationMessage({ intake });
+
+  assert.match(message, /2026-07-29/);
+  assert.match(message, /서울시 강남구/);
+  assert.match(message, /신호 위반/);
+  assert.doesNotMatch(message, /상담 질문/);
+  assert.deepEqual(listConsultationIntakeMissingFields(intake), []);
+});
+
+test("requests detailed accident facts only for fault ratio", () => {
+  assert.deepEqual(
+    listConsultationIntakeMissingFields({
+      consultationType: "fault_ratio",
+    }).map((item) => item.key),
+    ["roadLayout", "vehicleActions", "signalPriority", "collisionLocation"]
+  );
+  assert.deepEqual(
+    listConsultationIntakeMissingFields({
+      consultationType: "fine_notice",
+      violationDate: "2026-07-29",
+      violationLocation: "서울시 강남구",
+      violationType: "신호 위반",
     }),
     []
   );

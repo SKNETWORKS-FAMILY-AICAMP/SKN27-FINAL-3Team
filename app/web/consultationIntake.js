@@ -1,12 +1,24 @@
 export const CONSULTATION_TYPE_OPTIONS = [
   { value: "", label: "선택 안 함" },
+  { value: "general", label: "일반 상담" },
+  { value: "fine_notice", label: "과태료·범칙금" },
+  { value: "fault_ratio", label: "사고 과실비율" },
+];
+
+export const ACCIDENT_TYPE_OPTIONS = [
+  { value: "", label: "사고 유형 선택" },
   { value: "intersection", label: "교차로 사고" },
   { value: "lane_change", label: "차선 변경·끼어들기" },
   { value: "rear_end", label: "추돌 사고" },
   { value: "parking", label: "주정차·출차 사고" },
   { value: "pedestrian_bicycle", label: "보행자·자전거 사고" },
-  { value: "fine_notice", label: "과태료·범칙금 상담" },
   { value: "other", label: "기타 사고" },
+];
+
+export const FINE_NOTICE_FIELDS = [
+  { key: "violationDate", label: "위반 일시", question: "고지서에 적힌 위반 일시" },
+  { key: "violationLocation", label: "위반 장소", question: "고지서에 적힌 위반 장소" },
+  { key: "violationType", label: "위반 유형", question: "신호 위반, 속도 위반 등" },
 ];
 
 export const CONSULTATION_FACT_FIELDS = [
@@ -33,6 +45,7 @@ export const CONSULTATION_FACT_FIELDS = [
 ];
 
 const ACCIDENT_CONSULTATION_TYPES = new Set([
+  "fault_ratio",
   "intersection",
   "lane_change",
   "rear_end",
@@ -44,6 +57,11 @@ const ACCIDENT_CONSULTATION_TYPES = new Set([
 export function createEmptyConsultationIntake() {
   return {
     consultationType: "",
+    accidentType: "",
+    violationDate: "",
+    violationLocation: "",
+    violationType: "",
+    fineQuestion: "",
     roadLayout: "",
     vehicleActions: "",
     signalPriority: "",
@@ -83,6 +101,18 @@ export function buildStructuredConsultationMessage({ freeText = "", intake } = {
     sections.push(`[상담 유형]\n${typeLabel}`);
   }
 
+  const accidentTypeLabel = consultationTypeLabel(normalizedIntake.accidentType);
+  if (normalizedIntake.consultationType === "fault_ratio" && accidentTypeLabel) {
+    sections.push(`[사고 유형]\n${accidentTypeLabel}`);
+  }
+
+  const fineLines = FINE_NOTICE_FIELDS.flatMap((field) =>
+    normalizedIntake[field.key] ? [`- ${field.label}: ${normalizedIntake[field.key]}`] : []
+  );
+  if (normalizedIntake.consultationType === "fine_notice" && fineLines.length) {
+    sections.push(`[과태료 기본정보]\n${fineLines.join("\n")}`);
+  }
+
   const factLines = CONSULTATION_FACT_FIELDS.flatMap((field) =>
     normalizedIntake[field.key] ? [`- ${field.label}: ${normalizedIntake[field.key]}`] : []
   );
@@ -107,6 +137,12 @@ export function buildStructuredConsultationMessage({ freeText = "", intake } = {
   return sections.join("\n\n").trim();
 }
 
+export function buildConsultationMessagePair({ freeText = "", intake } = {}) {
+  const displayText = normalizeText(freeText);
+  const requestText = buildStructuredConsultationMessage({ freeText, intake });
+  return { displayText: displayText || requestText, requestText };
+}
+
 function shouldCollectAccidentFacts(intake) {
   return (
     ACCIDENT_CONSULTATION_TYPES.has(intake.consultationType) ||
@@ -116,7 +152,9 @@ function shouldCollectAccidentFacts(intake) {
 }
 
 function consultationTypeLabel(value) {
-  const match = CONSULTATION_TYPE_OPTIONS.find((option) => option.value === value);
+  const match = [...CONSULTATION_TYPE_OPTIONS, ...ACCIDENT_TYPE_OPTIONS].find(
+    (option) => option.value === value
+  );
   return match ? match.label : "";
 }
 

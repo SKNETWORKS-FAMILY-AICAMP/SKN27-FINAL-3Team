@@ -698,10 +698,16 @@ def test_live_load_calls_all_existing_load_paths_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
-    calls: list[tuple[object, bool, int]] = []
+    calls: list[tuple[object, bool, bool, int]] = []
 
-    def load_legal(current_bundle, *, replace: bool, batch_size: int):
-        calls.append((current_bundle, replace, batch_size))
+    def load_legal(
+        current_bundle,
+        *,
+        replace: bool,
+        skip_schema: bool,
+        batch_size: int,
+    ):
+        calls.append((current_bundle, replace, skip_schema, batch_size))
         return {"loaded": 1}
 
     monkeypatch.setattr(load_production_rag_seed, "_load_legal_pgvector", load_legal)
@@ -710,16 +716,17 @@ def test_live_load_calls_all_existing_load_paths_once(
         bundle,
         dry_run=False,
         replace_legal=True,
+        skip_legal_schema=True,
         batch_size=25,
     )
 
     assert len(calls) == 1
-    assert calls[0][0].manifest_path != bundle.manifest_path
+    assert calls[0][0].manifest_path == bundle.manifest_path
     assert calls[0][0].embedding_space == bundle.embedding_space
     assert {
         role: artifact.sha256 for role, artifact in calls[0][0].artifacts.items()
     } == {role: artifact.sha256 for role, artifact in bundle.artifacts.items()}
-    assert calls[0][1:] == (True, 25)
+    assert calls[0][1:] == (True, True, 25)
     assert result["status"] == "loaded"
     assert result["external_writes"] is True
 
@@ -737,25 +744,32 @@ def test_live_load_revalidates_bundle_before_external_writes(tmp_path: Path) -> 
         )
 
 
-def test_live_load_uses_verified_snapshot_for_legal_pgvector(
+def test_live_load_reuses_revalidated_read_only_bundle_without_snapshot_copy(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
-    source_legal_path = bundle.artifacts["legal_chunks"].path
-    consumed_legal_rows: list[dict[str, object]] = []
+    copied_paths: list[Path] = []
+
+    def unexpected_snapshot(*_args, **_kwargs):
+        copied_paths.append(Path("snapshot"))
+        raise AssertionError("read-only seed loads must not create a full snapshot")
 
     def load_legal(current_bundle, *, replace: bool, batch_size: int):
         assert replace is False
         assert batch_size == 10
-        mutated_row = dict(_valid_rows()["legal_chunks"][0])
-        mutated_row["chunk_id"] = "changed-after-verification"
-        _write_jsonl(source_legal_path, [mutated_row])
-        consumed_legal_rows.extend(
-            iter_rag_seed_jsonl(current_bundle.artifacts["legal_chunks"])
-        )
+        assert current_bundle.manifest_path == bundle.manifest_path
+        assert current_bundle.artifacts["legal_chunks"].path == bundle.artifacts[
+            "legal_chunks"
+        ].path
         return {"loaded": 1}
 
+    monkeypatch.setattr(
+        load_production_rag_seed,
+        "TemporaryDirectory",
+        unexpected_snapshot,
+        raising=False,
+    )
     monkeypatch.setattr(load_production_rag_seed, "_load_legal_pgvector", load_legal)
 
     result = load_production_rag_seed.execute_rag_seed_load(
@@ -766,7 +780,7 @@ def test_live_load_uses_verified_snapshot_for_legal_pgvector(
     )
 
     assert result["status"] == "loaded"
-    assert consumed_legal_rows[0]["chunk_id"] == "law-1"
+    assert copied_paths == []
 
 
 def test_live_load_rejects_self_consistent_bundle_replacement(tmp_path: Path) -> None:

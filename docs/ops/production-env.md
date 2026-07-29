@@ -106,23 +106,34 @@ Legal retrieval is pgvector-only. Production must not start with vector search d
 
 ```dotenv
 LEGAL_RAG_VECTOR_ENABLED=1
-LEGAL_RAG_QUERY_EMBEDDING_PROVIDER=sentence-transformers
-LEGAL_RAG_QUERY_EMBEDDING_MODEL=intfloat/multilingual-e5-large
+LEGAL_RAG_QUERY_EMBEDDING_PROVIDER=openai
+LEGAL_RAG_QUERY_EMBEDDING_MODEL=text-embedding-3-large
 LEGAL_RAG_QUERY_EMBEDDING_DIMENSIONS=1024
 APP_RELEASE_VERSION=<immutable-release-tag-or-commit>
 LEGAL_DATASET_VERSION=<validated-run-summary-dataset-version>
 LEGAL_DATASET_VERIFIED_AT=<validated-run-summary-finished-at>
-LAW_GROUND_SEARCH_ENABLE_NEO4J=0
+LEGAL_RAG_SEED_MANIFEST_SHA256=<approved-production-rag-seed-manifest-sha256>
+LAW_GROUND_SEARCH_ENABLE_NEO4J=1
+LAW_GRAPH_REQUIRED=1
+NEO4J_URI=bolt://law-neo4j:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=<secret-from-runtime-securestring>
+NEO4J_DATABASE=neo4j
 ```
 
-Load ETL output into `law_chunks` and `law_embeddings` before serving traffic.
+Load the approved v1 seed into `law_chunks` and `law_embeddings`, then derive and
+verify the Neo4j graph from that exact seed before serving traffic. pgvector remains
+the only vector retrieval backend; the private `law-neo4j` container is graph
+evidence only and must never expose a host port. `fault-standard-neo4j` remains a
+separate future graph and does not share this volume, credentials, or dataset.
 `LEGAL_DATASET_VERSION` and `LEGAL_DATASET_VERIFIED_AT` are non-secret release
 evidence values. Copy them only from the same `run_summary.json` that passed the
 freshness gate; never type a newer timestamp to bypass that gate.
 If pgvector is unavailable or has no result, the runtime returns a safe
 unavailable/empty result; it does not fall back to Django table search.
-Keep `LAW_GROUND_SEARCH_ENABLE_NEO4J=0` unless the Neo4j hint graph and legal
-relation graph have both been loaded and `NEO4J_URI` points to that service.
+Keep `LAW_GROUND_SEARCH_ENABLE_NEO4J=0` in local development unless the Neo4j
+hint graph and legal relation graph have both been loaded. Pilot sets it to `1`
+only with the private `law-neo4j` service and a verified graph dataset.
 The legal ingestion pipeline writes `relations/law_extra_relations.jsonl` for
 `HAS_PENALTY`, `HAS_APPENDIX`, `HAS_EXCEPTION`, and `RELATED_TO`;
 `export_neo4j.py` imports that file when present. Before enabling Neo4j-backed
@@ -194,6 +205,28 @@ TEXT_ML_CASE_SEARCH_V2_FINAL_TOP_K=10
 
 The readiness report includes `text_ml_case_search_rag` and validates the
 three pgvector domains, their embedding counts, and HNSW indexes.
+
+### Review-case embedding retention
+
+Apply the review-case schema maintenance before loading a new manifest. It adds
+the non-destructive embedding revision contract and preserves existing vectors:
+
+```powershell
+python -m etl.fault_cases.src.review_case.db_loading.schema_manager --apply-schema
+```
+
+Then load the approved manifest with `--replace`. In this retention mode,
+`--replace` does not delete documents, chunks, or embeddings: chunks missing
+from the new manifest become inactive, while matching current text hashes reuse
+their existing embeddings without another provider request. Changed text creates
+a new retained embedding revision; the earlier revision stays stored but is not
+used for current retrieval.
+
+After a failed embedding run, rerun the same seed command. Successfully stored
+batches are reused and only pending current-hash chunks call the provider. A
+model or embedding-version change intentionally creates a separate retained
+embedding space and therefore requires embedding the active chunks once in that
+new space.
 
 Run the safe smoke:
 
@@ -446,3 +479,24 @@ remain executable.
 - Store real Google OAuth, app JWT, OAuth token, database, object storage, and
   LLM keys in the deployment secret store.
 - After changing secrets, rerun the readiness command and the auth smoke tests.
+
+## 8. Pilot Caddy Host-Network Cutover
+
+The Pilot Compose Caddy service may use `network_mode: host` when Docker cannot
+publish host ports 80 and 443. It has no `pilot` bridge attachment and resolves
+only `edge-rate-limit` through the configured private edge IP. Caddy runs as
+UID/GID `10001`; the deployed IMDS firewall rejects metadata traffic from that
+UID in the host `OUTPUT` chain.
+
+Keep public traffic closed while changing this topology:
+
+1. Record the current IPv4 TCP 80 and 443 security-group rules, then revoke
+   only those rules.
+2. Run release staging with `-AllowCaddyOfflineForHostNetworkCutover` and then
+   promotion. This switch is valid only for `-StageForReleaseUpdate` while the
+   recorded public ingress rules remain blocked. Verify Compose Caddy, backend
+   readiness, and the host-local live and ready endpoints.
+3. Restore the exact recorded 80 and 443 rules only after all checks pass, then
+   verify the public domain.
+4. On failure, leave ingress closed and use the existing rollback workflow;
+   never substitute a manually created host-network Caddy container.
