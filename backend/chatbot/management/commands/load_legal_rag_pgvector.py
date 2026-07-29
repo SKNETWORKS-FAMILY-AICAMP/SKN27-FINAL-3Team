@@ -27,6 +27,7 @@ class Command(BaseCommand):
         parser.add_argument("--embeddings", default=str(DEFAULT_EMBEDDINGS_PATH), help="Path to law_embeddings JSONL.")
         parser.add_argument("--schema", default=str(DEFAULT_SCHEMA_PATH), help="Path to pgvector schema SQL.")
         parser.add_argument("--schema-only", action="store_true", help="Create schema and indexes without loading data.")
+        parser.add_argument("--skip-schema", action="store_true", help="Skip DDL when schema maintenance already ran.")
         parser.add_argument("--replace", action="store_true", help="Truncate legal RAG tables before loading JSONL data.")
         parser.add_argument("--batch-size", type=int, default=500, help="Rows per insert batch.")
         parser.add_argument("--smoke-query", default="", help="Optional query to run through legal_rag_service after load.")
@@ -41,6 +42,7 @@ class Command(BaseCommand):
         embeddings_path = Path(options["embeddings"])
         schema_path = Path(options["schema"])
         schema_only = bool(options["schema_only"])
+        skip_schema = bool(options["skip_schema"])
 
         if not schema_path.exists():
             raise CommandError(f"Schema file not found: {schema_path}")
@@ -51,7 +53,8 @@ class Command(BaseCommand):
                 raise CommandError(f"Embeddings file not found: {embeddings_path}")
 
         with transaction.atomic():
-            _execute_schema(schema_path)
+            if not skip_schema:
+                _execute_schema(schema_path)
             if options["replace"] and not schema_only:
                 with connection.cursor() as cursor:
                     cursor.execute("TRUNCATE TABLE law_embeddings CASCADE;")

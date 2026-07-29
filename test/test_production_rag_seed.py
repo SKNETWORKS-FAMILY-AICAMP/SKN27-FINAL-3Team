@@ -698,10 +698,16 @@ def test_live_load_calls_all_existing_load_paths_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
-    calls: list[tuple[object, bool, int]] = []
+    calls: list[tuple[object, bool, bool, int]] = []
 
-    def load_legal(current_bundle, *, replace: bool, batch_size: int):
-        calls.append((current_bundle, replace, batch_size))
+    def load_legal(
+        current_bundle,
+        *,
+        replace: bool,
+        skip_schema: bool,
+        batch_size: int,
+    ):
+        calls.append((current_bundle, replace, skip_schema, batch_size))
         return {"loaded": 1}
 
     monkeypatch.setattr(load_production_rag_seed, "_load_legal_pgvector", load_legal)
@@ -710,6 +716,7 @@ def test_live_load_calls_all_existing_load_paths_once(
         bundle,
         dry_run=False,
         replace_legal=True,
+        skip_legal_schema=True,
         batch_size=25,
     )
 
@@ -719,7 +726,7 @@ def test_live_load_calls_all_existing_load_paths_once(
     assert {
         role: artifact.sha256 for role, artifact in calls[0][0].artifacts.items()
     } == {role: artifact.sha256 for role, artifact in bundle.artifacts.items()}
-    assert calls[0][1:] == (True, 25)
+    assert calls[0][1:] == (True, True, 25)
     assert result["status"] == "loaded"
     assert result["external_writes"] is True
 
