@@ -6,26 +6,18 @@ import json
 from typing import Any
 
 
-VLM_JSON_PROMPT = """Analyze the accident-video frames and return exactly one compact JSON object.
+VLM_JSON_PROMPT = """Explain the locked VideoMAE accident classification using only visible evidence.
+The canonical label is read-only. Do not change it, re-predict it, or emit any accident-type label field.
 Do not use Markdown or add text outside JSON. Write all descriptions in concise English.
-Do not repeat bounding-box coordinates. visible_objects must contain at most 5 short label strings.
-Do not infer facts that are not visible; use uncertain and explain why.
+Do not infer fault ratio, liable parties, violations, or facts that are not visible.
 
 Required keys:
-summary, visible_objects, predicted_accident_target, accident_target_evidence,
-accident_visible, accident_visibility, collision_moment_visible, accident_situation,
-bbox_helpfulness, bbox_quality, scene_conditions, uncertainties
+schema_version, narrative, evidence_sentences, conflict, conflict_reason, uncertainties
 
-Allowed enum values:
-predicted_accident_target: car_vs_car | car_vs_pedestrian | car_vs_motorcycle | car_vs_bicycle | uncertain
-accident_visible: true | false | uncertain
-accident_visibility: clear | unclear | not_visible | uncertain
-collision_moment_visible: true | false | uncertain
-bbox_helpfulness: helpful | partially_helpful | not_helpful | uncertain
-bbox_quality: good | fair | poor | uncertain
-
-scene_conditions must contain weather, visibility, road_surface, lighting, evidence.
-uncertainties must be an array of short strings."""
+schema_version must be "vision-qwen-explanation-v1".
+evidence_sentences must contain at most 5 items. Each item must contain frame_refs and sentence.
+Every frame_refs value must name a provided frame. uncertainties must contain at most 3 short strings.
+conflict_reason must be a short string only when conflict is true; otherwise it must be null."""
 
 VLM_JSON_RETRY_PROMPT = (
     VLM_JSON_PROMPT
@@ -33,23 +25,9 @@ VLM_JSON_RETRY_PROMPT = (
 )
 
 REQUIRED = (
-    "summary", "visible_objects", "predicted_accident_target",
-    "accident_target_evidence", "accident_visible", "accident_visibility",
-    "collision_moment_visible", "accident_situation", "bbox_helpfulness",
-    "bbox_quality", "scene_conditions", "uncertainties",
+    "schema_version", "narrative", "evidence_sentences", "conflict",
+    "conflict_reason", "uncertainties",
 )
-ENUMS = {
-    "predicted_accident_target": {
-        "car_vs_car", "car_vs_pedestrian", "car_vs_motorcycle",
-        "car_vs_bicycle", "uncertain",
-    },
-    "accident_visible": {"true", "false", "uncertain"},
-    "accident_visibility": {"clear", "unclear", "not_visible", "uncertain"},
-    "collision_moment_visible": {"true", "false", "uncertain"},
-    "bbox_helpfulness": {"helpful", "partially_helpful", "not_helpful", "uncertain"},
-    "bbox_quality": {"good", "fair", "poor", "uncertain"},
-}
-SCENE_FIELDS = {"weather", "visibility", "road_surface", "lighting", "evidence"}
 
 
 def completed_vlm_asset_ids(rows: list[dict[str, Any]]) -> set[str]:
@@ -61,9 +39,6 @@ def adaptive_retry_prompt(error: str) -> str:
     instruction = "Return the complete JSON object again."
     if error.startswith("schema_invalid:missing:"):
         instruction = f"Include the missing required field {error.removeprefix('schema_invalid:missing:')}."
-    elif error.startswith("schema_invalid:enum:"):
-        field = error.removeprefix("schema_invalid:enum:")
-        instruction = f"Use one allowed value for {field}: {' | '.join(sorted(ENUMS[field]))}."
     elif error.startswith("json_incomplete:"):
         instruction = "Use short strings, double quotes, and close every array and object."
     return f"{VLM_JSON_PROMPT}\nPrevious validation error: {error}\n{instruction}"
@@ -73,28 +48,50 @@ def retry_token_limit(error: str) -> int:
     return 1024 if error.startswith("json_incomplete:") else 512
 
 
-def _schema_error(value: Any) -> str:
+def _schema_error(value: Any, allowed_frame_refs: set[str] | None = None) -> str:
     if not isinstance(value, dict):
         return "schema_invalid:not_object"
     for field in REQUIRED:
         if field not in value:
             return f"schema_invalid:missing:{field}"
-    if not isinstance(value["visible_objects"], list):
-        return "schema_invalid:type:visible_objects"
+    if value["schema_version"] != "vision-qwen-explanation-v1":
+        return "schema_invalid:schema_version"
+    if not isinstance(value["narrative"], str) or len(value["narrative"]) > 800:
+        return "schema_invalid:type_or_length:narrative"
+    if not isinstance(value["evidence_sentences"], list):
+        return "schema_invalid:type:evidence_sentences"
+    if len(value["evidence_sentences"]) > 5:
+        return "schema_invalid:max_items:evidence_sentences"
     if not isinstance(value["uncertainties"], list):
         return "schema_invalid:type:uncertainties"
-    if not isinstance(value["scene_conditions"], dict):
-        return "schema_invalid:type:scene_conditions"
-    missing_scene = sorted(SCENE_FIELDS - value["scene_conditions"].keys())
-    if missing_scene:
-        return f"schema_invalid:missing:scene_conditions.{missing_scene[0]}"
-    for field, allowed in ENUMS.items():
-        if str(value[field]).lower() not in allowed:
-            return f"schema_invalid:enum:{field}"
+    if len(value["uncertainties"]) > 3:
+        return "schema_invalid:max_items:uncertainties"
+    if not isinstance(value["conflict"], bool):
+        return "schema_invalid:type:conflict"
+    reason = value["conflict_reason"]
+    if (value["conflict"] and not isinstance(reason, str)) or (
+        not value["conflict"] and reason is not None
+    ):
+        return "schema_invalid:conflict_reason"
+    for item in value["evidence_sentences"]:
+        if not isinstance(item, dict) or set(item) != {"frame_refs", "sentence"}:
+            return "schema_invalid:evidence_sentence"
+        if not isinstance(item["frame_refs"], list) or not item["frame_refs"]:
+            return "schema_invalid:frame_refs"
+        if not isinstance(item["sentence"], str) or len(item["sentence"]) > 300:
+            return "schema_invalid:type_or_length:sentence"
+        if allowed_frame_refs is not None:
+            for frame_ref in item["frame_refs"]:
+                if frame_ref not in allowed_frame_refs:
+                    return f"schema_invalid:frame_ref:{frame_ref}"
+    if any(not isinstance(item, str) or len(item) > 200 for item in value["uncertainties"]):
+        return "schema_invalid:type_or_length:uncertainties"
     return ""
 
 
-def parse_vlm_json(text: str) -> tuple[dict[str, Any], bool, str]:
+def parse_vlm_json(
+    text: str, allowed_frame_refs: set[str] | None = None
+) -> tuple[dict[str, Any], bool, str]:
     """Read the first complete JSON object and validate the handoff schema."""
     start = text.find("{")
     if start < 0:
@@ -103,7 +100,7 @@ def parse_vlm_json(text: str) -> tuple[dict[str, Any], bool, str]:
         value, _ = json.JSONDecoder().raw_decode(text[start:])
     except json.JSONDecodeError as exc:
         return {}, False, f"json_incomplete:{exc.msg}"
-    error = _schema_error(value)
+    error = _schema_error(value, allowed_frame_refs)
     if error:
         return {}, False, error
     return value, True, ""

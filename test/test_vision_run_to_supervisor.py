@@ -120,7 +120,10 @@ class VisionRunToSupervisorTest(unittest.TestCase):
                 "ai.vision.visualize": types.SimpleNamespace(
                     create_visualizations=lambda *_: (
                         root / "visualizations.json",
-                        {"visualizations": []},
+                        {"visualizations": [{
+                            "frame_id": "frame_1",
+                            "visualization_path": "frame_1_bbox.jpg",
+                        }]},
                     )
                 ),
             }
@@ -129,21 +132,26 @@ class VisionRunToSupervisorTest(unittest.TestCase):
                  patch("ai.vision.merge_analysis.FINAL_OUTPUT_DIR", final_dir), \
                  patch("ai.vision.build_supervisor_handoff.OUTPUT_DIR", handoff_dir), \
                  patch("ai.vision.run_to_supervisor.infer_videomae", side_effect=lambda *_: calls.append("videomae") or video_result), \
-                 patch("ai.vision.run_to_supervisor.analyze_qwen", side_effect=lambda _paths, _metadata, _model, count, _device, _revision: (
+                 patch("ai.vision.run_to_supervisor.analyze_qwen", side_effect=lambda _paths, _metadata, _classification, _model, count, _device, _revision: (
                      calls.append(("qwen", count)) or {
-                         "valid": True, "summary": "collision", "collision_moment_visible": True,
+                         "valid": True,
+                         "schema_version": "vision-qwen-explanation-v1",
+                         "narrative": "collision",
+                         "evidence_sentences": [],
+                         "conflict": False,
+                         "conflict_reason": None,
                          "uncertainties": ["occlusion"],
                      }
                  )):
                 result = run(video, checkpoint=checkpoint)
             payload = json.loads(result.read_text())["vision_supervisor_handoff"]
             self.assertEqual(calls[:4], [
-                "videomae", ("extract", 32), ("detect", "yolov8m.pt", .25), ("qwen", 32)
+                "videomae", ("extract", 32), ("detect", "yolov8m.pt", .25), ("qwen", 12)
             ])
             self.assertEqual(payload["model_analysis"]["trained_accident_prediction"]["label"], "car_vs_car")
             self.assertEqual(payload["model_analysis"]["selected_yolo_model"], "yolov8m.pt")
-            self.assertEqual(payload["model_analysis"]["qwen"]["uncertainties"], ["occlusion"])
-            self.assertEqual(payload["media_summary"]["summary"], "collision")
+            self.assertEqual(payload["model_analysis"]["qwen_explanation"]["uncertainties"], ["occlusion"])
+            self.assertEqual(payload["media_summary"]["summary"], "old")
 
     def test_korean_videomae_label_routes_to_a_yolo_model(self):
         prediction, model = select_yolo_model(
@@ -176,7 +184,10 @@ class VisionRunToSupervisorTest(unittest.TestCase):
                 "ai.vision.visualize": types.SimpleNamespace(
                     create_visualizations=lambda *_: (
                         root / "visualizations.json",
-                        {"visualizations": []},
+                        {"visualizations": [{
+                            "frame_id": "frame_1",
+                            "visualization_path": "frame_1_bbox.jpg",
+                        }]},
                     )
                 ),
             }
@@ -189,9 +200,14 @@ class VisionRunToSupervisorTest(unittest.TestCase):
                 result = run(video, checkpoint=checkpoint)
             payload = json.loads(result.read_text())["vision_supervisor_handoff"]
             self.assertEqual(payload["status"], "partial")
-            self.assertFalse(payload["model_analysis"]["qwen"]["valid"])
-            self.assertTrue(payload["model_analysis"]["qwen"]["requires_review"])
-            self.assertEqual(payload["model_analysis"]["qwen"]["error_code"], "vision_qwen_unavailable")
+            self.assertFalse(payload["model_analysis"]["qwen_explanation"]["valid"])
+            self.assertTrue(payload["model_analysis"]["qwen_explanation"]["fallback_used"])
+            self.assertTrue(payload["model_analysis"]["qwen_explanation"]["requires_review"])
+            self.assertEqual(payload["model_analysis"]["qwen_explanation"]["error_code"], "vision_qwen_unavailable")
+            self.assertEqual(
+                payload["model_analysis"]["trained_accident_prediction"]["label"],
+                "car_vs_bicycle",
+            )
             self.assertNotIn("RuntimeError", json.dumps(payload, ensure_ascii=False))
 
     def test_handoff_drops_local_paths_and_qwen_exception_text(self):
@@ -231,9 +247,44 @@ class VisionRunToSupervisorTest(unittest.TestCase):
         self.assertNotIn("C:/private", serialized)
         self.assertNotIn("RuntimeError", serialized)
         self.assertEqual(
-            handoff["vision_supervisor_handoff"]["model_analysis"]["qwen"]["error_code"],
+            handoff["vision_supervisor_handoff"]["model_analysis"]["qwen_explanation"]["error_code"],
             "vision_qwen_unavailable",
         )
+
+    def test_qwen_conflict_cannot_change_videomae_canonical_label(self):
+        handoff = build_handoff(
+            {
+                "status": "partial",
+                "vision_agent_output": {
+                    "agent_output": {
+                        "structured_result": {
+                            "trained_model_prediction": {
+                                "label": "car_vs_car",
+                                "score": 0.8,
+                                "requires_review": True,
+                            },
+                            "qwen_analysis": {
+                                "valid": True,
+                                "schema_version": "vision-qwen-explanation-v1",
+                                "narrative": "Visible evidence appears inconsistent.",
+                                "evidence_sentences": [],
+                                "conflict": True,
+                                "conflict_reason": "A bicycle is visible.",
+                                "uncertainties": [],
+                                "requires_review": True,
+                            },
+                        }
+                    }
+                },
+            }
+        )["vision_supervisor_handoff"]
+
+        self.assertEqual(
+            handoff["model_analysis"]["trained_accident_prediction"]["label"],
+            "car_vs_car",
+        )
+        self.assertTrue(handoff["model_analysis"]["qwen_explanation"]["conflict"])
+        self.assertNotIn("predicted_accident_target", json.dumps(handoff))
 
     def test_invalid_videomae_category_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unsupported"):

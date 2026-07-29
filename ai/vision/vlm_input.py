@@ -4,13 +4,19 @@ import json
 from pathlib import Path
 
 
-def build_qwen_content(frame_paths, frame_metadata, prompt, max_frames):
+def build_qwen_content(
+    frame_paths, frame_metadata, prompt, max_frames, classification_context
+):
     if max_frames < 1:
         raise ValueError("vlm_input_contract:max_frames")
     if not frame_paths:
         raise ValueError("vlm_input_contract:empty")
     if len(frame_paths) != len(frame_metadata):
         raise ValueError("vlm_input_contract:count_mismatch")
+    if not isinstance(classification_context, dict) or not classification_context.get(
+        "canonical_label"
+    ):
+        raise ValueError("vlm_input_contract:classification_context")
 
     frames = []
     content = []
@@ -28,8 +34,11 @@ def build_qwen_content(frame_paths, frame_metadata, prompt, max_frames):
                 for key in ("class_name", "confidence", "bbox_xyxy")
             })
         frames.append({
+            "frame_ref": f"frame_{int(metadata['frame_order']):02d}",
             "frame_order": metadata["frame_order"],
             "timestamp_sec": metadata["timestamp_sec"],
+            "role": metadata.get("role", "event_evidence"),
+            "selection_reason": metadata.get("selection_reason", "selected_by_event_evidence"),
             "image_name": Path(path).name,
             "objects": objects,
         })
@@ -41,8 +50,17 @@ def build_qwen_content(frame_paths, frame_metadata, prompt, max_frames):
 
     evidence = json.dumps(
         {
-            "instruction": "frames[i] describes images[i]",
-            "frames": frames,
+            "classification_context": classification_context,
+            "evidence_context": {
+                "instruction": "frames[i] describes images[i]",
+                "frames": frames,
+            },
+            "task": {
+                "instruction": (
+                    "Explain the locked VideoMAE classification using only visible "
+                    "evidence. Do not change or re-predict the canonical label."
+                )
+            },
         },
         ensure_ascii=False,
         separators=(",", ":"),

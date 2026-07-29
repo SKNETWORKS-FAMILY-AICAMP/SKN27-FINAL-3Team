@@ -41,6 +41,10 @@ def build_notebook(source: Path, model_name: str, pilot_qwen_invalid: int = 0) -
             "from ai.vision.vlm_json import VLM_JSON_PROMPT, VLM_JSON_RETRY_PROMPT, parse_vlm_json",
             "from ai.vision.vlm_json import VLM_JSON_PROMPT, VLM_JSON_RETRY_PROMPT, adaptive_retry_prompt, completed_vlm_asset_ids, parse_vlm_json, retry_token_limit",
         )
+        source_text = source_text.replace(
+            "QWEN_OUTPUT_CSV = OUTPUT_DIR / 'qwen_yolo_compare_results.csv'",
+            "QWEN_OUTPUT_CSV = OUTPUT_DIR / 'qwen_explanation_v1_results.csv'",
+        )
         source_text = re.sub(
             r"(?m)^(\s*)for prompt_text in \(VLM_JSON_PROMPT, VLM_JSON_RETRY_PROMPT\):$",
             lambda match: (
@@ -152,7 +156,7 @@ def build_notebook(source: Path, model_name: str, pilot_qwen_invalid: int = 0) -
             "                                'bbox_xyxy': [round(float(value), 2) for value in box.xyxy[0].tolist()]})\n"
             "        metadata.append({'frame_order': frame_number(path), 'timestamp_sec': round((order - 1) * float(row.get('duration_sec', 0)) / max(len(image_paths) - 1, 1), 3), 'objects': objects})\n"
             "    return metadata\n\n"
-            "def qwen_analyze_images(image_paths, frame_metadata, model, processor):\n",
+            "def qwen_analyze_images(image_paths, frame_metadata, classification_context, model, processor):\n",
         )
         source_text = source_text.replace(
             "    used_paths = select_collision_aware_frames(image_paths, QWEN_INPUT_FRAME_COUNT)\n"
@@ -165,11 +169,62 @@ def build_notebook(source: Path, model_name: str, pilot_qwen_invalid: int = 0) -
         source_text = source_text.replace(
             "            content = [{'type': 'image', 'image': str(path), 'max_pixels': 640 * 360} for path in used_paths]\n"
             "            content.append({'type': 'text', 'text': prompt_text})\n",
-            "            content = build_qwen_content(used_paths, used_metadata, prompt_text, QWEN_INPUT_FRAME_COUNT)\n",
+            "            content = build_qwen_content(used_paths, used_metadata, prompt_text, QWEN_INPUT_FRAME_COUNT, classification_context)\n",
         )
         source_text = source_text.replace(
             "            annotated_frame_paths(row), model, processor\n",
-            "            annotated_frame_paths(row), yolo_frame_metadata(row, annotated_frame_paths(row)), model, processor\n",
+            "            annotated_frame_paths(row), yolo_frame_metadata(row, annotated_frame_paths(row)), classification_context, model, processor\n",
+        )
+        source_text = source_text.replace(
+            "            parsed, valid, last_error = parse_vlm_json(last_output)\n",
+            "            allowed_frame_refs = {f\"frame_{frame_number(path):02d}\" for path in used_paths}\n"
+            "            parsed, valid, last_error = parse_vlm_json(last_output, allowed_frame_refs)\n",
+        )
+        source_text = source_text.replace(
+            "TRAINED_CLASSIFIER = TrainedCategoryClassifier(TRAINED_CHECKPOINT)\n",
+            "TRAINED_CLASSIFIER = TrainedCategoryClassifier(TRAINED_CHECKPOINT)\n\n"
+            "def classification_context_for_row(row):\n"
+            "    trained = TRAINED_CLASSIFIER.predict(row['local_path'])\n"
+            "    return {\n"
+            "        'canonical_label': trained['label'],\n"
+            "        'confidence': trained['confidence'],\n"
+            "        'top2_margin': trained.get('top2_margin'),\n"
+            "        'requires_review': trained['confidence'] < 0.5,\n"
+            "        'model_version': Path(trained['checkpoint']).name,\n"
+            "        'checkpoint_hash': None,\n"
+            "    }\n",
+        )
+        source_text = source_text.replace(
+            "    try:\n"
+            "        parsed, raw_output, valid, error, used_frame_count = qwen_analyze_images(\n",
+            "    classification_context = classification_context_for_row(row)\n"
+            "    try:\n"
+            "        parsed, raw_output, valid, error, used_frame_count = qwen_analyze_images(\n",
+        )
+        source_text = source_text.replace(
+            "    decision = resolve_accident_target(parsed.get('predicted_accident_target'))\n",
+            "",
+        )
+        source_text = source_text.replace(
+            "'predicted_accident_target': decision['final_accident_target'],",
+            "'predicted_accident_target': classification_context['canonical_label'],",
+        )
+        source_text = source_text.replace(
+            "'needs_user_input': str(decision['needs_user_input']),\n"
+            "        'user_question': decision['user_question'],",
+            "'needs_user_input': 'False',\n"
+            "        'user_question': '',",
+        )
+        source_text = source_text.replace(
+            "'accident_situation': parsed.get('accident_situation', ''),",
+            "'accident_situation': '',\n"
+            "        'qwen_schema_version': parsed.get('schema_version', 'vision-qwen-explanation-v1'),\n"
+            "        'narrative': parsed.get('narrative', f\"VideoMAE classified the event as {classification_context['canonical_label']} with confidence {classification_context['confidence']:.2%}.\"),\n"
+            "        'evidence_sentences': json.dumps(parsed.get('evidence_sentences', []), ensure_ascii=False),\n"
+            "        'conflict': str(parsed.get('conflict', False)),\n"
+            "        'conflict_reason': parsed.get('conflict_reason') or '',\n"
+            "        'fallback_used': str(not valid),\n"
+            "        'canonical_label_preserved': 'True',",
         )
         cell["source"] = source_text.splitlines(keepends=True)
     qwen_index = next(i for i, cell in enumerate(cells) if "qwen_results = []" in "".join(cell["source"]))
@@ -253,7 +308,7 @@ print('cached_summary_rows:', len(summary_rows))
 
 def result_count(category: str, model_name: str) -> int:
     output = ROOT / "storage/vision/outputs/category_yolo_qwen_compare" / category / "known_label_adaptive_32frames"
-    path = output / ("qwen_yolo_compare_results.csv" if model_name == "qwen" else "llava_onevision_results.csv")
+    path = output / ("qwen_explanation_v1_results.csv" if model_name == "qwen" else "llava_onevision_results.csv")
     if not path.exists():
         return 0
     valid_field = "qwen_json_valid" if model_name == "qwen" else "json_valid"
@@ -264,14 +319,14 @@ def result_count(category: str, model_name: str) -> int:
             if str(row.get(valid_field, "")).lower() == "true"
             and row.get(
                 "qwen_input_frame_count" if model_name == "qwen" else "llava_input_frame_count"
-            ) == "32"
+            ) == ("12" if model_name == "qwen" else "32")
             and language_valid(row.get("raw_output_text", ""))
         })
 
 
 def processed_count(category: str, model_name: str) -> int:
     output = ROOT / "storage/vision/outputs/category_yolo_qwen_compare" / category / "known_label_adaptive_32frames"
-    path = output / ("qwen_yolo_compare_results.csv" if model_name == "qwen" else "llava_onevision_results.csv")
+    path = output / ("qwen_explanation_v1_results.csv" if model_name == "qwen" else "llava_onevision_results.csv")
     if not path.exists():
         return 0
     frame_field = "qwen_input_frame_count" if model_name == "qwen" else "llava_input_frame_count"
@@ -279,7 +334,7 @@ def processed_count(category: str, model_name: str) -> int:
         return len({
             row["asset_id"]
             for row in csv.DictReader(file)
-            if row.get(frame_field) == "32"
+            if row.get(frame_field) == ("12" if model_name == "qwen" else "32")
         })
 
 
@@ -336,6 +391,9 @@ if args.check:
         assert "Use English only for every JSON text value" in qwen
         assert "language_invalid:non_korean_or_english_script" in qwen
         assert "build_qwen_content(used_paths, used_metadata" in qwen
+        assert "classification_context_for_row" in qwen
+        assert "qwen_explanation_v1_results.csv" in qwen
+        assert "parsed.get('predicted_accident_target')" not in qwen
         for model_name, notebook in (("qwen", qwen_notebook), ("llava", llava_notebook)):
             for index, cell in enumerate(notebook["cells"]):
                 if cell.get("cell_type") == "code":
@@ -353,7 +411,7 @@ environment.update(
     VISION_PROJECT_ROOT=str(ROOT),
     VISION_MAX_VIDEOS=str(TARGET_PER_CATEGORY),
     VISION_ANALYSIS_SAMPLE_COUNT=str(TARGET_PER_CATEGORY),
-    VISION_VLM_INPUT_FRAME_COUNT="32",
+    VISION_VLM_INPUT_FRAME_COUNT="12",
     VISION_FORCE_PREPROCESS="0",
     VISION_RUN_GDOWN_DOWNLOAD="0",
     VISION_RUN_MODEL_COMPARISON="0",

@@ -30,6 +30,21 @@ def test_qwen_job_uses_cached_yolo_and_one_metadata_model():
     assert "qwen_retry_pending:" in source
 
 
+def test_qwen_job_uses_locked_videomae_context_and_explanation_schema():
+    notebook = _build_notebook()
+    source = "\n".join("".join(cell.get("source", [])) for cell in notebook["cells"])
+    runner = Path("scripts/vision/run_vlm32_independent.py").read_text(encoding="utf-8")
+
+    assert "classification_context_for_row" in source
+    assert "build_qwen_content(used_paths, used_metadata, prompt_text, QWEN_INPUT_FRAME_COUNT, classification_context)" in source
+    assert "parsed.get('predicted_accident_target')" not in source
+    assert "'narrative': parsed.get('narrative'" in source
+    assert "'conflict': str(parsed.get('conflict'" in source
+    assert "'fallback_used': str(not valid)" in source
+    assert "qwen_explanation_v1_results.csv" in source
+    assert 'VISION_VLM_INPUT_FRAME_COUNT="12"' in runner
+
+
 def test_qwen_pilot_uses_existing_invalid_rows():
     runner = Path("scripts/vision/run_vlm32_independent.py").read_text(encoding="utf-8")
     namespace = {"__file__": str(Path("scripts/vision/run_vlm32_independent.py").resolve())}
@@ -112,7 +127,7 @@ def test_processed_count_includes_persisted_invalid_32_frame_result(tmp_path):
         / "known_label_adaptive_32frames"
     )
     output.mkdir(parents=True)
-    with (output / "qwen_yolo_compare_results.csv").open(
+    with (output / "qwen_explanation_v1_results.csv").open(
         "w", encoding="utf-8", newline=""
     ) as file:
         writer = csv.DictWriter(
@@ -130,13 +145,13 @@ def test_processed_count_includes_persisted_invalid_32_frame_result(tmp_path):
                 {
                     "asset_id": "valid",
                     "qwen_json_valid": "True",
-                    "qwen_input_frame_count": "32",
+                    "qwen_input_frame_count": "12",
                     "raw_output_text": "{}",
                 },
                 {
                     "asset_id": "invalid",
                     "qwen_json_valid": "False",
-                    "qwen_input_frame_count": "32",
+                    "qwen_input_frame_count": "12",
                     "raw_output_text": "{",
                 },
             ]
