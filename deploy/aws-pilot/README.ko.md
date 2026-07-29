@@ -23,6 +23,25 @@ fault-ratio precedent 모두 PostgreSQL pgvector로만 수행한다.
    `verify_pgvector_rag_readiness`, 법령 smoke, text-ML `--require-pgvector` smoke를 순서대로 실행한다.
 3. `Deploy-Pilot.ps1`으로 promotion한다. readiness, object-storage, supervisor, HTTP smoke를 확인한다.
 
+## Caddy host-network cutover
+
+When Docker host-port publishing is unavailable, the Compose-managed Caddy
+service uses host networking and resolves only the private `edge-rate-limit`
+address. It runs as UID/GID `10001`; the deployment installs the matching IMDS
+firewall script before Compose starts, so Caddy cannot reach EC2 metadata.
+
+1. Record the existing public IPv4 TCP 80 and 443 security-group rules, then
+   revoke only those two rules while the release is staged.
+2. Complete the release stage with
+   `-AllowCaddyOfflineForHostNetworkCutover`, then run normal promotion. Use
+   that switch only while those public ingress rules remain blocked. Verify
+   Caddy, backend readiness, `/api/health/live/`, and `/api/health/ready/`
+   from the host.
+3. Restore only the recorded TCP 80 and 443 rules after those checks pass, then
+   perform the public health check.
+4. If any check fails, keep public ingress blocked and use `Rollback-Pilot.ps1`;
+   do not start a manual host-network Caddy container.
+
 ## 롤백과 관찰
 
 - `Rollback-Pilot.ps1`은 애플리케이션 release만 이전 release로 되돌린다. pgvector 데이터나

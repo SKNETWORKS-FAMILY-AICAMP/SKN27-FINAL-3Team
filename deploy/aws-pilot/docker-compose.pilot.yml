@@ -61,6 +61,29 @@ x-operational-logging: &operational-logging
     max-buffer-size: 1m
 
 services:
+  caddy-volume-init:
+    image: ${CADDY_IMAGE_REF:-caddy:2.11.4-alpine}
+    restart: "no"
+    mem_limit: 32m
+    logging: *default-logging
+    user: "0:0"
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    network_mode: none
+    command:
+      - sh
+      - -ec
+      - >-
+        mkdir -p /data /config /var/log/caddy &&
+        chown -R 10001:10001 /data /config /var/log/caddy
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+
   caddy:
     image: ${CADDY_IMAGE_REF:-caddy:2.11.4-alpine}
     restart: unless-stopped
@@ -71,21 +94,21 @@ services:
     security_opt: [no-new-privileges:true]
     read_only: true
     tmpfs: [/tmp]
+    user: "10001:10001"
     env_file: *edge-env-file
-    ports:
-      - "80:80"
-      - "443:443"
+    network_mode: host
+    extra_hosts:
+      - "edge-rate-limit:${PILOT_EDGE_RATE_LIMIT_IP:-172.31.0.3}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
       - caddy_logs:/var/log/caddy
     depends_on:
+      caddy-volume-init:
+        condition: service_completed_successfully
       edge-rate-limit:
         condition: service_healthy
-    networks:
-      pilot:
-        ipv4_address: ${PILOT_CADDY_IP:-172.31.0.2}
 
   edge-rate-limit:
     image: ${HAPROXY_IMAGE_REF:-haproxy:3.4.2-alpine}

@@ -18,6 +18,7 @@ param(
     [switch]$SkipBuild,
     [switch]$StageForInitialRagBootstrap,
     [switch]$StageForReleaseUpdate,
+    [switch]$AllowCaddyOfflineForHostNetworkCutover,
     [switch]$AllowPaidNonDlSmoke,
     [switch]$AllowPaidSupervisorSmoke,
     [switch]$RequireGoogleLiveSmoke,
@@ -255,6 +256,9 @@ if ($RequireGoogleLiveSmoke -and -not $SkipBuild) {
 
 if ($StageForInitialRagBootstrap -and $StageForReleaseUpdate) {
     throw "Initial RAG bootstrap and release update staging are mutually exclusive."
+}
+if ($AllowCaddyOfflineForHostNetworkCutover -and -not $StageForReleaseUpdate) {
+    throw "-AllowCaddyOfflineForHostNetworkCutover requires -StageForReleaseUpdate."
 }
 $isStageMode = $StageForInitialRagBootstrap -or $StageForReleaseUpdate
 
@@ -550,6 +554,12 @@ try {
     $stageProjectName = "skn27-stage-$ReleaseTag"
     $stageComposeCommand = "docker compose --project-name '$stageProjectName' --env-file .compose.env --env-file .stage-compose.env -f docker-compose.pilot.yml"
     $productionComposeCommand = "docker compose --project-name skn27-pilot --env-file .compose.env --env-file .production-compose.env -f docker-compose.pilot.yml"
+    $currentReleaseRequiredServices = if ($AllowCaddyOfflineForHostNetworkCutover) {
+        "edge-rate-limit frontend backend agent-worker file-scan-worker ops-monitor redis clamav law-neo4j"
+    }
+    else {
+        "caddy edge-rate-limit frontend backend agent-worker file-scan-worker ops-monitor redis clamav law-neo4j"
+    }
     $GOOGLE_LIVE_SMOKE_ENABLED = if ($RequireGoogleLiveSmoke) { "1" } else { "0" }
     $commands = @(
         "set -eu",
@@ -577,12 +587,13 @@ try {
         "grep -E '^(APP_DOMAIN|ACME_EMAIL)=' `$RELEASE_DIR/.runtime.env > `$RELEASE_DIR/.edge.env",
         "grep -q '^AWS_REGION=' `$RELEASE_DIR/.compose.env && grep -q '^BACKEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^FRONTEND_REPOSITORY_URL=' `$RELEASE_DIR/.compose.env && grep -q '^RELEASE_TAG=' `$RELEASE_DIR/.compose.env && grep -q '^LAW_NEO4J_IMAGE_REF=' `$RELEASE_DIR/.compose.env && grep -q '^LEGAL_DATASET_VERSION=' `$RELEASE_DIR/.compose.env && grep -q '^LEGAL_DATASET_VERIFIED_AT=' `$RELEASE_DIR/.compose.env && grep -q '^NEO4J_USER=' `$RELEASE_DIR/.compose.env && grep -q '^NEO4J_PASSWORD=' `$RELEASE_DIR/.compose.env && grep -q '^OPERATIONAL_LOG_GROUP=' `$RELEASE_DIR/.compose.env",
         "test `$(wc -l < `$RELEASE_DIR/.edge.env) -eq 2",
-        "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.30.0.0/24' 'PILOT_CADDY_IP=172.30.0.2' 'PILOT_EDGE_RATE_LIMIT_IP=172.30.0.3' 'PILOT_FRONTEND_IP=172.30.0.4' 'PILOT_BACKEND_IP=172.30.0.5' 'PILOT_AGENT_WORKER_IP=172.30.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.30.0.7' 'PILOT_REDIS_IP=172.30.0.8' 'PILOT_OPS_MONITOR_IP=172.30.0.9' 'PILOT_CLAMAV_IP=172.30.0.10' 'PILOT_LAW_NEO4J_IP=172.30.0.12' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' 'PILOT_LAW_NEO4J_VOLUME_NAME=${stageProjectName}_law_neo4j_data' 'PILOT_LAW_NEO4J_LOG_VOLUME_NAME=${stageProjectName}_law_neo4j_logs' > `$RELEASE_DIR/.stage-compose.env",
-        "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.31.0.0/24' 'PILOT_CADDY_IP=172.31.0.2' 'PILOT_EDGE_RATE_LIMIT_IP=172.31.0.3' 'PILOT_FRONTEND_IP=172.31.0.4' 'PILOT_BACKEND_IP=172.31.0.5' 'PILOT_AGENT_WORKER_IP=172.31.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.31.0.7' 'PILOT_REDIS_IP=172.31.0.8' 'PILOT_OPS_MONITOR_IP=172.31.0.9' 'PILOT_CLAMAV_IP=172.31.0.10' 'PILOT_LAW_NEO4J_IP=172.31.0.12' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' 'PILOT_LAW_NEO4J_VOLUME_NAME=${stageProjectName}_law_neo4j_data' 'PILOT_LAW_NEO4J_LOG_VOLUME_NAME=${stageProjectName}_law_neo4j_logs' > `$RELEASE_DIR/.production-compose.env",
+        "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.30.0.0/24' 'PILOT_EDGE_RATE_LIMIT_IP=172.30.0.3' 'PILOT_FRONTEND_IP=172.30.0.4' 'PILOT_BACKEND_IP=172.30.0.5' 'PILOT_AGENT_WORKER_IP=172.30.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.30.0.7' 'PILOT_REDIS_IP=172.30.0.8' 'PILOT_OPS_MONITOR_IP=172.30.0.9' 'PILOT_CLAMAV_IP=172.30.0.10' 'PILOT_LAW_NEO4J_IP=172.30.0.12' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' 'PILOT_LAW_NEO4J_VOLUME_NAME=${stageProjectName}_law_neo4j_data' 'PILOT_LAW_NEO4J_LOG_VOLUME_NAME=${stageProjectName}_law_neo4j_logs' > `$RELEASE_DIR/.stage-compose.env",
+        "printf '%s\n' 'PILOT_NETWORK_SUBNET=172.31.0.0/24' 'PILOT_EDGE_RATE_LIMIT_IP=172.31.0.3' 'PILOT_FRONTEND_IP=172.31.0.4' 'PILOT_BACKEND_IP=172.31.0.5' 'PILOT_AGENT_WORKER_IP=172.31.0.6' 'PILOT_FILE_SCAN_WORKER_IP=172.31.0.7' 'PILOT_REDIS_IP=172.31.0.8' 'PILOT_OPS_MONITOR_IP=172.31.0.9' 'PILOT_CLAMAV_IP=172.31.0.10' 'PILOT_LAW_NEO4J_IP=172.31.0.12' 'PILOT_REDIS_VOLUME_NAME=${stageProjectName}_redis_data' 'PILOT_CLAMAV_VOLUME_NAME=${stageProjectName}_clamav_data' 'PILOT_LAW_NEO4J_VOLUME_NAME=${stageProjectName}_law_neo4j_data' 'PILOT_LAW_NEO4J_LOG_VOLUME_NAME=${stageProjectName}_law_neo4j_logs' > `$RELEASE_DIR/.production-compose.env",
         "printf '%s\n' '$stageProjectName' > `$RELEASE_DIR/.stage-project-name.tmp",
         "chmod 0444 `$RELEASE_DIR/.stage-project-name.tmp && mv -f `$RELEASE_DIR/.stage-project-name.tmp `$RELEASE_DIR/.stage-project-name",
         "aws ecr get-login-password --region '$region' | docker login --username AWS --password-stdin '$registry'",
         "cd `$RELEASE_DIR",
+        "install -m 0755 `$RELEASE_DIR/deploy/aws-pilot/configure-imds-firewall.sh /usr/local/sbin/skn27-imds-firewall.sh",
         "/usr/local/sbin/skn27-imds-firewall.sh",
         "MEM_TOTAL_KB=`$(awk '/MemTotal/ {print `$2}' /proc/meminfo); test `$MEM_TOTAL_KB -ge 7600000",
         "MEM_AVAILABLE_KB=`$(awk '/MemAvailable/ {print `$2}' /proc/meminfo); test `$MEM_AVAILABLE_KB -ge 3000000",
@@ -620,7 +631,7 @@ try {
             "CURRENT_CONTAINER_IDS=`$($productionComposeCommand ps -q | sort)",
             "test -n `"`$CURRENT_CONTAINER_IDS`"",
             "CURRENT_RUNNING_SERVICES=`$($productionComposeCommand ps --services --filter status=running)",
-            "for required_service in caddy edge-rate-limit frontend backend agent-worker file-scan-worker ops-monitor redis clamav law-neo4j; do printf '%s\n' `"`$CURRENT_RUNNING_SERVICES`" | grep -qx `"`$required_service`"; done",
+            "for required_service in $currentReleaseRequiredServices; do printf '%s\n' `"`$CURRENT_RUNNING_SERVICES`" | grep -qx `"`$required_service`"; done",
             "test ! -e `$RELEASE_DIR && test ! -L `$RELEASE_DIR",
             "test -z `"`$(find /opt/skn27-pilot/releases -mindepth 2 -maxdepth 2 -type f \( -name '.initial-rag-bootstrap.staged' -o -name '.release-update.staged' \) -print -quit 2>/dev/null)`"",
             "stage_failed() { status=`$?; trap - ERR; cd `$RELEASE_DIR 2>/dev/null || true; $stageComposeCommand down --remove-orphans >/dev/null 2>&1 || true; docker volume rm '${stageProjectName}_redis_data' '${stageProjectName}_clamav_data' >/dev/null 2>&1 || true; rm -rf -- `$RELEASE_DIR; exit `$status; }",

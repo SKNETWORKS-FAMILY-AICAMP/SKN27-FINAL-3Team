@@ -285,7 +285,20 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
         services["rag-loader"]["environment"]["REVIEW_CASE_POSTGRES_EXPORT_ROOT"]
         == "/tmp/review-case-postgres-exports"
     )
-    assert set(services["caddy"]["ports"]) == {"80:80", "443:443"}
+    caddy = services["caddy"]
+    assert caddy["network_mode"] == "host"
+    assert "ports" not in caddy
+    assert "networks" not in caddy
+    assert caddy["extra_hosts"] == [
+        "edge-rate-limit:${PILOT_EDGE_RATE_LIMIT_IP:-172.31.0.3}"
+    ]
+    assert caddy["user"] == "10001:10001"
+    initializer = services["caddy-volume-init"]
+    assert initializer["network_mode"] == "none"
+    assert initializer["user"] == "0:0"
+    assert initializer["cap_drop"] == ["ALL"]
+    assert initializer["cap_add"] == ["CHOWN"]
+    assert caddy["depends_on"]["caddy-volume-init"]["condition"] == "service_completed_successfully"
     for name, config in services.items():
         if name != "caddy":
             assert "ports" not in config, name
@@ -1013,6 +1026,7 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
     services = compose["services"]
     user_data = (TERRAFORM_DIR / "user_data.sh.tftpl").read_text(encoding="utf-8")
     deploy = _read_deploy("Deploy-Pilot.ps1")
+    firewall_script = _read_deploy("configure-imds-firewall.sh")
     runbook = _read_deploy("README.ko.md")
 
     allowed = {
@@ -1026,7 +1040,6 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
         )
         assert f"{address}/32" in user_data
     for name in (
-        "caddy",
         "edge-rate-limit",
         "frontend",
         "redis",
@@ -1036,11 +1049,20 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
         assert services[name]["cap_drop"] == ["ALL"]
         assert "no-new-privileges:true" in services[name]["security_opt"]
 
+    assert services["caddy"]["network_mode"] == "host"
+    assert services["caddy"]["user"] == "10001:10001"
     assert "DOCKER-USER" in user_data
     assert "169.254.169.254/32" in user_data
+    assert "OUTPUT" in user_data
+    assert 'caddy_uid="10001"' in user_data
+    assert '--uid-owner "$caddy_uid"' in user_data
+    assert "OUTPUT" in firewall_script
+    assert 'caddy_uid="10001"' in firewall_script
+    assert '--uid-owner "$caddy_uid"' in firewall_script
     assert "skn27-imds-firewall.service" in user_data
     assert "RemainAfterExit=yes" in user_data
     assert "/usr/local/sbin/skn27-imds-firewall.sh" in deploy
+    assert "configure-imds-firewall.sh" in deploy
     assert "IMDS allow smoke" in deploy
     assert "IMDS deny smoke" in deploy
     assert "credential proxy" in runbook.lower()
@@ -1522,7 +1544,12 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
     compose = yaml.safe_load(compose_text)
 
     assert "[switch]$StageForReleaseUpdate" in deploy
+    assert "[switch]$AllowCaddyOfflineForHostNetworkCutover" in deploy
     assert "Initial RAG bootstrap and release update staging are mutually exclusive" in deploy
+    assert (
+        "if ($AllowCaddyOfflineForHostNetworkCutover -and -not $StageForReleaseUpdate)"
+        in deploy
+    )
     assert '[ValidatePattern("^[a-z0-9][a-z0-9-]{0,31}$")]' in deploy
     assert '$stageProjectName = "skn27-stage-$ReleaseTag"' in deploy
     assert "--project-name '$stageProjectName'" in deploy
@@ -1531,7 +1558,6 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
     assert "--env-file .production-compose.env" in deploy
 
     expected_addresses = {
-        "caddy": "${PILOT_CADDY_IP:-172.31.0.2}",
         "edge-rate-limit": "${PILOT_EDGE_RATE_LIMIT_IP:-172.31.0.3}",
         "frontend": "${PILOT_FRONTEND_IP:-172.31.0.4}",
         "backend": "${PILOT_BACKEND_IP:-172.31.0.5}",
@@ -1563,11 +1589,15 @@ def test_release_update_stage_is_isolated_from_the_current_compose_project() -> 
         volume_name = f"${{stageProjectName}}_{suffix}"
         assert volume_name in stage_env_line
         assert volume_name in production_env_line
+    assert "PILOT_CADDY_IP=" not in deploy
+    assert "PILOT_EDGE_RATE_LIMIT_IP=172.31.0.3" in production_env_line
 
     remote = deploy.index("$commands = @(")
     update = deploy.index("if ($StageForReleaseUpdate) {", remote)
     update_end = deploy.index("else {", update)
     update_segment = deploy[update:update_end]
+    assert "$currentReleaseRequiredServices = if ($AllowCaddyOfflineForHostNetworkCutover)" in deploy
+    assert "for required_service in $currentReleaseRequiredServices" in update_segment
     for required in (
         "CURRENT_RELEASE=`$(readlink -f /opt/skn27-pilot/current)",
         r'test `"`$CURRENT_RELEASE`" != `"`$RELEASE_DIR`"',
