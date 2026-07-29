@@ -177,7 +177,7 @@ def _recording_connection(
     return connection, calls
 
 
-def test_replace_and_upsert_review_case_rows_is_one_scoped_transaction(
+def test_replace_and_upsert_review_case_rows_marks_missing_chunks_inactive(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -200,10 +200,13 @@ def test_replace_and_upsert_review_case_rows_is_one_scoped_transaction(
 
     statements = [event[0] for event in connection.events]
     assert calls == [(seed_service.SETTINGS.review_case_db, False)]
-    assert "DELETE FROM review_case_documents" in statements[0]
+    assert "UPDATE review_case_chunks" in statements[0]
+    assert "SET is_active = FALSE" in statements[0]
     assert "WHERE source_type = %s" in statements[0]
+    assert all("DELETE FROM review_case_documents" not in statement for statement in statements)
     assert "INSERT INTO review_case_documents" in statements[1]
     assert "INSERT INTO review_case_chunks" in statements[2]
+    assert "is_active" in statements[2]
     assert result == {
         "review_case_documents": 1,
         "review_case_chunks": 2,

@@ -27,12 +27,16 @@ def count_embedding_rows() -> int:
                 sql.SQL(
                     """
                     SELECT COUNT(*)
-                    FROM {embedding_table}
-                    WHERE embedding_provider = %s
-                      AND embedding_model = %s
-                      AND embedding_version = %s
-                      AND embedding_dim = %s
-                      AND embedding_vector IS NOT NULL
+                    FROM {embedding_table} AS embedding
+                    JOIN review_case_chunks AS chunk
+                      ON chunk.chunk_id = embedding.chunk_id
+                    WHERE embedding.embedding_provider = %s
+                      AND embedding.embedding_model = %s
+                      AND embedding.embedding_version = %s
+                      AND embedding.embedding_dim = %s
+                      AND embedding.embedding_vector IS NOT NULL
+                      AND chunk.is_active IS TRUE
+                      AND embedding.source_text_hash = chunk.text_hash
                     """
                 ).format(embedding_table=sql.Identifier(EMBEDDING_TABLE)),
                 (

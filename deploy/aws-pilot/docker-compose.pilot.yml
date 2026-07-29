@@ -33,7 +33,8 @@ x-backend-environment: &backend-environment
   APP_RELEASE_VERSION: ${RELEASE_TAG:?RELEASE_TAG is required}
   LEGAL_DATASET_VERSION: ${LEGAL_DATASET_VERSION:?LEGAL_DATASET_VERSION is required}
   LEGAL_DATASET_VERIFIED_AT: ${LEGAL_DATASET_VERIFIED_AT:?LEGAL_DATASET_VERIFIED_AT is required}
-  LAW_GROUND_SEARCH_ENABLE_NEO4J: "0"
+  LAW_GROUND_SEARCH_ENABLE_NEO4J: "1"
+  LAW_GRAPH_REQUIRED: "1"
 
 x-runtime-env-file: &runtime-env-file
   - path: .runtime.env
@@ -144,6 +145,8 @@ services:
         condition: service_healthy
       clamav:
         condition: service_healthy
+      law-neo4j:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; request=urllib.request.Request('http://127.0.0.1:8000/api/health/live/', headers={'Host':'localhost','X-Forwarded-Proto':'https'}); urllib.request.urlopen(request, timeout=3)"]
       interval: 30s
@@ -153,6 +156,21 @@ services:
     networks:
       pilot:
         ipv4_address: ${PILOT_BACKEND_IP:-172.31.0.5}
+
+  rag-loader:
+    image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
+    env_file: *runtime-env-file
+    environment:
+      <<: *backend-environment
+      REVIEW_CASE_POSTGRES_EXPORT_ROOT: /tmp/review-case-postgres-exports
+    mem_limit: 768m
+    logging: *default-logging
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    networks:
+      pilot: {}
 
   agent-worker:
     image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
@@ -224,6 +242,7 @@ services:
     mem_limit: 160m
     logging: *default-logging
     cap_drop: [ALL]
+    cap_add: [SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     tmpfs: [/tmp]
     volumes:
@@ -243,7 +262,7 @@ services:
     mem_limit: 2048m
     logging: *default-logging
     cap_drop: [ALL]
-    cap_add: [CHOWN, SETGID, SETUID]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     environment:
       CLAMD_CONF_ConcurrentDatabaseReload: "no"
@@ -259,6 +278,29 @@ services:
       pilot:
         ipv4_address: ${PILOT_CLAMAV_IP:-172.31.0.10}
 
+  law-neo4j:
+    image: ${LAW_NEO4J_IMAGE_REF:?LAW_NEO4J_IMAGE_REF is required}
+    restart: unless-stopped
+    mem_limit: 768m
+    logging: *default-logging
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:?NEO4J_USER is required}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 384m
+      NEO4J_server_memory_pagecache_size: 256m
+    volumes:
+      - law_neo4j_data:/data
+      - law_neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u \"$${NEO4J_AUTH%%/*}\" -p \"$${NEO4J_AUTH#*/}\" \"RETURN 1\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 10
+    networks:
+      pilot:
+        ipv4_address: ${PILOT_LAW_NEO4J_IP:-172.31.0.12}
+
 volumes:
   caddy_data:
   caddy_config:
@@ -267,6 +309,10 @@ volumes:
     name: ${PILOT_REDIS_VOLUME_NAME:-skn27-pilot_redis_data}
   clamav_data:
     name: ${PILOT_CLAMAV_VOLUME_NAME:-skn27-pilot_clamav_data}
+  law_neo4j_data:
+    name: ${PILOT_LAW_NEO4J_VOLUME_NAME:-skn27-pilot_law_neo4j_data}
+  law_neo4j_logs:
+    name: ${PILOT_LAW_NEO4J_LOG_VOLUME_NAME:-skn27-pilot_law_neo4j_logs}
 
 networks:
   pilot:

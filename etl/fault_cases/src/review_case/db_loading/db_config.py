@@ -3,14 +3,27 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 ARTIFACT_ROOT = PROJECT_ROOT / "etl" / "fault_cases" / "artifacts" / "review_case_output"
 REVIEW_CASE_MD_ROOT = PROJECT_ROOT / "etl" / "fault_cases" / "Fault_cases_MD" / "심의사례"
 PREPROCESSED_DIR = ARTIFACT_ROOT / "preprocessed"
-POSTGRES_EXPORT_ROOT = ARTIFACT_ROOT / "postgres_exports"
 SCHEMA_PATH = PROJECT_ROOT / "storage" / "schemas" / "review_case_db_schema.sql"
+
+
+def resolve_postgres_export_root(
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    env = os.environ if environ is None else environ
+    configured = env.get("REVIEW_CASE_POSTGRES_EXPORT_ROOT", "").strip()
+    if configured:
+        return Path(configured)
+    return ARTIFACT_ROOT / "postgres_exports"
+
+
+POSTGRES_EXPORT_ROOT = resolve_postgres_export_root()
 
 
 def load_dotenv_if_available() -> None:
