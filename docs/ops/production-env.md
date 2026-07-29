@@ -479,3 +479,24 @@ remain executable.
 - Store real Google OAuth, app JWT, OAuth token, database, object storage, and
   LLM keys in the deployment secret store.
 - After changing secrets, rerun the readiness command and the auth smoke tests.
+
+## 8. Pilot Caddy Host-Network Cutover
+
+The Pilot Compose Caddy service may use `network_mode: host` when Docker cannot
+publish host ports 80 and 443. It has no `pilot` bridge attachment and resolves
+only `edge-rate-limit` through the configured private edge IP. Caddy runs as
+UID/GID `10001`; the deployed IMDS firewall rejects metadata traffic from that
+UID in the host `OUTPUT` chain.
+
+Keep public traffic closed while changing this topology:
+
+1. Record the current IPv4 TCP 80 and 443 security-group rules, then revoke
+   only those rules.
+2. Run release staging with `-AllowCaddyOfflineForHostNetworkCutover` and then
+   promotion. This switch is valid only for `-StageForReleaseUpdate` while the
+   recorded public ingress rules remain blocked. Verify Compose Caddy, backend
+   readiness, and the host-local live and ready endpoints.
+3. Restore the exact recorded 80 and 443 rules only after all checks pass, then
+   verify the public domain.
+4. On failure, leave ingress closed and use the existing rollback workflow;
+   never substitute a manually created host-network Caddy container.
