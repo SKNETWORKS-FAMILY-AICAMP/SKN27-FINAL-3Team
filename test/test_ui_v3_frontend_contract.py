@@ -71,8 +71,63 @@ def test_quick_question_groups_render_without_undefined_legacy_reference() -> No
     assert "{quickQuestions.map((item) => (" not in shell
 
 
+def test_chat_places_save_and_four_service_examples_before_messages() -> None:
+    shell = _shell()
+    chat = shell[shell.index("function ChatScreenV2("):]
+
+    assert chat.index('aria-label="상담 저장 선택"') < chat.index('className="messages"')
+    assert chat.index('className="quick-examples"') < chat.index('className="messages"')
+    assert 'title: "과태료·범칙금"' in chat
+    assert 'title: "과실비율"' in chat
+    assert 'title: "법령 관련 질문"' not in chat
+    assert chat.count('className="quick-chip"') == 1
+    assert chat.count("과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘") == 1
+    assert chat.count("보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘") == 1
+
+
+def test_chat_clears_question_before_request_and_uses_soft_active_background() -> None:
+    shell = _shell()
+    styles = _styles()
+    submit_start = shell.index("async function submitServiceMessage(")
+    submit_end = shell.index("async function streamAssistantMessage(", submit_start)
+    submit = shell[submit_start:submit_end]
+
+    assert submit.index('setQuestion("");') < submit.index("setIsSubmitting(true);")
+    assert ".chat-sidebar .conversation-card.active {\n  border-color: var(--brand-soft-border);\n  background: var(--brand-soft);" in styles
+
+
 def test_empty_chat_keeps_the_primary_composer_above_the_desktop_fold() -> None:
     styles = _styles()
 
     assert "min-height: clamp(220px, 28vh, 300px);" in styles
     assert ".chat-empty-state {\n  min-height: 420px;" not in styles
+
+
+def test_chat_entry_reuses_the_existing_session_and_guide_has_one_cta() -> None:
+    shell = _shell()
+
+    assert shell.count('onOpenChat={() => ensureGuestSession("chatbot")}') >= 3
+
+    guide_start = shell.index("function GuideScreen")
+    guide_end = shell.index("function EntryScreenWheelLegacy")
+    guide = shell[guide_start:guide_end]
+    assert guide.count("onClick={onOpenChat}") == 1
+    assert "onClick={onGuestStart}" not in guide
+
+
+def test_consultation_intake_renders_only_the_selected_case_type_fields() -> None:
+    shell = _shell()
+
+    assert "ACCIDENT_TYPE_OPTIONS" in shell
+    assert "FINE_NOTICE_FIELDS" in shell
+    assert 'selectedType === "fine_notice"' in shell
+    assert 'selectedType === "fault_ratio"' in shell
+    assert "{isFineNotice && (" in shell
+    assert "{isFaultRatio && (" in shell
+
+
+def test_user_message_and_primary_ctas_have_final_light_theme_overrides() -> None:
+    styles = _styles()
+
+    assert ".message.user .bubble p {\n  color: #111844;" in styles
+    assert ".service-closing .button.primary,\n.guide-screen__actions .button.primary" in styles

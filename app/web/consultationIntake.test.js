@@ -64,3 +64,39 @@ test("lists only unresolved accident facts as missing", () => {
     []
   );
 });
+
+test("builds fine notice details without requesting accident facts", () => {
+  const intake = createEmptyConsultationIntake();
+  intake.consultationType = "fine_notice";
+  intake.violationDate = "2026-07-29";
+  intake.violationLocation = "서울시 강남구";
+  intake.violationType = "신호 위반";
+  intake.fineQuestion = "이의신청이 가능한가요?";
+
+  const message = buildStructuredConsultationMessage({ intake });
+
+  assert.match(message, /2026-07-29/);
+  assert.match(message, /서울시 강남구/);
+  assert.match(message, /신호 위반/);
+  assert.match(message, /이의신청이 가능한가요/);
+  assert.deepEqual(listConsultationIntakeMissingFields(intake), []);
+});
+
+test("requests detailed accident facts only for fault ratio", () => {
+  assert.deepEqual(
+    listConsultationIntakeMissingFields({
+      consultationType: "fault_ratio",
+    }).map((item) => item.key),
+    ["roadLayout", "vehicleActions", "signalPriority", "collisionLocation"]
+  );
+  assert.deepEqual(
+    listConsultationIntakeMissingFields({
+      consultationType: "fine_notice",
+      violationDate: "2026-07-29",
+      violationLocation: "서울시 강남구",
+      violationType: "신호 위반",
+      fineQuestion: "이의신청이 가능한가요?",
+    }),
+    []
+  );
+});
