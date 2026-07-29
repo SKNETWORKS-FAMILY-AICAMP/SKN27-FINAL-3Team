@@ -144,7 +144,10 @@ try {
         InstanceIds  = @($instanceId)
         Comment      = "Load verified SKN27 production RAG seed for $ReleaseTag"
         TimeoutSeconds = $SsmTimeoutSeconds
-        Parameters   = @{ commands = $commands }
+        Parameters   = @{
+            commands         = $commands
+            executionTimeout = @([string]$SsmTimeoutSeconds)
+        }
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $request -Encoding utf8NoBOM
 
     $commandId = (& aws ssm send-command --region $region --cli-input-json "file://$request" --query "Command.CommandId" --output text --no-cli-pager).Trim()
