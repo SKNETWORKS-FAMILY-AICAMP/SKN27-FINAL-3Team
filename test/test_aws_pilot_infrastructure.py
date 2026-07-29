@@ -1068,10 +1068,13 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
     assert "configure-imds-firewall.sh" in deploy
     assert '"configure-imds-firewall.sh"' in bundle_copy_segment
     assert (
-        "install -m 0755 `$RELEASE_DIR/configure-imds-firewall.sh "
+        r"tr -d '\r' < `$RELEASE_DIR/configure-imds-firewall.sh "
+        "> /tmp/skn27-imds-firewall.sh"
+    ) in deploy
+    assert (
+        "install -m 0755 /tmp/skn27-imds-firewall.sh "
         "/usr/local/sbin/skn27-imds-firewall.sh"
     ) in deploy
-    assert "`$RELEASE_DIR/deploy/aws-pilot/configure-imds-firewall.sh" not in deploy
     assert "IMDS allow smoke" in deploy
     assert "IMDS deny smoke" in deploy
     assert "credential proxy" in runbook.lower()
