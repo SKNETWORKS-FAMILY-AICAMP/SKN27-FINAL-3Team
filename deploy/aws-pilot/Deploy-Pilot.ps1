@@ -496,7 +496,7 @@ $staging = Join-Path ([IO.Path]::GetTempPath()) "skn27-pilot-$([guid]::NewGuid()
 $bundle = "$staging.zip"
 New-Item -ItemType Directory -Path $staging | Out-Null
 try {
-    foreach ($name in @("docker-compose.pilot.yml", "Caddyfile", "haproxy.cfg")) {
+    foreach ($name in @("docker-compose.pilot.yml", "Caddyfile", "haproxy.cfg", "configure-imds-firewall.sh")) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $staging
     }
     Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $bundle

@@ -1028,6 +1028,9 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
     deploy = _read_deploy("Deploy-Pilot.ps1")
     firewall_script = _read_deploy("configure-imds-firewall.sh")
     runbook = _read_deploy("README.ko.md")
+    bundle_start = deploy.index("$staging = Join-Path")
+    bundle_end = deploy.index("Compress-Archive", bundle_start)
+    bundle_copy_segment = deploy[bundle_start:bundle_end]
 
     allowed = {
         "backend": "172.31.0.5",
@@ -1063,6 +1066,7 @@ def test_docker_imds_firewall_allows_only_app_workers_and_hardens_other_services
     assert "RemainAfterExit=yes" in user_data
     assert "/usr/local/sbin/skn27-imds-firewall.sh" in deploy
     assert "configure-imds-firewall.sh" in deploy
+    assert '"configure-imds-firewall.sh"' in bundle_copy_segment
     assert (
         "install -m 0755 `$RELEASE_DIR/configure-imds-firewall.sh "
         "/usr/local/sbin/skn27-imds-firewall.sh"
