@@ -483,3 +483,34 @@ def test_unknown_runtime_provider_fails_closed(monkeypatch) -> None:
 
     assert result["structured_result"]["error_code"] == "vision_remote_unavailable"
     assert "jupyter" not in repr(result)
+def test_safe_handoff_accepts_qwen3_explanation_contract():
+    result = adapter._safe_worker_handoff(
+        {
+            "vision_supervisor_handoff": {
+                "schema_version": "vision-supervisor-handoff-v1",
+                "status": "complete",
+                "model_analysis": {
+                    "trained_accident_prediction": {
+                        "label": "car_vs_car",
+                        "score": 0.9,
+                        "requires_review": False,
+                    },
+                    "qwen_explanation": {
+                        "valid": True,
+                        "schema_version": "vision-qwen-explanation-v1",
+                        "narrative": "Two cars converge.",
+                        "evidence_sentences": [],
+                        "conflict": False,
+                        "confirmed_accident": True,
+                        "canonical_label": "car_vs_car",
+                        "impact_visibility": "inferred",
+                        "fallback_used": False,
+                    },
+                },
+            }
+        }
+    )
+
+    assert result["qwen"]["schema_version"] == "vision-qwen-explanation-v1"
+    assert result["qwen"]["canonical_label"] == "car_vs_car"
+    assert result["qwen"]["confirmed_accident"] is True

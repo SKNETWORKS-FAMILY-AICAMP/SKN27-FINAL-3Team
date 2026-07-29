@@ -1,4 +1,5 @@
 import ast
+import inspect
 import json
 import importlib
 import os
@@ -41,10 +42,11 @@ class VisionRunToSupervisorTest(unittest.TestCase):
 
         self.assertIn("adaptive_retry_prompt(last_error)", source)
         self.assertIn("retry_token_limit(last_error)", source)
-        self.assertEqual(
-            source.count("revision=qwen_revision"),
-            2,
+        self.assertIn(
+            'revision = {"revision": qwen_revision} if qwen_revision else {}',
+            source,
         )
+        self.assertGreaterEqual(source.count("**revision"), 2)
 
     def test_qwen_errors_have_stable_handoff_codes(self):
         self.assertEqual(
@@ -61,16 +63,18 @@ class VisionRunToSupervisorTest(unittest.TestCase):
         )
         self.assertEqual(qwen_error_code("CUDA out of memory"), "vision_qwen_unavailable")
 
-    def test_shared_frame_defaults_are_32(self):
+    def test_videomae_uses_32_frames_and_evidence_uses_16(self):
         with patch.dict(os.environ, {}, clear=True):
             experiment = load_experiment_config("car_vs_car")
 
-        self.assertEqual(experiment.frame_count, 32)
-        self.assertEqual(experiment.vlm_input_frame_count, 32)
-        self.assertEqual(
-            experiment.qwen_model_revision,
-            "66285546d2b821cf421d4f5eb2576359d3770cd3",
-        )
+        self.assertEqual(experiment.frame_count, 16)
+        self.assertEqual(experiment.vlm_input_frame_count, 16)
+        self.assertEqual(experiment.qwen_model_id, "Qwen/Qwen3-VL-4B-Instruct")
+        self.assertEqual(experiment.qwen_model_revision, "")
+        signature = inspect.signature(run)
+        self.assertEqual(signature.parameters["videomae_frame_count"].default, 32)
+        self.assertEqual(signature.parameters["frame_count"].default, 16)
+        self.assertEqual(signature.parameters["qwen_frame_count"].default, 16)
         pipeline_tree = ast.parse(
             Path("ai/vision/pipeline.py").read_text(encoding="utf-8")
         )
@@ -80,7 +84,7 @@ class VisionRunToSupervisorTest(unittest.TestCase):
             if isinstance(node, ast.FunctionDef)
             and node.name == "extract_keyframes"
         )
-        self.assertEqual(ast.literal_eval(function.args.defaults[-1]), 32)
+        self.assertEqual(ast.literal_eval(function.args.defaults[-1]), 16)
 
     def test_yolo_detection_module_is_not_empty(self):
         with patch.dict(sys.modules, {"ultralytics": types.SimpleNamespace(YOLO=object)}):
@@ -146,7 +150,7 @@ class VisionRunToSupervisorTest(unittest.TestCase):
                 result = run(video, checkpoint=checkpoint)
             payload = json.loads(result.read_text())["vision_supervisor_handoff"]
             self.assertEqual(calls[:4], [
-                "videomae", ("extract", 32), ("detect", "yolov8m.pt", .25), ("qwen", 12)
+                "videomae", ("extract", 16), ("detect", "yolov8m.pt", .25), ("qwen", 16)
             ])
             self.assertEqual(payload["model_analysis"]["trained_accident_prediction"]["label"], "car_vs_car")
             self.assertEqual(payload["model_analysis"]["selected_yolo_model"], "yolov8m.pt")

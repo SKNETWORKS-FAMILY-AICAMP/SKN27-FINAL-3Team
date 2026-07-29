@@ -334,7 +334,13 @@ def _safe_worker_handoff(worker_payload: Any) -> dict[str, Any]:
         if isinstance(model_analysis.get("trained_accident_prediction"), dict)
         else {}
     )
-    qwen = model_analysis.get("qwen") if isinstance(model_analysis.get("qwen"), dict) else {}
+    qwen = (
+        model_analysis.get("qwen_explanation")
+        if isinstance(model_analysis.get("qwen_explanation"), dict)
+        else model_analysis.get("qwen")
+        if isinstance(model_analysis.get("qwen"), dict)
+        else {}
+    )
 
     evidence = _safe_evidence(visual.get("evidence_candidates"))
     return {
@@ -354,13 +360,18 @@ def _safe_worker_handoff(worker_payload: Any) -> dict[str, Any]:
             qwen,
             (
                 "valid",
-                "summary",
-                "predicted_accident_target",
-                "accident_target_evidence",
-                "collision_moment_visible",
-                "accident_situation",
-                "scene_conditions",
+                "schema_version",
+                "narrative",
+                "evidence_sentences",
+                "conflict",
+                "conflict_reason",
                 "uncertainties",
+                "confirmed_accident",
+                "accident_type",
+                "canonical_label",
+                "impact_visibility",
+                "impact_evidence",
+                "fallback_used",
                 "requires_review",
                 "error_code",
             ),

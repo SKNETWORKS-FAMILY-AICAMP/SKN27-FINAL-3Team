@@ -48,8 +48,8 @@ Worker 환경변수:
 
 ```text
 VISION_TRAINED_CLASSIFIER_CHECKPOINT=/runpod-volume/models/videomae
-VISION_QWEN_MODEL_ID=Qwen/Qwen2.5-VL-3B-Instruct
-VISION_QWEN_MODEL_REVISION=66285546d2b821cf421d4f5eb2576359d3770cd3
+VISION_QWEN_MODEL_ID=Qwen/Qwen3-VL-4B-Instruct
+VISION_QWEN_MODEL_REVISION=
 HF_HOME=/runpod-volume/huggingface
 RUNPOD_VISION_ALLOWED_HOSTS=<approved-bucket>.s3.<region>.amazonaws.com
 RUNPOD_VISION_DOWNLOAD_TIMEOUT_SECONDS=60
@@ -61,6 +61,11 @@ RUNPOD_VISION_EXECUTION_TIMEOUT_SECONDS=540
 `workersMax=1`로 시작한다. 애플리케이션의 `RUNPOD_API_KEY`와
 `RUNPOD_VISION_ENDPOINT_ID` 설정 및 Supervisor 연결은 Supervisor 담당 범위다.
 API key는 restricted key로 발급하고 이미지나 로그에 넣지 않는다.
+
+서비스 계약은 VideoMAE 분류에 32프레임을 사용하고, OpenCV·YOLO·Qwen에는
+충돌 후보 중심의 16프레임(context/pre-impact/impact/post-impact 각 4개)을
+사용한다. VideoMAE의 사고유형과 `confirmed_accident=true`는 Qwen이 변경할
+수 없는 입력이며, Qwen은 보이는 근거만 설명한다.
 
 ## 검증 명령
 
@@ -80,13 +85,11 @@ docker build --platform linux/amd64 -f deploy/runpod-vision/Dockerfile -t <regis
 
 ## 사람 확인이 필요한 결정
 
-1. Qwen의 schema-valid `651/1,200`(54.25%)를 `partial` fallback 조건으로 운영
-   허용할지 승인한다. 승인하지 않으면 Qwen을 배포 경로에서 제외한다.
-2. valid 651건 중 영어-only `650건`을 허용할지 승인한다. 영어-only가
-   필수면 나머지 1건을 `vision_qwen_language_invalid`로 처리하도록 후속 변경한다.
-3. 비식별 실제 영상으로 `/run → /status → handoff → Supervisor`를 실행해
+1. 검증 400건에서 Qwen3 JSON valid `394/400`, fallback `6/400`, label
+   preservation `400/400` 결과를 운영 기준선으로 승인한다.
+2. 비식별 실제 영상으로 `/run → /status → handoff → Supervisor`를 실행해
    success, partial, invalid JSON, timeout, download failure를 각각 확인한다.
-4. 관찰 최대 GPU 메모리 `19,532 MiB`에 여유를 둔 GPU와 timeout을 선택한다.
+3. 관찰 Qwen3 GPU peak `12,991.6 MiB`에 여유를 둔 GPU와 timeout을 선택한다.
 
 LLaVA는 48GB급 환경에서도 OOM이 발생해 운영 후보로 확정하지 않았다. Qwen은
 사고 유형이나 과실을 확정하지 않고 VideoMAE·YOLO 결과의 상황 설명만 보조한다.

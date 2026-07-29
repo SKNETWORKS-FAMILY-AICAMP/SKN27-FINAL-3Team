@@ -48,6 +48,26 @@ def retry_token_limit(error: str) -> int:
     return 1024 if error.startswith("json_incomplete:") else 512
 
 
+def _normalize_value(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    if value.get("conflict") is None:
+        value["conflict"] = False
+    evidence = value.get("evidence_sentences")
+    if isinstance(evidence, list):
+        normalized = []
+        for item in evidence:
+            if isinstance(item, str) and ":" in item:
+                frame_ref, sentence = item.split(":", 1)
+                item = {
+                    "frame_refs": [frame_ref.strip()],
+                    "sentence": sentence.strip(),
+                }
+            normalized.append(item)
+        value["evidence_sentences"] = normalized
+    return value
+
+
 def _schema_error(value: Any, allowed_frame_refs: set[str] | None = None) -> str:
     if not isinstance(value, dict):
         return "schema_invalid:not_object"
@@ -100,7 +120,40 @@ def parse_vlm_json(
         value, _ = json.JSONDecoder().raw_decode(text[start:])
     except json.JSONDecodeError as exc:
         return {}, False, f"json_incomplete:{exc.msg}"
+    value = _normalize_value(value)
     error = _schema_error(value, allowed_frame_refs)
     if error:
         return {}, False, error
     return value, True, ""
+
+
+_IMPACT_VISIBILITY = {"direct", "inferred", "not_visible"}
+_DENIAL_PHRASES = (
+    "no accident",
+    "no collision",
+    "not an accident",
+    "did not collide",
+)
+
+
+def enforce_confirmed_accident_context(
+    value: dict[str, Any], canonical_label: str
+) -> dict[str, Any]:
+    """Keep dataset truth and VideoMAE type fixed; Qwen only explains evidence."""
+    result = dict(value)
+    result["confirmed_accident"] = True
+    result["accident_type"] = canonical_label
+    result["canonical_label"] = canonical_label
+    visibility = result.get("impact_visibility")
+    if visibility not in _IMPACT_VISIBILITY:
+        visibility = "inferred"
+    result["impact_visibility"] = visibility
+    evidence = result.get("impact_evidence")
+    result["impact_evidence"] = evidence if isinstance(evidence, list) else []
+    narrative = str(result.get("narrative", ""))
+    if any(phrase in narrative.lower() for phrase in _DENIAL_PHRASES):
+        result["narrative"] = (
+            "Confirmed accident; impact is not directly visible in the sampled frames."
+        )
+        result["impact_visibility"] = "not_visible"
+    return result

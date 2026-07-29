@@ -1,10 +1,15 @@
-"""Extract representative key frames from an accident video."""
+"""Extract representative key frames from a raw accident video.
+
+This is the first Vision POC step: read one video, sample frames, and write
+metadata for later detection/schema conversion.
+"""
 from pathlib import Path
 import json
 
 import cv2
 
 from ai.vision.adaptive_preprocessing import enhance_frame_adaptive
+from ai.vision.impact_frames import grouped_impact_frame_indices, scan_video_motion_scores
 
 
 RAW_DIR = Path("storage/vision/raw")
@@ -25,7 +30,7 @@ def find_first_video() -> Path:
     return videos[0]
 
 
-def extract_keyframes(video_path: Path, frame_count_target: int = 32):
+def extract_keyframes(video_path: Path, frame_count_target: int = 16):
     FRAME_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -41,18 +46,26 @@ def extract_keyframes(video_path: Path, frame_count_target: int = 32):
     if total_frames <= 0:
         raise RuntimeError(f"Invalid frame count: {video_path}")
 
-    if frame_count_target <= 1:
-        target_indices = [0]
+    if frame_count_target == 16:
+        target_frames = grouped_impact_frame_indices(
+            scan_video_motion_scores(video_path, total_frames),
+            total_frames,
+        )
+    elif frame_count_target <= 1:
+        target_frames = [(0, "context")]
     else:
-        target_indices = [
-            round(i * (total_frames - 1) / (frame_count_target - 1))
+        target_frames = [
+            (
+                round(i * (total_frames - 1) / (frame_count_target - 1)),
+                "sample_keyframe",
+            )
             for i in range(frame_count_target)
         ]
 
     video_stem = video_path.stem
     records = []
 
-    for order, frame_index in enumerate(target_indices, start=1):
+    for order, (frame_index, frame_role) in enumerate(target_frames, start=1):
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ok, frame = cap.read()
 
@@ -62,7 +75,8 @@ def extract_keyframes(video_path: Path, frame_count_target: int = 32):
                     "frame_order": order,
                     "frame_index": frame_index,
                     "timestamp_sec": None,
-                    "frame_role": "sample_keyframe",
+                    "frame_role": frame_role,
+                    "selection_reason": "impact_centered_optical_flow",
                     "frame_path": None,
                     "status": "failed",
                 }
@@ -82,7 +96,8 @@ def extract_keyframes(video_path: Path, frame_count_target: int = 32):
                 "timestamp_sec": round(timestamp_sec, 3)
                 if timestamp_sec is not None
                 else None,
-                "frame_role": "sample_keyframe",
+                "frame_role": frame_role,
+                "selection_reason": "impact_centered_optical_flow",
                 "frame_path": frame_path.as_posix(),
                 "status": "ok",
             }
@@ -112,7 +127,7 @@ def extract_keyframes(video_path: Path, frame_count_target: int = 32):
 
 def main():
     video_path = find_first_video()
-    output_path, output = extract_keyframes(video_path, frame_count_target=32)
+    output_path, output = extract_keyframes(video_path, frame_count_target=16)
 
     print(f"source_video: {output['source_video']}")
     print(f"total_frames: {output['video_metadata']['total_frames']}")
