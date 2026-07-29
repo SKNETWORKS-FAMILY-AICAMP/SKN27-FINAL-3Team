@@ -158,7 +158,7 @@ def test_review_case_readiness_and_index_are_scoped_to_provider() -> None:
         / "etl/fault_cases/src/review_case/search/pgvector/create_index.py"
     ).read_text(encoding="utf-8")
 
-    assert "WHERE embedding_provider = %s" in source
+    assert "WHERE embedding.embedding_provider = %s" in source
     assert "WHERE embedding_provider = {embedding_provider}" in source
     assert "embedding_provider=sql.Literal(EMBEDDING_SETTINGS.provider)" in source
     assert (
@@ -220,6 +220,35 @@ def test_review_case_dimension_migration_is_backup_gated() -> None:
     assert "TYPE vector(1024)" in migration
     assert "CHECK (embedding_dim = 1024)" in migration
     assert "COMMIT;" in migration
+
+
+def test_review_case_embedding_retention_schema_and_migration_are_non_destructive() -> None:
+    schema = (ROOT / "storage/schemas/review_case_db_schema.sql").read_text(
+        encoding="utf-8"
+    )
+    migration = (
+        ROOT / "storage/migrations/20260728_review_case_embedding_retention.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "is_active BOOLEAN NOT NULL DEFAULT TRUE" in schema
+    assert "source_text_hash TEXT NOT NULL" in schema
+    assert "PRIMARY KEY (chunk_id, embedding_model, embedding_version, source_text_hash)" in schema
+    assert "TRUNCATE TABLE review_case_chunk_embeddings" not in migration
+    assert "DELETE FROM review_case_chunk_embeddings" not in migration
+    assert "embedding_meta->>'text_hash'" in migration
+    assert "legacy-unverified:" in migration
+
+
+def test_review_case_base_schema_defers_active_index_to_retention_migration() -> None:
+    schema = (ROOT / "storage/schemas/review_case_db_schema.sql").read_text(
+        encoding="utf-8"
+    )
+    migration = (
+        ROOT / "storage/migrations/20260728_review_case_embedding_retention.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE INDEX IF NOT EXISTS idx_review_case_chunks_active" not in schema
+    assert "CREATE INDEX IF NOT EXISTS idx_review_case_chunks_active" in migration
 
 
 def test_text_ml_smoke_exposes_pgvector_requirement_flag() -> None:

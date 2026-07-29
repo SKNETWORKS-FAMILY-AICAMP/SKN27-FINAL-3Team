@@ -125,6 +125,7 @@ def replace_and_upsert_review_case_rows(
             len(row.chunk_text),
             len(row.search_text.split()),
             hashlib.sha256(row.chunk_text.encode("utf-8")).hexdigest(),
+            True,
             row.source_ref,
             row.source_type,
             row.source_reliability_score,
@@ -154,6 +155,7 @@ def replace_and_upsert_review_case_rows(
         INSERT INTO review_case_chunks (
             chunk_id, review_case_id, review_no, chunk_type, sequence_no,
             chunk_text, search_text, char_count, token_count, text_hash,
+            is_active,
             source_ref, source_type, source_reliability_score,
             parse_status, quality_flags, raw_json
         ) VALUES %s
@@ -173,6 +175,7 @@ def replace_and_upsert_review_case_rows(
                 ELSE review_case_chunks.embedding_status
             END,
             text_hash = EXCLUDED.text_hash,
+            is_active = TRUE,
             source_ref = EXCLUDED.source_ref,
             source_type = EXCLUDED.source_type,
             source_reliability_score = EXCLUDED.source_reliability_score,
@@ -187,7 +190,9 @@ def replace_and_upsert_review_case_rows(
             if replace:
                 cursor.execute(
                     """
-                    DELETE FROM review_case_documents
+                    UPDATE review_case_chunks
+                    SET is_active = FALSE,
+                        updated_at = now()
                     WHERE source_type = %s
                     """,
                     ("review_case",),

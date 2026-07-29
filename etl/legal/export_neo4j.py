@@ -13,6 +13,7 @@ from typing import Iterable
 from etl.common.utils import load_env_file, read_jsonl_iter as read_jsonl
 import yaml
 
+from app.services.law_graph_seed import LawGraphSeed
 from neo4j import GraphDatabase
 
 
@@ -144,6 +145,7 @@ def create_constraints(session) -> None:
         "CREATE CONSTRAINT legal_source_id IF NOT EXISTS FOR (n:LegalSource) REQUIRE n.source_id IS UNIQUE",
         "CREATE CONSTRAINT law_version_id IF NOT EXISTS FOR (n:LawVersion) REQUIRE n.source_version_id IS UNIQUE",
         "CREATE CONSTRAINT law_chunk_id IF NOT EXISTS FOR (n:LawChunk) REQUIRE n.chunk_id IS UNIQUE",
+        "CREATE CONSTRAINT legal_graph_dataset_version IF NOT EXISTS FOR (n:LegalGraphDataset) REQUIRE n.dataset_version IS UNIQUE",
         "CREATE CONSTRAINT user_term_text IF NOT EXISTS FOR (n:UserTerm) REQUIRE n.text IS UNIQUE",
         "CREATE CONSTRAINT legal_term_text IF NOT EXISTS FOR (n:LegalTerm) REQUIRE n.text IS UNIQUE",
         "CREATE CONSTRAINT law_search_term_text IF NOT EXISTS FOR (n:LawSearchTerm) REQUIRE n.text IS UNIQUE",
@@ -220,6 +222,64 @@ def import_legal_artifacts(session, output_dir: Path, batch_size: int, import_si
         "law_relations": relation_count,
         "law_extra_relations": len(extra_relations),
         "similarity_relations": similarity_count,
+    }
+
+
+def import_law_graph_seed(
+    session,
+    seed: LawGraphSeed,
+    *,
+    batch_size: int,
+) -> dict[str, int]:
+    """Idempotently import a verified seed-derived law graph in bounded batches."""
+
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+    sources = [dict(row) for row in seed.sources]
+    versions = [dict(row) for row in seed.versions]
+    chunks = [dict(row) for row in seed.chunks]
+    relations = [dict(row) for row in seed.relations]
+
+    run_batches(
+        session,
+        """
+        UNWIND $rows AS row
+        MERGE (source:LegalSource {source_id: row.source_id})
+        SET source += row
+        """,
+        sources,
+        batch_size,
+    )
+    run_batches(
+        session,
+        """
+        UNWIND $rows AS row
+        MATCH (source:LegalSource {source_id: row.source_id})
+        MERGE (version:LawVersion {source_version_id: row.source_version_id})
+        SET version += row
+        MERGE (source)-[:HAS_VERSION]->(version)
+        """,
+        versions,
+        batch_size,
+    )
+    run_batches(
+        session,
+        """
+        UNWIND $rows AS row
+        MATCH (version:LawVersion {source_version_id: row.source_version_id})
+        MERGE (chunk:LawChunk {chunk_id: row.chunk_id})
+        SET chunk += row
+        MERGE (version)-[:HAS_CHUNK]->(chunk)
+        """,
+        chunks,
+        batch_size,
+    )
+    relation_count = import_relations(session, relations, batch_size)
+    return {
+        "legal_sources": len(sources),
+        "law_versions": len(versions),
+        "law_chunks": len(chunks),
+        "law_relations": relation_count,
     }
 
 

@@ -8,6 +8,13 @@ from .db_config import POSTGRES_EXPORT_ROOT, SCHEMA_PATH, SETTINGS
 from .db_connection import apply_sql_file, create_database_if_missing
 
 
+RETENTION_MIGRATION_PATH = (
+    SCHEMA_PATH.parent.parent
+    / "migrations"
+    / "20260728_review_case_embedding_retention.sql"
+)
+
+
 def apply_schema(create_db: bool = True, apply_schema_sql: bool = True) -> dict:
     created = False
     if create_db:
@@ -15,11 +22,16 @@ def apply_schema(create_db: bool = True, apply_schema_sql: bool = True) -> dict:
 
     if apply_schema_sql:
         apply_sql_file(SETTINGS.review_case_db, SCHEMA_PATH.read_text(encoding="utf-8"))
+        apply_sql_file(
+            SETTINGS.review_case_db,
+            RETENTION_MIGRATION_PATH.read_text(encoding="utf-8"),
+        )
 
     report = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "db_name": SETTINGS.review_case_db,
         "schema_path": str(SCHEMA_PATH),
+        "retention_migration_path": str(RETENTION_MIGRATION_PATH),
         "database_created": created,
         "schema_applied": apply_schema_sql,
     }
