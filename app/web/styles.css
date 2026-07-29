@@ -6383,7 +6383,7 @@ body {
 
 .chat-sidebar .conversation-card.active {
   border-color: var(--brand-soft-border);
-  background: linear-gradient(135deg, rgba(114, 136, 174, 0.2), rgba(234, 224, 207, 0.45));
+  background: var(--brand-soft);
   box-shadow: 0 8px 18px rgba(17, 24, 68, 0.08);
 }
 
@@ -6391,6 +6391,77 @@ body {
 .chat-sidebar .conversation-card.active span,
 .chat-sidebar .conversation-card strong {
   color: var(--ink);
+}
+
+.appeal-decision-panel {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--brand-soft-border);
+  border-left: 5px solid var(--brand-mid);
+  border-radius: 18px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.appeal-decision-panel--risky {
+  border-left-color: #c2410c;
+  background: #fff7ed;
+}
+
+.appeal-decision-panel--failed {
+  border-left-color: #ca8a04;
+  background: #fefce8;
+}
+
+.appeal-decision-panel--safe {
+  border-left-color: #167c67;
+}
+
+.appeal-decision-panel__risk,
+.appeal-decision-panel__merit,
+.appeal-decision-panel__combined {
+  display: grid;
+  gap: 6px;
+}
+
+.appeal-decision-panel__merit,
+.appeal-decision-panel__combined {
+  padding-top: 14px;
+  border-top: 1px solid rgba(17, 24, 68, 0.12);
+}
+
+.appeal-decision-panel__label {
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.appeal-decision-panel p,
+.appeal-decision-panel small {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.appeal-decision-panel__merit--low strong {
+  color: #c2410c;
+}
+
+.appeal-decision-panel__merit--failed strong,
+.appeal-decision-panel__merit--pending strong {
+  color: #a16207;
+}
+
+.appeal-decision-panel__merit--strong strong {
+  color: #075985;
+}
+
+.appeal-decision-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .entry-wheel__viewport::before {

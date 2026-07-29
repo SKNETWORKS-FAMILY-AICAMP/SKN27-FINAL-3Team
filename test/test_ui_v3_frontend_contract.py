@@ -71,6 +71,31 @@ def test_quick_question_groups_render_without_undefined_legacy_reference() -> No
     assert "{quickQuestions.map((item) => (" not in shell
 
 
+def test_chat_places_save_and_four_service_examples_before_messages() -> None:
+    shell = _shell()
+    chat = shell[shell.index("function ChatScreenV2("):]
+
+    assert chat.index('aria-label="상담 저장 선택"') < chat.index('className="messages"')
+    assert chat.index('className="quick-examples"') < chat.index('className="messages"')
+    assert 'title: "과태료·범칙금"' in chat
+    assert 'title: "과실비율"' in chat
+    assert 'title: "법령 관련 질문"' not in chat
+    assert chat.count('className="quick-chip"') == 1
+    assert chat.count("과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘") == 1
+    assert chat.count("보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘") == 1
+
+
+def test_chat_clears_question_before_request_and_uses_soft_active_background() -> None:
+    shell = _shell()
+    styles = _styles()
+    submit_start = shell.index("async function submitServiceMessage(")
+    submit_end = shell.index("async function streamAssistantMessage(", submit_start)
+    submit = shell[submit_start:submit_end]
+
+    assert submit.index('setQuestion("");') < submit.index("setIsSubmitting(true);")
+    assert ".chat-sidebar .conversation-card.active {\n  border-color: var(--brand-soft-border);\n  background: var(--brand-soft);" in styles
+
+
 def test_empty_chat_keeps_the_primary_composer_above_the_desktop_fold() -> None:
     styles = _styles()
 

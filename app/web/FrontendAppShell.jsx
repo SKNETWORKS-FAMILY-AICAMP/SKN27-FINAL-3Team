@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createFrontendApi } from "./apiClient.js";
+import { buildAppealDecisionUi } from "./appealDecisionUi.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
 import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
 import { reportsForCase } from "./caseReports.js?null-case-v1";
@@ -281,6 +282,7 @@ export default function FrontendAppShell({
   const [reportList, setReportList] = useState([]);
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
+  const [acknowledgedAppealKey, setAcknowledgedAppealKey] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const isMountedRef = useRef(false);
   const authRefreshContextRef = useRef({ guestId, guestCredential, sessionId });
@@ -339,6 +341,19 @@ export default function FrontendAppShell({
   const deadlineGuidance = isDeadlineGuidance(analysisResponse?.deadline_guidance)
     ? analysisResponse.deadline_guidance
     : null;
+  const appealDecision =
+    analysisResponse?.structured_results?.appeal_decision_flow || null;
+  const appealDecisionUi = buildAppealDecisionUi(appealDecision);
+  const appealDecisionKey = appealDecisionUi?.requiresAcknowledgement
+    ? [
+        analysisResponse?.persistence?.job_id || analysisResponse?.message_id || sessionId,
+        appealDecision?.risk_flag,
+        appealDecision?.risk_judgment_failed,
+        appealDecision?.risk_trigger_category,
+      ].join("|")
+    : "";
+  const appealRiskAcknowledged =
+    !appealDecisionUi?.requiresAcknowledgement || acknowledgedAppealKey === appealDecisionKey;
   const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
   const attachmentClassificationResult =
     analysisResponse?.structured_results?.attachment_document_classification || null;
@@ -731,6 +746,14 @@ export default function FrontendAppShell({
     handleAttachmentFile(event.dataTransfer.files?.[0] || null);
   }
 
+  function openReportingWorkspace() {
+    if (appealDecisionUi?.requiresAcknowledgement && !appealRiskAcknowledged) {
+      setReportActionStatus("운전자 신원 노출 위험을 확인한 뒤 리포트 작업대로 이동할 수 있습니다.");
+      return;
+    }
+    setActiveRoute("reporting");
+  }
+
   async function runCurrentReportAction(action = "download_objection") {
     const jobId = currentReport?.job_id || analysisResponse?.persistence?.job_id || analysisResponse?.supervisor_execution?.job_id || "";
     const documentType = "objection_form";
@@ -741,6 +764,10 @@ export default function FrontendAppShell({
       ? activeReportingPayload.report_actions.find((item) => item?.type === action)
       : null;
     if (reportAction === "download") {
+      if (appealDecisionUi?.requiresAcknowledgement && !appealRiskAcknowledged) {
+        setReportActionStatus("운전자 신원 노출 위험을 확인한 뒤 문서를 생성·다운로드할 수 있습니다.");
+        return;
+      }
       if (appealGate?.blocked === true) {
         setReportActionStatus(appealGate.reason || "이의신청 가능 여부를 확인한 뒤 문서를 다운로드할 수 있습니다.");
         return;
@@ -1094,6 +1121,7 @@ export default function FrontendAppShell({
       return;
     }
 
+    setQuestion("");
     setIsSubmitting(true);
     setStatusMessage("상담 내용을 정리하고 있습니다.");
     setSubmittedQuestion(composedQuestion);
@@ -1182,7 +1210,6 @@ export default function FrontendAppShell({
       };
       await streamAssistantMessage(conversationHistory, assistantMessage);
       setAnalysisResponse(workerResult);
-      setQuestion("");
       setConsultationIntake(createEmptyConsultationIntake());
       const canSaveGuestConversation = !effectiveAuthSessionId && Boolean(
         workerResult?.persistence?.job_id || workerResult?.session_id || workerResult?.message_id
@@ -1599,6 +1626,9 @@ export default function FrontendAppShell({
           {activeRoute === "chatbot" && (
             <ChatScreenV2
               analysisCards={visibleAnalysisCards}
+              appealDecisionUi={appealDecisionUi}
+              appealRiskAcknowledged={appealRiskAcknowledged}
+              onAcknowledgeAppealRisk={() => setAcknowledgedAppealKey(appealDecisionKey)}
               attachmentOptions={attachmentOptions}
               assistantAnswer={assistantAnswer}
               assistantFollowUp={assistantFollowUp}
@@ -1618,9 +1648,10 @@ export default function FrontendAppShell({
               onOcrFieldChange={updateOcrConfirmationField}
               onKeepTemporary={keepConversationTemporary}
               onRegisterAttachment={registerAttachmentMetadata}
-              onOpenReporting={() => setActiveRoute("reporting")}
+              onOpenReporting={openReportingWorkspace}
               onConfirmReportDocument={confirmCurrentReportDocument}
               onRunReportAction={runCurrentReportAction}
+              onRetryAppealDecision={() => setQuestion("운전자 신원 노출 위험과 사유 인정 가능성을 다시 판단해줘")}
               onSaveConversation={saveConversationAfterLogin}
               onSubmit={submitServiceMessage}
               pendingAuthAction={pendingAuthAction}
@@ -1649,13 +1680,17 @@ export default function FrontendAppShell({
           {(activeRoute === "fineResult" || activeRoute === "faultResult") && (
             <CaseResultScreen
               analysisCards={analysisCards}
+              appealDecisionUi={appealDecisionUi}
+              appealRiskAcknowledged={appealRiskAcknowledged}
+              onAcknowledgeAppealRisk={() => setAcknowledgedAppealKey(appealDecisionKey)}
+              onRetryAppealDecision={() => { setQuestion("운전자 신원 노출 위험과 사유 인정 가능성을 다시 판단해줘"); setActiveRoute("chatbot"); }}
               caseType={activeRoute === "faultResult" ? "fault" : caseType}
               currentReport={currentReport}
               deadlineGuidance={deadlineGuidance}
               resultSafetyGuidance={resultSafetyGuidance}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
-              onOpenReport={() => setActiveRoute("reporting")}
+              onOpenReport={openReportingWorkspace}
               onPrepareDraftRegeneration={prepareDraftRegeneration}
               onPrepareMissingEvidence={prepareMissingEvidenceUpload}
               onConfirmDocument={confirmCurrentReportDocument}
@@ -2504,6 +2539,9 @@ function ConversationSidebar({
 
 function ChatScreenV2({
   analysisCards,
+  appealDecisionUi,
+  appealRiskAcknowledged,
+  onAcknowledgeAppealRisk,
   attachmentClassificationResult,
   attachmentOptions,
   assistantAnswer,
@@ -2528,6 +2566,7 @@ function ChatScreenV2({
   onOpenReporting,
   onConfirmReportDocument,
   onRunReportAction,
+  onRetryAppealDecision,
   onSaveConversation,
   onSubmit,
   pendingAuthAction,
@@ -2584,10 +2623,6 @@ function ChatScreenV2({
       questions: [
         "과태료 고지서를 받았는데 어떻게 해야 하는지 봐줘",
         "6월 24일 오후 3시 초등학교 앞에서 아이가 아파 잠깐 정차했어",
-        "과태료와 범칙금은 어떤 차이가 있고 벌점은 언제 붙어?",
-        "무인 단속 고지서를 받았는데 실제 운전자가 내가 아니면 어떻게 해야 해?",
-        "과태료 의견제출 기한이 지났는데 이의를 제기할 방법이 있을까?",
-        "어린이보호구역에서 응급상황 때문에 잠깐 정차한 경우도 단속 대상이야?",
       ],
     },
     {
@@ -2595,17 +2630,6 @@ function ChatScreenV2({
       questions: [
         "신호 없는 교차로에서 나는 직진, 상대는 우측 진입 중 사고가 났어",
         "보험사 접수 내역을 바탕으로 과실 쟁점을 정리해줘",
-        "차선을 바꾸던 중 뒤차와 부딪혔는데 과실비율은 무엇을 기준으로 정해?",
-        "앞차가 갑자기 급정거해서 추돌했는데 뒤차가 항상 100% 책임이야?",
-        "불법 주정차 차량 때문에 시야가 가려져 사고가 나면 그 차량에도 책임이 있어?",
-        "보험사가 제시한 과실비율에 동의하지 않을 때 어떤 자료를 준비해야 해?",
-      ],
-    },
-    {
-      title: "법령 관련 질문",
-      questions: [
-        "황색 신호에 교차로에 진입했다가 사고가 났는데 신호위반으로 볼 수 있어?",
-        "교통사고 사실확인원과 경찰 조사 결과는 과실비율 판단에 어떤 영향을 줘?",
       ],
     },
   ];
@@ -2630,6 +2654,47 @@ function ChatScreenV2({
           </div>
         </div>
         <div className="chat-main">
+          {savePromptVisible && (
+            <section className="save-choice-panel" aria-label="상담 저장 선택">
+              <div>
+                <span className="save-choice-label">상담 저장</span>
+                <strong>이 상담을 내 상담 기록에 저장하시겠어요?</strong>
+                <p>로그인하면 나중에 다시 확인할 수 있습니다. 저장하지 않은 상담은 현재 접속 중에만 유지됩니다.</p>
+              </div>
+              <div className="save-choice-actions">
+                <button className="button" type="button" onClick={onKeepTemporary}>
+                  저장하지 않기
+                </button>
+                <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
+                  {isSavingConversation ? "저장 중" : "로그인 후 저장"}
+                </button>
+              </div>
+            </section>
+          )}
+
+          <details className="quick-examples">
+            <summary className="quick-examples-header">
+              <span>
+                <strong>서비스 예시 작동 방식</strong>
+                <small>궁금한 상황을 선택하면 질문이 입력창에 담깁니다.</small>
+              </span>
+            </summary>
+            <div className="quick-example-groups">
+              {quickQuestionGroups.map((group) => (
+                <section className="quick-example-group" aria-label={group.title} key={group.title}>
+                  <h4>{group.title}</h4>
+                  <div className="quick-row">
+                    {group.questions.map((item) => (
+                      <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </details>
+
           <div className="messages">
             {!hasConversation && (
               <section className="chat-empty-state" aria-label="상담 시작">
@@ -2655,6 +2720,15 @@ function ChatScreenV2({
                         {!isUser && !message.streaming && message.followUp && <FollowUpNote followUp={message.followUp} />}
                         {!isUser && !message.streaming && isLatestAssistant && (
                           <>
+                            {appealDecisionUi && (
+                              <AppealDecisionPanel
+                                ui={appealDecisionUi}
+                                riskAcknowledged={appealRiskAcknowledged}
+                                onAcknowledge={onAcknowledgeAppealRisk}
+                                onEdit={() => setQuestion("이의 사유 내용을 수정하고 싶어")}
+                                onRetry={onRetryAppealDecision}
+                              />
+                            )}
                             {chatSafetyGuidance && <SafetyGuidancePanel guidance={chatSafetyGuidance} />}
                             <MissingFieldsPrompt supervisorState={supervisorState} />
                             {canGenerateReport && (reportingPayload || analysisCards.length > 0) && (
@@ -2695,24 +2769,6 @@ function ChatScreenV2({
             )}
           </div>
 
-          {savePromptVisible && (
-            <section className="save-choice-panel" aria-label="상담 저장 선택">
-              <div>
-                <span className="save-choice-label">상담 저장</span>
-                <strong>이 상담을 내 상담 기록에 저장하시겠어요?</strong>
-                <p>로그인하면 나중에 다시 확인할 수 있습니다. 저장하지 않은 상담은 현재 접속 중에만 유지됩니다.</p>
-              </div>
-              <div className="save-choice-actions">
-                <button className="button" type="button" onClick={onKeepTemporary}>
-                  저장하지 않기
-                </button>
-                <button className="button primary" type="button" onClick={onSaveConversation} disabled={isSavingConversation}>
-                  {isSavingConversation ? "저장 중" : "로그인 후 저장"}
-                </button>
-              </div>
-            </section>
-          )}
-
           {saveDecision === "session_only" && (
             <section className="save-choice-panel is-muted" aria-label="임시 상담 유지">
               <strong>이번 상담은 임시로 유지합니다.</strong>
@@ -2737,29 +2793,6 @@ function ChatScreenV2({
               onConfirm={onConfirmAttachmentClassification}
             />
           )}
-
-          <details className="quick-examples">
-            <summary className="quick-examples-header">
-              <span>
-                <strong>서비스 예시 작동 방식</strong>
-                <small>궁금한 상황을 선택하면 질문이 입력창에 담깁니다.</small>
-              </span>
-            </summary>
-            <div className="quick-example-groups">
-              {quickQuestionGroups.map((group) => (
-                <section className="quick-example-group" aria-label={group.title} key={group.title}>
-                  <h4>{group.title}</h4>
-                  <div className="quick-row">
-                    {group.questions.map((item) => (
-                      <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
-                        {item}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </details>
 
           <div className="chat-input">
             <div className="input-stack">
@@ -3851,6 +3884,42 @@ function DeadlineGuidancePanel({ guidance }) {
   );
 }
 
+function AppealDecisionPanel({ onAcknowledge, onEdit, onRetry, riskAcknowledged, ui }) {
+  return (
+    <aside
+      className={`appeal-decision-panel appeal-decision-panel--${ui.risk.status}`}
+      role={ui.risk.status === "safe" ? "status" : "alert"}
+      aria-label="이의신청 위험과 인정 가능성"
+    >
+      <section className="appeal-decision-panel__risk">
+        <span className="appeal-decision-panel__label">RG · 위험 확인</span>
+        <strong>{ui.risk.label}</strong>
+        <p>{ui.risk.message}</p>
+        {ui.risk.category && <small>감지 유형 · {ui.risk.category}</small>}
+      </section>
+      <section className={`appeal-decision-panel__merit appeal-decision-panel__merit--${ui.merit.status}`} role="status">
+        <span className="appeal-decision-panel__label">MG · 인정 가능성</span>
+        <strong>{ui.merit.label}</strong>
+        {ui.merit.reliefLabel && <span className="tag">{ui.merit.reliefLabel}</span>}
+        <p>{ui.merit.basis}</p>
+      </section>
+      <section className="appeal-decision-panel__combined">
+        <strong>종합 안내</strong>
+        <p>{ui.combinedMessage}</p>
+      </section>
+      <div className="appeal-decision-panel__actions">
+        <button className="button" type="button" onClick={onEdit}>내용 수정</button>
+        {ui.canRetry && <button className="button" type="button" onClick={onRetry}>판정 다시 요청</button>}
+        {ui.requiresAcknowledgement && (
+          <button className="button primary" type="button" onClick={onAcknowledge} disabled={riskAcknowledged}>
+            {riskAcknowledged ? "위험 확인 완료" : "위험을 확인하고 계속"}
+          </button>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 function SafetyGuidancePanel({ guidance }) {
   const limitations = stringList(guidance?.limitations);
   const nextActions = stringList(guidance?.nextActions);
@@ -3917,6 +3986,10 @@ function EvidenceBoundaryPanel({ facts = [], userClaims = [] }) {
 
 function CaseResultScreen({
   analysisCards = [],
+  appealDecisionUi = null,
+  appealRiskAcknowledged = false,
+  onAcknowledgeAppealRisk,
+  onRetryAppealDecision,
   caseType = "fine",
   currentReport = null,
   deadlineGuidance = null,
@@ -3987,6 +4060,15 @@ function CaseResultScreen({
 
       <div className="dashboard case-result-dashboard">
         <ServiceInformationNotice />
+        {appealDecisionUi && (
+          <AppealDecisionPanel
+            ui={appealDecisionUi}
+            riskAcknowledged={appealRiskAcknowledged}
+            onAcknowledge={onAcknowledgeAppealRisk}
+            onEdit={onOpenChat}
+            onRetry={onRetryAppealDecision}
+          />
+        )}
         {resultSafetyGuidance && <SafetyGuidancePanel guidance={resultSafetyGuidance} />}
         {deadlineGuidance && (
           <DeadlineGuidancePanel guidance={deadlineGuidance} />
@@ -4032,7 +4114,7 @@ function CaseResultScreen({
                 <div className="case-result-card-list">
                   {analysisCards.slice(0, 4).map((card, index) => (
                     <article className="case-result-card" key={analysisCardKey(card, index)}>
-                      <span className={card.status === "success" ? "tag green" : "tag amber"}>{card.card_type}</span>
+                      <span className={analysisCardTagClass(card)}>{card.card_type}</span>
                       <strong>{card.title}</strong>
                       <p>{card.summary}</p>
                     </article>
@@ -4711,10 +4793,16 @@ function restoreCurrentReport(job = {}, item = {}) {
 function normalizeAnalysisCards(cards) {
   return cards.map((card) => ({
     card_type: normalizeLabel(card.card_type),
+    node_code: card.node_code || "",
     title: normalizeDisplayText(card.title || "분석 항목"),
     status: card.status || "partial",
     summary: normalizeDisplayText(card.summary || "추가 확인이 필요합니다."),
   }));
+}
+
+function analysisCardTagClass(card) {
+  if (card?.node_code === "appeal_decision_flow") return "tag amber";
+  return card?.status === "success" ? "tag green" : "tag amber";
 }
 
 function detectCaseType({ analysisCards = [], analysisResponse = null, currentReport = null } = {}) {
