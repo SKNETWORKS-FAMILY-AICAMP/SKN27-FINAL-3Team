@@ -721,6 +721,7 @@ def test_ssm_jobs_have_configurable_timeout_cancel_and_terminal_confirmation() -
 
     rag_seed_loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
     assert "TimeoutSeconds = $SsmTimeoutSeconds" in rag_seed_loader
+    assert "executionTimeout = @([string]$SsmTimeoutSeconds)" in rag_seed_loader
 
 
 def test_remote_state_is_precreated_versioned_encrypted_and_lockfile_based() -> None:
