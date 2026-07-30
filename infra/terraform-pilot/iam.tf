@@ -65,6 +65,24 @@ data "aws_iam_policy_document" "app" {
   }
 
   statement {
+    sid       = "ReadVisionQueueResults"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.clean.arn}/vision/aws-queue/v1/*"]
+  }
+
+  dynamic "statement" {
+    for_each = var.vision_worker_enabled ? [true] : []
+
+    content {
+      sid       = "SendVisionQueueJobs"
+      effect    = "Allow"
+      actions   = ["sqs:SendMessage"]
+      resources = [aws_sqs_queue.vision_worker[0].arn]
+    }
+  }
+
+  statement {
     sid    = "UseReportStagingObjects"
     effect = "Allow"
     actions = [

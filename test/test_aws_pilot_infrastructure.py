@@ -66,7 +66,11 @@ def test_terraform_avoids_the_managed_services_that_make_the_pilot_expensive() -
 
 def test_compute_is_one_ssm_only_x86_instance_with_encrypted_gp3_and_eip() -> None:
     source = _terraform_source()
-    assert len(re.findall(r'resource\s+"aws_instance"', source)) == 1
+    compute = (TERRAFORM_DIR / "compute.tf").read_text(encoding="utf-8")
+    vision = (TERRAFORM_DIR / "vision_worker.tf").read_text(encoding="utf-8")
+    assert len(re.findall(r'resource\s+"aws_instance"', compute)) == 1
+    assert len(re.findall(r'resource\s+"aws_instance"', vision)) == 1
+    assert "count = var.vision_worker_enabled ? 1 : 0" in vision
     assert re.search(r'default\s*=\s*"t3a\.large"', source)
     assert re.search(r'name\s*=\s*"architecture"', source)
     assert re.search(r'values\s*=\s*\["x86_64"\]', source)
@@ -170,6 +174,11 @@ def test_pilot_runtime_declares_runpod_vision_without_secret_values() -> None:
         "RUNPOD_VISION_DOWNLOAD_TIMEOUT_SECONDS",
         "RUNPOD_VISION_MAX_DOWNLOAD_BYTES",
         "RUNPOD_VISION_EXECUTION_TIMEOUT_SECONDS",
+        "AWS_VISION_QUEUE_URL",
+        "AWS_VISION_RESULT_BUCKET",
+        "AWS_VISION_RESULT_PREFIX",
+        "AWS_VISION_TIMEOUT_SECONDS",
+        "AWS_VISION_POLL_INTERVAL_SECONDS",
     }
     keys = {
         line.split("=", 1)[0]
@@ -225,12 +234,16 @@ def test_postgres_force_ssl_uses_the_static_parameter_apply_method() -> None:
 
 def test_private_s3_and_ecr_resources_have_encryption_and_lifecycle_controls() -> None:
     source = _terraform_source()
+    registry = (TERRAFORM_DIR / "registry.tf").read_text(encoding="utf-8")
+    vision = (TERRAFORM_DIR / "vision_worker.tf").read_text(encoding="utf-8")
     assert len(re.findall(r'resource\s+"aws_s3_bucket"\s+"(clean|quarantine)"', source)) == 2
     assert len(re.findall(r'resource\s+"aws_s3_bucket_public_access_block"', source)) == 2
     assert len(re.findall(r'resource\s+"aws_s3_bucket_server_side_encryption_configuration"', source)) == 2
     assert len(re.findall(r'resource\s+"aws_s3_bucket_lifecycle_configuration"', source)) == 2
     assert len(re.findall(r'resource\s+"aws_ecr_repository"\s+"(backend|frontend)"', source)) == 2
-    assert len(re.findall(r'resource\s+"aws_ecr_lifecycle_policy"', source)) == 2
+    assert len(re.findall(r'resource\s+"aws_ecr_lifecycle_policy"', registry)) == 2
+    assert len(re.findall(r'resource\s+"aws_ecr_lifecycle_policy"', vision)) == 1
+    assert "count = var.vision_worker_enabled ? 1 : 0" in vision
     assert len(re.findall(r"scan_on_push\s*=\s*true", source)) >= 2
 
 

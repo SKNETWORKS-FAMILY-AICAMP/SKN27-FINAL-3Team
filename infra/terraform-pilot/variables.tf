@@ -265,3 +265,93 @@ variable "operational_heartbeat_missing_periods" {
     error_message = "operational_heartbeat_missing_periods must be at least 2."
   }
 }
+
+variable "vision_worker_enabled" {
+  description = "Create the private GPU Vision worker only after image, AMI, and budget approval."
+  type        = bool
+  default     = false
+}
+
+variable "vision_worker_instance_type" {
+  description = "GPU instance type reserved for the private Vision worker."
+  type        = string
+  default     = "g5.xlarge"
+
+  validation {
+    condition     = contains(["g5.xlarge"], var.vision_worker_instance_type)
+    error_message = "vision_worker_instance_type must be the approved 24 GiB g5.xlarge pilot size."
+  }
+}
+
+variable "vision_worker_ami_id" {
+  description = "Private GPU-ready AMI containing Docker, NVIDIA drivers, and the approved model volume."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      !var.vision_worker_enabled ||
+      can(regex("^ami-[0-9a-f]{8,17}$", var.vision_worker_ami_id))
+    )
+    error_message = "vision_worker_ami_id must be an explicit GPU-ready AMI ID when Vision is enabled."
+  }
+}
+
+variable "vision_worker_image_tag" {
+  description = "Immutable Vision worker image tag already pushed to the dedicated ECR repository."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      !var.vision_worker_enabled ||
+      can(regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", var.vision_worker_image_tag))
+    )
+    error_message = "vision_worker_image_tag must be an immutable ECR tag when Vision is enabled."
+  }
+}
+
+variable "vision_worker_model_volume_prepared" {
+  description = "Explicit acknowledgement that the AMI or attached volume contains the approved Vision models."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.vision_worker_enabled || var.vision_worker_model_volume_prepared
+    error_message = "vision_worker_model_volume_prepared must be true before enabling the GPU worker."
+  }
+}
+
+variable "vision_worker_allowed_hosts" {
+  description = "Comma-separated approved S3 hosts allowed for signed Vision video downloads."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.vision_worker_enabled || trimspace(var.vision_worker_allowed_hosts) != ""
+    error_message = "vision_worker_allowed_hosts must be set before enabling the GPU worker."
+  }
+}
+
+variable "vision_worker_checkpoint_path" {
+  description = "Existing absolute VideoMAE checkpoint path on the prepared private GPU host."
+  type        = string
+  default     = "/vision-volume/models/videomae"
+}
+
+variable "vision_worker_qwen_model_id" {
+  description = "Pinned Vision Qwen model identifier available from the prepared local cache."
+  type        = string
+  default     = "Qwen/Qwen3-VL-4B-Instruct"
+}
+
+variable "vision_worker_idle_minutes" {
+  description = "Scheduled idle check interval. A worker stops only when no SQS message is visible or in flight."
+  type        = number
+  default     = 15
+
+  validation {
+    condition     = contains([5, 10, 15, 30], var.vision_worker_idle_minutes)
+    error_message = "vision_worker_idle_minutes must be 5, 10, 15, or 30."
+  }
+}
