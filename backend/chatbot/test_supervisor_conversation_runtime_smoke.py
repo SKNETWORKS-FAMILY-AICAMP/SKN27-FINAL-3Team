@@ -227,7 +227,7 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
             "limitations": [],
         }
 
-        def run_law(_agent_input, _adapter_context):
+        def run_law(_agent_input, _adapter_context, **_kwargs):
             return {"status": "success", "summary": "Fixture law result.", "structured_result": {"matched_laws": []}, "evidence": [], "next_actions": [], "limitations": []}
 
         def complete_from_external_worker(work_item_id, **_kwargs):
@@ -387,7 +387,7 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
                 }
             }
 
-        def run_law(_agent_input, _adapter_context):
+        def run_law(_agent_input, _adapter_context, **_kwargs):
             return {
                 "status": "success",
                 "summary": "Persisted law result.",
