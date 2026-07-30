@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for required in AWS_DEFAULT_REGION BACKEND_REPOSITORY_URL FRONTEND_REPOSITORY_URL CODEBUILD_RESOLVED_SOURCE_VERSION; do
+for required in AWS_DEFAULT_REGION BACKEND_REPOSITORY_URL FRONTEND_REPOSITORY_URL VITE_GOOGLE_CLIENT_ID CODEBUILD_RESOLVED_SOURCE_VERSION; do
   if [[ -z "${!required:-}" ]]; then
     echo "Missing required environment variable: $required" >&2
     exit 2

@@ -28,6 +28,29 @@ def test_buildspec_conditionally_builds_immutable_vision_image() -> None:
     assert "latest" not in buildspec
 
 
+def test_frontend_build_requires_google_client_id() -> None:
+    builder = (
+        ROOT / "deploy" / "aws-pilot" / "Build-And-Push-ImmutableImages.sh"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        "AWS_DEFAULT_REGION BACKEND_REPOSITORY_URL FRONTEND_REPOSITORY_URL "
+        "VITE_GOOGLE_CLIENT_ID CODEBUILD_RESOLVED_SOURCE_VERSION"
+    ) in builder
+
+
+def test_terraform_rejects_ci_without_frontend_google_client_id() -> None:
+    variables = (ROOT / "infra" / "terraform-pilot" / "variables.tf").read_text(
+        encoding="utf-8"
+    )
+    variable_start = variables.index('variable "frontend_google_client_id"')
+    variable_end = variables.index('\n}\n', variable_start) + 2
+    google_client_id_variable = variables[variable_start:variable_end]
+
+    assert "!var.ci_enabled || trimspace(var.frontend_google_client_id) != \"\"" in google_client_id_variable
+    assert "ci_enabled requires frontend_google_client_id." in google_client_id_variable
+
+
 def test_codebuild_preflights_immutable_ecr_tags_with_explicit_lookup_failures() -> None:
     codebuild = (
         ROOT / "infra" / "terraform-pilot" / "codebuild.tf"

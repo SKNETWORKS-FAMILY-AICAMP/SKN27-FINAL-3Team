@@ -48,6 +48,11 @@ variable "frontend_google_client_id" {
   description = "Public Google OAuth client ID compiled into the frontend image; not a secret."
   type        = string
   default     = ""
+
+  validation {
+    condition     = !var.ci_enabled || trimspace(var.frontend_google_client_id) != ""
+    error_message = "ci_enabled requires frontend_google_client_id."
+  }
 }
 
 variable "ci_log_retention_days" {
