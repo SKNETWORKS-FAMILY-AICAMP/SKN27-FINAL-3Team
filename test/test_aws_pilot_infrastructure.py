@@ -1562,21 +1562,25 @@ def test_normal_promotion_uses_one_production_supervisor_runtime_smoke() -> None
     )
 
 
-def test_normal_promotion_waits_for_host_ports_and_never_starts_seed_loader() -> None:
+def test_normal_promotion_waits_only_for_health_checked_services() -> None:
     deploy = _read_deploy("Deploy-Pilot.ps1")
     previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")
     promote = deploy.index("ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current", previous)
     normal_segment = deploy[previous:promote]
 
-    operational_services = (
-        "OPERATIONAL_SERVICES='caddy edge-rate-limit frontend backend "
-        "agent-worker file-scan-worker ops-monitor redis clamav law-neo4j'"
+    waited_services = (
+        "WAITED_SERVICES='caddy edge-rate-limit frontend backend redis clamav law-neo4j'"
     )
-    assert operational_services in normal_segment
+    background_services = (
+        "BACKGROUND_SERVICES='agent-worker file-scan-worker ops-monitor'"
+    )
+    assert waited_services in normal_segment
+    assert background_services in normal_segment
     assert (
         "$productionComposeCommand up -d --wait --wait-timeout 600 "
-        "--remove-orphans `$OPERATIONAL_SERVICES"
+        "--remove-orphans `$WAITED_SERVICES"
     ) in normal_segment
+    assert "$productionComposeCommand up -d `$BACKGROUND_SERVICES" in normal_segment
     assert (
         "for attempt in `$(seq 1 30); do ! ss -ltnp | grep -E '(:80|:443)'"
     ) in normal_segment
@@ -1587,8 +1591,12 @@ def test_normal_promotion_waits_for_host_ports_and_never_starts_seed_loader() ->
         "for attempt in `$(seq 1 30); do ! ss -ltnp | grep -E '(:80|:443)'"
     ) < normal_segment.rindex(
         "$productionComposeCommand up -d --wait --wait-timeout 600 "
-        "--remove-orphans `$OPERATIONAL_SERVICES"
+        "--remove-orphans `$WAITED_SERVICES"
     )
+    assert normal_segment.index(
+        "$productionComposeCommand up -d --wait --wait-timeout 600 "
+        "--remove-orphans `$WAITED_SERVICES"
+    ) < normal_segment.rindex("$productionComposeCommand up -d `$BACKGROUND_SERVICES")
 
 
 def test_release_update_stage_is_isolated_from_the_current_compose_project() -> None:
