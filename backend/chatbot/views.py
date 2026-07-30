@@ -202,6 +202,9 @@ def guest_session(request: HttpRequest) -> JsonResponse:
     )
     try:
         payload["persistence"] = persist_guest_session_identity(payload, raw_payload=body)
+    except SessionBindingError as exc:
+        forbidden = build_auth_error("forbidden", reason=exc.reason)
+        return _json_response(request, forbidden, status=403)
     except DatabaseError:
         unavailable = build_auth_error(
             "provider_unavailable",

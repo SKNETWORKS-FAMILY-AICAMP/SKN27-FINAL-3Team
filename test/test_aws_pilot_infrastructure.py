@@ -722,7 +722,7 @@ def test_ssm_jobs_have_configurable_timeout_cancel_and_terminal_confirmation() -
     rag_seed_loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
     assert "TimeoutSeconds = $SsmTimeoutSeconds" in rag_seed_loader
     assert "executionTimeout = @([string]$SsmTimeoutSeconds)" in rag_seed_loader
-    assert "_rag-seed-runners/" in rag_seed_loader
+    assert '"_deploy/$ReleaseTag/rag-seed-runner.sh"' in rag_seed_loader
     assert "aws s3 cp" in rag_seed_loader
     assert "bash /tmp/skn27-rag-seed-runner.sh" in rag_seed_loader
 

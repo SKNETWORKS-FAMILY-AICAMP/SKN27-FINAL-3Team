@@ -250,7 +250,9 @@ def test_guest_bootstrap_rebinds_server_session_before_follow_up_workflows() -> 
     block = shell[start:end]
 
     assert block.count("api.createGuestSession(") >= 2
-    assert "const ensuredSessionId = initialGuest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;" in block
+    assert "resolveGuestBootstrapSessionId({" in block
+    assert "boundSessionId: initialGuest?.session_binding?.session_id," in block
+    assert "guestCredential," in block
     assert "const reboundGuest = await api.createGuestSession(" in block
     assert "guest_id: initialGuestId," in block
     assert "session_id: ensuredSessionId," in block

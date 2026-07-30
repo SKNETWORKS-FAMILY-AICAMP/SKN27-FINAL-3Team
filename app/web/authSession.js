@@ -82,6 +82,22 @@ export function buildAuthContext({ authState, guestId, authSessionId, sessionId,
   };
 }
 
+export function resolveGuestBootstrapSessionId({
+  boundSessionId,
+  sessionId,
+  guestId,
+  guestCredential,
+  nowMs = Date.now(),
+} = {}) {
+  if (boundSessionId) {
+    return String(boundSessionId);
+  }
+  if (guestId && guestCredential && sessionId) {
+    return String(sessionId);
+  }
+  return `ses_web_${Number(nowMs)}`;
+}
+
 export async function buildGoogleLoginPayload({
   googleClientId,
   purpose = "LOGIN",

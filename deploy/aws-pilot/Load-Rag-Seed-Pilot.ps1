@@ -137,7 +137,7 @@ $runnerCommands = @(
     "trap - ERR"
 )
 
-$runnerKey = "_rag-seed-runners/$ReleaseTag/$RagSeedManifestSha256/run-rag-seed.sh"
+$runnerKey = "_deploy/$ReleaseTag/rag-seed-runner.sh"
 $runnerPath = Join-Path ([IO.Path]::GetTempPath()) "skn27-rag-seed-runner-$([guid]::NewGuid().ToString('N')).sh"
 try {
     [IO.File]::WriteAllText($runnerPath, ($runnerCommands -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
