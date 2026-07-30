@@ -2994,6 +2994,20 @@ components:
           - type: 'null'
           default: null
           title: Routing Intent
+        consultation_type:
+          anyOf:
+          - enum:
+            - general
+            - fault_ratio
+            - fine_notice
+            type: string
+          - type: 'null'
+          default: null
+          title: Consultation Type
+        facts:
+          additionalProperties: true
+          title: Facts
+          type: object
         case_storage_consent:
           anyOf:
           - type: boolean
