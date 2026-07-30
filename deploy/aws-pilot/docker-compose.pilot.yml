@@ -181,6 +181,7 @@ services:
         ipv4_address: ${PILOT_BACKEND_IP:-172.31.0.5}
 
   rag-loader:
+    profiles: [seed]
     image: ${BACKEND_REPOSITORY_URL:?BACKEND_REPOSITORY_URL is required}:${RELEASE_TAG:?RELEASE_TAG is required}
     env_file: *runtime-env-file
     environment:
@@ -274,6 +275,7 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
+      start_period: 60s
       retries: 5
     networks:
       pilot:
