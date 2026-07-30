@@ -171,7 +171,7 @@ def _patched_agents(*, law_status: str = "success"):
             }
         }
 
-    def run_law(_agent_input, _adapter_context):
+    def run_law(_agent_input, _adapter_context, **_kwargs):
         return {
             "status": law_status,
             "summary": "Fixture law result.",

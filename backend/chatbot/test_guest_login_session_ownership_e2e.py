@@ -186,7 +186,7 @@ def _patched_report_ready_agents():
             }
         }
 
-    def run_law(_agent_input, _adapter_context):
+    def run_law(_agent_input, _adapter_context, **_kwargs):
         return {
             "status": "success",
             "summary": "Fixture law result.",
