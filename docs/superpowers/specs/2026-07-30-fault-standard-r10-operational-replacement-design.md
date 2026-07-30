@@ -11,11 +11,13 @@
    Calculator V2를 현재 운영 RAG 계약 안으로 이식한다.
 2. Rule을 정상 선택한 요청에는 사고 조건이 일부 부족하더라도 항상 기본 과실비율
    숫자를 반환한다.
-3. 기존 구현과 R10을 독립적으로 운영하고 즉시 되돌릴 수 있는 전환 구조를 만든다.
+3. 검증을 통과한 R10으로 현재 인정기준 구현을 직접 교체하고 운영 경로에는 기존
+   구현이나 버전 선택기를 남기지 않는다.
 
-선택한 방식은 세 번째 권장안인 **운영 코드 이식 + 격리된 저장소 + 기능 플래그
-전환**이다. `standard_TEST` 폴더를 운영 중에 직접 import하거나 기존 DB를 제자리에서
-덮어쓰지 않는다.
+선택한 방식은 세 번째 권장안에서 불필요한 운영 버전 선택기를 제거한
+**운영 코드 이식 + 격리된 저장소 사전 검증 + R10 직접 교체**다.
+`standard_TEST` 폴더를 운영 중에 직접 import하거나 기존 DB를 제자리에서 덮어쓰지
+않는다.
 
 ## 2. 기준 릴리스와 금지 대상
 
@@ -53,7 +55,7 @@ Final Ratio Exact 60%다. 따라서 이 서비스의 숫자는 자동 법률판�
 - R10 C 검색 경로와 단계별 B/A 강등 처리
 - Rule 기본비율을 이용한 강제 숫자 반환 정책
 - 검색, 선택, Variant, 당사자 매핑, 계산의 추적 정보
-- legacy/R10 기능 플래그, shadow 비교, 전환, 롤백
+- 교체 전 baseline 비교와 검증 완료 후 R10 직접 전환
 - 단위, 통합, COMPLETE30, 장애 주입, 계약 회귀 테스트
 
 ### 제외
@@ -83,13 +85,13 @@ Final Ratio Exact 60%다. 따라서 이 서비스의 숫자는 자동 법률판�
 - 단점: 테스트 스냅샷 폴더가 운영 의존성이 되고 failed candidate와 운영 코드의
   경계가 흐려진다. 폴더 이동이나 정리에도 서비스가 깨질 수 있다.
 
-### 접근 3: 운영 코드 이식 + 격리 저장소 + 기능 플래그
+### 접근 3: 운영 코드 이식 + 격리 저장소 사전 검증 + 직접 교체
 
-- 장점: 현재 공개 계약을 유지하면서 R10을 독립 검증할 수 있다. shadow 비교,
-  점진 전환, 즉시 롤백이 가능하다. `standard_TEST`를 제거해도 운영 코드가 유지된다.
-- 단점: 어댑터, 별도 적재, 전환 설정과 테스트가 추가된다.
+- 장점: 현재 공개 계약을 유지하면서 R10을 독립 검증한 뒤 운영 코드를 단순한
+  R10 단일 경로로 유지할 수 있다. `standard_TEST`를 제거해도 운영 코드가 유지된다.
+- 단점: R10 적재와 검증이 완료되기 전에는 운영 진입점을 교체할 수 없다.
 
-운영 안정성과 추적 가능성이 가장 높은 접근 3을 채택한다.
+운영 단순성과 데이터 안전성을 함께 확보하는 접근 3을 채택한다.
 
 ## 5. 목표 구조
 
@@ -97,15 +99,13 @@ Final Ratio Exact 60%다. 따라서 이 서비스의 숫자는 자동 법률판�
 Supervisor/상위 호출자
   -> 현재 RagRequest 계약
   -> fault_standard.service
-     -> runtime selector (legacy | r10 | shadow)
-        -> legacy runtime
-        -> R10 operational runtime
-           -> query embedding
-           -> PostgreSQL exact cosine Top-50
-           -> PostgreSQL structural rerank (B)
-           -> Neo4j relationship/path rerank (C)
-           -> selected Rule + party mapping
-           -> forced numeric calculator
+     -> R10 operational runtime
+        -> query embedding
+        -> PostgreSQL exact cosine Top-50
+        -> PostgreSQL structural rerank (B)
+        -> Neo4j relationship/path rerank (C)
+        -> selected Rule + party mapping
+        -> forced numeric calculator
      -> 현재 DomainSearchResult 계약
   -> 이후 과실비율 에이전트가 다른 RAG 결과와 조립
 ```
@@ -129,7 +129,6 @@ manifest, Core/Search/Calculator 입력, 압축 embedding, PostgreSQL/Neo4j 적�
 - `selector`: A Top-50, B 구조 판정, C 관계 판정과 선택 trace를 만든다.
 - `calculator`: 선택된 Rule의 비율과 확인된 가감요소만 계산한다.
 - `result_adapter`: R10 내부 결과를 기존 `DomainSearchResult`로 변환한다.
-- `runtime_selector`: legacy, r10, shadow 실행 모드를 결정한다.
 
 각 구성요소는 다른 구성요소의 내부 자료구조를 직접 참조하지 않고 명시적 입력과
 출력 객체로 통신한다.
@@ -280,28 +279,16 @@ R10 PostgreSQL과 Neo4j 데이터는 기존 운영 데이터와 물리적 또는
 적재 검증은 새 schema와 새 label/release ID만 대상으로 한다. 기존
 `rag_qwen4`, `FaultStandardOperational`, V7/V9 label은 읽기·쓰기·삭제하지 않는다.
 
-## 11. 실행 모드와 전환
+## 11. R10 직접 교체
 
-환경 설정 `FAULT_STANDARD_RUNTIME_VERSION`은 다음 모드를 제공한다.
+운영 환경에는 `legacy | shadow | r10` 선택 설정을 만들지 않는다. 검증이 끝나면
+현재 `fault_standard.service`가 R10 구현을 직접 호출하도록 바꾸고 기존 retriever,
+selector, calculator 구현은 운영 Python 경로에서 제거한다.
 
-- `legacy`: 현재 인정기준 구현만 호출
-- `r10`: R10 구현만 호출
-- `shadow`: legacy 결과를 사용자에게 반환하고 R10도 내부 비교용으로 실행
-
-기본값은 배포 전까지 `legacy`다. 알 수 없는 설정값은 자동으로 R10을 선택하지 않고
-시작 단계에서 설정 오류로 처리한다.
-
-shadow 모드에서는 다음 항목만 비교 로그에 남긴다.
-
-- 요청/trace 식별용 비식별 ID
-- 각 런타임 상태
-- 선택 Rule ID
-- user/opponent 기본 및 최종 비율
-- R10 `ratio_source`
-- 후보/계산 단계별 지연시간
-- 차이 분류
-
-원문 사용자 질의, 개인정보, 전체 사고 사실은 비교 로그에 기록하지 않는다.
+교체 전 비교는 운영 중 이중 실행이 아니라 테스트 환경에서 수행한다. 현재 구현의
+대표 입력 결과를 baseline artifact로 먼저 고정한 뒤 같은 입력을 R10에 실행하여
+Rule, 비율, 상태, 지연시간 차이를 보고한다. 이 비교 artifact는 평가용이며 운영
+runtime에서 읽지 않는다.
 
 ## 12. 장애 처리와 강등
 
@@ -313,9 +300,8 @@ R10 내부 검색 단계는 다음 순서로 강등한다.
    A 1위 Rule의 근거는 반환하되 자동 숫자 계산은 하지 않고 `partial`
 4. embedding 또는 PostgreSQL vector 조회 장애: `failed`
 
-구조 저장소 장애 시 legacy 결과로 몰래 전환하지 않는다. runtime 단위 전환은
-오직 `FAULT_STANDARD_RUNTIME_VERSION`과 명시적 롤백 절차로 수행한다. 그래야
-사용자가 받은 결과의 출처를 추적할 수 있다.
+구조 저장소 장애 시 제거된 기존 구현으로 몰래 전환하지 않는다. 사용자에게 반환된
+결과의 출처는 항상 R10이어야 한다.
 
 ## 13. 검증 전략
 
@@ -363,22 +349,24 @@ R10 내부 검색 단계는 다음 순서로 강등한다.
 - Variant 불명확 강등 결과의 `ratio_source=rule_base`
 - 인프라 장애에서 숫자 조작 0
 
-이후 실제 대표 사고 질의의 shadow 결과를 검토한다. 알려진 R10 한계인 q06/q13
-selector, q28/q30 adjustment 중복 위험, Neo4j rerank demotion 8건은 별도 회귀
-목록으로 추적하며 숨기지 않는다.
+이후 대표 사고 질의의 교체 전 baseline과 R10 결과를 테스트 환경에서 비교한다.
+알려진 R10 한계인 q06/q13 selector, q28/q30 adjustment 중복 위험, Neo4j
+rerank demotion 8건은 별도 회귀 목록으로 추적하며 숨기지 않는다.
 
-## 14. 전환 및 롤백
+## 14. 직접 전환과 복구
 
-1. 현재 legacy 결과와 환경 설정을 baseline으로 동결한다.
+1. 현재 구현의 대표 결과를 평가 baseline으로 동결한다.
 2. R10 artifact preflight를 통과시킨다.
 3. 격리된 PostgreSQL/Neo4j에 적재하고 저장소 검증을 통과시킨다.
-4. `legacy` 모드에서 코드와 계약 회귀 테스트를 통과시킨다.
-5. `shadow` 모드로 R10 차이 보고서를 만든다.
-6. COMPLETE30 및 shadow 승인 후 `r10`으로 전환한다.
-7. 장애 또는 품질 Gate 실패 시 설정을 `legacy`로 되돌린다.
+4. R10 단위·통합·계약 회귀 테스트를 통과시킨다.
+5. 테스트 환경에서 baseline/R10 차이 보고서를 만든다.
+6. COMPLETE30과 차이 보고서가 Gate를 통과하면 운영 진입점을 R10으로 직접 교체한다.
+7. 교체 후 smoke test가 통과하면 R10을 유일한 인정기준 운영 경로로 사용한다.
 
-롤백은 데이터 삭제를 요구하지 않는다. R10 저장소는 원인 분석을 위해 보존하고,
-별도 승인 전에는 기존 저장소나 copied test 폴더를 삭제하지 않는다.
+운영 코드 안에는 비상 복구용 기존 구현을 남기지 않는다. 배포 직후 심각한 장애가
+발생한 경우에만 이전 Git commit을 다시 배포하여 복구한다. 이 복구 절차도
+R10 정상 검증 후 계속 실행되는 기능이나 설정은 아니다. 기존 DB와 copied test
+폴더 정리는 R10 교체와 분리하며 별도 삭제 승인이 있기 전에는 삭제하지 않는다.
 
 ## 15. 구현 순서
 
@@ -391,9 +379,9 @@ selector, q28/q30 adjustment 중복 위험, Neo4j rerank demotion 8건은 별도
 7. B/C selector와 trace
 8. 강제 숫자 calculator
 9. 기존 `DomainSearchResult` 어댑터
-10. runtime feature flag와 shadow 비교
-11. 단위/통합/COMPLETE30/장애 테스트
-12. shadow 보고서, R10 전환, 롤백 검증
+10. 단위/통합/COMPLETE30/장애 테스트
+11. 테스트 환경 baseline 비교 보고서
+12. 운영 진입점 R10 직접 교체와 smoke test
 
 구체적인 파일 목록, 테스트 이름, 각 단계의 실패 테스트와 실행 명령은 이 설계
 승인 후 별도 구현 계획에 작성한다.
@@ -406,7 +394,7 @@ selector, q28/q30 adjustment 중복 위험, Neo4j rerank demotion 8건은 별도
 - 정상 Rule 선택 시 Variant 정보가 부족해도 Rule 기본비율 숫자가 반환된다.
 - 첫 번째 Variant 임의 선택과 미확인 adjustment 적용이 없다.
 - user/opponent 매핑과 비율 출처가 trace에 남는다.
-- R10 저장소가 기존 저장소와 격리되고 삭제 없는 롤백이 가능하다.
+- R10 저장소가 기존 저장소와 격리되고 기존 DB를 변경하지 않는다.
 - COMPLETE30 기준 성능이 R10 기준보다 후퇴하지 않는다.
-- `legacy`, `shadow`, `r10` 모드의 테스트가 모두 통과한다.
+- 운영 `fault_standard.service`에는 R10 단일 실행 경로만 존재한다.
 - 심의사례/판례/최종 과실비율 에이전트 작업이 이번 범위에 섞이지 않는다.
