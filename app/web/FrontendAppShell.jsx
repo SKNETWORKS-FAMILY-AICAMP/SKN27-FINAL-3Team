@@ -22,6 +22,7 @@ import {
   CONSULTATION_TYPE_OPTIONS,
   FINE_NOTICE_FIELDS,
   buildConsultationMessagePair,
+  buildConsultationRequestContext,
   createEmptyConsultationIntake,
 } from "./consultationIntake.js";
 import { shouldPromptGuestConversationSave } from "./guestConversationPolicy.js";
@@ -1120,6 +1121,9 @@ export default function FrontendAppShell({
       freeText: trimmedQuestion,
       intake: consultationIntake,
     });
+    const consultationRequestContext = buildConsultationRequestContext({
+      intake: consultationIntake,
+    });
     const confirmationForRequest = ocrConfirmation || pendingOcrConfirmation;
     if (!composedQuestion) {
       setStatusMessage("상담 내용을 입력하거나 구조화 입력 항목을 작성해 주세요.");
@@ -1192,6 +1196,8 @@ export default function FrontendAppShell({
           auth_context: activeAuthContext,
           conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
           user_text: composedQuestion,
+          consultation_type: consultationRequestContext.consultation_type || undefined,
+          facts: consultationRequestContext.facts,
           ocr_confirmation: confirmationForRequest || undefined,
           attachment_classification_confirmation:
             attachmentClassificationConfirmation || undefined,

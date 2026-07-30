@@ -33,11 +33,15 @@ def test_public_chat_message_request_accepts_documented_input_shape() -> None:
             "conversation_history": [{"role": "user", "content": "사고 상담"}],
             "conversation_save_state": "pending",
             "execution_mode": "async_worker",
+            "consultation_type": "fault_ratio",
+            "facts": {"road_layout": "신호등 없는 교차로"},
         }
     )
 
     assert request.session_id == "ses_1"
     assert request.conversation_save_state == "pending"
+    assert request.consultation_type == "fault_ratio"
+    assert request.facts["road_layout"] == "신호등 없는 교차로"
 
 
 def test_chat_message_contract_accepts_only_documented_ocr_confirmation_fields() -> None:

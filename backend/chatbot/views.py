@@ -85,6 +85,9 @@ from app.services.history_event_mock_service import (
     source_from_request,
     subject_from_payload,
 )
+from app.services.public_consultation_routing_service import (
+    resolve_public_consultation_intent,
+)
 from app.services.report_query_service import (
     WORKER_REPORT_SOURCE,
     compose_report_detail_response,
@@ -1301,6 +1304,10 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             stored_followup_state,
         )
 
+    public_consultation_routing_intent = resolve_public_consultation_intent(
+        identity_body.get("consultation_type")
+    )
+
     usage = record_usage_event(identity_body, scope="chat_message")
     if not usage["allowed"]:
         return _rate_limit_response(request, usage)
@@ -1310,6 +1317,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             routing_intent_override=(
                 classification_routing_intent
                 or followup_routing_intent(stored_followup_state)
+                or public_consultation_routing_intent
             ),
         )
     except Exception:

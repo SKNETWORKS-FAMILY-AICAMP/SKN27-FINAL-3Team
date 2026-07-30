@@ -126,6 +126,17 @@ def test_consultation_intake_renders_only_the_selected_case_type_fields() -> Non
     assert "{isFaultRatio && (" in shell
 
 
+def test_chat_submission_forwards_bounded_consultation_type_and_canonical_facts() -> None:
+    shell = _shell()
+    submit_start = shell.index("async function submitServiceMessage(")
+    submit_end = shell.index("async function streamAssistantMessage(", submit_start)
+    submit = shell[submit_start:submit_end]
+
+    assert "buildConsultationRequestContext" in shell
+    assert "consultation_type: consultationRequestContext.consultation_type || undefined" in submit
+    assert "facts: consultationRequestContext.facts" in submit
+
+
 def test_user_message_and_primary_ctas_have_final_light_theme_overrides() -> None:
     styles = _styles()
 

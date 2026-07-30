@@ -602,6 +602,39 @@ def test_fault_ratio_followup_answer_is_accumulated_before_next_question() -> No
 
 
 @patch("app.services.chat_orchestration_service.build_supervisor_state_with_optional_llm")
+def test_structured_fault_facts_do_not_repeat_core_questions(build_supervisor_state) -> None:
+    build_supervisor_state.return_value = {
+        "contract_version": "supervisor_conversation_state.v2",
+        "stage": "need_fact_confirmation",
+        "collected_facts": [],
+        "missing_fields": [],
+        "next_questions": [],
+        "agent_input_packages": [],
+        "reporting_payload": None,
+    }
+
+    response = submit_message(
+        {
+            "session_id": "ses_structured_facts",
+            "user_text": "교차로 사고 과실을 상담하고 싶습니다.",
+            "facts": {
+                "road_layout": "신호등이 없는 같은 폭의 일반 교차로",
+                "vehicle_actions": "저는 직진, 상대 차량은 우측 도로에서 진입",
+                "signal_priority": "신호와 일시정지 표지가 없습니다.",
+                "collision_location": "제 차량 우측 앞 범퍼와 상대 차량 좌측 앞 범퍼",
+            },
+        },
+        routing_intent_override="accident_initial_consultation",
+    )
+
+    assert response["consultation_state"]["fact_state"]["missing_fields"] == []
+    assert not {
+        question["field"]
+        for question in response["pending_questions"]
+    } & {"road_layout", "vehicle_actions", "signal_priority", "collision_location"}
+
+
+@patch("app.services.chat_orchestration_service.build_supervisor_state_with_optional_llm")
 def test_accident_initial_message_uses_llm_only_for_fact_candidates(build_supervisor_state) -> None:
     build_supervisor_state.return_value = {
         "contract_version": "supervisor_conversation_state.v2",

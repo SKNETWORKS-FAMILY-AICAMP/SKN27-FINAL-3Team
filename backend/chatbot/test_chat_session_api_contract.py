@@ -75,6 +75,43 @@ class ChatSessionApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["status"], "scope_guidance")
 
+    def test_chat_message_maps_public_consultation_type_without_trusting_agent_input(
+        self,
+    ) -> None:
+        with patch(
+            "chatbot.views.submit_message",
+            return_value={
+                "contract_version": "chat_message.v1",
+                "session_id": "ses_chat_contract_routing",
+                "message_id": "msg_chat_contract_routing",
+                "status": "scope_guidance",
+            },
+        ) as submit_message:
+            response = self.client.post(
+                "/api/chat/messages/",
+                data={
+                    "session_id": "ses_chat_contract_routing",
+                    "user_text": "사고 과실 상담을 시작합니다.",
+                    "consultation_type": "fault_ratio",
+                    "facts": {
+                        "road_layout": "신호등 없는 교차로",
+                        "vehicle_actions": "양쪽 차량이 직진했습니다.",
+                    },
+                    "routing_intent": "text_ml_case_search",
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            submit_message.call_args.kwargs["routing_intent_override"],
+            "accident_initial_consultation",
+        )
+        self.assertEqual(
+            submit_message.call_args.args[0]["facts"]["road_layout"],
+            "신호등 없는 교차로",
+        )
+
     def test_chat_message_keeps_worker_polling_fields_for_queued_response(self) -> None:
         response = self.client.post(
             "/api/chat/messages/",

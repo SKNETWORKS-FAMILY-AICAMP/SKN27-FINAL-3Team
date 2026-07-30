@@ -25,6 +25,39 @@ test("keeps structured context in the request but shows only the user's free tex
   );
 });
 
+test("builds a bounded fault-ratio request context with canonical fact keys", () => {
+  assert.equal(typeof consultationIntakeModule.buildConsultationRequestContext, "function");
+  assert.deepEqual(
+    consultationIntakeModule.buildConsultationRequestContext({
+      intake: {
+        consultationType: "fault_ratio",
+        roadLayout: "신호등 없는 사거리",
+        vehicleActions: "저는 직진, 상대는 우측 진입",
+        signalPriority: "표지 없음",
+        collisionLocation: "제 우측 앞범퍼와 상대 좌측 앞범퍼",
+      },
+    }),
+    {
+      consultation_type: "fault_ratio",
+      facts: {
+        road_layout: "신호등 없는 사거리",
+        vehicle_actions: "저는 직진, 상대는 우측 진입",
+        signal_priority: "표지 없음",
+        collision_location: "제 우측 앞범퍼와 상대 좌측 앞범퍼",
+      },
+    }
+  );
+});
+
+test("does not turn arbitrary intake fields into server facts", () => {
+  assert.deepEqual(
+    consultationIntakeModule.buildConsultationRequestContext({
+      intake: { consultationType: "general", confirmedFacts: "임의 텍스트" },
+    }),
+    { consultation_type: "general", facts: {} }
+  );
+});
+
 test("supports general consultation without extra structured fields", () => {
   assert.ok(
     CONSULTATION_TYPE_OPTIONS.some(

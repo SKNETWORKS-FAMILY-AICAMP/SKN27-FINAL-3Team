@@ -50,6 +50,8 @@ class ChatMessageRequest(ChatContractRequest):
     conversation_save_state: Literal["saved", "pending", "session_only"] | None = None
     execution_mode: str | None = Field(default=None, min_length=1, max_length=64)
     routing_intent: str | None = Field(default=None, min_length=1, max_length=120)
+    consultation_type: Literal["general", "fault_ratio", "fine_notice"] | None = None
+    facts: dict[str, Any] = Field(default_factory=dict)
     case_storage_consent: bool | None = None
     ocr_confirmation: OcrConfirmationRequest | None = None
     attachment_classification_confirmation: AttachmentClassificationConfirmationRequest | None = None
