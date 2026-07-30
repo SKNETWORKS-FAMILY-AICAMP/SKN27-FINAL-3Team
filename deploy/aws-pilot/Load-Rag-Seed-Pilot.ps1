@@ -84,7 +84,7 @@ if ($RagSeedS3Uri -match "(^|/)\.\.(/|$)") { throw "RAG seed URI cannot contain 
 
 $stageProjectName = "skn27-stage-$ReleaseTag"
 $stageComposeCommand = "docker compose --project-name '$stageProjectName' --env-file .compose.env --env-file .stage-compose.env -f docker-compose.pilot.yml"
-$commands = @(
+$runnerCommands = @(
     "set -euo pipefail",
     "exec 9>/var/lock/skn27-pilot-maintenance.lock",
     "flock -w 60 9",
@@ -135,6 +135,24 @@ $commands = @(
     "printf '%s\n' '$RagSeedManifestSha256' > `$RELEASE_STATE_FILE.tmp",
     "chmod 0444 `$RELEASE_STATE_FILE.tmp && mv -f `$RELEASE_STATE_FILE.tmp `$RELEASE_STATE_FILE",
     "trap - ERR"
+)
+
+$runnerKey = "_rag-seed-runners/$ReleaseTag/$RagSeedManifestSha256/run-rag-seed.sh"
+$runnerPath = Join-Path ([IO.Path]::GetTempPath()) "skn27-rag-seed-runner-$([guid]::NewGuid().ToString('N')).sh"
+try {
+    [IO.File]::WriteAllText($runnerPath, ($runnerCommands -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+    & aws s3 cp $runnerPath "s3://$cleanBucket/$runnerKey" --region $region --only-show-errors --no-cli-pager
+    Assert-LastExitCode "Upload RAG seed runner"
+}
+finally {
+    Remove-Item -LiteralPath $runnerPath -Force -ErrorAction SilentlyContinue
+}
+
+$commands = @(
+    "set -euo pipefail",
+    "aws s3 cp 's3://$cleanBucket/$runnerKey' /tmp/skn27-rag-seed-runner.sh --region '$region' --only-show-errors",
+    "chmod 0700 /tmp/skn27-rag-seed-runner.sh",
+    "bash /tmp/skn27-rag-seed-runner.sh"
 )
 
 $request = Join-Path ([IO.Path]::GetTempPath()) "skn27-rag-seed-$([guid]::NewGuid().ToString('N')).json"
