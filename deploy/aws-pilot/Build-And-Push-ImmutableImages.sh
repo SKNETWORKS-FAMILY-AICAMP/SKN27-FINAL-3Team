@@ -21,11 +21,22 @@ aws ecr get-login-password --region "$AWS_DEFAULT_REGION" |
 image_exists() {
   local image_uri="$1"
   local repository_name="${image_uri#*/}"
+  local lookup_error
 
-  aws ecr describe-images \
+  if lookup_error="$(aws ecr describe-images \
     --region "$AWS_DEFAULT_REGION" \
     --repository-name "$repository_name" \
-    --image-ids "imageTag=$IMAGE_TAG" >/dev/null 2>&1
+    --image-ids "imageTag=$IMAGE_TAG" 2>&1)"; then
+    return 0
+  fi
+
+  if grep -Fq "ImageNotFoundException" <<<"$lookup_error"; then
+    return 1
+  fi
+
+  echo "Unable to determine immutable image state for $image_uri:$IMAGE_TAG." >&2
+  echo "$lookup_error" >&2
+  exit 2
 }
 
 if image_exists "$BACKEND_REPOSITORY_URL"; then

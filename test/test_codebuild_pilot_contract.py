@@ -28,6 +28,23 @@ def test_buildspec_conditionally_builds_immutable_vision_image() -> None:
     assert "latest" not in buildspec
 
 
+def test_codebuild_preflights_immutable_ecr_tags_with_explicit_lookup_failures() -> None:
+    codebuild = (
+        ROOT / "infra" / "terraform-pilot" / "codebuild.tf"
+    ).read_text(encoding="utf-8")
+    builder = (
+        ROOT / "deploy" / "aws-pilot" / "Build-And-Push-ImmutableImages.sh"
+    ).read_text(encoding="utf-8")
+
+    policy_start = codebuild.index('data "aws_iam_policy_document" "codebuild"')
+    policy_end = codebuild.index('resource "aws_iam_role_policy" "codebuild"', policy_start)
+    build_policy = codebuild[policy_start:policy_end]
+
+    assert '"ecr:DescribeImages"' in build_policy
+    assert "ImageNotFoundException" in builder
+    assert "Unable to determine immutable image state" in builder
+
+
 def test_buildspec_installs_pytest_before_running_ci_contract_tests() -> None:
     buildspec = (ROOT / "buildspec.pilot.yml").read_text(encoding="utf-8")
 
