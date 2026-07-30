@@ -76,6 +76,8 @@ app_domain="$(sed -n 's/^APP_DOMAIN=//p' .edge.env)"
 
 compose=(docker compose --project-name skn27-pilot --env-file .compose.env --env-file .production-compose.env -f docker-compose.pilot.yml)
 rollback_tag="pipeline-rollback-${target_tag}"
+frontend_image_ref="$frontend_repository:$target_tag"
+rollback_frontend_image_ref="$frontend_repository:$rollback_tag"
 
 snapshot_rollback_image() {
   local service="$1"
@@ -107,7 +109,7 @@ rollback_app_release() {
   local status=$?
   trap - ERR
   restore_tag
-  "${compose[@]}" up -d --no-deps backend frontend >/dev/null 2>&1 || true
+  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend >/dev/null 2>&1 || true
   exit "$status"
 }
 
@@ -116,8 +118,8 @@ trap rollback_app_release ERR
 RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py migrate --check
 aws ecr get-login-password --region '__AWS_REGION__' | docker login --username AWS --password-stdin "$registry"
 sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$target_tag/" .compose.env
-"${compose[@]}" pull backend frontend
-"${compose[@]}" up -d --no-deps backend frontend
+FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend
+FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend
 
 for path in /api/health/live/ /api/health/ready/; do
   curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve "$app_domain:443:127.0.0.1" "https://$app_domain$path" >/dev/null
