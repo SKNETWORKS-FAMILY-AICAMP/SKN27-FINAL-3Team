@@ -24,6 +24,7 @@ import {
   buildConsultationMessagePair,
   createEmptyConsultationIntake,
 } from "./consultationIntake.js";
+import { shouldPromptGuestConversationSave } from "./guestConversationPolicy.js";
 
 const TAB_ROUTES = [
   { id: "chatbot", label: "사고·과태료 상담" },
@@ -1218,10 +1219,13 @@ export default function FrontendAppShell({
       };
       await streamAssistantMessage(conversationHistory, assistantMessage);
       setAnalysisResponse(workerResult);
-      setConsultationIntake(createEmptyConsultationIntake());
-      const canSaveGuestConversation = !effectiveAuthSessionId && Boolean(
-        workerResult?.persistence?.job_id || workerResult?.session_id || workerResult?.message_id
-      );
+      if (workerResult?.status === "success") {
+        setConsultationIntake(createEmptyConsultationIntake());
+      }
+      const canSaveGuestConversation = shouldPromptGuestConversationSave({
+        authSessionId: effectiveAuthSessionId,
+        result: workerResult,
+      });
       setSavePromptVisible(canSaveGuestConversation);
       setGuestDetailedReportUsed(canSaveGuestConversation);
       setSaveDecision(effectiveAuthSessionId ? "saved" : "undecided");
