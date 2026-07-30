@@ -9,6 +9,7 @@ import {
   buildAuthContext,
   buildGoogleLoginPayload,
   clearStoredAuthSession,
+  googleLoginFailureMessage,
   persistAuthSession,
   readStoredGoogleProfile,
   readStoredAuthSession,
@@ -551,60 +552,67 @@ export default function FrontendAppShell({
   }
 
   async function loginAndBindCurrentSession({ source = "manual_login", nextRoute = "chatbot" } = {}) {
-    const activeGuestSession = await ensureGuestSession(nextRoute);
-    if (!activeGuestSession?.sessionId || !activeGuestSession?.guestCredential) {
-      throw new Error("Guest session is required before Google login.");
+    try {
+      const activeGuestSession = await ensureGuestSession(nextRoute);
+      if (!activeGuestSession?.sessionId || !activeGuestSession?.guestCredential) {
+        throw new Error("Guest session is required before Google login.");
+      }
+      const activeSessionId = activeGuestSession.sessionId || sessionId || `ses_web_${Date.now()}`;
+      const activeGuestId = activeGuestSession.guestId || guestId || "";
+      const activeGuestCredential = activeGuestSession.guestCredential;
+      const loginPayload = {
+        guest_id: activeGuestId,
+        session_id: activeSessionId,
+        ...(await buildGoogleLoginPayload({ googleClientId, guestId: activeGuestId })),
+      };
+      const loginResult = await api.loginWithGoogleCode(loginPayload, {
+        guestId: activeGuestId,
+        guestCredential: activeGuestCredential,
+      });
+      const nextToken = loginResult?.access_token || "";
+      const subject = loginResult?.subject || {};
+      const nextAuthSessionId = subject.auth_session_id || "";
+      const nextGuestId = subject.guest_id || activeGuestId;
+      const nextUserId = subject.user_id || loginResult?.user?.user_id || null;
+
+      setActiveAuthToken(nextToken);
+      setAuthSessionId(nextAuthSessionId);
+      setGuestId(nextGuestId);
+      setGuestCredential("");
+      setSessionId(activeSessionId);
+      persistAuthSession({
+        accessToken: nextToken,
+        googleProfile: loginResult?.user || null,
+        authSessionId: nextAuthSessionId,
+        guestId: nextGuestId,
+        guestCredential: "",
+        sessionId: activeSessionId,
+        userId: nextUserId,
+      });
+
+      const nextIdentity = {
+        authToken: nextToken,
+        authSessionId: nextAuthSessionId,
+        guestId: nextGuestId,
+        guestCredential: "",
+      };
+      return {
+        authSessionId: nextAuthSessionId,
+        authToken: nextToken,
+        guestId: nextGuestId,
+        guestCredential: "",
+        identity: nextIdentity,
+        loginResult,
+        sessionId: activeSessionId,
+        source,
+        userId: nextUserId,
+      };
+    } catch (error) {
+      const publicMessage = googleLoginFailureMessage(error);
+      const loginError = new Error(publicMessage);
+      loginError.publicMessage = publicMessage;
+      throw loginError;
     }
-    const activeSessionId = activeGuestSession.sessionId || sessionId || `ses_web_${Date.now()}`;
-    const activeGuestId = activeGuestSession.guestId || guestId || "";
-    const activeGuestCredential = activeGuestSession.guestCredential;
-    const loginPayload = {
-      guest_id: activeGuestId,
-      session_id: activeSessionId,
-      ...(await buildGoogleLoginPayload({ googleClientId, guestId: activeGuestId })),
-    };
-    const loginResult = await api.loginWithGoogleCode(loginPayload, {
-      guestId: activeGuestId,
-      guestCredential: activeGuestCredential,
-    });
-    const nextToken = loginResult?.access_token || "";
-    const subject = loginResult?.subject || {};
-    const nextAuthSessionId = subject.auth_session_id || "";
-    const nextGuestId = subject.guest_id || activeGuestId;
-    const nextUserId = subject.user_id || loginResult?.user?.user_id || null;
-
-    setActiveAuthToken(nextToken);
-    setAuthSessionId(nextAuthSessionId);
-    setGuestId(nextGuestId);
-    setGuestCredential("");
-    setSessionId(activeSessionId);
-    persistAuthSession({
-      accessToken: nextToken,
-      googleProfile: loginResult?.user || null,
-      authSessionId: nextAuthSessionId,
-      guestId: nextGuestId,
-      guestCredential: "",
-      sessionId: activeSessionId,
-      userId: nextUserId,
-    });
-
-    const nextIdentity = {
-      authToken: nextToken,
-      authSessionId: nextAuthSessionId,
-      guestId: nextGuestId,
-      guestCredential: "",
-    };
-    return {
-      authSessionId: nextAuthSessionId,
-      authToken: nextToken,
-      guestId: nextGuestId,
-      guestCredential: "",
-      identity: nextIdentity,
-      loginResult,
-      sessionId: activeSessionId,
-      source,
-      userId: nextUserId,
-    };
   }
 
   async function logoutAndResetSession() {
@@ -1367,8 +1375,10 @@ export default function FrontendAppShell({
       setGuestDetailedReportUsed(false);
       setStatusMessage("현재 상담을 Google 계정 기준 내 사건 이력에 저장했습니다.");
       return loginState;
-    } catch (_error) {
-      setStatusMessage("로그인 또는 저장 연결에 실패했습니다. 상담은 지금 상태로 계속 진행할 수 있습니다.");
+    } catch (error) {
+      setStatusMessage(
+        `${error?.publicMessage || googleLoginFailureMessage(error)} 상담은 지금 상태로 계속 진행할 수 있습니다.`
+      );
       return null;
     } finally {
       setIsSavingConversation(false);
