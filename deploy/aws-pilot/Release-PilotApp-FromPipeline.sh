@@ -109,6 +109,7 @@ rollback_app_release() {
   local status=$?
   trap - ERR
   restore_tag
+  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" rm -sf backend frontend >/dev/null 2>&1 || true
   FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend >/dev/null 2>&1 || true
   exit "$status"
 }
@@ -119,6 +120,7 @@ RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python back
 aws ecr get-login-password --region '__AWS_REGION__' | docker login --username AWS --password-stdin "$registry"
 sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$target_tag/" .compose.env
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend
+FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" rm -sf backend frontend
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend
 
 for path in /api/health/live/ /api/health/ready/; do
