@@ -8,12 +8,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_buildspec_conditionally_builds_immutable_vision_image() -> None:
     buildspec = (ROOT / "buildspec.pilot.yml").read_text(encoding="utf-8")
+    immutable_builder = (
+        ROOT / "deploy" / "aws-pilot" / "Build-And-Push-ImmutableImages.sh"
+    )
 
-    assert "CODEBUILD_RESOLVED_SOURCE_VERSION" in buildspec
     assert "test/test_aws_vision_worker_infrastructure.py" in buildspec
-    assert "deploy/aws-vision/Dockerfile" in buildspec
-    assert 'test -n "$VISION_REPOSITORY_URI"' in buildspec
-    assert 'docker push "$VISION_REPOSITORY_URI:$IMAGE_TAG"' in buildspec
+    assert "bash deploy/aws-pilot/Build-And-Push-ImmutableImages.sh" in buildspec
+    assert immutable_builder.is_file()
+
+    builder = immutable_builder.read_text(encoding="utf-8")
+    assert "CODEBUILD_RESOLVED_SOURCE_VERSION" in builder
+    assert "aws ecr describe-images" in builder
+    assert '--image-ids "imageTag=$IMAGE_TAG"' in builder
+    assert 'docker push "$BACKEND_REPOSITORY_URL:$IMAGE_TAG"' in builder
+    assert 'docker push "$FRONTEND_REPOSITORY_URL:$IMAGE_TAG"' in builder
+    assert 'test -n "${VISION_REPOSITORY_URI:-}"' in builder
+    assert 'docker push "$VISION_REPOSITORY_URI:$IMAGE_TAG"' in builder
+    assert "Skipping existing immutable image" in builder
     assert "latest" not in buildspec
 
 
