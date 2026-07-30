@@ -212,3 +212,24 @@ def test_app_release_runner_snapshots_legacy_images_for_first_release_rollback()
     assert "Current release tag is not an immutable" not in runner
     assert "StandardOutputContent" in runner
     assert "StandardErrorContent" in runner
+
+
+def test_app_release_runner_overrides_frontend_image_ref_for_release_and_rollback() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'frontend_image_ref="$frontend_repository:$target_tag"' in runner
+    assert 'rollback_frontend_image_ref="$frontend_repository:$rollback_tag"' in runner
+    assert (
+        'FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend'
+        in runner
+    )
+    assert (
+        'FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend'
+        in runner
+    )
+    assert (
+        'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend'
+        in runner
+    )
