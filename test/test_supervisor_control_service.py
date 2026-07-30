@@ -260,9 +260,65 @@ def test_fine_notice_procedure_with_verified_result_does_not_use_fallback_guidan
         user_text="과태료 의견제출 절차를 알려줘.",
     )
 
-    assert merged["assistant_message"]["answer"] == "검증된 법령 근거를 확인했습니다."
+    assert "관련 법령 근거(참고)" in merged["assistant_message"]["answer"]
+    assert "도로교통법" in merged["assistant_message"]["answer"]
     assert merged["pending_questions"] == []
     assert merged["next_actions"] == ["review_verified_results"]
+
+
+def test_fine_notice_procedure_renders_practical_guidance_from_verified_law_result() -> None:
+    merged = merge_final_response(
+        {
+            "law_ground_search": {
+                "status": "success",
+                "summary": "조문 5건 검색됨 (관계 확장 포함)",
+                "structured_result": {
+                    "matched_laws": [
+                        {
+                            "law_name": "도로교통법",
+                            "article": "제32조",
+                            "summary": "정차 및 주차의 금지 장소에 관한 규정입니다.",
+                            "source_reference": "law:verified:1",
+                        }
+                    ],
+                    "applicable_conditions": [
+                        "고지서의 위반 일시·장소·처분 문구와 대조해 적용 여부를 확인해야 합니다."
+                    ],
+                },
+                "evidence": [{"source_reference": "law:verified:1"}],
+                "limitations": [],
+            },
+            "agent_result_validation": {
+                "status": "success",
+                "structured_result": {
+                    "merge_ready": True,
+                    "report_ready": False,
+                    "accepted_results": ["law_ground_search"],
+                    "rejected_results": [],
+                    "missing_fields": [],
+                    "limitations": [],
+                },
+            },
+        },
+        routing_intent="fine_notice_procedure",
+        user_text="과태료 고지서를 받았는데 어떻게 해야 하나요?",
+    )
+
+    answer = merged["assistant_message"]["answer"]
+    assert "조문 5건 검색됨" not in answer
+    assert "도로교통법 제32조" in answer
+    assert "고지서에 적힌 처분명" in answer
+    assert "고지서에 기재된 기한" in answer
+    assert "확정할 수 없습니다" not in answer
+    assert merged["cards"] == [
+        {
+            "card_type": "verified_law_result",
+            "node_code": "law_ground_search",
+            "status": "success",
+            "title": "확인된 관련 법령",
+            "summary": "도로교통법 제32조",
+        }
+    ]
 
 
 def test_final_response_merge_prepends_deadline_guidance_card() -> None:

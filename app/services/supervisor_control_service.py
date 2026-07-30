@@ -214,7 +214,11 @@ def merge_final_response(
         cards = []
     else:
         try:
-            cards = _result_cards(accepted, upstream_results)
+            cards = _result_cards(
+                accepted,
+                upstream_results,
+                routing_intent=routing_intent,
+            )
         except Exception:
             cards = []
             limitations.append(
@@ -242,8 +246,16 @@ def merge_final_response(
             },
         )
         limitations.extend(_string_list(deadline_guidance["limitations"]))
+    fine_notice_answer = (
+        _fine_notice_procedure_answer(structured_results)
+        if routing_intent == "fine_notice_procedure"
+        and "law_ground_search" in accepted
+        else ""
+    )
     if evidence_only:
         answer = EVIDENCE_ONLY_NOTICE
+    elif fine_notice_answer:
+        answer = fine_notice_answer
     elif summaries:
         answer = "\n\n".join(_dedupe_strings(summaries))
     elif questions:
@@ -538,16 +550,95 @@ def _agent_output(value: Any) -> dict[str, Any]:
 def _result_cards(
     accepted: list[str],
     upstream_results: dict[str, Any],
+    *,
+    routing_intent: str = "",
 ) -> list[dict[str, Any]]:
-    return [
-        {
-            "card_type": "verified_agent_result",
-            "node_code": node_code,
-            "status": _agent_output(upstream_results.get(node_code)).get("status"),
-            "summary": _agent_output(upstream_results.get(node_code)).get("summary"),
-        }
-        for node_code in accepted
+    cards: list[dict[str, Any]] = []
+    for node_code in accepted:
+        output = _agent_output(upstream_results.get(node_code))
+        structured_result = _dict(output.get("structured_result"))
+        law_entries = _law_provision_entries(structured_result)
+        if (
+            routing_intent == "fine_notice_procedure"
+            and node_code == "law_ground_search"
+            and law_entries
+        ):
+            cards.append(
+                {
+                    "card_type": "verified_law_result",
+                    "node_code": node_code,
+                    "status": output.get("status"),
+                    "title": "확인된 관련 법령",
+                    "summary": " · ".join(label for label, _detail in law_entries),
+                }
+            )
+            continue
+        cards.append(
+            {
+                "card_type": "verified_agent_result",
+                "node_code": node_code,
+                "status": output.get("status"),
+                "summary": output.get("summary"),
+            }
+        )
+    return cards
+
+
+def _fine_notice_procedure_answer(structured_results: dict[str, dict[str, Any]]) -> str:
+    """Render verified law retrieval as safe, readable next steps.
+
+    This intentionally avoids calculating a deadline or deciding whether an
+    objection will succeed.  Those require the notice itself and, where
+    applicable, the dedicated OCR/appeal workflow.
+    """
+
+    law_entries = _law_provision_entries(structured_results.get("law_ground_search"))
+    if not law_entries:
+        return ""
+    conditions = _string_list(
+        _dict(structured_results.get("law_ground_search")).get(
+            "applicable_conditions"
+        )
+    )
+    lines = [
+        "과태료 고지서를 받으셨다면 다음 순서로 확인해 보세요.",
+        "1. 고지서에 적힌 처분명·위반 일시와 장소·적용 법조문을 실제 사실과 대조하세요.",
+        "2. 다툴 사유가 있으면 당시 사진·영상과 관련 영수증·기록을 원본으로 보관하세요.",
+        "3. 의견제출 또는 이의제기 방법은 발급기관 안내를 확인하고, 기한은 고지서에 기재된 기한을 기준으로 판단하세요.",
+        "관련 법령 근거(참고)",
+        *[
+            f"- {label}{f': {detail}' if detail else ''}"
+            for label, detail in law_entries
+        ],
     ]
+    if conditions:
+        lines.append(f"적용 전 확인: {conditions[0]}")
+    return "\n".join(lines)
+
+
+def _law_provision_entries(value: Any) -> list[tuple[str, str]]:
+    structured_result = _dict(value)
+    raw_items = _dict_list(structured_result.get("matched_laws"))
+    if not raw_items:
+        raw_items = _dict_list(structured_result.get("law_provisions"))
+    entries: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw_items[:3]:
+        law_name = _text(item.get("law_name") or item.get("title"))
+        article = _text(
+            item.get("article")
+            or item.get("article_no")
+            or item.get("section_ref")
+        )
+        label = " ".join(part for part in (law_name, article) if part)
+        if not label:
+            continue
+        detail = _text(item.get("summary") or item.get("provision_text"))
+        entry = (label, detail)
+        if entry not in seen:
+            seen.add(entry)
+            entries.append(entry)
+    return entries
 
 
 def _deadline_guidance(
