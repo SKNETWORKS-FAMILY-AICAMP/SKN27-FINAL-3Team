@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+command -v docker >/dev/null
+command -v nvidia-smi >/dev/null
+
+aws ecr get-login-password --region '${aws_region}' \
+  | docker login --username AWS --password-stdin '${ecr_registry}'
+docker pull '${image_uri}'
+docker rm -f skn27-vision-worker >/dev/null 2>&1 || true
+docker run -d \
+  --name skn27-vision-worker \
+  --restart unless-stopped \
+  --gpus all \
+  --log-driver awslogs \
+  --log-opt awslogs-region='${aws_region}' \
+  --log-opt awslogs-group='${log_group_name}' \
+  --log-opt awslogs-stream='vision-worker' \
+  -e AWS_VISION_QUEUE_URL='${queue_url}' \
+  -e AWS_VISION_RESULT_BUCKET='${result_bucket}' \
+  -e AWS_VISION_RESULT_PREFIX='vision/aws-queue/v1' \
+  -e VISION_TRAINED_CLASSIFIER_CHECKPOINT='${checkpoint_path}' \
+  -e VISION_QWEN_MODEL_ID='${qwen_model_id}' \
+  -e HF_HOME='/vision-volume/huggingface' \
+  -e RUNPOD_VISION_ALLOWED_HOSTS='${allowed_hosts}' \
+  '${image_uri}'

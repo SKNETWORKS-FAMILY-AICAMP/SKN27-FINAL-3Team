@@ -100,3 +100,18 @@ output "operational_alert_topic_arn" {
   description = "SNS topic ARN for operational alarm and recovery notifications."
   value       = aws_sns_topic.operational_alerts.arn
 }
+
+output "vision_worker_queue_url" {
+  description = "Private FIFO queue URL for the optional AWS Vision provider."
+  value       = var.vision_worker_enabled ? aws_sqs_queue.vision_worker[0].url : null
+}
+
+output "vision_worker_ecr_repository_url" {
+  description = "Dedicated immutable ECR repository for the optional GPU Vision worker."
+  value       = var.vision_worker_enabled ? aws_ecr_repository.vision_worker[0].repository_url : null
+}
+
+output "vision_worker_instance_id" {
+  description = "Private GPU worker instance ID when the explicitly enabled Vision stack exists."
+  value       = var.vision_worker_enabled ? aws_instance.vision_worker[0].id : null
+}
