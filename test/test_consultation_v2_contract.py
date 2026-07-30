@@ -266,7 +266,7 @@ def test_frontend_renders_canonical_law_ground_results_and_retrieval_status() ->
         "retrieval.attempted_backends",
     ):
         assert token in shell
-    assert shell.count("<LawGroundInsightPanel") == 2
+    assert shell.count("<LawGroundInsightPanel") == 3
     for class_name in (
         "agent-insight-panel",
         "agent-insight-head",

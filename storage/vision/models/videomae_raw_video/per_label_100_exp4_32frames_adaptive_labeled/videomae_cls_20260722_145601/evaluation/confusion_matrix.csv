@@ -1,0 +1,5 @@
+expected\predicted,car_vs_bicycle,car_vs_car,car_vs_motorcycle,car_vs_pedestrian
+car_vs_bicycle,7,0,8,0
+car_vs_car,0,12,2,1
+car_vs_motorcycle,2,1,12,0
+car_vs_pedestrian,0,3,3,9

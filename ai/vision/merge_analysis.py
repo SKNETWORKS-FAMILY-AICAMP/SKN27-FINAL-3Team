@@ -58,9 +58,8 @@ def build_video_understanding(videomae_result: dict[str, Any]) -> dict[str, Any]
         "clip_count": videomae_result.get("clip_count"),
         "clips": clips,
         "interpretation_note": (
-            "VideoMAE accident-classifier labels are trained-model predictions. "
-            "They do not determine accident type, fault ratio, legal liability, "
-            "or final situation summary by themselves."
+            "VideoMAE is the sole Vision model source for the canonical accident-type "
+            "prediction. It does not determine fault ratio or legal liability."
         ),
     }
 
@@ -84,7 +83,10 @@ def build_final_analysis(agent_output: dict[str, Any], videomae_result: dict[str
             "yolo_bbox_role": "key frame evidence, detected objects, bbox-change event window candidates",
             "videomae_role": "clip-level trained accident-type prediction",
             "videomae_top_labels": top_labels,
-            "decision": "Use the trained VideoMAE prediction with YOLO/Qwen evidence and human review.",
+            "decision": (
+                "Use VideoMAE as the canonical accident-type prediction. "
+                "YOLO provides evidence and Qwen provides explanation only."
+            ),
         },
         "limitations": [
             "This final analysis does not estimate fault ratio.",

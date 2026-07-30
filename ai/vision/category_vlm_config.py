@@ -22,6 +22,7 @@ class ExperimentConfig:
     yolo_imgsz: int
     yolo_models: tuple[str, ...]
     qwen_model_id: str
+    qwen_model_revision: str
     llava_model_id: str
     qwen_yolo_model: str | None
     drive_folder_url: str
@@ -87,12 +88,18 @@ def load_experiment_config(category_key: str) -> ExperimentConfig:
     return ExperimentConfig(
         max_videos=_positive_int("VISION_MAX_VIDEOS", 100),
         analysis_sample_count=_positive_int("VISION_ANALYSIS_SAMPLE_COUNT", 100),
-        frame_count=_positive_int("VISION_FRAME_COUNT", 100),
-        vlm_input_frame_count=_positive_int("VISION_VLM_INPUT_FRAME_COUNT", 4),
+        frame_count=_positive_int("VISION_FRAME_COUNT", 16),
+        vlm_input_frame_count=_positive_int("VISION_VLM_INPUT_FRAME_COUNT", 16),
         yolo_conf=confidence,
         yolo_imgsz=_positive_int("VISION_YOLO_IMGSZ", 960),
         yolo_models=models,
-        qwen_model_id=os.getenv("VISION_QWEN_MODEL_ID", "Qwen/Qwen2.5-VL-3B-Instruct"),
+        qwen_model_id=os.getenv(
+            "VISION_QWEN_MODEL_ID", "Qwen/Qwen3-VL-4B-Instruct"
+        ),
+        qwen_model_revision=os.getenv(
+            "VISION_QWEN_MODEL_REVISION",
+            "",
+        ),
         llava_model_id=os.getenv(
             "VISION_LLAVA_MODEL_ID", "llava-hf/llava-onevision-qwen2-7b-ov-hf"
         ),

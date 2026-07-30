@@ -170,11 +170,11 @@ def test_subprocess_video_decode_failure_uses_a_stable_failure(monkeypatch) -> N
     assert "C:/" not in repr(result)
 
 
-def _remote_worker_output() -> dict:
+def _remote_worker_output(*, status: str = "partial") -> dict:
     return {
         "vision_supervisor_handoff": {
             "schema_version": "vision-supervisor-handoff-v1",
-            "status": "partial",
+            "status": status,
             "source": {"source_video": "C:/private/video.mp4"},
             "media_summary": {
                 "media_type": "video",
@@ -336,6 +336,30 @@ def test_runpod_provider_reuses_cached_job_id(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
+    ("handoff_status", "result_status", "execution_status"),
+    [
+        ("complete", "success", "success"),
+        ("partial", "partial", "completed_with_review_required"),
+        ("failed", "failed", "degraded"),
+    ],
+)
+def test_adapter_preserves_handoff_status(
+    handoff_status: str,
+    result_status: str,
+    execution_status: str,
+) -> None:
+    handoff = adapter._safe_worker_handoff(
+        _remote_worker_output(status=handoff_status)
+    )
+
+    result = adapter._success(handoff)
+
+    assert handoff["status"] == handoff_status
+    assert result["status"] == result_status
+    assert result["execution_status"] == execution_status
+
+
+@pytest.mark.parametrize(
     "error_code",
     [
         "vision_remote_execution_failed",
@@ -459,3 +483,34 @@ def test_unknown_runtime_provider_fails_closed(monkeypatch) -> None:
 
     assert result["structured_result"]["error_code"] == "vision_remote_unavailable"
     assert "jupyter" not in repr(result)
+def test_safe_handoff_accepts_qwen3_explanation_contract():
+    result = adapter._safe_worker_handoff(
+        {
+            "vision_supervisor_handoff": {
+                "schema_version": "vision-supervisor-handoff-v1",
+                "status": "complete",
+                "model_analysis": {
+                    "trained_accident_prediction": {
+                        "label": "car_vs_car",
+                        "score": 0.9,
+                        "requires_review": False,
+                    },
+                    "qwen_explanation": {
+                        "valid": True,
+                        "schema_version": "vision-qwen-explanation-v1",
+                        "narrative": "Two cars converge.",
+                        "evidence_sentences": [],
+                        "conflict": False,
+                        "confirmed_accident": True,
+                        "canonical_label": "car_vs_car",
+                        "impact_visibility": "inferred",
+                        "fallback_used": False,
+                    },
+                },
+            }
+        }
+    )
+
+    assert result["qwen"]["schema_version"] == "vision-qwen-explanation-v1"
+    assert result["qwen"]["canonical_label"] == "car_vs_car"
+    assert result["qwen"]["confirmed_accident"] is True

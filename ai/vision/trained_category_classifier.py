@@ -44,12 +44,14 @@ def find_best_checkpoint(project_root: Path) -> Path:
 
 
 class TrainedCategoryClassifier:
-    def __init__(self, checkpoint: Path, frame_count: int = 16, device_name: str = "auto"):
+    def __init__(self, checkpoint: Path, frame_count: int = 32, device_name: str = "auto"):
         import torch
         from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
 
+        from ai.vision.train_videomae_classifier import choose_device
+
         self.torch = torch
-        self.device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else device_name)
+        self.device = choose_device(device_name)
         self.frame_count = frame_count
         self.processor = VideoMAEImageProcessor.from_pretrained(checkpoint)
         self.model = VideoMAEForVideoClassification.from_pretrained(checkpoint).to(self.device).eval()

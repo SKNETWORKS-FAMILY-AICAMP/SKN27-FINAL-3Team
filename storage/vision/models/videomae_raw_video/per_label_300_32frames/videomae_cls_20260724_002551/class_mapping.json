@@ -1,0 +1,6 @@
+{
+  "car_vs_bicycle": 0,
+  "car_vs_car": 1,
+  "car_vs_motorcycle": 2,
+  "car_vs_pedestrian": 3
+}

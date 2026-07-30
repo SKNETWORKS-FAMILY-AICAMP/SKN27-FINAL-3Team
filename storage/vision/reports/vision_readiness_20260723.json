@@ -1,0 +1,116 @@
+{
+  "root": "D:/dev/SKN27-FINAL-3Team",
+  "frame_count": 32,
+  "artifacts": [
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/manifests/videomae_labeled_fixed100_split.csv",
+      "exists": true,
+      "size_bytes": 162462,
+      "sha256": "ce3de14071a0c10dad05a576b5805d7eedcdeeb6e4a5db3fcc33ba2d4cc428b1"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/config.json",
+      "exists": true,
+      "size_bytes": 1029,
+      "sha256": "0c0f2f7433dd1c60137977e39a6f24e2305f0f45b201e365d3202c9672137037"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/preprocessor_config.json",
+      "exists": true,
+      "size_bytes": 415,
+      "sha256": "4bc9b255ff212041bc28127d4fa0ae1630abca52bb2d882f3e4c0b9e5b763f06"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/class_mapping.json",
+      "exists": true,
+      "size_bytes": 96,
+      "sha256": "6514cf057b4f63054bfc32b5535f2357666f42180470950610569e227f53b539"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/run_config.json",
+      "exists": true,
+      "size_bytes": 672,
+      "sha256": "6fa620d057e8d9aedc4a793e49a51e7f4b6c8b9780e8a096d4f023830497bffb"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/training_history.csv",
+      "exists": true,
+      "size_bytes": 421,
+      "sha256": "7e83acce5b66564f956e03b0acbe66e5cbce429269d20f20fc37a90a49b6a1f5"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/evaluation/test_metrics.json",
+      "exists": true,
+      "size_bytes": 1051,
+      "sha256": "ca1e5844fac7b4b2f28cb7182b654cb711f09e9ab1a80503499b958456095e5c"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/evaluation/test_predictions.csv",
+      "exists": true,
+      "size_bytes": 17266,
+      "sha256": "e8188cbe2a824d978d11896acf3db5e459c67bb4684f8faa945a169b6259ca0f"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/evaluation/confusion_matrix.csv",
+      "exists": true,
+      "size_bytes": 182,
+      "sha256": "faa95506d5e4b35646aa703c0ccbfadd060bbe804a25c0f8d18eadcfb7ed4edc"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/evaluation/confusion_matrix.png",
+      "exists": true,
+      "size_bytes": 38271,
+      "sha256": "d2040edb02b274345426c87345a15c5ef1559b9342c11a27e132a300b6ed5f7e"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/evaluation/misclassified_videos.csv",
+      "exists": true,
+      "size_bytes": 5870,
+      "sha256": "5bed91f90f5af0cf568739107b30ae72952f047b6df17fd7e8053d0d2e741195"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/model.safetensors",
+      "exists": true,
+      "size_bytes": 344943488,
+      "sha256": "ae2b11d4a53135231e146ffbd0bf753013bf0a0570d1b175f9e8c63de7364bc7"
+    },
+    {
+      "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601/pytorch_model.bin",
+      "exists": false
+    }
+  ],
+  "manifest": {
+    "path": "D:/dev/SKN27-FINAL-3Team/storage/vision/manifests/videomae_labeled_fixed100_metadata.csv",
+    "row_count": 400,
+    "missing_or_unknown": {
+      "incident_id": 0,
+      "viewpoint": 0,
+      "lighting": 0,
+      "visible_target": 0
+    },
+    "incident_split_leaks": {},
+    "incident_integrity": "verified_no_split_leak"
+  },
+  "qwen": {
+    "row_count": 4,
+    "input_frame_counts": [
+      32
+    ],
+    "files": [
+      "D:/dev/SKN27-FINAL-3Team/storage/vision/outputs/category_yolo_qwen_compare/car_vs_car/adaptive_preprocess_32frames/qwen_yolo_compare_results.csv"
+    ]
+  },
+  "llava": {
+    "row_count": 0,
+    "input_frame_counts": [],
+    "files": []
+  },
+  "readiness": {
+    "exp4_checkpoint": true,
+    "fixed_split": true,
+    "metadata_complete": true,
+    "incident_split_isolated": true,
+    "qwen_32_frame_results": false,
+    "llava_32_frame_results": false
+  }
+}

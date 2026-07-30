@@ -1,0 +1,23 @@
+{
+  "run_id": "videomae_cls_20260724_002551",
+  "manifest": "/workspace/SKN27-FINAL-3Team/storage/vision/staging/per_label_300/videomae_300_split.csv",
+  "label_column": "coarse_label",
+  "model_name": "MCG-NJU/videomae-base-finetuned-kinetics",
+  "freeze_backbone": false,
+  "frame_count": 32,
+  "epochs": 3,
+  "batch_size": 2,
+  "learning_rate": 1e-05,
+  "weight_decay": 0.05,
+  "early_stopping_patience": 2,
+  "best_epoch": 3,
+  "best_val_accuracy": 0.5888888888888889,
+  "final_test_loss": 0.9443944653289186,
+  "final_test_accuracy": 0.6444444444444445,
+  "seed": 42,
+  "device": "cuda",
+  "train_rows": 840,
+  "val_rows": 180,
+  "test_rows": 180,
+  "model_path": "/workspace/videomae_per_label_300/videomae_cls_20260724_002551"
+}

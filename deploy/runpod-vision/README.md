@@ -1,62 +1,95 @@
 # RunPod Serverless Vision worker
 
-이 디렉터리는 `vision_media_analysis`의 Queue-based Serverless worker image를
-정의한다. worker는 signed HTTPS URL로 받은 scan-ready 영상만 분석하고
-정제된 `vision_supervisor_handoff`만 반환한다.
+`vision_media_analysis`의 RunPod Serverless 배포 패키지다. Worker는 scan-ready
+영상의 signed HTTPS URL만 받고, 경로·URL query·예외 원문을 제거한
+`vision-supervisor-handoff-v1`만 반환한다.
 
-## 로컬 build
+## 고정된 운영 입력
 
-실제 registry와 release tag를 로컬 변수로 넣는다.
+| 항목 | 값 |
+|---|---|
+| VideoMAE | `per_label_300_32frames/videomae_cls_20260724_002551` |
+| VideoMAE weights SHA-256 | `f2c453b9b93f206338ffb5df9f213f196aa9f85ac2c5fcca22ce4fc689ddcff1` |
+| Qwen | `Qwen/Qwen2.5-VL-3B-Instruct` |
+| Qwen revision | `66285546d2b821cf421d4f5eb2576359d3770cd3` |
+| VideoMAE / YOLO / Qwen 프레임 | `32 / 32 / 32` |
+| 차대차 / 차대이륜차 YOLO | `yolov8m.pt` (`5d4a90cdc7a21786cc59cd19778e9eafff836df9e2da32524737c7ee6efe4fe5`) |
+| 차대보행자 YOLO | `yolo11n.pt` (`0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1`) |
+| 차대자전거 YOLO | `yolo11s.pt` (`85a76fe86dd8afe384648546b56a7a78580c7cb7b404fc595f97969322d502d5`) |
 
-```powershell
-docker build --platform linux/amd64 `
-  -f deploy/runpod-vision/Dockerfile `
-  -t <registry>/skn27-vision:<release-tag> .
-```
+VideoMAE 설정 해시는 `config.json`
+`80c9bfc42fb74744b68e9ac0282a28bd8350599283c1f637eac6908ae971bb6a`,
+`preprocessor_config.json`
+`1b8cd6bc1f257539c93390eb0b821fad87687a16c21669d3201942083497f119`,
+`class_mapping.json`
+`3f968782e9c51ef4c858dca9e6eddcca4827099a884183f4d29054b34ecc0759`,
+`run_config.json`
+`e010d06c31862cceed2ece4815272984ac7e3c9e412d22a2178df946803fe172`다.
 
-모델, checkpoint, API key와 signed URL은 image layer에 넣지 않는다.
+## Network Volume
 
-## RunPod 설정
-
-초기 Endpoint는 비용과 중복 실행을 제한하기 위해 다음 값으로 시작한다.
+다음을 `/runpod-volume`에 배치하고 read-only로 사용한다.
 
 ```text
-workersMin=0
-workersMax=1
+/runpod-volume/models/videomae/
+  config.json
+  model.safetensors
+  preprocessor_config.json
+  class_mapping.json
+  run_config.json
+/runpod-volume/models/yolo/
+  yolov8m.pt
+  yolo11n.pt
+  yolo11s.pt
+/runpod-volume/huggingface/
 ```
 
-Endpoint 생성 전에 팀이 승인할 항목:
-
-1. 32-frame 비교 결과로 운영 VLM 하나를 선택한다.
-2. VideoMAE checkpoint를 RunPod Network Volume에 배치한다.
-3. `VISION_TRAINED_CLASSIFIER_CHECKPOINT`를 volume 내부 read-only 경로로
-   설정한다.
-4. Hugging Face cache가 필요하면 `HF_HOME=/runpod-volume/huggingface`를
-   유지한다.
-5. VRAM을 만족하는 최소 GPU와 execution timeout을 smoke 결과로 결정한다.
-
-worker 환경변수:
+Worker 환경변수:
 
 ```text
 VISION_TRAINED_CLASSIFIER_CHECKPOINT=/runpod-volume/models/videomae
+VISION_QWEN_MODEL_ID=Qwen/Qwen3-VL-4B-Instruct
+VISION_QWEN_MODEL_REVISION=
+HF_HOME=/runpod-volume/huggingface
 RUNPOD_VISION_ALLOWED_HOSTS=<approved-bucket>.s3.<region>.amazonaws.com
 RUNPOD_VISION_DOWNLOAD_TIMEOUT_SECONDS=60
 RUNPOD_VISION_MAX_DOWNLOAD_BYTES=52428800
 RUNPOD_VISION_EXECUTION_TIMEOUT_SECONDS=540
 ```
 
-애플리케이션의 `RUNPOD_API_KEY`는 restricted key로 발급하고 AWS runtime
-SecureString에만 입력한다. worker image와 RunPod worker 환경에는
-애플리케이션 API key가 필요하지 않다.
+초기 Endpoint는 중복 실행과 비용을 제한하도록 `workersMin=0`,
+`workersMax=1`로 시작한다. 애플리케이션의 `RUNPOD_API_KEY`와
+`RUNPOD_VISION_ENDPOINT_ID` 설정 및 Supervisor 연결은 Supervisor 담당 범위다.
+API key는 restricted key로 발급하고 이미지나 로그에 넣지 않는다.
 
-## 사람 게이트
+서비스 계약은 VideoMAE 분류에 32프레임을 사용하고, OpenCV·YOLO·Qwen에는
+충돌 후보 중심의 16프레임(context/pre-impact/impact/post-impact 각 4개)을
+사용한다. VideoMAE의 사고유형과 `confirmed_accident=true`는 Qwen이 변경할
+수 없는 입력이며, Qwen은 보이는 근거만 설명한다.
 
-- image를 승인된 registry에 push
-- 과금 가능한 Endpoint 생성
-- 모델 artifact와 GPU/timeout 승인
-- 비식별 영상으로 `/run` → `/status` → Supervisor handoff E2E
-- worker와 애플리케이션 로그에서 API key, signed URL query, 로컬 경로가
-  보이지 않는지 확인
+## 검증 명령
 
-이 증적이 없으면 저장소 contract test와 image 정의가 통과해도 운영 Vision
-연결 완료로 표시하지 않는다.
+```powershell
+Get-FileHash <network-volume-copy>\model.safetensors -Algorithm SHA256
+uv run --with pytest pytest -q test/test_vision_run_to_supervisor.py test/test_vision_media_analysis_adapter.py test/test_runpod_vision_worker.py test/test_vlm_input_contract.py test/test_vlm_json.py
+docker build --platform linux/amd64 -f deploy/runpod-vision/Dockerfile -t <registry>/skn27-vision:<release-tag> .
+```
+
+판정 기준:
+
+- 해시가 위 값과 다르면 배포 중지
+- 테스트가 하나라도 실패하면 배포 중지
+- `complete`, `partial`, `failed`가 worker와 adapter를 지나 보존되어야 함
+- Qwen JSON invalid는 전체 실패가 아니라 `partial`과 `requires_review`여야 함
+- 로그에 API key, signed URL query, 로컬/volume 경로, 예외 원문이 없어야 함
+
+## 사람 확인이 필요한 결정
+
+1. 검증 400건에서 Qwen3 JSON valid `394/400`, fallback `6/400`, label
+   preservation `400/400` 결과를 운영 기준선으로 승인한다.
+2. 비식별 실제 영상으로 `/run → /status → handoff → Supervisor`를 실행해
+   success, partial, invalid JSON, timeout, download failure를 각각 확인한다.
+3. 관찰 Qwen3 GPU peak `12,991.6 MiB`에 여유를 둔 GPU와 timeout을 선택한다.
+
+LLaVA는 48GB급 환경에서도 OOM이 발생해 운영 후보로 확정하지 않았다. Qwen은
+사고 유형이나 과실을 확정하지 않고 VideoMAE·YOLO 결과의 상황 설명만 보조한다.

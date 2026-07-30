@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from app.services.runpod_vision_client import SAFE_IDENTIFIER
 from app.services.vision_media_analysis_adapter import _safe_worker_handoff
+from app.services.vision_media_analysis_adapter import HANDOFF_STATUSES
 
 
 REQUEST_SCHEMA_VERSION = "vision-runpod-request-v1"
@@ -243,12 +244,15 @@ def _run_pipeline(input_path: Path) -> dict[str, Any]:
 
 def _safe_remote_worker_output(worker_payload: Any) -> dict[str, Any]:
     safe = _safe_worker_handoff(worker_payload)
-    if safe.get("handoff_schema_version") != HANDOFF_SCHEMA_VERSION:
+    if (
+        safe.get("handoff_schema_version") != HANDOFF_SCHEMA_VERSION
+        or safe.get("status") not in HANDOFF_STATUSES
+    ):
         raise VisionWorkerError("vision_worker_invalid_handoff")
     return {
         "vision_supervisor_handoff": {
             "schema_version": HANDOFF_SCHEMA_VERSION,
-            "status": "partial",
+            "status": safe["status"],
             "media_summary": safe["media_summary"],
             "event_candidates": safe["event_candidates"],
             "visual_evidence": {

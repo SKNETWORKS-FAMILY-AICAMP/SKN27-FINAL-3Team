@@ -17,6 +17,7 @@ deploy/aws-pilot/.edge.env
 __pycache__/
 *.py[cod]
 .pytest_cache/
+**/.ipynb_checkpoints/
 tmp/law_ingestion*/
 output/law_ingestion/
 storage/neo4j/data/
@@ -87,6 +88,13 @@ output/pptx/*.inspect.ndjson
 서식문서/
 설계/
 models/
+!storage/vision/models/
+!storage/vision/models/**/
+!storage/vision/models/**/run_config.json
+!storage/vision/models/**/training_history.csv
+!storage/vision/models/**/class_mapping.json
+!storage/vision/models/**/config.json
+!storage/vision/models/**/preprocessor_config.json
 docs/presentation/
 
 etl/fault_cases/artifacts/

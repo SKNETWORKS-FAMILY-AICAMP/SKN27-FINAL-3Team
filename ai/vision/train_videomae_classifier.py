@@ -1,8 +1,4 @@
-"""Fine-tune VideoMAE for coarse accident type classification.
-
-This uses video clips directly from the download manifest. Keep the first run
-small; VideoMAE is much heavier than the ResNet18 frame baseline.
-"""
+"""Fine-tune VideoMAE for accident type classification."""
 from pathlib import Path
 import argparse
 import csv
@@ -16,11 +12,13 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
-from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
+from transformers import VideoMAEConfig, VideoMAEForVideoClassification, VideoMAEImageProcessor
+
+from ai.vision.adaptive_preprocessing import enhance_frame_adaptive
 
 
 DEFAULT_MANIFEST_PATH = Path(
-    "storage/vision/datasets/classification/manifests/train_700_download_manifest.csv"
+    "storage/vision/manifests/videomae_labeled_fixed100_split.csv"
 )
 DEFAULT_OUTPUT_DIR = Path("storage/vision/models/videomae_classification")
 DEFAULT_MODEL_NAME = "MCG-NJU/videomae-base-finetuned-kinetics"
@@ -60,8 +58,8 @@ def filter_rows(rows: list[dict], root_dir: Path, label_column: str) -> list[dic
     for row in rows:
         if row.get("clip_status") and row.get("clip_status") != "ok":
             continue
-        label = row.get(label_column)
-        local_path = row.get("local_path")
+        label = row.get(label_column) or row.get("category")
+        local_path = row.get("local_path") or row.get("relative_video_path")
         if not label or not local_path:
             continue
         path = Path(local_path)
@@ -69,6 +67,7 @@ def filter_rows(rows: list[dict], root_dir: Path, label_column: str) -> list[dic
             path = root_dir / path
         if path.exists() and path.stat().st_size > 0:
             copied = dict(row)
+            copied[label_column] = label
             copied["resolved_local_path"] = path.as_posix()
             valid.append(copied)
     return valid
@@ -96,16 +95,22 @@ def sample_indices(frame_count: int, target_count: int) -> list[int]:
 
 
 def read_video_frames(path: Path, frame_count: int) -> list[np.ndarray]:
-    capture = cv2.VideoCapture(path.as_posix())
-    total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     frames = []
-    for index in sample_indices(total, frame_count):
-        capture.set(cv2.CAP_PROP_POS_FRAMES, index)
-        ok, frame = capture.read()
-        if not ok:
-            continue
-        frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    capture.release()
+    if path.is_dir():
+        images = sorted(path.glob("frame_*.jpg"))
+        for index in sample_indices(len(images), frame_count):
+            frame = cv2.imread(images[index].as_posix()) if images else None
+            if frame is not None:
+                frames.append(cv2.cvtColor(enhance_frame_adaptive(frame), cv2.COLOR_BGR2RGB))
+    else:
+        capture = cv2.VideoCapture(path.as_posix())
+        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        for index in sample_indices(total, frame_count):
+            capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+            ok, frame = capture.read()
+            if ok:
+                frames.append(cv2.cvtColor(enhance_frame_adaptive(frame), cv2.COLOR_BGR2RGB))
+        capture.release()
 
     if not frames:
         frames = [np.zeros((224, 224, 3), dtype=np.uint8)]
@@ -140,14 +145,24 @@ def make_loader(rows, label_to_index, label_column, frame_count, processor, batc
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
 
 
-def run_epoch(model, loader, optimizer, device, train: bool, show_progress: bool) -> tuple[float, float]:
+def run_epoch(
+    model,
+    loader,
+    optimizer,
+    device,
+    train: bool,
+    show_progress: bool,
+    phase: str = "",
+    epoch: int | None = None,
+) -> tuple[float, float]:
     if loader is None:
         return 0.0, 0.0
     model.train(train)
     total_loss = 0.0
     correct = 0
     total = 0
-    batches = tqdm(loader, leave=False) if show_progress else loader
+    description = " ".join(value for value in (f"epoch={epoch}" if epoch else "", phase.upper()) if value)
+    batches = tqdm(loader, leave=False, desc=description) if show_progress else loader
 
     for pixel_values, labels in batches:
         pixel_values = pixel_values.to(device)
@@ -173,7 +188,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--label-column", default=DEFAULT_LABEL_COLUMN)
     parser.add_argument("--model-name", default=DEFAULT_MODEL_NAME)
-    parser.add_argument("--frame-count", type=int, default=16)
+    parser.add_argument("--frame-count", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=1e-5)
@@ -197,16 +212,23 @@ def main() -> None:
 
     train_rows, val_rows, test_rows = split_rows(rows)
     label_to_index = build_label_mapping(rows, args.label_column)
+    if len(label_to_index) != 4:
+        raise ValueError(f"Expected 4 accident labels, found: {sorted(label_to_index)}")
+    if not train_rows or not val_rows or not test_rows:
+        raise ValueError("Manifest must contain non-empty train, val, and test splits")
     id2label = {index: label for label, index in label_to_index.items()}
     label2id = {label: index for label, index in label_to_index.items()}
 
     device = choose_device(args.device)
     processor = VideoMAEImageProcessor.from_pretrained(args.model_name)
+    config = VideoMAEConfig.from_pretrained(args.model_name)
+    config.num_labels = len(label_to_index)
+    config.id2label = id2label
+    config.label2id = label2id
+    config.num_frames = args.frame_count
     model = VideoMAEForVideoClassification.from_pretrained(
         args.model_name,
-        num_labels=len(label_to_index),
-        id2label=id2label,
-        label2id=label2id,
+        config=config,
         ignore_mismatched_sizes=True,
     ).to(device)
 
@@ -240,18 +262,21 @@ def main() -> None:
     print(f"rows: train={len(train_rows)} val={len(val_rows)} test={len(test_rows)}")
 
     for epoch in range(1, args.epochs + 1):
-        train_loss, train_acc = run_epoch(model, train_loader, optimizer, device, True, args.show_progress)
+        train_loss, train_acc = run_epoch(
+            model, train_loader, optimizer, device, True, args.show_progress, "train", epoch
+        )
         with torch.no_grad():
-            val_loss, val_acc = run_epoch(model, val_loader, optimizer, device, False, args.show_progress)
-            test_loss, test_acc = run_epoch(model, test_loader, optimizer, device, False, args.show_progress)
+            val_loss, val_acc = run_epoch(
+                model, val_loader, optimizer, device, False, args.show_progress, "validation", epoch
+            )
         row = {
             "epoch": str(epoch),
             "train_loss": f"{train_loss:.6f}",
             "train_accuracy": f"{train_acc:.6f}",
             "val_loss": f"{val_loss:.6f}",
             "val_accuracy": f"{val_acc:.6f}",
-            "test_loss": f"{test_loss:.6f}",
-            "test_accuracy": f"{test_acc:.6f}",
+            "test_loss": "",
+            "test_accuracy": "",
         }
         history.append(row)
         print(
@@ -273,6 +298,17 @@ def main() -> None:
     if best_state is not None:
         model.load_state_dict(best_state)
 
+    with torch.no_grad():
+        test_loss, test_acc = run_epoch(
+            model, test_loader, optimizer, device, False, args.show_progress, "final test", best_epoch
+        )
+    history[best_epoch - 1]["test_loss"] = f"{test_loss:.6f}"
+    history[best_epoch - 1]["test_accuracy"] = f"{test_acc:.6f}"
+    print(
+        f"final_test best_epoch={best_epoch} "
+        f"test_loss={test_loss:.6f} test_acc={test_acc:.6f}"
+    )
+
     model.save_pretrained(output_dir)
     processor.save_pretrained(output_dir)
     (output_dir / "class_mapping.json").write_text(json.dumps(label_to_index, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -290,6 +326,8 @@ def main() -> None:
         "early_stopping_patience": args.early_stopping_patience,
         "best_epoch": best_epoch,
         "best_val_accuracy": best_val_acc,
+        "final_test_loss": test_loss,
+        "final_test_accuracy": test_acc,
         "seed": args.seed,
         "device": str(device),
         "train_rows": len(train_rows),

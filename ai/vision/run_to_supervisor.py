@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+DEFAULT_QWEN_MODEL = "Qwen/Qwen3-VL-4B-Instruct"
+DEFAULT_QWEN_REVISION = ""
 
 
 def _checkpoint_files(checkpoint: Path) -> tuple[Path, Path]:
@@ -27,9 +32,9 @@ def infer_videomae(video: Path, checkpoint: Path, frame_count: int, device_name:
     import torch
     from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
 
-    from ai.vision.train_videomae_classifier import read_video_frames
+    from ai.vision.train_videomae_classifier import choose_device, read_video_frames
 
-    device = torch.device("cuda" if device_name == "auto" and torch.cuda.is_available() else device_name)
+    device = choose_device(device_name)
     frames = read_video_frames(video, frame_count)
     processor = VideoMAEImageProcessor.from_pretrained(checkpoint)
     model = VideoMAEForVideoClassification.from_pretrained(checkpoint).to(device).eval()
@@ -59,14 +64,48 @@ def infer_videomae(video: Path, checkpoint: Path, frame_count: int, device_name:
     }
 
 
-def _json_object(text: str) -> dict[str, Any]:
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end < start:
-        raise ValueError("Qwen response did not contain a JSON object")
-    return json.loads(text[start : end + 1])
+def _json_object(
+    text: str, allowed_frame_refs: set[str] | None = None
+) -> dict[str, Any]:
+    from ai.vision.vlm_json import parse_vlm_json
+
+    value, valid, error = parse_vlm_json(text, allowed_frame_refs)
+    if not valid:
+        raise ValueError(error)
+    return value
 
 
-def analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, device_name: str) -> dict[str, Any]:
+def qwen_error_code(error: str) -> str:
+    if error.startswith("vlm_input_contract:"):
+        return "vision_qwen_input_contract"
+    if error.startswith("json_incomplete:"):
+        return "vision_qwen_json_incomplete"
+    if error.startswith("schema_invalid:"):
+        return "vision_qwen_schema_invalid"
+    if error.startswith("language_invalid:"):
+        return "vision_qwen_language_invalid"
+    return "vision_qwen_unavailable"
+
+
+def _qwen_model_class(model_name: str):
+    if "Qwen3" in model_name:
+        from transformers import Qwen3VLForConditionalGeneration
+
+        return Qwen3VLForConditionalGeneration
+    from transformers import Qwen2_5_VLForConditionalGeneration
+
+    return Qwen2_5_VLForConditionalGeneration
+
+
+def analyze_qwen(
+    frame_paths: list[str],
+    frame_metadata: list[dict[str, Any]],
+    classification_context: dict[str, Any],
+    model_name: str,
+    max_frames: int,
+    device_name: str,
+    qwen_revision: str = DEFAULT_QWEN_REVISION,
+) -> dict[str, Any]:
     if not frame_paths:
         return {
             "valid": False,
@@ -76,34 +115,96 @@ def analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, devic
         }
     import torch
     from qwen_vl_utils import process_vision_info
-    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    from transformers import AutoProcessor
 
-    selected = frame_paths[:max_frames]
-    prompt = (
-        "Analyze these accident-video key frames. Return JSON only with keys: summary, "
-        "visible_objects, predicted_accident_target, accident_target_evidence, accident_visible, "
-        "collision_moment_visible, accident_situation, scene_conditions, uncertainties. "
-        "predicted_accident_target must be one of car_vs_car, pedestrian, motorcycle, bicycle, uncertain."
+    from ai.vision.vlm_input import build_qwen_content
+    from ai.vision.vlm_json import (
+        VLM_JSON_PROMPT,
+        adaptive_retry_prompt,
+        enforce_confirmed_accident_context,
+        retry_token_limit,
     )
-    content = [{"type": "image", "image": str(Path(path).resolve()), "max_pixels": 640 * 360} for path in selected]
-    content.append({"type": "text", "text": prompt})
-    messages = [{"role": "user", "content": content}]
-    processor = AutoProcessor.from_pretrained(model_name)
-    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        model_name, torch_dtype="auto", device_map="auto" if device_name == "auto" else device_name
+
+    revision = {"revision": qwen_revision} if qwen_revision else {}
+    processor = AutoProcessor.from_pretrained(model_name, **revision)
+    model = _qwen_model_class(model_name).from_pretrained(
+        model_name,
+        torch_dtype="auto",
+        device_map="auto" if device_name == "auto" else device_name,
+        low_cpu_mem_usage=True,
+        **revision,
     ).eval()
-    text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    image_inputs, video_inputs = process_vision_info(messages)
-    inputs = processor(text=[text], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt").to(model.device)
-    with torch.inference_mode():
-        generated = model.generate(**inputs, max_new_tokens=256, do_sample=False, use_cache=False)
-    trimmed = [output[len(source) :] for source, output in zip(inputs.input_ids, generated)]
-    raw = processor.batch_decode(trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-    result = _json_object(raw)
-    result.update({"valid": True, "model_name": model_name, "frame_count": len(selected)})
-    del model, inputs
+    last_error = "json_incomplete:no_attempt"
+    result = None
+    for attempt in range(2):
+        prompt = (
+            VLM_JSON_PROMPT
+            if attempt == 0
+            else adaptive_retry_prompt(last_error)
+        )
+        content = build_qwen_content(
+            frame_paths,
+            frame_metadata,
+            prompt,
+            max_frames,
+            classification_context,
+        )
+        messages = [{"role": "user", "content": content}]
+        text = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        image_inputs, video_inputs = process_vision_info(messages)
+        inputs = processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        ).to(model.device)
+        with torch.inference_mode():
+            generated = model.generate(
+                **inputs,
+                max_new_tokens=512 if attempt == 0 else retry_token_limit(last_error),
+                do_sample=False,
+                use_cache=True,
+            )
+        trimmed = [
+            output[len(source) :]
+            for source, output in zip(inputs.input_ids, generated)
+        ]
+        raw = processor.batch_decode(
+            trimmed,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )[0]
+        try:
+            allowed_refs = {
+                f"frame_{int(item['frame_order']):02d}"
+                for item in frame_metadata[:max_frames]
+            }
+            result = _json_object(raw, allowed_refs)
+        except ValueError as exc:
+            last_error = str(exc)
+        del inputs, generated
+        if result is not None:
+            break
+    del model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if result is None:
+        raise ValueError(last_error)
+    result = enforce_confirmed_accident_context(
+        result, classification_context["canonical_label"]
+    )
+    result.update(
+        {
+            "valid": True,
+            "fallback_used": False,
+            "requires_review": bool(result.get("conflict")),
+            "model_name": model_name,
+            "frame_count": min(len(frame_paths), max_frames),
+        }
+    )
     return result
 
 
@@ -135,34 +236,114 @@ def select_yolo_model(
     return prediction, override or BEST_YOLO_MODELS[label]
 
 
-def safe_analyze_qwen(frame_paths: list[str], model_name: str, max_frames: int, device_name: str) -> dict[str, Any]:
-    try:
-        return analyze_qwen(frame_paths, model_name, max_frames, device_name)
-    except Exception:
+def safe_analyze_qwen(
+    frame_paths: list[str],
+    frame_metadata: list[dict[str, Any]],
+    classification_context: dict[str, Any],
+    model_name: str,
+    max_frames: int,
+    device_name: str,
+    qwen_revision: str = DEFAULT_QWEN_REVISION,
+) -> dict[str, Any]:
+    label = classification_context["canonical_label"]
+    confidence = classification_context.get("confidence")
+
+    def fallback(error_code: str) -> dict[str, Any]:
         return {
             "valid": False,
-            "error_code": "vision_qwen_unavailable",
+            "schema_version": "vision-qwen-explanation-v1",
+            "narrative": (
+                f"VideoMAE classified the event as {label}"
+                f" with confidence {confidence:.2%}."
+                if isinstance(confidence, (int, float))
+                else f"VideoMAE classified the event as {label}."
+            ),
+            "evidence_sentences": [],
+            "conflict": False,
+            "conflict_reason": None,
+            "uncertainties": [
+                "Qwen explanation generation failed; human review is required."
+            ],
+            "confirmed_accident": True,
+            "accident_type": label,
+            "canonical_label": label,
+            "impact_visibility": "not_visible",
+            "impact_evidence": [],
+            "fallback_used": True,
+            "error_code": error_code,
             "requires_review": True,
-            "limitations": ["Qwen analysis was unavailable; VideoMAE and YOLO results remain available."],
+            "limitations": [
+                "Qwen explanation was unavailable; VideoMAE and YOLO results remain available."
+            ],
         }
 
+    if not frame_paths:
+        return fallback("vision_qwen_input_contract")
+    try:
+        return analyze_qwen(
+            frame_paths,
+            frame_metadata,
+            classification_context,
+            model_name,
+            max_frames,
+            device_name,
+            qwen_revision,
+        )
+    except Exception as exc:
+        return fallback(qwen_error_code(str(exc)))
 
-def _frame_paths(agent_output: dict[str, Any]) -> list[str]:
+
+def _qwen_evidence(
+    agent_output: dict[str, Any], visualization_output: dict[str, Any]
+) -> tuple[list[str], list[dict[str, Any]]]:
     agent = agent_output.get("agent_output", agent_output)
-    frames = agent.get("structured_result", {}).get("key_frames", [])
-    return [str(frame["frame_path"]) for frame in frames if frame.get("frame_path")]
+    structured = agent.get("structured_result", {})
+    frames = {
+        frame["frame_id"]: frame
+        for frame in structured.get("key_frames", [])
+        if frame.get("frame_id")
+    }
+    objects: dict[str, list[dict[str, Any]]] = {}
+    for obj in structured.get("detected_objects", []):
+        objects.setdefault(obj.get("source_ref"), []).append(
+            {
+                "class_name": obj.get("class_name", "unknown"),
+                "confidence": obj.get("confidence", 0.0),
+                "bbox_xyxy": obj.get("bbox", {}).get("values"),
+            }
+        )
+
+    paths, metadata = [], []
+    for visual in visualization_output.get("visualizations", []):
+        frame = frames.get(visual.get("frame_id"))
+        if not frame or not visual.get("visualization_path"):
+            continue
+        paths.append(visual["visualization_path"])
+        metadata.append(
+            {
+                "frame_order": frame.get("frame_order"),
+                "timestamp_sec": frame.get("timestamp_sec"),
+                "role": frame.get("frame_role", "event_evidence"),
+                "selection_reason": frame.get(
+                    "selection_reason", "selected_by_event_evidence"
+                ),
+                "objects": objects.get(visual["frame_id"], []),
+            }
+        )
+    return paths, metadata
 
 
 def run(
     input_path: Path,
     *,
     checkpoint: Path,
-    frame_count: int = 8,
-    videomae_frame_count: int = 16,
+    frame_count: int = 16,
+    videomae_frame_count: int = 32,
     yolo_model: str | None = None,
     confidence: float = 0.25,
-    qwen_model: str = "Qwen/Qwen2.5-VL-3B-Instruct",
-    qwen_frame_count: int = 4,
+    qwen_model: str = DEFAULT_QWEN_MODEL,
+    qwen_revision: str = DEFAULT_QWEN_REVISION,
+    qwen_frame_count: int = 16,
     device: str = "auto",
     skip_qwen: bool = False,
     min_category_confidence: float = 0.5,
@@ -180,14 +361,53 @@ def run(
     from ai.vision.models import detect_keyframes
     from ai.vision.pipeline import extract_keyframes
     from ai.vision.schemas import convert_detection_to_agent_output
+    from ai.vision.visualize import create_visualizations
 
     videomae = infer_videomae(input_path, checkpoint, videomae_frame_count, device)
     prediction, selected_yolo_model = select_yolo_model(videomae, yolo_model, min_category_confidence)
+    top_predictions = videomae["clips"][0].get("top_predictions", [])
+    top2_margin = (
+        round(
+            float(top_predictions[0]["score"]) - float(top_predictions[1]["score"]),
+            6,
+        )
+        if len(top_predictions) > 1
+        else None
+    )
+    _, weights = _checkpoint_files(checkpoint)
+    with weights.open("rb") as stream:
+        checkpoint_hash = hashlib.file_digest(stream, "sha256").hexdigest()
+    classification_context = {
+        "canonical_label": prediction["label"],
+        "confidence": prediction["score"],
+        "confirmed_accident": True,
+        "top2_margin": top2_margin,
+        "requires_review": prediction["requires_review"],
+        "model_version": checkpoint.name,
+        "checkpoint_hash": checkpoint_hash,
+    }
     keyframe_path, _ = extract_keyframes(input_path, frame_count)
     detection_path, _ = detect_keyframes(keyframe_path, selected_yolo_model, confidence)
     agent_path, agent_output = convert_detection_to_agent_output(detection_path)
-    qwen = {"valid": False, "skipped": True, "requires_review": True} if skip_qwen else safe_analyze_qwen(
-        _frame_paths(agent_output), qwen_model, qwen_frame_count, device
+    _, visualization_output = create_visualizations(agent_path)
+    qwen_paths, qwen_metadata = _qwen_evidence(agent_output, visualization_output)
+    qwen = (
+        {
+            "valid": False,
+            "skipped": True,
+            "requires_review": True,
+            "error_code": "vision_qwen_skipped",
+        }
+        if skip_qwen
+        else safe_analyze_qwen(
+            qwen_paths,
+            qwen_metadata,
+            classification_context,
+            qwen_model,
+            qwen_frame_count,
+            device,
+            qwen_revision,
+        )
     )
 
     agent = agent_output.get("agent_output", agent_output)
@@ -195,8 +415,6 @@ def run(
     structured["trained_model_prediction"] = prediction
     structured["selected_yolo_model"] = selected_yolo_model
     structured["qwen_analysis"] = qwen
-    if qwen.get("summary"):
-        agent["summary"] = qwen["summary"]
     if not qwen.get("valid"):
         agent["status"] = "partial"
         structured.setdefault("limitations", []).extend(qwen.get("limitations", []))
@@ -204,6 +422,12 @@ def run(
         agent["status"] = "partial"
         structured.setdefault("limitations", []).append(
             f"VideoMAE confidence is below the review threshold ({min_category_confidence:.2f})."
+        )
+    if qwen.get("conflict"):
+        agent["status"] = "partial"
+        prediction["requires_review"] = True
+        structured.setdefault("limitations", []).append(
+            "Qwen reported a conflict with visible evidence; the VideoMAE label remains unchanged."
         )
 
     final_path = FINAL_OUTPUT_DIR / output_name(agent_path)
@@ -218,12 +442,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run trained VideoMAE, YOLO and Qwen for Supervisor handoff.")
     parser.add_argument("input", type=Path)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--frame-count", type=int, default=8)
-    parser.add_argument("--videomae-frame-count", type=int, default=16)
+    parser.add_argument("--frame-count", type=int, default=16)
+    parser.add_argument("--videomae-frame-count", type=int, default=32)
     parser.add_argument("--yolo-model", default=None, help="Optional explicit override for category-selected YOLO")
     parser.add_argument("--confidence", type=float, default=0.25)
-    parser.add_argument("--qwen-model", default="Qwen/Qwen2.5-VL-3B-Instruct")
-    parser.add_argument("--qwen-frame-count", type=int, default=4)
+    parser.add_argument(
+        "--qwen-model",
+        default=os.getenv("VISION_QWEN_MODEL_ID", DEFAULT_QWEN_MODEL),
+    )
+    parser.add_argument(
+        "--qwen-revision",
+        default=os.getenv("VISION_QWEN_MODEL_REVISION", DEFAULT_QWEN_REVISION),
+    )
+    parser.add_argument("--qwen-frame-count", type=int, default=16)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--skip-qwen", action="store_true", help="Troubleshooting only")
     parser.add_argument("--min-category-confidence", type=float, default=0.5)
@@ -235,6 +466,7 @@ def main() -> None:
     output = run(args.input, checkpoint=args.checkpoint, frame_count=args.frame_count,
                  videomae_frame_count=args.videomae_frame_count, yolo_model=args.yolo_model,
                  confidence=args.confidence, qwen_model=args.qwen_model,
+                 qwen_revision=args.qwen_revision,
                  qwen_frame_count=args.qwen_frame_count, device=args.device, skip_qwen=args.skip_qwen,
                  min_category_confidence=args.min_category_confidence)
     print(f"supervisor_handoff_path: {output}")

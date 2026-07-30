@@ -1,0 +1,42 @@
+{
+  "sample_count": 60,
+  "accuracy": 0.666667,
+  "macro_f1": 0.669382,
+  "confidence_threshold": 0.5,
+  "low_confidence_rate": 0.183333,
+  "per_class": {
+    "car_vs_bicycle": {
+      "support": 15,
+      "precision": 0.777778,
+      "recall": 0.466667,
+      "f1": 0.583333
+    },
+    "car_vs_car": {
+      "support": 15,
+      "precision": 0.75,
+      "recall": 0.8,
+      "f1": 0.774194
+    },
+    "car_vs_motorcycle": {
+      "support": 15,
+      "precision": 0.48,
+      "recall": 0.8,
+      "f1": 0.6
+    },
+    "car_vs_pedestrian": {
+      "support": 15,
+      "precision": 0.9,
+      "recall": 0.6,
+      "f1": 0.72
+    }
+  },
+  "misclassification_to_car_rate": {
+    "car_vs_bicycle": 0.0,
+    "car_vs_motorcycle": 0.066667,
+    "car_vs_pedestrian": 0.2
+  },
+  "loss": 0.881587,
+  "checkpoint": "/workspace/SKN27-FINAL-3Team/storage/vision/models/videomae_raw_video/per_label_100_exp4_32frames_adaptive_labeled/videomae_cls_20260722_145601",
+  "manifest": "storage/vision/manifests/videomae_labeled_fixed100_split.csv",
+  "frame_count": 32
+}

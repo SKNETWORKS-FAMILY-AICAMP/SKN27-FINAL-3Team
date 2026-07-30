@@ -1,8 +1,4 @@
-"""Draw detected object bounding boxes on key-frame images.
-
-The generated images are for review, presentation, and evidence inspection;
-they are not used as training inputs.
-"""
+"""Draw detected object boxes for review and Qwen evidence input."""
 from pathlib import Path
 import json
 

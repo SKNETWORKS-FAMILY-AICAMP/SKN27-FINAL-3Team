@@ -12,6 +12,7 @@ from typing import Any
 FINAL_ANALYSIS_DIR = Path("storage/vision/outputs/final_analysis")
 OUTPUT_DIR = Path("storage/vision/outputs/supervisor_handoff")
 SCHEMA_VERSION = "vision-supervisor-handoff-v1"
+HANDOFF_STATUSES = {"complete", "partial", "failed"}
 NOT_DETERMINED_BY_VISION = [
     "fault_ratio",
     "liable_party",
@@ -123,16 +124,26 @@ def compact_qwen_analysis(qwen: Any) -> dict[str, Any]:
         error_code = "vision_qwen_unavailable"
     return {
         "valid": value.get("valid", False),
-        "summary": value.get("summary"),
-        "predicted_accident_target": value.get("predicted_accident_target"),
-        "accident_target_evidence": value.get("accident_target_evidence"),
-        "collision_moment_visible": value.get("collision_moment_visible"),
-        "accident_situation": value.get("accident_situation"),
-        "scene_conditions": value.get("scene_conditions"),
+        "schema_version": value.get("schema_version"),
+        "narrative": value.get("narrative"),
+        "evidence_sentences": value.get("evidence_sentences", []),
+        "conflict": value.get("conflict", False),
+        "conflict_reason": value.get("conflict_reason"),
         "uncertainties": value.get("uncertainties", []),
+        "confirmed_accident": value.get("confirmed_accident", True),
+        "accident_type": value.get("accident_type"),
+        "canonical_label": value.get("canonical_label"),
+        "impact_visibility": value.get("impact_visibility", "not_visible"),
+        "impact_evidence": value.get("impact_evidence", []),
+        "fallback_used": value.get("fallback_used", False),
         "requires_review": value.get("requires_review", not value.get("valid", False)),
         "error_code": error_code,
     }
+
+
+def handoff_status(value: Any) -> str:
+    status = "complete" if value == "success" else value
+    return status if status in HANDOFF_STATUSES else "failed"
 
 
 def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
@@ -150,7 +161,9 @@ def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
                 "vision_node_code": agent.get("node_code"),
                 "analysis_scope": final_analysis.get("analysis_scope"),
             },
-            "status": final_analysis.get("status") or agent.get("status"),
+            "status": handoff_status(
+                final_analysis.get("status") or agent.get("status")
+            ),
             "media_summary": {
                 "media_type": structured.get("media_type"),
                 "summary": agent.get("summary"),
@@ -166,7 +179,7 @@ def build_handoff(final_analysis: dict[str, Any]) -> dict[str, Any]:
             "model_analysis": {
                 "trained_accident_prediction": compact_prediction(structured.get("trained_model_prediction")),
                 "selected_yolo_model": structured.get("selected_yolo_model"),
-                "qwen": compact_qwen_analysis(qwen),
+                "qwen_explanation": compact_qwen_analysis(qwen),
             },
             "not_determined_by_vision": NOT_DETERMINED_BY_VISION,
             "routing_recommendation": {
