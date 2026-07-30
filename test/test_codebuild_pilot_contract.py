@@ -174,6 +174,7 @@ def test_app_release_runner_only_promotes_immutable_app_images() -> None:
     assert '[[ "$IMAGE_TAG" =~ ^[0-9a-f]{12}$ ]]' in runner
     assert "migrate --check" in runner
     assert '"${compose[@]}" pull backend frontend' in runner
+    assert '"${compose[@]}" rm -sf backend frontend' in runner
     assert '"${compose[@]}" up -d --no-deps backend frontend' in runner
     assert "curl --fail --silent --show-error" in runner
     assert "rollback_app_release" in runner
@@ -226,7 +227,15 @@ def test_app_release_runner_overrides_frontend_image_ref_for_release_and_rollbac
         in runner
     )
     assert (
+        'FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" rm -sf backend frontend'
+        in runner
+    )
+    assert (
         'FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend'
+        in runner
+    )
+    assert (
+        'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" rm -sf backend frontend >/dev/null 2>&1 || true'
         in runner
     )
     assert (
