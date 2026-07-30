@@ -17,6 +17,17 @@ def test_buildspec_conditionally_builds_immutable_vision_image() -> None:
     assert "latest" not in buildspec
 
 
+def test_buildspec_installs_pytest_before_running_ci_contract_tests() -> None:
+    buildspec = (ROOT / "buildspec.pilot.yml").read_text(encoding="utf-8")
+
+    install_command = 'python -m pip install --disable-pip-version-check "pytest==9.1.1"'
+    test_command = "python -m pytest -q test/test_aws_pilot_infrastructure.py"
+
+    assert install_command in buildspec
+    assert test_command in buildspec
+    assert buildspec.index(install_command) < buildspec.index(test_command)
+
+
 def test_terraform_keeps_ci_and_vision_registry_independently_disabled() -> None:
     codebuild = (
         ROOT / "infra" / "terraform-pilot" / "codebuild.tf"
