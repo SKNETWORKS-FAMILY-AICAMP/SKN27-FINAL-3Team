@@ -172,6 +172,11 @@ def test_app_release_runner_only_promotes_immutable_app_images() -> None:
 
     assert 'IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}"' in runner
     assert '[[ "$IMAGE_TAG" =~ ^[0-9a-f]{12}$ ]]' in runner
+    assert (
+        'PILOT_BACKEND_IP="${PILOT_MIGRATION_CHECK_IP:-172.31.0.11}" '
+        'RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend '
+        'python backend/manage.py migrate --check'
+    ) in runner
     assert "migrate --check" in runner
     assert '"${compose[@]}" pull backend frontend' in runner
     assert '"${compose[@]}" rm -sf backend frontend' in runner

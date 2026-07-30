@@ -116,7 +116,7 @@ rollback_app_release() {
 
 trap rollback_app_release ERR
 
-RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py migrate --check
+PILOT_BACKEND_IP="${PILOT_MIGRATION_CHECK_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py migrate --check
 aws ecr get-login-password --region '__AWS_REGION__' | docker login --username AWS --password-stdin "$registry"
 sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$target_tag/" .compose.env
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend
