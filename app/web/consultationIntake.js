@@ -24,21 +24,25 @@ export const FINE_NOTICE_FIELDS = [
 export const CONSULTATION_FACT_FIELDS = [
   {
     key: "roadLayout",
+    serverKey: "road_layout",
     label: "도로 형태",
     question: "사고 장소의 도로 형태",
   },
   {
     key: "vehicleActions",
+    serverKey: "vehicle_actions",
     label: "양쪽 차량 행동",
     question: "충돌 직전 양쪽 차량의 진행 방향과 행동",
   },
   {
     key: "signalPriority",
+    serverKey: "signal_priority",
     label: "신호·우선권",
     question: "당시 신호나 우선권 상황",
   },
   {
     key: "collisionLocation",
+    serverKey: "collision_location",
     label: "충돌 부위",
     question: "각 차량의 어느 부위가 충돌했는지",
   },
@@ -141,6 +145,18 @@ export function buildConsultationMessagePair({ freeText = "", intake } = {}) {
   const displayText = normalizeText(freeText);
   const requestText = buildStructuredConsultationMessage({ freeText, intake });
   return { displayText: displayText || requestText, requestText };
+}
+
+export function buildConsultationRequestContext({ intake } = {}) {
+  const normalizedIntake = normalizeConsultationIntake(intake);
+  return {
+    consultation_type: normalizedIntake.consultationType,
+    facts: Object.fromEntries(
+      CONSULTATION_FACT_FIELDS.flatMap(({ key, serverKey }) =>
+        normalizedIntake[key] ? [[serverKey, normalizedIntake[key]]] : []
+      )
+    ),
+  };
 }
 
 function shouldCollectAccidentFacts(intake) {
