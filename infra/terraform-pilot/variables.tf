@@ -10,6 +10,17 @@ variable "ci_enabled" {
   default     = false
 }
 
+variable "pilot_app_release_enabled" {
+  description = "Append manual approval and backend/frontend-only Pilot EC2 release stages to the CI pipeline."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.pilot_app_release_enabled || var.ci_enabled
+    error_message = "pilot_app_release_enabled requires ci_enabled."
+  }
+}
+
 variable "github_connection_arn" {
   description = "Available CodeStar GitHub connection ARN used only when ci_enabled is true."
   type        = string

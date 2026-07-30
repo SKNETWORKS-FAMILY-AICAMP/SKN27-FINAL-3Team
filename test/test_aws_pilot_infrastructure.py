@@ -253,6 +253,42 @@ def test_private_s3_and_ecr_resources_have_encryption_and_lifecycle_controls() -
     assert len(re.findall(r"scan_on_push\s*=\s*true", source)) >= 2
 
 
+def test_app_release_is_opt_in_and_does_not_receive_runtime_secret_access() -> None:
+    codebuild = (TERRAFORM_DIR / "codebuild.tf").read_text(encoding="utf-8")
+    variables = (TERRAFORM_DIR / "variables.tf").read_text(encoding="utf-8")
+
+    assert 'variable "pilot_app_release_enabled"' in variables
+    assert "default     = false" in variables
+    policy_start = codebuild.index(
+        'data "aws_iam_policy_document" "pilot_app_release"'
+    )
+    policy_end = codebuild.index(
+        'resource "aws_iam_role_policy" "pilot_app_release"', policy_start
+    )
+    release_policy = codebuild[policy_start:policy_end]
+    assert "aws_instance.app.arn" in release_policy
+    assert "ssm:GetParameter" not in release_policy
+    assert "ssm:PutParameter" not in release_policy
+
+
+def test_app_release_runbook_preserves_the_full_manual_release_path() -> None:
+    runbook = _read_deploy("README.ko.md")
+
+    for required in (
+        "ApprovePilotAppRelease",
+        "pilot_app_release_enabled",
+        "migrate --check",
+        "rollback",
+        "RAG seed",
+        "paid smoke",
+        "Vision Worker",
+        "Deploy-Pilot.ps1",
+        "Compose",
+        "Caddy",
+    ):
+        assert required in runbook
+
+
 def test_budget_and_ssm_secret_contract_are_present_without_secret_outputs() -> None:
     source = _terraform_source()
     assert 'resource "aws_budgets_budget"' in source
