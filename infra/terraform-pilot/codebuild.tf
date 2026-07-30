@@ -58,6 +58,24 @@ data "aws_iam_policy_document" "codebuild" {
       "${aws_cloudwatch_log_group.codebuild[0].arn}:*",
     ]
   }
+
+  statement {
+    sid     = "ReadPipelineArtifactBucketMetadata"
+    effect  = "Allow"
+    actions = ["s3:GetBucketAcl", "s3:GetBucketLocation"]
+    resources = [
+      aws_s3_bucket.pipeline_artifacts[0].arn,
+    ]
+  }
+
+  statement {
+    sid     = "ReadWritePipelineArtifacts"
+    effect  = "Allow"
+    actions = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"]
+    resources = [
+      "${aws_s3_bucket.pipeline_artifacts[0].arn}/*",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "codebuild" {

@@ -37,3 +37,17 @@ def test_terraform_keeps_ci_and_vision_registry_independently_disabled() -> None
         "!var.vision_worker_enabled || var.vision_registry_enabled"
         in variables
     )
+
+
+def test_codebuild_role_can_read_and_write_pipeline_artifacts() -> None:
+    codebuild = (
+        ROOT / "infra" / "terraform-pilot" / "codebuild.tf"
+    ).read_text(encoding="utf-8")
+
+    assert '"ReadWritePipelineArtifacts"' in codebuild
+    assert '"s3:GetObject"' in codebuild
+    assert '"s3:GetObjectVersion"' in codebuild
+    assert '"s3:PutObject"' in codebuild
+    assert '"s3:GetBucketAcl"' in codebuild
+    assert '"s3:GetBucketLocation"' in codebuild
+    assert "aws_s3_bucket.pipeline_artifacts[0].arn" in codebuild
