@@ -108,7 +108,17 @@ output "vision_worker_queue_url" {
 
 output "vision_worker_ecr_repository_url" {
   description = "Dedicated immutable ECR repository for the optional GPU Vision worker."
-  value       = var.vision_worker_enabled ? aws_ecr_repository.vision_worker[0].repository_url : null
+  value       = var.vision_registry_enabled ? aws_ecr_repository.vision_worker[0].repository_url : null
+}
+
+output "codebuild_project_name" {
+  description = "CodeBuild project that tests and pushes immutable Pilot images."
+  value       = var.ci_enabled ? aws_codebuild_project.pilot[0].name : null
+}
+
+output "codepipeline_name" {
+  description = "Source/build-only pipeline; it never promotes the Pilot release."
+  value       = var.ci_enabled ? aws_codepipeline.pilot[0].name : null
 }
 
 output "vision_worker_instance_id" {

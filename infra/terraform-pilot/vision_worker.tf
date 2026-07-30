@@ -30,7 +30,7 @@ resource "aws_sqs_queue" "vision_worker" {
 }
 
 resource "aws_ecr_repository" "vision_worker" {
-  count = var.vision_worker_enabled ? 1 : 0
+  count = var.vision_registry_enabled ? 1 : 0
 
   name                 = "${local.name_prefix}/vision-worker"
   image_tag_mutability = "IMMUTABLE"
@@ -40,7 +40,7 @@ resource "aws_ecr_repository" "vision_worker" {
 }
 
 resource "aws_ecr_lifecycle_policy" "vision_worker" {
-  count = var.vision_worker_enabled ? 1 : 0
+  count = var.vision_registry_enabled ? 1 : 0
 
   repository = aws_ecr_repository.vision_worker[0].name
   policy = jsonencode({

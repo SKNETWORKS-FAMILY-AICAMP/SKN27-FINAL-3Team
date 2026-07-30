@@ -4,6 +4,47 @@ variable "aws_region" {
   default     = "ap-northeast-2"
 }
 
+variable "ci_enabled" {
+  description = "Create the source/build-only CodeBuild and CodePipeline resources."
+  type        = bool
+  default     = false
+}
+
+variable "github_connection_arn" {
+  description = "Available CodeStar GitHub connection ARN used only when ci_enabled is true."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = !var.ci_enabled || can(regex("^arn:aws:codeconnections:", var.github_connection_arn)) || can(regex("^arn:aws:codestar-connections:", var.github_connection_arn))
+    error_message = "ci_enabled requires an available GitHub connection ARN."
+  }
+}
+
+variable "github_repository_full_name" {
+  description = "GitHub owner/repository used by the source/build-only pipeline."
+  type        = string
+  default     = "SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team"
+}
+
+variable "github_dev_branch" {
+  description = "Git branch that triggers the source/build-only pipeline."
+  type        = string
+  default     = "dev"
+}
+
+variable "frontend_google_client_id" {
+  description = "Public Google OAuth client ID compiled into the frontend image; not a secret."
+  type        = string
+  default     = ""
+}
+
+variable "ci_log_retention_days" {
+  description = "CloudWatch retention for CodeBuild logs."
+  type        = number
+  default     = 30
+}
+
 variable "project_name" {
   description = "Lowercase name prefix used for pilot resources."
   type        = string
@@ -268,6 +309,17 @@ variable "operational_heartbeat_missing_periods" {
 
 variable "vision_worker_enabled" {
   description = "Create the private GPU Vision worker only after image, AMI, and budget approval."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.vision_worker_enabled || var.vision_registry_enabled
+    error_message = "vision_worker_enabled requires vision_registry_enabled."
+  }
+}
+
+variable "vision_registry_enabled" {
+  description = "Create only the immutable Vision ECR repository; it never creates GPU execution resources."
   type        = bool
   default     = false
 }
