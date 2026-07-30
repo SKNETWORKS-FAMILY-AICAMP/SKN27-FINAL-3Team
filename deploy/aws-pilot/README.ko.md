@@ -50,6 +50,27 @@ firewall script before Compose starts, so Caddy cannot reach EC2 metadata.
   상태를 관찰한다.
 - 운영 데이터와 클라우드 리소스 삭제는 이 저장소 변경과 별개로 승인된 변경 창에서 수행한다.
 
+## CodePipeline 앱 이미지 승인 배포
+
+`pilot_app_release_enabled=true`는 기존 Source/Build Pipeline 뒤에
+`ApprovePilotAppRelease` 승인 단계를 추가한다. 이 경로는 Build가 성공해 ECR에
+immutable commit tag가 올라간 경우에만 사용한다.
+
+1. CodePipeline의 Build 결과에서 대상 backend/frontend commit tag를 확인한다.
+2. 해당 코드가 앱 이미지 변경만 포함하는지 확인한 뒤 `ApprovePilotAppRelease`를 승인한다.
+3. Deploy CodeBuild와 SSM command 결과에서 `migrate --check`, backend/frontend
+   restart, HTTPS live/ready 확인이 모두 성공했는지 확인한다.
+4. 실패하면 Pipeline은 실패로 종료되며 release runner가 이전 `RELEASE_TAG`로
+   rollback 한다. SSM 결과와 Deploy CodeBuild log를 보관하고, 새 승인은 문제를
+   해결한 commit에서만 다시 진행한다.
+
+이 경로는 RAG seed, paid smoke, Vision Worker, DB schema 변경, Compose 또는 Caddy
+변경을 실행하지 않는다. 위 항목이나 법령/그래프 적재가 필요한 release는 반드시
+기존 `Deploy-Pilot.ps1`의 검토된 전체 절차를 사용한다.
+
+활성화는 코드 merge만으로 되지 않는다. 검토된 Terraform plan에서
+`ci_enabled=true`와 `pilot_app_release_enabled=true`를 함께 설정해야 한다.
+
 ## 공통 운영 통제
 
 - 비용 가드레일: Pilot은 `t3a.large` 이상의 8 GiB x86 인스턴스를 사용하며, ClamAV 재적재와

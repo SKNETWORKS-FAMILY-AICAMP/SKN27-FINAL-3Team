@@ -75,10 +75,13 @@ data "aws_iam_policy_document" "codepipeline" {
   }
 
   statement {
-    sid       = "StartPilotBuild"
-    effect    = "Allow"
-    actions   = ["codebuild:BatchGetBuilds", "codebuild:StartBuild"]
-    resources = [aws_codebuild_project.pilot[0].arn]
+    sid     = "StartPilotBuild"
+    effect  = "Allow"
+    actions = ["codebuild:BatchGetBuilds", "codebuild:StartBuild"]
+    resources = concat(
+      [aws_codebuild_project.pilot[0].arn],
+      local.pilot_app_release_enabled ? [aws_codebuild_project.pilot_app_release[0].arn] : [],
+    )
   }
 
   statement {
@@ -94,6 +97,16 @@ data "aws_iam_policy_document" "codepipeline" {
       aws_s3_bucket.pipeline_artifacts[0].arn,
       "${aws_s3_bucket.pipeline_artifacts[0].arn}/*",
     ]
+  }
+
+  dynamic "statement" {
+    for_each = local.pilot_app_release_enabled ? [1] : []
+    content {
+      sid       = "PublishReleaseApprovalNotification"
+      effect    = "Allow"
+      actions   = ["sns:Publish"]
+      resources = [aws_sns_topic.operational_alerts.arn]
+    }
   }
 }
 
@@ -143,6 +156,42 @@ resource "aws_codepipeline" "pilot" {
       output_artifacts = ["BuildMetadata"]
       configuration = {
         ProjectName = aws_codebuild_project.pilot[0].name
+      }
+    }
+  }
+
+  dynamic "stage" {
+    for_each = local.pilot_app_release_enabled ? [1] : []
+    content {
+      name = "ApprovePilotAppRelease"
+      action {
+        name     = "ApproveImmutableAppImages"
+        category = "Approval"
+        owner    = "AWS"
+        provider = "Manual"
+        version  = "1"
+        configuration = {
+          NotificationArn = aws_sns_topic.operational_alerts.arn
+          CustomData      = "Promotes backend/frontend images for the verified dev commit only; RAG, schema, paid smoke, and Vision are excluded."
+        }
+      }
+    }
+  }
+
+  dynamic "stage" {
+    for_each = local.pilot_app_release_enabled ? [1] : []
+    content {
+      name = "DeployPilotAppRelease"
+      action {
+        name            = "ReleaseBackendAndFrontend"
+        category        = "Build"
+        owner           = "AWS"
+        provider        = "CodeBuild"
+        version         = "1"
+        input_artifacts = ["SourceArtifact"]
+        configuration = {
+          ProjectName = aws_codebuild_project.pilot_app_release[0].name
+        }
       }
     }
   }
