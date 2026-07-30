@@ -1562,20 +1562,24 @@ def test_normal_promotion_uses_one_production_supervisor_runtime_smoke() -> None
     )
 
 
-def test_normal_promotion_waits_only_for_health_checked_services() -> None:
+def test_normal_promotion_bootstraps_redis_before_waiting_for_core_services() -> None:
     deploy = _read_deploy("Deploy-Pilot.ps1")
     previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")
     promote = deploy.index("ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current", previous)
     normal_segment = deploy[previous:promote]
 
     waited_services = (
-        "WAITED_SERVICES='caddy edge-rate-limit frontend backend redis clamav law-neo4j'"
+        "WAITED_SERVICES='caddy edge-rate-limit frontend backend clamav law-neo4j'"
     )
     background_services = (
         "BACKGROUND_SERVICES='agent-worker file-scan-worker ops-monitor'"
     )
     assert waited_services in normal_segment
     assert background_services in normal_segment
+    assert "wait_for_redis()" in normal_segment
+    assert "for attempt in `$(seq 1 120); do" in normal_segment
+    assert "$productionComposeCommand exec -T redis redis-cli ping | grep -qx PONG" in normal_segment
+    assert "$productionComposeCommand up -d --remove-orphans redis" in normal_segment
     assert (
         "$productionComposeCommand up -d --wait --wait-timeout 600 "
         "--remove-orphans `$WAITED_SERVICES"
