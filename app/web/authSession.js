@@ -116,6 +116,33 @@ export async function buildGoogleLoginPayload({
   };
 }
 
+export function googleLoginFailureMessage(error) {
+  const trustedMessage = String(error?.publicMessage || "").trim();
+  if (trustedMessage) {
+    return trustedMessage;
+  }
+  const detail = [error?.message, error?.code, error?.reason, error]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase())
+    .join(" ");
+  if (detail.includes("redirect_uri_mismatch")) {
+    return "Google 로그인 설정이 현재 서비스 주소와 일치하지 않습니다. 앱 관리자에게 리디렉션 주소 설정을 확인해 달라고 요청해 주세요.";
+  }
+  if (detail.includes("popup_failed_to_open") || detail.includes("popup blocked")) {
+    return "Google 로그인 창을 열지 못했습니다. 브라우저의 팝업 차단을 해제한 뒤 다시 시도해 주세요.";
+  }
+  if (detail.includes("popup_closed") || detail.includes("popup closed")) {
+    return "Google 로그인 창이 닫혔습니다. 로그인 창을 닫지 말고 다시 시도해 주세요.";
+  }
+  if (detail.includes("timed out")) {
+    return "Google 로그인 응답을 받지 못했습니다. 팝업 차단 여부를 확인한 뒤 다시 시도해 주세요.";
+  }
+  if (detail.includes("client id") || detail.includes("google oauth") || detail.includes("authorization code")) {
+    return "Google 로그인 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+  }
+  return "Google 로그인 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+}
+
 export async function requestGoogleAuthorizationCode({ clientId, scope = GOOGLE_LOGIN_SCOPE, timeoutMs = 60000 }) {
   const normalizedClientId = String(clientId || "").trim();
   if (!normalizedClientId) {
