@@ -59,13 +59,15 @@ release_dir="$(readlink -f /opt/skn27-pilot/current 2>/dev/null || true)"
 cd "$release_dir"
 
 previous_tag="$(sed -n 's/^RELEASE_TAG=//p' .compose.env)"
-[[ "$previous_tag" =~ ^[0-9a-f]{12}$ ]] || {
-  echo 'Current release tag is not an immutable 12-character Git SHA.' >&2
+[[ -n "$previous_tag" ]] || {
+  echo 'Current release does not define RELEASE_TAG.' >&2
   exit 78
 }
 
 target_tag='__IMAGE_TAG__'
 registry='__BACKEND_REGISTRY__'
+backend_repository='__BACKEND_REPOSITORY__'
+frontend_repository='__FRONTEND_REPOSITORY__'
 app_domain="$(sed -n 's/^APP_DOMAIN=//p' .edge.env)"
 [[ -n "$app_domain" ]] || {
   echo 'Current release does not define APP_DOMAIN.' >&2
@@ -73,9 +75,32 @@ app_domain="$(sed -n 's/^APP_DOMAIN=//p' .edge.env)"
 }
 
 compose=(docker compose --project-name skn27-pilot --env-file .compose.env --env-file .production-compose.env -f docker-compose.pilot.yml)
+rollback_tag="pipeline-rollback-${target_tag}"
+
+snapshot_rollback_image() {
+  local service="$1"
+  local repository="$2"
+  local container_id
+  local image_id
+
+  container_id="$("${compose[@]}" ps -q "$service")"
+  [[ -n "$container_id" ]] || {
+    echo "Current $service container is unavailable for rollback snapshot." >&2
+    exit 78
+  }
+  image_id="$(docker inspect --format '{{.Image}}' "$container_id")"
+  [[ -n "$image_id" ]] || {
+    echo "Current $service image ID is unavailable for rollback snapshot." >&2
+    exit 78
+  }
+  docker tag "$image_id" "$repository:$rollback_tag"
+}
+
+snapshot_rollback_image backend "$backend_repository"
+snapshot_rollback_image frontend "$frontend_repository"
 
 restore_tag() {
-  sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$previous_tag/" .compose.env
+  sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$rollback_tag/" .compose.env
 }
 
 rollback_app_release() {
@@ -105,6 +130,8 @@ REMOTE_SCRIPT
 
 remote_script="${remote_script//__IMAGE_TAG__/$IMAGE_TAG}"
 remote_script="${remote_script//__BACKEND_REGISTRY__/${BACKEND_REPOSITORY_URL%%/*}}"
+remote_script="${remote_script//__BACKEND_REPOSITORY__/$BACKEND_REPOSITORY_URL}"
+remote_script="${remote_script//__FRONTEND_REPOSITORY__/$FRONTEND_REPOSITORY_URL}"
 remote_script="${remote_script//__AWS_REGION__/$AWS_DEFAULT_REGION}"
 
 python3 - "$request_path" "$PILOT_INSTANCE_ID" "$remote_script" <<'PY'
@@ -147,6 +174,13 @@ while (( SECONDS < deadline )); do
       ;;
     Failed|Cancelled|TimedOut)
       echo "Pilot app release SSM command finished with status $status." >&2
+      aws ssm get-command-invocation \
+        --region "$AWS_DEFAULT_REGION" \
+        --command-id "$command_id" \
+        --instance-id "$PILOT_INSTANCE_ID" \
+        --query '{StandardOutputContent:StandardOutputContent,StandardErrorContent:StandardErrorContent}' \
+        --output json \
+        --no-cli-pager >&2 || true
       exit 1
       ;;
   esac

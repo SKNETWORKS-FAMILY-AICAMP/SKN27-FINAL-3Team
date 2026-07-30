@@ -178,3 +178,20 @@ def test_app_release_runner_only_promotes_immutable_app_images() -> None:
     assert "docker build" not in buildspec
     assert "docker push" not in buildspec
     assert "pytest" not in buildspec
+
+
+def test_app_release_runner_snapshots_legacy_images_for_first_release_rollback() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'rollback_tag="pipeline-rollback-${target_tag}"' in runner
+    assert '"${compose[@]}" ps -q "$service"' in runner
+    assert "docker inspect --format '{{.Image}}'" in runner
+    assert 'docker tag "$image_id" "$repository:$rollback_tag"' in runner
+    assert 'snapshot_rollback_image backend "$backend_repository"' in runner
+    assert 'snapshot_rollback_image frontend "$frontend_repository"' in runner
+    assert 'RELEASE_TAG=$rollback_tag' in runner
+    assert "Current release tag is not an immutable" not in runner
+    assert "StandardOutputContent" in runner
+    assert "StandardErrorContent" in runner
