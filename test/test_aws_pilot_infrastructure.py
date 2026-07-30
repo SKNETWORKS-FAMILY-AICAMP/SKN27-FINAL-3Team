@@ -234,12 +234,18 @@ def test_postgres_force_ssl_uses_the_static_parameter_apply_method() -> None:
 
 def test_private_s3_and_ecr_resources_have_encryption_and_lifecycle_controls() -> None:
     source = _terraform_source()
+    storage = (TERRAFORM_DIR / "storage.tf").read_text(encoding="utf-8")
+    pipeline = (TERRAFORM_DIR / "codepipeline.tf").read_text(encoding="utf-8")
     registry = (TERRAFORM_DIR / "registry.tf").read_text(encoding="utf-8")
     vision = (TERRAFORM_DIR / "vision_worker.tf").read_text(encoding="utf-8")
     assert len(re.findall(r'resource\s+"aws_s3_bucket"\s+"(clean|quarantine)"', source)) == 2
-    assert len(re.findall(r'resource\s+"aws_s3_bucket_public_access_block"', source)) == 2
-    assert len(re.findall(r'resource\s+"aws_s3_bucket_server_side_encryption_configuration"', source)) == 2
-    assert len(re.findall(r'resource\s+"aws_s3_bucket_lifecycle_configuration"', source)) == 2
+    assert len(re.findall(r'resource\s+"aws_s3_bucket_public_access_block"', storage)) == 2
+    assert len(re.findall(r'resource\s+"aws_s3_bucket_server_side_encryption_configuration"', storage)) == 2
+    assert len(re.findall(r'resource\s+"aws_s3_bucket_lifecycle_configuration"', storage)) == 2
+    assert 'resource "aws_s3_bucket" "pipeline_artifacts"' in pipeline
+    assert 'resource "aws_s3_bucket_public_access_block" "pipeline_artifacts"' in pipeline
+    assert 'resource "aws_s3_bucket_server_side_encryption_configuration" "pipeline_artifacts"' in pipeline
+    assert 'resource "aws_s3_bucket_lifecycle_configuration" "pipeline_artifacts"' in pipeline
     assert len(re.findall(r'resource\s+"aws_ecr_repository"\s+"(backend|frontend)"', source)) == 2
     assert len(re.findall(r'resource\s+"aws_ecr_lifecycle_policy"', registry)) == 2
     assert len(re.findall(r'resource\s+"aws_ecr_lifecycle_policy"', vision)) == 1

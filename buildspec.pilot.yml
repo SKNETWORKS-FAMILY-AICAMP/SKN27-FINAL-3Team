@@ -1,0 +1,29 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - test -n "$AWS_DEFAULT_REGION"
+      - test -n "$BACKEND_REPOSITORY_URL"
+      - test -n "$FRONTEND_REPOSITORY_URL"
+      - export IMAGE_TAG="$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c1-12)"
+      - test -n "$IMAGE_TAG"
+      - export ECR_REGISTRY="$(echo "$BACKEND_REPOSITORY_URL" | cut -d/ -f1)"
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+  build:
+    commands:
+      - python -m pytest -q test/test_aws_pilot_infrastructure.py test/test_aws_vision_worker_infrastructure.py test/test_codebuild_pilot_contract.py
+      - docker build --platform linux/amd64 -f Dockerfile -t "$BACKEND_REPOSITORY_URL:$IMAGE_TAG" .
+      - docker build --platform linux/amd64 -f deploy/aws-pilot/Dockerfile.frontend --build-arg "VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID" -t "$FRONTEND_REPOSITORY_URL:$IMAGE_TAG" .
+      - |
+        if test -n "$VISION_REPOSITORY_URI"; then
+          docker build --platform linux/amd64 -f deploy/aws-vision/Dockerfile -t "$VISION_REPOSITORY_URI:$IMAGE_TAG" .
+        fi
+  post_build:
+    commands:
+      - docker push "$BACKEND_REPOSITORY_URL:$IMAGE_TAG"
+      - docker push "$FRONTEND_REPOSITORY_URL:$IMAGE_TAG"
+      - |
+        if test -n "$VISION_REPOSITORY_URI"; then
+          docker push "$VISION_REPOSITORY_URI:$IMAGE_TAG"
+        fi
