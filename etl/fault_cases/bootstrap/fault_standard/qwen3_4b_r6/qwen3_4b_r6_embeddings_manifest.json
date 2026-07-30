@@ -1,0 +1,40 @@
+{
+  "artifact_type": "qwen3_4b_r6_embeddings",
+  "created_at_utc": "2026-07-29T00:52:34.442475+00:00",
+  "model_id": "Qwen/Qwen3-Embedding-4B",
+  "requested_revision": "main",
+  "resolved_revision": "5cf2132abc99cad020ac570b19d031efec650f2b",
+  "pooling": "last_token",
+  "normalization": "l2",
+  "output_dtype": "float32",
+  "inference_dtype": "bfloat16",
+  "embedding_dimension": 2560,
+  "max_length_tokens": 2048,
+  "query_instruction": "주어진 자동차 사고 질문과 가장 일치하는 자동차사고 과실비율 인정기준 문서를 검색하세요.",
+  "document_instruction": null,
+  "seed": 20260729,
+  "record_count": 6175,
+  "document_count": 6145,
+  "query_count": 30,
+  "input_hashes": {
+    "all_search_documents_v2.jsonl": "0602a7c9f1d268bb832fdf4c5a139e9a17f6e44e898358617eb0aaf162baa3a1",
+    "complete30_consumer_questions_v1.jsonl": "8bc649f5f38a07c893bcce4a5aa397c540b926d544cd60b3d40fc7a3cf876889",
+    "search_v2_release_manifest.json": "a4085c563a90db10a6991399c7ddedacdbfc069fc927e30350ae6be35f3695bc",
+    "runpod_encode_r6.py": "bfcaaf5efbd9cf1c4b5c4fd35e1a9f87381907b58b402697e2563e6e986f63fe"
+  },
+  "output_file": "qwen3_4b_r6_embeddings.jsonl.gz",
+  "output_sha256": "cd6d031ff775beb7401dcb729007190685a687b43afcad4c7c96207f171b8e8d",
+  "environment": {
+    "python": "3.11.10 (main, Sep  7 2024, 18:35:41) [GCC 11.4.0]",
+    "platform": "Linux-6.8.0-65-generic-x86_64-with-glibc2.35",
+    "torch": "2.4.1+cu124",
+    "transformers": "4.53.3",
+    "cuda_runtime": "12.4",
+    "gpu_name": "NVIDIA A40"
+  },
+  "leakage_contract": {
+    "answer_key_in_bundle": false,
+    "qrels_in_bundle": false,
+    "gold_rule_or_ratio_in_query_input": false
+  }
+}

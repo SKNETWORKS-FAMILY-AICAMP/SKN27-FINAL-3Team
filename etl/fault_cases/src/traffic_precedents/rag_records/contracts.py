@@ -1,0 +1,7 @@
+from __future__ import annotations
+
+
+ALLOWED_GRADES = frozenset({"GENERAL_READY_DIRECT", "SEED_READY"})
+FORBIDDEN_ROLES = frozenset(
+    {"OTHER", "PARTY_ARGUMENT", "INLINE_CITATION", "INSURANCE_DAMAGE_PROCEDURE"}
+)

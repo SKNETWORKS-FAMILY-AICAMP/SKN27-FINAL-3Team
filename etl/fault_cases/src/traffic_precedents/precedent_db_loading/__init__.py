@@ -1,1 +1,1 @@
-"""PostgreSQL loading utilities for traffic precedent RAG datasets."""
+"""PostgreSQL/pgvector loader for the fixed precedent corpus."""

@@ -90,6 +90,13 @@ models/
 docs/presentation/
 
 etl/fault_cases/artifacts/
+etl/fault_cases/review_case_test/
+etl/fault_cases/precedents_test/
+etl/fault_cases/standard_TEST/
+etl/fault_cases/ppt/
+/tmp/
+/pytest-cache-files-*/
+node_modules/
 
 # Local Git worktrees
 .worktrees/

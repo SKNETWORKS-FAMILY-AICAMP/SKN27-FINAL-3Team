@@ -1,0 +1,11 @@
+from __future__ import annotations
+
+from enum import Enum
+
+
+class PrecedentGrade(str, Enum):
+    SEED_READY = "SEED_READY"
+    GENERAL_READY_DIRECT = "GENERAL_READY_DIRECT"
+    GENERAL_READY_LEGAL_SUPPORT = "GENERAL_READY_LEGAL_SUPPORT"
+    GENERAL_QUARANTINE = "GENERAL_QUARANTINE"
+    GENERAL_EXCLUDED = "GENERAL_EXCLUDED"

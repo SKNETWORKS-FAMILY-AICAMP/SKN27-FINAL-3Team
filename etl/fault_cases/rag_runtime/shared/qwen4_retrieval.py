@@ -11,7 +11,7 @@ import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
 import pyarrow.parquet as pq
 import psycopg
@@ -213,3 +213,47 @@ def search_by_vector(corpus: str, query_vector: list[float], top_k: int = 10, ca
         if len(unique) >= top_k:
             break
     return unique
+
+
+def fetch_document_chunks(
+    corpus: str,
+    document_ids: Sequence[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """리랭커 문맥용 청크를 한 번의 읽기 전용 쿼리로 조회한다."""
+
+    if corpus != "review_case":
+        raise ValueError(
+            "전체 사례 문맥 조회는 review_case만 지원합니다."
+        )
+    unique_ids = list(dict.fromkeys(str(value) for value in document_ids))
+    if not unique_ids:
+        return {}
+
+    sql = """
+        SELECT
+            c.document_id,
+            c.chunk_id,
+            c.chunk_type,
+            c.chunk_text,
+            c.metadata
+        FROM rag_qwen4.chunks AS c
+        WHERE c.document_id = ANY(%s)
+        ORDER BY c.document_id, c.chunk_index, c.chunk_id
+    """
+    with _connect(corpus) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, (unique_ids,))
+            columns = [
+                column.name for column in cursor.description
+            ]
+            rows = [
+                dict(zip(columns, values, strict=True))
+                for values in cursor.fetchall()
+            ]
+
+    grouped: dict[str, list[dict[str, Any]]] = {
+        document_id: [] for document_id in unique_ids
+    }
+    for row in rows:
+        grouped.setdefault(str(row["document_id"]), []).append(row)
+    return grouped

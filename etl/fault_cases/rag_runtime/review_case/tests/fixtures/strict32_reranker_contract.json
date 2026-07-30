@@ -1,0 +1,1324 @@
+{
+    "contract_version":  "review_case_strict32_bge_v1",
+    "metrics":  {
+                    "query_count":  32,
+                    "candidate_count_per_query":  5,
+                    "first_stage_hit_at_1_count":  20,
+                    "reranker_hit_at_1_count":  24,
+                    "reranker_recall_at_5_count":  32
+                },
+    "queries":  [
+                    {
+                        "query_id":  "fault_common_q01",
+                        "approved_relevant_case_ids":  ["review_case_2019_008384"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_008384",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.82157361507415771,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_070162",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.8034287691116333,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_051544",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.80236971378326416,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_034537",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.80116850137710571,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_001024",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.79733401536941528,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  4
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q02",
+                        "approved_relevant_case_ids":  ["review_case_2019_001024","review_case_2019_034537"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_034537",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.85157328844070435,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_001024",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.84829974174499512,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_035378",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.84296828508377075,
+                                               "reranker_score":  1,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_074368",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.83972764015197754,
+                                               "reranker_score":  1,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2016_036161",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.82852798700332642,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q08",
+                        "approved_relevant_case_ids":  ["review_case_2019_041855","review_case_2019_046215"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_046215",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.81873255968093872,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_076812",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.81253433227539063,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_041855",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.809612512588501,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_043123",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.8032231330871582,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_050987",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.78758978843688965,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q09",
+                        "approved_relevant_case_ids":  ["review_case_2019_046500"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_058245",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.80647861957550049,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_062323",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.79576754570007324,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_046500",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.79548650979995728,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_042047",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.79142415523529053,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_011885",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.79016119241714478,
+                                               "reranker_score":  1,
+                                               "expected_rank":  3
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q10",
+                        "approved_relevant_case_ids":  ["review_case_2019_031656","review_case_2019_044419","review_case_2019_049493"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_031656",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.83653277158737183,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_044419",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.83531224727630615,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_054943",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.83480840921401978,
+                                               "reranker_score":  1,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_029924",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.83453267812728882,
+                                               "reranker_score":  1,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_008765",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.83265185356140137,
+                                               "reranker_score":  1,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q11",
+                        "approved_relevant_case_ids":  ["review_case_2019_031656"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_008765",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.8161696195602417,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_062323",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.807226300239563,
+                                               "reranker_score":  0.9765625,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_031656",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.8070186972618103,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_043504",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.80115443468093872,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_042047",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.799147367477417,
+                                               "reranker_score":  0.9765625,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q12",
+                        "approved_relevant_case_ids":  ["review_case_2019_034337"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_020711",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.85412567853927612,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_077391",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.84380805492401123,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_072642",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.84061598777771,
+                                               "reranker_score":  1,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_069536",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.84013760089874268,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_034337",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.83949840068817139,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q13",
+                        "approved_relevant_case_ids":  ["review_case_2016_036061","review_case_2019_037461","review_case_2019_042637","review_case_2019_049162"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_072428",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.79818069934844971,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_020711",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.79571199417114258,
+                                               "reranker_score":  0.98828125,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_037461",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.79389691352844238,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_031514",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.784088134765625,
+                                               "reranker_score":  0.9765625,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_042637",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.78062689304351807,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q14",
+                        "approved_relevant_case_ids":  ["review_case_2018_054446"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_054446",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.84059429168701172,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_061759",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.83346807956695557,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_072649",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.82075941562652588,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_002570",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.74635607004165649,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_042047",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.73840904235839844,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q17",
+                        "approved_relevant_case_ids":  ["review_case_2018_017356","review_case_2018_030703","review_case_2019_007588","review_case_2019_008973"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_008973",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.83414322137832642,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_007588",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.82130885124206543,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_017356",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.8203732967376709,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_030703",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.81071102619171143,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_011021",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.80571591854095459,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q19",
+                        "approved_relevant_case_ids":  ["review_case_2018_061822","review_case_2019_044564"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_061822",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.80543124675750732,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_044564",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.78798258304595947,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_041855",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.75155818462371826,
+                                               "reranker_score":  0.9453125,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_046215",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.74958032369613647,
+                                               "reranker_score":  0.91796875,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_061937",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.745297908782959,
+                                               "reranker_score":  0.97265625,
+                                               "expected_rank":  3
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q20",
+                        "approved_relevant_case_ids":  ["review_case_2017_060836"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_042887",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.804055392742157,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_060836",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.74119013547897339,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_032889",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.725376546382904,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_014443",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.71171802282333374,
+                                               "reranker_score":  0.94921875,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_033681",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.70453774929046631,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  4
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q21",
+                        "approved_relevant_case_ids":  ["review_case_2017_064915","review_case_2019_053543"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2017_064915",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.78548085689544678,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_053543",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.78406721353530884,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_007380",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.77690941095352173,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_016517",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.77079480886459351,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_033424",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.76762652397155762,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q22",
+                        "approved_relevant_case_ids":  ["review_case_2018_078354","review_case_2019_038889"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_078354",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.79978561401367188,
+                                               "reranker_score":  0.96484375,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_038889",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.7471039891242981,
+                                               "reranker_score":  0.98046875,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_040462",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.72050225734710693,
+                                               "reranker_score":  0.95703125,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_064915",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.71935701370239258,
+                                               "reranker_score":  0.98046875,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_053543",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.717858612537384,
+                                               "reranker_score":  0.96875,
+                                               "expected_rank":  3
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q25",
+                        "approved_relevant_case_ids":  ["review_case_2019_039292","review_case_2019_056480"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_039292",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.76709234714508057,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_056480",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.74714016914367676,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_045956",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.72898721694946289,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_009725",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.72787320613861084,
+                                               "reranker_score":  0.890625,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_034721",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.72167360782623291,
+                                               "reranker_score":  0.953125,
+                                               "expected_rank":  4
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q27",
+                        "approved_relevant_case_ids":  ["review_case_2018_009725"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_039292",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.68488723039627075,
+                                               "reranker_score":  0.82421875,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_009725",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.68204689025878906,
+                                               "reranker_score":  0.59765625,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_045956",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.65678679943084717,
+                                               "reranker_score":  0.72265625,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_056480",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.65486836433410645,
+                                               "reranker_score":  0.7578125,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_064915",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.65250194072723389,
+                                               "reranker_score":  0.2197265625,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q28",
+                        "approved_relevant_case_ids":  ["review_case_2018_009725"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_039292",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.72933793067932129,
+                                               "reranker_score":  0.94921875,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_009725",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.72396445274353027,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_045956",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.71572726964950562,
+                                               "reranker_score":  0.86328125,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_056480",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.705440104007721,
+                                               "reranker_score":  0.8671875,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_069006",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.701518714427948,
+                                               "reranker_score":  0.8203125,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q29",
+                        "approved_relevant_case_ids":  ["review_case_2019_005556","review_case_2019_042887"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2017_025153",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.76834118366241455,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_005556",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.75842225551605225,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_015270",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.7224997878074646,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_042887",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.71567606925964355,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_054658",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.69363868236541748,
+                                               "reranker_score":  0.6953125,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q30",
+                        "approved_relevant_case_ids":  ["review_case_2018_066885"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_066885",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.77680659294128418,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_005556",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.71592807769775391,
+                                               "reranker_score":  0.94921875,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_033681",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.69600147008895874,
+                                               "reranker_score":  0.9140625,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_057490",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.68665552139282227,
+                                               "reranker_score":  0.3125,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_042887",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.686309278011322,
+                                               "reranker_score":  0.90234375,
+                                               "expected_rank":  4
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q33",
+                        "approved_relevant_case_ids":  ["review_case_2019_002786","review_case_2019_037393"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_037393",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.80401992797851563,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_023315",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.79838460683822632,
+                                               "reranker_score":  0.98828125,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_005596",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.79710197448730469,
+                                               "reranker_score":  0.98828125,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_035522",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.78405392169952393,
+                                               "reranker_score":  0.94921875,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_002786",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.78313827514648438,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q34",
+                        "approved_relevant_case_ids":  ["review_case_2018_060681","review_case_2019_039702"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_005596",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.80014687776565552,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_035522",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.79076719284057617,
+                                               "reranker_score":  0.9765625,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_060681",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.78984856605529785,
+                                               "reranker_score":  0.98828125,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_023315",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.78275966644287109,
+                                               "reranker_score":  0.98828125,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_037393",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.77023643255233765,
+                                               "reranker_score":  0.95703125,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q35",
+                        "approved_relevant_case_ids":  ["review_case_2018_047765","review_case_2019_023315"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_071745",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.8029024600982666,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_054658",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.801042914390564,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_037393",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.79179841279983521,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_023315",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.78692305088043213,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_005596",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.78439033031463623,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q36",
+                        "approved_relevant_case_ids":  ["review_case_2017_055165","review_case_2019_018393","review_case_2019_025985","review_case_2019_034403"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_018393",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.843151330947876,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_025985",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.83728122711181641,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_055165",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.806778073310852,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_034403",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.80542647838592529,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_038452",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.76728260517120361,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q37",
+                        "approved_relevant_case_ids":  ["review_case_2017_064945","review_case_2019_010134"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2017_064945",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.86211121082305908,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_010134",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.81174260377883911,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_065639",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.80580872297286987,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_007495",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.75930166244506836,
+                                               "reranker_score":  0.98828125,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_034403",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.75142788887023926,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q38",
+                        "approved_relevant_case_ids":  ["review_case_2018_045956","review_case_2018_068200"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_045956",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.79757332801818848,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_068200",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.75546783208847046,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_063611",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.72368025779724121,
+                                               "reranker_score":  0.98828125,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_033766",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.70933723449707031,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_039292",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.70403730869293213,
+                                               "reranker_score":  0.90625,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q39",
+                        "approved_relevant_case_ids":  ["review_case_2018_063611","review_case_2019_033766"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_063611",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.8035615086555481,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_033766",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.78882622718811035,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_045956",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.72879314422607422,
+                                               "reranker_score":  0.9765625,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_035677",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.71848046779632568,
+                                               "reranker_score":  0.984375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_044386",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.71570050716400146,
+                                               "reranker_score":  0.98046875,
+                                               "expected_rank":  4
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q40",
+                        "approved_relevant_case_ids":  ["review_case_2019_022179"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_074368",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.81312251091003418,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_076812",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.81005346775054932,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_008384",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.79404711723327637,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_022179",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.79372262954711914,
+                                               "reranker_score":  1,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_068225",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.79209113121032715,
+                                               "reranker_score":  1,
+                                               "expected_rank":  4
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q41",
+                        "approved_relevant_case_ids":  ["review_case_2019_011885","review_case_2019_062323"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2018_058245",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.80922603607177734,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_011885",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.80375277996063232,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_042047",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.79086768627166748,
+                                               "reranker_score":  1,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_062323",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.79062783718109131,
+                                               "reranker_score":  1,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_002570",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.78431469202041626,
+                                               "reranker_score":  1,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q42",
+                        "approved_relevant_case_ids":  ["review_case_2019_050987"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_050987",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.84895658493041992,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_022283",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.844050407409668,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2016_051812",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.83810144662857056,
+                                               "reranker_score":  1,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_006857",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.83583676815032959,
+                                               "reranker_score":  1,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_076812",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.80285096168518066,
+                                               "reranker_score":  1,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q43",
+                        "approved_relevant_case_ids":  ["review_case_2018_060821","review_case_2019_045742"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_045742",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.7859950065612793,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_060821",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.77511739730834961,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_063711",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.7746812105178833,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_028354",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.75254511833190918,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_063911",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.73391687870025635,
+                                               "reranker_score":  0.953125,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q44",
+                        "approved_relevant_case_ids":  ["review_case_2018_060821","review_case_2019_045742"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_045742",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.74511474370956421,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_063711",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.74302184581756592,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_060821",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.738304853439331,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_063911",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.73505735397338867,
+                                               "reranker_score":  0.9921875,
+                                               "expected_rank":  5
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_028354",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.72947144508361816,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  4
+                                           }
+                                       ]
+                    },
+                    {
+                        "query_id":  "fault_common_q45",
+                        "approved_relevant_case_ids":  ["review_case_2019_016517"],
+                        "candidates":  [
+                                           {
+                                               "review_case_id":  "review_case_2019_016517",
+                                               "first_stage_rank":  1,
+                                               "first_stage_score":  0.803632378578186,
+                                               "reranker_score":  1,
+                                               "expected_rank":  1
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2018_033424",
+                                               "first_stage_rank":  2,
+                                               "first_stage_score":  0.80311965942382813,
+                                               "reranker_score":  1,
+                                               "expected_rank":  2
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_053543",
+                                               "first_stage_rank":  3,
+                                               "first_stage_score":  0.744208037853241,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  3
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2019_028354",
+                                               "first_stage_rank":  4,
+                                               "first_stage_score":  0.74376368522644043,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  4
+                                           },
+                                           {
+                                               "review_case_id":  "review_case_2017_064915",
+                                               "first_stage_rank":  5,
+                                               "first_stage_score":  0.737923264503479,
+                                               "reranker_score":  0.99609375,
+                                               "expected_rank":  5
+                                           }
+                                       ]
+                    }
+                ]
+}
