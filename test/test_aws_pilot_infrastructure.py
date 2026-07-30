@@ -281,11 +281,13 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     assert services["backend"]["depends_on"]["law-neo4j"]["condition"] == "service_healthy"
     assert services["rag-loader"]["networks"]["pilot"] == {}
     assert "ipv4_address" not in services["rag-loader"]["networks"]["pilot"]
+    assert services["rag-loader"]["profiles"] == ["seed"]
     assert (
         services["rag-loader"]["environment"]["REVIEW_CASE_POSTGRES_EXPORT_ROOT"]
         == "/tmp/review-case-postgres-exports"
     )
     assert services["rag-loader"]["mem_limit"] == "1536m"
+    assert services["redis"]["healthcheck"]["start_period"] == "60s"
     caddy = services["caddy"]
     assert caddy["network_mode"] == "host"
     assert "ports" not in caddy
@@ -369,7 +371,7 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     assert "initial RAG stage service states" in deploy
     assert "logs --tail 80 `$stage_service" in deploy
     loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
-    assert "run --rm --no-deps rag-loader" in loader
+    assert "$stageComposeCommand --profile seed run --rm --no-deps rag-loader" in loader
     assert "run --rm --no-deps backend" not in loader
 
 
@@ -491,13 +493,13 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
     expected_steps = (
         "aws s3 cp '$RagSeedS3Uri'",
         "sha256sum -c -",
-        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py verify_production_rag_seed_manifest",
-        "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_production_rag_seed",
-        "rag-loader python backend/manage.py load_legal_graph_seed",
-        "rag-loader python backend/manage.py verify_legal_graph_readiness --format json",
-        "run --rm --no-deps rag-loader python backend/manage.py smoke_law_ground_search --require-results",
-        "run --rm --no-deps rag-loader python backend/manage.py verify_pgvector_rag_readiness --format json",
-        "run --rm --no-deps rag-loader python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
+        "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py verify_production_rag_seed_manifest",
+        "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_production_rag_seed",
+        "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_legal_graph_seed",
+        "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py verify_legal_graph_readiness --format json",
+        "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py smoke_law_ground_search --require-results",
+        "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py verify_pgvector_rag_readiness --format json",
+        "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
     )
     positions = [deploy.index(step) for step in expected_steps]
     assert positions == sorted(positions)
@@ -1557,6 +1559,35 @@ def test_normal_promotion_uses_one_production_supervisor_runtime_smoke() -> None
     assert (
         "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call"
         not in normal_segment
+    )
+
+
+def test_normal_promotion_waits_for_host_ports_and_never_starts_seed_loader() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+    previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")
+    promote = deploy.index("ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current", previous)
+    normal_segment = deploy[previous:promote]
+
+    operational_services = (
+        "OPERATIONAL_SERVICES='caddy edge-rate-limit frontend backend "
+        "agent-worker file-scan-worker ops-monitor redis clamav law-neo4j'"
+    )
+    assert operational_services in normal_segment
+    assert (
+        "$productionComposeCommand up -d --wait --wait-timeout 600 "
+        "--remove-orphans `$OPERATIONAL_SERVICES"
+    ) in normal_segment
+    assert (
+        "for attempt in `$(seq 1 30); do ! ss -ltnp | grep -E '(:80|:443)'"
+    ) in normal_segment
+    assert normal_segment.index("$productionComposeCommand down") < normal_segment.index(
+        "for attempt in `$(seq 1 30); do ! ss -ltnp | grep -E '(:80|:443)'"
+    )
+    assert normal_segment.index(
+        "for attempt in `$(seq 1 30); do ! ss -ltnp | grep -E '(:80|:443)'"
+    ) < normal_segment.rindex(
+        "$productionComposeCommand up -d --wait --wait-timeout 600 "
+        "--remove-orphans `$OPERATIONAL_SERVICES"
     )
 
 
