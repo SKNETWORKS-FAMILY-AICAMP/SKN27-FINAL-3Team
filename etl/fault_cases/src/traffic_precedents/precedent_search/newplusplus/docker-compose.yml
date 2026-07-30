@@ -1,0 +1,23 @@
+services:
+  precedent-newplusplus-pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: skn27-precedent-newplusplus-pgvector
+    environment:
+      POSTGRES_DB: precedent_newplusplus_db
+      POSTGRES_USER: precedent_app
+      POSTGRES_PASSWORD: ${PRECEDENT_NEWPLUSPLUS_DB_PASSWORD:-precedent_test_only}
+    ports:
+      - "5437:5432"
+    volumes:
+      - precedent_newplusplus_pgdata:/var/lib/postgresql/data
+      - ./01_init_pgvector.sql:/docker-entrypoint-initdb.d/01_init_pgvector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U precedent_app -d precedent_newplusplus_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  precedent_newplusplus_pgdata:
+    name: skn27_precedent_newplusplus_pgdata
+

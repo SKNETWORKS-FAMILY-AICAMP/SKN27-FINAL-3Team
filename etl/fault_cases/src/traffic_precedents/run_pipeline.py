@@ -1,59 +1,74 @@
-"""Traffic precedents pipeline controller."""
+from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
 
-STAGES = ("crawl", "preprocess", "classify1", "verify1", "classify2", "verify2", "chunk", "load", "all")
+
+PIPELINE_STAGES = (
+    "collect",
+    "validate-collection",
+    "preprocess",
+    "semantic-blocks",
+    "classify",
+    "validate-classification",
+    "build-rag-records",
+    "embed",
+    "load",
+)
+CLI_STAGES = (*PIPELINE_STAGES, "all")
 BASE_DIR = Path(__file__).resolve().parent
+STAGE_MODULES = {
+    "collect": "collection.run",
+    "validate-collection": "collection.run_validation",
+    "preprocess": "preprocessing.run",
+    "semantic-blocks": "semantic_blocks.run",
+    "classify": "classification.run_classification",
+    "validate-classification": "classification.run_validation",
+    "build-rag-records": "rag_records.run",
+    "embed": "precedent_embedding.build_embeddings",
+    "load": "precedent_db_loading.run",
+}
 
-def parse_stage_args() -> tuple[str, list[str]]:
-    parser = argparse.ArgumentParser(description="Run the traffic_precedents pipeline.")
-    parser.add_argument("--stage", choices=STAGES, default="all")
-    args, remaining = parser.parse_known_args()
-    return args.stage, remaining
 
-def run_script(script_path: Path, args: list[str]) -> None:
-    if not script_path.exists():
-        print(f"[{script_path.name}] Not found: {script_path}", file=sys.stderr)
-        sys.exit(1)
-        
-    cmd = [sys.executable, str(script_path), *args]
-    print(f"\n[{script_path.name}] Running...")
-    result = subprocess.run(cmd, cwd=str(BASE_DIR))
-    if result.returncode != 0:
-        print(f"[{script_path.name}] Failed with exit code {result.returncode}", file=sys.stderr)
-        sys.exit(result.returncode)
+def run_stage(stage: str, remaining: list[str]) -> None:
+    module = (
+        "etl.fault_cases.src.traffic_precedents."
+        + STAGE_MODULES[stage]
+    )
+    result = subprocess.run([sys.executable, "-m", module, *remaining], check=False)
+    if result.returncode:
+        raise SystemExit(result.returncode)
+
 
 def main() -> None:
-    stage, remaining = parse_stage_args()
-    
-    stages_to_run = []
-    if stage == "all":
-        stages_to_run = list(STAGES[:-1])
-    else:
-        stages_to_run = [stage]
+    parser = argparse.ArgumentParser(description="Run the precedent RAG pipeline.")
+    parser.add_argument("--stage", choices=CLI_STAGES, default="all")
+    parser.add_argument(
+        "--pipeline-config",
+        type=Path,
+        help="JSON object mapping each stage to its CLI argument list.",
+    )
+    args, remaining = parser.parse_known_args()
+    stages = PIPELINE_STAGES if args.stage == "all" else (args.stage,)
+    stage_arguments: dict[str, list[str]] = {}
+    if args.pipeline_config:
+        raw = json.loads(
+            args.pipeline_config.expanduser().resolve().read_text(encoding="utf-8")
+        )
+        if not isinstance(raw, dict):
+            raise ValueError("pipeline config must be a JSON object")
+        stage_arguments = {
+            str(stage): [str(value) for value in values]
+            for stage, values in raw.items()
+        }
+    if args.stage == "all" and not stage_arguments:
+        raise ValueError("--pipeline-config is required for --stage all")
+    for stage in stages:
+        run_stage(stage, stage_arguments.get(stage, remaining))
 
-    for s in stages_to_run:
-        if s == "crawl":
-            run_script(BASE_DIR / "traffic_precedents_crawling" / "traffic_prec_api_collector_all_raw_commented.py", remaining if stage == "crawl" else [])
-        elif s == "preprocess":
-            run_script(BASE_DIR / "traffic_precedents_preprocessing" / "preprocess_run.py", remaining if stage == "preprocess" else [])
-        elif s == "classify1":
-            run_script(BASE_DIR / "traffic_precedents_1st_classification-traffic accident" / "traffic_relevance_reclassifier_stage1.py", remaining if stage == "classify1" else [])
-        elif s == "verify1":
-            run_script(BASE_DIR / "traffic_precedents_1st_classification-verification" / "traffic_relevance_recheck.py", remaining if stage == "verify1" else [])
-        elif s == "classify2":
-            run_script(BASE_DIR / "traffic_precedents_2nd_classification-fault_ratio" / "traffic_fault_ratio_stage2.py", remaining if stage == "classify2" else [])
-        elif s == "verify2":
-            run_script(BASE_DIR / "traffic_precedents_2nd_classification-verification" / "traffic_fault_ratio_recheck.py", remaining if stage == "verify2" else [])
-        elif s == "chunk":
-            run_script(BASE_DIR / "precedent_chunking" / "build_fault_ratio_precedent_chunks.py", remaining if stage == "chunk" else [])
-        elif s == "load":
-            run_script(BASE_DIR / "precedent_db_loading" / "schema_loader.py", [])
-            run_script(BASE_DIR / "precedent_db_loading" / "load_traffic_precedents.py", [])
-            run_script(BASE_DIR / "precedent_db_loading" / "load_fault_ratio_precedents.py", remaining if stage == "load" else [])
 
 if __name__ == "__main__":
     main()

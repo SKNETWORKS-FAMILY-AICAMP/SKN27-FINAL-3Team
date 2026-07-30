@@ -27,6 +27,7 @@ class SearchEvidence(TypedDict, total=False):
     rerank_score: float
     score_type: str
     confidence: str
+    decision_fault_ratio: str | None
     metadata: dict[str, Any]
     limitations: list[str]
 
