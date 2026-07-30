@@ -102,7 +102,9 @@ def test_pilot_app_release_requires_manual_approval_and_scoped_ssm_access() -> N
     release_policy = codebuild[policy_start:policy_end]
     assert '"ssm:SendCommand"' in release_policy
     assert '"ssm:GetCommandInvocation"' in release_policy
-    assert "aws_instance.app.arn" in release_policy
+    assert 'data "aws_instance" "pilot_app_release_target"' in codebuild
+    assert "data.aws_instance.pilot_app_release_target[0].arn" in release_policy
+    assert "aws_instance.app.arn" not in release_policy
     assert "AWS-RunShellScript" in release_policy
     assert '"s3:GetObject"' in release_policy
     assert '"s3:GetObjectVersion"' in release_policy
@@ -117,6 +119,18 @@ def test_pilot_app_release_requires_manual_approval_and_scoped_ssm_access() -> N
         "ecr:PutImage",
     ):
         assert forbidden not in release_policy
+
+
+def test_pilot_app_release_does_not_depend_on_the_managed_ec2_resource() -> None:
+    codebuild = (
+        ROOT / "infra" / "terraform-pilot" / "codebuild.tf"
+    ).read_text(encoding="utf-8")
+
+    release_start = codebuild.index('data "aws_instance" "pilot_app_release_target"')
+    release_config = codebuild[release_start:]
+    assert "data.aws_instance.pilot_app_release_target[0].id" in release_config
+    assert "aws_instance.app.id" not in release_config
+    assert "aws_instance.app.arn" not in release_config
 
 
 def test_app_release_runner_only_promotes_immutable_app_images() -> None:

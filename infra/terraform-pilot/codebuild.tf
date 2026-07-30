@@ -150,6 +150,15 @@ resource "aws_iam_role" "pilot_app_release" {
   assume_role_policy = data.aws_iam_policy_document.codebuild_assume_role.json
 }
 
+data "aws_instance" "pilot_app_release_target" {
+  count = local.pilot_app_release_enabled ? 1 : 0
+
+  filter {
+    name   = "tag:Name"
+    values = ["${local.name_prefix}-app"]
+  }
+}
+
 data "aws_iam_policy_document" "pilot_app_release" {
   count = local.pilot_app_release_enabled ? 1 : 0
 
@@ -185,7 +194,7 @@ data "aws_iam_policy_document" "pilot_app_release" {
     effect  = "Allow"
     actions = ["ssm:SendCommand"]
     resources = [
-      aws_instance.app.arn,
+      data.aws_instance.pilot_app_release_target[0].arn,
       "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
     ]
   }
@@ -225,7 +234,7 @@ resource "aws_codebuild_project" "pilot_app_release" {
 
     environment_variable {
       name  = "PILOT_INSTANCE_ID"
-      value = aws_instance.app.id
+      value = data.aws_instance.pilot_app_release_target[0].id
     }
     environment_variable {
       name  = "BACKEND_REPOSITORY_URL"

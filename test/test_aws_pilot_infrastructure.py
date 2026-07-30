@@ -266,7 +266,8 @@ def test_app_release_is_opt_in_and_does_not_receive_runtime_secret_access() -> N
         'resource "aws_iam_role_policy" "pilot_app_release"', policy_start
     )
     release_policy = codebuild[policy_start:policy_end]
-    assert "aws_instance.app.arn" in release_policy
+    assert "data.aws_instance.pilot_app_release_target[0].arn" in release_policy
+    assert "aws_instance.app.arn" not in release_policy
     assert "ssm:GetParameter" not in release_policy
     assert "ssm:PutParameter" not in release_policy
 
