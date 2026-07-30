@@ -285,6 +285,7 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
         services["rag-loader"]["environment"]["REVIEW_CASE_POSTGRES_EXPORT_ROOT"]
         == "/tmp/review-case-postgres-exports"
     )
+    assert services["rag-loader"]["mem_limit"] == "1536m"
     caddy = services["caddy"]
     assert caddy["network_mode"] == "host"
     assert "ports" not in caddy

@@ -186,7 +186,7 @@ services:
     environment:
       <<: *backend-environment
       REVIEW_CASE_POSTGRES_EXPORT_ROOT: /tmp/review-case-postgres-exports
-    mem_limit: 768m
+    mem_limit: 1536m
     logging: *default-logging
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
