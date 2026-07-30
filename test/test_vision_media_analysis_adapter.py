@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import vision_media_analysis_adapter as adapter
+from app.services.aws_vision_queue_client import AwsVisionQueueResult
 from app.services.runpod_vision_client import RunPodVisionError, RunPodVisionResult
 
 
@@ -290,6 +291,40 @@ def test_runpod_provider_bypasses_local_checkpoint_and_caches_submitted_job(
     assert SIGNED_URL not in repr(result)
     assert "C:/" not in repr(result)
     assert "runpod-private-key" not in repr(result)
+
+
+def test_aws_queue_provider_uses_the_existing_signed_video_contract(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeClient:
+        def run(self, request):
+            captured["request"] = request
+            return AwsVisionQueueResult(
+                execution_id="exec_aws_queue_1",
+                output=_remote_worker_output(),
+            )
+
+    monkeypatch.setenv("VISION_RUNTIME_PROVIDER", "aws_queue")
+    monkeypatch.setenv(
+        "AWS_VISION_QUEUE_URL",
+        "https://sqs.ap-northeast-2.amazonaws.com/123/vision.fifo",
+    )
+    monkeypatch.setenv("AWS_VISION_RESULT_BUCKET", "skn27-vision-results")
+    monkeypatch.setattr(
+        adapter,
+        "_presign_runpod_video",
+        lambda _attachment, *, timeout_seconds: SIGNED_URL,
+    )
+    monkeypatch.setattr(adapter, "_new_aws_queue_client", lambda _config: FakeClient())
+
+    result = adapter.run_vision_media_analysis(
+        _canonical_video_input(),
+        {"execution_id": "exec_aws_queue_1"},
+    )
+
+    assert captured["request"]["video_url"] == SIGNED_URL
+    assert result["status"] == "partial"
+    assert SIGNED_URL not in repr(result)
 
 
 def test_runpod_provider_reuses_cached_job_id(monkeypatch) -> None:

@@ -12,6 +12,11 @@ from tempfile import TemporaryDirectory
 from typing import Any
 from urllib.parse import urlsplit
 
+from app.services.aws_vision_queue_client import (
+    AwsVisionQueueClient,
+    AwsVisionQueueConfig,
+    AwsVisionQueueError,
+)
 from app.services.runpod_vision_client import (
     RunPodVisionClient,
     RunPodVisionConfig,
@@ -46,6 +51,8 @@ def run_vision_media_analysis(
         return _run_local_provider(attachment, adapter_context)
     if provider == "runpod":
         return _run_runpod_provider(attachment, adapter_context)
+    if provider == "aws_queue":
+        return _run_aws_queue_provider(attachment, adapter_context)
     return _failure("vision_remote_unavailable")
 
 
@@ -142,6 +149,48 @@ def _run_runpod_provider(
 
 def _new_runpod_client(config: RunPodVisionConfig) -> RunPodVisionClient:
     return RunPodVisionClient(config)
+
+
+def _run_aws_queue_provider(
+    attachment: dict[str, Any],
+    adapter_context: dict[str, Any],
+) -> dict[str, Any]:
+    execution_id = _safe_execution_id(adapter_context.get("execution_id"))
+    attachment_id = _safe_execution_id(attachment.get("attachment_id"))
+    content_type = str(
+        attachment.get("content_type") or attachment.get("mime_type") or ""
+    ).lower()
+    try:
+        config = AwsVisionQueueConfig.from_environment()
+        video_url = _presign_runpod_video(
+            attachment,
+            timeout_seconds=config.timeout_seconds,
+        )
+        result = _new_aws_queue_client(config).run(
+            {
+                "schema_version": RUNPOD_REQUEST_SCHEMA_VERSION,
+                "execution_id": execution_id,
+                "attachment_id": attachment_id,
+                "video_url": video_url,
+                "content_type": content_type,
+            }
+        )
+        safe_handoff = _safe_worker_handoff(result.output)
+        if (
+            safe_handoff.get("handoff_schema_version")
+            != "vision-supervisor-handoff-v1"
+            or safe_handoff.get("status") not in HANDOFF_STATUSES
+        ):
+            raise AwsVisionQueueError("vision_remote_invalid_response")
+        return _success(safe_handoff)
+    except AwsVisionQueueError as exc:
+        return _failure(exc.code)
+    except Exception:
+        return _failure("vision_remote_unavailable")
+
+
+def _new_aws_queue_client(config: AwsVisionQueueConfig) -> AwsVisionQueueClient:
+    return AwsVisionQueueClient(config)
 
 
 def presign_get(
