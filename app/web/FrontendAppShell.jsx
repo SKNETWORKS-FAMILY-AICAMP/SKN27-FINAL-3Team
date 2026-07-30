@@ -13,6 +13,7 @@ import {
   readStoredGoogleProfile,
   readStoredAuthSession,
   readStoredAuthToken,
+  resolveGuestBootstrapSessionId,
   scheduleAppJwtRefresh,
 } from "./authSession.js";
 import {
@@ -495,7 +496,12 @@ export default function FrontendAppShell({
       );
       const initialGuestId = initialGuest?.guest?.guest_id || guestId;
       const initialGuestCredential = initialGuest?.guest_credential || "";
-      const ensuredSessionId = initialGuest?.session_binding?.session_id || sessionId || `ses_web_${Date.now()}`;
+      const ensuredSessionId = resolveGuestBootstrapSessionId({
+        boundSessionId: initialGuest?.session_binding?.session_id,
+        sessionId,
+        guestId,
+        guestCredential,
+      });
       if (!initialGuestId || !initialGuestCredential) {
         throw new Error("Guest session response is incomplete.");
       }
