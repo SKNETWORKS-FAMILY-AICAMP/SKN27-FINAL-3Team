@@ -216,9 +216,9 @@ printf '%s  %s\n' "$manifest_sha256" "$rag_dir/$manifest_relative_path" | sha256
 find "$rag_dir" -type d -exec chmod 0555 {} +
 find "$rag_dir" -type f -exec chmod 0444 {} +
 
-RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$rag_dir:/run/production-rag-seed:ro" backend python backend/manage.py verify_production_rag_seed_manifest --manifest "/run/production-rag-seed/$manifest_relative_path" --format json
-RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$rag_dir:/run/production-rag-seed:ro" backend python backend/manage.py build_legal_operational_evidence --manifest "/run/production-rag-seed/$manifest_relative_path" --dataset-version "$legal_dataset_version" --release-version "$target_tag" --verified-at "$legal_dataset_verified_at" > "$candidate_evidence_file"
-RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$candidate_dir:/run/candidate-evidence:ro" backend python -m etl.legal.validate_run_summary --summary /run/candidate-evidence/run_summary.json --max-age-hours "$legal_max_age_hours" --expected-dataset-version "$legal_dataset_version" --expected-release-version "$target_tag"
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$rag_dir:/run/production-rag-seed:ro" backend python backend/manage.py verify_production_rag_seed_manifest --manifest "/run/production-rag-seed/$manifest_relative_path" --format json
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$rag_dir:/run/production-rag-seed:ro" backend python backend/manage.py build_legal_operational_evidence --manifest "/run/production-rag-seed/$manifest_relative_path" --dataset-version "$legal_dataset_version" --release-version "$target_tag" --verified-at "$legal_dataset_verified_at" > "$candidate_evidence_file"
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$candidate_dir:/run/candidate-evidence:ro" backend python -m etl.legal.validate_run_summary --summary /run/candidate-evidence/run_summary.json --max-age-hours "$legal_max_age_hours" --expected-dataset-version "$legal_dataset_version" --expected-release-version "$target_tag"
 chmod 0444 "$candidate_evidence_file"
 
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" rm -sf backend frontend agent-worker file-scan-worker ops-monitor
@@ -234,7 +234,7 @@ mv -f "$release_evidence_tmp" "$release_evidence_file"
 install -m 0444 "$candidate_evidence_file" "$candidate_evidence_tmp"
 mv -f "$candidate_evidence_tmp" "$shared_evidence_file"
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor
-FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode transaction
+PILOT_OPS_MONITOR_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode transaction
 
 trap - ERR
 cleanup_seed_and_evidence

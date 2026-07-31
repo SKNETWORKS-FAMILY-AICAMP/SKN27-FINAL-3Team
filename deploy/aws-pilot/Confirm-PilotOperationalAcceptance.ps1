@@ -121,7 +121,7 @@ record_status() {
 
 while :; do
   set +e
-  snapshot="$(compose run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode acceptance)"
+  snapshot="$(PILOT_OPS_MONITOR_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" compose run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode acceptance)"
   gate_status=$?
   set -e
   if test "$gate_status" -ne 0; then
