@@ -132,7 +132,7 @@ export function googleLoginFailureMessage(error) {
     return "Google 로그인 창을 열지 못했습니다. 브라우저의 팝업 차단을 해제한 뒤 다시 시도해 주세요.";
   }
   if (detail.includes("popup_closed") || detail.includes("popup closed")) {
-    return "Google 로그인 창이 닫혔습니다. 로그인 창을 닫지 말고 다시 시도해 주세요.";
+    return "Google 로그인 창이 닫혔거나 서비스 화면으로 돌아오지 못했습니다. 팝업 차단을 해제하고 다시 시도해 주세요.";
   }
   if (detail.includes("timed out")) {
     return "Google 로그인 응답을 받지 못했습니다. 팝업 차단 여부를 확인한 뒤 다시 시도해 주세요.";

@@ -4572,6 +4572,21 @@ button.report-list-card.active {
   color: var(--muted);
 }
 
+.report-workbench-temporary,
+.report-workbench-load-error {
+  border: 1px solid rgba(224, 141, 43, 0.55);
+  border-radius: 12px;
+  background: rgba(255, 245, 232, 0.72);
+  color: #5d3c12;
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+}
+
+.report-workbench-temporary p,
+.report-workbench-load-error {
+  margin: 0.35rem 0 0;
+}
+
 .case-report-detail {
   display: grid;
   gap: 18px;

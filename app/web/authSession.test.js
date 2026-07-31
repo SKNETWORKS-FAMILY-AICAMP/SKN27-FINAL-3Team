@@ -44,6 +44,6 @@ test("explains a blocked or closed Google popup with a retry action", () => {
   );
   assert.equal(
     googleLoginFailureMessage(new Error("popup_closed")),
-    "Google 로그인 창이 닫혔습니다. 로그인 창을 닫지 말고 다시 시도해 주세요."
+    "Google 로그인 창이 닫혔거나 서비스 화면으로 돌아오지 못했습니다. 팝업 차단을 해제하고 다시 시도해 주세요."
   );
 });

@@ -63,6 +63,7 @@ test("does not replace an existing report with an empty-state instruction", () =
     hasReport: true,
     hasSavedReports: true,
     canGenerateReport: true,
+    isPersistedReport: true,
     reportingPayload: { report_id: "report_123" },
     supervisorState: {
       stage: "agent_execution_ready",
@@ -72,4 +73,27 @@ test("does not replace an existing report with an empty-state instruction", () =
   });
 
   assert.equal(state.kind, "available");
+});
+
+test("waits for persisted report detail instead of rendering a list summary as a completed report", () => {
+  const state = deriveReportWorkbenchState({
+    hasReport: false,
+    hasSavedReports: true,
+    savedReportDetailLoaded: false,
+  });
+
+  assert.equal(state.kind, "loading_saved_report");
+  assert.equal(state.ctaLabel, "목록 새로고침");
+});
+
+test("labels an in-session report payload as temporary until a signed-in user saves it", () => {
+  const state = deriveReportWorkbenchState({
+    hasReport: true,
+    reportingPayload: { report_type: "fault_ratio_analysis", sections: [] },
+    isAuthenticated: false,
+    isPersistedReport: false,
+  });
+
+  assert.equal(state.kind, "temporary_preview");
+  assert.match(state.description, /로그인/);
 });
