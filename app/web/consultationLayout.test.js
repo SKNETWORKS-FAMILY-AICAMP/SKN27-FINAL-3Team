@@ -11,15 +11,43 @@ const shell = fullShell.slice(
 
 test("consultation helpers appear before conversation messages", () => {
   const save = shell.indexOf('aria-label="상담 저장 선택"');
-  const examples = shell.indexOf('className="quick-examples"');
   const messages = shell.indexOf('className="messages"');
 
   assert.ok(save >= 0);
-  assert.ok(examples > save);
-  assert.ok(messages > examples);
+  assert.ok(messages > save);
   assert.match(styles, /\.save-choice-panel\s*\{\s*order:\s*1;/);
-  assert.match(styles, /\.quick-examples\s*\{\s*order:\s*2;/);
   assert.match(styles, /\.messages\s*\{\s*order:\s*3;/);
+});
+
+test("quick examples live quietly inside the empty conversation state", () => {
+  const emptyState = shell.slice(
+    shell.indexOf('className="chat-empty-state"'),
+    shell.indexOf('<div className="chat-input">'),
+  );
+  const topLevelBeforeMessages = shell.slice(
+    shell.indexOf('<div className="chat-main">'),
+    shell.indexOf('className="messages"'),
+  );
+
+  assert.match(emptyState, /어떤 내용을 적어야 할지 막막하신가요/);
+  assert.match(emptyState, /예시 질문 보기/);
+  assert.match(emptyState, /quickQuestionGroups\.map/);
+  assert.match(emptyState, /setQuestion\(item\)/);
+  assert.match(emptyState, /quickExamplesRef\.current\.open = false/);
+  assert.match(emptyState, /questionInputRef\.current\?\.focus\(\)/);
+  assert.match(shell, /ref=\{questionInputRef\}/);
+  assert.doesNotMatch(topLevelBeforeMessages, /서비스 예시 작동 방식/);
+  assert.doesNotMatch(emptyState, /onSubmit/);
+});
+
+test("quick example disclosure uses a compact borderless hierarchy", () => {
+  const compactStyles = styles.slice(styles.lastIndexOf("/* Compact quick examples */"));
+
+  assert.match(compactStyles, /\.empty-state-examples\s*\{[^}]*font-size:\s*12px/s);
+  assert.match(compactStyles, /\.empty-state-examples \.quick-examples\s*\{[^}]*border:\s*0/s);
+  assert.match(compactStyles, /\.empty-state-examples \.quick-examples\s*\{[^}]*background:\s*transparent/s);
+  assert.match(compactStyles, /\.empty-state-examples \.quick-examples-header\s*\{[^}]*min-height:\s*28px/s);
+  assert.match(compactStyles, /\.empty-state-examples \.quick-examples-header\s*\{[^}]*width:\s*max-content/s);
 });
 
 test("structured intake keeps a compact type row and gates detail fields behind disclosure", () => {

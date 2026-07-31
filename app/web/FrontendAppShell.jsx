@@ -2617,6 +2617,8 @@ function ChatScreenV2({
   uploadInputResetKey,
 }) {
   const attachmentInputRef = useRef(null);
+  const questionInputRef = useRef(null);
+  const quickExamplesRef = useRef(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const visibleMessages = chatMessages.length
     ? chatMessages
@@ -2704,29 +2706,6 @@ function ChatScreenV2({
             </section>
           )}
 
-          <details className="quick-examples">
-            <summary className="quick-examples-header">
-              <span>
-                <strong>서비스 예시 작동 방식</strong>
-                <small>궁금한 상황을 선택하면 질문이 입력창에 담깁니다.</small>
-              </span>
-            </summary>
-            <div className="quick-example-groups">
-              {quickQuestionGroups.map((group) => (
-                <section className="quick-example-group" aria-label={group.title} key={group.title}>
-                  <h4>{group.title}</h4>
-                  <div className="quick-row">
-                    {group.questions.map((item) => (
-                      <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
-                        {item}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </details>
-
           <div className="messages">
             {!hasConversation && (
               <section className="chat-empty-state" aria-label="상담 시작">
@@ -2736,6 +2715,37 @@ function ChatScreenV2({
                   사고 직후라면 장소, 시간, 상대방 주장, 고지서 내용처럼 기억나는 것만 적어도 됩니다.
                   로그인과 자료 업로드는 상담이 진행된 뒤 필요한 시점에 안내합니다.
                 </p>
+                <div className="empty-state-examples">
+                  <span>어떤 내용을 적어야 할지 막막하신가요?</span>
+                  <details className="quick-examples" ref={quickExamplesRef}>
+                    <summary className="quick-examples-header">예시 질문 보기</summary>
+                    <div className="quick-example-groups">
+                      {quickQuestionGroups.map((group) => (
+                        <section className="quick-example-group" aria-label={group.title} key={group.title}>
+                          <h4>{group.title}</h4>
+                          <div className="quick-row">
+                            {group.questions.map((item) => (
+                              <button
+                                className="quick-chip"
+                                type="button"
+                                key={item}
+                                onClick={() => {
+                                  setQuestion(item);
+                                  if (quickExamplesRef.current) {
+                                    quickExamplesRef.current.open = false;
+                                  }
+                                  questionInputRef.current?.focus();
+                                }}
+                              >
+                                {item}
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  </details>
+                </div>
               </section>
             )}
 
@@ -2843,6 +2853,7 @@ function ChatScreenV2({
                 onDrop={onAttachmentDrop}
               >
                 <textarea
+                  ref={questionInputRef}
                   aria-label="상담 메시지 입력"
                   placeholder={composerPlaceholder}
                   value={question}
