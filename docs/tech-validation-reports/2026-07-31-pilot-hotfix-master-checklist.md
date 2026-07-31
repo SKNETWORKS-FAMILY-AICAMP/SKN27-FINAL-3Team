@@ -1,11 +1,11 @@
 # Pilot 핫픽스 구현·검증·재배포 마스터 체크리스트
 
-> 문서 상태: 실행 중 / G0·G1 검증 완료 / G2 착수 대기  
-> 최초 작성일: 2026-07-31  
-> 기준 권고서: `docs/tech-validation-reports/2026-07-31-e2e-cross-analysis-final-hotfix-report.md`  
-> 대상 HFX: HFX-009 ~ HFX-018  
-> 최종 범위: 구현, 회귀 테스트, 운영 재배포, 배포 후 13개 E2E, GO/NO-GO 판정  
-> 구현 기준: `origin/dev` `61e0c56ba8a783423cb8a830e5d7088001e5593b`  
+> 문서 상태: 실행 중 / G0·G1·G2 검증 완료 / G3 착수 가능
+> 최초 작성일: 2026-07-31
+> 기준 권고서: `docs/tech-validation-reports/2026-07-31-e2e-cross-analysis-final-hotfix-report.md`
+> 대상 HFX: HFX-009 ~ HFX-018
+> 최종 범위: 구현, 회귀 테스트, 운영 재배포, 배포 후 13개 E2E, GO/NO-GO 판정
+> 구현 기준: `origin/dev` `61e0c56ba8a783423cb8a830e5d7088001e5593b`
 > 구현 브랜치: `feat-pilot-safety-hotfix`
 
 ## 1. 이 문서의 역할
@@ -152,7 +152,7 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 |---|---|---|---|---|
 | G0 | UI 핫픽스 종료·최신 dev 재기준화 | 검증 완료 | UI 핫픽스 병합 | 기준 SHA·baseline·브랜치 확정 |
 | G1 | P0 개인정보·입력 gate·라우팅 | 검증 완료 | G0 완료 | ID 2·8·10·12 회귀 통과 |
-| G2 | 인증·새 상담 상태 | 대기 | G1 완료 | ID 5 기능 재평가 가능, auth 유지 |
+| G2 | 인증·새 상담 상태 | 검증 완료 | G1 완료 | ID 5 기능 재평가 가능, auth 유지 |
 | G3 | 운영 모니터·로그·Neo4j | 대기 | G1 완료 | monitor 정상, credential 로그 0 |
 | G4 | 고지서·첨부·상충 진술 | 대기 | G1·G2 완료 | ID 3·4·9·11·13 통과 |
 | G5 | polling·부분 실패 UX·증거 규격 | 대기 | G2·G4 완료 | 상태 UX와 캡처 규격 통과 |
@@ -169,7 +169,7 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | HFX-009 | P0 | 의도·서비스 범위 라우팅 정렬 | 2 | G0 | 검증 완료 |
 | HFX-010 | P0 | 한국어 문맥 개인정보 차단·로그 credential 제거 | 8 | G0 | 앱 경계 검증 완료 / Caddy는 G3 대기 |
 | HFX-011 | P0 | 저정보·욕설-only·해석 불가 입력 gate | 10, 12 | G0 | 검증 완료 |
-| HFX-012 | P0 | 인증 session 복구·새 상담 상태 원자화 | 5 | G1 | 대기 |
+| HFX-012 | P0 | 인증 session 복구·새 상담 상태 원자화 | 5 | G1 | 로컬 검증 완료 / 배포 E2E 대기 |
 | HFX-013 | P0 | run summary 배포·monitor·Neo4j 정상화 | 운영 | G1 | 대기 |
 | HFX-014 | P1 | 고지서 intake slot·안전한 법령 응답 | 3, 9, 11 | G1 | 대기 |
 | HFX-015 | P1 | 첨부 분류→확인→OCR→분석 handoff | 4, 5 | G2, HFX-014 | 대기 |
@@ -299,33 +299,72 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 
 ### HFX-012 구현 범위
 
-- [ ] 앱 시작 시 저장 token이 있으면 `/auth/me`로 서버 상태 검증
-- [ ] access token refresh와 session/resource 오류를 구분
-- [ ] 인증 상태에서는 guest bootstrap을 호출하지 않음
-- [ ] Google code 403을 안전한 reason code로 분류
-- [ ] 인증 오류가 기존 상담·첨부·사용자 소유권을 잘못 폐기하지 않음
-- [ ] 새 상담은 서버에서 새 session ID를 발급받은 뒤 활성화
-- [ ] 새 상담에서 chat, intake, report, OCR, pending auth action 초기화
-- [ ] 새 상담에서 `registeredAttachments`를 0개로 초기화
-- [ ] 새 상담 후에도 authenticated user는 유지
-- [ ] 다른 사용자의 session/report 접근 차단 유지
+- [x] 앱 시작 시 저장 token이 있으면 `/auth/me`로 서버 상태 검증
+- [x] access token refresh와 session/resource 오류를 구분
+- [x] 인증 상태에서는 guest bootstrap을 호출하지 않음
+- [x] Google code 403을 안전한 reason code로 분류
+- [x] 인증 오류가 기존 상담·첨부·사용자 소유권을 잘못 폐기하지 않음
+- [x] 새 상담은 서버에서 새 session ID를 발급받은 뒤 활성화
+- [x] 새 상담에서 chat, intake, report, OCR, pending auth action 초기화
+- [x] 새 상담에서 `registeredAttachments`를 0개로 초기화
+- [x] 새 상담 후에도 authenticated user는 유지
+- [x] 다른 사용자의 session/report 접근 차단 유지
 
 ### 필수 사용자 흐름
 
-- [ ] guest 상담 → Google 로그인 → 동일 상담 소유권 연결
-- [ ] 로그인 → 새로고침 → `/auth/me` → 로그인 유지
-- [ ] 로그인 → 새 상담 → auth 유지 + 새 session
-- [ ] 로그인 → 첨부 → 새 상담 → 이전 첨부 0개
-- [ ] access token 만료 → refresh 성공 → 동일 사용자 유지
-- [ ] refresh 실패 → 안전 안내, 소유권 혼합 없음
-- [ ] ID 5 → 로그인 유지 → 첨부 → 초안 gate 진입
+- [x] guest 상담 → Google 로그인 → 동일 상담 소유권 연결
+- [x] 로그인 → 새로고침 → `/auth/me` → 로그인 유지
+- [x] 로그인 → 새 상담 → auth 유지 + 새 session
+- [x] 로그인 → 첨부 → 새 상담 → 이전 첨부 0개
+- [x] access token 만료 임박 → 선제 refresh 성공 → 동일 사용자 유지
+- [x] 이미 만료·무효·revoked 또는 refresh 실패 → 안전 안내, 기존 상담 보존, 소유권 혼합 없음
+- [x] ID 5 → 인증 유지·첨부 진입 계약 통과. 초안 생성 전체 흐름은 HFX-015/G4와 배포 E2E에서 계속 검증
 
 ### G2 종료 조건
 
-- [ ] ID 5가 더 이상 인증 때문에 미평가되지 않음
-- [ ] guest/auth/session/attachment lifecycle 계약 테스트 통과
-- [ ] resource ownership E2E 통과
-- [ ] UI 핫픽스와 충돌 resolution review 완료
+- [x] ID 5의 인증 미평가 원인을 제거하고 로컬 인증·첨부 진입 계약으로 재평가 가능
+- [x] guest/auth/session/attachment lifecycle 계약 테스트 통과
+- [x] resource ownership E2E 통과
+- [x] UI 핫픽스 merge SHA 기반 충돌 resolution review 완료
+
+### G2 최종 검증 증거
+
+- 기준:
+  - P0/G1 사용자 커밋: `9db7ccb50f5d9961597bb551846cbfc677723db6`
+  - 상세 계획: `docs/superpowers/plans/2026-07-31-auth-new-conversation-state-hotfix.md`
+- frontend auth/new-conversation 집중 검증:
+  - `app/web/authSession.test.js`: 저장 JWT `/auth/me` 검증, 만료 임박 선제 refresh, refresh 실패 시 guest/session 보존, auth-session 불일치 차단
+  - `app/web/newConversationState.test.js`: 새 session 발급, 누락·동일 ID 거부, conversation-owned state fresh reset
+  - `test/test_frontend_auth_session_contract.py`: startup 검증, guest bootstrap 차단, 세션 gate 실패 시 요청 중단, 새 상담 전체 초기화
+- frontend 전체:
+  - 명령: `node --test app/web/*.test.js`
+  - 결과: `52 passed`, `0 failed`
+- Python P0·인증 통합:
+  - 명령: G1 안전 경계와 G2 인증 관련 14개 test module을 `python -m pytest ... -q`로 실행
+  - 결과: `175 passed`, `1 existing LangChainPendingDeprecationWarning`
+- Django 인증·소유권·P0 API:
+  - 명령: `python backend/manage.py test chatbot.test_production_hardening chatbot.test_security_hardening.AuthSessionRotationSecurityTests chatbot.test_guest_credential_boundary chatbot.test_report_api_contract chatbot.test_resource_ownership_e2e chatbot.test_guest_login_session_ownership_e2e chatbot.test_operational_log_privacy --verbosity 1`
+  - 결과: `71 tests`, `OK`
+  - 테스트용 queue persistence 예외 및 provider key 부재 안내는 의도된 fixture/fallback 로그이며 실패가 아님
+- production build:
+  - 올바른 작업 디렉터리: `app/web`
+  - 명령: `npm run build`
+  - 결과: Vite `7.3.6`, `41 modules transformed`, 성공
+  - 저장소 루트에서의 최초 `npm run build`는 `package.json` 부재로 ENOENT였으며 코드·번들 오류가 아님
+- diff:
+  - `git diff --check`: 오류 없음
+  - 변경 범위: HFX-012 프런트 production/test와 승인 계획·체크리스트
+- 저장소 전체 Python suite:
+  - 명령: `python -m pytest -q`
+  - 최초 결과: `1316 passed`, `37 skipped`, `4 subtests passed`, `2 failed`, `1 existing warning`
+  - 최초 실패 2건은 `test_consultation_v2_contract.py`의 삭제된 persistent Vision/OCR 안내 문구 단정과 `test_ui_v3_frontend_contract.py`의 quick examples 구형 위치 단정
+  - 사용자 커밋 `9db7ccb5`의 `FrontendAppShell.jsx`에서도 동일하게 실패하는 기존 불일치이며 이번 G2 diff는 해당 문구·레이아웃 구간을 수정하지 않음
+  - 최신 `app/web/consultationLayout.test.js`는 반대로 persistent instruction 부재와 empty-state 내부 quick examples를 명시하며 통과
+  - 사용자 승인 후 production UI는 유지하고 구형 Python 계약 2건만 최신 Node/UI 계약에 맞춰 정렬
+  - 최종 결과: `1318 passed`, `37 skipped`, `4 subtests passed`, `0 failed`, `1 existing warning`
+- 남은 검증:
+  - 실제 Google Console·운영 브라우저의 reload/login/new-chat는 G8 smoke와 G9 ID 5에서 재검증
+  - 첨부→분류→OCR→초안 생성의 후반부는 HFX-015/G4 범위
 
 ## 9. G3 — 운영 모니터·로그·Neo4j
 
@@ -608,6 +647,7 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | 발견 ID | 발견 단계 | 증상 | 기존 HFX 포함 여부 | 위험도 | 이번 핫픽스 포함 결정 | 근거 |
 |---|---|---|---|---|---|---|
 | DISC-001 | G0 | `postcss <=8.5.17` path traversal advisory | 기존 HFX 외 | high advisory | G7 전 영향 확인 후 별도 lockfile 업데이트 여부 결정 | `npm audit --json`, GHSA-r28c-9q8g-f849 |
+| DISC-002 | G2 종료 검증 | UI PR #354의 최신 Node 계약과 과거 Python source-contract 2건이 상충하여 전체 `pytest` 2건 실패 | 기존 HFX 외 / UI test debt | integration gate | 포함 승인·해결. production UI는 유지하고 구형 Python 단정만 최신 UI 계약에 맞춰 조정 | `HEAD(9db7ccb5)` 동일 재현, 집중 2/2 및 전체 `1318 passed / 0 failed` |
 
 ### 범위 변경 규칙
 
@@ -626,7 +666,8 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | 구현 기준 | UI 핫픽스 병합 후 최신 `origin/dev` | 오래된 SHA 기반 구현 방지 | 승인 |
 | 운영 배포 | 별도 승인 게이트 | 운영 변경과 롤백 권한 보호 | 승인 |
 | G0 기준점 | PR #354 merge SHA `61e0c56b` | UI 핫픽스 포함 최신 `dev`에서 재기준화 | 완료 |
-| P0 실행 계획 | `docs/superpowers/plans/2026-07-31-p0-safety-boundary-hotfix.md` | HFX-009~011을 TDD와 커밋 경계로 분리 | 실행 중 |
+| P0 실행 계획 | `docs/superpowers/plans/2026-07-31-p0-safety-boundary-hotfix.md` | HFX-009~011을 TDD와 커밋 경계로 분리 | 검증 완료 |
+| G2 실행 계획 | `docs/superpowers/plans/2026-07-31-auth-new-conversation-state-hotfix.md` | HFX-012 startup auth 검증·session gate·원자적 새 상담을 TDD로 분리 | 검증 완료 |
 
 ## 19. 단계별 상세 계획 문서 전환 조건
 

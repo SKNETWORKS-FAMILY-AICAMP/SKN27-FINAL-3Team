@@ -51,6 +51,164 @@ export function scheduleAppJwtRefresh({
   };
 }
 
+export async function recoverStoredAuthSession({
+  storedSession = {},
+  getCurrentAuthSubject,
+  refreshAuthToken,
+  nowMs = Date.now(),
+} = {}) {
+  const stored = normalizeRecoverySession(storedSession);
+  if (!stored.access_token || !stored.auth_session_id) {
+    return {
+      status: "not_applicable",
+      reason: null,
+      refreshed: false,
+      session: guestRecoverySession(stored),
+    };
+  }
+  if (typeof getCurrentAuthSubject !== "function" || typeof refreshAuthToken !== "function") {
+    throw new TypeError("Authentication recovery requires auth/me and refresh functions.");
+  }
+
+  let candidate = stored;
+  let refreshed = false;
+  const expiresAtMs = readUnverifiedJwtExpirationMs(stored.access_token);
+  const refreshDelayMs = millisecondsUntilAppJwtRefresh(stored.access_token, { nowMs });
+  if (refreshDelayMs === 0) {
+    try {
+      const refreshResult = await refreshAuthToken(
+        {
+          guest_id: stored.guest_id || undefined,
+          session_id: stored.session_id || undefined,
+        },
+        recoveryIdentity(stored)
+      );
+      candidate = sessionFromRefreshResult(stored, refreshResult);
+      refreshed = true;
+    } catch (error) {
+      const expired = expiresAtMs !== null && expiresAtMs <= Number(nowMs);
+      if (expired || isAuthenticationRejection(error)) {
+        return reauthRequiredResult(stored, errorReason(error));
+      }
+      // A transient refresh failure must not discard a still-valid token.
+      candidate = stored;
+    }
+  }
+
+  try {
+    const authSubject = await getCurrentAuthSubject({
+      sessionId: candidate.session_id || undefined,
+      identity: recoveryIdentity(candidate),
+    });
+    const verifiedSubject = authSubject?.subject || {};
+    const expectedAuthSessionId = String(candidate.auth_session_id || "");
+    if (
+      authSubject?.auth_state !== "authenticated" ||
+      verifiedSubject?.is_authenticated !== true ||
+      String(verifiedSubject?.auth_session_id || "") !== expectedAuthSessionId
+    ) {
+      return reauthRequiredResult(stored, "auth_session_mismatch");
+    }
+    const expectedUserId = String(candidate.user_id || "");
+    const verifiedUserId = String(verifiedSubject?.user_id || "");
+    if (expectedUserId && verifiedUserId && expectedUserId !== verifiedUserId) {
+      return reauthRequiredResult(stored, "auth_user_mismatch");
+    }
+    return {
+      status: "authenticated",
+      reason: null,
+      refreshed,
+      authSubject,
+      session: {
+        ...candidate,
+        guest_id: verifiedSubject?.guest_id || candidate.guest_id || null,
+        user_id: verifiedUserId || candidate.user_id || null,
+      },
+    };
+  } catch (error) {
+    if (isAuthenticationRejection(error)) {
+      return reauthRequiredResult(stored, errorReason(error));
+    }
+    return {
+      status: "verification_unavailable",
+      reason: errorReason(error),
+      refreshed,
+      session: stored,
+    };
+  }
+}
+
+function normalizeRecoverySession(storedSession) {
+  return {
+    access_token: storedSession?.access_token || null,
+    auth_session_id: storedSession?.auth_session_id || null,
+    user_id: storedSession?.user_id || null,
+    guest_id: storedSession?.guest_id || null,
+    guest_credential: storedSession?.guest_credential || null,
+    session_id: storedSession?.session_id || null,
+  };
+}
+
+function sessionFromRefreshResult(stored, refreshResult) {
+  const subject = refreshResult?.subject || {};
+  const accessToken = String(refreshResult?.access_token || "");
+  const authSessionId = String(subject?.auth_session_id || "");
+  if (!accessToken || !authSessionId) {
+    const error = new Error("Auth refresh response is incomplete.");
+    error.code = "token_invalid";
+    error.reason = "refresh_response_incomplete";
+    error.status = 401;
+    throw error;
+  }
+  return {
+    ...stored,
+    access_token: accessToken,
+    auth_session_id: authSessionId,
+    user_id: subject?.user_id || stored.user_id || null,
+    guest_id: subject?.guest_id || stored.guest_id || null,
+  };
+}
+
+function recoveryIdentity(session) {
+  return {
+    authToken: session.access_token || "",
+    authSessionId: session.auth_session_id || "",
+    guestId: session.guest_id || "",
+    guestCredential: session.guest_credential || "",
+  };
+}
+
+function guestRecoverySession(stored) {
+  return {
+    access_token: null,
+    auth_session_id: null,
+    user_id: null,
+    guest_id: stored.guest_id || null,
+    guest_credential: stored.guest_credential || null,
+    session_id: stored.session_id || null,
+  };
+}
+
+function reauthRequiredResult(stored, reason) {
+  return {
+    status: "reauth_required",
+    reason: reason || "authentication_rejected",
+    refreshed: false,
+    session: guestRecoverySession(stored),
+  };
+}
+
+function isAuthenticationRejection(error) {
+  return (
+    [401, 403].includes(Number(error?.status)) ||
+    ["auth_required", "token_expired", "token_invalid"].includes(String(error?.code || ""))
+  );
+}
+
+function errorReason(error) {
+  return String(error?.code || error?.reason || "auth_verification_unavailable");
+}
+
 function readUnverifiedJwtExpirationMs(token) {
   const payloadSegment = String(token || "").split(".")[1];
   if (!payloadSegment) {

@@ -7,6 +7,10 @@ import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
 import { reportsForCase } from "./caseReports.js?null-case-v1";
 import { shouldDiscardRejectedChatInput } from "./chatPrivacyUi.js";
 import {
+  createNewConversationResetState,
+  issueNewConversationSession,
+} from "./newConversationState.js";
+import {
   buildAuthContext,
   buildGoogleLoginPayload,
   clearStoredAuthSession,
@@ -14,7 +18,7 @@ import {
   persistAuthSession,
   readStoredGoogleProfile,
   readStoredAuthSession,
-  readStoredAuthToken,
+  recoverStoredAuthSession,
   resolveGuestBootstrapSessionId,
   scheduleAppJwtRefresh,
   toGoogleLoginError,
@@ -254,11 +258,17 @@ export default function FrontendAppShell({
 }) {
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
   const storedAuthSession = useMemo(() => readStoredAuthSession(), []);
+  const hasStoredAuthenticatedSession = Boolean(
+    storedAuthSession.access_token && storedAuthSession.auth_session_id
+  );
   const [activeRoute, setActiveRoute] = useState("entry");
   const [sessionId, setSessionId] = useState(() => storedAuthSession.session_id || "");
   const [guestId, setGuestId] = useState(() => storedAuthSession.guest_id || "");
   const [guestCredential, setGuestCredential] = useState(() => storedAuthSession.guest_credential || "");
-  const [authSessionId, setAuthSessionId] = useState(() => storedAuthSession.auth_session_id || "");
+  const [authSessionId, setAuthSessionId] = useState("");
+  const [authRestoreStatus, setAuthRestoreStatus] = useState(
+    hasStoredAuthenticatedSession ? "checking" : "ready"
+  );
   const [mypageSummary, setMypageSummary] = useState(null);
   const [historyEvents, setHistoryEvents] = useState(null);
   const [question, setQuestion] = useState("");
@@ -266,7 +276,7 @@ export default function FrontendAppShell({
   const [chatMessages, setChatMessages] = useState([]);
   const [consultationIntake, setConsultationIntake] = useState(() => createEmptyConsultationIntake());
   const [analysisResponse, setAnalysisResponse] = useState(null);
-  const [activeAuthToken, setActiveAuthToken] = useState(() => readStoredAuthToken());
+  const [activeAuthToken, setActiveAuthToken] = useState("");
   const [savePromptVisible, setSavePromptVisible] = useState(false);
   const [saveDecision, setSaveDecision] = useState("undecided");
   const [statusMessage, setStatusMessage] = useState("");
@@ -317,11 +327,16 @@ export default function FrontendAppShell({
     userId: null,
   });
   const isGuestReady = Boolean(guestId && guestCredential);
-  const sessionLabel = authSessionId
-    ? "Google 계정 상담"
-    : isGuestReady
-      ? "비회원 상담"
-      : "상담 준비";
+  const sessionLabel =
+    authRestoreStatus === "checking"
+      ? "로그인 확인 중"
+      : authRestoreStatus === "verification_unavailable"
+        ? "로그인 확인 필요"
+        : authSessionId
+          ? "Google 계정 상담"
+          : isGuestReady
+            ? "비회원 상담"
+            : "상담 준비";
   const cases = mypageSummary?.cases?.length ? mypageSummary.cases : [];
   const effectiveReportList = reportList;
   const effectiveCurrentReport = currentReport;
@@ -417,6 +432,90 @@ export default function FrontendAppShell({
   }, [api]);
 
   useEffect(() => {
+    if (!hasStoredAuthenticatedSession) {
+      setAuthRestoreStatus("ready");
+      return undefined;
+    }
+
+    let recoveryActive = true;
+    setAuthRestoreStatus("checking");
+    recoverStoredAuthSession({
+      storedSession: storedAuthSession,
+      getCurrentAuthSubject: (options) => api.getCurrentAuthSubject(options),
+      refreshAuthToken: (payload, requestIdentity) =>
+        api.refreshAuthToken(payload, requestIdentity),
+    })
+      .then((result) => {
+        if (!recoveryActive) {
+          return;
+        }
+        const recovered = result.session || {};
+        if (result.status === "authenticated") {
+          setActiveAuthToken(recovered.access_token || "");
+          setAuthSessionId(recovered.auth_session_id || "");
+          setGuestId(recovered.guest_id || "");
+          setGuestCredential(recovered.guest_credential || "");
+          setSessionId(recovered.session_id || "");
+          persistAuthSession({
+            accessToken: recovered.access_token,
+            authSessionId: recovered.auth_session_id,
+            guestId: recovered.guest_id,
+            guestCredential: recovered.guest_credential,
+            googleProfile: readStoredGoogleProfile(),
+            sessionId: recovered.session_id,
+            userId: recovered.user_id,
+          });
+          setAuthRestoreStatus("ready");
+          setStatusMessage(
+            result.refreshed
+              ? "로그인 상태를 안전하게 갱신했습니다."
+              : "저장된 로그인 상태를 확인했습니다."
+          );
+          return;
+        }
+        if (result.status === "reauth_required") {
+          clearStoredAuthSession();
+          persistAuthSession({
+            guestId: recovered.guest_id,
+            guestCredential: recovered.guest_credential,
+            sessionId: recovered.session_id,
+          });
+          setActiveAuthToken("");
+          setAuthSessionId("");
+          setGuestId(recovered.guest_id || "");
+          setGuestCredential(recovered.guest_credential || "");
+          setSessionId(recovered.session_id || "");
+          setAuthRestoreStatus("ready");
+          setStatusMessage(
+            "로그인 확인이 만료되었습니다. 기존 상담은 유지되며 Google 로그인 후 계속할 수 있습니다."
+          );
+          return;
+        }
+        setActiveAuthToken("");
+        setAuthSessionId("");
+        setAuthRestoreStatus("verification_unavailable");
+        setStatusMessage(
+          "로그인 상태를 확인하지 못했습니다. 기존 상담을 보존했으며 잠시 후 새로고침해 주세요."
+        );
+      })
+      .catch(() => {
+        if (!recoveryActive) {
+          return;
+        }
+        setActiveAuthToken("");
+        setAuthSessionId("");
+        setAuthRestoreStatus("verification_unavailable");
+        setStatusMessage(
+          "로그인 상태를 확인하지 못했습니다. 기존 상담을 보존했으며 잠시 후 새로고침해 주세요."
+        );
+      });
+
+    return () => {
+      recoveryActive = false;
+    };
+  }, [api, hasStoredAuthenticatedSession, storedAuthSession]);
+
+  useEffect(() => {
     if (!activeAuthToken || !authSessionId) {
       return undefined;
     }
@@ -478,9 +577,6 @@ export default function FrontendAppShell({
           setSessionId(refreshContext.sessionId || "");
           setMypageSummary(null);
           setHistoryEvents(null);
-          setCurrentReport(null);
-          setReportList([]);
-          setPendingAuthAction(null);
           setStatusMessage("로그인이 만료되었습니다. Google 계정으로 다시 로그인해 주세요.");
         }
       },
@@ -493,6 +589,14 @@ export default function FrontendAppShell({
   }, [api, activeAuthToken, authSessionId]);
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
+    if (authRestoreStatus !== "ready" || authSessionId || activeAuthToken) {
+      setStatusMessage(
+        authRestoreStatus === "ready"
+          ? "로그인된 계정의 상담 세션을 확인하고 있습니다."
+          : "저장된 로그인 상태를 확인한 뒤 상담을 시작할 수 있습니다."
+      );
+      return null;
+    }
     setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 준비하고 있습니다.");
     try {
       const initialGuest = await api.createGuestSession(
@@ -545,6 +649,51 @@ export default function FrontendAppShell({
   }
 
   async function ensureGuestSession(nextRoute = "chatbot") {
+    if (authRestoreStatus !== "ready") {
+      setStatusMessage("저장된 로그인 상태를 확인한 뒤 상담을 시작할 수 있습니다.");
+      return null;
+    }
+    if (authSessionId && activeAuthToken) {
+      if (sessionId) {
+        setActiveRoute(nextRoute);
+        return {
+          authSessionId,
+          authToken: activeAuthToken,
+          guestCredential,
+          guestId,
+          sessionId,
+        };
+      }
+      try {
+        const created = await api.createChatSession({}, identity);
+        const nextSessionId = String(created?.session_id || "");
+        if (!nextSessionId) {
+          throw new Error("Authenticated chat session response is incomplete.");
+        }
+        const stored = readStoredAuthSession();
+        setSessionId(nextSessionId);
+        persistAuthSession({
+          accessToken: activeAuthToken,
+          authSessionId,
+          guestId,
+          guestCredential,
+          googleProfile: readStoredGoogleProfile(),
+          sessionId: nextSessionId,
+          userId: stored.user_id,
+        });
+        setActiveRoute(nextRoute);
+        return {
+          authSessionId,
+          authToken: activeAuthToken,
+          guestCredential,
+          guestId,
+          sessionId: nextSessionId,
+        };
+      } catch (_error) {
+        setStatusMessage("로그인된 상담 세션을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        return null;
+      }
+    }
     if (sessionId && guestId && guestCredential) {
       setActiveRoute(nextRoute);
       return { guestCredential, guestId, sessionId };
@@ -665,6 +814,10 @@ export default function FrontendAppShell({
   }
 
   async function registerAttachmentMetadata() {
+    if (authRestoreStatus !== "ready") {
+      setStatusMessage("로그인 상태 확인이 끝난 뒤 자료를 첨부할 수 있습니다.");
+      return;
+    }
     setIsRegisteringAttachment(true);
     setStatusMessage(selectedUploadFile ? "첨부 파일을 업로드하고 있습니다." : "첨부 metadata를 등록하고 있습니다.");
     try {
@@ -687,8 +840,11 @@ export default function FrontendAppShell({
         nextIdentity = loginState.identity;
         setPendingAuthAction(null);
       } else {
-        const guestSessionResult = sessionId ? null : await bootstrapGuestSession("chatbot");
-        activeSession = sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
+        const guestSessionResult = sessionId ? null : await ensureGuestSession("chatbot");
+        activeSession = sessionId || guestSessionResult?.sessionId || "";
+        if (!activeSession) {
+          throw new Error("A verified chat session is required before attachment registration.");
+        }
         activeGuestId = guestId || guestSessionResult?.guestId || "";
         nextIdentity = {
           ...identity,
@@ -1144,6 +1300,10 @@ export default function FrontendAppShell({
     ocrConfirmation,
     attachmentClassificationConfirmation,
   } = {}) {
+    if (authRestoreStatus !== "ready") {
+      setStatusMessage("로그인 상태 확인이 끝난 뒤 상담 내용을 보낼 수 있습니다.");
+      return;
+    }
     const trimmedQuestion = String(userText ?? question).trim();
     const { displayText, requestText: composedQuestion } = buildConsultationMessagePair({
       freeText: trimmedQuestion,
@@ -1179,8 +1339,17 @@ export default function FrontendAppShell({
 
     const effectiveAuthSessionId = followupLoginState?.authSessionId || authSessionId;
     const effectiveIdentity = followupLoginState?.identity || identity;
-    const guestSessionResult = followupLoginState?.sessionId || sessionId ? null : await bootstrapGuestSession("chatbot");
-    const activeSession = followupLoginState?.sessionId || sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
+    const guestSessionResult =
+      followupLoginState?.sessionId || sessionId ? null : await ensureGuestSession("chatbot");
+    const activeSession =
+      followupLoginState?.sessionId || sessionId || guestSessionResult?.sessionId || "";
+    if (!activeSession) {
+      setQuestion(trimmedQuestion);
+      setSubmittedQuestion("");
+      setIsSubmitting(false);
+      setStatusMessage("상담 세션을 준비하지 못했습니다. 입력 내용은 유지되며 다시 시도할 수 있습니다.");
+      return;
+    }
     const activeGuestId = followupLoginState?.guestId || guestId || guestSessionResult?.guestId || "";
     const activeGuestCredential = followupLoginState
       ? followupLoginState.guestCredential || ""
@@ -1461,20 +1630,68 @@ export default function FrontendAppShell({
     );
   }
 
-  function startNewConversation() {
-    setQuestion("");
-    setSubmittedQuestion("");
-    setChatMessages([]);
-    setConsultationIntake(createEmptyConsultationIntake());
-    setAnalysisResponse(null);
-    setCurrentReport(null);
-    setReportActionStatus("");
-    setSaveDecision("undecided");
-    setSavePromptVisible(false);
-    setGuestDetailedReportUsed(false);
-    setSessionId("");
-    setStatusMessage("새 상담을 시작할 수 있습니다.");
-    setActiveRoute("chatbot");
+  async function startNewConversation() {
+    if (authRestoreStatus !== "ready") {
+      setStatusMessage("로그인 상태 확인이 끝난 뒤 새 상담을 시작할 수 있습니다.");
+      return;
+    }
+    if (isSubmitting || isRegisteringAttachment || isSavingConversation) {
+      setStatusMessage("진행 중인 요청이 끝난 뒤 새 상담을 시작해 주세요.");
+      return;
+    }
+
+    setStatusMessage("새 상담 세션을 준비하고 있습니다.");
+    try {
+      const nextSessionId = await issueNewConversationSession({
+        currentSessionId: sessionId,
+        createSession: () => api.createChatSession({}, identity),
+      });
+      const reset = createNewConversationResetState();
+      const stored = readStoredAuthSession();
+
+      setSessionId(nextSessionId);
+      persistAuthSession({
+        accessToken: activeAuthToken,
+        authSessionId,
+        guestId,
+        guestCredential,
+        googleProfile: readStoredGoogleProfile(),
+        sessionId: nextSessionId,
+        userId: stored.user_id,
+      });
+      setQuestion(reset.question);
+      setSubmittedQuestion(reset.submittedQuestion);
+      setChatMessages(reset.chatMessages);
+      setConsultationIntake(createEmptyConsultationIntake());
+      setAnalysisResponse(reset.analysisResponse);
+      setCurrentReport(reset.currentReport);
+      setReportList(reset.reportList);
+      setReportActionStatus(reset.reportActionStatus);
+      setReportWorkspaceLoadError(reset.reportWorkspaceLoadError);
+      setIsReportWorkspaceLoading(reset.isReportWorkspaceLoading);
+      setSaveDecision(reset.saveDecision);
+      setSavePromptVisible(reset.savePromptVisible);
+      setGuestDetailedReportUsed(reset.guestDetailedReportUsed);
+      setAttachmentPurpose(reset.attachmentPurpose);
+      setSelectedUploadFile(reset.selectedUploadFile);
+      setRegisteredAttachments(reset.registeredAttachments);
+      setUploadInputResetKey((value) => value + 1);
+      setIsRegisteringAttachment(reset.isRegisteringAttachment);
+      setOcrConfirmationFields(reset.ocrConfirmationFields);
+      setPendingOcrConfirmation(reset.pendingOcrConfirmation);
+      setPendingAuthAction(reset.pendingAuthAction);
+      setAcknowledgedAppealKey(reset.acknowledgedAppealKey);
+      setMypageSummary(reset.mypageSummary);
+      setHistoryEvents(reset.historyEvents);
+      setIsSubmitting(reset.isSubmitting);
+      setIsSavingConversation(reset.isSavingConversation);
+      setStatusMessage("새 상담을 시작했습니다.");
+      setActiveRoute("chatbot");
+    } catch (_error) {
+      setStatusMessage(
+        "새 상담 세션을 만들지 못했습니다. 기존 상담은 그대로 유지되며 다시 시도할 수 있습니다."
+      );
+    }
   }
 
   async function loadMyPageSummary(options = {}) {

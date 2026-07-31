@@ -29,6 +29,9 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     logoutAuthSession(payload = {}, identity = {}) {
       return postJson(joinApiPath(authApiBase, "auth/logout/"), payload, identity);
     },
+    createChatSession(payload = {}, identity = {}) {
+      return postJson(joinApiPath(apiBase, "chat/sessions/"), payload, identity);
+    },
     submitChatMessage(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "chat/messages/"), payload, identity);
     },

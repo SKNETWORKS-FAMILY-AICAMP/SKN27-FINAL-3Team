@@ -122,13 +122,27 @@ def test_frontend_renders_editable_ocr_confirmation_before_follow_up() -> None:
     assert "notice_stage" in shell
 
 
-def test_start_new_conversation_clears_the_previous_session_id() -> None:
+def test_start_new_conversation_issues_server_session_then_resets_conversation_state() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
-    start = shell.index("function startNewConversation() {")
+    start = shell.index("async function startNewConversation() {")
     end = shell.index("async function loadMyPageSummary", start)
     block = shell[start:end]
 
-    assert 'setSessionId("");' in block
+    issue_index = block.index("await issueNewConversationSession")
+    reset_index = block.index("createNewConversationResetState()")
+
+    assert issue_index < reset_index
+    assert "api.createChatSession({}, identity)" in block
+    assert "setSessionId(nextSessionId)" in block
+    assert "persistAuthSession({" in block
+    assert "setRegisteredAttachments(reset.registeredAttachments)" in block
+    assert "setSelectedUploadFile(reset.selectedUploadFile)" in block
+    assert "setOcrConfirmationFields(reset.ocrConfirmationFields)" in block
+    assert "setPendingOcrConfirmation(reset.pendingOcrConfirmation)" in block
+    assert "setPendingAuthAction(reset.pendingAuthAction)" in block
+    assert "setCurrentReport(reset.currentReport)" in block
+    assert "setReportList(reset.reportList)" in block
+    assert 'setSessionId("");' not in block
 
 
 def test_prepare_missing_evidence_upload_keeps_the_current_session_binding() -> None:
@@ -177,6 +191,52 @@ def test_app_auth_session_persists_authenticated_identity_for_reload_and_report_
         "writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null)",
     ):
         assert required in persistence
+
+
+def test_frontend_verifies_stored_auth_before_exposing_authenticated_state() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    assert "recoverStoredAuthSession" in shell
+    assert "api.getCurrentAuthSubject" in shell
+    assert 'const [authRestoreStatus, setAuthRestoreStatus] = useState(' in shell
+    assert 'const [authSessionId, setAuthSessionId] = useState("");' in shell
+    assert 'const [activeAuthToken, setActiveAuthToken] = useState("");' in shell
+    assert 'authRestoreStatus === "checking"' in shell
+
+
+def test_frontend_session_gate_never_bootstraps_guest_for_authenticated_identity() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+    bootstrap_start = shell.index("async function bootstrapGuestSession")
+    bootstrap_end = shell.index("async function ensureGuestSession", bootstrap_start)
+    bootstrap = shell[bootstrap_start:bootstrap_end]
+    ensure_start = bootstrap_end
+    ensure_end = shell.index("async function loginAndBindCurrentSession", ensure_start)
+    ensure = shell[ensure_start:ensure_end]
+
+    assert 'createChatSession(payload = {}, identity = {})' in api_client
+    assert '"chat/sessions/"' in api_client
+    assert 'authRestoreStatus !== "ready"' in bootstrap
+    assert "authSessionId || activeAuthToken" in bootstrap
+    assert 'authRestoreStatus !== "ready"' in ensure
+    assert "authSessionId && activeAuthToken" in ensure
+    assert "api.createChatSession" in ensure
+    assert shell.count("await bootstrapGuestSession(") == 1
+
+
+def test_frontend_aborts_message_and_attachment_requests_when_session_gate_is_closed() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    registration_start = shell.index("async function registerAttachmentMetadata")
+    registration_end = shell.index("function handleAttachmentFile", registration_start)
+    registration = shell[registration_start:registration_end]
+    submit_start = shell.index("async function submitServiceMessage({")
+    submit_end = shell.index("async function streamAssistantMessage", submit_start)
+    submit = shell[submit_start:submit_end]
+
+    for block in (registration, submit):
+        assert 'authRestoreStatus !== "ready"' in block
+        assert "`ses_web_${Date.now()}`" not in block
+        assert "guestSessionResult?.sessionId" in block
 
 
 def test_auth_session_storage_round_trip_restores_authenticated_state() -> None:
@@ -269,7 +329,8 @@ def test_chat_submit_recovery_uses_structured_auth_error_metadata() -> None:
         '_error?.requiredAction === "login"',
         '_error?.requiredAction === "refresh_guest_session"',
         '_error?.code === "guest_session_invalid"',
-        'setAnalysisResponse(isRateLimitExceeded ? null : { cards: FALLBACK_ANALYSIS_CARDS })',
+        "isRateLimitExceeded || discardRejectedInput",
+        ": { cards: FALLBACK_ANALYSIS_CARDS }",
     ):
         assert required in block
 

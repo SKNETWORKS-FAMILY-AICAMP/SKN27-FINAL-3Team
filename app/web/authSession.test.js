@@ -4,8 +4,180 @@ import * as authSession from "./authSession.js";
 
 import {
   googleLoginFailureMessage,
+  recoverStoredAuthSession,
   resolveGuestBootstrapSessionId,
 } from "./authSession.js";
+
+function appJwtWithExpiration(expiresAtSeconds) {
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${encode({ alg: "HS256", typ: "JWT" })}.${encode({ exp: expiresAtSeconds })}.signature`;
+}
+
+test("recovers a stored authenticated session only after auth/me verifies it", async () => {
+  const nowMs = 1770000000000;
+  const storedToken = appJwtWithExpiration(Math.floor(nowMs / 1000) + 1800);
+  const calls = [];
+
+  const result = await recoverStoredAuthSession({
+    storedSession: {
+      access_token: storedToken,
+      auth_session_id: "auth_verified",
+      user_id: "usr_verified",
+      guest_id: "gst_lineage",
+      guest_credential: "signed-guest-credential",
+      session_id: "ses_current",
+    },
+    nowMs,
+    getCurrentAuthSubject: async ({ sessionId, identity }) => {
+      calls.push({ operation: "auth_me", sessionId, identity });
+      return {
+        auth_state: "authenticated",
+        subject: {
+          auth_session_id: "auth_verified",
+          guest_id: "gst_lineage",
+          is_authenticated: true,
+          user_id: "usr_verified",
+        },
+      };
+    },
+    refreshAuthToken: async () => {
+      calls.push({ operation: "refresh" });
+      throw new Error("refresh should not run outside the early-refresh window");
+    },
+  });
+
+  assert.equal(result.status, "authenticated");
+  assert.equal(result.refreshed, false);
+  assert.equal(result.session.access_token, storedToken);
+  assert.equal(result.session.auth_session_id, "auth_verified");
+  assert.equal(result.session.user_id, "usr_verified");
+  assert.equal(result.session.guest_credential, "signed-guest-credential");
+  assert.deepEqual(calls.map(({ operation }) => operation), ["auth_me"]);
+  assert.equal(calls[0].identity.authToken, storedToken);
+  assert.equal(calls[0].sessionId, "ses_current");
+});
+
+test("refreshes a still-valid token in the early window before auth/me verification", async () => {
+  const nowMs = 1770000000000;
+  const storedToken = appJwtWithExpiration(Math.floor(nowMs / 1000) + 240);
+  const refreshedToken = appJwtWithExpiration(Math.floor(nowMs / 1000) + 3600);
+  const calls = [];
+
+  const result = await recoverStoredAuthSession({
+    storedSession: {
+      access_token: storedToken,
+      auth_session_id: "auth_before_refresh",
+      user_id: "usr_verified",
+      guest_id: "gst_lineage",
+      guest_credential: "signed-guest-credential",
+      session_id: "ses_current",
+    },
+    nowMs,
+    refreshAuthToken: async (payload, identity) => {
+      calls.push({ operation: "refresh", payload, identity });
+      return {
+        access_token: refreshedToken,
+        subject: {
+          auth_session_id: "auth_after_refresh",
+          guest_id: "gst_lineage",
+          user_id: "usr_verified",
+        },
+      };
+    },
+    getCurrentAuthSubject: async ({ sessionId, identity }) => {
+      calls.push({ operation: "auth_me", sessionId, identity });
+      return {
+        auth_state: "authenticated",
+        subject: {
+          auth_session_id: "auth_after_refresh",
+          guest_id: "gst_lineage",
+          is_authenticated: true,
+          user_id: "usr_verified",
+        },
+      };
+    },
+  });
+
+  assert.equal(result.status, "authenticated");
+  assert.equal(result.refreshed, true);
+  assert.equal(result.session.access_token, refreshedToken);
+  assert.equal(result.session.auth_session_id, "auth_after_refresh");
+  assert.deepEqual(calls.map(({ operation }) => operation), ["refresh", "auth_me"]);
+  assert.equal(calls[1].identity.authToken, refreshedToken);
+  assert.equal(calls[1].identity.authSessionId, "auth_after_refresh");
+});
+
+test("preserves signed guest and chat recovery context when proactive refresh fails", async () => {
+  const nowMs = 1770000000000;
+  const storedToken = appJwtWithExpiration(Math.floor(nowMs / 1000) - 1);
+  let authMeCalled = false;
+  const refreshError = Object.assign(new Error("expired"), {
+    code: "token_expired",
+    reason: "expired_token",
+  });
+
+  const result = await recoverStoredAuthSession({
+    storedSession: {
+      access_token: storedToken,
+      auth_session_id: "auth_expired",
+      user_id: "usr_previous",
+      guest_id: "gst_lineage",
+      guest_credential: "signed-guest-credential",
+      session_id: "ses_current",
+    },
+    nowMs,
+    refreshAuthToken: async () => {
+      throw refreshError;
+    },
+    getCurrentAuthSubject: async () => {
+      authMeCalled = true;
+      throw new Error("auth/me should not run with an unusable token");
+    },
+  });
+
+  assert.equal(result.status, "reauth_required");
+  assert.equal(result.reason, "token_expired");
+  assert.equal(result.session.access_token, null);
+  assert.equal(result.session.auth_session_id, null);
+  assert.equal(result.session.user_id, null);
+  assert.equal(result.session.guest_id, "gst_lineage");
+  assert.equal(result.session.guest_credential, "signed-guest-credential");
+  assert.equal(result.session.session_id, "ses_current");
+  assert.equal(authMeCalled, false);
+});
+
+test("rejects an auth/me response for a different authenticated session", async () => {
+  const nowMs = 1770000000000;
+  const storedToken = appJwtWithExpiration(Math.floor(nowMs / 1000) + 1800);
+
+  const result = await recoverStoredAuthSession({
+    storedSession: {
+      access_token: storedToken,
+      auth_session_id: "auth_expected",
+      user_id: "usr_expected",
+      guest_id: "gst_lineage",
+      guest_credential: "signed-guest-credential",
+      session_id: "ses_current",
+    },
+    nowMs,
+    refreshAuthToken: async () => {
+      throw new Error("refresh should not run");
+    },
+    getCurrentAuthSubject: async () => ({
+      auth_state: "authenticated",
+      subject: {
+        auth_session_id: "auth_other",
+        is_authenticated: true,
+        user_id: "usr_expected",
+      },
+    }),
+  });
+
+  assert.equal(result.status, "reauth_required");
+  assert.equal(result.reason, "auth_session_mismatch");
+  assert.equal(result.session.guest_id, "gst_lineage");
+  assert.equal(result.session.session_id, "ses_current");
+});
 
 test("does not reuse a stale chat session without a valid guest credential", () => {
   assert.equal(

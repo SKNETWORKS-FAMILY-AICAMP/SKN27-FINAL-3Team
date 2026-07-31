@@ -71,12 +71,16 @@ def test_quick_question_groups_render_without_undefined_legacy_reference() -> No
     assert "{quickQuestions.map((item) => (" not in shell
 
 
-def test_chat_places_save_and_four_service_examples_before_messages() -> None:
+def test_chat_places_service_examples_inside_the_empty_conversation_state() -> None:
     shell = _shell()
     chat = shell[shell.index("function ChatScreenV2("):]
+    messages_index = chat.index('className="messages"')
+    empty_state_index = chat.index('className="chat-empty-state"')
+    quick_examples_index = chat.index('className="quick-examples"')
+    composer_index = chat.index('className="chat-input"')
 
-    assert chat.index('aria-label="상담 저장 선택"') < chat.index('className="messages"')
-    assert chat.index('className="quick-examples"') < chat.index('className="messages"')
+    assert chat.index('aria-label="상담 저장 선택"') < messages_index
+    assert messages_index < empty_state_index < quick_examples_index < composer_index
     assert 'title: "과태료·범칙금"' in chat
     assert 'title: "과실비율"' in chat
     assert 'title: "법령 관련 질문"' not in chat
