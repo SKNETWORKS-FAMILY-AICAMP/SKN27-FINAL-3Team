@@ -184,7 +184,7 @@ def test_pilot_app_release_does_not_depend_on_the_managed_ec2_resource() -> None
     assert "aws_instance.app.arn" not in release_config
 
 
-def test_app_release_runner_only_promotes_immutable_app_images() -> None:
+def test_app_release_runner_restarts_all_services_that_execute_the_backend_image() -> None:
     runner_path = ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
     buildspec_path = ROOT / "buildspec.pilot-app-release.yml"
 
@@ -201,9 +201,11 @@ def test_app_release_runner_only_promotes_immutable_app_images() -> None:
         'python backend/manage.py migrate --check'
     ) in runner
     assert "migrate --check" in runner
-    assert '"${compose[@]}" pull backend frontend' in runner
-    assert '"${compose[@]}" rm -sf backend frontend' in runner
+    runtime_services = "backend frontend agent-worker file-scan-worker ops-monitor"
+    assert f'"${{compose[@]}}" pull {runtime_services}' in runner
+    assert f'"${{compose[@]}}" rm -sf {runtime_services}' in runner
     assert '"${compose[@]}" up -d --no-deps backend frontend' in runner
+    assert '"${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor' in runner
     assert "curl --fail --silent --show-error" in runner
     assert "rollback_app_release" in runner
     assert "aws ssm send-command" in runner
@@ -250,12 +252,13 @@ def test_app_release_runner_overrides_frontend_image_ref_for_release_and_rollbac
 
     assert 'frontend_image_ref="$frontend_repository:$target_tag"' in runner
     assert 'rollback_frontend_image_ref="$frontend_repository:$rollback_tag"' in runner
+    runtime_services = "backend frontend agent-worker file-scan-worker ops-monitor"
     assert (
-        'FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend'
+        f'FRONTEND_IMAGE_REF="$frontend_image_ref" "${{compose[@]}}" pull {runtime_services}'
         in runner
     )
     assert (
-        'FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" rm -sf backend frontend'
+        f'FRONTEND_IMAGE_REF="$frontend_image_ref" "${{compose[@]}}" rm -sf {runtime_services}'
         in runner
     )
     assert (
@@ -263,10 +266,18 @@ def test_app_release_runner_overrides_frontend_image_ref_for_release_and_rollbac
         in runner
     )
     assert (
-        'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" rm -sf backend frontend >/dev/null 2>&1 || true'
+        'FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor'
+        in runner
+    )
+    assert (
+        f'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${{compose[@]}}" rm -sf {runtime_services} >/dev/null 2>&1 || true'
         in runner
     )
     assert (
         'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend'
+        in runner
+    )
+    assert (
+        'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor'
         in runner
     )
