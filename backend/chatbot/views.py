@@ -1343,8 +1343,17 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["execution_mode"] = "scope_guidance"
         return _json_response(request, chat_response)
 
-    if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
-        if chat_response["status"] in {"needs_input", "case_ready"}:
+    if chat_response["status"] in {
+        "needs_input",
+        "needs_clarification",
+        "high_risk_handoff",
+        "case_ready",
+    }:
+        if chat_response["status"] in {
+            "needs_input",
+            "needs_clarification",
+            "case_ready",
+        }:
             try:
                 chat_response["persistence"] = persist_chat_followup_state(
                     identity_body,
@@ -1356,6 +1365,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["usage"] = usage
         execution_modes = {
             "needs_input": "input_collection",
+            "needs_clarification": "input_clarification",
             "high_risk_handoff": "expert_handoff",
             "case_ready": "case_creation_required",
         }

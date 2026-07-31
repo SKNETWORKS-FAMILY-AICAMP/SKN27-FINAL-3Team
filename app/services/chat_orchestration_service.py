@@ -12,6 +12,7 @@ from app.services.attachment_mock_service import resolve_attachment_references
 from app.services.case_memory_service import update_case_memory
 from app.services.case_evidence_service import build_case_evidence
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS, build_consultation_state_v2
+from app.services.input_understanding_service import evaluate_input_understanding
 from app.services.law_ground_contract import normalize_law_evidence
 from app.services.service_scope_policy_service import evaluate_service_scope
 from app.services.supervisor_control_service import (
@@ -149,7 +150,32 @@ def submit_message(
     if not user_text and not attachments:
         return _needs_input_response(session_id=session_id, message_id=message_id)
 
-    routing_intent = routing_intent_override or route_supervisor_input(user_text, attachments)
+    input_understanding = evaluate_input_understanding(
+        user_text=user_text,
+        attachments=attachments,
+    )
+    if input_understanding["status"] in {
+        "needs_clarification",
+        "blocked_sensitive",
+    }:
+        return _input_clarification_response(
+            session_id=session_id,
+            message_id=message_id,
+            input_understanding=input_understanding,
+        )
+    user_text = str(input_understanding["safe_user_text"] or user_text).strip()
+    payload = {
+        **payload,
+        "user_text": user_text,
+        "safe_user_text": user_text,
+        "input_understanding": input_understanding["public_metadata"],
+    }
+    detected_routing_intent = route_supervisor_input(user_text, attachments)
+    routing_intent = (
+        detected_routing_intent
+        if routing_intent_override in {"", "general_consultation"}
+        else routing_intent_override
+    )
     scope_guidance = build_scope_guidance_response(
         session_id=session_id,
         message_id=message_id,
@@ -598,6 +624,43 @@ def _needs_input_response(*, session_id: str, message_id: str) -> dict[str, Any]
         },
         "limitations": [],
     }
+
+
+def _input_clarification_response(
+    *,
+    session_id: str,
+    message_id: str,
+    input_understanding: dict[str, Any],
+) -> dict[str, Any]:
+    question = str(input_understanding["message"])
+    response = _needs_input_response(
+        session_id=session_id,
+        message_id=message_id,
+    )
+    response.update(
+        {
+            "routing_intent": "needs_clarification",
+            "status": "needs_clarification",
+            "assistant_message": {"answer": question, "summary": question},
+            "progress": {
+                "status": "needs_clarification",
+                "active_node": "",
+                "message": question,
+            },
+            "pending_questions": [
+                {"field": "user_text", "question": question}
+            ],
+            "input_understanding": input_understanding["public_metadata"],
+        }
+    )
+    response["analysis_plan"].update(
+        {
+            "routing_intent": "needs_clarification",
+            "status": "needs_clarification",
+            "steps": [],
+        }
+    )
+    return response
 
 
 def _scope_guidance_response(

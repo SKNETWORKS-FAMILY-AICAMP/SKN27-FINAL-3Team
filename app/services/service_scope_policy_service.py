@@ -47,7 +47,17 @@ def evaluate_service_scope(
             "decision": "proceed",
         }
     for excluded_case in policy["excluded_cases"]:
-        if any(_normalized(keyword) in normalized_text for keyword in excluded_case["keywords"]):
+        if (
+            _excluded_case_applies(
+                excluded_case,
+                routing_intent=_text(routing_intent),
+                normalized_text=normalized_text,
+            )
+            and any(
+                _normalized(keyword) in normalized_text
+                for keyword in excluded_case["keywords"]
+            )
+        ):
             return _scope_result(excluded_case)
 
     supported = policy["supported_intents"].get(_text(routing_intent))
@@ -81,6 +91,11 @@ def _validate_policy(policy: Any) -> None:
             raise ValueError("service_scope_policy_contains_invalid_exclusion_decision")
         if not _string_list(entry.get("keywords")):
             raise ValueError("service_scope_policy_exclusion_requires_keywords")
+        for optional_key in ("applicable_intents", "required_context_keywords"):
+            if optional_key in entry and not _string_list(entry.get(optional_key)):
+                raise ValueError(
+                    f"service_scope_policy_exclusion_requires_{optional_key}"
+                )
     unclassified = policy.get("unclassified_intent")
     if not isinstance(unclassified, dict) or unclassified.get("decision") != "proceed":
         raise ValueError("service_scope_policy_requires_unclassified_intent_flow")
@@ -95,6 +110,22 @@ def _scope_result(entry: dict[str, Any]) -> dict[str, Any]:
         "limitations": _string_list(entry.get("limitations")),
         "next_actions": _string_list(entry.get("next_actions")),
     }
+
+
+def _excluded_case_applies(
+    entry: dict[str, Any],
+    *,
+    routing_intent: str,
+    normalized_text: str,
+) -> bool:
+    applicable_intents = set(_string_list(entry.get("applicable_intents")))
+    if applicable_intents and routing_intent not in applicable_intents:
+        return False
+    required_context_keywords = _string_list(entry.get("required_context_keywords"))
+    return not required_context_keywords or any(
+        _normalized(keyword) in normalized_text
+        for keyword in required_context_keywords
+    )
 
 
 def _normalized(value: Any) -> str:

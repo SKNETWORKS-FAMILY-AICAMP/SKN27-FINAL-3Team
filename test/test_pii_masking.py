@@ -3,11 +3,14 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 
+import pytest
+
 from ai.agents.fine_notice_analysis import masking as fine_notice_masking
 from app.security.pii_masking import (
     MASK_TOKEN,
     MASKED_ADDRESS,
     MASKED_SECRET,
+    detect_text_categories,
     mask_address,
     mask_driver_license,
     mask_name,
@@ -30,6 +33,43 @@ RAW_PII = {
     "resident_id": "900101-1234567",
     "driver_license": "11-22-123456-78",
 }
+
+
+@pytest.mark.parametrize(
+    ("value", "category", "raw_identifier"),
+    (
+        ("900101-1234567이고", "resident_id", "900101-1234567"),
+        ("900101-1234567입니다", "resident_id", "900101-1234567"),
+        ("(900101-1234567)", "resident_id", "900101-1234567"),
+        ("11-22-333333-44입니다", "driver_license", "11-22-333333-44"),
+    ),
+)
+def test_identity_numbers_are_detected_with_korean_context(
+    value: str,
+    category: str,
+    raw_identifier: str,
+) -> None:
+    assert detect_text_categories(value)[category] == 1
+    assert raw_identifier not in mask_text(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "1900101-1234567",
+        "900101-12345678",
+        "111-22-333333-44",
+        "11-22-333333-445",
+    ),
+)
+def test_identity_number_patterns_do_not_partially_match_adjacent_digits(
+    value: str,
+) -> None:
+    categories = detect_text_categories(value)
+
+    assert "resident_id" not in categories
+    assert "driver_license" not in categories
+    assert mask_text(value) == value
 
 
 def test_canonical_field_masking_rules() -> None:

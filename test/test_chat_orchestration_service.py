@@ -28,6 +28,36 @@ def test_report_routing_policy_has_no_obsolete_pre_merge_placement_rule() -> Non
     assert "insert_before" not in policy["report_policy"]
 
 
+def test_pedestrian_crosswalk_law_question_routes_to_law_search_without_handoff() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_2",
+            "user_text": "도로교통법상 우회전할 때 보행자가 횡단보도에 있으면 반드시 멈춰야 하나요?",
+        },
+        routing_intent_override="general_consultation",
+    )
+
+    assert response["status"] == "queued"
+    assert response["routing_intent"] == "traffic_law_search"
+    assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
+        "input_context_validation",
+        "law_ground_search",
+        "agent_result_validation",
+        "final_response_merge",
+    ]
+    assert response.get("service_scope", {}).get("decision") != "expert_handoff"
+
+
+def test_general_consultation_plan_does_not_default_to_law_search() -> None:
+    node_codes = plan_node_codes("general_consultation", report_requested=False)
+
+    assert node_codes == (
+        "input_context_validation",
+        "agent_result_validation",
+        "final_response_merge",
+    )
+
+
 def test_text_only_fine_notice_draft_request_enters_verified_intake_without_bypassing_ocr_gate() -> None:
     routing_intent = route_supervisor_input(
         "과태료 고지서에 대한 이의신청서 초안을 작성해 주세요.",
@@ -476,41 +506,77 @@ def test_enabled_supervisor_failure_blocks_analysis_plan_and_reporting(monkeypat
     assert response["reporting_payload"] is None
 
 
-def test_enabled_supervisor_cannot_override_server_ready_stage(monkeypatch) -> None:
+def test_low_information_input_stops_before_enabled_supervisor(monkeypatch) -> None:
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
     monkeypatch.setattr(
         "app.services.supervisor_llm_service._request_supervisor_json",
-        lambda *_args: {
-            "conversation_summary": "A law reference is still required.",
-            "collected_facts": [],
-            "missing_fields": [
-                {"field": "law_question", "reason": "model_requested"}
-            ],
-            "next_questions": [
-                {"field": "law_question", "question": "Which law should be reviewed?"}
-            ],
-            "agent_input_packages": [
-                {
-                    "node_code": "law_ground_search",
-                    "payload": {},
-                }
-            ],
-        },
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("Supervisor LLM must not run")
+        ),
     )
 
     response = submit_message(
         {"session_id": "ses_need_more_input", "user_text": "help"}
     )
 
-    assert response["status"] == "queued"
-    assert response["progress"]["status"] == "queued"
-    assert response["pending_questions"] == []
-    assert response["analysis_plan"]["steps"]
+    assert response["status"] == "needs_clarification"
+    assert response["progress"]["status"] == "needs_clarification"
+    assert response["pending_questions"]
+    assert response["analysis_plan"]["steps"] == []
     assert response["reporting_payload"] is None
     assert response["report_links"] == []
-    assert response["supervisor_state"]["stage"] == "agent_execution_ready"
-    assert response["supervisor_state"]["missing_fields"] == []
+    assert response["supervisor_state"] == {}
+
+
+def test_profanity_only_e2e_input_stops_without_an_agent_plan() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_10",
+            "user_text": "아 진짜 짜증나네 씨발",
+        }
+    )
+
+    assert response["status"] == "needs_clarification"
+    assert response["routing_intent"] == "needs_clarification"
+    assert response["analysis_plan"]["steps"] == []
+    assert "씨발" not in repr(response)
+
+
+def test_compatibility_jamo_e2e_input_stops_without_an_agent_plan() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_12",
+            "user_text": "ㄱㅈㅅ ㅂㄹㅈ ㄴㅂㄱㅎ ㅁㄹㄱㅆㅇ",
+        }
+    )
+
+    assert response["status"] == "needs_clarification"
+    assert response["routing_intent"] == "needs_clarification"
+    assert response["analysis_plan"]["steps"] == []
+
+
+def test_profanity_with_fine_notice_intent_keeps_procedure_routing() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_9",
+            "user_text": "과태료 고지서 받았는데 이게 대체 무슨 개소리야? 이의신청 할 수 있는지 알려줘.",
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert "개소리" not in repr(response)
+
+
+def test_typo_heavy_fine_notice_input_keeps_procedure_routing() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_11",
+            "user_text": "과태료 고지서 잇는데 이의시처 됨? 기한 지낫는지 모르겟음",
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
 
 
 def test_fine_notice_procedure_question_does_not_run_ocr_appeal_or_report() -> None:

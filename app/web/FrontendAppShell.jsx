@@ -5,6 +5,7 @@ import { buildAppealDecisionUi } from "./appealDecisionUi.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
 import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
 import { reportsForCase } from "./caseReports.js?null-case-v1";
+import { shouldDiscardRejectedChatInput } from "./chatPrivacyUi.js";
 import {
   buildAuthContext,
   buildGoogleLoginPayload,
@@ -1275,6 +1276,7 @@ export default function FrontendAppShell({
       logDeveloperDiagnostic("chat.error", {
         message: _error?.message || "unknown error",
       });
+      const discardRejectedInput = shouldDiscardRejectedChatInput(_error);
       const isRateLimitExceeded = _error?.status === 429 || _error?.code === "rate_limit_exceeded";
       const requiresLogin =
         _error?.requiredAction === "login" ||
@@ -1282,7 +1284,11 @@ export default function FrontendAppShell({
       const requiresGuestSessionRefresh =
         _error?.requiredAction === "refresh_guest_session" || _error?.code === "guest_session_invalid";
       let errorMessage = "응답을 불러오지 못해 접수 상태만 표시합니다.";
-      if (isRateLimitExceeded) {
+      if (discardRejectedInput) {
+        errorMessage =
+          _error?.publicMessage ||
+          "민감정보가 감지되어 입력을 저장하지 않았습니다. 해당 정보를 제거한 뒤 다시 입력해 주세요.";
+      } else if (isRateLimitExceeded) {
         errorMessage = effectiveAuthSessionId
           ? "오늘의 상담 가능 횟수를 모두 사용했습니다. 잠시 후 다시 시도해 주세요."
           : "비회원 상담 가능 횟수를 모두 사용했습니다. 계속 상담하려면 Google 로그인해 주세요.";
@@ -1307,8 +1313,11 @@ export default function FrontendAppShell({
           ? _error?.publicMessage || "로그인이 만료되었습니다. 다시 로그인한 뒤 같은 상담을 이어가 주세요."
           : _error?.publicMessage || "로그인이 필요합니다. Google 로그인 후 같은 상담을 이어가 주세요.";
       }
+      if (discardRejectedInput) {
+        setSubmittedQuestion("");
+      }
       setChatMessages([
-        ...conversationHistory,
+        ...(discardRejectedInput ? chatMessages : conversationHistory),
         {
           role: "assistant",
           content: errorMessage,
@@ -1316,8 +1325,14 @@ export default function FrontendAppShell({
           pending_questions: [],
         },
       ]);
-      setAnalysisResponse(isRateLimitExceeded ? null : { cards: FALLBACK_ANALYSIS_CARDS });
-      setSavePromptVisible(!isRateLimitExceeded && !authSessionId);
+      setAnalysisResponse(
+        isRateLimitExceeded || discardRejectedInput
+          ? null
+          : { cards: FALLBACK_ANALYSIS_CARDS }
+      );
+      setSavePromptVisible(
+        !isRateLimitExceeded && !discardRejectedInput && !authSessionId
+      );
       setStatusMessage(errorMessage);
     } finally {
       setIsSubmitting(false);

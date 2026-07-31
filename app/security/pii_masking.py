@@ -93,9 +93,12 @@ SENSITIVE_CONTENT_FIELD_KEYS = {
     "transcript",
 }
 
-_RESIDENT_ID_PATTERN = re.compile(r"\b\d{6}\s*-\s*[1-8]\d{6}\b")
+_RESIDENT_ID_PATTERN = re.compile(
+    r"(?<!\d)\d{6}\s*-\s*[1-8]\d{6}(?!\d)"
+)
 _DRIVER_LICENSE_PATTERN = re.compile(
-    r"\b(?:[가-힣]{2}\s*)?\d{2}\s*[- ]?\s*\d{2}\s*[- ]?\s*\d{6}\s*[- ]?\s*\d{2}\b"
+    r"(?<!\d)(?:[가-힣]{2}\s*)?\d{2}\s*[- ]?\s*\d{2}\s*[- ]?\s*"
+    r"\d{6}\s*[- ]?\s*\d{2}(?!\d)"
 )
 _MOBILE_PHONE_PATTERN = re.compile(r"(?<!\d)01[016789]\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}(?!\d)")
 _LANDLINE_PHONE_PATTERN = re.compile(r"\b0\d{1,2}\s*[-.]?\s*\d{3,4}\s*[-.]?\s*\d{4}\b")
