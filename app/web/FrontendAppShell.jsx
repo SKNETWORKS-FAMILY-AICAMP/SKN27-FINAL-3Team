@@ -2708,6 +2708,8 @@ function ChatScreenV2({
   uploadInputResetKey,
 }) {
   const attachmentInputRef = useRef(null);
+  const questionInputRef = useRef(null);
+  const quickExamplesRef = useRef(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const visibleMessages = chatMessages.length
     ? chatMessages
@@ -2795,29 +2797,6 @@ function ChatScreenV2({
             </section>
           )}
 
-          <details className="quick-examples">
-            <summary className="quick-examples-header">
-              <span>
-                <strong>서비스 예시 작동 방식</strong>
-                <small>궁금한 상황을 선택하면 질문이 입력창에 담깁니다.</small>
-              </span>
-            </summary>
-            <div className="quick-example-groups">
-              {quickQuestionGroups.map((group) => (
-                <section className="quick-example-group" aria-label={group.title} key={group.title}>
-                  <h4>{group.title}</h4>
-                  <div className="quick-row">
-                    {group.questions.map((item) => (
-                      <button className="quick-chip" type="button" key={item} onClick={() => setQuestion(item)}>
-                        {item}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </details>
-
           <div className="messages">
             {!hasConversation && (
               <section className="chat-empty-state" aria-label="상담 시작">
@@ -2827,6 +2806,37 @@ function ChatScreenV2({
                   사고 직후라면 장소, 시간, 상대방 주장, 고지서 내용처럼 기억나는 것만 적어도 됩니다.
                   로그인과 자료 업로드는 상담이 진행된 뒤 필요한 시점에 안내합니다.
                 </p>
+                <div className="empty-state-examples">
+                  <span>어떤 내용을 적어야 할지 막막하신가요?</span>
+                  <details className="quick-examples" ref={quickExamplesRef}>
+                    <summary className="quick-examples-header">예시 질문 보기</summary>
+                    <div className="quick-example-groups">
+                      {quickQuestionGroups.map((group) => (
+                        <section className="quick-example-group" aria-label={group.title} key={group.title}>
+                          <h4>{group.title}</h4>
+                          <div className="quick-row">
+                            {group.questions.map((item) => (
+                              <button
+                                className="quick-chip"
+                                type="button"
+                                key={item}
+                                onClick={() => {
+                                  setQuestion(item);
+                                  if (quickExamplesRef.current) {
+                                    quickExamplesRef.current.open = false;
+                                  }
+                                  questionInputRef.current?.focus();
+                                }}
+                              >
+                                {item}
+                              </button>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  </details>
+                </div>
               </section>
             )}
 
@@ -2934,71 +2944,79 @@ function ChatScreenV2({
                 onDrop={onAttachmentDrop}
               >
                 <textarea
+                  ref={questionInputRef}
                   aria-label="상담 메시지 입력"
                   placeholder={composerPlaceholder}
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
                 />
-                <strong>파일을 끌어 놓거나 + 메뉴에서 선택하세요.</strong>
-                <span>영상은 Vision 분석, 이미지와 PDF는 OCR 분류로 전달됩니다.</span>
-              <div className="composer-toolbar">
-                <div className="attachment-menu-wrap">
-                  <button
-                    className="attachment-plus"
-                    type="button"
-                    aria-label="자료 첨부"
-                    aria-expanded={attachmentMenuOpen}
-                    onClick={() => setAttachmentMenuOpen((open) => !open)}
-                  >
-                    +
-                  </button>
-                  {attachmentMenuOpen && (
-                    <div className="attachment-menu" role="menu">
-                      {attachmentOptions.map((option) => (
-                        <button type="button" role="menuitem" key={option.label} onClick={() => openAttachmentPicker(option)}>
-                          <strong>{option.label}</strong>
-                          <span>{option.description}</span>
-                        </button>
-                      ))}
+                <div className="composer-toolbar">
+                  <div className="attachment-menu-wrap">
+                    <button
+                      className="attachment-plus"
+                      type="button"
+                      aria-label="자료 첨부"
+                      aria-expanded={attachmentMenuOpen}
+                      onClick={() => setAttachmentMenuOpen((open) => !open)}
+                    >
+                      +
+                    </button>
+                    {attachmentMenuOpen && (
+                      <div className="attachment-menu" role="menu">
+                        {attachmentOptions.map((option) => (
+                          <button type="button" role="menuitem" key={option.label} onClick={() => openAttachmentPicker(option)}>
+                            <strong>{option.label}</strong>
+                            <span>{option.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      ref={attachmentInputRef}
+                      key={uploadInputResetKey}
+                      className="attachment-file-input"
+                      type="file"
+                      accept={ATTACHMENT_ACCEPT}
+                      onChange={(event) => onAttachmentFile(event.target.files?.[0] || null)}
+                    />
+                  </div>
+
+                  {selectedUploadFile && (
+                    <div className="selected-attachment">
+                      <span>{selectedUploadFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={onRegisterAttachment}
+                        disabled={isRegisteringAttachment || Boolean(capabilityError)}
+                      >
+                        {isRegisteringAttachment ? "첨부 중" : isAuthenticated ? "첨부" : "로그인 후 첨부"}
+                      </button>
+                      <button type="button" aria-label="선택한 파일 제거" onClick={() => onAttachmentFile(null)}>×</button>
                     </div>
                   )}
-                  <input
-                    ref={attachmentInputRef}
-                    key={uploadInputResetKey}
-                    className="attachment-file-input"
-                    type="file"
-                    accept={ATTACHMENT_ACCEPT}
-                    onChange={(event) => onAttachmentFile(event.target.files?.[0] || null)}
-                  />
+
+                  {!selectedUploadFile && registeredAttachments.length > 0 && (
+                    <span className="attachment-count">첨부 {registeredAttachments.length}개</span>
+                  )}
+
+                  <button
+                    className="button primary composer-send"
+                    type="button"
+                    aria-label="전송"
+                    title={isSubmitting ? "답변 정리 중" : "전송"}
+                    onClick={onSubmit}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting
+                      ? <span aria-hidden="true">…</span>
+                      : <span aria-hidden="true">↑</span>}
+                  </button>
                 </div>
-
                 {selectedUploadFile && (
-                  <div className="selected-attachment">
-                    <span>{selectedUploadFile.name}</span>
-                    <button
-                      type="button"
-                      onClick={onRegisterAttachment}
-                      disabled={isRegisteringAttachment || Boolean(capabilityError)}
-                    >
-                      {isRegisteringAttachment ? "첨부 중" : isAuthenticated ? "첨부" : "로그인 후 첨부"}
-                    </button>
-                    <button type="button" aria-label="선택한 파일 제거" onClick={() => onAttachmentFile(null)}>×</button>
-                  </div>
+                  <span className="composer-file-status" role="status">
+                    {`${selectedUploadFile.name} 선택됨 · ${VIDEO_MIME_TYPES.has(selectedUploadFile.type) ? "Vision" : "OCR"} 대기`}
+                  </span>
                 )}
-
-                {!selectedUploadFile && registeredAttachments.length > 0 && (
-                  <span className="attachment-count">첨부 {registeredAttachments.length}개</span>
-                )}
-
-                <button className="button primary composer-send" type="button" onClick={onSubmit} disabled={isSubmitting}>
-                  {isSubmitting ? "정리 중" : "전송"}
-                </button>
-              </div>
-                <span role="status">
-                  {selectedUploadFile
-                    ? `${selectedUploadFile.name} 선택됨 · ${VIDEO_MIME_TYPES.has(selectedUploadFile.type) ? "Vision" : "OCR"} 대기`
-                    : "첨부할 파일을 하나 선택하세요."}
-                </span>
               </div>
 
               {capabilityError && <p className="attachment-help" role="alert">{capabilityError}</p>}
@@ -3092,7 +3110,7 @@ function ConsultationIntakePanel({
   registeredAttachments,
   value,
 }) {
-  const [isIntakeOpen, setIsIntakeOpen] = useState(true);
+  const [isIntakeOpen, setIsIntakeOpen] = useState(false);
   const rawSelectedType = value?.consultationType || "";
   const legacyAccidentType = ACCIDENT_TYPE_OPTIONS.some((option) => option.value === rawSelectedType)
     ? rawSelectedType
@@ -3101,125 +3119,124 @@ function ConsultationIntakePanel({
   const isFineNotice = selectedType === "fine_notice";
   const isFaultRatio = selectedType === "fault_ratio";
   const requiresStructuredDetails = isFineNotice || isFaultRatio;
-  useEffect(() => setIsIntakeOpen(true), [selectedType]);
   return (
-    <details
-      className="consultation-intake-card"
-      aria-label="구조화 입력 단계"
-      open={isIntakeOpen}
-      onToggle={(event) => setIsIntakeOpen(event.currentTarget.open)}
-    >
-      <summary className="consultation-intake-card__summary">
-        <span>
-          <strong>
-            {requiresStructuredDetails ? "필수 입력 조건" : selectedType ? "상담 유형" : "먼저 상담 유형을 선택해 주세요."}
-          </strong>
-        </span>
-      </summary>
-      {requiresStructuredDetails && (
-        <div className="consultation-intake-card__head">
-          <button className="button" type="button" onClick={onReset}>
-            입력 초기화
-          </button>
-        </div>
-      )}
-
-      <div className={`consultation-intake-grid${isFineNotice ? " is-fine-notice" : ""}`}>
-        <label className="consultation-intake-field consultation-intake-field--wide">
-          <span>사건 유형</span>
-          <select
-            value={selectedType}
-            onChange={(event) => onChange("consultationType", event.target.value)}
-          >
-            {CONSULTATION_TYPE_OPTIONS.map((option) => (
-              <option key={option.value || "empty"} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {isFineNotice && (
-          <>
-            {FINE_NOTICE_FIELDS.map((field) => (
-              <label className="consultation-intake-field" key={field.key}>
-                <span>{field.label}</span>
-                <input
-                  type={field.key === "violationDate" ? "date" : "text"}
-                  value={value?.[field.key] || ""}
-                  onChange={(event) => onChange(field.key, event.target.value)}
-                  placeholder={field.question}
-                />
-              </label>
-            ))}
-          </>
-        )}
-
-        {isFaultRatio && (
-          <>
-            <label className="consultation-intake-field consultation-intake-field--wide">
-              <span>사고 유형</span>
-              <select
-                value={value?.accidentType || legacyAccidentType}
-                onChange={(event) => onChange("accidentType", event.target.value)}
-              >
-                {ACCIDENT_TYPE_OPTIONS.map((option) => (
-                  <option key={option.value || "empty"} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {CONSULTATION_FACT_FIELDS.map((field) => (
-              <label className="consultation-intake-field" key={field.key}>
-                <span>{field.label}</span>
-                <input
-                  type="text"
-                  value={value?.[field.key] || ""}
-                  onChange={(event) => onChange(field.key, event.target.value)}
-                  placeholder={field.question}
-                />
-              </label>
-            ))}
-
-            <label className="consultation-intake-field consultation-intake-field--wide">
-              <span>확인된 사실</span>
-              <textarea
-                rows={3}
-                value={value?.confirmedFacts || ""}
-                onChange={(event) => onChange("confirmedFacts", event.target.value)}
-                placeholder="사고 시각, 장소, 첨부자료로 확인된 내용처럼 검증 가능한 사실을 적어 주세요."
-              />
-            </label>
-
-            <label className="consultation-intake-field consultation-intake-field--wide">
-              <span>사용자 주장·상대방 주장</span>
-              <textarea
-                rows={3}
-                value={value?.userClaims || ""}
-                onChange={(event) => onChange("userClaims", event.target.value)}
-                placeholder="상대가 주장하는 내용이나 아직 확인되지 않은 진술을 따로 적어 주세요."
-              />
-            </label>
-
-          </>
-        )}
-      </div>
-
-      <div className="consultation-intake-footer">
+    <div className="consultation-intake">
+      <label className="consultation-type-row">
+        <span>사건 유형</span>
+        <select
+          value={selectedType}
+          onChange={(event) => {
+            setIsIntakeOpen(false);
+            onChange("consultationType", event.target.value);
+          }}
+        >
+          {CONSULTATION_TYPE_OPTIONS.map((option) => (
+            <option key={option.value || "empty"} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         {registeredAttachments.length > 0 && (
-          <span className="consultation-intake-badge">첨부 자료 {registeredAttachments.length}개 연결됨</span>
+          <span className="consultation-intake-badge">첨부 {registeredAttachments.length}</span>
         )}
-        {isFineNotice ? (
-          <p className="consultation-intake-help">
-            고지서는 아래 첨부 버튼으로 등록하고, 고지서 내용과 궁금한 점을 함께 적어 주세요.
-          </p>
-        ) : !selectedType ? (
-          <p className="consultation-intake-help">상담 유형을 선택하면 필요한 입력 항목이 표시됩니다.</p>
-        ) : null}
-      </div>
-    </details>
+      </label>
+
+      {requiresStructuredDetails && (
+        <details
+          className="consultation-intake-card"
+          aria-label="구조화 입력 단계"
+          open={isIntakeOpen}
+          onToggle={(event) => setIsIntakeOpen(event.currentTarget.open)}
+        >
+          <summary className="consultation-intake-card__summary">
+            <strong>상세 정보</strong>
+            <span>선택 사항</span>
+          </summary>
+          <div className="consultation-intake-card__head">
+            <strong>필수 입력 조건</strong>
+            <button className="button" type="button" onClick={onReset}>
+              입력 초기화
+            </button>
+          </div>
+
+          <div className={`consultation-intake-grid${isFineNotice ? " is-fine-notice" : ""}`}>
+            {isFineNotice && (
+              <>
+                {FINE_NOTICE_FIELDS.map((field) => (
+                  <label className="consultation-intake-field" key={field.key}>
+                    <span>{field.label}</span>
+                    <input
+                      type={field.key === "violationDate" ? "date" : "text"}
+                      value={value?.[field.key] || ""}
+                      onChange={(event) => onChange(field.key, event.target.value)}
+                      placeholder={field.question}
+                    />
+                  </label>
+                ))}
+              </>
+            )}
+
+            {isFaultRatio && (
+              <>
+                <label className="consultation-intake-field consultation-intake-field--wide">
+                  <span>사고 유형</span>
+                  <select
+                    value={value?.accidentType || legacyAccidentType}
+                    onChange={(event) => onChange("accidentType", event.target.value)}
+                  >
+                    {ACCIDENT_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value || "empty"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {CONSULTATION_FACT_FIELDS.map((field) => (
+                  <label className="consultation-intake-field" key={field.key}>
+                    <span>{field.label}</span>
+                    <input
+                      type="text"
+                      value={value?.[field.key] || ""}
+                      onChange={(event) => onChange(field.key, event.target.value)}
+                      placeholder={field.question}
+                    />
+                  </label>
+                ))}
+
+                <label className="consultation-intake-field consultation-intake-field--wide">
+                  <span>확인된 사실</span>
+                  <textarea
+                    rows={3}
+                    value={value?.confirmedFacts || ""}
+                    onChange={(event) => onChange("confirmedFacts", event.target.value)}
+                    placeholder="사고 시각, 장소, 첨부자료로 확인된 내용처럼 검증 가능한 사실을 적어 주세요."
+                  />
+                </label>
+
+                <label className="consultation-intake-field consultation-intake-field--wide">
+                  <span>사용자 주장·상대방 주장</span>
+                  <textarea
+                    rows={3}
+                    value={value?.userClaims || ""}
+                    onChange={(event) => onChange("userClaims", event.target.value)}
+                    placeholder="상대가 주장하는 내용이나 아직 확인되지 않은 진술을 따로 적어 주세요."
+                  />
+                </label>
+              </>
+            )}
+          </div>
+
+          {isFineNotice && (
+            <div className="consultation-intake-footer">
+              <p className="consultation-intake-help">
+                고지서는 아래 첨부 버튼으로 등록하고, 고지서 내용과 궁금한 점을 함께 적어 주세요.
+              </p>
+            </div>
+          )}
+        </details>
+      )}
+    </div>
   );
 }
 
