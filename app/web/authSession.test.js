@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as authSession from "./authSession.js";
 
 import {
   googleLoginFailureMessage,
@@ -44,6 +45,29 @@ test("explains a blocked or closed Google popup with a retry action", () => {
   );
   assert.equal(
     googleLoginFailureMessage(new Error("popup_closed")),
-    "Google 로그인 창이 닫혔습니다. 로그인 창을 닫지 말고 다시 시도해 주세요."
+    "Google 로그인 창이 닫혔거나 서비스 화면으로 돌아오지 못했습니다. 팝업 차단을 해제하고 다시 시도해 주세요."
   );
+});
+
+test("explains a session ownership rejection even when the API supplied a generic 403 message", () => {
+  assert.equal(
+    googleLoginFailureMessage({
+      publicMessage: "요청한 리소스에 접근할 권한이 없습니다.",
+      reason: "google_session_already_owned",
+    }),
+    "이 상담은 이미 다른 계정에 저장되어 있습니다. 새 상담을 시작한 뒤 Google 로그인을 다시 시도해 주세요."
+  );
+});
+
+test("retains the structured Google login rejection reason for the caller", () => {
+  assert.equal(typeof authSession.toGoogleLoginError, "function");
+  const error = authSession.toGoogleLoginError({
+    publicMessage: "요청한 리소스에 접근할 권한이 없습니다.",
+    reason: "google_session_already_owned",
+    status: 403,
+  });
+
+  assert.equal(error.publicMessage, "이 상담은 이미 다른 계정에 저장되어 있습니다. 새 상담을 시작한 뒤 Google 로그인을 다시 시도해 주세요.");
+  assert.equal(error.reason, "google_session_already_owned");
+  assert.equal(error.status, 403);
 });

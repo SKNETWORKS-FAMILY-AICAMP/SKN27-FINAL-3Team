@@ -4531,6 +4531,62 @@ button.report-list-card.active {
   max-width: 560px;
 }
 
+.report-workbench-empty {
+  justify-items: stretch;
+  text-align: left;
+}
+
+.report-workbench-empty > .tag {
+  width: fit-content;
+}
+
+.report-workbench-empty > h3,
+.report-workbench-empty > p {
+  margin: 0;
+}
+
+.report-workbench-empty > .button {
+  width: fit-content;
+  margin-top: 6px;
+}
+
+.report-workbench-empty__missing {
+  width: 100%;
+  padding: 16px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--soft);
+}
+
+.report-workbench-empty__missing strong {
+  color: var(--ink);
+}
+
+.report-workbench-empty__missing ul {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+}
+
+.report-workbench-temporary,
+.report-workbench-load-error {
+  border: 1px solid rgba(224, 141, 43, 0.55);
+  border-radius: 12px;
+  background: rgba(255, 245, 232, 0.72);
+  color: #5d3c12;
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+}
+
+.report-workbench-temporary p,
+.report-workbench-load-error {
+  margin: 0.35rem 0 0;
+}
+
 .case-report-detail {
   display: grid;
   gap: 18px;

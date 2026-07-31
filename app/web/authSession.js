@@ -119,6 +119,9 @@ export async function buildGoogleLoginPayload({
 export function googleLoginFailureMessage(error) {
   const trustedMessage = String(error?.publicMessage || "").trim();
   if (trustedMessage) {
+    if (String(error?.reason || "").toLowerCase().includes("google_session_already_owned")) {
+      return "이 상담은 이미 다른 계정에 저장되어 있습니다. 새 상담을 시작한 뒤 Google 로그인을 다시 시도해 주세요.";
+    }
     return trustedMessage;
   }
   const detail = [error?.message, error?.code, error?.reason, error]
@@ -132,7 +135,7 @@ export function googleLoginFailureMessage(error) {
     return "Google 로그인 창을 열지 못했습니다. 브라우저의 팝업 차단을 해제한 뒤 다시 시도해 주세요.";
   }
   if (detail.includes("popup_closed") || detail.includes("popup closed")) {
-    return "Google 로그인 창이 닫혔습니다. 로그인 창을 닫지 말고 다시 시도해 주세요.";
+    return "Google 로그인 창이 닫혔거나 서비스 화면으로 돌아오지 못했습니다. 팝업 차단을 해제하고 다시 시도해 주세요.";
   }
   if (detail.includes("timed out")) {
     return "Google 로그인 응답을 받지 못했습니다. 팝업 차단 여부를 확인한 뒤 다시 시도해 주세요.";
@@ -141,6 +144,17 @@ export function googleLoginFailureMessage(error) {
     return "Google 로그인 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.";
   }
   return "Google 로그인 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+}
+
+export function toGoogleLoginError(error) {
+  const loginError = new Error(googleLoginFailureMessage(error));
+  loginError.publicMessage = loginError.message;
+  for (const key of ["code", "reason", "requiredAction", "status"]) {
+    if (error?.[key] !== undefined && error?.[key] !== null) {
+      loginError[key] = error[key];
+    }
+  }
+  return loginError;
 }
 
 export async function requestGoogleAuthorizationCode({ clientId, scope = GOOGLE_LOGIN_SCOPE, timeoutMs = 60000 }) {
