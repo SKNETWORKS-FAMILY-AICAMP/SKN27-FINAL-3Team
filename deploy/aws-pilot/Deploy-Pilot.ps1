@@ -572,7 +572,7 @@ try {
 
     $materializeCommands = @(
         "install -d -m 0750 `$RELEASE_DIR",
-        "install -d -m 0750 /opt/skn27-pilot/operational-evidence",
+        "install -d -m 0755 /opt/skn27-pilot/operational-evidence",
         "aws s3api get-object --bucket '$bucket' --key '$manifestKey' --version-id '$ManifestVersionId' --region '$region' /tmp/deployment-manifest.json >/dev/null",
         "printf '%s  %s\n' '$ManifestSha256' /tmp/deployment-manifest.json | sha256sum -c -",
         "python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m[`"ReleaseTag`"]==sys.argv[2] and m[`"BundleKey`"]==sys.argv[3] and m[`"BundleSha256`"]==sys.argv[4] and m[`"BundleVersionId`"]==sys.argv[5] and m[`"NginxImageRef`"]==sys.argv[6] and m[`"PostgresMaintenanceImageRef`"]==sys.argv[7]' /tmp/deployment-manifest.json '$ReleaseTag' '$bundleKey' '$BundleSha256' '$BundleVersionId' '$nginxImageRef' '$postgresMaintenanceImageRef'",
@@ -719,8 +719,7 @@ try {
             "$productionComposeCommand exec -T backend python backend/manage.py smoke_supervisor_conversation_runtime --allow-paid-provider-call --require-llm-used --require-real-agent-results --require-persisted-handoff --require-report --fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --timeout-seconds 600 --format json",
             "curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve '${appDomain}:443:127.0.0.1' https://${appDomain}/api/health/live/ >/dev/null",
             "curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve '${appDomain}:443:127.0.0.1' https://${appDomain}/api/health/ready/ >/dev/null",
-            "MONITOR_PREFLIGHT=`$($productionComposeCommand run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once)",
-            "printf '%s\n' `"`$MONITOR_PREFLIGHT`" | python3 -c 'import json,sys; payload=json.load(sys.stdin); legal=payload.get(`"legal_data`") or {}; assert payload.get(`"status`") != `"fail`"; assert legal.get(`"status`") == `"success`"; assert legal.get(`"dataset_version`") == sys.argv[1]; assert legal.get(`"release_version`") == sys.argv[2]' `"`$LEGAL_DATASET_VERSION`" '$ReleaseTag'",
+            "$productionComposeCommand run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode transaction",
             "$productionComposeCommand up -d `$MONITOR_SERVICE",
             "ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current",
             "rm -f `$RELEASE_DIR/.initial-rag-bootstrap.staged `$RELEASE_DIR/.release-update.staged",

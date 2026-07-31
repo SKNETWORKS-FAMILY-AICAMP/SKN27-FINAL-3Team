@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly timeout_seconds=900
+readonly timeout_seconds=1800
 readonly poll_seconds=10
 
 require_env() {
@@ -52,19 +52,23 @@ flock -w 60 8 || {
 }
 
 release_dir="$(readlink -f /opt/skn27-pilot/current 2>/dev/null || true)"
-[[ -n "$release_dir" && -d "$release_dir" ]] || {
+[[ -n "$release_dir" && -d "$release_dir" && ! -L "$release_dir" ]] || {
   echo 'Current Pilot release directory is unavailable.' >&2
   exit 78
 }
 cd "$release_dir"
 
 previous_tag="$(sed -n 's/^RELEASE_TAG=//p' .compose.env)"
-[[ -n "$previous_tag" ]] || {
-  echo 'Current release does not define RELEASE_TAG.' >&2
+[[ "$previous_tag" =~ ^[0-9a-f]{12}$ ]] || {
+  echo 'Current release tag is not an immutable twelve-character Git SHA.' >&2
   exit 78
 }
 
 target_tag='__IMAGE_TAG__'
+[[ "$target_tag" != "$previous_tag" ]] || {
+  echo 'Target release already matches the current release.' >&2
+  exit 78
+}
 registry='__BACKEND_REGISTRY__'
 backend_repository='__BACKEND_REPOSITORY__'
 frontend_repository='__FRONTEND_REPOSITORY__'
@@ -75,9 +79,88 @@ app_domain="$(sed -n 's/^APP_DOMAIN=//p' .edge.env)"
 }
 
 compose=(docker compose --project-name skn27-pilot --env-file .compose.env --env-file .production-compose.env -f docker-compose.pilot.yml)
-rollback_tag="pipeline-rollback-${target_tag}"
 frontend_image_ref="$frontend_repository:$target_tag"
-rollback_frontend_image_ref="$frontend_repository:$rollback_tag"
+rollback_frontend_image_ref="$frontend_repository:$previous_tag"
+seed_source_file='/opt/skn27-pilot/state/legal-operational-evidence-source.env'
+[[ -f "$seed_source_file" ]] || {
+  echo 'Verified seed source descriptor is unavailable.' >&2
+  exit 78
+}
+
+declare -A seed_source=()
+while IFS='=' read -r key value; do
+  case "$key" in
+    RAG_SEED_S3_URI|RAG_SEED_MANIFEST_RELATIVE_PATH|RAG_SEED_MANIFEST_SHA256)
+      [[ -z "${seed_source[$key]+x}" ]] || {
+        echo 'Seed source descriptor contains a duplicate key.' >&2
+        exit 78
+      }
+      seed_source["$key"]="$value"
+      ;;
+    *)
+      echo 'Seed source descriptor contains an unsupported key.' >&2
+      exit 78
+      ;;
+  esac
+done < "$seed_source_file"
+[[ "${#seed_source[@]}" -eq 3 ]]
+rag_seed_s3_uri="${seed_source[RAG_SEED_S3_URI]}"
+manifest_relative_path="${seed_source[RAG_SEED_MANIFEST_RELATIVE_PATH]}"
+manifest_sha256="${seed_source[RAG_SEED_MANIFEST_SHA256]}"
+[[ "$rag_seed_s3_uri" =~ ^s3://[a-zA-Z0-9.-]+/_rag-seed/[a-zA-Z0-9._/-]+/$ ]]
+[[ "$manifest_relative_path" =~ ^[A-Za-z0-9._-]+\.json$ ]]
+[[ "$manifest_sha256" =~ ^[0-9a-f]{64}$ ]]
+[[ "$rag_seed_s3_uri" != *"/../"* ]]
+
+legal_dataset_version="$(sed -n 's/^LEGAL_DATASET_VERSION=//p' .runtime.env)"
+legal_dataset_verified_at="$(sed -n 's/^LEGAL_DATASET_VERIFIED_AT=//p' .runtime.env)"
+legal_max_age_hours="$(sed -n 's/^OPERATIONAL_LEGAL_MAX_AGE_HOURS=//p' .runtime.env)"
+[[ -n "$legal_dataset_version" && -n "$legal_dataset_verified_at" && -n "$legal_max_age_hours" ]]
+
+release_evidence_dir="$release_dir/operational-evidence"
+release_evidence_file="$release_evidence_dir/run_summary.json"
+release_evidence_tmp="$release_evidence_dir/.run_summary.json.app-release.tmp"
+release_evidence_backup="$release_evidence_dir/.run_summary.json.app-release.backup.$$"
+shared_evidence_dir='/opt/skn27-pilot/operational-evidence'
+shared_evidence_file="$shared_evidence_dir/run_summary.json"
+candidate_evidence_tmp="$shared_evidence_dir/.run_summary.json.app-release.tmp"
+shared_evidence_backup="$shared_evidence_dir/.run_summary.json.app-release.backup.$$"
+candidate_dir="/opt/skn27-pilot/app-release-evidence/$target_tag"
+candidate_evidence_file="$candidate_dir/run_summary.json"
+rag_dir="/opt/skn27-pilot/app-release-rag/$manifest_sha256"
+
+install -d -m 0755 "$release_evidence_dir"
+install -d -m 0755 "$shared_evidence_dir"
+release_evidence_existed=0
+if [[ -f "$release_evidence_file" ]]; then
+  install -m 0444 "$release_evidence_file" "$release_evidence_backup"
+  release_evidence_existed=1
+fi
+shared_evidence_existed=0
+if [[ -f "$shared_evidence_file" ]]; then
+  install -m 0444 "$shared_evidence_file" "$shared_evidence_backup"
+  shared_evidence_existed=1
+fi
+
+restore_previous_evidence() {
+  if (( release_evidence_existed )); then
+    install -m 0444 "$release_evidence_backup" "$release_evidence_tmp"
+    mv -f "$release_evidence_tmp" "$release_evidence_file"
+  else
+    rm -f "$release_evidence_file" "$release_evidence_tmp"
+  fi
+  if (( shared_evidence_existed )); then
+    install -m 0444 "$shared_evidence_backup" "$candidate_evidence_tmp"
+    mv -f "$candidate_evidence_tmp" "$shared_evidence_file"
+  else
+    rm -f "$shared_evidence_file" "$candidate_evidence_tmp"
+  fi
+}
+
+cleanup_seed_and_evidence() {
+  rm -rf -- "$rag_dir" "$candidate_dir"
+  rm -f "$release_evidence_backup" "$shared_evidence_backup"
+}
 
 snapshot_rollback_image() {
   local service="$1"
@@ -95,42 +178,66 @@ snapshot_rollback_image() {
     echo "Current $service image ID is unavailable for rollback snapshot." >&2
     exit 78
   }
-  docker tag "$image_id" "$repository:$rollback_tag"
+  docker tag "$image_id" "$repository:$previous_tag"
 }
 
 snapshot_rollback_image backend "$backend_repository"
 snapshot_rollback_image frontend "$frontend_repository"
 
 restore_tag() {
-  sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$rollback_tag/" .compose.env
+  sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$previous_tag/" .compose.env
 }
 
 rollback_app_release() {
   local status=$?
   trap - ERR
   restore_tag
+  restore_previous_evidence 2>/dev/null || true
   FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" rm -sf backend frontend agent-worker file-scan-worker ops-monitor >/dev/null 2>&1 || true
   FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend >/dev/null 2>&1 || true
   FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor >/dev/null 2>&1 || true
+  cleanup_seed_and_evidence 2>/dev/null || true
   exit "$status"
 }
 
 trap rollback_app_release ERR
 
-PILOT_BACKEND_IP="${PILOT_MIGRATION_CHECK_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py migrate --check
 aws ecr get-login-password --region '__AWS_REGION__' | docker login --username AWS --password-stdin "$registry"
-sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$target_tag/" .compose.env
-FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend agent-worker file-scan-worker ops-monitor
+RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend agent-worker file-scan-worker ops-monitor
+PILOT_BACKEND_IP="${PILOT_MIGRATION_CHECK_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py migrate --check
+
+test ! -e "$rag_dir" && test ! -L "$rag_dir"
+test ! -e "$candidate_dir" && test ! -L "$candidate_dir"
+install -d -m 0700 "$rag_dir"
+install -d -m 0700 "$candidate_dir"
+aws s3 cp "$rag_seed_s3_uri" "$rag_dir/" --region '__AWS_REGION__' --recursive --only-show-errors
+test -f "$rag_dir/$manifest_relative_path"
+printf '%s  %s\n' "$manifest_sha256" "$rag_dir/$manifest_relative_path" | sha256sum -c -
+find "$rag_dir" -type d -exec chmod 0555 {} +
+find "$rag_dir" -type f -exec chmod 0444 {} +
+
+RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$rag_dir:/run/production-rag-seed:ro" backend python backend/manage.py verify_production_rag_seed_manifest --manifest "/run/production-rag-seed/$manifest_relative_path" --format json
+RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$rag_dir:/run/production-rag-seed:ro" backend python backend/manage.py build_legal_operational_evidence --manifest "/run/production-rag-seed/$manifest_relative_path" --dataset-version "$legal_dataset_version" --release-version "$target_tag" --verified-at "$legal_dataset_verified_at" > "$candidate_evidence_file"
+RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps -v "$candidate_dir:/run/candidate-evidence:ro" backend python -m etl.legal.validate_run_summary --summary /run/candidate-evidence/run_summary.json --max-age-hours "$legal_max_age_hours" --expected-dataset-version "$legal_dataset_version" --expected-release-version "$target_tag"
+chmod 0444 "$candidate_evidence_file"
+
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" rm -sf backend frontend agent-worker file-scan-worker ops-monitor
+sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$target_tag/" .compose.env
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend
 
 for path in /api/health/live/ /api/health/ready/; do
   curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve "$app_domain:443:127.0.0.1" "https://$app_domain$path" >/dev/null
 done
 
+install -m 0444 "$candidate_evidence_file" "$release_evidence_tmp"
+mv -f "$release_evidence_tmp" "$release_evidence_file"
+install -m 0444 "$candidate_evidence_file" "$candidate_evidence_tmp"
+mv -f "$candidate_evidence_tmp" "$shared_evidence_file"
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor
+FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode transaction
 
 trap - ERR
+cleanup_seed_and_evidence
 echo "App release completed for $target_tag."
 REMOTE_SCRIPT
 )

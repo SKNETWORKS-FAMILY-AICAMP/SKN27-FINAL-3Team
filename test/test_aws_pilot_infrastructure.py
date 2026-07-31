@@ -150,7 +150,8 @@ def test_operational_monitor_connects_safe_health_metrics_to_cloudwatch() -> Non
     assert 'Get-TerraformValue $outputs "operational_log_group_name"' in deploy
     assert "OPERATIONAL_LOG_GROUP" in deploy
     assert "PILOT_OPS_MONITOR_IP" in deploy
-    assert "install -d -m 0750 /opt/skn27-pilot/operational-evidence" in deploy
+    assert "install -d -m 0755 /opt/skn27-pilot/operational-evidence" in deploy
+    assert "install -d -m 0750 /opt/skn27-pilot/operational-evidence" not in deploy
     runtime_env = _read_deploy("runtime.env.example")
     assert (
         "OPERATIONAL_LEGAL_RUN_SUMMARY_PATH=/run/operational-evidence/run_summary.json"
@@ -709,6 +710,83 @@ def test_rag_seed_builds_release_bound_operational_evidence_after_readiness() ->
     assert "cleanup_rag_seed" in load_failed
 
 
+def test_full_seed_load_persists_root_only_seed_descriptor_after_validation() -> None:
+    loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+
+    evidence_validation = loader.index(
+        "etl.legal.validate_run_summary --summary"
+    )
+    evidence_move = loader.index("mv -f `$EVIDENCE_TMP `$EVIDENCE_FILE")
+    descriptor_move = loader.index("mv -f `$SEED_SOURCE_TMP `$SEED_SOURCE_FILE")
+
+    assert evidence_validation < evidence_move < descriptor_move
+    assert "SEED_SOURCE_DIR='/opt/skn27-pilot/state'" in loader
+    assert (
+        "SEED_SOURCE_FILE=`$SEED_SOURCE_DIR/"
+        "legal-operational-evidence-source.env"
+    ) in loader
+    assert "install -d -m 0700 `$SEED_SOURCE_DIR" in loader
+    assert "chmod 0600 `$SEED_SOURCE_TMP" in loader
+    assert "install -d -m 0755 `$EVIDENCE_DIR" in loader
+    assert "install -d -m 0750 `$EVIDENCE_DIR" not in loader
+    for key in (
+        "RAG_SEED_S3_URI",
+        "RAG_SEED_MANIFEST_RELATIVE_PATH",
+        "RAG_SEED_MANIFEST_SHA256",
+    ):
+        assert key in loader
+
+
+def test_evidence_recovery_is_locked_verified_atomic_and_provider_free() -> None:
+    recovery_path = DEPLOY_DIR / "Recover-PilotOperationalEvidence.ps1"
+    assert recovery_path.is_file()
+    recovery = recovery_path.read_text(encoding="utf-8")
+
+    tag_check = recovery.index("CURRENT_TAG")
+    download = recovery.index("aws s3 cp", tag_check)
+    digest = recovery.index("sha256sum -c -", download)
+    manifest = recovery.index("verify_production_rag_seed_manifest", digest)
+    build = recovery.index("build_legal_operational_evidence", manifest)
+    validation = recovery.index("etl.legal.validate_run_summary", build)
+    release_move = recovery.index(
+        'mv -f "$RELEASE_EVIDENCE_TMP" "$RELEASE_EVIDENCE_FILE"',
+        validation,
+    )
+    shared_move = recovery.index(
+        'mv -f "$SHARED_EVIDENCE_TMP" "$SHARED_EVIDENCE_FILE"',
+        release_move,
+    )
+    descriptor_move = recovery.index(
+        'mv -f "$SEED_SOURCE_TMP" "$SEED_SOURCE_FILE"',
+        shared_move,
+    )
+    preflight = recovery.index(
+        "observe_operational_health --once --gate-mode transaction",
+        descriptor_move,
+    )
+
+    assert tag_check < download < digest < manifest < build < validation
+    assert validation < release_move < shared_move < descriptor_move < preflight
+    for token in (
+        "/var/lock/skn27-pilot-maintenance.lock",
+        'install -d -m 0755 "$SHARED_EVIDENCE_DIR"',
+        'chmod 0444 "$RELEASE_EVIDENCE_TMP"',
+        'chmod 0600 "$SEED_SOURCE_TMP"',
+        "restore_previous_evidence",
+        "restore_previous_descriptor",
+        "cleanup_rag_seed",
+    ):
+        assert token in recovery
+    for forbidden in (
+        "AllowPaidReviewCaseEmbedding",
+        "allow-paid-provider-call",
+        "load_review_case_pgvector_seed",
+        "load_production_rag_seed",
+        "load_legal_graph_seed",
+    ):
+        assert forbidden not in recovery
+
+
 def test_normal_promotion_validates_promotes_and_preflights_operational_evidence() -> None:
     deploy = _read_deploy("Deploy-Pilot.ps1")
     previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")
@@ -748,7 +826,7 @@ def test_normal_promotion_validates_promotes_and_preflights_operational_evidence
         core_start,
     )
     monitor_preflight = normal_segment.index(
-        "observe_operational_health --once"
+        "observe_operational_health --once --gate-mode transaction"
     )
     monitor_start = normal_segment.index(
         "$productionComposeCommand up -d `$MONITOR_SERVICE",
@@ -835,6 +913,55 @@ def test_rollback_refreshes_current_ssm_credentials_instead_of_reusing_old_secre
     assert "get-parameter" in rollback
     assert "--with-decryption" in rollback
     assert ".runtime.env" in rollback
+
+
+def test_manual_rollback_validates_and_restores_release_bound_evidence() -> None:
+    rollback = _read_deploy("Rollback-Pilot.ps1")
+
+    validate = rollback.index("etl.legal.validate_run_summary")
+    mutate = rollback.index("$composeCommand up -d", validate)
+    promote = rollback.index("mv -f `$TARGET_EVIDENCE_TMP `$SHARED_EVIDENCE_FILE", mutate)
+    gate = rollback.index(
+        "observe_operational_health --once --gate-mode transaction", promote
+    )
+    symlink = rollback.index(
+        "ln -sfn '$releaseDirectory' /opt/skn27-pilot/current", gate
+    )
+
+    assert validate < mutate < promote < gate < symlink
+    for token in (
+        "PRECOMMAND_EVIDENCE_EXISTED=0",
+        "PRECOMMAND_EVIDENCE_BACKUP",
+        "restore_precommand_evidence",
+        "--expected-release-version '$ReleaseTag'",
+        "install -d -m 0755 /opt/skn27-pilot/operational-evidence",
+        "install -m 0444 `$TARGET_EVIDENCE_FILE `$TARGET_EVIDENCE_TMP",
+    ):
+        assert token in rollback
+
+
+def test_operational_acceptance_requires_elapsed_consecutive_pass_time() -> None:
+    watcher = _read_deploy("Confirm-PilotOperationalAcceptance.ps1")
+
+    assert "[ValidateRange(600, 3600)]" in watcher
+    assert "[int]$AcceptanceSeconds = 600" in watcher
+    assert "[int]$MaxWaitSeconds = 1200" in watcher
+    assert "[int]$IntervalSeconds = 60" in watcher
+    assert "observe_operational_health --once --gate-mode acceptance" in watcher
+    assert "BACKEND_IMAGE_REF" in watcher
+    assert "*:__RELEASE_TAG__)" in watcher
+    assert "pass_started_at" in watcher
+    assert "date +%s" in watcher
+    assert "pass_started_at=0" in watcher
+    assert "decision=fail" in watcher
+    assert "exit 1" in watcher
+    for forbidden in (
+        "load_production_rag_seed",
+        "load_legal_rag_pgvector",
+        "AllowPaid",
+        "provider",
+    ):
+        assert forbidden not in watcher
 
 
 def test_rag_seed_is_a_locked_read_only_maintenance_job_not_part_of_deploy() -> None:
@@ -1324,8 +1451,26 @@ def test_rollback_preserves_reviewed_runtime_digests_and_baked_provenance() -> N
         "HAPROXY_IMAGE_REF",
         "REDIS_IMAGE_REF",
         "CLAMAV_IMAGE_REF",
+        "LAW_NEO4J_IMAGE_REF",
     ):
         assert name in rollback
+    compose_projection = next(
+        line
+        for line in rollback.splitlines()
+        if "grep -E '^(" in line and ".runtime.env > .compose.env" in line
+    )
+    for name in (
+        "AWS_REGION",
+        "BACKEND_REPOSITORY_URL",
+        "FRONTEND_REPOSITORY_URL",
+        "LAW_NEO4J_IMAGE_REF",
+        "LEGAL_DATASET_VERSION",
+        "LEGAL_DATASET_VERIFIED_AT",
+        "NEO4J_USER",
+        "NEO4J_PASSWORD",
+        "OPERATIONAL_LOG_GROUP",
+    ):
+        assert name in compose_projection
     assert "@sha256:[0-9a-f]{64}$" in rollback
     assert "deployment-manifest.json" in rollback
     assert "NginxImageRef" in deploy
@@ -1405,6 +1550,7 @@ def test_failed_rollback_restores_previous_release_and_removes_partial_target() 
 
     recovery_body = rollback[recovery:arm_trap]
     assert "down" in recovery_body
+    assert "restore_precommand_evidence || echo" in recovery_body
     assert "cd `$PREVIOUS_RELEASE" in recovery_body
     assert "up -d --remove-orphans" in recovery_body
     assert r"ln -sfn `$PREVIOUS_RELEASE /opt/skn27-pilot/current" in recovery_body

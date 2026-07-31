@@ -44,8 +44,10 @@ firewall script before Compose starts, so Caddy cannot reach EC2 metadata.
 
 ## 롤백과 관찰
 
-- `Rollback-Pilot.ps1`은 애플리케이션 release만 이전 release로 되돌린다. pgvector 데이터나
-  DB migration을 자동 되돌리지 않는다.
+- `Rollback-Pilot.ps1`은 대상 release의 법령 operational evidence를 먼저 검증하고,
+  애플리케이션과 shared evidence를 함께 전환한다. transaction gate 실패 시 명령 시작 전
+  release·shared evidence·`current` 링크를 복원한다. pgvector 데이터나 DB migration은
+  자동 되돌리지 않는다.
 - 배포 뒤에는 error rate, pgvector unavailable 비율, no-result 비율, p50/p95 latency와 HNSW index
   상태를 관찰한다.
 - 운영 데이터와 클라우드 리소스 삭제는 이 저장소 변경과 별개로 승인된 변경 창에서 수행한다.
@@ -56,17 +58,31 @@ firewall script before Compose starts, so Caddy cannot reach EC2 metadata.
 `ApprovePilotAppRelease` 승인 단계를 추가한다. 이 경로는 Build가 성공해 ECR에
 immutable commit tag가 올라간 경우에만 사용한다.
 
+현재 운영 SHA `818199aee975`에 seed descriptor가 없으면 app-release pipeline을
+먼저 승인하지 않는다. 승인된 URI·manifest 경로·SHA로
+`Recover-PilotOperationalEvidence.ps1`을 실행하고 transaction gate와
+`Confirm-PilotOperationalAcceptance.ps1 -ReleaseTag 818199aee975`의 600초 연속
+통과를 확인한 뒤 아래 절차를 진행한다.
+
 1. CodePipeline의 Build 결과에서 대상 backend/frontend commit tag를 확인한다.
 2. 해당 코드가 앱 이미지 변경만 포함하는지 확인한 뒤 `ApprovePilotAppRelease`를 승인한다.
-3. Deploy CodeBuild와 SSM command 결과에서 `migrate --check`, backend/frontend
+3. Deploy CodeBuild와 SSM command 결과에서 evidence 검증·원자 전환,
+   transaction gate, `migrate --check`, backend/frontend
    restart, HTTPS live/ready 확인이 모두 성공했는지 확인한다.
-4. 실패하면 Pipeline은 실패로 종료되며 release runner가 이전 `RELEASE_TAG`로
+4. 후보 SHA에 `Confirm-PilotOperationalAcceptance.ps1`을 실행해 600초 연속
+   acceptance를 확인한 뒤에만 G8 smoke와 13개 E2E를 시작한다.
+5. 실패하면 Pipeline은 실패로 종료되며 release runner가 실제 이전 `RELEASE_TAG`와
+   명령 시작 전 evidence를
    rollback 한다. SSM 결과와 Deploy CodeBuild log를 보관하고, 새 승인은 문제를
    해결한 commit에서만 다시 진행한다.
 
 이 경로는 RAG seed, paid smoke, Vision Worker, DB schema 변경, Compose 또는 Caddy
 변경을 실행하지 않는다. 위 항목이나 법령/그래프 적재가 필요한 release는 반드시
 기존 `Deploy-Pilot.ps1`의 검토된 전체 절차를 사용한다.
+
+evidence-only 복구와 acceptance watcher에는 유료 공급자 또는 seed loader 실행
+switch가 없다. immutable seed 검증 실패를 자동 적재로 우회하지 말고, 전체 seed
+reload나 유료 smoke가 정말 필요할 때만 별도 승인받는다.
 
 활성화는 코드 merge만으로 되지 않는다. 검토된 Terraform plan에서
 `ci_enabled=true`와 `pilot_app_release_enabled=true`를 함께 설정해야 한다.
