@@ -1,6 +1,6 @@
 # Pilot 핫픽스 구현·검증·재배포 마스터 체크리스트
 
-> 문서 상태: 실행 중 / G0~G5 로컬 구현·검증 완료 / G3·G5 운영 증거 수집 대기
+> 문서 상태: 실행 중 / G0~G6 로컬 검증 및 runtime RC SHA 고정 완료 / G3·G5 운영 증거 수집 대기
 > 최초 작성일: 2026-07-31
 > 기준 권고서: `docs/tech-validation-reports/2026-07-31-e2e-cross-analysis-final-hotfix-report.md`
 > 대상 HFX: HFX-009 ~ HFX-018
@@ -156,7 +156,7 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | G3 | 운영 모니터·로그·Neo4j | 로컬 구현·검증 완료 / 운영 확인 대기 | G1 완료 | monitor 정상, credential 로그 0 |
 | G4 | 고지서·첨부·상충 진술 | 로컬 구현·검증 완료 / 운영 E2E 대기 | G1·G2 완료 | ID 3·4·9·11·13 통과 |
 | G5 | polling·부분 실패 UX·증거 규격 | 로컬 구현·검증 완료 / 운영 증거 수집 대기 | G2·G4 완료 | 상태 UX와 캡처 규격 통과 |
-| G6 | 전체 로컬·통합 회귀 | 대기 | G1~G5 완료 | 관련 전체 test/build 통과 |
+| G6 | 전체 로컬·통합 회귀 | 완료 / runtime RC `631e9278` | G1~G5 완료 | 관련 전체 test/build 통과 |
 | G7 | 운영 재배포 준비·승인 | 대기 | G6 완료 | 배포 전 체크와 사용자 승인 |
 | G8 | 운영 재배포·smoke | 대기 | G7 승인 | 운영 smoke 통과 |
 | G9 | 배포 후 13개 E2E·운영 관찰 | 대기 | G8 완료 | 13/13, 즉시 실패 0, monitor 정상 |
@@ -635,17 +635,31 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 
 ### 테스트 순서
 
-- [ ] 변경 단위별 가장 좁은 테스트
-- [ ] PII·입력 gate·라우팅 계약 테스트
-- [ ] auth/session/ownership 테스트
-- [ ] fine notice·attachment·Supervisor 테스트
-- [ ] 운영 설정·배포 계약 테스트
-- [ ] 전체 프런트 node test
-- [ ] 관련 Python 계약 테스트
-- [ ] Django 통합 E2E
-- [ ] Agent·RAG·graph 회귀
-- [ ] Vite production build
-- [ ] docker compose config validation
+- [x] 변경 단위별 가장 좁은 테스트
+- [x] PII·입력 gate·라우팅 계약 테스트
+- [x] auth/session/ownership 테스트
+- [x] fine notice·attachment·Supervisor 테스트
+- [x] 운영 설정·배포 계약 테스트
+- [x] 전체 프런트 node test
+- [x] 관련 Python 계약 테스트
+- [x] Django 통합 E2E
+- [x] Agent·RAG·graph 회귀
+- [x] Vite production build
+- [x] docker compose config validation
+
+### G6 로컬 검증 증거
+
+- 상세 증거:
+  `docs/tech-validation-reports/2026-07-31-g6-full-regression-evidence.md`
+- runtime RC SHA:
+  `631e927833a7bfead2ae5efcd318bdac99212b8a`
+- 전체 pytest: `1450 passed`, `37 skipped`, `4 subtests passed`, 실패 0
+- Django chatbot 전체 discovery: `383 tests`, `OK`
+- frontend Node: `66 passed`, 실패 0
+- Vite production build: `44 modules transformed`, 성공
+- local·pilot Compose: `config --quiet` 성공
+- 신규 warning 없음. 기존 `LangChainPendingDeprecationWarning` 1건 유지
+- DISC-003·DISC-004 해결 후 focused·전체 회귀 재검증 완료
 
 ### 검증 기록
 
@@ -661,12 +675,12 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 
 ### G6 종료 조건
 
-- [ ] 관련 전체 테스트 0 failure
-- [ ] production build 성공
-- [ ] compose/config 검증 성공
-- [ ] 새 warning은 영향 분석과 승인 기록
-- [ ] 변경 파일 전체 review 완료
-- [ ] 배포 전 release candidate SHA 고정
+- [x] 관련 전체 테스트 0 failure
+- [x] production build 성공
+- [x] compose/config 검증 성공
+- [x] 새 warning은 영향 분석과 승인 기록 — 신규 warning 없음, 기존 LangChain warning 1건
+- [x] 변경 파일 전체 review 완료
+- [x] 배포 전 release candidate SHA 고정 — `631e927833a7bfead2ae5efcd318bdac99212b8a`
 
 ## 13. G7 — 운영 재배포 준비·승인
 
@@ -794,6 +808,8 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 |---|---|---|---|---|---|---|
 | DISC-001 | G0 | `postcss <=8.5.17` path traversal advisory | 기존 HFX 외 | high advisory | G7 전 영향 확인 후 별도 lockfile 업데이트 여부 결정 | `npm audit --json`, GHSA-r28c-9q8g-f849 |
 | DISC-002 | G2 종료 검증 | UI PR #354의 최신 Node 계약과 과거 Python source-contract 2건이 상충하여 전체 `pytest` 2건 실패 | 기존 HFX 외 / UI test debt | integration gate | 포함 승인·해결. production UI는 유지하고 구형 Python 단정만 최신 UI 계약에 맞춰 조정 | `HEAD(9db7ccb5)` 동일 재현, 집중 2/2 및 전체 `1318 passed / 0 failed` |
+| DISC-003 | G6 Django 전체 discovery | public law projector·law adapter의 최신 계약과 구형 Django fixture 2건이 불일치해 383건 중 1 failure·1 error | 기존 HFX 외 / Django test debt | integration gate | 포함·해결. production 코드는 유지하고 source-backed law fixture와 `llm_extractor` keyword 수용 mock으로 정렬 | 단독 RED 2건, 집중 GREEN `2 tests / OK`, 전체 GREEN `383 tests / OK` |
+| DISC-004 | G6 pilot Compose render | `docker compose config --quiet`가 `OPERATIONAL_LOG_GROUP` 필수 변수 누락으로 실패 | 기존 HFX 외 / deployment template defect | release gate | 포함·해결. Compose 필수 키와 runtime template의 집합 계약을 추가하고 deploy-script 주입 placeholder 한 줄 보완 | 신규 RED 1건, GREEN `1 passed`; AWS pilot `85 passed`; local·pilot Compose render 성공 |
 
 ### 범위 변경 규칙
 
