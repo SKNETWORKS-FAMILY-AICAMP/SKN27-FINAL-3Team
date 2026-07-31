@@ -152,6 +152,8 @@ def create_constraints(session) -> None:
         "CREATE CONSTRAINT vehicle_type_code IF NOT EXISTS FOR (n:VehicleType) REQUIRE n.code IS UNIQUE",
         "CREATE CONSTRAINT violation_type_code IF NOT EXISTS FOR (n:ViolationType) REQUIRE n.code IS UNIQUE",
         "CREATE CONSTRAINT penalty_type_code IF NOT EXISTS FOR (n:PenaltyType) REQUIRE n.code IS UNIQUE",
+        "CREATE INDEX law_version_temporal IF NOT EXISTS FOR (n:LawVersion) ON (n.enforce_date, n.expire_date)",
+        "CREATE INDEX law_chunk_temporal IF NOT EXISTS FOR (n:LawChunk) ON (n.enforce_date, n.expire_date)",
     ]
     for query in constraints:
         session.run(query).consume()

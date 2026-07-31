@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,8 @@ def evaluate_run_summary(
     now: datetime,
     max_age_hours: int,
     required_sources: list[str],
+    expected_dataset_version: str | None = None,
+    expected_release_version: str | None = None,
 ) -> dict[str, Any]:
     if now.tzinfo is None:
         raise ValueError("now must include timezone information")
@@ -48,6 +51,20 @@ def evaluate_run_summary(
         errors.append("unsupported_contract_version")
     if not required:
         errors.append("no_sources_to_validate")
+    if expected_dataset_version is not None:
+        expected_dataset_version = _required_safe_version(
+            expected_dataset_version,
+            "expected_dataset_version",
+        )
+        if _safe_version(summary.get("dataset_version")) != expected_dataset_version:
+            errors.append("dataset_version_mismatch")
+    if expected_release_version is not None:
+        expected_release_version = _required_safe_version(
+            expected_release_version,
+            "expected_release_version",
+        )
+        if _safe_version(summary.get("release_version")) != expected_release_version:
+            errors.append("release_version_mismatch")
 
     missing_sources = [
         source_id for source_id in required if source_id not in sources_by_id
@@ -81,7 +98,8 @@ def evaluate_run_summary(
         "checked_at": checked_at.isoformat(),
         "max_age_hours": max_age_hours,
         "run_id": summary.get("run_id"),
-        "dataset_version": summary.get("dataset_version"),
+        "dataset_version": _safe_version(summary.get("dataset_version")),
+        "release_version": _safe_version(summary.get("release_version")),
         "required_sources": required,
         "missing_sources": missing_sources,
         "failed_sources": failed_sources,
@@ -100,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Required source_id; repeat for each required source",
     )
+    parser.add_argument("--expected-dataset-version")
+    parser.add_argument("--expected-release-version")
     parser.add_argument("--output", help="Optional validation JSON output path")
     parser.add_argument(
         "--now",
@@ -118,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
         now=now,
         max_age_hours=args.max_age_hours,
         required_sources=args.required_source,
+        expected_dataset_version=args.expected_dataset_version,
+        expected_release_version=args.expected_release_version,
     )
     rendered = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output:
@@ -141,6 +163,20 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return None
     return parsed.astimezone(timezone.utc)
+
+
+def _safe_version(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text or len(text) > 128:
+        return None
+    return text if re.fullmatch(r"[A-Za-z0-9._:-]+", text) else None
+
+
+def _required_safe_version(value: Any, name: str) -> str:
+    safe_value = _safe_version(value)
+    if safe_value is None:
+        raise ValueError(f"{name} must be a safe version identifier")
+    return safe_value
 
 
 if __name__ == "__main__":

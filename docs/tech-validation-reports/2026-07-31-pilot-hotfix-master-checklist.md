@@ -1,6 +1,6 @@
 # Pilot 핫픽스 구현·검증·재배포 마스터 체크리스트
 
-> 문서 상태: 실행 중 / G0·G1·G2 검증 완료 / G3 착수 가능
+> 문서 상태: 실행 중 / G0·G1·G2 검증 완료 / G3 로컬 구현·검증 완료, 운영 확인 대기
 > 최초 작성일: 2026-07-31
 > 기준 권고서: `docs/tech-validation-reports/2026-07-31-e2e-cross-analysis-final-hotfix-report.md`
 > 대상 HFX: HFX-009 ~ HFX-018
@@ -153,7 +153,7 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | G0 | UI 핫픽스 종료·최신 dev 재기준화 | 검증 완료 | UI 핫픽스 병합 | 기준 SHA·baseline·브랜치 확정 |
 | G1 | P0 개인정보·입력 gate·라우팅 | 검증 완료 | G0 완료 | ID 2·8·10·12 회귀 통과 |
 | G2 | 인증·새 상담 상태 | 검증 완료 | G1 완료 | ID 5 기능 재평가 가능, auth 유지 |
-| G3 | 운영 모니터·로그·Neo4j | 대기 | G1 완료 | monitor 정상, credential 로그 0 |
+| G3 | 운영 모니터·로그·Neo4j | 로컬 구현·검증 완료 / 운영 확인 대기 | G1 완료 | monitor 정상, credential 로그 0 |
 | G4 | 고지서·첨부·상충 진술 | 대기 | G1·G2 완료 | ID 3·4·9·11·13 통과 |
 | G5 | polling·부분 실패 UX·증거 규격 | 대기 | G2·G4 완료 | 상태 UX와 캡처 규격 통과 |
 | G6 | 전체 로컬·통합 회귀 | 대기 | G1~G5 완료 | 관련 전체 test/build 통과 |
@@ -170,7 +170,7 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | HFX-010 | P0 | 한국어 문맥 개인정보 차단·로그 credential 제거 | 8 | G0 | 앱 경계 검증 완료 / Caddy는 G3 대기 |
 | HFX-011 | P0 | 저정보·욕설-only·해석 불가 입력 gate | 10, 12 | G0 | 검증 완료 |
 | HFX-012 | P0 | 인증 session 복구·새 상담 상태 원자화 | 5 | G1 | 로컬 검증 완료 / 배포 E2E 대기 |
-| HFX-013 | P0 | run summary 배포·monitor·Neo4j 정상화 | 운영 | G1 | 대기 |
+| HFX-013 | P0 | run summary 배포·monitor·Neo4j 정상화 | 운영 | G1 | 로컬 구현·검증 완료 / 운영 확인 대기 |
 | HFX-014 | P1 | 고지서 intake slot·안전한 법령 응답 | 3, 9, 11 | G1 | 대기 |
 | HFX-015 | P1 | 첨부 분류→확인→OCR→분석 handoff | 4, 5 | G2, HFX-014 | 대기 |
 | HFX-016 | P1 | 상충 진술 계약·반복 질문 제거 | 13 | G1 | 대기 |
@@ -370,30 +370,102 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 
 ### HFX-013 run summary·monitor
 
-- [ ] 법령 적재 후 검증된 `run_summary.json` 생성
-- [ ] release 디렉터리에서 operational evidence 경로로 원자 복사
-- [ ] ops-monitor 시작 전 file 존재·JSON schema·freshness 검사
-- [ ] stale/missing/invalid이면 배포 precheck 실패
-- [ ] monitor가 legal dataset version과 release SHA를 안전하게 연결
-- [ ] 정상 데이터에서 `status=ok`
+- [x] 법령 적재 후 검증된 `run_summary.json` 생성
+- [x] release 디렉터리에서 operational evidence 경로로 원자 복사
+- [x] ops-monitor 시작 전 file 존재·JSON schema·freshness 검사
+- [x] stale/missing/invalid이면 배포 precheck 실패
+- [x] monitor가 legal dataset version과 release SHA를 안전하게 연결
+- [x] 정상 증적에서 `legal_data.status=success`, 전체 snapshot `status=pass|warn` 계약 검증
+
+로컬 구현 증거:
+
+- `app/services/legal_operational_evidence.py`는 manifest 검증을 통과한
+  `legal_chunks`의 식별자·개수·날짜만 사용하며 법령 본문과 embedding을
+  증적에 포함하지 않는다.
+- `build_legal_operational_evidence` management command는
+  `LEGAL_DATASET_VERSION`, `APP_RELEASE_VERSION`, timezone-aware 검증 시각을
+  `legal_ingestion_run_summary.v2`에 결합한다.
+- `Load-Rag-Seed-Pilot.ps1`은 graph/PGVector/readiness/smoke 통과 후 release
+  전용 임시 summary를 생성·검증·`0444` 설정·원자 rename하고 나서만
+  `.production-rag-seed.complete`를 기록한다.
+- `Deploy-Pilot.ps1`은 cutover 전에 release summary를 검증하고, shared
+  evidence를 임시 파일로 설치·재검증·원자 rename한다. one-shot monitor의
+  dataset/release 일치를 확인한 뒤에만 loop `ops-monitor`를 시작하며
+  rollback은 이전 release 증적을 복원한다.
 
 ### Caddy credential 로그
 
-- [ ] access log를 허용 필드 중심으로 제한
-- [ ] `Authorization` 기록 금지
-- [ ] `Cookie` 기록 금지
-- [ ] `X-Guest-Credential` 기록 금지
+- [x] access log에서 request header 객체 전체 제거
+- [x] `Authorization` 기록 금지
+- [x] `Cookie` 기록 금지
+- [x] `X-Guest-Credential` 기록 금지
 - [ ] 기존 노출 guest credential 폐기
 - [ ] 기존 로그 접근자·보존·복제 범위 확인
-- [ ] 로그 redaction 회귀 테스트 추가
+- [x] 로그 redaction 회귀 테스트 추가
+
+로컬 구현 증거:
+
+- `deploy/aws-pilot/Caddyfile`의 `format filter`가
+  `request>headers delete` 후 JSON으로 인코딩한다. reverse proxy의 인증
+  header 전달 계약은 변경하지 않았다.
+- `docs/ops/caddy-credential-log-incident-runbook.md`에 SSM
+  `APP_JWT_SECRET` 회전, backend 계열 서비스 재생성, 기존 app/guest
+  credential `401`, local/CloudWatch/backup/replication 범위 조사,
+  승인된 purge와 credential canary zero-match 절차를 분리했다.
+- 실제 secret 회전과 로그 삭제는 파괴적 운영 작업이므로 G7/G8 승인 전
+  실행하지 않았다.
 
 ### Neo4j readiness
 
-- [ ] 현재 graph snapshot schema 확인
-- [ ] `expire_date` property 계약과 seed 결과 정렬
+- [x] seed/load 코드의 graph snapshot schema와 temporal index 계약 확인
+- [x] `expire_date` property 계약과 seed 결과 정렬
 - [ ] 대표 law query에서 property 경고 0건 확인
-- [ ] graph 결과가 없을 때 안전 fallback 확인
-- [ ] 신규 RAG/graph 설계 반영 여부와 이번 핫픽스 범위 구분
+- [x] graph 결과가 없을 때 안전 fallback 확인
+- [x] 신규 RAG/graph 설계 반영 여부와 이번 핫픽스 범위 구분
+
+로컬 구현 증거:
+
+- `LawVersion`과 `LawChunk`에
+  `(enforce_date, expire_date)` idempotent index를 추가했다.
+- readiness는 모든 version/chunk의 `enforce_date`, historical
+  version/chunk의 `expire_date`를 집계로 검증한다. active
+  `expire_date=null`은 정상이다.
+- 오류는 `law_version_temporal_metadata_invalid` 또는
+  `law_chunk_temporal_metadata_invalid`의 고정 코드만 반환한다.
+- Neo4j session이 없을 때 안전한 partial/empty 결과를 반환하고
+  `--require-results`에서는 실패하는 기존 fallback 2건을 재검증했다.
+- 신규 그래프 재설계나 backfill은 하지 않았고, 이번 범위는 기존
+  immutable seed의 property/index/readiness 계약 강화로 제한했다.
+
+### G3 로컬 검증 증거
+
+- G3 비-Django 집중:
+  - 명령: 법령 증적·요약 validation·AWS pilot·배포 문서·Neo4j command의
+    6개 test module을 `python -m pytest ... -q`로 실행
+  - 결과: `127 passed`, `0 failed`
+- G3 Django 집중:
+  - 명령: operational observability/privacy와 Neo4j unavailable
+    fallback을 `python backend/manage.py test ... --verbosity 1`로 실행
+  - 결과: `19 tests`, `OK`
+- 전체 Python:
+  - 명령: `python -m pytest -q`
+  - 결과: `1335 passed`, `37 skipped`, `4 subtests passed`,
+    `0 failed`, `1 existing LangChainPendingDeprecationWarning`
+- frontend 전체:
+  - 명령: `node --test app/web/*.test.js`
+  - 결과: `52 passed`, `0 failed`
+- production build:
+  - 작업 디렉터리: `app/web`
+  - 명령: `npm run build`
+  - 결과: Vite `7.3.6`, `41 modules transformed`, 성공
+- 배포 스크립트:
+  - `Load-Rag-Seed-Pilot.ps1`, `Deploy-Pilot.ps1` PowerShell AST parse 성공
+  - 실제 SSM·AWS·Docker 배포 명령은 실행하지 않음
+- Caddy:
+  - 구성·privacy 정적 계약 테스트 통과
+  - 로컬 호스트에 `caddy` binary와 `caddy:2.11.4-alpine` image가 없어
+    native `caddy validate`는 실행하지 않음. G8에서 고정 image의 실제
+    container 시작과 credential canary zero-match로 확인
 
 ### G3 종료 조건
 
@@ -401,6 +473,10 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 - [ ] credential 원문 로그 0건
 - [ ] Neo4j 대표 질의 경고 0건 또는 승인된 비차단 warning 문서화
 - [ ] 배포 precheck가 잘못된 run summary를 실제로 차단
+
+위 네 항목은 로컬 정적/회귀 검증으로 완료 처리하지 않는다. G7 승인 후
+G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 G3를 최종
+완료로 전환한다.
 
 ## 10. G4 — 고지서·첨부·상충 진술
 

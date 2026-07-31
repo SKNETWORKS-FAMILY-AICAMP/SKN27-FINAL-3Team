@@ -95,6 +95,16 @@ class Command(BaseCommand):
                         [],
                     )
                 ),
+                legal_expected_dataset_version=getattr(
+                    settings,
+                    "LEGAL_DATASET_VERSION",
+                    "",
+                ),
+                legal_expected_release_version=getattr(
+                    settings,
+                    "APP_RELEASE_VERSION",
+                    "",
+                ),
             )
         except Exception:  # The monitor must emit only a stable safe failure.
             return _safe_failure_snapshot()

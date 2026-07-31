@@ -9,7 +9,7 @@ from unittest import mock
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from chatbot.models import (
     AgentInvocation,
@@ -173,6 +173,8 @@ class OperationalObservabilityTests(TestCase):
                 legal_run_summary_path=str(summary_path),
                 legal_max_age_hours=24,
                 legal_required_sources=["traffic_act"],
+                legal_expected_dataset_version="dataset-v1",
+                legal_expected_release_version="release-abc123",
             )
 
         self.assertEqual(
@@ -180,6 +182,7 @@ class OperationalObservabilityTests(TestCase):
             {
                 "status": "success",
                 "dataset_version": "dataset-v1",
+                "release_version": "release-abc123",
                 "missing_source_count": 0,
                 "failed_source_count": 0,
                 "stale_source_count": 0,
@@ -216,6 +219,8 @@ class OperationalObservabilityTests(TestCase):
                 legal_run_summary_path=str(stale_path),
                 legal_max_age_hours=24,
                 legal_required_sources=["traffic_act"],
+                legal_expected_dataset_version="dataset-v1",
+                legal_expected_release_version="release-abc123",
             )
             invalid_path = Path(temp_dir) / "invalid.json"
             invalid_path.write_text("{not-json", encoding="utf-8")
@@ -236,6 +241,113 @@ class OperationalObservabilityTests(TestCase):
             ["monitor_configuration_invalid"],
         )
         self.assertNotIn("not-json", str(invalid))
+
+    def test_legal_run_summary_provenance_mismatch_fails_closed(self):
+        with TemporaryDirectory() as temp_dir:
+            summary_path = Path(temp_dir) / "run_summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    self._legal_summary(
+                        last_verified_at=self.now - timedelta(hours=1),
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            dataset_mismatch = build_operational_health_snapshot(
+                observed_at=self.now,
+                legal_run_summary_path=str(summary_path),
+                legal_max_age_hours=24,
+                legal_required_sources=["traffic_act"],
+                legal_expected_dataset_version="dataset-v2",
+                legal_expected_release_version="release-abc123",
+            )
+            release_mismatch = build_operational_health_snapshot(
+                observed_at=self.now,
+                legal_run_summary_path=str(summary_path),
+                legal_max_age_hours=24,
+                legal_required_sources=["traffic_act"],
+                legal_expected_dataset_version="dataset-v1",
+                legal_expected_release_version="release-different",
+            )
+
+        for snapshot in (dataset_mismatch, release_mismatch):
+            with self.subTest(snapshot=snapshot):
+                self.assertEqual(snapshot["status"], "fail")
+                self.assertEqual(snapshot["legal_data"]["status"], "failed")
+                self.assertEqual(
+                    snapshot["legal_data"]["reason_code"],
+                    "legal_data_provenance_mismatch",
+                )
+                self.assertEqual(
+                    snapshot["alerts"],
+                    [
+                        {
+                            "code": "legal_data_provenance_mismatch",
+                            "severity": "critical",
+                        }
+                    ],
+                )
+
+    def test_configured_legal_monitor_requires_safe_expected_versions(self):
+        with TemporaryDirectory() as temp_dir:
+            summary_path = Path(temp_dir) / "run_summary.json"
+            summary_path.write_text(
+                json.dumps(
+                    self._legal_summary(
+                        last_verified_at=self.now - timedelta(hours=1),
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            snapshot = build_operational_health_snapshot(
+                observed_at=self.now,
+                legal_run_summary_path=str(summary_path),
+                legal_expected_dataset_version="dataset v1",
+                legal_expected_release_version="release-abc123",
+            )
+
+        self.assertEqual(snapshot["status"], "fail")
+        self.assertEqual(snapshot["legal_data"]["status"], "invalid")
+        self.assertEqual(
+            snapshot["alerts"],
+            [
+                {
+                    "code": "monitor_configuration_invalid",
+                    "severity": "critical",
+                }
+            ],
+        )
+
+    @override_settings(
+        OPERATIONAL_LEGAL_RUN_SUMMARY_PATH="C:/evidence/run_summary.json",
+        OPERATIONAL_LEGAL_REQUIRED_SOURCES=["traffic_act"],
+        LEGAL_DATASET_VERSION="dataset-v1",
+        APP_RELEASE_VERSION="release-abc123",
+    )
+    @mock.patch(
+        "chatbot.management.commands.observe_operational_health.build_operational_health_snapshot"
+    )
+    def test_observe_command_passes_expected_provenance(self, snapshot_builder):
+        snapshot_builder.return_value = {
+            "contract_version": "operational_health.v1",
+            "status": "pass",
+        }
+        stdout = StringIO()
+
+        call_command("observe_operational_health", "--once", stdout=stdout)
+
+        snapshot_builder.assert_called_once()
+        kwargs = snapshot_builder.call_args.kwargs
+        self.assertEqual(
+            kwargs["legal_expected_dataset_version"],
+            "dataset-v1",
+        )
+        self.assertEqual(
+            kwargs["legal_expected_release_version"],
+            "release-abc123",
+        )
 
     def test_observe_command_prints_one_compact_json_line(self):
         stdout = StringIO()
@@ -312,6 +424,7 @@ class OperationalObservabilityTests(TestCase):
             "contract_version": "legal_ingestion_run_summary.v2",
             "run_id": "legal_ingestion:test",
             "dataset_version": "dataset-v1",
+            "release_version": "release-abc123",
             "source_summaries": [
                 {
                     "source_id": "traffic_act",

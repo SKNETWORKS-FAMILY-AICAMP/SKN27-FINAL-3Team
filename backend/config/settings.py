@@ -72,6 +72,8 @@ OPERATIONAL_LEGAL_REQUIRED_SOURCES = [
     ).split(",")
     if source_id.strip()
 ]
+LEGAL_DATASET_VERSION = os.environ.get("LEGAL_DATASET_VERSION", "")
+APP_RELEASE_VERSION = os.environ.get("APP_RELEASE_VERSION", "")
 OBJECT_STORAGE_PROVIDER = os.environ.get("OBJECT_STORAGE_PROVIDER", "mock_s3")
 OBJECT_STORAGE_BUCKET = os.environ.get("OBJECT_STORAGE_BUCKET", "skn27-demo-object-storage")
 OBJECT_STORAGE_QUARANTINE_BUCKET = os.environ.get(

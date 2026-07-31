@@ -16,8 +16,24 @@ class _Result:
 
 
 class _Session:
-    def __init__(self, metadata_manifest_sha256: str):
+    def __init__(
+        self,
+        metadata_manifest_sha256: str,
+        *,
+        version_temporal: dict | None = None,
+        chunk_temporal: dict | None = None,
+    ):
         self.metadata_manifest_sha256 = metadata_manifest_sha256
+        self.version_temporal = version_temporal or {
+            "version_count": 2,
+            "enforce_date_count": 2,
+            "historical_missing_expire_count": 0,
+        }
+        self.chunk_temporal = chunk_temporal or {
+            "chunk_count": 2,
+            "enforce_date_count": 2,
+            "historical_missing_expire_count": 0,
+        }
         self.events: list[str] = []
 
     def __enter__(self):
@@ -39,6 +55,10 @@ class _Session:
                     }
                 ]
             )
+        if "version_count" in query and "LawVersion" in query:
+            return _Result([self.version_temporal])
+        if "historical_missing_expire_count" in query and "LawChunk" in query:
+            return _Result([self.chunk_temporal])
         if "count(chunk) AS chunk_count" in query:
             return _Result([{"chunk_count": 2}])
         if "MATCH (c1:LawChunk" in query:
@@ -62,6 +82,41 @@ class _Driver:
 
     def session(self, **_kwargs):
         return self.session_instance
+
+
+def _configure_graph_env(monkeypatch) -> None:
+    monkeypatch.setenv("NEO4J_URI", "bolt://law-neo4j:7687")
+    monkeypatch.setenv("NEO4J_USER", "neo4j")
+    monkeypatch.setenv("NEO4J_PASSWORD", "secret-not-in-output")
+    monkeypatch.setenv("NEO4J_DATABASE", "neo4j")
+    monkeypatch.setenv("LEGAL_DATASET_VERSION", "2026-07-28-law-v1")
+    monkeypatch.setenv("LEGAL_RAG_SEED_MANIFEST_SHA256", "a" * 64)
+
+
+def test_graph_schema_registers_temporal_property_indexes() -> None:
+    from etl.legal.export_neo4j import create_constraints
+
+    class RecordingSession:
+        def __init__(self):
+            self.queries: list[str] = []
+
+        def run(self, query):
+            self.queries.append(" ".join(query.split()))
+            return _Result()
+
+    session = RecordingSession()
+
+    create_constraints(session)
+
+    rendered = "\n".join(session.queries)
+    assert (
+        "CREATE INDEX law_version_temporal IF NOT EXISTS "
+        "FOR (n:LawVersion) ON (n.enforce_date, n.expire_date)"
+    ) in rendered
+    assert (
+        "CREATE INDEX law_chunk_temporal IF NOT EXISTS "
+        "FOR (n:LawChunk) ON (n.enforce_date, n.expire_date)"
+    ) in rendered
 
 
 def test_graph_loader_writes_dataset_metadata_only_after_import(monkeypatch) -> None:
@@ -124,6 +179,78 @@ def test_graph_readiness_rejects_manifest_mismatch(monkeypatch) -> None:
     assert result["status"] == "fail"
     assert result["error_code"] == "manifest_sha256_mismatch"
     assert "secret-not-in-output" not in str(result)
+
+
+def test_graph_readiness_rejects_historical_version_without_expiry(
+    monkeypatch,
+) -> None:
+    from backend.chatbot.management.commands import verify_legal_graph_readiness as command
+
+    session = _Session(
+        metadata_manifest_sha256="a" * 64,
+        version_temporal={
+            "version_count": 2,
+            "enforce_date_count": 2,
+            "historical_missing_expire_count": 1,
+        },
+    )
+    _configure_graph_env(monkeypatch)
+    monkeypatch.setattr(
+        command.GraphDatabase,
+        "driver",
+        lambda *_args, **_kwargs: _Driver(session),
+    )
+
+    result = command.verify_legal_graph_readiness()
+
+    assert result == {
+        "contract_version": "legal_graph_readiness.v1",
+        "status": "fail",
+        "error_code": "law_version_temporal_metadata_invalid",
+    }
+
+
+def test_graph_readiness_rejects_chunk_without_enforce_date(monkeypatch) -> None:
+    from backend.chatbot.management.commands import verify_legal_graph_readiness as command
+
+    session = _Session(
+        metadata_manifest_sha256="a" * 64,
+        chunk_temporal={
+            "chunk_count": 2,
+            "enforce_date_count": 1,
+            "historical_missing_expire_count": 0,
+        },
+    )
+    _configure_graph_env(monkeypatch)
+    monkeypatch.setattr(
+        command.GraphDatabase,
+        "driver",
+        lambda *_args, **_kwargs: _Driver(session),
+    )
+
+    result = command.verify_legal_graph_readiness()
+
+    assert result["status"] == "fail"
+    assert result["error_code"] == "law_chunk_temporal_metadata_invalid"
+
+
+def test_graph_readiness_accepts_active_versions_without_expiry(
+    monkeypatch,
+) -> None:
+    from backend.chatbot.management.commands import verify_legal_graph_readiness as command
+
+    session = _Session(metadata_manifest_sha256="a" * 64)
+    _configure_graph_env(monkeypatch)
+    monkeypatch.setattr(
+        command.GraphDatabase,
+        "driver",
+        lambda *_args, **_kwargs: _Driver(session),
+    )
+
+    result = command.verify_legal_graph_readiness()
+
+    assert result["status"] == "ready"
+    assert result["legal_chunk_count"] == 2
 
 
 def test_runtime_readiness_requires_verified_graph_when_enabled(monkeypatch) -> None:
