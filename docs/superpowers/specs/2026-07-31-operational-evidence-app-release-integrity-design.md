@@ -15,6 +15,12 @@ parent directory is root-owned mode `0750`, while the monitor runs as the
 non-root image user. The app-only release path can nevertheless report
 success because it gates only migrations and HTTP live/ready checks.
 
+The current production release is `818199aee975`. It predates the seed-source
+descriptor. The first release using this design must therefore not require a
+descriptor before the one-time evidence-only recovery has created it. The
+bootstrap is an evidence control-plane operation against the still-running
+`818199aee975` images; it is not an application deployment.
+
 ## Existing contracts that remain authoritative
 
 - Backend and frontend images remain immutable twelve-character Git SHA tags.
@@ -140,13 +146,48 @@ Under the existing maintenance lock, the remote release performs:
    frontend.
 7. Require HTTPS live and ready checks.
 8. Atomically promote candidate evidence, then start workers and monitor.
-9. Run `observe_operational_health --once`, parse its JSON, and require
-   `status=pass` before reporting pipeline success.
+9. Run `observe_operational_health --once`, parse its JSON, and apply the
+   immediate transaction gate below before reporting pipeline success.
 
 The monitor is stopped while image tag and evidence are switched, avoiding a
 window in which it can observe mixed provenance.
 
-## Rollback and failure behavior
+## Immediate transaction gate and ten-minute acceptance gate
+
+Deployment mutation and operational acceptance are separate gates.
+`Deploy-Pilot.ps1`, `Release-PilotApp-FromPipeline.sh`, and
+`Rollback-Pilot.ps1` must share the same immediate-gate evaluator rather than
+embedding three different interpretations of the health snapshot. The
+ten-minute acceptance command uses the same evaluator in strict-pass mode.
+
+The immediate transaction gate runs after the candidate evidence, images,
+workers, and monitor are active. It fails and rolls back when any of the
+following is true:
+
+- live or ready HTTP checks fail;
+- the health snapshot is not valid `operational_health` JSON;
+- `status=fail` or any `critical` alert is present;
+- legal data is missing, invalid, stale, failed, or not bound to the exact
+  candidate dataset and release versions;
+- any warning other than `queue_backlog` is present.
+
+The immediate gate may accept `status=warn` only when every alert is the
+warning-level `queue_backlog` code and legal data is otherwise exact and
+successful. This narrow exception prevents an in-flight queue item observed
+during worker restart from causing a false rollback. It does not allow
+`queue_oldest_age_exceeded`, `worker_lease_stale`, `worker_retrying`, worker or
+provider failures, or any legal-data warning.
+
+Pipeline transaction success means only that the atomic release switch is
+safe. It is not production acceptance. Acceptance requires a separate
+observation window lasting at least 600 seconds in which every sampled
+operational-health snapshot has `status=pass`, no alerts, and exact legal
+dataset and release versions. A warning resets the consecutive-pass window.
+A critical result invokes the approved rollback path; a non-critical warning
+that does not clear keeps G8 and the thirteen E2E scenarios blocked and
+requires operator investigation.
+
+## Automatic rollback and failure behavior
 
 The error trap is armed before any candidate mutation. On failure it:
 
@@ -163,6 +204,30 @@ both success and failure. Logs may contain status, tag, and safe validation
 errors, but never seed contents, runtime secrets, provider responses, OCR,
 prompts, or user data.
 
+## Manual rollback evidence transaction
+
+`Rollback-Pilot.ps1` uses the same maintenance lock and evidence boundary as
+the automatic rollback. Before it stops or recreates any service it must:
+
+1. Resolve the requested target release directory and require its
+   `.compose.env` release tag to equal the requested release tag.
+2. Require the target release's `operational-evidence/run_summary.json`.
+3. Validate that summary with the target backend image for schema, freshness,
+   dataset version, and the exact target release version.
+4. Snapshot the currently shared evidence, including its absent state, into a
+   root-owned temporary backup.
+
+After switching the images and release tag, the command installs the validated
+target evidence as root-owned mode `0444` through a temporary file and atomic
+rename, starts workers and monitor, and runs the same immediate transaction
+gate. It updates `/opt/skn27-pilot/current` only after that gate succeeds.
+
+If any rollback step fails, the rollback error trap restores the pre-command
+release, shared evidence, services, and current symlink before returning the
+original nonzero status. A missing or invalid target evidence file prevents
+all mutation; the command must never roll an application release back while
+leaving evidence bound to another release.
+
 ## Test strategy
 
 1. Static contract tests require shared-directory `0755`, evidence `0444`, and
@@ -174,25 +239,40 @@ prompts, or user data.
 4. Negative tests reject database load commands, paid-provider flags, and
    provider smoke from the evidence-only path.
 5. App-release tests require descriptor validation, candidate-bound evidence,
-   monitor stop/switch/start ordering, and final operational-health pass.
+   monitor stop/switch/start ordering, a fail-closed critical gate, and the
+   narrow immediate `queue_backlog` warning exception.
 6. Rollback tests require the real previous tag and prior evidence state to be
    restored before services restart.
-7. Focused Python infrastructure and evidence tests run first, followed by the
+7. Manual-rollback tests require target evidence validation before mutation,
+   atomic shared-evidence restoration, monitor preflight, and restoration of
+   the pre-command release and evidence when the rollback itself fails.
+8. Acceptance tests require at least 600 seconds of consecutive `pass`
+   snapshots; warnings reset the window and critical alerts select rollback.
+9. Focused Python infrastructure and evidence tests run first, followed by the
    full pytest suite, frontend tests/build, Terraform formatting/validation,
    and shell/YAML syntax checks.
-8. Production acceptance requires the shared summary to validate, operational
+10. Production acceptance requires the shared summary to validate, operational
    health to stay `pass` for ten minutes, and only then may the remaining G8
    checks and thirteen E2E scenarios begin.
 
 ## Operational activation sequence
 
-1. Merge and deploy this hotfix from the latest `dev` commit.
-2. Run the evidence-only recovery command with the previously approved seed
-   URI/path/SHA. This is the only one-time operator input and has no provider
-   cost.
-3. Confirm one preflight plus ten minutes of continuous operational-health
-   `pass` evidence.
-4. Confirm the next app-only pipeline release exercises automatic candidate
-   evidence generation and fail-closed rollback.
-5. If the approved seed cannot be retrieved or verified, stop and request
+1. Merge this hotfix into the latest `dev` commit, but do not approve or start
+   the app-release pipeline yet.
+2. From that reviewed source, run only the evidence-recovery operator command
+   against the still-running production release `818199aee975`, passing the
+   previously approved seed URI/path/SHA and `-ReleaseTag 818199aee975`. The
+   command must verify that the running image tag is exactly `818199aee975`.
+3. Confirm the recovery created both the shared validated evidence and the
+   root-only seed-source descriptor without changing images, databases, RAG
+   data, or providers.
+4. Require the immediate critical preflight, then observe at least 600 seconds
+   of consecutive operational-health `pass` snapshots for `818199aee975`.
+5. Only after that bootstrap acceptance may an operator approve the new
+   app-release pipeline. The new release must exercise descriptor validation,
+   candidate evidence generation, atomic promotion, and fail-closed rollback.
+6. Apply the immediate transaction gate to the new release, then complete a
+   separate minimum-600-second consecutive-`pass` acceptance window before G8
+   and the thirteen E2E scenarios begin.
+7. If the approved seed cannot be retrieved or verified, stop and request
    explicit approval before any full seed reload or paid provider call.
