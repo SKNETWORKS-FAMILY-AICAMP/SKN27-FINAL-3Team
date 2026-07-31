@@ -16,6 +16,7 @@ from app.services.law_ground_contract import normalize_law_evidence
 from app.services.service_scope_policy_service import evaluate_service_scope
 from app.services.supervisor_control_service import (
     evaluate_case_promotion,
+    merge_final_response,
     reduce_consultation_fact_state,
 )
 from app.services.supervisor_llm_service import build_supervisor_state_with_optional_llm
@@ -392,6 +393,9 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
             "supervisor_handoff": dict(node_execution.get("supervisor_handoff") or {}),
             "reporting_payload": dict(node_execution.get("reporting_payload") or {}),
         }
+    reconstructed = _rebuild_persisted_supervisor_response(node_execution, executions)
+    if reconstructed is not None:
+        return reconstructed
     summaries: list[str] = []
     structured_results: dict[str, dict[str, Any]] = {}
     evidence: list[dict[str, Any]] = []
@@ -444,6 +448,69 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
         "structured_results": structured_results,
         "evidence": _dedupe_dicts(evidence, key="source_reference"),
         "limitations": _dedupe(limitations),
+        "supervisor_handoff": dict(node_execution.get("supervisor_handoff") or {}),
+        "reporting_payload": dict(node_execution.get("reporting_payload") or {}),
+    }
+
+
+def _rebuild_persisted_supervisor_response(
+    node_execution: dict[str, Any],
+    executions: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Recover a safe final response when legacy persistence lacks the merge row."""
+
+    upstream_results: dict[str, dict[str, Any]] = {}
+    statuses: list[str] = []
+    for execution in executions:
+        output = execution.get("agent_output") if isinstance(execution.get("agent_output"), dict) else {}
+        node_code = str(output.get("node_code") or execution.get("node_code") or "").strip()
+        if not node_code:
+            continue
+        upstream_results[node_code] = output
+        statuses.append(str(output.get("status") or "failed"))
+    if "agent_result_validation" not in upstream_results:
+        return None
+
+    supervisor_state = (
+        node_execution.get("supervisor_state")
+        if isinstance(node_execution.get("supervisor_state"), dict)
+        else {}
+    )
+    routing_intent = str(
+        node_execution.get("routing_intent")
+        or supervisor_state.get("routing_intent")
+        or ""
+    )
+    evidence_only = routing_intent in {
+        "accident_evidence_analysis",
+        "accident_photo_evidence_analysis",
+    }
+    merged = merge_final_response(
+        upstream_results,
+        pending_questions=[
+            item
+            for item in supervisor_state.get("next_questions") or []
+            if isinstance(item, dict)
+        ],
+        evidence_only=evidence_only,
+        routing_intent=routing_intent,
+        user_text=_user_text_from_supervisor_state(supervisor_state),
+    )
+    if not merged.get("structured_results"):
+        return None
+    return {
+        "contract_version": "analysis_result.v2",
+        "job_id": node_execution.get("job_id"),
+        "status": _combined_status(statuses),
+        "assistant_message": dict(merged.get("assistant_message") or {}),
+        "structured_results": dict(merged.get("structured_results") or {}),
+        "evidence": list(merged.get("evidence") or []),
+        "limitations": list(merged.get("limitations") or []),
+        "next_actions": list(merged.get("next_actions") or []),
+        "deadline_guidance": dict(merged.get("deadline_guidance") or {}),
+        "pending_questions": list(merged.get("pending_questions") or []),
+        "cards": list(merged.get("cards") or []),
+        "report_links": list(merged.get("report_links") or []),
         "supervisor_handoff": dict(node_execution.get("supervisor_handoff") or {}),
         "reporting_payload": dict(node_execution.get("reporting_payload") or {}),
     }

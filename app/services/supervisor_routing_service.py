@@ -93,7 +93,7 @@ def route_supervisor_input(
         if purposes and attachment_purposes.intersection(purposes):
             return intent
         if keywords and any(keyword in normalized_text for keyword in keywords):
-            return intent
+            return _promote_fine_notice_report_intent(intent, user_text)
     return _text(policy["default_intent"])
 
 
@@ -121,6 +121,23 @@ def report_generation_requested(user_text: str) -> bool:
         any(term in normalized for term in document_terms)
         and any(term in normalized for term in action_terms)
     )
+
+
+def _promote_fine_notice_report_intent(intent: str, user_text: str) -> str:
+    """Send a text-only draft request through verified fine-notice intake first.
+
+    The promotion does not authorize report generation by itself.  The
+    orchestration layer still requires confirmed OCR fields before it can add
+    the law, appeal, and report nodes to the executable plan.
+    """
+
+    report_policy = _routing_policy()["report_policy"]
+    if (
+        intent == "fine_notice_procedure"
+        and report_generation_requested(user_text)
+    ):
+        return _text(report_policy.get("supported_intent")) or intent
+    return intent
 
 
 def plan_node_codes(routing_intent: str, *, report_requested: bool) -> tuple[str, ...]:

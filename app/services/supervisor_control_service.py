@@ -7,6 +7,7 @@ from typing import Any
 
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS
 from app.services.deadline_guidance_service import build_deadline_guidance
+from app.services.law_ground_contract import normalize_law_structured_result
 from app.services.supervisor_routing_service import agent_result_validation_policy
 
 
@@ -178,7 +179,14 @@ def merge_final_response(
         summary = _text(output.get("summary"))
         if summary:
             summaries.append(summary)
-        structured_results[node_code] = _dict(output.get("structured_result"))
+        structured_result = _dict(output.get("structured_result"))
+        if node_code == "law_ground_search" and structured_result.get("law_provisions"):
+            # Completed jobs are recomposed from persisted AgentResult rows.
+            # Normalize again here so legacy/raw agent fields such as
+            # source_name and article_no render identically to live adapter
+            # output instead of falling back to its retrieval-count summary.
+            structured_result = normalize_law_structured_result(structured_result)
+        structured_results[node_code] = structured_result
         evidence.extend(_dict_list(output.get("evidence")))
         limitations.extend(_string_list(output.get("limitations")))
 

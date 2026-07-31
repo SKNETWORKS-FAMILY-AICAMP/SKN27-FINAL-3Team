@@ -136,6 +136,57 @@ def test_completed_result_normalizes_only_dict_agent_outputs_for_composer() -> N
     ]
 
 
+def test_completed_fine_notice_result_rebuilds_persisted_law_guidance_with_its_routing_intent() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+    from app.services.chat_orchestration_service import compose_agent_response
+
+    outcome = load_analysis_result(
+        "job_persisted_law",
+        load_job=lambda _job_id: {
+            "job_id": "job_persisted_law",
+            "status": "success",
+            "routing_intent": "fine_notice_procedure",
+            "agent_results": [
+                {
+                    "node_code": "law_ground_search",
+                    "status": "success",
+                    "summary": "조문 5건 검색됨 (관계 확장 포함)",
+                    "structured_result": {
+                        "law_provisions": [
+                            {
+                                "source_name": "도로교통법",
+                                "article_no": "제32조",
+                                "provision_text": "정차 및 주차의 금지 장소에 관한 규정입니다.",
+                                "source_reference": "law:query:1",
+                            }
+                        ]
+                    },
+                    "evidence": [{"source_reference": "law:query:1"}],
+                    "limitations": [],
+                },
+                {
+                    "node_code": "agent_result_validation",
+                    "status": "success",
+                    "structured_result": {
+                        "accepted_results": ["law_ground_search"],
+                        "rejected_results": [],
+                        "report_ready": False,
+                    },
+                    "evidence": [],
+                    "limitations": [],
+                },
+            ],
+        },
+        compose_response=compose_agent_response,
+    )
+
+    answer = outcome.payload["assistant_message"]["answer"]
+
+    assert outcome.kind == "completed"
+    assert "조문 5건 검색됨" not in answer
+    assert "도로교통법 제32조" in answer
+
+
 def test_completed_result_preserves_persisted_presentation_fields() -> None:
     from app.services.analysis_job_query_service import load_analysis_result
 

@@ -321,6 +321,48 @@ def test_fine_notice_procedure_renders_practical_guidance_from_verified_law_resu
     ]
 
 
+def test_fine_notice_procedure_normalizes_persisted_agent_law_fields_before_rendering() -> None:
+    merged = merge_final_response(
+        {
+            "law_ground_search": {
+                "status": "success",
+                "summary": "조문 5건 검색됨 (관계 확장 포함)",
+                "structured_result": {
+                    "law_provisions": [
+                        {
+                            "source_name": "도로교통법",
+                            "article_no": "제32조",
+                            "provision_text": "정차 및 주차의 금지 장소에 관한 규정입니다.",
+                            "source_reference": "law:raw-agent:1",
+                        }
+                    ]
+                },
+                "evidence": [{"source_reference": "law:raw-agent:1"}],
+                "limitations": [],
+            },
+            "agent_result_validation": {
+                "status": "success",
+                "structured_result": {
+                    "merge_ready": True,
+                    "report_ready": False,
+                    "accepted_results": ["law_ground_search"],
+                    "rejected_results": [],
+                    "missing_fields": [],
+                    "limitations": [],
+                },
+            },
+        },
+        routing_intent="fine_notice_procedure",
+        user_text="과태료 고지서를 받았는데 어떻게 해야 하나요?",
+    )
+
+    answer = merged["assistant_message"]["answer"]
+
+    assert "조문 5건 검색됨" not in answer
+    assert "도로교통법 제32조" in answer
+    assert "정차 및 주차의 금지 장소" in answer
+
+
 def test_final_response_merge_prepends_deadline_guidance_card() -> None:
     deadline = (date.today() + timedelta(days=2)).isoformat()
     merged = merge_final_response(
