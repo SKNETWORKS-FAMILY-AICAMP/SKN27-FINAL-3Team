@@ -11,6 +11,7 @@ from app.services.attachment_workflow_service import (
     ATTACHMENT_WORKFLOW_STATES,
     build_attachment_workflows,
 )
+from app.services.analysis_progress_service import build_analysis_progress
 from app.services.fact_conflict_service import normalize_fact_conflicts
 from app.services.public_law_projection_service import project_public_law_items
 
@@ -243,6 +244,7 @@ def load_analysis_result(
                     job,
                     job.get("attachment_workflows"),
                 ),
+                "analysis_progress": build_analysis_progress(job),
             },
         )
 
@@ -293,6 +295,10 @@ def load_analysis_result(
             "progress_state": _project_progress_state(job.get("progress_state")),
         }
     )
+    result["analysis_progress"] = build_analysis_progress(
+        job,
+        composed_result=result,
+    )
     return AnalysisJobQueryOutcome(kind="completed", payload=result)
 
 
@@ -331,6 +337,10 @@ def _project_analysis_job_detail(
             ),
             "reports": _project_report_summaries(job.get("reports")),
         }
+    )
+    projected["analysis_progress"] = build_analysis_progress(
+        job,
+        composed_result=projected,
     )
     return projected
 

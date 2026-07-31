@@ -225,6 +225,21 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertEqual(body["status"], "queued")
         self.assertEqual(body["execution_mode"], "async_worker")
         self.assertEqual(body["work_item"]["work_item_id"], "work_1")
+        self.assertEqual(
+            body["analysis_progress"],
+            {
+                "contract_version": "analysis_progress.v1",
+                "semantic_status": "queued",
+                "terminal": False,
+                "retryable": True,
+                "next_action": "continue_polling",
+                "user_message": (
+                    "분석 요청이 대기 중입니다. 순서가 되면 자동으로 진행됩니다."
+                ),
+                "job_id": "job_1",
+                "correlation_id": "work_1",
+            },
+        )
         self.assertNotIn("mock", str(body).lower())
         queued_payload = enqueue.call_args.args[1]
         self.assertEqual(

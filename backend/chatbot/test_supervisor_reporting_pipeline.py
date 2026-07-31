@@ -317,6 +317,44 @@ def _ready_case_evidence_source(
 
 
 class SupervisorReportingPipelineTests(TestCase):
+    def test_persisted_job_remains_pollable_without_transient_progress_cache(
+        self,
+    ) -> None:
+        from chatbot.views import analysis_result
+
+        queued, _payload = _queued_work(suffix="restart_continuity")
+        job_id = queued["job_id"]
+        work_item_id = queued["work_item_id"]
+        request = RequestFactory().get(f"/api/analysis/results/{job_id}/")
+
+        with (
+            patch(
+                "chatbot.views._analysis_job_access_response",
+                return_value=None,
+            ),
+            patch(
+                "chatbot.views.read_analysis_job_progress",
+                return_value=None,
+            ),
+        ):
+            response = analysis_result(request, job_id)
+
+        body = json.loads(response.content)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(body["result"]["job_id"], job_id)
+        self.assertEqual(
+            body["result"]["analysis_progress"]["semantic_status"],
+            "queued",
+        )
+        self.assertEqual(
+            body["result"]["analysis_progress"]["job_id"],
+            job_id,
+        )
+        self.assertEqual(
+            body["result"]["analysis_progress"]["correlation_id"],
+            work_item_id,
+        )
+
     def test_confirmed_case_worker_uses_real_reporting_adapter_and_creates_report(self) -> None:
         from app.services.agent_node_service import execute_agent_plan as real_execute_plan
 

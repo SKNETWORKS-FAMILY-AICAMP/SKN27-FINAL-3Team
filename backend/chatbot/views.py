@@ -44,6 +44,7 @@ from app.services.analysis_job_query_service import (
     load_analysis_job_detail,
     load_analysis_result,
 )
+from app.services.analysis_progress_service import build_analysis_progress
 from app.services.attachment_mock_service import (
     UploadTooLargeError,
     get_attachment as get_mock_attachment,
@@ -1408,6 +1409,13 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         "status": persistence["work_item_status"],
         "job_id": persistence["job_id"],
     }
+    chat_response["analysis_progress"] = build_analysis_progress(
+        {
+            "job_id": persistence["job_id"],
+            "status": "queued",
+            "work_item": chat_response["work_item"],
+        }
+    )
     chat_response["supervisor_execution"] = _supervisor_execution_response(
         node_execution,
         persistence=persistence,

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createFrontendApi } from "./apiClient.js";
+import { buildAnalysisProgressUi } from "./analysisProgressUi.js";
 import { buildAppealDecisionUi } from "./appealDecisionUi.js";
 import { buildAttachmentWorkflowUi } from "./attachmentWorkflowUi.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
@@ -35,6 +36,7 @@ import {
 } from "./consultationIntake.js";
 import { shouldPromptGuestConversationSave } from "./guestConversationPolicy.js";
 import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
+import { pollWorkerResult } from "./workerPolling.js";
 
 const TAB_ROUTES = [
   { id: "chatbot", label: "사고·과태료 상담" },
@@ -53,7 +55,6 @@ const FALLBACK_ANALYSIS_CARDS = [
 const EXECUTION_MODE = "async_worker";
 const WORKER_POLL_INTERVAL_MS = 500;
 const WORKER_POLL_MAX_ATTEMPTS = 60;
-const WORKER_PENDING_JOB_STATUSES = new Set(["queued", "running", "retrying"]);
 const FINE_NOTICE_DEADLINE_DAYS = 60;
 const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf,video/mp4,video/quicktime";
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime"]);
@@ -381,6 +382,9 @@ export default function FrontendAppShell({
   const attachmentClassificationResult =
     analysisResponse?.structured_results?.attachment_document_classification || null;
   const attachmentWorkflowUi = buildAttachmentWorkflowUi(analysisResponse?.attachment_workflows);
+  const analysisProgressUi = buildAnalysisProgressUi(
+    analysisResponse?.analysis_progress
+  );
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -1198,65 +1202,19 @@ export default function FrontendAppShell({
     if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
       return chatResult;
     }
-    let latestResult = chatResult;
-    logDeveloperDiagnostic("worker.status", {
-      status: "polling",
-      authenticated: Boolean(requestIdentity?.authToken),
-    });
-    try {
-      for (let attempt = 0; attempt < WORKER_POLL_MAX_ATTEMPTS; attempt += 1) {
-        const jobDetailResult = await api.getAnalysisResult({
+    return pollWorkerResult({
+      initialResult: chatResult,
+      loadResult: () => api.getAnalysisResult({
           jobId: workItem.job_id,
           identity: requestIdentity,
-        });
-        const jobDetail = jobDetailResult?.result || jobDetailResult?.job || {};
-        const processedItem = jobDetail.work_item || {};
-        const progressState = jobDetail.progress_state || processedItem.progress_state || {};
-        const jobStatus = jobDetail.status || progressState.job_status || latestResult.status;
-        const nextWorkItem = {
-          ...workItem,
-          ...processedItem,
-          status: processedItem.status || workItem.status,
-          job_status: progressState.job_status || jobStatus || workItem.job_status,
-          progress_state: progressState,
-        };
-        latestResult = {
-          ...latestResult,
-          ...jobDetail,
-          execution_mode: chatResult.execution_mode,
-          persistence: chatResult.persistence,
-          status: jobStatus,
-          job_detail: jobDetail,
-          supervisor_execution: {
-            ...(latestResult.supervisor_execution || {}),
-            ...(jobDetail.supervisor_execution || {}),
-            work_item: nextWorkItem,
-            worker_poll: {
-              contract_version: "worker_progress_polling.v1",
-              status: processedItem.status || null,
-              job_status: jobStatus || null,
-              progress_state: progressState,
-            },
-          },
-          work_item: nextWorkItem,
-        };
-        logDeveloperDiagnostic("worker.status", {
-          attempt: attempt + 1,
-          jobStatus: jobStatus || null,
-          status: processedItem.status || "waiting",
-        });
-        if (!WORKER_PENDING_JOB_STATUSES.has(jobStatus)) {
-          return latestResult;
-        }
-        if (attempt < WORKER_POLL_MAX_ATTEMPTS - 1) {
-          await waitForWorkerPoll();
-        }
-      }
-      return latestResult;
-    } catch (_error) {
-      logDeveloperDiagnostic("worker.error", { message: _error?.message || "progress polling failed" });
-      return latestResult;
-    }
+      }),
+      wait: waitForWorkerPoll,
+      maxAttempts: WORKER_POLL_MAX_ATTEMPTS,
+      onUpdate: setAnalysisResponse,
+      onDiagnostic: ({ event, ...payload }) => {
+        logDeveloperDiagnostic(`worker.${event}`, payload);
+      },
+    });
   }
 
   function updateOcrConfirmationField(field, value) {
@@ -1418,7 +1376,9 @@ export default function FrontendAppShell({
         role: "assistant",
         content:
           workerResult?.assistant_message?.core_answer ||
-          assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
+          workerResult?.polling_notice?.message ||
+          workerResult?.analysis_progress?.user_message ||
+          assistantMessageText(workerResult?.assistant_message),
         status: workerResult?.status || "partial",
         pending_questions: workerResult?.pending_questions || [],
         followUp: workerResult?.assistant_message?.follow_up || null,
@@ -1436,13 +1396,15 @@ export default function FrontendAppShell({
       setGuestDetailedReportUsed(canSaveGuestConversation);
       setSaveDecision(effectiveAuthSessionId ? "saved" : "undecided");
       setStatusMessage(
-        effectiveAuthSessionId
+        workerResult?.polling_notice?.message ||
+        workerResult?.analysis_progress?.user_message ||
+        (effectiveAuthSessionId
           ? ""
           : canSaveGuestConversation
             ? workerResult?.status === "success"
               ? "상담 응답을 받았습니다. 저장 여부를 선택할 수 있습니다."
               : "상담 응답을 받았습니다. 현재 상태로 저장하거나 답변을 이어갈 수 있습니다."
-            : "추가 정보가 필요합니다. 답변을 이어서 입력해 주세요."
+            : "추가 정보가 필요합니다. 답변을 이어서 입력해 주세요.")
       );
     } catch (_error) {
       logDeveloperDiagnostic("chat.error", {
@@ -1967,6 +1929,7 @@ export default function FrontendAppShell({
           {activeRoute === "chatbot" && (
             <ChatScreenV2
               analysisCards={visibleAnalysisCards}
+              analysisProgressUi={analysisProgressUi}
               appealDecisionUi={appealDecisionUi}
               appealRiskAcknowledged={appealRiskAcknowledged}
               onAcknowledgeAppealRisk={() => setAcknowledgedAppealKey(appealDecisionKey)}
@@ -2894,6 +2857,7 @@ function ConversationSidebar({
 
 function ChatScreenV2({
   analysisCards,
+  analysisProgressUi,
   appealDecisionUi,
   appealRiskAcknowledged,
   onAcknowledgeAppealRisk,
@@ -3032,6 +2996,19 @@ function ChatScreenV2({
                   {isSavingConversation ? "저장 중" : "로그인 후 저장"}
                 </button>
               </div>
+            </section>
+          )}
+
+          {analysisProgressUi && (
+            <section
+              className={`analysis-progress analysis-progress--${analysisProgressUi.tone}`}
+              aria-label="분석 진행 상태"
+            >
+              <strong>{analysisProgressUi.label}</strong>
+              <p>{analysisProgressUi.message}</p>
+              {analysisProgressUi.retryable && (
+                <small>현재 상태 확인을 다시 시도할 수 있습니다.</small>
+              )}
             </section>
           )}
 

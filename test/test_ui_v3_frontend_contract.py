@@ -39,6 +39,26 @@ def test_result_screen_separates_confirmed_facts_from_user_claims() -> None:
     assert "사용자 진술 · 추가 확인 필요" in shell
 
 
+def test_result_screen_renders_server_owned_semantic_progress() -> None:
+    shell = _shell()
+
+    assert (
+        'import { buildAnalysisProgressUi } from "./analysisProgressUi.js";'
+        in shell
+    )
+    assert "const analysisProgressUi = buildAnalysisProgressUi(" in shell
+    assert "analysisResponse?.analysis_progress" in shell
+    assert "analysisProgressUi={analysisProgressUi}" in shell
+    assert 'aria-label="분석 진행 상태"' in shell
+    assert (
+        "analysis-progress analysis-progress--${analysisProgressUi.tone}"
+        in shell
+    )
+    assert "{analysisProgressUi.label}" in shell
+    assert "{analysisProgressUi.message}" in shell
+    assert "analysisProgressUi.retryable &&" in shell
+
+
 def test_follow_up_and_legal_sources_explain_why_and_when() -> None:
     shell = _shell()
 

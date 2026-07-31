@@ -85,6 +85,18 @@ def test_pending_result_uses_the_v2_contract_without_calling_composer() -> None:
         "work_item": {},
         "progress_state": {},
         "attachment_workflows": [],
+        "analysis_progress": {
+            "contract_version": "analysis_progress.v1",
+            "semantic_status": "queued",
+            "terminal": False,
+            "retryable": True,
+            "next_action": "continue_polling",
+            "user_message": (
+                "분석 요청이 대기 중입니다. 순서가 되면 자동으로 진행됩니다."
+            ),
+            "job_id": "job_queued",
+            "correlation_id": None,
+        },
     }
     assert composer_calls == []
 
@@ -236,6 +248,18 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
         "supervisor_execution": {"status": "success", "node_results": []},
         "work_item": {},
         "progress_state": {},
+        "analysis_progress": {
+            "contract_version": "analysis_progress.v1",
+            "semantic_status": "needs_input",
+            "terminal": True,
+            "retryable": False,
+            "next_action": "provide_requested_input",
+            "user_message": (
+                "분석을 계속하려면 표시된 확인 항목에 답해 주세요."
+            ),
+            "job_id": "job_done",
+            "correlation_id": None,
+        },
     }
 
 
@@ -970,6 +994,116 @@ def test_pending_result_projects_only_worker_polling_fields() -> None:
     )
     assert "s3://" not in repr(outcome.payload["attachment_workflows"])
     assert "structured_results" not in outcome.payload
+
+
+def test_pending_result_exposes_server_owned_semantic_progress() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_running",
+        load_job=lambda _job_id: {
+            "job_id": "job_running",
+            "status": "running",
+            "work_item": {
+                "contract_version": "agent_worker_queue.v1",
+                "work_item_id": "awork_job_running",
+                "job_id": "job_running",
+                "status": "retrying",
+                "worker_payload": {"authorization": "must-not-leak"},
+            },
+            "progress_state": {
+                "contract_version": "agent_worker_progress.v1",
+                "state": "running",
+                "job_status": "running",
+                "raw_exception": "must-not-leak",
+            },
+        },
+        compose_response=lambda _payload: AssertionError(
+            "pending results do not compose"
+        ),
+    )
+
+    assert outcome.payload["analysis_progress"] == {
+        "contract_version": "analysis_progress.v1",
+        "semantic_status": "running",
+        "terminal": False,
+        "retryable": True,
+        "next_action": "continue_polling",
+        "user_message": (
+            "분석이 진행 중입니다. 확인된 결과는 완료되는 대로 표시됩니다."
+        ),
+        "job_id": "job_running",
+        "correlation_id": "awork_job_running",
+    }
+    assert "authorization" not in repr(outcome.payload["analysis_progress"])
+    assert "raw_exception" not in repr(outcome.payload["analysis_progress"])
+
+
+def test_terminal_worker_success_without_user_result_is_semantic_partial() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_worker_only",
+        load_job=lambda _job_id: {
+            "job_id": "job_worker_only",
+            "status": "success",
+            "work_item": {
+                "work_item_id": "awork_job_worker_only",
+                "status": "success",
+            },
+            "agent_results": [],
+        },
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "status": "success",
+        },
+    )
+
+    assert outcome.kind == "completed"
+    assert outcome.payload["status"] == "success"
+    assert outcome.payload["analysis_progress"]["semantic_status"] == "partial"
+    assert outcome.payload["analysis_progress"]["terminal"] is True
+
+
+def test_result_and_detail_share_persisted_progress_identifiers() -> None:
+    from app.services.analysis_job_query_service import (
+        load_analysis_job_detail,
+        load_analysis_result,
+    )
+
+    stored = {
+        "job_id": "job_shared_progress",
+        "status": "queued",
+        "work_item": {
+            "contract_version": "agent_worker_queue.v1",
+            "work_item_id": "awork_job_shared_progress",
+            "job_id": "job_shared_progress",
+            "status": "queued",
+        },
+    }
+    result = load_analysis_result(
+        "job_shared_progress",
+        load_job=lambda _job_id: stored,
+        compose_response=lambda _payload: AssertionError(
+            "pending results do not compose"
+        ),
+    )
+    detail = load_analysis_job_detail(
+        "job_shared_progress",
+        load_job=lambda _job_id: stored,
+        load_progress=lambda _job_id: None,
+    )
+
+    expected = {
+        "job_id": "job_shared_progress",
+        "correlation_id": "awork_job_shared_progress",
+    }
+    assert {
+        field: result.payload["analysis_progress"][field] for field in expected
+    } == expected
+    assert {
+        field: detail.payload["analysis_progress"][field] for field in expected
+    } == expected
 
 
 def test_completed_result_projects_normalized_fact_conflicts_only() -> None:

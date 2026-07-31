@@ -1,6 +1,6 @@
 # Pilot 핫픽스 구현·검증·재배포 마스터 체크리스트
 
-> 문서 상태: 실행 중 / G0·G1·G2 검증 완료 / G3 로컬 구현·검증 완료, 운영 확인 대기
+> 문서 상태: 실행 중 / G0~G5 로컬 구현·검증 완료 / G3·G5 운영 증거 수집 대기
 > 최초 작성일: 2026-07-31
 > 기준 권고서: `docs/tech-validation-reports/2026-07-31-e2e-cross-analysis-final-hotfix-report.md`
 > 대상 HFX: HFX-009 ~ HFX-018
@@ -155,7 +155,7 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | G2 | 인증·새 상담 상태 | 검증 완료 | G1 완료 | ID 5 기능 재평가 가능, auth 유지 |
 | G3 | 운영 모니터·로그·Neo4j | 로컬 구현·검증 완료 / 운영 확인 대기 | G1 완료 | monitor 정상, credential 로그 0 |
 | G4 | 고지서·첨부·상충 진술 | 로컬 구현·검증 완료 / 운영 E2E 대기 | G1·G2 완료 | ID 3·4·9·11·13 통과 |
-| G5 | polling·부분 실패 UX·증거 규격 | 대기 | G2·G4 완료 | 상태 UX와 캡처 규격 통과 |
+| G5 | polling·부분 실패 UX·증거 규격 | 로컬 구현·검증 완료 / 운영 증거 수집 대기 | G2·G4 완료 | 상태 UX와 캡처 규격 통과 |
 | G6 | 전체 로컬·통합 회귀 | 대기 | G1~G5 완료 | 관련 전체 test/build 통과 |
 | G7 | 운영 재배포 준비·승인 | 대기 | G6 완료 | 배포 전 체크와 사용자 승인 |
 | G8 | 운영 재배포·smoke | 대기 | G7 승인 | 운영 smoke 통과 |
@@ -174,8 +174,8 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | HFX-014 | P1 | 고지서 intake slot·안전한 법령 응답 | 3, 9, 11 | G1 | 로컬 구현·검증 완료 / 운영 E2E 대기 |
 | HFX-015 | P1 | 첨부 분류→확인→OCR→분석 handoff | 4, 5 | G2, HFX-014 | 로컬 구현·검증 완료 / 운영 E2E 대기 |
 | HFX-016 | P1 | 상충 진술 계약·반복 질문 제거 | 13 | G1 | 로컬 구현·검증 완료 / 운영 E2E 대기 |
-| HFX-017 | P1 | polling timeout·partial·retry UX | 10, 11 | G2, G4 | 대기 |
-| HFX-018 | P1 | E2E 증거 캡처·correlation 규격 | 전체 | G4 | 대기 |
+| HFX-017 | P1 | polling timeout·partial·retry UX | 10, 11 | G2, G4 | 로컬 구현·검증 완료 / 운영 E2E 대기 |
+| HFX-018 | P1 | E2E 증거 캡처·correlation 규격 | 전체 | G4 | bundle 계약 검증 완료 / G9 실제 증거 수집 대기 |
 
 ## 7. G1 — P0 개인정보·입력 gate·라우팅
 
@@ -556,29 +556,30 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 
 ### HFX-017
 
-- [ ] Worker `success`와 사용자 과업 성공을 분리
-- [ ] 장기 polling에서 일반 “접수” 문구로 결과를 덮지 않음
-- [ ] `queued`, `running`, `partial`, `failed`, `needs_input`, `success` 구분
-- [ ] retry 가능 여부 표시
-- [ ] job/correlation ID를 개발자 진단에 연결
-- [ ] 화면에는 안전한 사용자 문구만 표시
-- [ ] backend 재기동 후 polling continuity 검증
+- [x] Worker `success`와 사용자 과업 성공을 분리
+- [x] 장기 polling에서 일반 “접수” 문구로 결과를 덮지 않음
+- [x] `queued`, `running`, `partial`, `failed`, `needs_input`, `success` 구분
+- [x] polling 중 `queued` → `running` → terminal 상태를 화면에 실시간 반영
+- [x] retry 가능 여부 표시
+- [x] job/correlation ID를 개발자 진단에 연결
+- [x] 화면에는 안전한 사용자 문구만 표시
+- [x] backend 재기동 후 polling continuity 검증
 
 ### HFX-018
 
 각 E2E evidence bundle은 다음을 포함한다.
 
-- [ ] release SHA
-- [ ] frontend/backend image digest
-- [ ] 테스트 ID와 exact input
-- [ ] 입력·최종 응답이 함께 보이는 스크린샷
-- [ ] HTTP status와 안전한 public response
-- [ ] routing intent
-- [ ] node list
-- [ ] semantic status
-- [ ] job/correlation ID
-- [ ] credential·PII를 제거한 로그
-- [ ] 실행 시각과 테스트 계정 유형
+- [x] release SHA — bundle 필수 계약 검증 완료, 실제 값은 G9에서 수집
+- [x] frontend/backend image digest — bundle 필수 계약 검증 완료, 실제 값은 G9에서 수집
+- [x] 테스트 ID와 exact input — bundle 필수 계약 검증 완료
+- [x] 입력·최종 응답이 함께 보이는 스크린샷 — 안전한 상대 artifact 이름 계약 완료, 실제 촬영은 G9
+- [x] HTTP status와 안전한 public response — allowlist·privacy 계약 완료
+- [x] routing intent
+- [x] node list
+- [x] semantic status
+- [x] job/correlation ID
+- [x] credential·PII를 제거한 로그 — masking·unsafe rejection 계약 완료
+- [x] 실행 시각과 테스트 계정 유형
 
 재촬영 필수 기존 증거:
 
@@ -589,6 +590,44 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 - [ ] ID 10
 - [ ] ID 11
 - [ ] ID 13
+
+### G5 로컬 구현·검증 증적
+
+- 기준: `HEAD fe80bc93` 위 미커밋 G5 작업 트리
+- 설계·구현 계획:
+  - `docs/superpowers/specs/2026-07-31-g5-polling-evidence-design.md`
+  - `docs/superpowers/plans/2026-07-31-g5-polling-evidence-hotfix.md`
+- G5 집중 Python:
+  - 명령: semantic progress·analysis query·evidence bundle·frontend source
+    contract 5개 module을 `python -m pytest ... -q`로 실행
+  - 결과: `114 passed`, `0 failed`
+- G5·인접 frontend:
+  - 명령: progress/polling·auth·attachment·new conversation 5개 Node test
+    module 실행
+  - 결과: `26 passed`, `0 failed`
+- Django worker·continuity·paid retry 경계:
+  - 명령:
+    `python backend/manage.py test chatbot.test_production_hardening chatbot.test_supervisor_reporting_pipeline --verbosity 1`
+  - 결과: `71 tests`, `OK`
+- 인접 개인정보·오케스트레이션·첨부·인증:
+  - 결과: `106 passed`, `0 failed`
+  - 경고: 기존 `LangChainPendingDeprecationWarning` 1건
+- 전체 Python:
+  - 명령: `python -m pytest -q`
+  - 결과: `1449 passed`, `37 skipped`, `4 subtests passed`, `0 failed`
+  - 경고: 기존 `LangChainPendingDeprecationWarning` 1건
+- frontend 전체:
+  - 명령: 확인된 `app/web/*.test.js` 12개를 `node --test`로 실행
+  - 결과: `66 passed`, `0 failed`
+- production build:
+  - 작업 디렉터리: `app/web`
+  - 명령: `npm run build`
+  - 결과: Vite `7.3.6`, `44 modules transformed`, 성공
+- 범위 확인:
+  - model·migration·worker lease·retry backoff·requeue API·paid Agent replay를
+    변경하지 않음
+  - 실제 release SHA·image digest·스크린샷·운영 로그·13개 E2E는 G8·G9에서
+    수집하며, G5 로컬 완료가 운영 증거 확보를 의미하지 않음
 
 ## 12. G6 — 전체 회귀 검증
 
