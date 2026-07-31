@@ -95,4 +95,3 @@ test("fails closed for unknown contracts and malformed identifiers", () => {
   assert.equal(ui.correlationId, null);
   assert.equal(ui.message.includes("private"), false);
 });
-

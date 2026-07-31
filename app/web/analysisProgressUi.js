@@ -64,4 +64,3 @@ function safeIdentifier(value) {
   const identifier = String(value || "").trim();
   return IDENTIFIER_PATTERN.test(identifier) ? identifier : null;
 }
-
