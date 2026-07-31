@@ -7841,3 +7841,228 @@ body,
 .guide-screen__actions .button.primary:hover {
   box-shadow: none;
 }
+
+/* Compact chat composer */
+.chat-input {
+  margin: 0 22px 14px;
+  padding: 8px;
+  gap: 8px;
+}
+
+.chat-input .input-stack {
+  gap: 8px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+
+.consultation-intake {
+  display: grid;
+  gap: 6px;
+}
+
+.consultation-type-row {
+  min-height: 40px;
+  padding: 5px 8px 5px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #d9dee9;
+  border-radius: 12px;
+  color: #35405f;
+  background: #f8f9fc;
+}
+
+.consultation-type-row > span:first-child {
+  flex: none;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.consultation-type-row select {
+  min-width: 0;
+  min-height: 30px;
+  flex: 1 1 auto;
+  padding: 3px 30px 3px 10px;
+  border: 0;
+  border-radius: 8px;
+  color: #111844;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.consultation-type-row select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(75, 86, 148, 0.16);
+}
+
+.consultation-type-row .consultation-intake-badge {
+  flex: none;
+  padding: 4px 7px;
+  font-size: 11px;
+}
+
+.consultation-intake-card {
+  padding: 0 12px;
+  gap: 12px;
+  border-radius: 12px;
+  color: #111844;
+  background: #eef1f7;
+  box-shadow: none;
+}
+
+.consultation-intake-card[open] {
+  padding-bottom: 12px;
+}
+
+.consultation-intake-card__summary {
+  min-height: 38px;
+  gap: 8px;
+}
+
+.consultation-intake-card__summary > strong {
+  font-size: 12px;
+}
+
+.consultation-intake-card__summary > span {
+  margin-left: auto;
+  color: #65708a;
+  font-size: 11px;
+}
+
+.consultation-intake-card__summary::after {
+  content: "＋";
+  font-size: 15px;
+}
+
+.consultation-intake-card[open] .consultation-intake-card__summary::after {
+  content: "－";
+}
+
+.consultation-intake-card__head {
+  align-items: center;
+}
+
+.consultation-intake-card__head strong {
+  font-size: 13px;
+}
+
+.consultation-intake-card__head .button {
+  min-height: 32px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.chat-attachment-bar {
+  padding: 0;
+  gap: 0;
+  overflow: visible;
+  border: 1px solid #cbd3e1;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.chat-attachment-bar .attachment-dropzone {
+  padding: 0;
+  gap: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: inherit;
+  background: #fff;
+}
+
+.chat-input textarea {
+  min-height: 64px;
+  max-height: 180px;
+  padding: 14px 16px 6px;
+  resize: none;
+  border-radius: 18px 18px 0 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.consultation-intake-field textarea {
+  min-height: 92px;
+  padding: 12px 14px;
+  resize: vertical;
+  border: 1px solid #cbd3e1;
+  border-radius: 14px;
+}
+
+.composer-toolbar {
+  min-height: 44px;
+  padding: 4px 8px 8px;
+  gap: 8px;
+  flex-wrap: nowrap;
+  border-top: 0;
+  background: #fff;
+}
+
+.chat-attachment-bar .attachment-dropzone > .composer-toolbar {
+  margin: 0;
+}
+
+.attachment-plus,
+.chat-input .composer-send {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.attachment-plus {
+  border: 0;
+  color: #4b5694;
+  background: transparent;
+  font-size: 25px;
+}
+
+.composer-send {
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.composer-send:disabled {
+  opacity: 0.55;
+}
+
+.composer-file-status {
+  padding: 0 12px 8px;
+  overflow: hidden;
+  color: #65708a;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .chat-input {
+    margin: 0 10px 10px;
+    padding: 6px;
+  }
+
+  .consultation-type-row {
+    gap: 6px;
+  }
+
+  .consultation-type-row > span:first-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .consultation-type-row select {
+    width: 100%;
+  }
+
+  .selected-attachment {
+    max-width: calc(100% - 96px);
+  }
+}
