@@ -27,6 +27,7 @@ import {
   createEmptyConsultationIntake,
 } from "./consultationIntake.js";
 import { shouldPromptGuestConversationSave } from "./guestConversationPolicy.js";
+import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
 
 const TAB_ROUTES = [
   { id: "chatbot", label: "사고·과태료 상담" },
@@ -1757,6 +1758,7 @@ export default function FrontendAppShell({
           {activeRoute === "reporting" && (
             <ReportingScreen
               analysisCards={visibleAnalysisCards}
+              canGenerateReport={hasReportGenerationNode(supervisorState)}
               currentReport={effectiveCurrentReport}
               isAuthenticated={Boolean(authSessionId)}
               onOpenChat={() => setActiveRoute("chatbot")}
@@ -2037,6 +2039,16 @@ const RAIL_ITEMS = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 5h16v11H8l-4 4V5z" />
+      </svg>
+    ),
+  },
+  {
+    id: "reporting",
+    label: "리포트 작업대",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+        <path d="M14 3v5h5M8 13h8M8 17h8" />
       </svg>
     ),
   },
@@ -4300,6 +4312,7 @@ function DocumentTypeCards({ cards, onCopy }) {
 
 function ReportingScreen({
   analysisCards = [],
+  canGenerateReport = false,
   currentReport = null,
   isAuthenticated = false,
   onOpenChat,
@@ -4335,7 +4348,14 @@ function ReportingScreen({
     appealBlocked: appealDownloadBlocked,
     reportId: currentReport?.report_id || activeReportingPayload?.report_id || null,
   };
-  const hasReport = Boolean(activeReportingPayload || analysisCards.length || supervisorExecution || currentReport || hasSavedReports);
+  const hasReport = Boolean(activeReportingPayload || currentReport || hasSavedReports);
+  const workbenchState = deriveReportWorkbenchState({
+    hasReport,
+    hasSavedReports,
+    canGenerateReport,
+    reportingPayload: activeReportingPayload,
+    supervisorState,
+  });
   const sections = Array.isArray(activeReportingPayload?.sections) ? activeReportingPayload.sections : [];
   const documentCards = Array.isArray(activeReportingPayload?.document_cards)
     ? activeReportingPayload.document_cards
@@ -4613,10 +4633,7 @@ function ReportingScreen({
               )}
             </div>
           ) : (
-            <div className="report-page-empty">
-              <h3>사고 리포트를 선택하면 문서가 열립니다.</h3>
-              <p>저장된 사고 리포트의 개요, 근거, 후속 행동을 문서 형태로 검토할 수 있습니다.</p>
-            </div>
+            <ReportWorkbenchEmptyState state={workbenchState} onOpenChat={onOpenChat} />
           )}
         </article>
 
@@ -4671,13 +4688,34 @@ function ReportingScreen({
             </>
           ) : (
             <div className="inspector-section">
-              <span className="tag green">대기</span>
-              <strong>리포트 선택 필요</strong>
-              <p>선택된 리포트의 상태와 다운로드 버튼이 이곳에 표시됩니다.</p>
+              <span className="tag amber">{workbenchState.stageLabel}</span>
+              <strong>{workbenchState.title}</strong>
+              <p>{workbenchState.description}</p>
             </div>
           )}
         </aside>
       </div>
+    </section>
+  );
+}
+
+function ReportWorkbenchEmptyState({ state, onOpenChat }) {
+  return (
+    <section className={`report-page-empty report-workbench-empty is-${state.kind}`} aria-label="리포트 작업대 준비 상태">
+      <span className="tag amber">{state.stageLabel}</span>
+      <h3>{state.title}</h3>
+      <p>{state.description}</p>
+      {state.missingItems.length > 0 && (
+        <section className="report-workbench-empty__missing" aria-label="부족한 자료">
+          <strong>현재 보완이 필요한 정보</strong>
+          <ul>
+            {state.missingItems.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </section>
+      )}
+      <button className="button primary" type="button" onClick={onOpenChat}>
+        {state.ctaLabel}
+      </button>
     </section>
   );
 }
