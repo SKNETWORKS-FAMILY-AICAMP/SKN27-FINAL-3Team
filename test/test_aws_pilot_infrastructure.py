@@ -787,6 +787,34 @@ def test_evidence_recovery_is_locked_verified_atomic_and_provider_free() -> None
         assert forbidden not in recovery
 
 
+def test_production_one_off_containers_override_running_service_ips() -> None:
+    scripts = {
+        name: _read_deploy(name)
+        for name in (
+            "Deploy-Pilot.ps1",
+            "Recover-PilotOperationalEvidence.ps1",
+            "Rollback-Pilot.ps1",
+            "Confirm-PilotOperationalAcceptance.ps1",
+            "Release-PilotApp-FromPipeline.sh",
+        )
+    }
+
+    for name, script in scripts.items():
+        assert "172.31.0.11" in script, name
+        for line in script.splitlines():
+            if "run --rm --no-deps" not in line:
+                continue
+            if name == "Deploy-Pilot.ps1" and "$productionComposeCommand" not in line:
+                continue
+            is_backend_run = " backend python" in line or line.rstrip().endswith(
+                " backend \\"
+            )
+            if is_backend_run:
+                assert "PILOT_BACKEND_IP=" in line, f"{name}: {line}"
+            if " ops-monitor" in line:
+                assert "PILOT_OPS_MONITOR_IP=" in line, f"{name}: {line}"
+
+
 def test_normal_promotion_validates_promotes_and_preflights_operational_evidence() -> None:
     deploy = _read_deploy("Deploy-Pilot.ps1")
     previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")

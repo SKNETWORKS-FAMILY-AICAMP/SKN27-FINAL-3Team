@@ -106,7 +106,7 @@ $commands = @(
     "test -f `$TARGET_EVIDENCE_FILE",
     "/usr/local/sbin/skn27-imds-firewall.sh",
     "aws ecr get-login-password --region '$region' | docker login --username AWS --password-stdin '$registry'",
-    "$composeCommand run --rm --no-deps -v '$releaseDirectory/operational-evidence:/run/target-evidence:ro' backend python -m etl.legal.validate_run_summary --summary /run/target-evidence/run_summary.json --max-age-hours `"`$LEGAL_MAX_AGE_HOURS`" --expected-dataset-version `"`$LEGAL_DATASET_VERSION`" --expected-release-version '$ReleaseTag'",
+    "PILOT_BACKEND_IP='172.31.0.11' $composeCommand run --rm --no-deps -v '$releaseDirectory/operational-evidence:/run/target-evidence:ro' backend python -m etl.legal.validate_run_summary --summary /run/target-evidence/run_summary.json --max-age-hours `"`$LEGAL_MAX_AGE_HOURS`" --expected-dataset-version `"`$LEGAL_DATASET_VERSION`" --expected-release-version '$ReleaseTag'",
     "install -d -m 0755 /opt/skn27-pilot/operational-evidence",
     "if [ -f `$SHARED_EVIDENCE_FILE ]; then install -m 0444 `$SHARED_EVIDENCE_FILE `$PRECOMMAND_EVIDENCE_BACKUP; PRECOMMAND_EVIDENCE_EXISTED=1; fi",
     "restore_precommand_evidence() { if [ `$PRECOMMAND_EVIDENCE_EXISTED -eq 1 ]; then install -m 0444 `$PRECOMMAND_EVIDENCE_BACKUP `$TARGET_EVIDENCE_TMP; mv -f `$TARGET_EVIDENCE_TMP `$SHARED_EVIDENCE_FILE; else rm -f `$SHARED_EVIDENCE_FILE `$TARGET_EVIDENCE_TMP; fi; }",
@@ -118,7 +118,7 @@ $commands = @(
     "install -m 0444 `$TARGET_EVIDENCE_FILE `$TARGET_EVIDENCE_TMP",
     "mv -f `$TARGET_EVIDENCE_TMP `$SHARED_EVIDENCE_FILE",
     "$composeCommand up -d ops-monitor",
-    "$composeCommand run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode transaction",
+    "PILOT_OPS_MONITOR_IP='172.31.0.11' $composeCommand run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode transaction",
     "ln -sfn '$releaseDirectory' /opt/skn27-pilot/current",
     "trap - ERR",
     "rm -f `$PRECOMMAND_EVIDENCE_BACKUP `$TARGET_EVIDENCE_TMP"

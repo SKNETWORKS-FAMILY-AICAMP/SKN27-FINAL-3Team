@@ -205,16 +205,16 @@ printf '%s  %s\n' '__MANIFEST_SHA256__' "$RAG_DIR/__MANIFEST_RELATIVE_PATH__" | 
 find "$RAG_DIR" -type d -exec chmod 0555 {} +
 find "$RAG_DIR" -type f -exec chmod 0444 {} +
 
-compose run --rm --no-deps -v "$RAG_DIR:/run/production-rag-seed:ro" backend \
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" compose run --rm --no-deps -v "$RAG_DIR:/run/production-rag-seed:ro" backend \
   python backend/manage.py verify_production_rag_seed_manifest \
   --manifest /run/production-rag-seed/__MANIFEST_RELATIVE_PATH__ --format json
-compose run --rm --no-deps -v "$RAG_DIR:/run/production-rag-seed:ro" backend \
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" compose run --rm --no-deps -v "$RAG_DIR:/run/production-rag-seed:ro" backend \
   python backend/manage.py build_legal_operational_evidence \
   --manifest /run/production-rag-seed/__MANIFEST_RELATIVE_PATH__ \
   --dataset-version "$LEGAL_DATASET_VERSION" \
   --release-version '__RELEASE_TAG__' \
   --verified-at "$LEGAL_DATASET_VERIFIED_AT" > "$RELEASE_EVIDENCE_TMP"
-compose run --rm --no-deps -v "$RELEASE_EVIDENCE_DIR:/run/release-evidence:ro" backend \
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" compose run --rm --no-deps -v "$RELEASE_EVIDENCE_DIR:/run/release-evidence:ro" backend \
   python -m etl.legal.validate_run_summary \
   --summary /run/release-evidence/.run_summary.json.tmp \
   --max-age-hours "$LEGAL_MAX_AGE_HOURS" \
@@ -224,7 +224,7 @@ chmod 0444 "$RELEASE_EVIDENCE_TMP"
 mv -f "$RELEASE_EVIDENCE_TMP" "$RELEASE_EVIDENCE_FILE"
 
 install -m 0444 "$RELEASE_EVIDENCE_FILE" "$SHARED_EVIDENCE_TMP"
-compose run --rm --no-deps -v "$SHARED_EVIDENCE_DIR:/run/operational-evidence:ro" backend \
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" compose run --rm --no-deps -v "$SHARED_EVIDENCE_DIR:/run/operational-evidence:ro" backend \
   python -m etl.legal.validate_run_summary \
   --summary /run/operational-evidence/.run_summary.json.tmp \
   --max-age-hours "$LEGAL_MAX_AGE_HOURS" \
@@ -239,7 +239,7 @@ printf '%s\n' \
 chmod 0600 "$SEED_SOURCE_TMP"
 mv -f "$SEED_SOURCE_TMP" "$SEED_SOURCE_FILE"
 
-compose run --rm --no-deps ops-monitor \
+PILOT_OPS_MONITOR_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" compose run --rm --no-deps ops-monitor \
   python backend/manage.py observe_operational_health --once --gate-mode transaction
 
 cleanup_rag_seed
