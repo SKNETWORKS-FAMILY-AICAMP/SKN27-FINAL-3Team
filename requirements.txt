@@ -5,10 +5,6 @@ neo4j
 openai
 boto3
 psycopg2-binary
-sentence-transformers==5.5.1
-transformers==4.57.6
-huggingface-hub>=0.34.0
-safetensors>=0.4.5
 redis==8.0.1
 google-auth==2.55.1
 langgraph

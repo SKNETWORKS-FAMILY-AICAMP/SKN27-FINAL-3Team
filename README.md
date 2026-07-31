@@ -188,6 +188,12 @@ python -m pip install -r requirements.txt
 npm --prefix app/web ci
 ```
 
+Pilot 운영 환경은 OpenAI 임베딩을 사용하므로 위 기본 설치만 필요합니다. 로컬에서 `sentence-transformers` 기반 임베딩 실험 또는 ETL을 실행하는 경우에만 다음 선택 의존성을 추가로 설치합니다.
+
+```powershell
+python -m pip install -r requirements-local-embedding.txt
+```
+
 백엔드, Agent Worker, 파일 검사 Worker, 프론트를 한 번에 실행합니다.
 
 ```powershell
