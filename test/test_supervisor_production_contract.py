@@ -9,6 +9,7 @@ def _candidate_from_request(request_payload):
     return {
         "conversation_summary": "Structured Supervisor summary",
         "collected_facts": [],
+        "fact_conflicts": [],
         "missing_fields": [],
         "next_questions": [],
         "agent_input_packages": [

@@ -128,6 +128,10 @@ def test_consultation_intake_renders_only_the_selected_case_type_fields() -> Non
     assert 'selectedType === "fault_ratio"' in shell
     assert "{isFineNotice && (" in shell
     assert "{isFaultRatio && (" in shell
+    assert 'field.key === "attachmentAvailable"' in shell
+    assert '<option value="">확인 필요</option>' in shell
+    assert '<option value="yes">첨부 가능</option>' in shell
+    assert '<option value="no">첨부 어려움</option>' in shell
 
 
 def test_chat_submission_forwards_bounded_consultation_type_and_canonical_facts() -> None:
@@ -139,6 +143,7 @@ def test_chat_submission_forwards_bounded_consultation_type_and_canonical_facts(
     assert "buildConsultationRequestContext" in shell
     assert "consultation_type: consultationRequestContext.consultation_type || undefined" in submit
     assert "facts: consultationRequestContext.facts" in submit
+    assert "fine_notice_slots: consultationRequestContext.fine_notice_slots" in submit
 
 
 def test_user_message_and_primary_ctas_have_final_light_theme_overrides() -> None:

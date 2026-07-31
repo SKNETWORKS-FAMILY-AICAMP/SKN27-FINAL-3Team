@@ -2864,6 +2864,7 @@ def _apply_attachment_classification_confirmation(
             request,
             code="classification_stale_or_unavailable",
             session_id=session_id,
+            attachment_id=attachment_id,
         )
     try:
         confirmed = resolve_confirmed_attachment_classification(
@@ -2875,6 +2876,7 @@ def _apply_attachment_classification_confirmation(
             request,
             code=exc.code,
             session_id=session_id,
+            attachment_id=attachment_id,
         )
 
     classification = confirmed["classification"]
@@ -2902,6 +2904,7 @@ def _apply_attachment_classification_confirmation(
             request,
             code="classification_stale_or_unavailable",
             session_id=session_id,
+            attachment_id=attachment_id,
         )
     normalized["attachments"] = attachments
     return normalized, routing_intent, None
@@ -2912,6 +2915,7 @@ def _attachment_classification_confirmation_error(
     *,
     code: str,
     session_id: str,
+    attachment_id: str,
 ) -> JsonResponse:
     return _json_response(
         request,
@@ -2935,6 +2939,19 @@ def _attachment_classification_confirmation_error(
             "error_code": code,
             "limitations": ["확인되지 않은 분류로 후속 분석을 실행하지 않았습니다."],
             "next_actions": ["rerun_attachment_classification"],
+            "attachment_workflows": [
+                {
+                    "contract_version": "attachment_workflow.v1",
+                    "attachment_id": attachment_id,
+                    "state": "failed",
+                    "next_action": "rerun_attachment_classification",
+                    "retryable": True,
+                    "missing_fields": [],
+                    "limitations": [
+                        "현재 파일과 일치하는 분류 확인 기록이 없습니다."
+                    ],
+                }
+            ],
         },
         status=409,
     )

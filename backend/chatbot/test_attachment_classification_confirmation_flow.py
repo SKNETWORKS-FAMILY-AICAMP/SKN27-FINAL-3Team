@@ -133,6 +133,16 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
                         "confirmed": True,
                         "attachment_id": attachment_id,
                     },
+                    "attachment_classification": {
+                        "classification": "fine_notice",
+                        "status": "success",
+                    },
+                    "attachment_workflows": [
+                        {
+                            "attachment_id": attachment_id,
+                            "state": "analysis_ready",
+                        }
+                    ],
                 },
                 content_type="application/json",
             )
@@ -147,6 +157,8 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
             for item in captured["payload"]["attachments"]
             if item["attachment_id"] == attachment_id
         )
+        self.assertNotIn("attachment_classification", captured["payload"])
+        self.assertNotIn("attachment_workflows", captured["payload"])
         self.assertEqual(confirmed_attachment["purpose"], "accident_scene")
         uploaded_file.refresh_from_db()
         record = uploaded_file.metadata["attachment_document_classification"]
@@ -179,7 +191,74 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
             response.json()["status"],
             "classification_confirmation_required",
         )
+        self.assertEqual(
+            response.json()["attachment_workflows"],
+            [
+                {
+                    "contract_version": "attachment_workflow.v1",
+                    "attachment_id": attachment_id,
+                    "state": "failed",
+                    "next_action": "rerun_attachment_classification",
+                    "retryable": True,
+                    "missing_fields": [],
+                    "limitations": [
+                        "현재 파일과 일치하는 분류 확인 기록이 없습니다."
+                    ],
+                }
+            ],
+        )
         submit_mock.assert_not_called()
+
+    def test_fine_notice_confirmation_queues_ocr_without_later_nodes(self) -> None:
+        session_id, attachment_id = self._upload_clean_photo()
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment_id)
+        persist_attachment_document_classification(
+            attachment_id=attachment_id,
+            storage_uri=uploaded_file.storage_uri,
+            execution_id="exec_fine_notice_classification",
+            structured_result={
+                "classification": "fine_notice",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+            },
+        )
+
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "고지서 분류를 확인했습니다. 내용을 분석해 주세요.",
+                "attachments": [{"attachment_id": attachment_id}],
+                "attachment_classification_confirmation": {
+                    "confirmed": True,
+                    "attachment_id": attachment_id,
+                },
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        body = response.json()
+        self.assertEqual(body["routing_intent"], "fine_notice_analysis")
+        node_codes = [
+            step["node_code"] for step in body["analysis_plan"]["steps"]
+        ]
+        self.assertEqual(
+            node_codes,
+            [
+                "input_context_validation",
+                "fine_notice_analysis",
+                "agent_result_validation",
+                "final_response_merge",
+            ],
+        )
+        self.assertNotIn("law_ground_search", node_codes)
+        self.assertNotIn("appeal_decision_flow", node_codes)
+        self.assertNotIn("objection_report_generation", node_codes)
+        self.assertEqual(
+            body["attachment_workflows"][0]["state"],
+            "ocr_running",
+        )
 
     def test_confirmation_cannot_target_an_attachment_omitted_from_request(self) -> None:
         session_id, attachment_id = self._upload_clean_photo()

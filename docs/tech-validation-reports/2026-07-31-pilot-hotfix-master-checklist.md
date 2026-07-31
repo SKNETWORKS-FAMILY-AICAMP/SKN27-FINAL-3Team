@@ -154,7 +154,7 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | G1 | P0 개인정보·입력 gate·라우팅 | 검증 완료 | G0 완료 | ID 2·8·10·12 회귀 통과 |
 | G2 | 인증·새 상담 상태 | 검증 완료 | G1 완료 | ID 5 기능 재평가 가능, auth 유지 |
 | G3 | 운영 모니터·로그·Neo4j | 로컬 구현·검증 완료 / 운영 확인 대기 | G1 완료 | monitor 정상, credential 로그 0 |
-| G4 | 고지서·첨부·상충 진술 | 대기 | G1·G2 완료 | ID 3·4·9·11·13 통과 |
+| G4 | 고지서·첨부·상충 진술 | 로컬 구현·검증 완료 / 운영 E2E 대기 | G1·G2 완료 | ID 3·4·9·11·13 통과 |
 | G5 | polling·부분 실패 UX·증거 규격 | 대기 | G2·G4 완료 | 상태 UX와 캡처 규격 통과 |
 | G6 | 전체 로컬·통합 회귀 | 대기 | G1~G5 완료 | 관련 전체 test/build 통과 |
 | G7 | 운영 재배포 준비·승인 | 대기 | G6 완료 | 배포 전 체크와 사용자 승인 |
@@ -171,9 +171,9 @@ UI 핫픽스와 충돌 가능성이 높은 파일은 새 기준 SHA에서 먼저
 | HFX-011 | P0 | 저정보·욕설-only·해석 불가 입력 gate | 10, 12 | G0 | 검증 완료 |
 | HFX-012 | P0 | 인증 session 복구·새 상담 상태 원자화 | 5 | G1 | 로컬 검증 완료 / 배포 E2E 대기 |
 | HFX-013 | P0 | run summary 배포·monitor·Neo4j 정상화 | 운영 | G1 | 로컬 구현·검증 완료 / 운영 확인 대기 |
-| HFX-014 | P1 | 고지서 intake slot·안전한 법령 응답 | 3, 9, 11 | G1 | 대기 |
-| HFX-015 | P1 | 첨부 분류→확인→OCR→분석 handoff | 4, 5 | G2, HFX-014 | 대기 |
-| HFX-016 | P1 | 상충 진술 계약·반복 질문 제거 | 13 | G1 | 대기 |
+| HFX-014 | P1 | 고지서 intake slot·안전한 법령 응답 | 3, 9, 11 | G1 | 로컬 구현·검증 완료 / 운영 E2E 대기 |
+| HFX-015 | P1 | 첨부 분류→확인→OCR→분석 handoff | 4, 5 | G2, HFX-014 | 로컬 구현·검증 완료 / 운영 E2E 대기 |
+| HFX-016 | P1 | 상충 진술 계약·반복 질문 제거 | 13 | G1 | 로컬 구현·검증 완료 / 운영 E2E 대기 |
 | HFX-017 | P1 | polling timeout·partial·retry UX | 10, 11 | G2, G4 | 대기 |
 | HFX-018 | P1 | E2E 증거 캡처·correlation 규격 | 전체 | G4 | 대기 |
 
@@ -482,44 +482,75 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 
 ### HFX-014 고지서 intake
 
-- [ ] 필수 slot을 문서명/처분 유형, 발급기관, 기한, 첨부 여부로 고정
-- [ ] 법령 검색 성공 여부와 무관하게 미충족 slot 질문
-- [ ] ID 3에서 문서명·발급기관·기한·사진 요청
-- [ ] ID 9에서 욕설 제거 후 동일 intake 유지
-- [ ] ID 11에서 오타를 허용하되 사실을 추측하지 않음
-- [ ] raw `provision_text`·깨진 OCR/RAG chunk 직접 노출 금지
-- [ ] 법령명·조문·검증된 짧은 요약만 표시
+- [x] 필수 slot을 문서명/처분 유형, 발급기관, 기한, 첨부 여부로 고정
+- [x] 법령 검색 성공 여부와 무관하게 미충족 slot 질문
+- [x] ID 3에서 문서명·발급기관·기한·사진 요청
+- [x] ID 9에서 욕설 제거 후 동일 intake 유지
+- [x] ID 11에서 오타를 허용하되 사실을 추측하지 않음
+- [x] raw `provision_text`·깨진 OCR/RAG chunk 직접 노출 금지
+- [x] 법령명·조문·검증된 짧은 요약만 표시
 
 ### HFX-015 첨부 handoff
 
-- [ ] scan
-- [ ] classification
-- [ ] classification 사용자 확인
-- [ ] OCR
-- [ ] OCR field 사용자 확인
-- [ ] fine notice analysis
-- [ ] 확인 정보·누락 정보·근거·한계 병합
-- [ ] appeal/report gate
-- [ ] 각 상태를 사용자에게 구분해 표시
-- [ ] partial/failed에서 다음 행동과 retry 제공
-- [ ] 실제 고지서와 닮은 합성 fixture 사용
+- [x] scan
+- [x] classification
+- [x] classification 사용자 확인
+- [x] OCR
+- [x] OCR field 사용자 확인
+- [x] fine notice analysis
+- [x] 확인 정보·누락 정보·근거·한계 병합
+- [x] appeal/report gate
+- [x] 각 상태를 사용자에게 구분해 표시
+- [x] partial/failed에서 다음 행동과 retry 제공
+- [x] 실제 고지서와 닮은 합성 fixture 사용
 
 ### HFX-016 상충 진술·반복 질문
 
-- [ ] Supervisor 계약에 `fact_conflicts` 추가
-- [ ] same-message conflict 보존
-- [ ] `signal_priority` 충돌을 사용자에게 명시
-- [ ] 충돌 field만 재질문
-- [ ] 이미 수집된 `vehicle_actions` 재질문 금지
-- [ ] 사실 카드 source와 confidence 유지
-- [ ] ID 13 exact input에서 과실 숫자 0건
+- [x] Supervisor 계약에 `fact_conflicts` 추가
+- [x] same-message conflict 보존
+- [x] `signal_priority` 충돌을 사용자에게 명시
+- [x] 충돌 field만 재질문
+- [x] 이미 수집된 `vehicle_actions` 재질문 금지
+- [x] 사실 카드 source와 confidence 유지
+- [x] ID 13 exact input에서 과실 숫자 0건
 
 ### G4 종료 조건
 
-- [ ] ID 3·4·9·11·13 통과
-- [ ] ID 6·7 안전 회귀 통과
-- [ ] 첨부 상태별 API·UI contract 통과
-- [ ] raw OCR·private storage path·PII 노출 0건
+- [x] ID 3·4·9·11·13 로컬 계약·오케스트레이션 통과
+- [x] ID 6·7 안전 회귀 통과
+- [x] 첨부 상태별 API·UI contract 통과
+- [x] raw OCR·private storage path·PII 노출 0건
+
+### G4 로컬 구현·검증 증적
+
+- 기준: `HEAD dfd12f4e` 위 미커밋 G4 작업 트리
+- 구현 계획:
+  - `docs/superpowers/plans/2026-07-31-g4-consultation-contract-hotfix.md`
+  - `docs/superpowers/specs/2026-07-31-g4-fine-notice-attachment-conflict-design.md`
+- 전체 Python:
+  - 명령: `python -m pytest -q`
+  - 결과: `1388 passed`, `37 skipped`, `4 subtests passed`, `0 failed`
+  - 경고: 기존 `LangChainPendingDeprecationWarning` 1건
+- frontend 전체:
+  - 명령: 확인된 `app/web/*.test.js` 10개를 `node --test`로 실행
+  - 결과: `57 passed`, `0 failed`
+- Django 첨부 분류 확인 API:
+  - 명령:
+    `python backend/manage.py test chatbot.test_attachment_classification_confirmation_flow --verbosity 1`
+  - 결과: `4 tests`, `OK`
+- production build:
+  - 작업 디렉터리: `app/web`
+  - 명령: `npm run build`
+  - 결과: Vite `7.3.6`, `42 modules transformed`, 성공
+- 추가 집중 검증:
+  - 부분 응답·대기 조회·저장 복원 교차검토: `73 passed`, `0 failed`
+  - G4-C 충돌 계약: `119 passed`, `0 failed`
+  - G4-B 합성 fixture·UI·오케스트레이션: `56 passed`, `0 failed`
+  - 첨부 상태 머신·저장 복원·입력 제어: `92 passed`, `0 failed`
+- 범위 확인:
+  - `UploadedFileStatus`, model, migration, generic polling loop, paid-call retry
+    정책은 변경하지 않음
+  - 실제 운영 배포 및 배포 후 13개 E2E는 G7 승인 후 G8·G9에서 별도 수행
 
 ## 11. G5 — polling·부분 실패 UX·증거 규격
 

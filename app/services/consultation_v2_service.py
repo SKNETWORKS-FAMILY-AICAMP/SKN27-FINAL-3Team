@@ -11,6 +11,12 @@ CORE_FACT_QUESTIONS: tuple[tuple[str, str], ...] = (
     ("signal_priority", "당시 신호나 우선권 상황을 알려주세요."),
     ("collision_location", "각 차량의 어느 부위가 충돌했는지 알려주세요."),
 )
+CONFLICT_QUESTIONS = {
+    "road_layout": "도로 형태에 대한 설명이 서로 다릅니다. 실제 사고 장소의 도로 형태를 다시 확인해 주세요.",
+    "vehicle_actions": "차량 행동에 대한 설명이 서로 다릅니다. 충돌 직전 양쪽 차량의 행동을 다시 확인해 주세요.",
+    "signal_priority": "본인 차량의 신호 상태에 대한 설명이 서로 다릅니다. 진입 당시 신호를 다시 확인해 주세요.",
+    "collision_location": "충돌 부위에 대한 설명이 서로 다릅니다. 양쪽 차량의 충돌 부위를 다시 확인해 주세요.",
+}
 
 HIGH_RISK_MARKERS = (
     "의식이 없",
@@ -36,6 +42,11 @@ def build_consultation_state_v2(
     normalized_facts = _dict(facts)
     normalized_sources = _dict_list(sources)
     normalized_conflicts = _dict_list(conflicts)
+    conflict_fields = [
+        _text(conflict.get("field"))
+        for conflict in normalized_conflicts
+        if _text(conflict.get("field")) in CONFLICT_QUESTIONS
+    ]
     high_risk = is_high_risk_consultation(user_text)
     missing_fields = [
         field
@@ -65,11 +76,21 @@ def build_consultation_state_v2(
             "required_fields": [field for field, _question in CORE_FACT_QUESTIONS],
             "missing_fields": missing_fields,
             "conflict_count": len(normalized_conflicts),
+            "conflict_fields": conflict_fields,
             "ready_for_fault_range": ready_for_fault_range,
         },
         "next_questions": (
             []
             if high_risk
+            else [
+                {
+                    "field": field,
+                    "reason": "conflicting_claim",
+                    "question": CONFLICT_QUESTIONS[field],
+                }
+                for field in conflict_fields
+            ]
+            if conflict_fields
             else [
                 {"field": field, "question": question}
                 for field, question in CORE_FACT_QUESTIONS
@@ -79,6 +100,8 @@ def build_consultation_state_v2(
         "next_action": (
             "expert_handoff"
             if high_risk
+            else "resolve_fact_conflicts"
+            if conflict_fields
             else "confirm_facts"
             if ready_for_fault_range
             else "collect_missing_facts"

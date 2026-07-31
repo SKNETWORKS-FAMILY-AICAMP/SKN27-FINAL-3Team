@@ -84,6 +84,7 @@ def test_pending_result_uses_the_v2_contract_without_calling_composer() -> None:
         "limitations": [],
         "work_item": {},
         "progress_state": {},
+        "attachment_workflows": [],
     }
     assert composer_calls == []
 
@@ -216,6 +217,19 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
         "pending_questions": [{"question": "confirm facts"}],
         "report_links": [],
         "attachments": [{"attachment_id": "attachment_1"}],
+        "attachment_workflows": [
+            {
+                "contract_version": "attachment_workflow.v1",
+                "attachment_id": "attachment_1",
+                "state": "failed",
+                "next_action": "reattach_file",
+                "retryable": True,
+                "missing_fields": [],
+                "limitations": [
+                    "현재 파일은 안전한 분석 대상으로 사용할 수 없습니다."
+                ],
+            }
+        ],
         "reporting_payload": {"report_id": "report_1"},
         "supervisor_state": {"stage": "finalize"},
         "user_claims": [],
@@ -278,7 +292,16 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
                 "node_code": "law_ground_search",
                 "status": "success",
                 "summary": "관련 법령을 찾았습니다.",
-                "structured_result": {"matched_laws": [{"title": "도로교통법"}]},
+                        "structured_result": {
+                            "matched_laws": [
+                                {
+                                    "law_name": "도로교통법",
+                                    "article": "제160조",
+                                    "summary": "과태료 절차 근거",
+                                    "source_reference": "law:1",
+                                }
+                            ]
+                        },
                 "evidence": [{"source_reference": "law:1"}],
                 "next_actions": ["근거를 확인해 주세요."],
                 "limitations": ["개별 판단은 확인이 필요합니다."],
@@ -313,7 +336,16 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
                     "node_code": "law_ground_search",
                     "status": "success",
                     "summary": "관련 법령을 찾았습니다.",
-                    "structured_result": {"matched_laws": [{"title": "도로교통법"}]},
+                    "structured_result": {
+                        "matched_laws": [
+                            {
+                                "law_name": "도로교통법",
+                                "article": "제160조",
+                                "summary": "과태료 절차 근거",
+                                "source_reference": "law:1",
+                            }
+                        ]
+                    },
                     "agent_input": {"secret": "hidden"},
                 }
             ],
@@ -376,7 +408,15 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
                 "node_code": "law_ground_search",
                 "status": "success",
                 "summary": "관련 법령을 찾았습니다.",
-                "structured_result": {"matched_laws": [{"title": "도로교통법"}]},
+                "structured_result": {
+                    "matched_laws": [
+                        {
+                            "law_name": "도로교통법",
+                            "article": "제160조",
+                            "summary": "과태료 절차 근거",
+                        }
+                    ]
+                },
             }
         ],
     }
@@ -693,10 +733,8 @@ def test_law_public_projection_drops_nested_private_metadata_and_unsafe_limitati
 
     node = outcome.payload["supervisor_execution"]["node_results"][0]
     structured = node["structured_result"]
-    assert structured["matched_laws"] == [{"law_name": "Road Traffic Act"}]
-    assert structured["law_provisions"] == [
-        {"source_name": "Road Traffic Act", "provision_text": "Safe public text"}
-    ]
+    assert structured["matched_laws"] == []
+    assert "law_provisions" not in structured
     assert structured["freshness"] == {
         "effective_at": "2026-07-20",
         "retrieved_at": "2026-07-27T09:00:00+09:00",
@@ -711,7 +749,7 @@ def test_law_public_projection_drops_nested_private_metadata_and_unsafe_limitati
     assert "RuntimeError: raw exception" not in repr(node)
 
 
-def test_law_public_projection_preserves_scalar_source_references() -> None:
+def test_law_public_projection_drops_scalar_source_references() -> None:
     from app.services.analysis_job_query_service import load_analysis_result
 
     outcome = load_analysis_result(
@@ -736,7 +774,7 @@ def test_law_public_projection_preserves_scalar_source_references() -> None:
     )
 
     node = outcome.payload["supervisor_execution"]["node_results"][0]
-    assert node["structured_result"]["matched_laws"] == ["law:server"]
+    assert node["structured_result"]["matched_laws"] == []
 
 
 def test_law_public_projection_does_not_invent_quality_summary_without_public_signals() -> None:
@@ -763,7 +801,7 @@ def test_law_public_projection_does_not_invent_quality_summary_without_public_si
     )
 
     node = outcome.payload["supervisor_execution"]["node_results"][0]
-    assert node["structured_result"] == {"matched_laws": ["law:server"]}
+    assert node["structured_result"] == {"matched_laws": []}
 
 
 def test_law_public_projection_builds_summary_when_missing() -> None:
@@ -889,6 +927,15 @@ def test_pending_result_projects_only_worker_polling_fields() -> None:
         load_job=lambda _job_id: {
             "job_id": "job_queued",
             "status": "queued",
+            "active_node": "attachment_document_classification",
+            "attachments": [
+                {
+                    "attachment_id": "att_queued",
+                    "status": "ready",
+                    "scan_status": "clean",
+                    "storage_uri": "s3://private/att_queued",
+                }
+            ],
             "work_item": {
                 "contract_version": "agent_worker_queue.v1",
                 "work_item_id": "work_1",
@@ -918,7 +965,72 @@ def test_pending_result_projects_only_worker_polling_fields() -> None:
         "state": "queued",
         "job_status": "queued",
     }
+    assert outcome.payload["attachment_workflows"][0]["state"] == (
+        "classification_running"
+    )
+    assert "s3://" not in repr(outcome.payload["attachment_workflows"])
     assert "structured_results" not in outcome.payload
+
+
+def test_completed_result_projects_normalized_fact_conflicts_only() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_conflict",
+        load_job=lambda _job_id: {
+            "job_id": "job_conflict",
+            "status": "partial",
+            "supervisor_state": {
+                "stage": "intake",
+                "fact_conflicts": [
+                    {
+                        "field": "signal_priority",
+                        "candidates": [
+                            {
+                                "value": "녹색 신호",
+                                "source_message_id": "msg_conflict",
+                                "confidence": 0.9,
+                            },
+                            {
+                                "value": "적색 신호",
+                                "source_message_id": "msg_conflict",
+                                "confidence": 0.8,
+                            },
+                        ],
+                    },
+                    {
+                        "field": "signal_priority",
+                        "candidates": [],
+                        "debug": "must-not-leak",
+                    },
+                ],
+            },
+            "agent_results": [],
+        },
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "status": "partial",
+        },
+    )
+
+    assert outcome.payload["supervisor_state"]["fact_conflicts"] == [
+        {
+            "field": "signal_priority",
+            "candidates": [
+                {
+                    "value": "녹색 신호",
+                    "source_message_id": "msg_conflict",
+                    "confidence": 0.9,
+                },
+                {
+                    "value": "적색 신호",
+                    "source_message_id": "msg_conflict",
+                    "confidence": 0.8,
+                },
+            ],
+        }
+    ]
+    assert "must-not-leak" not in repr(outcome.payload)
 
 
 def test_completed_result_prepends_composed_deadline_card_to_persisted_cards() -> None:
@@ -977,6 +1089,70 @@ def test_completed_result_uses_canonical_persisted_terminal_status() -> None:
 
     assert outcome.kind == "completed"
     assert outcome.payload["status"] == "failed"
+
+
+def test_completed_result_rebuilds_safe_attachment_workflow_from_persisted_data() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    stored = {
+        "job_id": "job_attachment_workflow",
+        "status": "partial",
+        "active_node": "fine_notice_analysis",
+        "attachments": [
+            {
+                "attachment_id": "att_notice",
+                "purpose": "fine_notice",
+                "status": "ready",
+                "scan_status": "clean",
+                "storage_uri": "s3://private/notices/att_notice",
+                "filename": "private-notice.pdf",
+            }
+        ],
+        "agent_results": [
+            {
+                "node_code": "attachment_document_classification",
+                "status": "success",
+                "structured_result": {
+                    "attachment_id": "att_notice",
+                    "status": "success",
+                },
+            },
+            {
+                "node_code": "fine_notice_analysis",
+                "status": "partial",
+                "structured_result": {
+                    "attachment_id": "att_notice",
+                    "requires_confirmation": True,
+                    "missing_fields": ["response_deadline"],
+                    "raw_ocr_text": "private OCR text",
+                },
+            },
+        ],
+    }
+
+    outcome = load_analysis_result(
+        "job_attachment_workflow",
+        load_job=lambda _job_id: stored,
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "status": "partial",
+            "assistant_message": {"answer": "확인이 필요합니다."},
+        },
+    )
+
+    assert outcome.payload["attachment_workflows"] == [
+        {
+            "contract_version": "attachment_workflow.v1",
+            "attachment_id": "att_notice",
+            "state": "ocr_needs_confirmation",
+            "next_action": "confirm_ocr_fields",
+            "retryable": False,
+            "missing_fields": ["response_deadline"],
+            "limitations": [],
+        }
+    ]
+    assert "s3://" not in repr(outcome.payload["attachment_workflows"])
+    assert "private OCR" not in repr(outcome.payload["attachment_workflows"])
 
 
 def test_result_reports_missing_job_without_calling_composer() -> None:

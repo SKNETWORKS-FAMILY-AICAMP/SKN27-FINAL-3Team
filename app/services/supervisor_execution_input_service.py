@@ -32,6 +32,10 @@ EXECUTION_CONTROL_FIELDS = frozenset(
         "agent_input",
         "analysis_plan",
         "analysis_plan_id",
+        "attachment_classification",
+        "attachment_workflow",
+        "attachment_workflows",
+        "classification",
         "depends_on",
         "execution_mode",
         "execution_status",
@@ -47,6 +51,7 @@ EXECUTION_CONTROL_FIELDS = frozenset(
         "supervisor_handoff",
         "supervisor_reporting_handoff",
         "upstream_results",
+        "workflow_state",
     }
 )
 

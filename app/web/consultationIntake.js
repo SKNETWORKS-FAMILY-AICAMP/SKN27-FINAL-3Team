@@ -16,9 +16,30 @@ export const ACCIDENT_TYPE_OPTIONS = [
 ];
 
 export const FINE_NOTICE_FIELDS = [
-  { key: "violationDate", label: "위반 일시", question: "고지서에 적힌 위반 일시" },
-  { key: "violationLocation", label: "위반 장소", question: "고지서에 적힌 위반 장소" },
-  { key: "violationType", label: "위반 유형", question: "신호 위반, 속도 위반 등" },
+  {
+    key: "documentDispositionType",
+    serverKey: "document_disposition_type",
+    label: "문서명·처분 유형",
+    question: "받은 문서의 이름 또는 처분 유형",
+  },
+  {
+    key: "issuingAuthority",
+    serverKey: "issuing_authority",
+    label: "발급기관",
+    question: "고지서를 발급한 기관",
+  },
+  {
+    key: "responseDeadline",
+    serverKey: "response_deadline",
+    label: "제출 기한",
+    question: "의견제출 또는 이의신청 기한",
+  },
+  {
+    key: "attachmentAvailable",
+    serverKey: "attachment_available",
+    label: "첨부 가능 여부",
+    question: "고지서 사진이나 파일을 첨부할 수 있는지",
+  },
 ];
 
 export const CONSULTATION_FACT_FIELDS = [
@@ -62,9 +83,10 @@ export function createEmptyConsultationIntake() {
   return {
     consultationType: "",
     accidentType: "",
-    violationDate: "",
-    violationLocation: "",
-    violationType: "",
+    documentDispositionType: "",
+    issuingAuthority: "",
+    responseDeadline: "",
+    attachmentAvailable: "",
     fineQuestion: "",
     roadLayout: "",
     vehicleActions: "",
@@ -149,7 +171,7 @@ export function buildConsultationMessagePair({ freeText = "", intake } = {}) {
 
 export function buildConsultationRequestContext({ intake } = {}) {
   const normalizedIntake = normalizeConsultationIntake(intake);
-  return {
+  const context = {
     consultation_type: normalizedIntake.consultationType,
     facts: Object.fromEntries(
       CONSULTATION_FACT_FIELDS.flatMap(({ key, serverKey }) =>
@@ -157,6 +179,14 @@ export function buildConsultationRequestContext({ intake } = {}) {
       )
     ),
   };
+  if (normalizedIntake.consultationType === "fine_notice") {
+    context.fine_notice_slots = Object.fromEntries(
+      FINE_NOTICE_FIELDS.flatMap(({ key, serverKey }) =>
+        normalizedIntake[key] ? [[serverKey, normalizedIntake[key]]] : []
+      )
+    );
+  }
+  return context;
 }
 
 function shouldCollectAccidentFacts(intake) {

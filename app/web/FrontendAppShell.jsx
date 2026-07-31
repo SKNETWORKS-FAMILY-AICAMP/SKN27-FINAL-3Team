@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createFrontendApi } from "./apiClient.js";
 import { buildAppealDecisionUi } from "./appealDecisionUi.js";
+import { buildAttachmentWorkflowUi } from "./attachmentWorkflowUi.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
 import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
 import { reportsForCase } from "./caseReports.js?null-case-v1";
@@ -379,6 +380,7 @@ export default function FrontendAppShell({
   const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
   const attachmentClassificationResult =
     analysisResponse?.structured_results?.attachment_document_classification || null;
+  const attachmentWorkflowUi = buildAttachmentWorkflowUi(analysisResponse?.attachment_workflows);
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -1395,6 +1397,7 @@ export default function FrontendAppShell({
           user_text: composedQuestion,
           consultation_type: consultationRequestContext.consultation_type || undefined,
           facts: consultationRequestContext.facts,
+          fine_notice_slots: consultationRequestContext.fine_notice_slots,
           ocr_confirmation: confirmationForRequest || undefined,
           attachment_classification_confirmation:
             attachmentClassificationConfirmation || undefined,
@@ -1996,6 +1999,7 @@ export default function FrontendAppShell({
               ocrConfirmationFields={ocrConfirmationFields}
               ocrResult={ocrResult}
               attachmentClassificationResult={attachmentClassificationResult}
+              attachmentWorkflowUi={attachmentWorkflowUi}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
@@ -2894,6 +2898,7 @@ function ChatScreenV2({
   appealRiskAcknowledged,
   onAcknowledgeAppealRisk,
   attachmentClassificationResult,
+  attachmentWorkflowUi,
   attachmentOptions,
   assistantAnswer,
   assistantFollowUp,
@@ -2943,6 +2948,7 @@ function ChatScreenV2({
   const questionInputRef = useRef(null);
   const quickExamplesRef = useRef(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const activeAttachmentWorkflow = attachmentWorkflowUi?.[0] || null;
   const visibleMessages = chatMessages.length
     ? chatMessages
     : submittedQuestion
@@ -3141,7 +3147,12 @@ function ChatScreenV2({
             </section>
           )}
 
-          {ocrResult?.requires_confirmation === true && (
+          {activeAttachmentWorkflow && (
+            <AttachmentWorkflowPanel workflow={activeAttachmentWorkflow} />
+          )}
+
+          {activeAttachmentWorkflow?.state === "ocr_needs_confirmation" &&
+            ocrResult?.requires_confirmation === true && (
             <OcrConfirmationCard
               fields={ocrConfirmationFields}
               isSubmitting={isSubmitting}
@@ -3150,7 +3161,8 @@ function ChatScreenV2({
             />
           )}
 
-          {attachmentClassificationResult?.requires_confirmation === true && (
+          {activeAttachmentWorkflow?.state === "classified_waiting_confirmation" &&
+            attachmentClassificationResult?.requires_confirmation === true && (
             <AttachmentClassificationConfirmationCard
               classification={attachmentClassificationResult?.classification}
               confidenceBand={attachmentClassificationResult?.confidence_band}
@@ -3261,6 +3273,37 @@ function ChatScreenV2({
           </div>
         </div>
       </div>
+    </section>
+  );
+}
+
+function AttachmentWorkflowPanel({ workflow }) {
+  return (
+    <section
+      className={`ocr-confirmation-card attachment-workflow-panel is-${workflow.tone}`}
+      aria-label="첨부 자료 처리 상태"
+      aria-live="polite"
+    >
+      <div>
+        <span className="eyebrow">첨부 자료 상태</span>
+        <strong>{workflow.title}</strong>
+        <p>{workflow.description}</p>
+      </div>
+      {workflow.missingFields.length > 0 && (
+        <ul>
+          {workflow.missingFields.map((field) => (
+            <li key={field}>추가 확인: {field}</li>
+          ))}
+        </ul>
+      )}
+      {workflow.limitations.length > 0 && (
+        <ul>
+          {workflow.limitations.map((limitation) => (
+            <li key={limitation}>{limitation}</li>
+          ))}
+        </ul>
+      )}
+      {workflow.action && <p>다음 작업: {workflow.action}</p>}
     </section>
   );
 }
@@ -3397,12 +3440,23 @@ function ConsultationIntakePanel({
                 {FINE_NOTICE_FIELDS.map((field) => (
                   <label className="consultation-intake-field" key={field.key}>
                     <span>{field.label}</span>
-                    <input
-                      type={field.key === "violationDate" ? "date" : "text"}
-                      value={value?.[field.key] || ""}
-                      onChange={(event) => onChange(field.key, event.target.value)}
-                      placeholder={field.question}
-                    />
+                    {field.key === "attachmentAvailable" ? (
+                      <select
+                        value={value?.[field.key] || ""}
+                        onChange={(event) => onChange(field.key, event.target.value)}
+                      >
+                        <option value="">확인 필요</option>
+                        <option value="yes">첨부 가능</option>
+                        <option value="no">첨부 어려움</option>
+                      </select>
+                    ) : (
+                      <input
+                        type={field.key === "responseDeadline" ? "date" : "text"}
+                        value={value?.[field.key] || ""}
+                        onChange={(event) => onChange(field.key, event.target.value)}
+                        placeholder={field.question}
+                      />
+                    )}
                   </label>
                 ))}
               </>
