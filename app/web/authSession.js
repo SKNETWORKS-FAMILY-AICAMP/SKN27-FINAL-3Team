@@ -119,6 +119,9 @@ export async function buildGoogleLoginPayload({
 export function googleLoginFailureMessage(error) {
   const trustedMessage = String(error?.publicMessage || "").trim();
   if (trustedMessage) {
+    if (String(error?.reason || "").toLowerCase().includes("google_session_already_owned")) {
+      return "이 상담은 이미 다른 계정에 저장되어 있습니다. 새 상담을 시작한 뒤 Google 로그인을 다시 시도해 주세요.";
+    }
     return trustedMessage;
   }
   const detail = [error?.message, error?.code, error?.reason, error]
@@ -141,6 +144,17 @@ export function googleLoginFailureMessage(error) {
     return "Google 로그인 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.";
   }
   return "Google 로그인 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+}
+
+export function toGoogleLoginError(error) {
+  const loginError = new Error(googleLoginFailureMessage(error));
+  loginError.publicMessage = loginError.message;
+  for (const key of ["code", "reason", "requiredAction", "status"]) {
+    if (error?.[key] !== undefined && error?.[key] !== null) {
+      loginError[key] = error[key];
+    }
+  }
+  return loginError;
 }
 
 export async function requestGoogleAuthorizationCode({ clientId, scope = GOOGLE_LOGIN_SCOPE, timeoutMs = 60000 }) {

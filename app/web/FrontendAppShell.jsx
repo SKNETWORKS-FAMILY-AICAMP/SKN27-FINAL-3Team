@@ -16,6 +16,7 @@ import {
   readStoredAuthToken,
   resolveGuestBootstrapSessionId,
   scheduleAppJwtRefresh,
+  toGoogleLoginError,
 } from "./authSession.js";
 import {
   ACCIDENT_TYPE_OPTIONS,
@@ -618,10 +619,7 @@ export default function FrontendAppShell({
         userId: nextUserId,
       };
     } catch (error) {
-      const publicMessage = googleLoginFailureMessage(error);
-      const loginError = new Error(publicMessage);
-      loginError.publicMessage = publicMessage;
-      throw loginError;
+      throw toGoogleLoginError(error);
     }
   }
 
@@ -1373,34 +1371,46 @@ export default function FrontendAppShell({
     setIsSavingConversation(true);
     setStatusMessage(statusMessage);
     try {
-      const loginState = await loginAndBindCurrentSession({
-        source,
-        nextRoute: "chatbot",
-      });
-      await api.updateConversationSaveState(
-        {
-          session_id: loginState.sessionId,
-          conversation_save_state: "saved",
-          conversation_save_source: source,
-        },
-        loginState.identity
-      );
-      const summary = await api.getMyPageSummary({ identity: loginState.identity, sessionId: loginState.sessionId });
-      setMypageSummary(summary);
-      const events = await api.listHistoryEvents({ identity: loginState.identity, sessionId: loginState.sessionId });
-      setHistoryEvents(events);
-      setActiveRoute(routeAfterSave);
+      let loginState;
+      try {
+        loginState = await loginAndBindCurrentSession({
+          source,
+          nextRoute: "chatbot",
+        });
+      } catch (error) {
+        setStatusMessage(
+          `${error?.publicMessage || googleLoginFailureMessage(error)} 상담은 지금 상태로 계속 진행할 수 있습니다.`
+        );
+        return null;
+      }
 
-      setSaveDecision("saved");
-      setSavePromptVisible(false);
-      setGuestDetailedReportUsed(false);
-      setStatusMessage("현재 상담을 Google 계정 기준 내 사건 이력에 저장했습니다.");
-      return loginState;
-    } catch (error) {
-      setStatusMessage(
-        `${error?.publicMessage || googleLoginFailureMessage(error)} 상담은 지금 상태로 계속 진행할 수 있습니다.`
-      );
-      return null;
+      try {
+        await api.updateConversationSaveState(
+          {
+            session_id: loginState.sessionId,
+            conversation_save_state: "saved",
+            conversation_save_source: source,
+          },
+          loginState.identity
+        );
+        setSaveDecision("saved");
+        setSavePromptVisible(false);
+        setGuestDetailedReportUsed(false);
+
+        const summary = await api.getMyPageSummary({ identity: loginState.identity, sessionId: loginState.sessionId });
+        setMypageSummary(summary);
+        const events = await api.listHistoryEvents({ identity: loginState.identity, sessionId: loginState.sessionId });
+        setHistoryEvents(events);
+        setActiveRoute(routeAfterSave);
+
+        setStatusMessage("현재 상담을 Google 계정 기준 내 사건 이력에 저장했습니다.");
+        return loginState;
+      } catch (error) {
+        setStatusMessage(
+          "Google 로그인은 완료됐지만 현재 상담의 저장 또는 내 사건·이력 갱신에 실패했습니다. 로그인 상태는 유지되며, 잠시 후 마이페이지를 새로고침해 다시 확인해 주세요."
+        );
+        return loginState;
+      }
     } finally {
       setIsSavingConversation(false);
     }
