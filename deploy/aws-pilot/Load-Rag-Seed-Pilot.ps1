@@ -81,6 +81,11 @@ if (-not $RagSeedS3Uri.StartsWith($expectedPrefix, [StringComparison]::Ordinal) 
     throw "RagSeedS3Uri must be a versioned prefix under $expectedPrefix and end with '/'."
 }
 if ($RagSeedS3Uri -match "(^|/)\.\.(/|$)") { throw "RAG seed URI cannot contain parent traversal." }
+foreach ($descriptorValue in @($RagSeedS3Uri, $RagSeedManifestRelativePath, $RagSeedManifestSha256)) {
+    if ($descriptorValue -match "[`r`n=]") {
+        throw "RAG seed descriptor values cannot contain control characters or '='."
+    }
+}
 
 $stageProjectName = "skn27-stage-$ReleaseTag"
 $stageComposeCommand = "docker compose --project-name '$stageProjectName' --env-file .compose.env --env-file .stage-compose.env -f docker-compose.pilot.yml"
@@ -111,6 +116,9 @@ $runnerCommands = @(
     "EVIDENCE_DIR=`$TARGET_RELEASE/operational-evidence",
     "EVIDENCE_FILE=`$EVIDENCE_DIR/run_summary.json",
     "EVIDENCE_TMP=`$EVIDENCE_DIR/.run_summary.json.tmp",
+    "SEED_SOURCE_DIR='/opt/skn27-pilot/state'",
+    "SEED_SOURCE_FILE=`$SEED_SOURCE_DIR/legal-operational-evidence-source.env",
+    "SEED_SOURCE_TMP=`$SEED_SOURCE_DIR/.legal-operational-evidence-source.env.tmp",
     "test ! -e `$EVIDENCE_FILE && test ! -e `$EVIDENCE_TMP",
     "load_failed() { status=`$?; trap - ERR EXIT; cleanup_rag_seed 2>/dev/null || true; cd `$TARGET_RELEASE 2>/dev/null || true; $stageComposeCommand down --remove-orphans >/dev/null 2>&1 || true; docker volume rm '${stageProjectName}_redis_data' '${stageProjectName}_clamav_data' '${stageProjectName}_law_neo4j_data' '${stageProjectName}_law_neo4j_logs' >/dev/null 2>&1 || true; rm -rf -- `$TARGET_RELEASE; exit `$status; }",
     "trap load_failed ERR",
@@ -136,7 +144,7 @@ $runnerCommands = @(
     "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py smoke_law_ground_search --require-results --format json",
     "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py verify_pgvector_rag_readiness --format json",
     "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results --format json",
-    "install -d -m 0750 `$EVIDENCE_DIR",
+    "install -d -m 0755 `$EVIDENCE_DIR",
     "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py build_legal_operational_evidence --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --dataset-version `"`$LEGAL_DATASET_VERSION`" --release-version '$ReleaseTag' --verified-at `"`$LEGAL_DATASET_VERIFIED_AT`" > `$EVIDENCE_TMP",
     "$stageComposeCommand --profile seed run --rm --no-deps -v `$EVIDENCE_DIR:/run/operational-evidence:ro rag-loader python -m etl.legal.validate_run_summary --summary /run/operational-evidence/.run_summary.json.tmp --max-age-hours `"`$LEGAL_MAX_AGE_HOURS`" --expected-dataset-version `"`$LEGAL_DATASET_VERSION`" --expected-release-version '$ReleaseTag'",
     "chmod 0444 `$EVIDENCE_TMP",
@@ -146,6 +154,10 @@ $runnerCommands = @(
     "chmod 0444 `$RELEASE_STATE_FILE.tmp && mv -f `$RELEASE_STATE_FILE.tmp `$RELEASE_STATE_FILE",
     "cleanup_rag_seed",
     "trap - EXIT",
+    "install -d -m 0700 `$SEED_SOURCE_DIR",
+    "printf '%s\n' 'RAG_SEED_S3_URI=$RagSeedS3Uri' 'RAG_SEED_MANIFEST_RELATIVE_PATH=$RagSeedManifestRelativePath' 'RAG_SEED_MANIFEST_SHA256=$RagSeedManifestSha256' > `$SEED_SOURCE_TMP",
+    "chmod 0600 `$SEED_SOURCE_TMP",
+    "mv -f `$SEED_SOURCE_TMP `$SEED_SOURCE_FILE",
     "trap - ERR"
 )
 

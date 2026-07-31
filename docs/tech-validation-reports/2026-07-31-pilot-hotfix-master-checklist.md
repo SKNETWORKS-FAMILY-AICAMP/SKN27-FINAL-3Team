@@ -698,6 +698,40 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 - [ ] 배포 시간과 관찰 담당 확인
 - [ ] 사용자에게 운영 배포 승인 요청
 
+### operational evidence/app-release hold point
+
+로컬 구현·계약 테스트 완료는 아래 운영 작업의 실행 완료를 의미하지 않는다.
+현재 운영 복구 입력(S3 URI, manifest 상대 경로, manifest SHA-256)과 실제 AWS
+변경 명령은 실행 직전에 별도 승인한다.
+
+- [ ] 현재 운영 SHA `818199aee975` evidence-only 복구
+- [ ] 현재 운영 SHA transaction gate 및 600초 연속 acceptance 통과
+- [ ] app-release pipeline 승인
+- [ ] 후보 릴리스 transaction gate 통과
+- [ ] 후보 릴리스 600초 연속 acceptance 통과
+- [ ] G8 운영 재배포·smoke 완료
+- [ ] 배포 후 13개 E2E 13/13 통과
+
+`Recover-PilotOperationalEvidence.ps1`과
+`Confirm-PilotOperationalAcceptance.ps1`은 provider·seed loader를 실행하지
+않는다. immutable seed 검증 실패 시 자동 재적재하지 않고, 유료/전체 seed
+작업이 필요한 경우 정확한 범위로 별도 승인받는다.
+
+로컬 구현 검증 증거(2026-07-31):
+
+- [x] 공통 transaction/acceptance gate와 Django command 계약 — 집중 pytest
+  `130 passed`, Django `16 passed`
+- [x] AWS 파일럿 배포·복구·수동 롤백·watcher 계약 — `89 passed`
+- [x] CodeBuild app-release 계약 — `14 passed`
+- [x] 전체 Python 회귀 — `1473 passed`, `37 skipped`, 기존 LangChain warning 1건
+- [x] 프런트 Node 회귀 — `node --test *.test.js`, `66 passed`
+- [x] Vite production build — 성공
+- [x] 전체 AWS PowerShell parser, app-release/watcher 원격 Bash 문법,
+  Terraform `fmt -check -recursive`, 금지된 유료·loader 문자열 0건
+- [ ] Terraform `validate` — 로컬 `.terraform/providers`에
+  `archive 2.8.0`, `aws 6.54.0`, `random 3.9.0` package가 없어 실행 차단.
+  구성 변경이나 임의 provider 다운로드 없이 G7 환경 검증으로 이관
+
 ### 배포 중단 조건
 
 - precheck 실패

@@ -349,6 +349,135 @@ class OperationalObservabilityTests(TestCase):
             "release-abc123",
         )
 
+    @override_settings(
+        LEGAL_DATASET_VERSION="dataset-v1",
+        APP_RELEASE_VERSION="release-abc123",
+    )
+    @mock.patch(
+        "chatbot.management.commands.observe_operational_health.build_operational_health_snapshot"
+    )
+    def test_transaction_gate_accepts_queue_backlog_only(self, snapshot_builder):
+        snapshot_builder.return_value = {
+            "contract_version": "operational_health.v1",
+            "event_type": "operational_health",
+            "status": "warn",
+            "legal_data": {
+                "status": "success",
+                "issue_count": 0,
+                "dataset_version": "dataset-v1",
+                "release_version": "release-abc123",
+            },
+            "alerts": [{"code": "queue_backlog", "severity": "warning"}],
+        }
+        stdout = StringIO()
+
+        call_command(
+            "observe_operational_health",
+            "--once",
+            "--gate-mode",
+            "transaction",
+            stdout=stdout,
+        )
+
+        rendered = json.loads(stdout.getvalue())
+        self.assertEqual(rendered["gate"]["decision"], "pass")
+        self.assertEqual(rendered["gate"]["reason_codes"], [])
+
+    @override_settings(
+        LEGAL_DATASET_VERSION="dataset-v1",
+        APP_RELEASE_VERSION="release-abc123",
+    )
+    @mock.patch(
+        "chatbot.management.commands.observe_operational_health.build_operational_health_snapshot"
+    )
+    def test_acceptance_gate_returns_reset_for_warning(self, snapshot_builder):
+        snapshot_builder.return_value = {
+            "contract_version": "operational_health.v1",
+            "event_type": "operational_health",
+            "status": "warn",
+            "legal_data": {
+                "status": "success",
+                "issue_count": 0,
+                "dataset_version": "dataset-v1",
+                "release_version": "release-abc123",
+            },
+            "alerts": [{"code": "queue_backlog", "severity": "warning"}],
+        }
+        stdout = StringIO()
+
+        call_command(
+            "observe_operational_health",
+            "--once",
+            "--gate-mode",
+            "acceptance",
+            stdout=stdout,
+        )
+
+        rendered = json.loads(stdout.getvalue())
+        self.assertEqual(rendered["gate"]["decision"], "reset")
+        self.assertEqual(
+            rendered["gate"]["reason_codes"],
+            ["acceptance_window_reset"],
+        )
+
+    @override_settings(
+        LEGAL_DATASET_VERSION="dataset-v1",
+        APP_RELEASE_VERSION="release-abc123",
+    )
+    @mock.patch(
+        "chatbot.management.commands.observe_operational_health.build_operational_health_snapshot"
+    )
+    def test_acceptance_gate_raises_safe_error_for_critical_snapshot(
+        self,
+        snapshot_builder,
+    ):
+        snapshot_builder.return_value = {
+            "contract_version": "operational_health.v1",
+            "event_type": "operational_health",
+            "status": "fail",
+            "legal_data": {
+                "status": "success",
+                "issue_count": 0,
+                "dataset_version": "dataset-v1",
+                "release_version": "release-abc123",
+            },
+            "alerts": [
+                {
+                    "code": "provider_failure",
+                    "severity": "critical",
+                    "private_detail": "secret-provider-diagnostic",
+                }
+            ],
+        }
+        stdout = StringIO()
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "operational health gate rejected snapshot",
+        ) as raised:
+            call_command(
+                "observe_operational_health",
+                "--once",
+                "--gate-mode",
+                "acceptance",
+                stdout=stdout,
+            )
+
+        self.assertNotIn("secret-provider-diagnostic", str(raised.exception))
+        self.assertEqual(json.loads(stdout.getvalue())["gate"]["decision"], "fail")
+
+    def test_observe_command_rejects_gate_mode_with_loop(self):
+        with self.assertRaisesMessage(
+            CommandError,
+            "--gate-mode cannot be combined with --loop",
+        ):
+            call_command(
+                "observe_operational_health",
+                "--loop",
+                "--gate-mode",
+                "transaction",
+            )
+
     def test_observe_command_prints_one_compact_json_line(self):
         stdout = StringIO()
 

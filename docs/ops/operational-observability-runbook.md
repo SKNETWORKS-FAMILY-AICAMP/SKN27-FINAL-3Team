@@ -80,6 +80,48 @@ python -m etl.legal.validate_run_summary `
 반영 후 `observe_operational_health --once`에서 `legal_data.status=success`,
 `issue_count=0`, 예상 `dataset_version`과 `release_version`인지 확인한다.
 
+## 현재 운영 복구와 두 단계 인수 게이트
+
+현재 운영 SHA `818199aee975`에는 새 app release가 요구하는 seed source
+descriptor가 없다. 따라서 새 앱을 먼저 배포하지 않는다. 다음 순서를
+고정하며 한 단계가 실패하면 다음 단계로 진행하지 않는다.
+
+1. 이 구현을 `dev`에 병합하고 로컬 회귀 결과와 대상 SHA를 고정한다.
+2. 승인된 S3 URI, manifest 상대 경로, manifest SHA-256을 사용해 현재 운영
+   SHA `818199aee975`에 `Recover-PilotOperationalEvidence.ps1`을 실행한다.
+   이 명령은 현재 실행 이미지와 release를 확인하고 release-local/shared
+   evidence 및 descriptor를 원자적으로 복구한 뒤 transaction gate를
+   실행한다.
+3. 현재 운영 SHA에 다음 명령을 실행해 acceptance gate가 `600초` 동안
+   연속 `pass`인지 확인한다. `queue_backlog` 같은 일시 경고는
+   `decision=reset`으로 연속 시간을 0으로 되돌리고, critical/fail은 즉시
+   실패한다.
+
+   ```powershell
+   ./deploy/aws-pilot/Confirm-PilotOperationalAcceptance.ps1 `
+     -ReleaseTag 818199aee975 `
+     -AcceptanceSeconds 600 `
+     -MaxWaitSeconds 1200
+   ```
+
+4. 위 복구와 600초 관찰이 모두 성공한 뒤에만 app-release pipeline 승인을
+   수행한다. 후보 배포는 release-bound evidence를 검증·원자 승격하고
+   transaction gate를 통과해야 한다.
+5. 후보 SHA에도 `Confirm-PilotOperationalAcceptance.ps1`을 실행해 다시
+   600초 연속 `pass`를 확인한다.
+6. 그 다음에만 G8 운영 smoke와 배포 후 `13개 E2E`를 시작한다.
+
+복구와 acceptance 명령에는 유료 공급자 동의 switch나 seed 적재 명령이
+없다. 승인된 immutable seed의 URI·경로·SHA 검증이 실패하면 자동 적재로
+우회하지 않고 중단한다. 전체 seed reload 또는 유료 smoke가 필요하면 정확한
+명령과 비용 범위를 제시하고 별도 명시 승인을 받은 뒤 수행한다.
+
+수동 복구가 필요하면 `Rollback-Pilot.ps1`을 사용한다. 이 명령은 대상
+release의 evidence를 서비스 변경 전에 검증하고, shared evidence를 원자
+전환한 뒤 transaction gate를 통과한 경우에만 `current` 링크를 바꾼다.
+실패 시 명령 시작 전 release, shared evidence의 존재/내용, 심볼릭 링크를
+복원한다. DB migration과 seed 데이터 자체는 자동으로 되돌리지 않는다.
+
 ## CloudWatch와 SNS
 
 Terraform은 다음을 만든다.

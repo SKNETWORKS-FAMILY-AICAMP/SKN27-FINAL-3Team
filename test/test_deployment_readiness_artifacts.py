@@ -238,6 +238,38 @@ def test_operational_observability_runbook_maps_safe_alerts_to_actions():
     assert "RunPod Endpoint" in checklist
 
 
+def test_operational_runbook_documents_bootstrap_and_two_gate_acceptance():
+    runbook = read_text(ROOT / "docs" / "ops" / "operational-observability-runbook.md")
+    for token in (
+        "818199aee975",
+        "Recover-PilotOperationalEvidence.ps1",
+        "Confirm-PilotOperationalAcceptance.ps1",
+        "queue_backlog",
+        "600초",
+        "Rollback-Pilot.ps1",
+        "13개 E2E",
+    ):
+        assert token in runbook
+    assert runbook.index("Recover-PilotOperationalEvidence.ps1") < runbook.index(
+        "app-release pipeline"
+    )
+
+    checklist = read_text(
+        ROOT
+        / "docs"
+        / "tech-validation-reports"
+        / "2026-07-31-pilot-hotfix-master-checklist.md"
+    )
+    for hold_item in (
+        "- [ ] 현재 운영 SHA `818199aee975` evidence-only 복구",
+        "- [ ] app-release pipeline 승인",
+        "- [ ] 후보 릴리스 600초 연속 acceptance 통과",
+        "- [ ] G8 운영 재배포·smoke 완료",
+        "- [ ] 배포 후 13개 E2E 13/13 통과",
+    ):
+        assert hold_item in checklist
+
+
 def test_runpod_vision_runtime_is_documented_without_committed_secrets():
     required_keys = {
         "VISION_RUNTIME_PROVIDER",

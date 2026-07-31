@@ -10,6 +10,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
+from app.services.operational_health_gate import evaluate_operational_health_gate
 from chatbot.operational_observability import (
     HEALTH_CONTRACT_VERSION,
     build_operational_health_snapshot,
@@ -30,6 +31,11 @@ class Command(BaseCommand):
             "--loop",
             action="store_true",
             help="Emit snapshots until interrupted.",
+        )
+        parser.add_argument(
+            "--gate-mode",
+            choices=("transaction", "acceptance"),
+            help="Evaluate the snapshot for a release transaction or acceptance window.",
         )
         parser.add_argument(
             "--interval-seconds",
@@ -61,14 +67,34 @@ class Command(BaseCommand):
         del args
         self._validate_options(options)
         while True:
+            snapshot = self._snapshot(options)
+            gate_mode = options.get("gate_mode")
+            if gate_mode:
+                snapshot = dict(snapshot)
+                snapshot["gate"] = evaluate_operational_health_gate(
+                    snapshot,
+                    expected_dataset_version=getattr(
+                        settings,
+                        "LEGAL_DATASET_VERSION",
+                        "",
+                    ),
+                    expected_release_version=getattr(
+                        settings,
+                        "APP_RELEASE_VERSION",
+                        "",
+                    ),
+                    mode=gate_mode,
+                )
             self.stdout.write(
                 json.dumps(
-                    self._snapshot(options),
+                    snapshot,
                     ensure_ascii=False,
                     separators=(",", ":"),
                     sort_keys=True,
                 )
             )
+            if snapshot.get("gate", {}).get("decision") == "fail":
+                raise CommandError("operational health gate rejected snapshot")
             if not options["loop"]:
                 return
             try:
@@ -110,6 +136,8 @@ class Command(BaseCommand):
             return _safe_failure_snapshot()
 
     def _validate_options(self, options) -> None:
+        if options.get("gate_mode") and options["loop"]:
+            raise CommandError("--gate-mode cannot be combined with --loop")
         if options["interval_seconds"] < 10:
             raise CommandError("--interval-seconds must be at least 10")
         for name in (

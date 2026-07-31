@@ -228,19 +228,20 @@ def test_app_release_runner_restarts_all_services_that_execute_the_backend_image
     assert "pytest" not in buildspec
 
 
-def test_app_release_runner_snapshots_legacy_images_for_first_release_rollback() -> None:
+def test_app_release_runner_snapshots_images_under_actual_previous_release_tag() -> None:
     runner = (
         ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
     ).read_text(encoding="utf-8")
 
-    assert 'rollback_tag="pipeline-rollback-${target_tag}"' in runner
+    assert '[[ "$previous_tag" =~ ^[0-9a-f]{12}$ ]]' in runner
+    assert "pipeline-rollback-" not in runner
     assert '"${compose[@]}" ps -q "$service"' in runner
     assert "docker inspect --format '{{.Image}}'" in runner
-    assert 'docker tag "$image_id" "$repository:$rollback_tag"' in runner
+    assert 'docker tag "$image_id" "$repository:$previous_tag"' in runner
     assert 'snapshot_rollback_image backend "$backend_repository"' in runner
     assert 'snapshot_rollback_image frontend "$frontend_repository"' in runner
-    assert 'RELEASE_TAG=$rollback_tag' in runner
-    assert "Current release tag is not an immutable" not in runner
+    assert 'RELEASE_TAG=$previous_tag' in runner
+    assert "Current release tag is not an immutable" in runner
     assert "StandardOutputContent" in runner
     assert "StandardErrorContent" in runner
 
@@ -251,7 +252,7 @@ def test_app_release_runner_overrides_frontend_image_ref_for_release_and_rollbac
     ).read_text(encoding="utf-8")
 
     assert 'frontend_image_ref="$frontend_repository:$target_tag"' in runner
-    assert 'rollback_frontend_image_ref="$frontend_repository:$rollback_tag"' in runner
+    assert 'rollback_frontend_image_ref="$frontend_repository:$previous_tag"' in runner
     runtime_services = "backend frontend agent-worker file-scan-worker ops-monitor"
     assert (
         f'FRONTEND_IMAGE_REF="$frontend_image_ref" "${{compose[@]}}" pull {runtime_services}'
@@ -281,3 +282,47 @@ def test_app_release_runner_overrides_frontend_image_ref_for_release_and_rollbac
         'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor'
         in runner
     )
+
+
+def test_app_release_verifies_descriptor_and_switches_candidate_evidence_atomically() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    descriptor = runner.index("legal-operational-evidence-source.env")
+    descriptor_parse = runner.index("while IFS='=' read -r key value", descriptor)
+    download = runner.index("aws s3 cp", descriptor_parse)
+    digest = runner.index("sha256sum -c -", download)
+    manifest = runner.index("verify_production_rag_seed_manifest", digest)
+    build = runner.index("build_legal_operational_evidence", manifest)
+    validation = runner.index("etl.legal.validate_run_summary", build)
+    stop = runner.index('"${compose[@]}" rm -sf', validation)
+    promote = runner.index(
+        'mv -f "$candidate_evidence_tmp" "$shared_evidence_file"',
+        stop,
+    )
+    gate = runner.index(
+        "observe_operational_health --once --gate-mode transaction",
+        promote,
+    )
+    disarm = runner.index("trap - ERR", gate)
+    cleanup = runner.index("cleanup_seed_and_evidence", disarm)
+
+    assert descriptor < descriptor_parse < download < digest < manifest
+    assert manifest < build < validation < stop < promote < gate
+    assert gate < disarm < cleanup
+    for token in (
+        "shared_evidence_existed",
+        "release_evidence_existed",
+        "restore_previous_evidence",
+        "candidate_evidence_file",
+        "cleanup_seed_and_evidence",
+    ):
+        assert token in runner
+    for forbidden in (
+        "allow-paid-provider-call",
+        "load_review_case_pgvector_seed",
+        "load_production_rag_seed",
+        "load_legal_graph_seed",
+    ):
+        assert forbidden not in runner
