@@ -233,15 +233,16 @@ def load_analysis_result(
         for item in job.get("agent_results", [])
         if isinstance(item, dict)
     ]
-    composed = compose_response(
-        {
-            "job_id": job_id,
-            "status_counts": deepcopy(job.get("status_counts") or {}),
-            "executions": executions,
-            "supervisor_state": deepcopy(job.get("supervisor_state") or {}),
-            "attachments": deepcopy(job.get("attachments") or []),
-        }
-    )
+    composition_input = {
+        "job_id": job_id,
+        "status_counts": deepcopy(job.get("status_counts") or {}),
+        "executions": executions,
+        "supervisor_state": deepcopy(job.get("supervisor_state") or {}),
+        "attachments": deepcopy(job.get("attachments") or []),
+    }
+    if job.get("routing_intent"):
+        composition_input["routing_intent"] = str(job["routing_intent"])
+    composed = compose_response(composition_input)
     result = _project_mapping(composed, _COMPOSED_RESULT_FIELDS)
     # The repository status is the canonical terminal outcome.  Recomputing it
     # from a mixture of successful and failed node rows can incorrectly turn a

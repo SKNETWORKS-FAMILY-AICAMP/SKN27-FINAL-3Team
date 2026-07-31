@@ -7,7 +7,12 @@ from app.services.attachment_mock_service import CANONICAL_SCAN_GATE_MARKER
 from app.services.agent_node_service import execute_agent_plan
 from app.services.chat_orchestration_service import compose_agent_response, submit_message
 from app.services.supervisor_llm_service import validate_slot_filling_state
-from app.services.supervisor_routing_service import DEFAULT_POLICY_PATH, routing_policy_metadata
+from app.services.supervisor_routing_service import (
+    DEFAULT_POLICY_PATH,
+    plan_node_codes,
+    route_supervisor_input,
+    routing_policy_metadata,
+)
 
 
 def test_supervisor_routing_uses_a_versioned_external_policy() -> None:
@@ -21,6 +26,76 @@ def test_report_routing_policy_has_no_obsolete_pre_merge_placement_rule() -> Non
     policy = json.loads(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
 
     assert "insert_before" not in policy["report_policy"]
+
+
+def test_text_only_fine_notice_draft_request_enters_verified_intake_without_bypassing_ocr_gate() -> None:
+    routing_intent = route_supervisor_input(
+        "과태료 고지서에 대한 이의신청서 초안을 작성해 주세요.",
+        [],
+    )
+
+    node_codes = plan_node_codes(routing_intent, report_requested=False)
+
+    assert routing_intent == "fine_notice_analysis"
+    assert node_codes == (
+        "input_context_validation",
+        "fine_notice_analysis",
+        "agent_result_validation",
+        "final_response_merge",
+    )
+    assert "objection_report_generation" not in node_codes
+
+
+def test_persisted_law_results_rebuild_fine_notice_guidance_when_final_merge_row_is_missing() -> None:
+    response = compose_agent_response(
+        {
+            "job_id": "job_persisted_law_result",
+            "routing_intent": "fine_notice_procedure",
+            "executions": [
+                {
+                    "node_code": "law_ground_search",
+                    "agent_output": {
+                        "node_code": "law_ground_search",
+                        "status": "success",
+                        "summary": "조문 5건 검색됨 (관계 확장 포함)",
+                        "structured_result": {
+                            "law_provisions": [
+                                {
+                                    "source_name": "도로교통법",
+                                    "article_no": "제32조",
+                                    "provision_text": "정차 및 주차의 금지 장소에 관한 규정입니다.",
+                                    "source_reference": "law:persisted:1",
+                                }
+                            ]
+                        },
+                        "evidence": [{"source_reference": "law:persisted:1"}],
+                        "limitations": [],
+                    },
+                },
+                {
+                    "node_code": "agent_result_validation",
+                    "agent_output": {
+                        "node_code": "agent_result_validation",
+                        "status": "success",
+                        "summary": "검증 완료",
+                        "structured_result": {
+                            "accepted_results": ["law_ground_search"],
+                            "rejected_results": [],
+                            "report_ready": False,
+                        },
+                        "evidence": [],
+                        "limitations": [],
+                    },
+                },
+            ],
+        }
+    )
+
+    answer = response["assistant_message"]["answer"]
+
+    assert "조문 5건 검색됨" not in answer
+    assert "도로교통법 제32조" in answer
+    assert "고지서에 적힌 처분명" in answer
 
 
 def test_empty_message_requests_input_without_creating_an_agent_plan() -> None:
