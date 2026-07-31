@@ -40,6 +40,8 @@ def build_operational_health_snapshot(
     legal_run_summary_path: str = "",
     legal_max_age_hours: int = 168,
     legal_required_sources: list[str] | None = None,
+    legal_expected_dataset_version: str = "",
+    legal_expected_release_version: str = "",
 ) -> dict[str, Any]:
     """Return a bounded snapshot without user content or runtime secrets."""
 
@@ -109,6 +111,8 @@ def build_operational_health_snapshot(
         now=now,
         max_age_hours=legal_max_age_hours,
         required_sources=legal_required_sources or [],
+        expected_dataset_version=legal_expected_dataset_version,
+        expected_release_version=legal_expected_release_version,
     )
     alerts.extend(legal_alerts)
     status = (
@@ -171,6 +175,8 @@ def _legal_data_snapshot(
     now: datetime,
     max_age_hours: int,
     required_sources: list[str],
+    expected_dataset_version: str,
+    expected_release_version: str,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     normalized_path = str(path or "").strip()
     if not normalized_path:
@@ -183,6 +189,17 @@ def _legal_data_snapshot(
             [_alert("legal_data_missing", severity="critical")],
         )
 
+    safe_expected_dataset_version = _safe_version(expected_dataset_version)
+    safe_expected_release_version = _safe_version(expected_release_version)
+    if (
+        safe_expected_dataset_version is None
+        or safe_expected_release_version is None
+    ):
+        return (
+            {"status": "invalid", "issue_count": 1},
+            [_alert("monitor_configuration_invalid", severity="critical")],
+        )
+
     try:
         summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
         if not isinstance(summary, dict):
@@ -192,6 +209,8 @@ def _legal_data_snapshot(
             now=now,
             max_age_hours=max_age_hours,
             required_sources=required_sources,
+            expected_dataset_version=safe_expected_dataset_version,
+            expected_release_version=safe_expected_release_version,
         )
     except (
         OSError,
@@ -211,15 +230,31 @@ def _legal_data_snapshot(
     errors = list(validation["errors"])
     legal_data = {
         "status": "success" if validation["status"] == "success" else "failed",
-        "dataset_version": _safe_dataset_version(validation.get("dataset_version")),
+        "dataset_version": _safe_version(validation.get("dataset_version")),
+        "release_version": _safe_version(validation.get("release_version")),
         "missing_source_count": missing_count,
         "failed_source_count": failed_count,
         "stale_source_count": stale_count,
         "issue_count": missing_count + failed_count + stale_count,
     }
     if errors:
-        legal_data["status"] = "invalid"
         legal_data["issue_count"] = max(1, legal_data["issue_count"])
+        provenance_errors = {
+            "dataset_version_mismatch",
+            "release_version_mismatch",
+        }
+        if set(errors).issubset(provenance_errors):
+            legal_data["reason_code"] = "legal_data_provenance_mismatch"
+            return (
+                legal_data,
+                [
+                    _alert(
+                        "legal_data_provenance_mismatch",
+                        severity="critical",
+                    )
+                ],
+            )
+        legal_data["status"] = "invalid"
         return (
             legal_data,
             [_alert("monitor_configuration_invalid", severity="critical")],
@@ -235,7 +270,7 @@ def _legal_data_snapshot(
     return legal_data, alerts
 
 
-def _safe_dataset_version(value: Any) -> str | None:
+def _safe_version(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text or len(text) > 128:
         return None

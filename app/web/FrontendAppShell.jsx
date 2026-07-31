@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createFrontendApi } from "./apiClient.js";
+import { buildAnalysisProgressUi } from "./analysisProgressUi.js";
 import { buildAppealDecisionUi } from "./appealDecisionUi.js";
+import { buildAttachmentWorkflowUi } from "./attachmentWorkflowUi.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
 import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
 import { reportsForCase } from "./caseReports.js?null-case-v1";
+import { shouldDiscardRejectedChatInput } from "./chatPrivacyUi.js";
+import {
+  createNewConversationResetState,
+  issueNewConversationSession,
+} from "./newConversationState.js";
 import {
   buildAuthContext,
   buildGoogleLoginPayload,
@@ -13,7 +20,7 @@ import {
   persistAuthSession,
   readStoredGoogleProfile,
   readStoredAuthSession,
-  readStoredAuthToken,
+  recoverStoredAuthSession,
   resolveGuestBootstrapSessionId,
   scheduleAppJwtRefresh,
   toGoogleLoginError,
@@ -29,6 +36,7 @@ import {
 } from "./consultationIntake.js";
 import { shouldPromptGuestConversationSave } from "./guestConversationPolicy.js";
 import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
+import { pollWorkerResult } from "./workerPolling.js";
 
 const TAB_ROUTES = [
   { id: "chatbot", label: "사고·과태료 상담" },
@@ -47,7 +55,6 @@ const FALLBACK_ANALYSIS_CARDS = [
 const EXECUTION_MODE = "async_worker";
 const WORKER_POLL_INTERVAL_MS = 500;
 const WORKER_POLL_MAX_ATTEMPTS = 60;
-const WORKER_PENDING_JOB_STATUSES = new Set(["queued", "running", "retrying"]);
 const FINE_NOTICE_DEADLINE_DAYS = 60;
 const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf,video/mp4,video/quicktime";
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime"]);
@@ -253,11 +260,17 @@ export default function FrontendAppShell({
 }) {
   const api = useMemo(() => createFrontendApi({ apiBase }), [apiBase]);
   const storedAuthSession = useMemo(() => readStoredAuthSession(), []);
+  const hasStoredAuthenticatedSession = Boolean(
+    storedAuthSession.access_token && storedAuthSession.auth_session_id
+  );
   const [activeRoute, setActiveRoute] = useState("entry");
   const [sessionId, setSessionId] = useState(() => storedAuthSession.session_id || "");
   const [guestId, setGuestId] = useState(() => storedAuthSession.guest_id || "");
   const [guestCredential, setGuestCredential] = useState(() => storedAuthSession.guest_credential || "");
-  const [authSessionId, setAuthSessionId] = useState(() => storedAuthSession.auth_session_id || "");
+  const [authSessionId, setAuthSessionId] = useState("");
+  const [authRestoreStatus, setAuthRestoreStatus] = useState(
+    hasStoredAuthenticatedSession ? "checking" : "ready"
+  );
   const [mypageSummary, setMypageSummary] = useState(null);
   const [historyEvents, setHistoryEvents] = useState(null);
   const [question, setQuestion] = useState("");
@@ -265,7 +278,7 @@ export default function FrontendAppShell({
   const [chatMessages, setChatMessages] = useState([]);
   const [consultationIntake, setConsultationIntake] = useState(() => createEmptyConsultationIntake());
   const [analysisResponse, setAnalysisResponse] = useState(null);
-  const [activeAuthToken, setActiveAuthToken] = useState(() => readStoredAuthToken());
+  const [activeAuthToken, setActiveAuthToken] = useState("");
   const [savePromptVisible, setSavePromptVisible] = useState(false);
   const [saveDecision, setSaveDecision] = useState("undecided");
   const [statusMessage, setStatusMessage] = useState("");
@@ -316,11 +329,16 @@ export default function FrontendAppShell({
     userId: null,
   });
   const isGuestReady = Boolean(guestId && guestCredential);
-  const sessionLabel = authSessionId
-    ? "Google 계정 상담"
-    : isGuestReady
-      ? "비회원 상담"
-      : "상담 준비";
+  const sessionLabel =
+    authRestoreStatus === "checking"
+      ? "로그인 확인 중"
+      : authRestoreStatus === "verification_unavailable"
+        ? "로그인 확인 필요"
+        : authSessionId
+          ? "Google 계정 상담"
+          : isGuestReady
+            ? "비회원 상담"
+            : "상담 준비";
   const cases = mypageSummary?.cases?.length ? mypageSummary.cases : [];
   const effectiveReportList = reportList;
   const effectiveCurrentReport = currentReport;
@@ -363,6 +381,10 @@ export default function FrontendAppShell({
   const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
   const attachmentClassificationResult =
     analysisResponse?.structured_results?.attachment_document_classification || null;
+  const attachmentWorkflowUi = buildAttachmentWorkflowUi(analysisResponse?.attachment_workflows);
+  const analysisProgressUi = buildAnalysisProgressUi(
+    analysisResponse?.analysis_progress
+  );
   const supervisorState = analysisResponse?.supervisor_state || null;
   const reportingPayload = analysisResponse?.reporting_payload || null;
   const supervisorExecution = analysisResponse?.supervisor_execution || null;
@@ -414,6 +436,90 @@ export default function FrontendAppShell({
       active = false;
     };
   }, [api]);
+
+  useEffect(() => {
+    if (!hasStoredAuthenticatedSession) {
+      setAuthRestoreStatus("ready");
+      return undefined;
+    }
+
+    let recoveryActive = true;
+    setAuthRestoreStatus("checking");
+    recoverStoredAuthSession({
+      storedSession: storedAuthSession,
+      getCurrentAuthSubject: (options) => api.getCurrentAuthSubject(options),
+      refreshAuthToken: (payload, requestIdentity) =>
+        api.refreshAuthToken(payload, requestIdentity),
+    })
+      .then((result) => {
+        if (!recoveryActive) {
+          return;
+        }
+        const recovered = result.session || {};
+        if (result.status === "authenticated") {
+          setActiveAuthToken(recovered.access_token || "");
+          setAuthSessionId(recovered.auth_session_id || "");
+          setGuestId(recovered.guest_id || "");
+          setGuestCredential(recovered.guest_credential || "");
+          setSessionId(recovered.session_id || "");
+          persistAuthSession({
+            accessToken: recovered.access_token,
+            authSessionId: recovered.auth_session_id,
+            guestId: recovered.guest_id,
+            guestCredential: recovered.guest_credential,
+            googleProfile: readStoredGoogleProfile(),
+            sessionId: recovered.session_id,
+            userId: recovered.user_id,
+          });
+          setAuthRestoreStatus("ready");
+          setStatusMessage(
+            result.refreshed
+              ? "로그인 상태를 안전하게 갱신했습니다."
+              : "저장된 로그인 상태를 확인했습니다."
+          );
+          return;
+        }
+        if (result.status === "reauth_required") {
+          clearStoredAuthSession();
+          persistAuthSession({
+            guestId: recovered.guest_id,
+            guestCredential: recovered.guest_credential,
+            sessionId: recovered.session_id,
+          });
+          setActiveAuthToken("");
+          setAuthSessionId("");
+          setGuestId(recovered.guest_id || "");
+          setGuestCredential(recovered.guest_credential || "");
+          setSessionId(recovered.session_id || "");
+          setAuthRestoreStatus("ready");
+          setStatusMessage(
+            "로그인 확인이 만료되었습니다. 기존 상담은 유지되며 Google 로그인 후 계속할 수 있습니다."
+          );
+          return;
+        }
+        setActiveAuthToken("");
+        setAuthSessionId("");
+        setAuthRestoreStatus("verification_unavailable");
+        setStatusMessage(
+          "로그인 상태를 확인하지 못했습니다. 기존 상담을 보존했으며 잠시 후 새로고침해 주세요."
+        );
+      })
+      .catch(() => {
+        if (!recoveryActive) {
+          return;
+        }
+        setActiveAuthToken("");
+        setAuthSessionId("");
+        setAuthRestoreStatus("verification_unavailable");
+        setStatusMessage(
+          "로그인 상태를 확인하지 못했습니다. 기존 상담을 보존했으며 잠시 후 새로고침해 주세요."
+        );
+      });
+
+    return () => {
+      recoveryActive = false;
+    };
+  }, [api, hasStoredAuthenticatedSession, storedAuthSession]);
 
   useEffect(() => {
     if (!activeAuthToken || !authSessionId) {
@@ -477,9 +583,6 @@ export default function FrontendAppShell({
           setSessionId(refreshContext.sessionId || "");
           setMypageSummary(null);
           setHistoryEvents(null);
-          setCurrentReport(null);
-          setReportList([]);
-          setPendingAuthAction(null);
           setStatusMessage("로그인이 만료되었습니다. Google 계정으로 다시 로그인해 주세요.");
         }
       },
@@ -492,6 +595,14 @@ export default function FrontendAppShell({
   }, [api, activeAuthToken, authSessionId]);
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
+    if (authRestoreStatus !== "ready" || authSessionId || activeAuthToken) {
+      setStatusMessage(
+        authRestoreStatus === "ready"
+          ? "로그인된 계정의 상담 세션을 확인하고 있습니다."
+          : "저장된 로그인 상태를 확인한 뒤 상담을 시작할 수 있습니다."
+      );
+      return null;
+    }
     setStatusMessage("로그인 없이 바로 상담을 시작할 수 있도록 준비하고 있습니다.");
     try {
       const initialGuest = await api.createGuestSession(
@@ -544,6 +655,51 @@ export default function FrontendAppShell({
   }
 
   async function ensureGuestSession(nextRoute = "chatbot") {
+    if (authRestoreStatus !== "ready") {
+      setStatusMessage("저장된 로그인 상태를 확인한 뒤 상담을 시작할 수 있습니다.");
+      return null;
+    }
+    if (authSessionId && activeAuthToken) {
+      if (sessionId) {
+        setActiveRoute(nextRoute);
+        return {
+          authSessionId,
+          authToken: activeAuthToken,
+          guestCredential,
+          guestId,
+          sessionId,
+        };
+      }
+      try {
+        const created = await api.createChatSession({}, identity);
+        const nextSessionId = String(created?.session_id || "");
+        if (!nextSessionId) {
+          throw new Error("Authenticated chat session response is incomplete.");
+        }
+        const stored = readStoredAuthSession();
+        setSessionId(nextSessionId);
+        persistAuthSession({
+          accessToken: activeAuthToken,
+          authSessionId,
+          guestId,
+          guestCredential,
+          googleProfile: readStoredGoogleProfile(),
+          sessionId: nextSessionId,
+          userId: stored.user_id,
+        });
+        setActiveRoute(nextRoute);
+        return {
+          authSessionId,
+          authToken: activeAuthToken,
+          guestCredential,
+          guestId,
+          sessionId: nextSessionId,
+        };
+      } catch (_error) {
+        setStatusMessage("로그인된 상담 세션을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        return null;
+      }
+    }
     if (sessionId && guestId && guestCredential) {
       setActiveRoute(nextRoute);
       return { guestCredential, guestId, sessionId };
@@ -664,6 +820,10 @@ export default function FrontendAppShell({
   }
 
   async function registerAttachmentMetadata() {
+    if (authRestoreStatus !== "ready") {
+      setStatusMessage("로그인 상태 확인이 끝난 뒤 자료를 첨부할 수 있습니다.");
+      return;
+    }
     setIsRegisteringAttachment(true);
     setStatusMessage(selectedUploadFile ? "첨부 파일을 업로드하고 있습니다." : "첨부 metadata를 등록하고 있습니다.");
     try {
@@ -686,8 +846,11 @@ export default function FrontendAppShell({
         nextIdentity = loginState.identity;
         setPendingAuthAction(null);
       } else {
-        const guestSessionResult = sessionId ? null : await bootstrapGuestSession("chatbot");
-        activeSession = sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
+        const guestSessionResult = sessionId ? null : await ensureGuestSession("chatbot");
+        activeSession = sessionId || guestSessionResult?.sessionId || "";
+        if (!activeSession) {
+          throw new Error("A verified chat session is required before attachment registration.");
+        }
         activeGuestId = guestId || guestSessionResult?.guestId || "";
         nextIdentity = {
           ...identity,
@@ -1039,65 +1202,19 @@ export default function FrontendAppShell({
     if (chatResult?.execution_mode !== "async_worker" || !workItem?.work_item_id) {
       return chatResult;
     }
-    let latestResult = chatResult;
-    logDeveloperDiagnostic("worker.status", {
-      status: "polling",
-      authenticated: Boolean(requestIdentity?.authToken),
-    });
-    try {
-      for (let attempt = 0; attempt < WORKER_POLL_MAX_ATTEMPTS; attempt += 1) {
-        const jobDetailResult = await api.getAnalysisResult({
+    return pollWorkerResult({
+      initialResult: chatResult,
+      loadResult: () => api.getAnalysisResult({
           jobId: workItem.job_id,
           identity: requestIdentity,
-        });
-        const jobDetail = jobDetailResult?.result || jobDetailResult?.job || {};
-        const processedItem = jobDetail.work_item || {};
-        const progressState = jobDetail.progress_state || processedItem.progress_state || {};
-        const jobStatus = jobDetail.status || progressState.job_status || latestResult.status;
-        const nextWorkItem = {
-          ...workItem,
-          ...processedItem,
-          status: processedItem.status || workItem.status,
-          job_status: progressState.job_status || jobStatus || workItem.job_status,
-          progress_state: progressState,
-        };
-        latestResult = {
-          ...latestResult,
-          ...jobDetail,
-          execution_mode: chatResult.execution_mode,
-          persistence: chatResult.persistence,
-          status: jobStatus,
-          job_detail: jobDetail,
-          supervisor_execution: {
-            ...(latestResult.supervisor_execution || {}),
-            ...(jobDetail.supervisor_execution || {}),
-            work_item: nextWorkItem,
-            worker_poll: {
-              contract_version: "worker_progress_polling.v1",
-              status: processedItem.status || null,
-              job_status: jobStatus || null,
-              progress_state: progressState,
-            },
-          },
-          work_item: nextWorkItem,
-        };
-        logDeveloperDiagnostic("worker.status", {
-          attempt: attempt + 1,
-          jobStatus: jobStatus || null,
-          status: processedItem.status || "waiting",
-        });
-        if (!WORKER_PENDING_JOB_STATUSES.has(jobStatus)) {
-          return latestResult;
-        }
-        if (attempt < WORKER_POLL_MAX_ATTEMPTS - 1) {
-          await waitForWorkerPoll();
-        }
-      }
-      return latestResult;
-    } catch (_error) {
-      logDeveloperDiagnostic("worker.error", { message: _error?.message || "progress polling failed" });
-      return latestResult;
-    }
+      }),
+      wait: waitForWorkerPoll,
+      maxAttempts: WORKER_POLL_MAX_ATTEMPTS,
+      onUpdate: setAnalysisResponse,
+      onDiagnostic: ({ event, ...payload }) => {
+        logDeveloperDiagnostic(`worker.${event}`, payload);
+      },
+    });
   }
 
   function updateOcrConfirmationField(field, value) {
@@ -1143,6 +1260,10 @@ export default function FrontendAppShell({
     ocrConfirmation,
     attachmentClassificationConfirmation,
   } = {}) {
+    if (authRestoreStatus !== "ready") {
+      setStatusMessage("로그인 상태 확인이 끝난 뒤 상담 내용을 보낼 수 있습니다.");
+      return;
+    }
     const trimmedQuestion = String(userText ?? question).trim();
     const { displayText, requestText: composedQuestion } = buildConsultationMessagePair({
       freeText: trimmedQuestion,
@@ -1178,8 +1299,17 @@ export default function FrontendAppShell({
 
     const effectiveAuthSessionId = followupLoginState?.authSessionId || authSessionId;
     const effectiveIdentity = followupLoginState?.identity || identity;
-    const guestSessionResult = followupLoginState?.sessionId || sessionId ? null : await bootstrapGuestSession("chatbot");
-    const activeSession = followupLoginState?.sessionId || sessionId || guestSessionResult?.sessionId || `ses_web_${Date.now()}`;
+    const guestSessionResult =
+      followupLoginState?.sessionId || sessionId ? null : await ensureGuestSession("chatbot");
+    const activeSession =
+      followupLoginState?.sessionId || sessionId || guestSessionResult?.sessionId || "";
+    if (!activeSession) {
+      setQuestion(trimmedQuestion);
+      setSubmittedQuestion("");
+      setIsSubmitting(false);
+      setStatusMessage("상담 세션을 준비하지 못했습니다. 입력 내용은 유지되며 다시 시도할 수 있습니다.");
+      return;
+    }
     const activeGuestId = followupLoginState?.guestId || guestId || guestSessionResult?.guestId || "";
     const activeGuestCredential = followupLoginState
       ? followupLoginState.guestCredential || ""
@@ -1225,6 +1355,7 @@ export default function FrontendAppShell({
           user_text: composedQuestion,
           consultation_type: consultationRequestContext.consultation_type || undefined,
           facts: consultationRequestContext.facts,
+          fine_notice_slots: consultationRequestContext.fine_notice_slots,
           ocr_confirmation: confirmationForRequest || undefined,
           attachment_classification_confirmation:
             attachmentClassificationConfirmation || undefined,
@@ -1245,7 +1376,9 @@ export default function FrontendAppShell({
         role: "assistant",
         content:
           workerResult?.assistant_message?.core_answer ||
-          assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),
+          workerResult?.polling_notice?.message ||
+          workerResult?.analysis_progress?.user_message ||
+          assistantMessageText(workerResult?.assistant_message),
         status: workerResult?.status || "partial",
         pending_questions: workerResult?.pending_questions || [],
         followUp: workerResult?.assistant_message?.follow_up || null,
@@ -1263,18 +1396,21 @@ export default function FrontendAppShell({
       setGuestDetailedReportUsed(canSaveGuestConversation);
       setSaveDecision(effectiveAuthSessionId ? "saved" : "undecided");
       setStatusMessage(
-        effectiveAuthSessionId
+        workerResult?.polling_notice?.message ||
+        workerResult?.analysis_progress?.user_message ||
+        (effectiveAuthSessionId
           ? ""
           : canSaveGuestConversation
             ? workerResult?.status === "success"
               ? "상담 응답을 받았습니다. 저장 여부를 선택할 수 있습니다."
               : "상담 응답을 받았습니다. 현재 상태로 저장하거나 답변을 이어갈 수 있습니다."
-            : "추가 정보가 필요합니다. 답변을 이어서 입력해 주세요."
+            : "추가 정보가 필요합니다. 답변을 이어서 입력해 주세요.")
       );
     } catch (_error) {
       logDeveloperDiagnostic("chat.error", {
         message: _error?.message || "unknown error",
       });
+      const discardRejectedInput = shouldDiscardRejectedChatInput(_error);
       const isRateLimitExceeded = _error?.status === 429 || _error?.code === "rate_limit_exceeded";
       const requiresLogin =
         _error?.requiredAction === "login" ||
@@ -1282,7 +1418,11 @@ export default function FrontendAppShell({
       const requiresGuestSessionRefresh =
         _error?.requiredAction === "refresh_guest_session" || _error?.code === "guest_session_invalid";
       let errorMessage = "응답을 불러오지 못해 접수 상태만 표시합니다.";
-      if (isRateLimitExceeded) {
+      if (discardRejectedInput) {
+        errorMessage =
+          _error?.publicMessage ||
+          "민감정보가 감지되어 입력을 저장하지 않았습니다. 해당 정보를 제거한 뒤 다시 입력해 주세요.";
+      } else if (isRateLimitExceeded) {
         errorMessage = effectiveAuthSessionId
           ? "오늘의 상담 가능 횟수를 모두 사용했습니다. 잠시 후 다시 시도해 주세요."
           : "비회원 상담 가능 횟수를 모두 사용했습니다. 계속 상담하려면 Google 로그인해 주세요.";
@@ -1307,8 +1447,11 @@ export default function FrontendAppShell({
           ? _error?.publicMessage || "로그인이 만료되었습니다. 다시 로그인한 뒤 같은 상담을 이어가 주세요."
           : _error?.publicMessage || "로그인이 필요합니다. Google 로그인 후 같은 상담을 이어가 주세요.";
       }
+      if (discardRejectedInput) {
+        setSubmittedQuestion("");
+      }
       setChatMessages([
-        ...conversationHistory,
+        ...(discardRejectedInput ? chatMessages : conversationHistory),
         {
           role: "assistant",
           content: errorMessage,
@@ -1316,8 +1459,14 @@ export default function FrontendAppShell({
           pending_questions: [],
         },
       ]);
-      setAnalysisResponse(isRateLimitExceeded ? null : { cards: FALLBACK_ANALYSIS_CARDS });
-      setSavePromptVisible(!isRateLimitExceeded && !authSessionId);
+      setAnalysisResponse(
+        isRateLimitExceeded || discardRejectedInput
+          ? null
+          : { cards: FALLBACK_ANALYSIS_CARDS }
+      );
+      setSavePromptVisible(
+        !isRateLimitExceeded && !discardRejectedInput && !authSessionId
+      );
       setStatusMessage(errorMessage);
     } finally {
       setIsSubmitting(false);
@@ -1446,20 +1595,68 @@ export default function FrontendAppShell({
     );
   }
 
-  function startNewConversation() {
-    setQuestion("");
-    setSubmittedQuestion("");
-    setChatMessages([]);
-    setConsultationIntake(createEmptyConsultationIntake());
-    setAnalysisResponse(null);
-    setCurrentReport(null);
-    setReportActionStatus("");
-    setSaveDecision("undecided");
-    setSavePromptVisible(false);
-    setGuestDetailedReportUsed(false);
-    setSessionId("");
-    setStatusMessage("새 상담을 시작할 수 있습니다.");
-    setActiveRoute("chatbot");
+  async function startNewConversation() {
+    if (authRestoreStatus !== "ready") {
+      setStatusMessage("로그인 상태 확인이 끝난 뒤 새 상담을 시작할 수 있습니다.");
+      return;
+    }
+    if (isSubmitting || isRegisteringAttachment || isSavingConversation) {
+      setStatusMessage("진행 중인 요청이 끝난 뒤 새 상담을 시작해 주세요.");
+      return;
+    }
+
+    setStatusMessage("새 상담 세션을 준비하고 있습니다.");
+    try {
+      const nextSessionId = await issueNewConversationSession({
+        currentSessionId: sessionId,
+        createSession: () => api.createChatSession({}, identity),
+      });
+      const reset = createNewConversationResetState();
+      const stored = readStoredAuthSession();
+
+      setSessionId(nextSessionId);
+      persistAuthSession({
+        accessToken: activeAuthToken,
+        authSessionId,
+        guestId,
+        guestCredential,
+        googleProfile: readStoredGoogleProfile(),
+        sessionId: nextSessionId,
+        userId: stored.user_id,
+      });
+      setQuestion(reset.question);
+      setSubmittedQuestion(reset.submittedQuestion);
+      setChatMessages(reset.chatMessages);
+      setConsultationIntake(createEmptyConsultationIntake());
+      setAnalysisResponse(reset.analysisResponse);
+      setCurrentReport(reset.currentReport);
+      setReportList(reset.reportList);
+      setReportActionStatus(reset.reportActionStatus);
+      setReportWorkspaceLoadError(reset.reportWorkspaceLoadError);
+      setIsReportWorkspaceLoading(reset.isReportWorkspaceLoading);
+      setSaveDecision(reset.saveDecision);
+      setSavePromptVisible(reset.savePromptVisible);
+      setGuestDetailedReportUsed(reset.guestDetailedReportUsed);
+      setAttachmentPurpose(reset.attachmentPurpose);
+      setSelectedUploadFile(reset.selectedUploadFile);
+      setRegisteredAttachments(reset.registeredAttachments);
+      setUploadInputResetKey((value) => value + 1);
+      setIsRegisteringAttachment(reset.isRegisteringAttachment);
+      setOcrConfirmationFields(reset.ocrConfirmationFields);
+      setPendingOcrConfirmation(reset.pendingOcrConfirmation);
+      setPendingAuthAction(reset.pendingAuthAction);
+      setAcknowledgedAppealKey(reset.acknowledgedAppealKey);
+      setMypageSummary(reset.mypageSummary);
+      setHistoryEvents(reset.historyEvents);
+      setIsSubmitting(reset.isSubmitting);
+      setIsSavingConversation(reset.isSavingConversation);
+      setStatusMessage("새 상담을 시작했습니다.");
+      setActiveRoute("chatbot");
+    } catch (_error) {
+      setStatusMessage(
+        "새 상담 세션을 만들지 못했습니다. 기존 상담은 그대로 유지되며 다시 시도할 수 있습니다."
+      );
+    }
   }
 
   async function loadMyPageSummary(options = {}) {
@@ -1732,6 +1929,7 @@ export default function FrontendAppShell({
           {activeRoute === "chatbot" && (
             <ChatScreenV2
               analysisCards={visibleAnalysisCards}
+              analysisProgressUi={analysisProgressUi}
               appealDecisionUi={appealDecisionUi}
               appealRiskAcknowledged={appealRiskAcknowledged}
               onAcknowledgeAppealRisk={() => setAcknowledgedAppealKey(appealDecisionKey)}
@@ -1764,6 +1962,7 @@ export default function FrontendAppShell({
               ocrConfirmationFields={ocrConfirmationFields}
               ocrResult={ocrResult}
               attachmentClassificationResult={attachmentClassificationResult}
+              attachmentWorkflowUi={attachmentWorkflowUi}
               question={question}
               registeredAttachments={registeredAttachments}
               reportActionStatus={reportActionStatus}
@@ -2658,10 +2857,12 @@ function ConversationSidebar({
 
 function ChatScreenV2({
   analysisCards,
+  analysisProgressUi,
   appealDecisionUi,
   appealRiskAcknowledged,
   onAcknowledgeAppealRisk,
   attachmentClassificationResult,
+  attachmentWorkflowUi,
   attachmentOptions,
   assistantAnswer,
   assistantFollowUp,
@@ -2711,6 +2912,7 @@ function ChatScreenV2({
   const questionInputRef = useRef(null);
   const quickExamplesRef = useRef(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const activeAttachmentWorkflow = attachmentWorkflowUi?.[0] || null;
   const visibleMessages = chatMessages.length
     ? chatMessages
     : submittedQuestion
@@ -2794,6 +2996,19 @@ function ChatScreenV2({
                   {isSavingConversation ? "저장 중" : "로그인 후 저장"}
                 </button>
               </div>
+            </section>
+          )}
+
+          {analysisProgressUi && (
+            <section
+              className={`analysis-progress analysis-progress--${analysisProgressUi.tone}`}
+              aria-label="분석 진행 상태"
+            >
+              <strong>{analysisProgressUi.label}</strong>
+              <p>{analysisProgressUi.message}</p>
+              {analysisProgressUi.retryable && (
+                <small>현재 상태 확인을 다시 시도할 수 있습니다.</small>
+              )}
             </section>
           )}
 
@@ -2909,7 +3124,12 @@ function ChatScreenV2({
             </section>
           )}
 
-          {ocrResult?.requires_confirmation === true && (
+          {activeAttachmentWorkflow && (
+            <AttachmentWorkflowPanel workflow={activeAttachmentWorkflow} />
+          )}
+
+          {activeAttachmentWorkflow?.state === "ocr_needs_confirmation" &&
+            ocrResult?.requires_confirmation === true && (
             <OcrConfirmationCard
               fields={ocrConfirmationFields}
               isSubmitting={isSubmitting}
@@ -2918,7 +3138,8 @@ function ChatScreenV2({
             />
           )}
 
-          {attachmentClassificationResult?.requires_confirmation === true && (
+          {activeAttachmentWorkflow?.state === "classified_waiting_confirmation" &&
+            attachmentClassificationResult?.requires_confirmation === true && (
             <AttachmentClassificationConfirmationCard
               classification={attachmentClassificationResult?.classification}
               confidenceBand={attachmentClassificationResult?.confidence_band}
@@ -3029,6 +3250,37 @@ function ChatScreenV2({
           </div>
         </div>
       </div>
+    </section>
+  );
+}
+
+function AttachmentWorkflowPanel({ workflow }) {
+  return (
+    <section
+      className={`ocr-confirmation-card attachment-workflow-panel is-${workflow.tone}`}
+      aria-label="첨부 자료 처리 상태"
+      aria-live="polite"
+    >
+      <div>
+        <span className="eyebrow">첨부 자료 상태</span>
+        <strong>{workflow.title}</strong>
+        <p>{workflow.description}</p>
+      </div>
+      {workflow.missingFields.length > 0 && (
+        <ul>
+          {workflow.missingFields.map((field) => (
+            <li key={field}>추가 확인: {field}</li>
+          ))}
+        </ul>
+      )}
+      {workflow.limitations.length > 0 && (
+        <ul>
+          {workflow.limitations.map((limitation) => (
+            <li key={limitation}>{limitation}</li>
+          ))}
+        </ul>
+      )}
+      {workflow.action && <p>다음 작업: {workflow.action}</p>}
     </section>
   );
 }
@@ -3165,12 +3417,23 @@ function ConsultationIntakePanel({
                 {FINE_NOTICE_FIELDS.map((field) => (
                   <label className="consultation-intake-field" key={field.key}>
                     <span>{field.label}</span>
-                    <input
-                      type={field.key === "violationDate" ? "date" : "text"}
-                      value={value?.[field.key] || ""}
-                      onChange={(event) => onChange(field.key, event.target.value)}
-                      placeholder={field.question}
-                    />
+                    {field.key === "attachmentAvailable" ? (
+                      <select
+                        value={value?.[field.key] || ""}
+                        onChange={(event) => onChange(field.key, event.target.value)}
+                      >
+                        <option value="">확인 필요</option>
+                        <option value="yes">첨부 가능</option>
+                        <option value="no">첨부 어려움</option>
+                      </select>
+                    ) : (
+                      <input
+                        type={field.key === "responseDeadline" ? "date" : "text"}
+                        value={value?.[field.key] || ""}
+                        onChange={(event) => onChange(field.key, event.target.value)}
+                        placeholder={field.question}
+                      />
+                    )}
                   </label>
                 ))}
               </>

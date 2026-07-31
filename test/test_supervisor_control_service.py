@@ -10,6 +10,7 @@ from app.services.supervisor_control_service import (
     validate_agent_results,
 )
 from app.services.supervisor_routing_service import agent_result_validation_policy
+from app.services.fine_notice_intake_service import FINE_NOTICE_QUESTIONS
 
 
 def test_agent_result_validation_rules_are_loaded_from_the_versioned_policy() -> None:
@@ -56,9 +57,18 @@ def test_fact_reducer_preserves_conflicting_values_for_user_confirmation() -> No
     assert reduced["conflicts"] == [
         {
             "field": "road_layout",
-            "existing_value": "교차로",
-            "candidate_value": "직선 도로였습니다.",
-            "candidate_source_message_id": "history:1",
+            "candidates": [
+                {
+                    "value": "교차로",
+                    "source_message_id": "payload:facts",
+                    "confidence": 1.0,
+                },
+                {
+                    "value": "직선 도로였습니다.",
+                    "source_message_id": "history:1",
+                    "confidence": 1.0,
+                },
+            ],
         }
     ]
 
@@ -159,7 +169,15 @@ def test_final_response_merge_uses_only_validation_accepted_results() -> None:
             "law_ground_search": {
                 "status": "success",
                 "summary": "도로교통법 근거 후보를 확인했습니다.",
-                "structured_result": {"matched_laws": [{"law_name": "도로교통법"}]},
+                "structured_result": {
+                    "matched_laws": [
+                        {
+                            "law_name": "도로교통법",
+                            "article": "제160조",
+                            "source_reference": "law:verified",
+                        }
+                    ]
+                },
                 "evidence": [{"source_reference": "law:1"}],
                 "limitations": ["사건별 적용 여부를 확인해야 합니다."],
             },
@@ -221,10 +239,10 @@ def test_fine_notice_procedure_without_verified_results_still_gives_safe_next_st
     assert "발급기관" in answer
     assert "응급상황을 확인할 자료" in answer
     assert merged["pending_questions"] == [
-        {
-            "field": "notice_received",
-            "question": "실제로 고지서나 단속 통지를 받으셨나요?",
-        },
+        *[
+            {"field": field, "question": question}
+            for field, question in FINE_NOTICE_QUESTIONS.items()
+        ],
         {
             "field": "emergency_evidence",
             "question": "응급상황을 확인할 수 있는 진료기록이나 영수증이 있나요?",
@@ -240,7 +258,15 @@ def test_fine_notice_procedure_with_verified_result_does_not_use_fallback_guidan
             "law_ground_search": {
                 "status": "success",
                 "summary": "검증된 법령 근거를 확인했습니다.",
-                "structured_result": {"matched_laws": [{"law_name": "도로교통법"}]},
+                "structured_result": {
+                    "matched_laws": [
+                        {
+                            "law_name": "도로교통법",
+                            "article": "제160조",
+                            "source_reference": "law:verified",
+                        }
+                    ]
+                },
                 "evidence": [{"source_reference": "law:verified"}],
                 "limitations": [],
             },
@@ -360,7 +386,8 @@ def test_fine_notice_procedure_normalizes_persisted_agent_law_fields_before_rend
 
     assert "조문 5건 검색됨" not in answer
     assert "도로교통법 제32조" in answer
-    assert "정차 및 주차의 금지 장소" in answer
+    assert "정차 및 주차의 금지 장소" not in answer
+    assert "provision_text" not in repr(merged)
 
 
 def test_final_response_merge_prepends_deadline_guidance_card() -> None:

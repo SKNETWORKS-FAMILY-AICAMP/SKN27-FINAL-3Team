@@ -190,7 +190,7 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
                 }
             }
 
-        def run_law(agent_input, adapter_context):
+        def run_law(agent_input, adapter_context, **_kwargs):
             law_calls.append((agent_input, adapter_context))
             return {
                 "status": "success",

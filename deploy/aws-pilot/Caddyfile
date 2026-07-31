@@ -12,7 +12,10 @@
 			roll_keep 5
 			roll_keep_for 168h
 		}
-		format json
+		format filter {
+			request>headers delete
+			wrap json
+		}
 	}
 
 	header {

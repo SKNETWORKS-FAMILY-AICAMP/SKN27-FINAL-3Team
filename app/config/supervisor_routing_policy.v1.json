@@ -94,7 +94,6 @@
     ],
     "general_consultation": [
       "input_context_validation",
-      "law_ground_search",
       "agent_result_validation",
       "final_response_merge"
     ]

@@ -39,6 +39,26 @@ def test_result_screen_separates_confirmed_facts_from_user_claims() -> None:
     assert "사용자 진술 · 추가 확인 필요" in shell
 
 
+def test_result_screen_renders_server_owned_semantic_progress() -> None:
+    shell = _shell()
+
+    assert (
+        'import { buildAnalysisProgressUi } from "./analysisProgressUi.js";'
+        in shell
+    )
+    assert "const analysisProgressUi = buildAnalysisProgressUi(" in shell
+    assert "analysisResponse?.analysis_progress" in shell
+    assert "analysisProgressUi={analysisProgressUi}" in shell
+    assert 'aria-label="분석 진행 상태"' in shell
+    assert (
+        "analysis-progress analysis-progress--${analysisProgressUi.tone}"
+        in shell
+    )
+    assert "{analysisProgressUi.label}" in shell
+    assert "{analysisProgressUi.message}" in shell
+    assert "analysisProgressUi.retryable &&" in shell
+
+
 def test_follow_up_and_legal_sources_explain_why_and_when() -> None:
     shell = _shell()
 
@@ -71,12 +91,16 @@ def test_quick_question_groups_render_without_undefined_legacy_reference() -> No
     assert "{quickQuestions.map((item) => (" not in shell
 
 
-def test_chat_places_save_and_four_service_examples_before_messages() -> None:
+def test_chat_places_service_examples_inside_the_empty_conversation_state() -> None:
     shell = _shell()
     chat = shell[shell.index("function ChatScreenV2("):]
+    messages_index = chat.index('className="messages"')
+    empty_state_index = chat.index('className="chat-empty-state"')
+    quick_examples_index = chat.index('className="quick-examples"')
+    composer_index = chat.index('className="chat-input"')
 
-    assert chat.index('aria-label="상담 저장 선택"') < chat.index('className="messages"')
-    assert chat.index('className="quick-examples"') < chat.index('className="messages"')
+    assert chat.index('aria-label="상담 저장 선택"') < messages_index
+    assert messages_index < empty_state_index < quick_examples_index < composer_index
     assert 'title: "과태료·범칙금"' in chat
     assert 'title: "과실비율"' in chat
     assert 'title: "법령 관련 질문"' not in chat
@@ -124,6 +148,10 @@ def test_consultation_intake_renders_only_the_selected_case_type_fields() -> Non
     assert 'selectedType === "fault_ratio"' in shell
     assert "{isFineNotice && (" in shell
     assert "{isFaultRatio && (" in shell
+    assert 'field.key === "attachmentAvailable"' in shell
+    assert '<option value="">확인 필요</option>' in shell
+    assert '<option value="yes">첨부 가능</option>' in shell
+    assert '<option value="no">첨부 어려움</option>' in shell
 
 
 def test_chat_submission_forwards_bounded_consultation_type_and_canonical_facts() -> None:
@@ -135,6 +163,7 @@ def test_chat_submission_forwards_bounded_consultation_type_and_canonical_facts(
     assert "buildConsultationRequestContext" in shell
     assert "consultation_type: consultationRequestContext.consultation_type || undefined" in submit
     assert "facts: consultationRequestContext.facts" in submit
+    assert "fine_notice_slots: consultationRequestContext.fine_notice_slots" in submit
 
 
 def test_user_message_and_primary_ctas_have_final_light_theme_overrides() -> None:

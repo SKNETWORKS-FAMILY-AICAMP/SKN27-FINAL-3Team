@@ -15,6 +15,7 @@ def _summary(*, verified_at: str, status: str = "success") -> dict:
         "contract_version": "legal_ingestion_run_summary.v2",
         "run_id": "legal:test",
         "dataset_version": "sha256:dataset",
+        "release_version": "release-abc123",
         "finished_at": verified_at,
         "source_summaries": [
             {
@@ -83,6 +84,31 @@ def test_validation_accepts_current_complete_summary() -> None:
     assert result["stale_sources"] == []
     assert result["run_id"] == "legal:test"
     assert result["dataset_version"] == "sha256:dataset"
+    assert result["release_version"] == "release-abc123"
+
+
+def test_validation_rejects_dataset_and_release_provenance_mismatch() -> None:
+    dataset_mismatch = evaluate_run_summary(
+        _summary(verified_at="2026-07-23T01:30:00+00:00"),
+        now=NOW,
+        max_age_hours=24,
+        required_sources=["road_traffic_act"],
+        expected_dataset_version="sha256:different",
+        expected_release_version="release-abc123",
+    )
+    release_mismatch = evaluate_run_summary(
+        _summary(verified_at="2026-07-23T01:30:00+00:00"),
+        now=NOW,
+        max_age_hours=24,
+        required_sources=["road_traffic_act"],
+        expected_dataset_version="sha256:dataset",
+        expected_release_version="release-different",
+    )
+
+    assert dataset_mismatch["status"] == "failed"
+    assert dataset_mismatch["errors"] == ["dataset_version_mismatch"]
+    assert release_mismatch["status"] == "failed"
+    assert release_mismatch["errors"] == ["release_version_mismatch"]
 
 
 def test_validation_rejects_summary_without_any_source() -> None:

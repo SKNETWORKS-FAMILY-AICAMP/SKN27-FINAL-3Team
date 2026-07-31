@@ -7,6 +7,14 @@ from dataclasses import dataclass
 import re
 from typing import Any, Callable, Literal
 
+from app.services.attachment_workflow_service import (
+    ATTACHMENT_WORKFLOW_STATES,
+    build_attachment_workflows,
+)
+from app.services.analysis_progress_service import build_analysis_progress
+from app.services.fact_conflict_service import normalize_fact_conflicts
+from app.services.public_law_projection_service import project_public_law_items
+
 
 AnalysisQueryKind = Literal["not_found", "detail", "pending", "completed"]
 JobLoader = Callable[[str], dict[str, Any] | None]
@@ -47,6 +55,7 @@ _SUPERVISOR_STATE_FIELDS = (
     "collected_facts",
     "missing_fields",
     "next_questions",
+    "fact_conflicts",
 )
 _SUPERVISOR_EXECUTION_FIELDS = (
     "contract_version",
@@ -134,6 +143,15 @@ _PUBLIC_PROGRESS_SNAPSHOT_FIELDS = (
     "source_tables",
 )
 _PUBLIC_ATTACHMENT_FIELDS = ("attachment_id", "purpose", "filename", "scan_status")
+_PUBLIC_ATTACHMENT_WORKFLOW_FIELDS = (
+    "contract_version",
+    "attachment_id",
+    "state",
+    "next_action",
+    "retryable",
+    "missing_fields",
+    "limitations",
+)
 _PUBLIC_REPORT_LINK_FIELDS = ("report_id", "action")
 _PUBLIC_REPORT_SUMMARY_FIELDS = (
     "report_id",
@@ -222,6 +240,11 @@ def load_analysis_result(
                 "limitations": [],
                 "work_item": _project_work_item(job.get("work_item")),
                 "progress_state": _project_progress_state(job.get("progress_state")),
+                "attachment_workflows": _attachment_workflows_for_job(
+                    job,
+                    job.get("attachment_workflows"),
+                ),
+                "analysis_progress": build_analysis_progress(job),
             },
         )
 
@@ -258,6 +281,10 @@ def load_analysis_result(
             "pending_questions": deepcopy(job.get("pending_questions") or []),
             "report_links": _project_report_links(job.get("report_links")),
             "attachments": _project_attachments(job.get("attachments")),
+            "attachment_workflows": _attachment_workflows_for_job(
+                job,
+                composed.get("attachment_workflows"),
+            ),
             "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
             "supervisor_state": _project_supervisor_state(job.get("supervisor_state")),
             "user_claims": _project_user_claims(job.get("supervisor_state")),
@@ -267,6 +294,10 @@ def load_analysis_result(
             "work_item": _project_work_item(job.get("work_item")),
             "progress_state": _project_progress_state(job.get("progress_state")),
         }
+    )
+    result["analysis_progress"] = build_analysis_progress(
+        job,
+        composed_result=result,
     )
     return AnalysisJobQueryOutcome(kind="completed", payload=result)
 
@@ -293,6 +324,10 @@ def _project_analysis_job_detail(
                 job.get("assistant_message_payload")
             ),
             "attachments": _project_attachments(job.get("attachments")),
+            "attachment_workflows": _attachment_workflows_for_job(
+                job,
+                job.get("attachment_workflows"),
+            ),
             "report_links": _project_report_links(job.get("report_links")),
             "limitations": _safe_public_limitations(job.get("limitations")),
             "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
@@ -302,6 +337,10 @@ def _project_analysis_job_detail(
             ),
             "reports": _project_report_summaries(job.get("reports")),
         }
+    )
+    projected["analysis_progress"] = build_analysis_progress(
+        job,
+        composed_result=projected,
     )
     return projected
 
@@ -332,6 +371,82 @@ def _project_attachments(value: Any) -> list[dict[str, Any]]:
         for item in value
         if isinstance(item, dict)
     ]
+
+
+def _project_attachment_workflows(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    workflows: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        state = str(item.get("state") or "").strip()
+        next_action = str(item.get("next_action") or "").strip()
+        attachment_id = str(item.get("attachment_id") or "").strip()
+        if (
+            item.get("contract_version") != "attachment_workflow.v1"
+            or state not in ATTACHMENT_WORKFLOW_STATES
+            or not attachment_id
+            or re.fullmatch(r"[a-z_]+", next_action) is None
+        ):
+            continue
+        workflows.append(
+            {
+                "contract_version": "attachment_workflow.v1",
+                "attachment_id": attachment_id,
+                "state": state,
+                "next_action": next_action,
+                "retryable": item.get("retryable") is True,
+                "missing_fields": [
+                    field.strip()
+                    for field in item.get("missing_fields") or []
+                    if isinstance(field, str) and field.strip()
+                ],
+                "limitations": _safe_public_limitations(item.get("limitations")),
+            }
+        )
+    return workflows
+
+
+def _attachment_workflows_for_job(
+    job: dict[str, Any],
+    composed_workflows: Any,
+) -> list[dict[str, Any]]:
+    projected = _project_attachment_workflows(composed_workflows)
+    if projected:
+        return projected
+
+    structured_results: dict[str, Any] = {}
+    for result in job.get("agent_results") or []:
+        if not isinstance(result, dict):
+            continue
+        node_code = str(result.get("node_code") or "").strip()
+        structured_result = result.get("structured_result")
+        if not node_code or not isinstance(structured_result, dict):
+            continue
+        existing = structured_results.get(node_code)
+        if existing is None:
+            structured_results[node_code] = structured_result
+        elif isinstance(existing, list):
+            existing.append(structured_result)
+        else:
+            structured_results[node_code] = [existing, structured_result]
+
+    return build_attachment_workflows(
+        attachments=[
+            item
+            for item in job.get("attachments") or []
+            if isinstance(item, dict)
+        ],
+        structured_results=structured_results,
+        active_node=str(job.get("active_node") or ""),
+        overall_status=str(job.get("status") or ""),
+        ocr_confirmation=(
+            job.get("ocr_confirmation")
+            if isinstance(job.get("ocr_confirmation"), dict)
+            else None
+        ),
+    )
 
 
 def _project_report_links(value: Any) -> list[dict[str, Any]]:
@@ -372,6 +487,10 @@ def _project_supervisor_state(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     projected = _project_mapping(value, _SUPERVISOR_STATE_FIELDS)
+    if "fact_conflicts" in value:
+        projected["fact_conflicts"] = normalize_fact_conflicts(
+            value.get("fact_conflicts")
+        )
     packages = value.get("agent_input_packages")
     if isinstance(packages, list):
         projected["agent_input_packages"] = [
@@ -506,10 +625,9 @@ def project_public_law_quality_summary(value: Any) -> dict[str, Any] | None:
 
 def _project_public_law_ground_structured_result(value: Any) -> dict[str, Any]:
     source = _dict_or_empty(value)
-    structured: dict[str, Any] = {}
-    for field in ("matched_laws", "law_provisions"):
-        if field in source:
-            structured[field] = _project_public_law_items(source[field])
+    structured: dict[str, Any] = {
+        "matched_laws": project_public_law_items(source),
+    }
     if "freshness" in source:
         structured["freshness"] = _project_public_freshness(source.get("freshness"))
 

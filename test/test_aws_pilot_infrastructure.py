@@ -195,6 +195,19 @@ def test_pilot_runtime_declares_runpod_vision_without_secret_values() -> None:
     ]
 
 
+def test_runtime_template_declares_every_required_compose_interpolation() -> None:
+    compose = _read_deploy("docker-compose.pilot.yml")
+    runtime_env = _read_deploy("runtime.env.example")
+    required_keys = set(re.findall(r"\$\{([A-Z0-9_]+):\?", compose))
+    template_keys = {
+        line.split("=", 1)[0]
+        for line in runtime_env.splitlines()
+        if line and not line.startswith("#") and "=" in line
+    }
+
+    assert required_keys.issubset(template_keys), required_keys - template_keys
+
+
 def test_database_is_private_single_az_encrypted_postgres_with_safe_defaults() -> None:
     source = _terraform_source()
     assert len(re.findall(r'resource\s+"aws_db_instance"', source)) == 1
@@ -445,6 +458,21 @@ def test_caddy_preserves_auth_headers_and_haproxy_enforces_per_ip_rate_limit() -
     assert "http_req_rate(1m)" in haproxy
 
 
+def test_caddy_access_log_drops_all_request_headers_without_changing_proxy_auth() -> None:
+    caddy = _read_deploy("Caddyfile")
+    log_start = caddy.index("log {")
+    log_end = caddy.index("\n\t}", log_start) + len("\n\t}")
+    log_block = caddy[log_start:log_end]
+    proxy_block = caddy[caddy.index("reverse_proxy") :]
+
+    assert "format filter {" in log_block
+    assert "request>headers delete" in log_block
+    assert "wrap json" in log_block
+    assert "log_credentials" not in caddy
+    for header in ("Authorization", "Cookie", "X-Guest-Credential"):
+        assert f"header_up -{header}" not in proxy_block
+
+
 def test_internal_health_checks_forward_https_with_an_explicit_safe_host() -> None:
     compose = yaml.safe_load(_read_deploy("docker-compose.pilot.yml"))
     backend_health = " ".join(compose["services"]["backend"]["healthcheck"]["test"])
@@ -622,6 +650,123 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
     )
     positions = [loader.index(step) for step in expected_steps]
     assert positions == sorted(positions)
+
+
+def test_rag_seed_builds_release_bound_operational_evidence_after_readiness() -> None:
+    loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+    load_failed = next(
+        line for line in loader.splitlines() if '"load_failed() {' in line
+    )
+
+    graph_readiness = loader.index(
+        "verify_legal_graph_readiness --format json"
+    )
+    law_smoke = loader.index(
+        "smoke_law_ground_search --require-results --format json"
+    )
+    pgvector_readiness = loader.index(
+        "verify_pgvector_rag_readiness --format json"
+    )
+    text_search_smoke = loader.index(
+        "smoke_text_ml_case_search --require-pgvector --require-results --format json"
+    )
+    build_summary = loader.index(
+        "build_legal_operational_evidence --manifest"
+    )
+    validate_summary = loader.index(
+        "etl.legal.validate_run_summary --summary"
+    )
+    atomic_move = loader.index(
+        "mv -f `$EVIDENCE_TMP `$EVIDENCE_FILE"
+    )
+    completion_marker = loader.index(
+        "mv -f `$RELEASE_STATE_FILE.tmp `$RELEASE_STATE_FILE"
+    )
+    cleanup = loader.index("cleanup_rag_seed", completion_marker)
+
+    assert (
+        graph_readiness
+        < law_smoke
+        < pgvector_readiness
+        < text_search_smoke
+        < build_summary
+        < validate_summary
+        < atomic_move
+        < completion_marker
+        < cleanup
+    )
+    for token in (
+        "LEGAL_DATASET_VERIFIED_AT",
+        "--dataset-version `\"`$LEGAL_DATASET_VERSION`\"",
+        "--release-version '$ReleaseTag'",
+        "--verified-at `\"`$LEGAL_DATASET_VERIFIED_AT`\"",
+        "--expected-dataset-version `\"`$LEGAL_DATASET_VERSION`\"",
+        "--expected-release-version '$ReleaseTag'",
+        "EVIDENCE_TMP=`$EVIDENCE_DIR/.run_summary.json.tmp",
+        "chmod 0444 `$EVIDENCE_TMP",
+    ):
+        assert token in loader
+    assert "cleanup_rag_seed" in load_failed
+
+
+def test_normal_promotion_validates_promotes_and_preflights_operational_evidence() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+    previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")
+    promote_release = deploy.index(
+        "ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current",
+        previous,
+    )
+    normal_segment = deploy[previous:promote_release]
+
+    release_evidence = normal_segment.index(
+        "RELEASE_EVIDENCE=`$RELEASE_DIR/operational-evidence/run_summary.json"
+    )
+    precheck = normal_segment.index(
+        "etl.legal.validate_run_summary --summary /run/release-evidence/run_summary.json"
+    )
+    stop_previous = normal_segment.index(
+        "$productionComposeCommand down",
+        precheck,
+    )
+    install_temporary = normal_segment.index(
+        "install -m 0444 `$RELEASE_EVIDENCE `$SHARED_EVIDENCE_TMP"
+    )
+    validate_temporary = normal_segment.index(
+        "etl.legal.validate_run_summary --summary /run/operational-evidence/.run_summary.json.tmp"
+    )
+    promote_evidence = normal_segment.index(
+        "mv -f `$SHARED_EVIDENCE_TMP `$SHARED_EVIDENCE_FILE"
+    )
+    promote_call = normal_segment.rindex("promote_operational_evidence")
+    core_start = normal_segment.index(
+        "$productionComposeCommand up -d --wait --wait-timeout 600 "
+        "--remove-orphans `$WAITED_SERVICES",
+        promote_call,
+    )
+    worker_start = normal_segment.index(
+        "$productionComposeCommand up -d `$BACKGROUND_SERVICES",
+        core_start,
+    )
+    monitor_preflight = normal_segment.index(
+        "observe_operational_health --once"
+    )
+    monitor_start = normal_segment.index(
+        "$productionComposeCommand up -d `$MONITOR_SERVICE",
+        monitor_preflight,
+    )
+
+    assert release_evidence < precheck < stop_previous < promote_call
+    assert install_temporary < validate_temporary < promote_evidence
+    assert promote_call < core_start < worker_start < monitor_preflight < monitor_start
+    assert "BACKGROUND_SERVICES='agent-worker file-scan-worker'" in normal_segment
+    assert "MONITOR_SERVICE='ops-monitor'" in normal_segment
+    assert "legal_data_provenance_mismatch" not in normal_segment
+    assert "restore_operational_evidence" in normal_segment
+    assert (
+        "cp `$PREVIOUS_RELEASE/operational-evidence/run_summary.json "
+        "`$SHARED_EVIDENCE_TMP"
+    ) in normal_segment
+    assert "rm -f `$SHARED_EVIDENCE_FILE" in normal_segment
 
 
 def test_deploy_fail_closed_hook_requires_unified_production_runtime_smoke() -> None:
@@ -1627,11 +1772,11 @@ def test_normal_promotion_bootstraps_redis_before_waiting_for_core_services() ->
     waited_services = (
         "WAITED_SERVICES='caddy edge-rate-limit frontend backend clamav law-neo4j'"
     )
-    background_services = (
-        "BACKGROUND_SERVICES='agent-worker file-scan-worker ops-monitor'"
-    )
+    background_services = "BACKGROUND_SERVICES='agent-worker file-scan-worker'"
+    monitor_service = "MONITOR_SERVICE='ops-monitor'"
     assert waited_services in normal_segment
     assert background_services in normal_segment
+    assert monitor_service in normal_segment
     assert "wait_for_redis()" in normal_segment
     assert "for attempt in `$(seq 1 120); do" in normal_segment
     assert "$productionComposeCommand exec -T redis redis-cli ping | grep -qx PONG" in normal_segment
@@ -1641,6 +1786,7 @@ def test_normal_promotion_bootstraps_redis_before_waiting_for_core_services() ->
         "--remove-orphans `$WAITED_SERVICES"
     ) in normal_segment
     assert "$productionComposeCommand up -d `$BACKGROUND_SERVICES" in normal_segment
+    assert "$productionComposeCommand up -d `$MONITOR_SERVICE" in normal_segment
     assert (
         "for attempt in `$(seq 1 30); do ! ss -ltnp | grep -E '(:80|:443)'"
     ) in normal_segment
@@ -1657,6 +1803,9 @@ def test_normal_promotion_bootstraps_redis_before_waiting_for_core_services() ->
         "$productionComposeCommand up -d --wait --wait-timeout 600 "
         "--remove-orphans `$WAITED_SERVICES"
     ) < normal_segment.rindex("$productionComposeCommand up -d `$BACKGROUND_SERVICES")
+    assert normal_segment.rindex(
+        "$productionComposeCommand up -d `$BACKGROUND_SERVICES"
+    ) < normal_segment.rindex("$productionComposeCommand up -d `$MONITOR_SERVICE")
 
 
 def test_release_update_stage_is_isolated_from_the_current_compose_project() -> None:

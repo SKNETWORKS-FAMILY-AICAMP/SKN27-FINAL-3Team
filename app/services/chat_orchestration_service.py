@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from app.security.chat_input_privacy import protect_chat_input_payload
 from app.services.attachment_mock_service import resolve_attachment_references
+from app.services.attachment_workflow_service import build_attachment_workflows
 from app.services.case_memory_service import update_case_memory
 from app.services.case_evidence_service import build_case_evidence
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS, build_consultation_state_v2
+from app.services.fine_notice_intake_service import reduce_fine_notice_intake
+from app.services.fact_conflict_service import (
+    detect_same_message_fact_conflicts,
+    normalize_fact_conflicts,
+)
+from app.services.input_understanding_service import evaluate_input_understanding
 from app.services.law_ground_contract import normalize_law_evidence
 from app.services.service_scope_policy_service import evaluate_service_scope
 from app.services.supervisor_control_service import (
@@ -149,7 +156,33 @@ def submit_message(
     if not user_text and not attachments:
         return _needs_input_response(session_id=session_id, message_id=message_id)
 
-    routing_intent = routing_intent_override or route_supervisor_input(user_text, attachments)
+    input_understanding = evaluate_input_understanding(
+        user_text=user_text,
+        attachments=attachments,
+    )
+    if input_understanding["status"] in {
+        "needs_clarification",
+        "blocked_sensitive",
+    }:
+        return _input_clarification_response(
+            session_id=session_id,
+            message_id=message_id,
+            input_understanding=input_understanding,
+        )
+    user_text = str(input_understanding["safe_user_text"] or user_text).strip()
+    payload = {
+        **payload,
+        "message_id": message_id,
+        "user_text": user_text,
+        "safe_user_text": user_text,
+        "input_understanding": input_understanding["public_metadata"],
+    }
+    detected_routing_intent = route_supervisor_input(user_text, attachments)
+    routing_intent = (
+        detected_routing_intent
+        if routing_intent_override in {"", "general_consultation"}
+        else routing_intent_override
+    )
     scope_guidance = build_scope_guidance_response(
         session_id=session_id,
         message_id=message_id,
@@ -160,6 +193,18 @@ def submit_message(
     if scope_guidance is not None:
         return scope_guidance
     ocr_confirmation = _normalized_ocr_confirmation(payload.get("ocr_confirmation"))
+    fine_notice_intake = (
+        reduce_fine_notice_intake(
+            {
+                **payload,
+                "user_text": user_text,
+                "attachments": attachments,
+                "ocr_confirmation": ocr_confirmation,
+            }
+        )
+        if routing_intent in {"fine_notice_procedure", "fine_notice_analysis"}
+        else None
+    )
     ocr_follow_up_allowed = _has_valid_ocr_confirmation(ocr_confirmation)
     report_requested = (
         report_generation_requested(user_text)
@@ -175,6 +220,18 @@ def submit_message(
             fallback_builder=_fallback_accident_supervisor_state,
         )
         source_message_id = str(payload.get("message_id") or message_id)
+        fact_conflicts = normalize_fact_conflicts(
+            [
+                *detect_same_message_fact_conflicts(
+                    user_text,
+                    source_message_id,
+                ),
+                *list(accident_supervisor_state.get("fact_conflicts") or []),
+                *list(payload.get("fact_conflicts") or []),
+            ],
+            default_source_message_id=source_message_id,
+        )
+        conflict_fields = {item["field"] for item in fact_conflicts}
         fact_candidates = [
             {
                 **dict(item),
@@ -182,10 +239,14 @@ def submit_message(
                 "confirmed": False,
             }
             for item in accident_supervisor_state.get("collected_facts") or []
-            if isinstance(item, dict)
+            if isinstance(item, dict) and item.get("field") not in conflict_fields
         ]
         fact_state = reduce_consultation_fact_state(
-            {**payload, "fact_candidates": fact_candidates}
+            {
+                **payload,
+                "fact_candidates": fact_candidates,
+                "fact_conflicts": fact_conflicts,
+            }
         )
         fact_sources = [
             dict(item)
@@ -228,6 +289,7 @@ def submit_message(
         }
         accident_supervisor_state = {
             **accident_supervisor_state,
+            "fact_conflicts": fact_conflicts,
             "case_evidence": case_evidence,
             "case_memory": case_memory,
             "conversation_summary": case_memory.get("conversation_summary")
@@ -278,6 +340,15 @@ def submit_message(
         attachments=attachments,
         ocr_confirmation=ocr_confirmation,
     )
+    if fine_notice_intake is not None:
+        supervisor_state = {
+            **supervisor_state,
+            "fine_notice_intake": fine_notice_intake,
+            "next_questions": _merge_fine_notice_questions(
+                supervisor_state.get("next_questions"),
+                fine_notice_intake,
+            ),
+        }
     if (supervisor_state.get("llm") or {}).get("status") == "failed":
         return _supervisor_unavailable_response(
             session_id=session_id,
@@ -322,6 +393,25 @@ def submit_message(
         report_requested=report_requested,
         ocr_confirmation=ocr_confirmation,
     )
+    active_workflow_node = next(
+        (
+            str(step["node_code"])
+            for step in analysis_plan["steps"]
+            if str(step.get("node_code") or "")
+            not in {
+                "input_context_validation",
+                "agent_result_validation",
+                "final_response_merge",
+            }
+        ),
+        "",
+    )
+    attachment_workflows = build_attachment_workflows(
+        attachments=attachments,
+        active_node=active_workflow_node,
+        overall_status="queued",
+        ocr_confirmation=ocr_confirmation,
+    )
 
     response = {
         "contract_version": "chat_message_accepted.v2",
@@ -336,19 +426,52 @@ def submit_message(
             "active_node": analysis_plan["steps"][0]["node_code"],
             "message": "상담 분석 작업이 대기열에 등록될 준비가 되었습니다.",
         },
-        "pending_questions": [],
+        "pending_questions": _merge_fine_notice_questions(
+            supervisor_state.get("next_questions"),
+            fine_notice_intake,
+        ),
         "cards": [],
         "report_links": [],
         "attachments": attachments,
+        "attachment_workflows": attachment_workflows,
         "blocked_attachments": list(payload.get("blocked_attachments") or []),
         "attachment_scan_policy": dict(payload.get("attachment_scan_policy") or {}),
         "scan_gate": dict(payload.get("scan_gate") or {}),
         "supervisor_state": supervisor_state,
+        "fine_notice_intake": fine_notice_intake,
         "reporting_payload": supervisor_state.get("reporting_payload"),
         "analysis_plan": analysis_plan,
         "limitations": [],
     }
     return response
+
+
+def _attachment_workflows_from_execution(
+    node_execution: dict[str, Any],
+    *,
+    structured_results: dict[str, Any],
+    status: str,
+) -> list[dict[str, Any]]:
+    progress = (
+        node_execution.get("progress")
+        if isinstance(node_execution.get("progress"), dict)
+        else {}
+    )
+    return build_attachment_workflows(
+        attachments=[
+            item
+            for item in node_execution.get("attachments", [])
+            if isinstance(item, dict)
+        ],
+        structured_results=structured_results,
+        active_node=str(progress.get("active_node") or ""),
+        overall_status=status,
+        ocr_confirmation=(
+            node_execution.get("ocr_confirmation")
+            if isinstance(node_execution.get("ocr_confirmation"), dict)
+            else None
+        ),
+    )
 
 
 def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
@@ -377,21 +500,42 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
             if isinstance(merged.get("assistant_message"), dict)
             else {"answer": final_output.get("summary", ""), "summary": final_output.get("summary", "")}
         )
+        supervisor_state = (
+            node_execution.get("supervisor_state")
+            if isinstance(node_execution.get("supervisor_state"), dict)
+            else {}
+        )
+        fine_notice_intake = (
+            supervisor_state.get("fine_notice_intake")
+            if isinstance(supervisor_state.get("fine_notice_intake"), dict)
+            else None
+        )
+        structured_results = dict(merged.get("structured_results") or {})
+        attachment_workflows = _attachment_workflows_from_execution(
+            node_execution,
+            structured_results=structured_results,
+            status=str(final_output.get("status") or "partial"),
+        )
         return {
             "contract_version": "analysis_result.v2",
             "job_id": node_execution.get("job_id"),
             "status": str(final_output.get("status") or "partial"),
             "assistant_message": assistant_message,
-            "structured_results": dict(merged.get("structured_results") or {}),
+            "structured_results": structured_results,
             "evidence": list(merged.get("evidence") or []),
             "limitations": list(merged.get("limitations") or []),
             "next_actions": list(merged.get("next_actions") or []),
             "deadline_guidance": dict(merged.get("deadline_guidance") or {}),
-            "pending_questions": list(merged.get("pending_questions") or []),
+            "pending_questions": _merge_fine_notice_questions(
+                merged.get("pending_questions"),
+                fine_notice_intake,
+            ),
             "cards": list(merged.get("cards") or []),
             "report_links": list(merged.get("report_links") or []),
             "supervisor_handoff": dict(node_execution.get("supervisor_handoff") or {}),
             "reporting_payload": dict(node_execution.get("reporting_payload") or {}),
+            "fine_notice_intake": fine_notice_intake,
+            "attachment_workflows": attachment_workflows,
         }
     reconstructed = _rebuild_persisted_supervisor_response(node_execution, executions)
     if reconstructed is not None:
@@ -450,6 +594,11 @@ def compose_agent_response(node_execution: dict[str, Any]) -> dict[str, Any]:
         "limitations": _dedupe(limitations),
         "supervisor_handoff": dict(node_execution.get("supervisor_handoff") or {}),
         "reporting_payload": dict(node_execution.get("reporting_payload") or {}),
+        "attachment_workflows": _attachment_workflows_from_execution(
+            node_execution,
+            structured_results=structured_results,
+            status=status,
+        ),
     }
 
 
@@ -498,12 +647,14 @@ def _rebuild_persisted_supervisor_response(
     )
     if not merged.get("structured_results"):
         return None
+    status = _combined_status(statuses)
+    structured_results = dict(merged.get("structured_results") or {})
     return {
         "contract_version": "analysis_result.v2",
         "job_id": node_execution.get("job_id"),
-        "status": _combined_status(statuses),
+        "status": status,
         "assistant_message": dict(merged.get("assistant_message") or {}),
-        "structured_results": dict(merged.get("structured_results") or {}),
+        "structured_results": structured_results,
         "evidence": list(merged.get("evidence") or []),
         "limitations": list(merged.get("limitations") or []),
         "next_actions": list(merged.get("next_actions") or []),
@@ -513,6 +664,11 @@ def _rebuild_persisted_supervisor_response(
         "report_links": list(merged.get("report_links") or []),
         "supervisor_handoff": dict(node_execution.get("supervisor_handoff") or {}),
         "reporting_payload": dict(node_execution.get("reporting_payload") or {}),
+        "attachment_workflows": _attachment_workflows_from_execution(
+            node_execution,
+            structured_results=structured_results,
+            status=status,
+        ),
     }
 
 
@@ -598,6 +754,68 @@ def _needs_input_response(*, session_id: str, message_id: str) -> dict[str, Any]
         },
         "limitations": [],
     }
+
+
+def _input_clarification_response(
+    *,
+    session_id: str,
+    message_id: str,
+    input_understanding: dict[str, Any],
+) -> dict[str, Any]:
+    question = str(input_understanding["message"])
+    response = _needs_input_response(
+        session_id=session_id,
+        message_id=message_id,
+    )
+    response.update(
+        {
+            "routing_intent": "needs_clarification",
+            "status": "needs_clarification",
+            "assistant_message": {"answer": question, "summary": question},
+            "progress": {
+                "status": "needs_clarification",
+                "active_node": "",
+                "message": question,
+            },
+            "pending_questions": [
+                {"field": "user_text", "question": question}
+            ],
+            "input_understanding": input_understanding["public_metadata"],
+        }
+    )
+    response["analysis_plan"].update(
+        {
+            "routing_intent": "needs_clarification",
+            "status": "needs_clarification",
+            "steps": [],
+        }
+    )
+    return response
+
+
+def _merge_fine_notice_questions(
+    existing: Any,
+    intake: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    intake_questions = [
+        dict(item)
+        for item in (intake or {}).get("next_questions") or []
+        if isinstance(item, Mapping) and str(item.get("field") or "").strip()
+    ]
+    other_questions = [
+        dict(item)
+        for item in existing or []
+        if isinstance(item, Mapping) and str(item.get("field") or "").strip()
+    ]
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*intake_questions, *other_questions]:
+        field = str(item["field"]).strip()
+        if field in seen:
+            continue
+        seen.add(field)
+        merged.append(item)
+    return merged
 
 
 def _scope_guidance_response(
@@ -910,6 +1128,7 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
         "conversation_turn_count": len(payload.get("conversation_history") or []) + 1,
         "conversation_summary": user_text,
         "collected_facts": [{"field": "user_text", "value": user_text}] if user_text else [],
+        "fact_conflicts": [],
         "missing_fields": [],
         "next_questions": [],
         "slot_state": slot_state,
@@ -942,7 +1161,22 @@ def _fallback_accident_supervisor_state(
     payload: dict[str, Any],
     routing_intent: str,
 ) -> dict[str, Any]:
-    fact_state = reduce_consultation_fact_state(payload)
+    fact_state = reduce_consultation_fact_state(
+        {
+            **payload,
+            "fact_candidates": [
+                *[
+                    item
+                    for item in payload.get("fact_candidates") or []
+                    if isinstance(item, dict)
+                ],
+                *_same_message_accident_fact_candidates(
+                    str(payload.get("user_text") or ""),
+                    str(payload.get("message_id") or payload.get("session_id") or ""),
+                ),
+            ],
+        }
+    )
     collected_facts = [
         {
             "field": field,
@@ -964,6 +1198,7 @@ def _fallback_accident_supervisor_state(
         "conversation_turn_count": len(payload.get("conversation_history") or []) + 1,
         "conversation_summary": str(payload.get("user_text") or "").strip(),
         "collected_facts": collected_facts,
+        "fact_conflicts": list(fact_state["conflicts"]),
         "missing_fields": missing_fields,
         "next_questions": [
             {"field": item["field"], "question": question_by_field[item["field"]]}
@@ -987,6 +1222,32 @@ def _fallback_accident_supervisor_state(
         "agent_input_packages": [],
         "reporting_payload": None,
     }
+
+
+def _same_message_accident_fact_candidates(
+    user_text: str,
+    source_message_id: str,
+) -> list[dict[str, Any]]:
+    text = str(user_text or "")
+    has_self_straight = bool(
+        re.search(r"(?:저는|제가|나는|내가|제\s*차(?:량)?)\s*[^.!?]{0,20}직진", text)
+    )
+    has_other_left_turn = bool(
+        re.search(r"상대(?:방|차|차량)?(?:는|가)?\s*[^.!?]{0,24}좌회전", text)
+    )
+    if not has_self_straight or not has_other_left_turn:
+        return []
+    return [
+        {
+            "field": "vehicle_actions",
+            "value": "본인 차량 직진, 상대 차량 좌회전",
+            "source_message_id": source_message_id,
+            "confidence": 0.9,
+            "confirmed": False,
+        }
+    ]
+
+
 def _analysis_plan(
     *,
     session_id: str,

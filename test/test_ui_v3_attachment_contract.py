@@ -44,3 +44,26 @@ def test_chat_file_selection_uses_parent_validation_boundary() -> None:
         in chat_screen
     )
     assert "setSelectedUploadFile(" not in chat_screen
+
+
+def test_attachment_workflow_is_derived_only_from_server_response() -> None:
+    shell = _shell()
+
+    assert 'from "./attachmentWorkflowUi.js"' in shell
+    assert "buildAttachmentWorkflowUi(analysisResponse?.attachment_workflows)" in shell
+    assert "attachmentWorkflowUi={attachmentWorkflowUi}" in shell
+    assert "AttachmentWorkflowPanel" in shell
+
+
+def test_attachment_workflow_state_makes_confirmation_cards_mutually_exclusive() -> None:
+    chat_screen = _chat_screen_source()
+
+    assert (
+        'activeAttachmentWorkflow?.state === "ocr_needs_confirmation"' in chat_screen
+    )
+    assert (
+        'activeAttachmentWorkflow?.state === "classified_waiting_confirmation"'
+        in chat_screen
+    )
+    assert "attachmentWorkflowUi?.[0] || null" in chat_screen
+    assert "activeAttachmentWorkflow && (" in chat_screen

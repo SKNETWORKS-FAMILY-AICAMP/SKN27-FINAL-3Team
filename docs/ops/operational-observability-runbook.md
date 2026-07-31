@@ -46,6 +46,7 @@ terraform -chdir=infra/terraform-pilot output -raw operational_log_group_name
 | `legal_data_missing` | `/run/operational-evidence/run_summary.json` 존재 여부와 승인된 source 목록 | 검증된 `legal_ingestion_run_summary.v2`만 원자적으로 배치한다. 파일을 임의로 생성해 알람만 끄지 않는다. |
 | `legal_data_stale` | `stale_source_count`, 마지막 검증일과 승인된 최대 age | 갱신 파이프라인과 `validate_run_summary.py`를 다시 실행한다. 새 dataset version을 검증한 후 교체한다. |
 | `legal_data_refresh_failed` | `failed_source_count`, ETL의 안전한 실패 보고서 | 실패 source를 수정한 뒤 전체 검증을 다시 실행한다. 부분 결과를 성공으로 표시하지 않는다. |
+| `legal_data_provenance_mismatch` | summary의 안전한 `dataset_version`, `release_version`과 현재 runtime 설정 | 다른 release의 summary를 복사해 알람만 끄지 않는다. 해당 release의 immutable RAG seed에서 증적을 다시 생성하고 cutover 전 strict validation을 재실행한다. |
 | `monitor_configuration_invalid` | DB 연결, JSON schema, 양수 임계값, monitor 컨테이너 상태 | 원문 예외를 CloudWatch에 복사하지 않는다. 설정을 수정하고 단발 명령이 정상 snapshot을 반환하는지 확인한다. |
 
 ## 법령 run summary 반영
@@ -57,7 +58,8 @@ terraform -chdir=infra/terraform-pilot output -raw operational_log_group_name
 1. 계약이 `legal_ingestion_run_summary.v2`다.
 2. 승인된 required source가 모두 존재한다.
 3. `missing_sources`, `failed_sources`, `stale_sources`가 비어 있다.
-4. `dataset_version`과 검증 시각이 운영 release 기록과 일치한다.
+4. `dataset_version`, `release_version`, 검증 시각이 운영 release 기록과
+   일치한다.
 
 검증 명령 예시는 다음과 같다.
 
@@ -65,16 +67,18 @@ terraform -chdir=infra/terraform-pilot output -raw operational_log_group_name
 python -m etl.legal.validate_run_summary `
   --summary output/law_ingestion/reports/run_summary.json `
   --max-age-hours 168 `
+  --expected-dataset-version <APPROVED_DATASET_VERSION> `
+  --expected-release-version <APPROVED_RELEASE_VERSION> `
   --required-source <APPROVED_SOURCE_ID>
 ```
 
 파일은 승인된 비공개 S3 배포 artifact와 SSM 경로를 통해 인스턴스로
-전달하고, 임시 파일을 `0440`으로 만든 뒤 같은 파일시스템에서
+전달하고, 임시 파일을 `0444`로 만든 뒤 같은 파일시스템에서
 `run_summary.json`으로 원자적 rename한다. 내용을 이슈, PR, 채팅 또는
 명령행 인자로 복사하지 않는다.
 
 반영 후 `observe_operational_health --once`에서 `legal_data.status=success`,
-`issue_count=0`, 예상 `dataset_version`인지 확인한다.
+`issue_count=0`, 예상 `dataset_version`과 `release_version`인지 확인한다.
 
 ## CloudWatch와 SNS
 

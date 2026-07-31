@@ -55,14 +55,15 @@ def test_frontend_uses_canonical_capability_and_async_result_contracts() -> None
     assert "/scan/" not in api_client
 
 
-def test_chat_attachment_bar_has_one_accessible_dropzone_for_vision_and_ocr() -> None:
+def test_chat_attachment_bar_has_one_compact_accessible_dropzone() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     styles = read_text(ROOT / "app" / "web" / "styles.css")
 
     assert 'className="attachment-dropzone"' in shell
-    assert 'role="status"' in shell
-    assert "영상은 Vision 분석" in shell
-    assert "이미지와 PDF는 OCR 분류" in shell
+    assert 'aria-label="상담 메시지 입력"' in shell
+    assert 'aria-label="자료 첨부"' in shell
+    assert "영상은 Vision 분석" not in shell
+    assert "이미지와 PDF는 OCR 분류" not in shell
     assert "onAttachmentFile(event.target.files?.[0] || null)" in shell
     assert ".chat-attachment-bar .attachment-dropzone" in styles
 
@@ -207,7 +208,8 @@ def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> No
         "analysisResponse?.assistant_message?.core_answer ||",
         "assistantMessageText(analysisResponse?.assistant_message);",
         "workerResult?.assistant_message?.core_answer ||",
-        'assistantMessageText(workerResult?.assistant_message, "상담 내용을 접수했습니다."),',
+        "workerResult?.analysis_progress?.user_message ||",
+        "workerResult?.polling_notice?.message ||",
         "const assistantMessage = assistantMessageText(",
         "assistant_message: assistantMessageText(",
     ):
@@ -219,17 +221,20 @@ def test_frontend_polls_guest_worker_jobs_until_a_terminal_result() -> None:
     poll_start = shell.index("async function pollQueuedWorkerResult")
     poll_end = shell.index("async function submitServiceMessage", poll_start)
     polling = shell[poll_start:poll_end]
+    submit_end = shell.index("async function streamAssistantMessage", poll_end)
+    submit = shell[poll_end:submit_end]
 
     assert "const WORKER_POLL_MAX_ATTEMPTS = 60;" in shell
     assert "setChatMessages(conversationHistory);" in shell
     assert "if (!requestIdentity?.authToken)" not in polling
-    assert (
-        "for (let attempt = 0; attempt < WORKER_POLL_MAX_ATTEMPTS; attempt += 1)"
-        in polling
-    )
-    assert "await api.getAnalysisResult" in polling
-    assert "...jobDetail," in polling
-    assert "await waitForWorkerPoll();" in polling
+    assert 'import { pollWorkerResult } from "./workerPolling.js";' in shell
+    assert "return pollWorkerResult({" in polling
+    assert "loadResult: () => api.getAnalysisResult({" in polling
+    assert "wait: waitForWorkerPoll" in polling
+    assert "maxAttempts: WORKER_POLL_MAX_ATTEMPTS" in polling
+    assert "onUpdate: setAnalysisResponse" in polling
+    assert "for (let attempt" not in polling
+    assert '"상담 내용을 접수했습니다."' not in submit
 
 
 def test_repeated_analysis_cards_use_unique_react_keys() -> None:

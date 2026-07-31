@@ -67,6 +67,15 @@
       "scope_code": "vehicle_pedestrian_collision",
       "decision": "expert_handoff",
       "keywords": ["보행자", "횡단보도"],
+      "applicable_intents": [
+        "accident_initial_consultation",
+        "accident_evidence_analysis",
+        "accident_photo_evidence_analysis"
+      ],
+      "required_context_keywords": [
+        "사고", "충돌", "접촉", "추돌", "과실", "다쳐",
+        "들이받", "부딪", "치었", "쳤"
+      ],
       "reason": "보행자가 포함된 사고는 인명 피해와 책임 판단 위험이 있어 이 서비스에서 과실이나 책임을 분석하지 않습니다.",
       "limitations": [
         "서비스 범위를 벗어난 사고 유형이며, 법적 책임이나 과실을 확정할 수 없습니다."
@@ -79,6 +88,15 @@
       "scope_code": "vehicle_cycle_collision",
       "decision": "expert_handoff",
       "keywords": ["자전거", "킥보드"],
+      "applicable_intents": [
+        "accident_initial_consultation",
+        "accident_evidence_analysis",
+        "accident_photo_evidence_analysis"
+      ],
+      "required_context_keywords": [
+        "사고", "충돌", "접촉", "추돌", "과실", "다쳐",
+        "들이받", "부딪", "치었", "쳤"
+      ],
       "reason": "자전거 또는 개인형 이동장치가 포함된 사고는 이 서비스의 자동 분석 범위에 포함되지 않습니다.",
       "limitations": [
         "서비스 범위를 벗어난 사고 유형이며, 책임 비율을 확정할 수 없습니다."
@@ -91,6 +109,15 @@
       "scope_code": "facility_collision",
       "decision": "guidance_only",
       "keywords": ["시설물", "가드레일", "전봇대"],
+      "applicable_intents": [
+        "accident_initial_consultation",
+        "accident_evidence_analysis",
+        "accident_photo_evidence_analysis"
+      ],
+      "required_context_keywords": [
+        "사고", "충돌", "접촉", "추돌", "과실",
+        "들이받", "부딪", "치었", "쳤"
+      ],
       "reason": "시설물 충돌 사고는 이 서비스의 자동 과실 분석 범위에 포함되지 않습니다.",
       "limitations": [
         "시설물 관리 주체와 손해 범위에 따라 별도 확인이 필요합니다."

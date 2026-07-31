@@ -49,6 +49,39 @@ test("builds a bounded fault-ratio request context with canonical fact keys", ()
   );
 });
 
+test("builds the approved fine-notice slot request context", () => {
+  assert.deepEqual(
+    consultationIntakeModule.FINE_NOTICE_FIELDS.map(({ key, serverKey }) => [key, serverKey]),
+    [
+      ["documentDispositionType", "document_disposition_type"],
+      ["issuingAuthority", "issuing_authority"],
+      ["responseDeadline", "response_deadline"],
+      ["attachmentAvailable", "attachment_available"],
+    ]
+  );
+  assert.deepEqual(
+    consultationIntakeModule.buildConsultationRequestContext({
+      intake: {
+        consultationType: "fine_notice",
+        documentDispositionType: "과태료 사전통지서",
+        issuingAuthority: "가상시청",
+        responseDeadline: "2026-08-07",
+        attachmentAvailable: "yes",
+      },
+    }),
+    {
+      consultation_type: "fine_notice",
+      facts: {},
+      fine_notice_slots: {
+        document_disposition_type: "과태료 사전통지서",
+        issuing_authority: "가상시청",
+        response_deadline: "2026-08-07",
+        attachment_available: "yes",
+      },
+    }
+  );
+});
+
 test("does not turn arbitrary intake fields into server facts", () => {
   assert.deepEqual(
     consultationIntakeModule.buildConsultationRequestContext({
@@ -134,15 +167,17 @@ test("lists only unresolved accident facts as missing", () => {
 test("builds fine notice details without requesting accident facts", () => {
   const intake = createEmptyConsultationIntake();
   intake.consultationType = "fine_notice";
-  intake.violationDate = "2026-07-29";
-  intake.violationLocation = "서울시 강남구";
-  intake.violationType = "신호 위반";
+  intake.documentDispositionType = "과태료 사전통지서";
+  intake.issuingAuthority = "가상시청";
+  intake.responseDeadline = "2026-08-07";
+  intake.attachmentAvailable = "yes";
 
   const message = buildStructuredConsultationMessage({ intake });
 
-  assert.match(message, /2026-07-29/);
-  assert.match(message, /서울시 강남구/);
-  assert.match(message, /신호 위반/);
+  assert.match(message, /- 문서명·처분 유형: 과태료 사전통지서/);
+  assert.match(message, /- 발급기관: 가상시청/);
+  assert.match(message, /- 제출 기한: 2026-08-07/);
+  assert.match(message, /- 첨부 가능 여부: yes/);
   assert.doesNotMatch(message, /상담 질문/);
   assert.deepEqual(listConsultationIntakeMissingFields(intake), []);
 });
@@ -157,9 +192,10 @@ test("requests detailed accident facts only for fault ratio", () => {
   assert.deepEqual(
     listConsultationIntakeMissingFields({
       consultationType: "fine_notice",
-      violationDate: "2026-07-29",
-      violationLocation: "서울시 강남구",
-      violationType: "신호 위반",
+      documentDispositionType: "과태료 사전통지서",
+      issuingAuthority: "가상시청",
+      responseDeadline: "2026-08-07",
+      attachmentAvailable: "yes",
     }),
     []
   );

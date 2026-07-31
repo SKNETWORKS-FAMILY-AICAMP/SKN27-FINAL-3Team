@@ -33,6 +33,37 @@ def conversation_response_format(
                 }
             ),
         },
+        "fact_conflicts": {
+            "type": "array",
+            "items": _object_schema(
+                {
+                    "field": {
+                        "type": "string",
+                        "enum": [
+                            "road_layout",
+                            "vehicle_actions",
+                            "signal_priority",
+                            "collision_location",
+                        ],
+                    },
+                    "candidates": {
+                        "type": "array",
+                        "minItems": 2,
+                        "items": _object_schema(
+                            {
+                                "value": {"type": "string"},
+                                "source_message_id": {"type": "string"},
+                                "confidence": {
+                                    "type": "number",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0,
+                                },
+                            }
+                        ),
+                    },
+                }
+            ),
+        },
         "missing_fields": {
             "type": "array",
             "items": _object_schema(

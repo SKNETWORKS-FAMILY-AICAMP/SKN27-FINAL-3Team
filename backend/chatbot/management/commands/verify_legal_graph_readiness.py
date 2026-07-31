@@ -67,6 +67,77 @@ def verify_legal_graph_readiness() -> dict[str, Any]:
                 expected_count = int(metadata.get("legal_chunk_count") or 0)
                 if graph_count != expected_count or expected_count <= 0:
                     return _failure("legal_chunk_count_mismatch")
+                version_temporal = session.run(
+                    """
+                    MATCH (version:LawVersion)
+                    RETURN count(version) AS version_count,
+                           count(version.enforce_date) AS enforce_date_count,
+                           count(
+                               CASE
+                                   WHEN version.version_status = 'historical'
+                                        AND version.expire_date IS NULL
+                                   THEN 1
+                               END
+                           ) AS historical_missing_expire_count
+                    """
+                ).single()
+                version_count = int(
+                    (version_temporal or {}).get("version_count") or 0
+                )
+                version_enforce_count = int(
+                    (version_temporal or {}).get("enforce_date_count") or 0
+                )
+                version_missing_expire = int(
+                    (version_temporal or {}).get(
+                        "historical_missing_expire_count"
+                    )
+                    or 0
+                )
+                if (
+                    version_count <= 0
+                    or version_enforce_count != version_count
+                    or version_missing_expire != 0
+                ):
+                    return _failure(
+                        "law_version_temporal_metadata_invalid"
+                    )
+                chunk_temporal = session.run(
+                    """
+                    MATCH (chunk:LawChunk)
+                    OPTIONAL MATCH
+                        (version:LawVersion)-[:HAS_CHUNK]->(chunk)
+                    WITH chunk, collect(version)[0] AS version
+                    RETURN count(chunk) AS chunk_count,
+                           count(chunk.enforce_date) AS enforce_date_count,
+                           count(
+                               CASE
+                                   WHEN version.version_status = 'historical'
+                                        AND chunk.expire_date IS NULL
+                                   THEN 1
+                               END
+                           ) AS historical_missing_expire_count
+                    """
+                ).single()
+                temporal_chunk_count = int(
+                    (chunk_temporal or {}).get("chunk_count") or 0
+                )
+                chunk_enforce_count = int(
+                    (chunk_temporal or {}).get("enforce_date_count") or 0
+                )
+                chunk_missing_expire = int(
+                    (chunk_temporal or {}).get(
+                        "historical_missing_expire_count"
+                    )
+                    or 0
+                )
+                if (
+                    temporal_chunk_count != graph_count
+                    or chunk_enforce_count != graph_count
+                    or chunk_missing_expire != 0
+                ):
+                    return _failure(
+                        "law_chunk_temporal_metadata_invalid"
+                    )
                 session.run(
                     """
                     MATCH (c1:LawChunk)-[r]-(c2:LawChunk)

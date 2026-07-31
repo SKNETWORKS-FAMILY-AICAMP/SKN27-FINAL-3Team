@@ -15,6 +15,7 @@ REQUIRED_DOCS = [
     ROOT / "docs" / "ops" / "backup-and-recovery.md",
     ROOT / "docs" / "ops" / "legal-data-freshness-runbook.md",
     ROOT / "docs" / "ops" / "analysis-execution-provenance.md",
+    ROOT / "docs" / "ops" / "caddy-credential-log-incident-runbook.md",
 ]
 
 
@@ -62,6 +63,37 @@ def test_secret_management_document_defines_rotation_and_logging_rules():
     assert "## 3. 교체 절차" in content
     assert "Authorization" in content
     assert "Cookie" in content
+
+
+def test_caddy_credential_log_incident_runbook_is_complete_and_redacted():
+    content = read_text(
+        ROOT / "docs" / "ops" / "caddy-credential-log-incident-runbook.md"
+    )
+    for token in (
+        "Authorization",
+        "Cookie",
+        "X-Guest-Credential",
+        "caddy_logs",
+        "CloudWatch",
+        "backup",
+        "replication",
+        "APP_JWT_SECRET",
+        "SSM",
+        "backend",
+        "agent-worker",
+        "file-scan-worker",
+        "ops-monitor",
+        "401",
+        "credential canary",
+        "zero match",
+        "release SHA",
+        "dataset version",
+        "운영 승인",
+    ):
+        assert token in content
+
+    assert "실제 token 값을 증적" in content
+    assert "실제 token 값을 명령행" in content
 
 
 def test_production_env_template_contains_readiness_keys():
@@ -191,6 +223,7 @@ def test_operational_observability_runbook_maps_safe_alerts_to_actions():
         "legal_data_missing",
         "legal_data_stale",
         "legal_data_refresh_failed",
+        "legal_data_provenance_mismatch",
         "monitor_configuration_invalid",
         "SNS",
         "구독 확인",

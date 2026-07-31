@@ -225,6 +225,21 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertEqual(body["status"], "queued")
         self.assertEqual(body["execution_mode"], "async_worker")
         self.assertEqual(body["work_item"]["work_item_id"], "work_1")
+        self.assertEqual(
+            body["analysis_progress"],
+            {
+                "contract_version": "analysis_progress.v1",
+                "semantic_status": "queued",
+                "terminal": False,
+                "retryable": True,
+                "next_action": "continue_polling",
+                "user_message": (
+                    "분석 요청이 대기 중입니다. 순서가 되면 자동으로 진행됩니다."
+                ),
+                "job_id": "job_1",
+                "correlation_id": "work_1",
+            },
+        )
         self.assertNotIn("mock", str(body).lower())
         queued_payload = enqueue.call_args.args[1]
         self.assertEqual(
@@ -393,7 +408,7 @@ class ProductionApiContractTests(SimpleTestCase):
             reason="supervisor_unavailable",
         )
 
-    def test_supervisor_need_more_input_chat_response_is_not_enqueued(self) -> None:
+    def test_low_information_chat_response_is_not_enqueued(self) -> None:
         candidate = {
             "conversation_summary": "A law reference is still required.",
             "collected_facts": [],
@@ -482,13 +497,66 @@ class ProductionApiContractTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         body = json.loads(response.content)
-        self.assertEqual(body["status"], "needs_input")
-        self.assertEqual(body["execution_mode"], "input_collection")
+        self.assertEqual(body["status"], "needs_clarification")
+        self.assertEqual(body["execution_mode"], "input_clarification")
         self.assertEqual(body["analysis_plan"]["steps"], [])
         self.assertIsNone(body["reporting_payload"])
         self.assertEqual(body["report_links"], [])
         enqueue.assert_not_called()
         persist_followup.assert_called_once()
+
+    def test_exact_low_information_e2e_inputs_never_enqueue_worker(self) -> None:
+        for e2e_id, user_text in (
+            (10, "아 진짜 짜증나네 씨발"),
+            (12, "ㄱㅈㅅ ㅂㄹㅈ ㄴㅂㄱㅎ ㅁㄹㄱㅆㅇ"),
+        ):
+            with self.subTest(e2e_id=e2e_id):
+                request = RequestFactory().post(
+                    "/api/chat/messages/",
+                    data={
+                        "session_id": f"ses_e2e_{e2e_id}",
+                        "user_text": user_text,
+                    },
+                    content_type="application/json",
+                )
+
+                with (
+                    patch(
+                        "chatbot.views._canonical_guest_identity_policy_response",
+                        return_value=None,
+                    ),
+                    patch(
+                        "chatbot.views.get_chat_session_access_metadata",
+                        return_value=None,
+                    ),
+                    patch(
+                        "chatbot.views.apply_attachment_scan_gate",
+                        side_effect=lambda payload: payload,
+                    ),
+                    patch(
+                        "chatbot.views.record_usage_event",
+                        return_value={"allowed": True},
+                    ),
+                    patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+                    patch(
+                        "chatbot.views.persist_chat_followup_state",
+                        return_value={
+                            "session_id": f"ses_e2e_{e2e_id}",
+                            "message_id": f"msg_e2e_{e2e_id}",
+                            "followup_state_version": "chat_session_followup_state.v1",
+                        },
+                    ) as persist_followup,
+                ):
+                    response = submit_chat_message(request)
+
+                self.assertEqual(response.status_code, 200)
+                body = json.loads(response.content)
+                self.assertEqual(body["status"], "needs_clarification")
+                self.assertEqual(body["execution_mode"], "input_clarification")
+                self.assertEqual(body["analysis_plan"]["steps"], [])
+                self.assertNotIn(user_text, str(body))
+                enqueue.assert_not_called()
+                persist_followup.assert_called_once()
 
     def test_scan_blocked_chat_message_does_not_consume_usage_quota(self) -> None:
         request = RequestFactory().post(
@@ -596,6 +664,45 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertEqual(body["error"]["code"], "chat_input_rejected")
         self.assertEqual(body["error"]["required_action"], "remove_sensitive_input")
         self.assertNotIn(blocked_credential, str(body))
+        record_usage.assert_not_called()
+        submit.assert_not_called()
+        enqueue.assert_not_called()
+
+    def test_chat_message_rejects_exact_e2e_identity_input_before_usage_or_queueing(
+        self,
+    ) -> None:
+        raw_resident_id = "900101-1234567"
+        raw_driver_license = "11-22-333333-44"
+        request = RequestFactory().post(
+            "/api/chat/messages/",
+            data={
+                "session_id": "ses_chat_identity_rejected",
+                "user_text": (
+                    f"제 주민등록번호는 {raw_resident_id}이고 "
+                    f"운전면허번호는 {raw_driver_license}입니다."
+                ),
+            },
+            content_type="application/json",
+        )
+
+        with (
+            patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None),
+            patch("chatbot.views.get_chat_session_access_metadata", return_value=None),
+            patch("chatbot.views.record_usage_event", return_value={"allowed": True}) as record_usage,
+            patch("chatbot.views.submit_message", side_effect=AssertionError("planner must not run")) as submit,
+            patch("chatbot.views.enqueue_analysis_job_work") as enqueue,
+        ):
+            response = submit_chat_message(request)
+
+        self.assertEqual(response.status_code, 400)
+        body = json.loads(response.content)
+        self.assertEqual(body["error"]["code"], "chat_input_rejected")
+        self.assertEqual(
+            body["error"]["privacy_gateway"]["blocked_categories"],
+            ["resident_id", "driver_license"],
+        )
+        self.assertNotIn(raw_resident_id, str(body))
+        self.assertNotIn(raw_driver_license, str(body))
         record_usage.assert_not_called()
         submit.assert_not_called()
         enqueue.assert_not_called()

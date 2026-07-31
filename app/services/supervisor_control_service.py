@@ -7,7 +7,10 @@ from typing import Any
 
 from app.services.consultation_v2_service import CORE_FACT_QUESTIONS
 from app.services.deadline_guidance_service import build_deadline_guidance
+from app.services.fine_notice_intake_service import FINE_NOTICE_QUESTIONS
 from app.services.law_ground_contract import normalize_law_structured_result
+from app.services.public_law_projection_service import project_public_law_items
+from app.services.fact_conflict_service import normalize_fact_conflicts
 from app.services.supervisor_routing_service import agent_result_validation_policy
 
 
@@ -34,7 +37,7 @@ def reduce_consultation_fact_state(payload: dict[str, Any]) -> dict[str, Any]:
     """Merge structured facts and question/answer turns without guessing facts."""
 
     facts: dict[str, dict[str, Any]] = {}
-    conflicts = _dict_list(payload.get("fact_conflicts"))
+    conflicts = normalize_fact_conflicts(payload.get("fact_conflicts"))
     sources = _source_by_field(payload.get("fact_sources"))
     for field, raw_value in _dict(payload.get("facts")).items():
         if field not in QUESTION_BY_FIELD:
@@ -49,6 +52,7 @@ def reduce_consultation_fact_state(payload: dict[str, Any]) -> dict[str, Any]:
     for candidate in _question_answer_candidates(payload.get("conversation_history")):
         _merge_fact_candidate(facts, conflicts, candidate)
 
+    conflicts = normalize_fact_conflicts(conflicts)
     conflict_fields = {_text(item.get("field")) for item in conflicts}
     missing_fields = [
         field
@@ -75,12 +79,24 @@ def evaluate_case_promotion(
     risk_level = _text(_dict(consultation_state.get("risk_gate")).get("level"))
     readiness = _dict(consultation_state.get("readiness"))
     missing_fields = _string_list(readiness.get("missing_fields"))
+    conflict_fields = _string_list(readiness.get("conflict_fields"))
     if risk_level == "high_risk":
         decision = "expert_handoff"
         requirements = ["emergency_and_expert_review"]
-    elif missing_fields or not bool(readiness.get("ready_for_fault_range")):
+    elif (
+        missing_fields
+        or conflict_fields
+        or not bool(readiness.get("ready_for_fault_range"))
+    ):
         decision = "ask_more"
-        requirements = [f"fact:{field}" for field in missing_fields]
+        requirements = [
+            *[f"fact_conflict:{field}" for field in conflict_fields],
+            *[
+                f"fact:{field}"
+                for field in missing_fields
+                if field not in conflict_fields
+            ],
+        ]
     elif not analysis_requested:
         decision = "stay_in_chat"
         requirements = []
@@ -285,6 +301,15 @@ def merge_final_response(
         if unavailable_guidance
         else ["answer_pending_question"] if questions else ["review_verified_results"]
     )
+    if (
+        routing_intent in {"fine_notice_procedure", "fine_notice_analysis"}
+        and "law_ground_search" in structured_results
+    ):
+        structured_results["law_ground_search"] = {
+            "matched_laws": project_public_law_items(
+                structured_results["law_ground_search"]
+            )
+        }
     return _build_final_response_payload(
         answer=answer,
         structured_results=structured_results,
@@ -317,22 +342,16 @@ def _verified_result_unavailable_guidance(
         for marker in ("응급", "병원", "진료", "아파", "고열", "구급")
     )
     pending_questions = [
-        {
-            "field": "notice_received",
-            "question": "실제로 고지서나 단속 통지를 받으셨나요?",
-        },
-        (
+        {"field": field, "question": question}
+        for field, question in FINE_NOTICE_QUESTIONS.items()
+    ]
+    if emergency_context:
+        pending_questions.append(
             {
                 "field": "emergency_evidence",
                 "question": "응급상황을 확인할 수 있는 진료기록이나 영수증이 있나요?",
             }
-            if emergency_context
-            else {
-                "field": "notice_details",
-                "question": "고지서의 발급기관과 의견제출 또는 이의신청 기한을 확인하셨나요?",
-            }
-        ),
-    ]
+        )
     evidence_guidance = (
         "응급상황을 확인할 자료(진료기록·영수증 등)를 확보한 뒤 "
         if emergency_context
@@ -495,12 +514,20 @@ def _merge_fact_candidate(
     if existing and _normalized(existing.get("value")) != _normalized(candidate["value"]):
         conflict = {
             "field": field,
-            "existing_value": existing.get("value"),
-            "candidate_value": candidate["value"],
-            "candidate_source_message_id": candidate["source_message_id"],
+            "candidates": [
+                {
+                    "value": _text(existing.get("value")),
+                    "source_message_id": _text(existing.get("source_message_id")),
+                    "confidence": existing.get("confidence", 1.0),
+                },
+                {
+                    "value": _text(candidate.get("value")),
+                    "source_message_id": _text(candidate.get("source_message_id")),
+                    "confidence": candidate.get("confidence", 1.0),
+                },
+            ],
         }
-        if conflict not in conflicts:
-            conflicts.append(conflict)
+        conflicts[:] = normalize_fact_conflicts([*conflicts, conflict])
         return
     if existing and existing.get("confirmed") and not candidate.get("confirmed"):
         return
@@ -626,22 +653,15 @@ def _fine_notice_procedure_answer(structured_results: dict[str, dict[str, Any]])
 
 def _law_provision_entries(value: Any) -> list[tuple[str, str]]:
     structured_result = _dict(value)
-    raw_items = _dict_list(structured_result.get("matched_laws"))
-    if not raw_items:
-        raw_items = _dict_list(structured_result.get("law_provisions"))
     entries: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
-    for item in raw_items[:3]:
-        law_name = _text(item.get("law_name") or item.get("title"))
-        article = _text(
-            item.get("article")
-            or item.get("article_no")
-            or item.get("section_ref")
-        )
+    for item in project_public_law_items(structured_result):
+        law_name = _text(item.get("law_name"))
+        article = _text(item.get("article"))
         label = " ".join(part for part in (law_name, article) if part)
         if not label:
             continue
-        detail = _text(item.get("summary") or item.get("provision_text"))
+        detail = _text(item.get("summary"))
         entry = (label, detail)
         if entry not in seen:
             seen.add(entry)

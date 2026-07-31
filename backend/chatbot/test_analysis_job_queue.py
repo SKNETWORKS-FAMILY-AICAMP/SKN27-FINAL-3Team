@@ -477,7 +477,16 @@ class AnalysisJobQueueTests(TestCase):
         adapter_output = {
             "status": "success",
             "summary": "server plan completed",
-            "structured_result": {"matched_laws": ["law:server"]},
+            "structured_result": {
+                "matched_laws": [
+                    {
+                        "law_name": "Road Traffic Act",
+                        "article": "Article 1",
+                        "summary": "Server-approved law ground.",
+                        "source_reference": "law:server",
+                    }
+                ]
+            },
             "evidence": [],
             "next_actions": [],
             "limitations": [],
@@ -520,7 +529,15 @@ class AnalysisJobQueueTests(TestCase):
         self.assertEqual(execution["node_results"][0]["status"], "success")
         self.assertEqual(
             execution["node_results"][0]["structured_result"],
-            {"matched_laws": ["law:server"]},
+            {
+                "matched_laws": [
+                    {
+                        "law_name": "Road Traffic Act",
+                        "article": "Article 1",
+                        "summary": "Server-approved law ground.",
+                    }
+                ]
+            },
         )
         for field in (
             "analysis_plan",

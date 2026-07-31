@@ -8123,6 +8123,43 @@ body,
   }
 }
 
+.analysis-progress {
+  display: grid;
+  gap: 3px;
+  margin: 0 18px 10px;
+  padding: 10px 12px;
+  border: 1px solid #dde2ef;
+  border-radius: 12px;
+  background: #f7f8fc;
+  color: #30395f;
+}
+
+.analysis-progress strong,
+.analysis-progress p,
+.analysis-progress small {
+  margin: 0;
+}
+
+.analysis-progress--active {
+  border-color: #c9d8ff;
+  background: #f3f6ff;
+}
+
+.analysis-progress--attention {
+  border-color: #ead7ad;
+  background: #fffaf0;
+}
+
+.analysis-progress--danger {
+  border-color: #efc5c5;
+  background: #fff5f5;
+}
+
+.analysis-progress--complete {
+  border-color: #bfdfcf;
+  background: #f2fbf6;
+}
+
 /* Compact quick examples */
 .empty-state-examples {
   display: grid;

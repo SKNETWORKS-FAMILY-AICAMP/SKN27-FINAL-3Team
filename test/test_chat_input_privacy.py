@@ -26,6 +26,31 @@ def test_gateway_blocks_secrets_without_echoing_the_value() -> None:
     assert error.decision.blocked_categories == ("secret",)
 
 
+def test_gateway_blocks_exact_e2e_identity_input_without_echoing_numbers() -> None:
+    raw_resident_id = "900101-1234567"
+    raw_driver_license = "11-22-333333-44"
+    user_text = (
+        f"제 주민등록번호는 {raw_resident_id}이고 "
+        f"운전면허번호는 {raw_driver_license}입니다."
+    )
+
+    with pytest.raises(ChatInputRejected) as captured:
+        protect_chat_input_payload({"user_text": user_text})
+
+    error = captured.value
+    public_metadata = error.decision.public_metadata()
+    assert error.decision.status == "blocked"
+    assert error.decision.blocked_categories == ("resident_id", "driver_license")
+    assert public_metadata["category_counts"] == {
+        "driver_license": 1,
+        "resident_id": 1,
+    }
+    assert raw_resident_id not in repr(public_metadata)
+    assert raw_driver_license not in repr(public_metadata)
+    assert raw_resident_id not in str(error)
+    assert raw_driver_license not in str(error)
+
+
 def test_gateway_masks_pii_and_only_exposes_category_counts() -> None:
     payload = {
         "user_text": (

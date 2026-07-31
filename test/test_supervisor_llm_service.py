@@ -186,6 +186,17 @@ def test_conversation_response_format_is_strict_and_excludes_server_owned_fields
     assert json_schema["name"] == "supervisor_conversation_response_v2"
     assert json_schema["strict"] is True
     assert root["additionalProperties"] is False
+    assert "fact_conflicts" in root["required"]
+    conflict_schema = root["properties"]["fact_conflicts"]["items"]
+    assert conflict_schema["additionalProperties"] is False
+    assert set(conflict_schema["required"]) == {"field", "candidates"}
+    candidate_schema = conflict_schema["properties"]["candidates"]["items"]
+    assert candidate_schema["additionalProperties"] is False
+    assert set(candidate_schema["required"]) == {
+        "value",
+        "source_message_id",
+        "confidence",
+    }
     for server_owned in (
         "contract_version",
         "scenario",
@@ -505,6 +516,7 @@ def _valid_state_candidate() -> dict:
     return {
         "conversation_summary": "LLM summary",
         "collected_facts": [],
+        "fact_conflicts": [],
         "missing_fields": [],
         "next_questions": [],
         "agent_input_packages": packages,
@@ -539,6 +551,41 @@ def _untrusted_injection_payload() -> dict:
             }
         ],
     }
+
+
+def test_supervisor_normalization_rebinds_fact_conflicts_to_current_message() -> None:
+    candidate = _valid_state_candidate()
+    candidate["fact_conflicts"] = [
+        {
+            "field": "signal_priority",
+            "candidates": [
+                {
+                    "value": "녹색 신호 진입",
+                    "source_message_id": "model:invented",
+                    "confidence": 0.9,
+                },
+                {
+                    "value": "적색 신호 진입 가능성",
+                    "source_message_id": "model:invented",
+                    "confidence": 0.7,
+                },
+            ],
+        }
+    ]
+
+    normalized, error = service._normalize_llm_state(
+        candidate,
+        fallback_state=_fallback_builder({}, "fine_notice"),
+        config={},
+        default_source_message_id="msg_current",
+    )
+
+    assert error is None
+    assert normalized is not None
+    assert all(
+        item["source_message_id"] == "msg_current"
+        for item in normalized["fact_conflicts"][0]["candidates"]
+    )
 
 
 def _assert_captured_request_is_untrusted_only(request_payload: dict, payload: dict) -> None:
@@ -1116,12 +1163,13 @@ def test_supervisor_llm_does_not_promote_server_required_input_to_ready(monkeypa
     monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
 
     def fake_request(_config, _request_payload, _response_format):
-        return {
-            "conversation_summary": "LLM summary",
-            "collected_facts": [
-                {"field": "evidence_status", "value": "블랙박스"}
-            ],
-            "missing_fields": [],
+            return {
+                "conversation_summary": "LLM summary",
+                "collected_facts": [
+                    {"field": "evidence_status", "value": "블랙박스"}
+                ],
+                "fact_conflicts": [],
+                "missing_fields": [],
             "next_questions": [],
             "agent_input_packages": [
                 {

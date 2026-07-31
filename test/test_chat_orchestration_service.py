@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 from app.services.attachment_mock_service import CANONICAL_SCAN_GATE_MARKER
@@ -26,6 +27,36 @@ def test_report_routing_policy_has_no_obsolete_pre_merge_placement_rule() -> Non
     policy = json.loads(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
 
     assert "insert_before" not in policy["report_policy"]
+
+
+def test_pedestrian_crosswalk_law_question_routes_to_law_search_without_handoff() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_2",
+            "user_text": "도로교통법상 우회전할 때 보행자가 횡단보도에 있으면 반드시 멈춰야 하나요?",
+        },
+        routing_intent_override="general_consultation",
+    )
+
+    assert response["status"] == "queued"
+    assert response["routing_intent"] == "traffic_law_search"
+    assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
+        "input_context_validation",
+        "law_ground_search",
+        "agent_result_validation",
+        "final_response_merge",
+    ]
+    assert response.get("service_scope", {}).get("decision") != "expert_handoff"
+
+
+def test_general_consultation_plan_does_not_default_to_law_search() -> None:
+    node_codes = plan_node_codes("general_consultation", report_requested=False)
+
+    assert node_codes == (
+        "input_context_validation",
+        "agent_result_validation",
+        "final_response_merge",
+    )
 
 
 def test_text_only_fine_notice_draft_request_enters_verified_intake_without_bypassing_ocr_gate() -> None:
@@ -193,6 +224,343 @@ def test_canonical_scan_ready_image_or_pdf_queues_document_classification_before
         "agent_result_validation",
         "final_response_merge",
     ]
+    assert response["attachment_workflows"] == [
+        {
+            "contract_version": "attachment_workflow.v1",
+            "attachment_id": "att_document",
+            "state": "classification_running",
+            "next_action": "wait_for_classification",
+            "retryable": False,
+            "missing_fields": [],
+            "limitations": [],
+        }
+    ]
+
+
+def test_composed_response_exposes_safe_ocr_confirmation_workflow() -> None:
+    result = compose_agent_response(
+        {
+            "job_id": "job_attachment_workflow",
+            "attachments": [
+                {
+                    "attachment_id": "att_notice",
+                    "status": "ready",
+                    "scan_status": "clean",
+                    "storage_uri": "s3://private/notices/att_notice",
+                    "filename": "private-notice.pdf",
+                }
+            ],
+            "executions": [
+                {
+                    "node_code": "final_response_merge",
+                    "agent_output": {
+                        "status": "partial",
+                        "summary": "확인이 필요합니다.",
+                        "structured_result": {
+                            "assistant_message": {
+                                "answer": "OCR 추출값을 확인해 주세요.",
+                                "summary": "OCR 추출값 확인이 필요합니다.",
+                            },
+                            "structured_results": {
+                                "attachment_document_classification": {
+                                    "attachment_id": "att_notice",
+                                    "status": "success",
+                                },
+                                "fine_notice_analysis": {
+                                    "attachment_id": "att_notice",
+                                    "requires_confirmation": True,
+                                    "missing_fields": ["response_deadline"],
+                                    "raw_ocr_text": "private OCR text",
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert result["attachment_workflows"] == [
+        {
+            "contract_version": "attachment_workflow.v1",
+            "attachment_id": "att_notice",
+            "state": "ocr_needs_confirmation",
+            "next_action": "confirm_ocr_fields",
+            "retryable": False,
+            "missing_fields": ["response_deadline"],
+            "limitations": [],
+        }
+    ]
+    assert "s3://" not in repr(result["attachment_workflows"])
+    assert "private OCR" not in repr(result["attachment_workflows"])
+
+
+def test_partial_composed_response_without_final_merge_keeps_attachment_workflow() -> None:
+    result = compose_agent_response(
+        {
+            "job_id": "job_partial_attachment",
+            "attachments": [
+                {
+                    "attachment_id": "att_partial",
+                    "status": "ready",
+                    "scan_status": "clean",
+                }
+            ],
+            "executions": [
+                {
+                    "node_code": "attachment_document_classification",
+                    "agent_output": {
+                        "node_code": "attachment_document_classification",
+                        "status": "success",
+                        "structured_result": {
+                            "attachment_id": "att_partial",
+                            "status": "success",
+                        },
+                    },
+                },
+                {
+                    "node_code": "fine_notice_analysis",
+                    "agent_output": {
+                        "node_code": "fine_notice_analysis",
+                        "status": "partial",
+                        "summary": "OCR 확인이 필요합니다.",
+                        "structured_result": {
+                            "attachment_id": "att_partial",
+                            "requires_confirmation": True,
+                            "missing_fields": ["response_deadline"],
+                        },
+                    },
+                },
+            ],
+        }
+    )
+
+    assert result["attachment_workflows"][0]["state"] == (
+        "ocr_needs_confirmation"
+    )
+
+
+def test_id4_synthetic_fine_notice_handoff_blocks_later_nodes_until_ocr_confirmation() -> None:
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "fine_notice"
+        / "synthetic_fine_notice.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    storage_uri = "s3://clean-bucket/canonical/uploads/usr/ses_id4/att_id4/notice.pdf"
+    attachment = {
+        "_canonical_scan_gate": CANONICAL_SCAN_GATE_MARKER,
+        "attachment_id": "att_id4",
+        "purpose": "fine_notice",
+        "type": "pdf",
+        "content_type": "application/pdf",
+        "status": "ready",
+        "scan_status": "clean",
+        "resolution_status": "scan_ready",
+        "storage_uri": storage_uri,
+        "object_storage": {
+            "resource_type": "uploaded_file",
+            "status": "ready",
+            "storage_uri": storage_uri,
+        },
+    }
+    user_text = (
+        "첨부한 고지서를 분석해서 의견제출 또는 이의신청을 검토할 수 있는지 "
+        "알려주세요."
+    )
+
+    classification_receipt = submit_message(
+        {
+            "session_id": "ses_id4",
+            "user_text": user_text,
+            "attachments": [attachment],
+        }
+    )
+    classification_nodes = [
+        step["node_code"] for step in classification_receipt["analysis_plan"]["steps"]
+    ]
+    assert classification_receipt["attachment_workflows"][0]["state"] == (
+        "classification_running"
+    )
+    assert "attachment_document_classification" in classification_nodes
+    assert "law_ground_search" not in classification_nodes
+    assert "appeal_decision_flow" not in classification_nodes
+    assert "objection_report_generation" not in classification_nodes
+
+    confirmed_attachment = {
+        **attachment,
+        "classification_confirmation": {
+            "source": "server_record",
+            "classification": "fine_notice",
+            "confidence_band": "high",
+        },
+    }
+    ocr_receipt = submit_message(
+        {
+            "session_id": "ses_id4",
+            "user_text": user_text,
+            "attachments": [confirmed_attachment],
+        },
+        routing_intent_override="fine_notice_analysis",
+    )
+    ocr_nodes = [step["node_code"] for step in ocr_receipt["analysis_plan"]["steps"]]
+    assert ocr_receipt["attachment_workflows"][0]["state"] == "ocr_running"
+    assert "fine_notice_analysis" in ocr_nodes
+    assert "law_ground_search" not in ocr_nodes
+    assert "appeal_decision_flow" not in ocr_nodes
+    assert "objection_report_generation" not in ocr_nodes
+
+    confirmed_receipt = submit_message(
+        {
+            "session_id": "ses_id4",
+            "user_text": "OCR 추출값을 확인했습니다. 후속 절차를 검토해 주세요.",
+            "attachments": [confirmed_attachment],
+            "ocr_confirmation": {
+                "confirmed": True,
+                "fields": {
+                    "fine_type": "과태료",
+                    "notice_stage": "사전통지",
+                    "issuing_authority": fixture["issuing_authority"],
+                    "opinion_deadline": fixture["response_deadline"],
+                },
+            },
+        },
+        routing_intent_override="fine_notice_analysis",
+    )
+    confirmed_nodes = [
+        step["node_code"] for step in confirmed_receipt["analysis_plan"]["steps"]
+    ]
+    assert "law_ground_search" in confirmed_nodes
+    assert "appeal_decision_flow" in confirmed_nodes
+    assert "objection_report_generation" not in confirmed_nodes
+
+    final = compose_agent_response(
+        {
+            "job_id": "job_id4",
+            "attachments": [confirmed_attachment],
+            "ocr_confirmation": {
+                "confirmed": True,
+                "fields": {
+                    "fine_type": "과태료",
+                    "notice_stage": "사전통지",
+                },
+            },
+            "executions": [
+                {
+                    "node_code": "final_response_merge",
+                    "agent_output": {
+                        "status": "success",
+                        "summary": "검토 결과",
+                        "structured_result": {
+                            "assistant_message": {
+                                "answer": "확인된 고지서 정보로 절차를 검토했습니다.",
+                                "summary": "고지서 절차 검토 결과",
+                            },
+                            "structured_results": {
+                                "attachment_document_classification": {
+                                    "attachment_id": "att_id4",
+                                    "status": "success",
+                                },
+                                "fine_notice_analysis": {
+                                    "attachment_id": "att_id4",
+                                    "confirmed_information": {
+                                        "document_disposition_type": fixture[
+                                            "document_disposition_type"
+                                        ],
+                                        "issuing_authority": fixture[
+                                            "issuing_authority"
+                                        ],
+                                        "response_deadline": fixture[
+                                            "response_deadline"
+                                        ],
+                                    },
+                                    "missing_information": ["위반 일시와 장소"],
+                                    "evidence_summary": [
+                                        "사용자가 확인한 OCR 항목을 사용했습니다."
+                                    ],
+                                },
+                            },
+                            "evidence": [
+                                {
+                                    "source_type": "user_confirmed_ocr",
+                                    "title": "확인된 고지서 항목",
+                                }
+                            ],
+                            "limitations": [
+                                "위반 일시와 장소는 추가 확인이 필요합니다."
+                            ],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert final["attachment_workflows"][0]["state"] == "analysis_ready"
+    assert final["structured_results"]["fine_notice_analysis"][
+        "confirmed_information"
+    ]["issuing_authority"] == "가상시청"
+    assert final["structured_results"]["fine_notice_analysis"][
+        "missing_information"
+    ] == ["위반 일시와 장소"]
+    assert final["evidence"]
+    assert final["limitations"]
+    assert fixture["synthetic_case_number"] not in repr(final)
+    assert "raw_ocr_text" not in repr(final)
+
+
+def test_id13_same_message_signal_conflict_blocks_fault_analysis() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_13",
+            "user_text": (
+                "저는 녹색 신호에 직진했고 상대는 신호위반 좌회전이었습니다. "
+                "그런데 블랙박스에는 제가 빨간불에 진입한 것처럼 보일 수도 있습니다. "
+                "과실이 몇 대 몇인가요?"
+            ),
+        }
+    )
+
+    assert response["routing_intent"] == "accident_initial_consultation"
+    conflicts = response["supervisor_state"]["fact_conflicts"]
+    assert [item["field"] for item in conflicts] == ["signal_priority"]
+    assert len(conflicts[0]["candidates"]) == 2
+    assert all(
+        candidate["source_message_id"] == response["message_id"]
+        and 0.0 <= candidate["confidence"] <= 1.0
+        for candidate in conflicts[0]["candidates"]
+    )
+    vehicle_card = next(
+        card
+        for card in response["cards"]
+        if card["field"] == "vehicle_actions"
+        and card["category"] != "unconfirmed"
+    )
+    assert "직진" in vehicle_card["value"]
+    assert "좌회전" in vehicle_card["value"]
+    assert [
+        question["field"] for question in response["pending_questions"]
+    ] == ["signal_priority"]
+    assert response["consultation_state"]["v2"]["next_action"] == (
+        "resolve_fact_conflicts"
+    )
+    assert response["consultation_state"]["v2"]["readiness"][
+        "ready_for_fault_range"
+    ] is False
+    assert response["analysis_plan"]["steps"] == []
+    assert "ratio_range" not in repr(response)
+    user_facing_result = repr(
+        {
+            "assistant_message": response["assistant_message"],
+            "cards": response["cards"],
+        }
+    )
+    assert not __import__("re").search(
+        r"\d+\s*[:대]\s*\d+",
+        user_facing_result,
+    )
+    assert "text_ml_case_search" not in repr(response)
 
 
 def test_confirmed_accident_photo_routes_to_search_without_video_analysis() -> None:
@@ -476,41 +844,178 @@ def test_enabled_supervisor_failure_blocks_analysis_plan_and_reporting(monkeypat
     assert response["reporting_payload"] is None
 
 
-def test_enabled_supervisor_cannot_override_server_ready_stage(monkeypatch) -> None:
+def test_low_information_input_stops_before_enabled_supervisor(monkeypatch) -> None:
     monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
     monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
     monkeypatch.setattr(
         "app.services.supervisor_llm_service._request_supervisor_json",
-        lambda *_args: {
-            "conversation_summary": "A law reference is still required.",
-            "collected_facts": [],
-            "missing_fields": [
-                {"field": "law_question", "reason": "model_requested"}
-            ],
-            "next_questions": [
-                {"field": "law_question", "question": "Which law should be reviewed?"}
-            ],
-            "agent_input_packages": [
-                {
-                    "node_code": "law_ground_search",
-                    "payload": {},
-                }
-            ],
-        },
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("Supervisor LLM must not run")
+        ),
     )
 
     response = submit_message(
         {"session_id": "ses_need_more_input", "user_text": "help"}
     )
 
-    assert response["status"] == "queued"
-    assert response["progress"]["status"] == "queued"
-    assert response["pending_questions"] == []
-    assert response["analysis_plan"]["steps"]
+    assert response["status"] == "needs_clarification"
+    assert response["progress"]["status"] == "needs_clarification"
+    assert response["pending_questions"]
+    assert response["analysis_plan"]["steps"] == []
     assert response["reporting_payload"] is None
     assert response["report_links"] == []
-    assert response["supervisor_state"]["stage"] == "agent_execution_ready"
-    assert response["supervisor_state"]["missing_fields"] == []
+    assert response["supervisor_state"] == {}
+
+
+def test_profanity_only_e2e_input_stops_without_an_agent_plan() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_10",
+            "user_text": "아 진짜 짜증나네 씨발",
+        }
+    )
+
+    assert response["status"] == "needs_clarification"
+    assert response["routing_intent"] == "needs_clarification"
+    assert response["analysis_plan"]["steps"] == []
+    assert "씨발" not in repr(response)
+
+
+def test_compatibility_jamo_e2e_input_stops_without_an_agent_plan() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_12",
+            "user_text": "ㄱㅈㅅ ㅂㄹㅈ ㄴㅂㄱㅎ ㅁㄹㄱㅆㅇ",
+        }
+    )
+
+    assert response["status"] == "needs_clarification"
+    assert response["routing_intent"] == "needs_clarification"
+    assert response["analysis_plan"]["steps"] == []
+
+
+def test_profanity_with_fine_notice_intent_keeps_procedure_routing() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_9",
+            "user_text": "과태료 고지서 받았는데 이게 대체 무슨 개소리야? 이의신청 할 수 있는지 알려줘.",
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert "개소리" not in repr(response)
+    assert [item["field"] for item in response["pending_questions"]] == [
+        "document_disposition_type",
+        "issuing_authority",
+        "response_deadline",
+        "attachment_available",
+    ]
+
+
+def test_e2e_3_requests_every_required_fine_notice_slot() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_3",
+            "message_id": "msg_e2e_3",
+            "user_text": (
+                "과태료 고지서를 받았는데 이의신청이나 의견제출은 "
+                "어떤 순서로 하면 되나요?"
+            ),
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert response["fine_notice_intake"]["contract_version"] == (
+        "fine_notice_intake.v1"
+    )
+    assert [item["field"] for item in response["pending_questions"]] == [
+        "document_disposition_type",
+        "issuing_authority",
+        "response_deadline",
+        "attachment_available",
+    ]
+
+
+def test_verified_law_result_keeps_missing_fine_notice_slot_questions() -> None:
+    fine_notice_intake = {
+        "contract_version": "fine_notice_intake.v1",
+        "slots": {},
+        "missing_fields": [
+            "document_disposition_type",
+            "issuing_authority",
+            "response_deadline",
+            "attachment_available",
+        ],
+        "next_questions": [
+            {"field": "document_disposition_type", "question": "문서명을 알려주세요."},
+            {"field": "issuing_authority", "question": "발급기관을 알려주세요."},
+            {"field": "response_deadline", "question": "기한을 알려주세요."},
+            {"field": "attachment_available", "question": "첨부할 수 있나요?"},
+        ],
+    }
+    response = compose_agent_response(
+        {
+            "job_id": "job_verified_notice",
+            "supervisor_state": {
+                "routing_intent": "fine_notice_procedure",
+                "fine_notice_intake": fine_notice_intake,
+                "next_questions": fine_notice_intake["next_questions"],
+            },
+            "executions": [
+                {
+                    "node_code": "final_response_merge",
+                    "agent_output": {
+                        "status": "success",
+                        "summary": "검증된 법령 안내",
+                        "structured_result": {
+                            "assistant_message": {
+                                "answer": "검증된 절차 안내입니다.",
+                                "summary": "검증된 절차 안내입니다.",
+                            },
+                            "structured_results": {
+                                "law_ground_search": {
+                                    "matched_laws": [
+                                        {
+                                            "law_name": "도로교통법",
+                                            "article": "제160조",
+                                        }
+                                    ]
+                                }
+                            },
+                            "pending_questions": [],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert [item["field"] for item in response["pending_questions"]] == [
+        "document_disposition_type",
+        "issuing_authority",
+        "response_deadline",
+        "attachment_available",
+    ]
+    assert response["fine_notice_intake"] == fine_notice_intake
+
+
+def test_typo_heavy_fine_notice_input_keeps_procedure_routing() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_e2e_11",
+            "user_text": "과태료 고지서 잇는데 이의시처 됨? 기한 지낫는지 모르겟음",
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert response["fine_notice_intake"]["slots"] == {}
+    assert [item["field"] for item in response["pending_questions"]] == [
+        "document_disposition_type",
+        "issuing_authority",
+        "response_deadline",
+        "attachment_available",
+    ]
+    assert "기한이 지났" not in repr(response)
 
 
 def test_fine_notice_procedure_question_does_not_run_ocr_appeal_or_report() -> None:

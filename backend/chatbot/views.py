@@ -44,6 +44,7 @@ from app.services.analysis_job_query_service import (
     load_analysis_job_detail,
     load_analysis_result,
 )
+from app.services.analysis_progress_service import build_analysis_progress
 from app.services.attachment_mock_service import (
     UploadTooLargeError,
     get_attachment as get_mock_attachment,
@@ -1343,8 +1344,17 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["execution_mode"] = "scope_guidance"
         return _json_response(request, chat_response)
 
-    if chat_response["status"] in {"needs_input", "high_risk_handoff", "case_ready"}:
-        if chat_response["status"] in {"needs_input", "case_ready"}:
+    if chat_response["status"] in {
+        "needs_input",
+        "needs_clarification",
+        "high_risk_handoff",
+        "case_ready",
+    }:
+        if chat_response["status"] in {
+            "needs_input",
+            "needs_clarification",
+            "case_ready",
+        }:
             try:
                 chat_response["persistence"] = persist_chat_followup_state(
                     identity_body,
@@ -1356,6 +1366,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         chat_response["usage"] = usage
         execution_modes = {
             "needs_input": "input_collection",
+            "needs_clarification": "input_clarification",
             "high_risk_handoff": "expert_handoff",
             "case_ready": "case_creation_required",
         }
@@ -1398,6 +1409,13 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         "status": persistence["work_item_status"],
         "job_id": persistence["job_id"],
     }
+    chat_response["analysis_progress"] = build_analysis_progress(
+        {
+            "job_id": persistence["job_id"],
+            "status": "queued",
+            "work_item": chat_response["work_item"],
+        }
+    )
     chat_response["supervisor_execution"] = _supervisor_execution_response(
         node_execution,
         persistence=persistence,
@@ -2854,6 +2872,7 @@ def _apply_attachment_classification_confirmation(
             request,
             code="classification_stale_or_unavailable",
             session_id=session_id,
+            attachment_id=attachment_id,
         )
     try:
         confirmed = resolve_confirmed_attachment_classification(
@@ -2865,6 +2884,7 @@ def _apply_attachment_classification_confirmation(
             request,
             code=exc.code,
             session_id=session_id,
+            attachment_id=attachment_id,
         )
 
     classification = confirmed["classification"]
@@ -2892,6 +2912,7 @@ def _apply_attachment_classification_confirmation(
             request,
             code="classification_stale_or_unavailable",
             session_id=session_id,
+            attachment_id=attachment_id,
         )
     normalized["attachments"] = attachments
     return normalized, routing_intent, None
@@ -2902,6 +2923,7 @@ def _attachment_classification_confirmation_error(
     *,
     code: str,
     session_id: str,
+    attachment_id: str,
 ) -> JsonResponse:
     return _json_response(
         request,
@@ -2925,6 +2947,19 @@ def _attachment_classification_confirmation_error(
             "error_code": code,
             "limitations": ["확인되지 않은 분류로 후속 분석을 실행하지 않았습니다."],
             "next_actions": ["rerun_attachment_classification"],
+            "attachment_workflows": [
+                {
+                    "contract_version": "attachment_workflow.v1",
+                    "attachment_id": attachment_id,
+                    "state": "failed",
+                    "next_action": "rerun_attachment_classification",
+                    "retryable": True,
+                    "missing_fields": [],
+                    "limitations": [
+                        "현재 파일과 일치하는 분류 확인 기록이 없습니다."
+                    ],
+                }
+            ],
         },
         status=409,
     )
