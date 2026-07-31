@@ -65,4 +65,3 @@ def test_explicit_non_traffic_domain_is_out_of_scope() -> None:
     )
 
     assert result["status"] == "out_of_scope"
-

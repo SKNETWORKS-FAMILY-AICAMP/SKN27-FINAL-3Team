@@ -195,6 +195,19 @@ def test_pilot_runtime_declares_runpod_vision_without_secret_values() -> None:
     ]
 
 
+def test_runtime_template_declares_every_required_compose_interpolation() -> None:
+    compose = _read_deploy("docker-compose.pilot.yml")
+    runtime_env = _read_deploy("runtime.env.example")
+    required_keys = set(re.findall(r"\$\{([A-Z0-9_]+):\?", compose))
+    template_keys = {
+        line.split("=", 1)[0]
+        for line in runtime_env.splitlines()
+        if line and not line.startswith("#") and "=" in line
+    }
+
+    assert required_keys.issubset(template_keys), required_keys - template_keys
+
+
 def test_database_is_private_single_az_encrypted_postgres_with_safe_defaults() -> None:
     source = _terraform_source()
     assert len(re.findall(r'resource\s+"aws_db_instance"', source)) == 1
