@@ -15,6 +15,9 @@
 
 - 좌측 메뉴에 `리포트 작업대`를 상시 추가한다.
 - 리포트가 없을 때에도 작업대를 열어 `현재 준비 단계`, `부족한 자료`, `AI 상담으로 이동`을 제공한다.
+- 빈 상태만으로 종료하지 않는다. 로그인 사용자는 작업대 진입·새로고침·로그인 성공 뒤 저장 리포트 목록과 선택 리포트의 상세를 자동으로 불러온다.
+- 비회원은 현재 상담에서 준비된 공개 리포팅 payload를 임시 미리보기로 검토할 수 있다. 저장 목록·저장·제출용 DOCX는 로그인 필요 정책을 유지하고, 그 이유와 다음 행동을 작업대에서 명시한다.
+- Google 로그인 실패는 설정 불일치, 팝업 차단·종료, 서버 코드 교환 실패를 구분해 안내한다. Google Cloud Console의 실제 등록값은 코드가 아닌 운영 설정으로 별도 검증한다.
 - 제공된 이슈 관리 엑셀은 팀의 상태·담당자 관리에 유지하고, Markdown 체크리스트는 기술적 원인·증거·수정·재검증 기준의 기준 문서로 사용한다.
 
 ## UX와 상태 모델
@@ -34,10 +37,19 @@
 ## 화면 변경
 
 1. `RAIL_ITEMS`에 `reporting` / `리포트 작업대`를 추가한다. 기존 라우트와 `ReportingScreen`을 재사용한다.
-2. `ReportingScreen`에는 현재의 세 칼럼 작업대 레이아웃을 유지한다.
-3. `hasReport`가 거짓이면 중앙 미리보기와 우측 상태 영역을 빈 화면이 아니라 `ReportWorkbenchEmptyState`로 교체한다.
-4. 빈 상태는 단계 배지, 사용자 친화적 설명, 최대 세 개의 부족 자료·사실, `AI 상담으로 이동` 버튼을 제공한다.
-5. 저장된 리포트·문서 확인·Google 로그인·DOCX 정책, 그리고 이의신청 신원 노출 확인 게이트는 변경하지 않는다.
+2. 작업대 진입 함수는 로그인 상태이면 목록 API를 호출하고, 최신 저장 리포트의 상세 API까지 조회한 뒤 캔버스에 표시한다. 로딩·목록 실패·로그인 필요 상태를 별도 공개 상태로 표시한다.
+3. `ReportingScreen`에는 현재의 세 칼럼 작업대 레이아웃을 유지한다. 목록 카드 선택도 상세 API를 통해 동일한 상세 DTO를 사용한다.
+4. 현재 상담의 `reporting_payload`가 준비됐지만 아직 저장되지 않았다면 임시 미리보기로 표시한다. 이 상태에서 저장·DOCX는 로그인 안내와 기존 문서 확인 게이트를 거친다.
+5. `hasReport`가 거짓이면 중앙 미리보기와 우측 상태 영역을 빈 화면이 아니라 `ReportWorkbenchEmptyState`로 교체한다. 빈 상태는 단계 배지, 사용자 친화적 설명, 최대 세 개의 부족 자료·사실, `AI 상담으로 이동` 버튼을 제공한다.
+6. 저장된 리포트·문서 확인·Google 로그인·DOCX 정책, 그리고 이의신청 신원 노출 확인 게이트는 우회하지 않는다.
+
+## 로그인 장애 분리와 운영 검증
+
+- 프런트는 Google Identity Services popup code flow에서 현재 `window.location.origin`을 backend code-exchange request의 `redirect_uri`로 보낸다.
+- backend는 `GOOGLE_CLIENT_ID`, `GOOGLE_POPUP_REDIRECT_URI`, 요청 `client_id`, 요청 origin을 비교한다. 불일치는 fail-closed가 맞으며, 비밀값을 응답에 포함하지 않는다.
+- `redirect_uri_mismatch`는 Google Cloud Console의 OAuth client 설정에서 현재 HTTPS origin이 등록되지 않았을 때 Google 단계에서 발생한다. 코드만으로 외부 Console 등록값을 수정하지 않는다.
+- `popup_closed`는 팝업이 사용자·브라우저·콜백 연결 실패로 닫힌 결과다. 화면은 재시도 행동과 안전한 오류 분류를 보여야 하며 raw authorization code는 로그·상태·UI에 남기지 않는다.
+- 운영 완료 조건은 Google Cloud Console의 Authorized JavaScript origins와 redirect URI가 `https://skn27-traffic-pilot.duckdns.org`에 맞고, runtime의 세 OAuth 값이 같은 client/origin을 사용하며, 실제 브라우저 한 번의 login → 현재 상담 저장 → report list/detail 재열기가 성공하는 것이다.
 
 ## E2E 범위
 

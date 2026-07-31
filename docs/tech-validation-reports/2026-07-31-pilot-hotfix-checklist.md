@@ -41,16 +41,16 @@ flowchart TD
 
 ### HFX-001 — 리포트 작업대 상시 진입과 빈 상태
 
-- [ ] **상태:** 구현·배포 전 검증 완료 / 배포 후 재검증 대기
+- [ ] **상태:** 구현·결정적 검증 완료 / 배포본 사용자 재검증 대기
 - **우선순위:** 높음
 - **유형 / 화면:** 화면·UI / 전역 좌측 메뉴, 리포트 작업대
 - **재현:** 홈 또는 상담 시작 전, 일반 법령 상담 완료, 역질문 중인 상담에서 좌측 메뉴를 확인한다.
 - **기대:** `리포트 작업대`가 항상 보이고, 리포트가 없으면 현재 준비 단계·부족한 자료·AI 상담 이동을 표시한다.
-- **실제:** 전역 메뉴에는 작업대가 없고, 이의신청 리포트 생성 조건을 모두 통과한 상담 하단에서만 `작업대`가 보인다.
-- **원인:** `RAIL_ITEMS`에 `reporting` 경로가 없고, 작업대 진입 CTA가 `objection_report_generation` 및 `reporting_payload` 준비 조건에만 묶여 있다.
-- **조치:** 상시 메뉴, 공개 상태 기반 빈 작업대, 단위·소스 계약 테스트를 추가했다.
-- **재검증:** 메뉴 → 빈 작업대 → AI 상담 이동, 준비 완료 리포트 → 기존 저장·DOCX 동작을 모두 확인한다.
-- **증거:** `node --test *.test.js` 35 통과, 관련 pytest 53 통과, `npm run build` 통과. 로컬 Vite는 5174 포트에서 정상 수신했으나 내장 브라우저의 localhost URL 정책으로 화면 확인은 배포 후로 이월한다.
+- **실제:** 2026-07-31 배포본에서 전역 메뉴의 `리포트 작업대`가 상시 노출되고, 상담 전에는 `상담 시작 전`·`아직 생성된 리포트가 없습니다.`·`AI 상담 시작` 빈 상태가 표시된다. 핫픽스 브랜치는 로그인 사용자가 메뉴 진입·새로고침·로그인 복귀 시 목록→상세 DTO를 자동 수화하고, 비회원의 분석 payload는 임시 미리보기로 구분한다.
+- **원인:** 기존에는 `RAIL_ITEMS`에 `reporting` 경로가 없었고, 추가 후에도 메뉴 진입이 route state만 바꿔 저장 목록·상세 API를 호출하지 않았다. 목록 요약이 `currentReport` fallback으로 렌더링돼 실제 리포트 본문·근거·문서 게이트가 없는 상태를 완료 리포트처럼 보일 수 있었다.
+- **조치:** 상시 메뉴·공개 상태 기반 빈 작업대에 더해, 수화 전 목록 요약을 `loading_saved_report`로 분리하고, `GET /api/reports/` → `GET /api/reports/{id}/` 순서의 상세 수화·임시 리포트 표시·로드 실패 재시도를 추가했다.
+- **재검증:** 로컬 결정적 테스트는 통과했다. 배포 후 로그인 → 저장 리포트 목록 → 상세 미리보기·근거·누락 자료 → 저장·DOCX 게이트 → 마이페이지 재열기를 실제 브라우저로 완료해야 한다.
+- **증거:** 신규 상태·OAuth 안내 node test 10 통과, 전체 프런트 node test 37 통과, 프런트 계약·OAuth boundary pytest 34 통과, Vite build 39 모듈 성공, Django report/auth 통합 44 통과. 기존 배포본 메뉴·빈 상태 브라우저 검증은 통과했으나 이번 수화 코드는 아직 배포 대기다.
 
 ### HFX-002 — 과실비율 에이전트의 사실 카드 병합·반복 역질문
 
@@ -122,7 +122,7 @@ flowchart TD
 
 | ID | 사용자 흐름 | 필수 연동 / 에이전트 | 성공 기준 | 상태 |
 | --- | --- | --- | --- | --- |
-| E2E-01 | 홈·사고 가이드·AI 상담·마이페이지·작업대 전환 | 프런트 라우팅, guest session | 모든 메뉴가 의도한 화면 또는 빈 상태를 보임 | 배포 전 코드 검증 완료 / 배포 후 재검증 대기 |
+| E2E-01 | 홈·사고 가이드·AI 상담·마이페이지·작업대 전환 | 프런트 라우팅, guest session | 모든 메뉴가 의도한 화면 또는 빈 상태를 보임 | 통과 — 배포본에서 작업대 메뉴·빈 상태·콘솔 무오류 확인 |
 | E2E-02 | 비회원 일반 법령 질문 | `law_ground_search`, legal RAG | 절차·근거·한계·다음 행동을 보이며 리포트 미생성을 오류처럼 말하지 않음 | 검증 대기 |
 | E2E-03 | 과태료 절차 텍스트 상담 | supervisor, legal RAG | 고지서 기한 확인 등 실용적 절차 안내, 과도한 이의신청 gate 없음 | 부분 확인됨 |
 | E2E-04 | 과태료 고지서 이미지/PDF 업로드 | file scan, OCR, `fine_notice_analysis` | 업로드·스캔·OCR·확인 단계가 구분되고 처분명·금액·기한이 안전하게 반영됨 | provider 승인 대기 |
@@ -130,8 +130,8 @@ flowchart TD
 | E2E-06 | 과실비율 사실 입력·역질문 | Supervisor, fact merge, `text_ml_case_search` | 중복 역질문 없음, 충돌 때만 판단 보류, 사실·근거·한계 표시 | 검증 대기 |
 | E2E-07 | 과실 사진·영상 첨부 | file scan, Vision worker, `vision_media_analysis` | 첨부 상태와 Vision 결과·부분 실패가 명확히 구분됨 | provider/GPU 승인 대기 |
 | E2E-08 | 과실 RAG·Neo4j 근거 | review-case RAG, law graph, `text_ml_case_search`, `law_ground_search` | 유사사례·법령 근거와 한계가 안전한 메타데이터로 확인됨 | 검증 대기 |
-| E2E-09 | 작업대 빈 상태·준비 완료·저장 리포트 | reporting route, report API | 빈 상태의 다음 행동과 기존 리포트 상세·다운로드가 함께 동작 | 수정 대기 |
-| E2E-10 | Google 로그인·내 사건·마이페이지 재열기 | OAuth, auth bind, report list/detail | 저장 후 소유자만 사건·리포트를 재확인하고 타 사용자 접근은 차단됨 | 검증 대기 |
+| E2E-09 | 작업대 빈 상태·준비 완료·저장 리포트 | reporting route, report API | 빈 상태의 다음 행동과 기존 리포트 상세·다운로드가 함께 동작 | 구현·결정적 검증 통과 / 배포 브라우저 검증 대기 |
+| E2E-10 | Google 로그인·내 사건·마이페이지 재열기 | OAuth, auth bind, report list/detail | 저장 후 소유자만 사건·리포트를 재확인하고 타 사용자 접근은 차단됨 | 코드·서버 계약 통과 / Google Console 실제 설정 및 브라우저 검증 대기 |
 | E2E-11 | 실패·복구 | upload scan, worker pending/partial/failed, retry UI | 실패 원인·재시도·자료 보완 경로가 있고 성공으로 오표시하지 않음 | 검증 대기 |
 
 ## 에이전트·데이터 품질 게이트
@@ -159,5 +159,7 @@ flowchart TD
 - [x] Vite 운영 빌드: 39 모듈 변환, 성공.
 - [x] 결정적 Django E2E: 59 통과. canonical flow, 첨부 분류 확인, guest-login 소유권, supervisor reporting, report API, resource ownership을 실제 API·큐·Worker·DOCX 경계까지 fixture로 검증했다.
 - [x] 에이전트·RAG·그래프 계약: 191 통과. agent node/execution, 법령 그래프 seed·명령, production RAG seed, pgvector readiness, legal RAG service를 외부 provider 없이 검증했다. LangGraph 의존성 deprecation 경고 1건만 있으며 실패는 없었다.
-- [x] 배포본 무과금 화면 확인: 홈과 guest 상담 시작은 정상이고 브라우저 오류는 없었다. 다만 현재 배포본에는 `리포트 작업대` 전역 메뉴가 없으므로 HFX-001 배포가 필요하다.
+- [x] 배포본 무과금 화면 재확인: 전역 `리포트 작업대` 메뉴 → `상담 시작 전` 빈 작업대 → `AI 상담 시작` CTA가 정상 노출됐고, 이 전환에서 브라우저 console error/warn은 0건이었다.
+- [x] 작업대 완성 핫픽스 로컬 검증: 저장 목록 요약은 상세 수화 전 완료 리포트로 렌더링하지 않고, 현재 상담의 미저장 payload는 임시 리포트로 구분한다. 목록·상세 API와 문서 액션의 기존 인증 경계는 유지했다.
+- [x] OAuth 오류 분리: `redirect_uri_mismatch`와 `popup_closed`의 안전한 사용자 안내 회귀를 추가했고, Google Console의 origin/redirect와 runtime client ID 일치 검증 절차를 운영 문서에 추가했다.
 - [ ] 실제 OCR·Vision·OpenAI provider를 사용하는 업로드/분석 E2E는 비용 승인 후 시행한다.

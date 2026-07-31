@@ -379,6 +379,22 @@ the normal promotion path.
 
 After Google Cloud OAuth settings are registered, verify code-flow settings:
 
+For the Pilot domain, verify the same Web client in both Google Cloud Console and
+the runtime configuration before attempting a browser login:
+
+| Boundary | Required value |
+| --- | --- |
+| Google Cloud Console: Authorized JavaScript origins | `https://skn27-traffic-pilot.duckdns.org` |
+| Google Cloud Console: Authorized redirect URI used by the Web client | `https://skn27-traffic-pilot.duckdns.org` |
+| runtime: `GOOGLE_POPUP_REDIRECT_URI` | `https://skn27-traffic-pilot.duckdns.org` (HTTPS origin only; no path, query, or fragment) |
+| runtime: `GOOGLE_CLIENT_ID` and frontend build: `VITE_GOOGLE_CLIENT_ID` | the identical Web client ID |
+
+`redirect_uri_mismatch` is rejected by Google before the application can
+exchange a code. `popup_closed` can mean the user closed the popup, the browser
+blocked it, or the callback page could not return to the service; it does not
+prove that the backend token exchange ran. Do not paste an authorization code
+into a URL, issue tracker, browser console, or shell history.
+
 Set `GOOGLE_OAUTH_CODE_EXCHANGE_DAILY_LIMIT` (default `20`). Keep
 `GOOGLE_OAUTH_TRUSTED_PROXY_CIDRS` empty for direct access; behind a reverse
 proxy, list only the proxy CIDRs controlled by this deployment. The application

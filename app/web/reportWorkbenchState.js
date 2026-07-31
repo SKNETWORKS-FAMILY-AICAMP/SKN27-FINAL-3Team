@@ -17,10 +17,37 @@ export function deriveReportWorkbenchState({
   hasReport = false,
   hasSavedReports = false,
   canGenerateReport = false,
+  isAuthenticated = false,
+  isPersistedReport = false,
   reportingPayload = null,
+  savedReportDetailLoaded = true,
   supervisorState = null,
 } = {}) {
-  if (hasReport || hasSavedReports || reportingPayload) {
+  if (hasSavedReports && !savedReportDetailLoaded && !reportingPayload) {
+    return {
+      kind: "loading_saved_report",
+      stageLabel: "저장 리포트 불러오는 중",
+      title: "저장된 리포트를 작업대에 연결하고 있습니다.",
+      description: "목록 요약이 아니라 리포트 본문과 근거를 확인한 뒤 표시합니다.",
+      missingItems: [],
+      ctaLabel: "목록 새로고침",
+    };
+  }
+
+  if (reportingPayload && !isPersistedReport) {
+    return {
+      kind: "temporary_preview",
+      stageLabel: "임시 리포트 미리보기",
+      title: "현재 상담의 분석 리포트를 검토할 수 있습니다.",
+      description: isAuthenticated
+        ? "저장 처리 후 내 사건과 작업대에서 다시 확인할 수 있습니다."
+        : "현재 접속 중에는 검토할 수 있지만 저장과 제출용 문서는 Google 로그인 후 사용할 수 있습니다.",
+      missingItems: [],
+      ctaLabel: "AI 상담으로 이동",
+    };
+  }
+
+  if (hasReport || hasSavedReports) {
     return {
       kind: "available",
       stageLabel: "리포트 확인 가능",

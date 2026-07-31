@@ -283,6 +283,8 @@ export default function FrontendAppShell({
   const [reportActionStatus, setReportActionStatus] = useState("");
   const [currentReport, setCurrentReport] = useState(null);
   const [reportList, setReportList] = useState([]);
+  const [isReportWorkspaceLoading, setIsReportWorkspaceLoading] = useState(false);
+  const [reportWorkspaceLoadError, setReportWorkspaceLoadError] = useState("");
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
   const [acknowledgedAppealKey, setAcknowledgedAppealKey] = useState("");
@@ -320,7 +322,7 @@ export default function FrontendAppShell({
       : "상담 준비";
   const cases = mypageSummary?.cases?.length ? mypageSummary.cases : [];
   const effectiveReportList = reportList;
-  const effectiveCurrentReport = currentReport || effectiveReportList[0] || null;
+  const effectiveCurrentReport = currentReport;
   const effectiveMypageSummary = mypageSummary;
   const history = historyEvents?.events || [];
   const analysisCards = analysisResponse?.cards?.length
@@ -597,6 +599,13 @@ export default function FrontendAppShell({
         guestId: nextGuestId,
         guestCredential: "",
       };
+      if (nextRoute === "reporting") {
+        await loadReports({
+          identity: nextIdentity,
+          sessionId: activeSessionId,
+          hydrateLatest: true,
+        });
+      }
       return {
         authSessionId: nextAuthSessionId,
         authToken: nextToken,
@@ -761,12 +770,23 @@ export default function FrontendAppShell({
     handleAttachmentFile(event.dataTransfer.files?.[0] || null);
   }
 
-  function openReportingWorkspace() {
+  async function openReportingWorkspace() {
     if (appealDecisionUi?.requiresAcknowledgement && !appealRiskAcknowledged) {
       setReportActionStatus("운전자 신원 노출 위험을 확인한 뒤 리포트 작업대로 이동할 수 있습니다.");
       return;
     }
     setActiveRoute("reporting");
+    if (authSessionId) {
+      await loadReports({ hydrateLatest: true });
+    }
+  }
+
+  function navigateToRoute(route) {
+    if (route === "reporting") {
+      void openReportingWorkspace();
+      return;
+    }
+    setActiveRoute(route);
   }
 
   async function runCurrentReportAction(action = "download_objection") {
@@ -1465,29 +1485,76 @@ export default function FrontendAppShell({
   async function loadReports(options = {}) {
     const requestIdentity = options?.identity || identity;
     const requestSessionId = options?.sessionId || sessionId;
+    const hydrateLatest = options?.hydrateLatest === true;
     if (!requestIdentity?.authToken && !requestIdentity?.authSessionId) {
       setReportList([]);
+      if (hydrateLatest) {
+        setCurrentReport(null);
+      }
       setStatusMessage("저장 리포트 목록은 로그인 후 확인할 수 있습니다.");
       return { reports: [] };
+    }
+    if (hydrateLatest) {
+      setIsReportWorkspaceLoading(true);
+      setReportWorkspaceLoadError("");
+      setCurrentReport(null);
     }
     setStatusMessage("리포트 목록을 불러오고 있습니다.");
     try {
       const result = await api.listReports({ sessionId: requestSessionId, identity: requestIdentity });
       const reports = Array.isArray(result?.reports) ? result.reports : [];
       setReportList(reports);
-      if (!currentReport && reports[0]) {
+      if (hydrateLatest) {
+        if (!reports[0]?.report_id) {
+          setCurrentReport(null);
+        } else {
+          try {
+            const detailResult = await api.getReportDetail({
+              reportId: reports[0].report_id,
+              sessionId: reports[0].session_id || requestSessionId,
+              identity: requestIdentity,
+            });
+            const detail = detailResult?.report;
+            if (!detail?.report_id || !detail?.content?.reporting_payload) {
+              throw new Error("report_detail_incomplete");
+            }
+            setCurrentReport(detail);
+          } catch (error) {
+            setCurrentReport(null);
+            setReportWorkspaceLoadError(
+              error?.message?.includes("login_required")
+                ? "저장 리포트를 확인하려면 Google 로그인이 필요합니다."
+                : "저장 리포트 상세를 불러오지 못했습니다. 목록 새로고침으로 다시 시도해 주세요."
+            );
+            setStatusMessage("리포트 목록은 확인했지만 상세를 불러오지 못했습니다.");
+            return result;
+          }
+        }
+      } else if (!currentReport && reports[0]) {
         setCurrentReport(reports[0]);
       }
       setStatusMessage("리포트 목록을 업데이트했습니다.");
       return result;
-    } catch (_error) {
+    } catch (error) {
       setReportList([]);
+      if (hydrateLatest) {
+        setCurrentReport(null);
+        setReportWorkspaceLoadError(
+          error?.message?.includes("login_required")
+            ? "저장 리포트를 확인하려면 Google 로그인이 필요합니다."
+            : "저장 리포트 상세를 불러오지 못했습니다. 목록 새로고침으로 다시 시도해 주세요."
+        );
+      }
       setStatusMessage(
-        _error?.message?.includes("login_required")
+        error?.message?.includes("login_required")
           ? "저장 리포트 목록은 로그인 후 확인할 수 있습니다."
           : "리포트 목록을 불러오지 못했습니다."
       );
       return null;
+    } finally {
+      if (hydrateLatest) {
+        setIsReportWorkspaceLoading(false);
+      }
     }
   }
 
@@ -1584,7 +1651,7 @@ export default function FrontendAppShell({
     <div className="app-shell" data-auth-state={authContext.auth_state}>
       <AppTopNavigation
         activeRoute={activeRoute}
-        onNavigate={setActiveRoute}
+        onNavigate={navigateToRoute}
         onOpenChat={() => ensureGuestSession("chatbot")}
         authAction={
           authSessionId ? (
@@ -1625,7 +1692,7 @@ export default function FrontendAppShell({
             isSavingConversation={isSavingConversation}
             onLogin={saveConversationAfterLogin}
             onLogout={logoutAndResetSession}
-            onNavigate={setActiveRoute}
+            onNavigate={navigateToRoute}
             onNewChat={startNewConversation}
             onOpenCase={openSavedCase}
             onToggleCollapse={() => setIsSidebarCollapsed((value) => !value)}
@@ -1641,7 +1708,7 @@ export default function FrontendAppShell({
               isAuthenticated={Boolean(authSessionId)}
               onGuestStart={() => ensureGuestSession("chatbot")}
               onOpenChat={() => ensureGuestSession("chatbot")}
-              onNavigate={setActiveRoute}
+              onNavigate={navigateToRoute}
             />
           )}
 
@@ -1744,7 +1811,7 @@ export default function FrontendAppShell({
               }}
               onRefresh={async () => {
                 await loadMyPageSummary();
-                await loadReports();
+                await loadReports({ hydrateLatest: true });
               }}
               reports={effectiveReportList}
               summary={effectiveMypageSummary}
@@ -1761,12 +1828,13 @@ export default function FrontendAppShell({
               canGenerateReport={hasReportGenerationNode(supervisorState)}
               currentReport={effectiveCurrentReport}
               isAuthenticated={Boolean(authSessionId)}
+              isReportWorkspaceLoading={isReportWorkspaceLoading}
               onOpenChat={() => setActiveRoute("chatbot")}
               onOpenReport={openReportDetail}
               onRefresh={async () => {
                 await loadMyPageSummary();
                 await loadHistoryEvents();
-                await loadReports();
+                await loadReports({ hydrateLatest: true });
               }}
               onPrepareDraftRegeneration={prepareDraftRegeneration}
               onPrepareMissingEvidence={prepareMissingEvidenceUpload}
@@ -1775,6 +1843,7 @@ export default function FrontendAppShell({
               reportActionStatus={reportActionStatus}
               reportList={effectiveReportList}
               reportingPayload={visibleReportingPayload}
+              reportWorkspaceLoadError={reportWorkspaceLoadError}
               supervisorExecution={supervisorExecution}
               supervisorState={supervisorState}
             />
@@ -4315,6 +4384,7 @@ function ReportingScreen({
   canGenerateReport = false,
   currentReport = null,
   isAuthenticated = false,
+  isReportWorkspaceLoading = false,
   onOpenChat,
   onOpenReport,
   onCopyDocumentCard,
@@ -4326,12 +4396,15 @@ function ReportingScreen({
   reportActionStatus = "",
   reportList = [],
   reportingPayload = null,
+  reportWorkspaceLoadError = "",
   supervisorExecution = null,
   supervisorState = null,
 }) {
   const [isReportListCollapsed, setIsReportListCollapsed] = useState(false);
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
   const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
+  const isPersistedReport = Boolean(currentReport?.report_id && currentReport?.content?.reporting_payload);
+  const savedReportDetailLoaded = !hasSavedReports || isPersistedReport;
   const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
   const documentConfirmation = activeReportingPayload?.document_confirmation || null;
   const hasOfficialDocument =
@@ -4348,12 +4421,15 @@ function ReportingScreen({
     appealBlocked: appealDownloadBlocked,
     reportId: currentReport?.report_id || activeReportingPayload?.report_id || null,
   };
-  const hasReport = Boolean(activeReportingPayload || currentReport || hasSavedReports);
+  const hasReport = Boolean(activeReportingPayload);
   const workbenchState = deriveReportWorkbenchState({
     hasReport,
     hasSavedReports,
     canGenerateReport,
+    isAuthenticated,
+    isPersistedReport,
     reportingPayload: activeReportingPayload,
+    savedReportDetailLoaded,
     supervisorState,
   });
   const sections = Array.isArray(activeReportingPayload?.sections) ? activeReportingPayload.sections : [];
@@ -4500,6 +4576,12 @@ function ReportingScreen({
                 </strong>
                 <p>확인된 상담과 제출 자료를 기준으로 정리한 결과이며 최종 법적 판단을 대신하지 않습니다.</p>
               </div>
+              {workbenchState.kind === "temporary_preview" && (
+                <div className="report-workbench-temporary" role="status">
+                  <strong>임시 리포트</strong>
+                  <p>{workbenchState.description}</p>
+                </div>
+              )}
 
               {isFineReport ? (
                 <section className="case-report-ratio case-report-fine-summary" aria-label="과태료 처분 현황">
@@ -4633,7 +4715,13 @@ function ReportingScreen({
               )}
             </div>
           ) : (
-            <ReportWorkbenchEmptyState state={workbenchState} onOpenChat={onOpenChat} />
+            <ReportWorkbenchEmptyState
+              state={workbenchState}
+              onOpenChat={onOpenChat}
+              onRefresh={onRefresh}
+              isLoading={isReportWorkspaceLoading}
+              loadError={reportWorkspaceLoadError}
+            />
           )}
         </article>
 
@@ -4691,6 +4779,7 @@ function ReportingScreen({
               <span className="tag amber">{workbenchState.stageLabel}</span>
               <strong>{workbenchState.title}</strong>
               <p>{workbenchState.description}</p>
+              {reportWorkspaceLoadError && <p className="report-workbench-load-error" role="alert">{reportWorkspaceLoadError}</p>}
             </div>
           )}
         </aside>
@@ -4699,12 +4788,15 @@ function ReportingScreen({
   );
 }
 
-function ReportWorkbenchEmptyState({ state, onOpenChat }) {
+function ReportWorkbenchEmptyState({ state, onOpenChat, onRefresh, isLoading = false, loadError = "" }) {
+  const refreshesSavedReport = state.kind === "loading_saved_report";
+  const action = refreshesSavedReport ? onRefresh : onOpenChat;
   return (
     <section className={`report-page-empty report-workbench-empty is-${state.kind}`} aria-label="리포트 작업대 준비 상태">
       <span className="tag amber">{state.stageLabel}</span>
       <h3>{state.title}</h3>
       <p>{state.description}</p>
+      {loadError && <p className="report-workbench-load-error" role="alert">{loadError}</p>}
       {state.missingItems.length > 0 && (
         <section className="report-workbench-empty__missing" aria-label="부족한 자료">
           <strong>현재 보완이 필요한 정보</strong>
@@ -4713,7 +4805,7 @@ function ReportWorkbenchEmptyState({ state, onOpenChat }) {
           </ul>
         </section>
       )}
-      <button className="button primary" type="button" onClick={onOpenChat}>
+      <button className="button primary" type="button" onClick={action} disabled={refreshesSavedReport && isLoading}>
         {state.ctaLabel}
       </button>
     </section>

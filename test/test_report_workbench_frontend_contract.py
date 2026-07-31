@@ -16,4 +16,7 @@ def test_report_workspace_is_reachable_from_the_global_rail_and_explains_empty_s
     assert "function ReportWorkbenchEmptyState" in shell
     assert "<ReportWorkbenchEmptyState" in shell
     assert "canGenerateReport={hasReportGenerationNode(supervisorState)}" in shell
+    assert "async function openReportingWorkspace" in shell
+    assert "loadReports({ hydrateLatest: true })" in shell
+    assert "setIsReportWorkspaceLoading" in shell
     assert ".report-workbench-empty" in styles
