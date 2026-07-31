@@ -109,8 +109,9 @@ rollback_app_release() {
   local status=$?
   trap - ERR
   restore_tag
-  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" rm -sf backend frontend >/dev/null 2>&1 || true
+  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" rm -sf backend frontend agent-worker file-scan-worker ops-monitor >/dev/null 2>&1 || true
   FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend >/dev/null 2>&1 || true
+  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor >/dev/null 2>&1 || true
   exit "$status"
 }
 
@@ -119,13 +120,15 @@ trap rollback_app_release ERR
 PILOT_BACKEND_IP="${PILOT_MIGRATION_CHECK_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py migrate --check
 aws ecr get-login-password --region '__AWS_REGION__' | docker login --username AWS --password-stdin "$registry"
 sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$target_tag/" .compose.env
-FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend
-FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" rm -sf backend frontend
+FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend agent-worker file-scan-worker ops-monitor
+FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" rm -sf backend frontend agent-worker file-scan-worker ops-monitor
 FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend
 
 for path in /api/health/live/ /api/health/ready/; do
   curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve "$app_domain:443:127.0.0.1" "https://$app_domain$path" >/dev/null
 done
+
+FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor
 
 trap - ERR
 echo "App release completed for $target_tag."
