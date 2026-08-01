@@ -680,6 +680,27 @@ def test_database_maintenance_promotes_precedent_seed_before_ssm_evidence() -> N
     assert iam.count('"ssm:PutParameter"') == 1
 
 
+def test_deploy_normalizes_runtime_line_endings_before_precedent_seed_regex() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+    helper = deploy.index("function Normalize-RuntimeEnvText")
+    read_parameter = deploy.index("function Get-VerifiedPrecedentSeedVersion")
+    normalize = deploy.index(
+        "Normalize-RuntimeEnvText $parameterValue",
+        read_parameter,
+    )
+    pattern = deploy.index(
+        "PRECEDENT_NEWPLUSPLUS_SEED_VERSION=(sha256:[0-9a-f]{64})",
+        read_parameter,
+    )
+
+    assert helper < read_parameter < normalize < pattern
+    assert (
+        '.Replace("`r`n", "`n").Replace("`r", "`n")'
+        in deploy[helper:read_parameter]
+    )
+    assert "$matches.Count -ne 1" in deploy[pattern:]
+
+
 def test_precedent_seed_rollback_is_explicit_verified_and_fail_closed() -> None:
     rollback = _read_deploy("Rollback-PilotPrecedentSeed.ps1")
 

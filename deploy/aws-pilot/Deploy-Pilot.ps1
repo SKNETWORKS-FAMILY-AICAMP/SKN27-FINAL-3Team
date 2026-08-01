@@ -102,6 +102,10 @@ function Set-EnvValue([string]$Content, [string]$Name, [string]$Value) {
     return $Content.TrimEnd() + "`n" + $line + "`n"
 }
 
+function Normalize-RuntimeEnvText([string]$Content) {
+    return $Content.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
 function Get-VerifiedPrecedentSeedVersion(
     [string]$Region,
     [string]$ParameterName
@@ -115,6 +119,7 @@ function Get-VerifiedPrecedentSeedVersion(
         --no-cli-pager 2>$null) | Out-String).TrimEnd("`r", "`n")
     Assert-LastExitCode "Read promoted precedent seed version"
 
+    $parameterValue = Normalize-RuntimeEnvText $parameterValue
     $pattern = "(?m)^PRECEDENT_NEWPLUSPLUS_SEED_VERSION=(sha256:[0-9a-f]{64})$"
     $matches = [regex]::Matches($parameterValue, $pattern)
     if ($matches.Count -ne 1) {
