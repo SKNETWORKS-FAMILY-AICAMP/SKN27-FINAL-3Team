@@ -131,11 +131,14 @@ def test_fault_ratio_readiness_uses_current_newplusplus_store(monkeypatch) -> No
     database = importlib.import_module(
         "etl.fault_cases.src.traffic_precedents.precedent_search.newplusplus.db"
     )
+    active_seed_version = "sha256:" + "a" * 64
+    monkeypatch.setenv("PRECEDENT_NEWPLUSPLUS_SEED_VERSION", active_seed_version)
     monkeypatch.setattr(
         database,
         "database_readiness",
         lambda: {
             "ready": True,
+            "active_seed_version": active_seed_version,
             "blocks": 3339,
             "cases": 825,
             "vector_dims": 2560,
@@ -145,6 +148,7 @@ def test_fault_ratio_readiness_uses_current_newplusplus_store(monkeypatch) -> No
     result = command._verify_fault_ratio_precedent()
 
     assert result["status"] == "ready"
+    assert result["active_seed_version"] == active_seed_version
     assert result["embedding_count"] == 3339
     assert result["case_count"] == 825
     assert result["embedding_space"] == {
@@ -153,6 +157,37 @@ def test_fault_ratio_readiness_uses_current_newplusplus_store(monkeypatch) -> No
         "dimensions": 2560,
         "revision": "5cf2132abc99cad020ac570b19d031efec650f2b",
     }
+
+
+def test_fault_ratio_readiness_rejects_runtime_seed_version_mismatch(
+    monkeypatch,
+) -> None:
+    command = importlib.import_module(MODULE_NAME)
+    database = importlib.import_module(
+        "etl.fault_cases.src.traffic_precedents.precedent_search.newplusplus.db"
+    )
+    actual_seed_version = "sha256:" + "a" * 64
+    monkeypatch.setenv(
+        "PRECEDENT_NEWPLUSPLUS_SEED_VERSION",
+        "sha256:" + "b" * 64,
+    )
+    monkeypatch.setattr(
+        database,
+        "database_readiness",
+        lambda: {
+            "ready": True,
+            "active_seed_version": actual_seed_version,
+            "blocks": 3339,
+            "cases": 825,
+            "vector_dims": 2560,
+        },
+    )
+
+    result = command._verify_fault_ratio_precedent()
+
+    assert result["status"] == "unavailable"
+    assert result["error_code"] == "fault_ratio_precedent_seed_version_mismatch"
+    assert result["active_seed_version"] == actual_seed_version
 
 
 def test_review_case_schema_uses_1024_dimensions() -> None:

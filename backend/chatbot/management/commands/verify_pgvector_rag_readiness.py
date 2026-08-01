@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Callable
 
 from django.core.management.base import BaseCommand, CommandError
@@ -176,10 +177,24 @@ def _verify_fault_ratio_precedent() -> dict[str, Any]:
 
     settings = ServiceSettings()
     readiness = database_readiness()
-    ready = bool(readiness.get("ready"))
+    actual_seed_version = str(readiness.get("active_seed_version") or "").strip()
+    expected_seed_version = str(
+        os.environ.get("PRECEDENT_NEWPLUSPLUS_SEED_VERSION") or ""
+    ).strip()
+    database_ready = bool(readiness.get("ready"))
+    seed_version_matches = bool(expected_seed_version) and (
+        actual_seed_version == expected_seed_version
+    )
+    ready = database_ready and seed_version_matches
+    error_code = ""
+    if not database_ready:
+        error_code = "fault_ratio_pgvector_not_ready"
+    elif not seed_version_matches:
+        error_code = "fault_ratio_precedent_seed_version_mismatch"
     return {
         "status": "ready" if ready else "unavailable",
-        "error_code": "" if ready else "fault_ratio_pgvector_not_ready",
+        "error_code": error_code,
+        "active_seed_version": actual_seed_version or None,
         "embedding_count": int(readiness.get("blocks") or 0),
         "case_count": int(readiness.get("cases") or 0),
         "embedding_space": {
