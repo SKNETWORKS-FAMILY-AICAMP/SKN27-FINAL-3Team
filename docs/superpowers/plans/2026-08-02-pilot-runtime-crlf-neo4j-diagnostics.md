@@ -39,7 +39,7 @@ Add a focused test next to the existing precedent seed deployment assertions:
 
 ```python
 def test_deploy_normalizes_runtime_line_endings_before_precedent_seed_regex():
-    deploy = _read("deploy/aws-pilot/Deploy-Pilot.ps1")
+    deploy = _read_deploy("Deploy-Pilot.ps1")
     helper = deploy.index("function Normalize-RuntimeEnvText")
     read_parameter = deploy.index("function Get-VerifiedPrecedentSeedVersion")
     normalize = deploy.index("Normalize-RuntimeEnvText $parameterValue", read_parameter)
