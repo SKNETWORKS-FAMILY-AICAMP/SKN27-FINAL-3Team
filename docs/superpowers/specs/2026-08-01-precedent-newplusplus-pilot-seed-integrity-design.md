@@ -269,7 +269,95 @@ DSN은 남기지 않는다.
 - frontend Node tests와 Vite production build
 - 운영 재배포 후 13개 E2E와 10분 operational acceptance
 
-## 12. 비범위
+## 12. publish 전 리뷰 보강 설계
+
+2026-08-01 publish 전 권한·복구 경계 리뷰에서 다음 세 결함을 확인했다.
+
+1. app role에는 `block_versions` 권한이 없지만 app credential로 실행되는 exact
+   verification과 readiness가 해당 table을 직접 조회한다.
+2. `connect_database`가 connection 생성 실패뿐 아니라 transaction body의
+   `SeedIntegrityError`까지 `DATABASE_NOT_READY`로 변환한다.
+3. seed rollback이 DB pointer를 교환한 뒤 SSM 또는 사후 검증에서 실패하면 두
+   권위값을 자동 복원하지 못하고도 maintenance marker를 제거할 수 있다.
+
+### 검토한 선택지
+
+#### 선택안 A — active-only app 검증과 보상 가능한 롤백
+
+app 경로는 `blocks` read-only view, `active_seed`, `seed_releases`만 사용하고,
+maintenance master 경로만 `block_versions`를 조회한다. rollback에는 private
+transaction journal과 보상 검증을 추가한다. 기존 최소 권한과 fail-closed 원칙을
+유지하므로 이 방식을 채택한다.
+
+#### 선택안 B — app role에 `block_versions` SELECT 추가
+
+현재 SQL을 그대로 둘 수 있지만 inactive seed 전체를 app에 노출해 승인된 최소
+권한 설계를 깨뜨린다. 채택하지 않는다.
+
+#### 선택안 C — app credential preflight 제거
+
+master 검증만 통과시키면 실제 runtime 권한 오류가 container 교체 뒤에 발견될 수
+있다. release gate가 약해지므로 채택하지 않는다.
+
+### active-only app 검증
+
+- `stage_seed`, `promote_seed`, `rollback_seed`의 master-only exact 검증은
+  `block_versions`를 계속 사용한다.
+- 공개 `verify_seed`는 expected version이 `active_seed.active_seed_version`과
+  일치하는지 먼저 확인하고 `blocks` view의 exact 3,339/825/2,560 및 허용 grade를
+  검증한다.
+- `database_readiness`도 `blocks` view와 `active_seed`만 조회한다.
+- app role grant는 기존대로 `blocks`, `seed_releases`, `active_seed` SELECT만
+  유지하며 `block_versions`는 계속 비공개다.
+- 테스트는 app-visible SQL에 `block_versions`가 없고 maintenance-only SQL에는
+  남아 있음을 고정한다.
+
+### domain 오류 전파
+
+- `connect_database`는 driver import, connection target 해석, 실제 connection 생성
+  실패만 `DB_DRIVER_MISSING` 또는 `DATABASE_NOT_READY`로 변환한다.
+- connection context 안에서 호출자가 발생시킨 `SeedIntegrityError`와
+  `SearchStageError`는 원래 code를 유지한다.
+- 일반 query 예외는 각 search service 또는 management command의 기존
+  credential-safe generic handler가 처리한다.
+- 실제 contextmanager에 domain 오류를 주입해 `ACTIVE_SEED_CHANGED`가 보존되는
+  회귀 테스트를 추가한다.
+
+### rollback 보상 상태머신
+
+rollback은 private work directory 안에 credential을 포함하지 않는 상태 journal을
+두고 다음 상태만 기록한다.
+
+1. `prepared`: original active/previous와 original SSM seed version을 검증했다.
+2. `db_swapped`: DB active pointer가 target previous로 교환됐다.
+3. `ssm_synced`: SSM이 새 active version과 일치한다.
+4. `verified`: master/app exact verification까지 성공했다.
+5. `compensated`: 실패 후 DB와 SSM을 original active version으로 되돌려 재검증했다.
+6. `recovery_required`: 보상 또는 보상 검증을 완료하지 못했다.
+
+`db_swapped` 이후 오류가 발생하면 remote error trap은 새 active를 expected 값으로
+사용해 pointer를 한 번 더 교환하고 original SSM 내용을 복원한다. 이후 master exact
+verification과 SSM read-back이 모두 original active와 일치할 때만
+`compensated`로 기록한다. app verification 실패도 동일한 보상 대상이다.
+
+PowerShell orchestration은 원격 명령이 terminal이라는 사실과 성공했다는 사실을
+분리한다. `verified`만 정상 성공으로 처리한다. `compensated`는 원래 상태가
+복구됐음을 확인한 뒤 runtime profile과 marker를 정리하지만 명령 자체는 실패로
+보고한다. `recovery_required`, status probe 실패, timeout·cancel 미확정이면
+maintenance profile과 marker를 유지하고 운영 traffic을 재개하지 않는다. journal
+probe는 상태명만 반환하며 credential, runtime env, SSM 값은 출력하지 않는다.
+
+### RED/GREEN 인수 계약
+
+- app-visible readiness와 exact verification SQL의 private table 참조 0건
+- real `connect_database` context에서 domain error code 보존
+- DB swap 뒤 SSM 실패, read-back 실패, master/app verify 실패 각각에 대해 보상
+  명령·original version 검증·journal 상태를 확인
+- 보상 미확정 시 profile/marker 유지, 보상 확인 시 안전한 정리 후 실패 보고
+- focused seed/command/AWS tests, 전체 pytest, Node tests와 Vite build 재통과
+- 운영 AWS·DB 호출, app release, 600초 acceptance, 13개 E2E는 계속 별도 승인
+
+## 13. 비범위
 
 - Qwen 문서 재임베딩
 - BGE/Qwen model 또는 retrieval/reranking 알고리즘 변경
@@ -278,7 +366,7 @@ DSN은 남기지 않는다.
 - review-case, legal 97,394 seed 내용 변경
 - 운영 적재·재배포·13개 E2E를 로컬 구현 완료로 간주하기
 
-## 13. 활성화 순서
+## 14. 활성화 순서
 
 1. 이 명세와 구현 계획 승인
 2. RED/GREEN으로 schema·service·command·deployment 계약 구현

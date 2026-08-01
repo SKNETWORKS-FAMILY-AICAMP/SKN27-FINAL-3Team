@@ -139,6 +139,14 @@ active가 다르거나 verified previous가 없으면 `ACTIVE_SEED_CHANGED` 또�
 master/app read-only verification까지 일치시킨다. 이 명령은 app image나 legal
 97,394 seed를 변경하지 않는다.
 
+app 검증과 readiness는 `blocks` active view, `active_seed`, `seed_releases`만
+조회하며 inactive `block_versions` 권한을 요구하지 않는다. rollback journal이
+`verified`면 정상 완료다. DB 교환 뒤 오류가 발생했지만 original DB pointer와 SSM을
+되돌려 재검증한 `compensated`는 marker/profile을 안전하게 정리한 뒤에도 명령을
+실패로 보고하므로 원인을 조사해야 한다. `recovery_required`, 중간 상태, journal
+probe 실패, timeout·cancel 미확정이면 database-maintenance profile과 marker를
+유지하며 운영 traffic을 재개하지 않는다.
+
 ## CloudWatch와 SNS
 
 Terraform은 다음을 만든다.

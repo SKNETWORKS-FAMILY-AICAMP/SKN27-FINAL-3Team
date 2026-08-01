@@ -70,6 +70,9 @@ python -m etl.fault_cases.src.traffic_precedents.run_pipeline `
 `precedent_newplusplus.blocks` view를 통해 active version만 읽는다. app role에는
 schema `USAGE`와 `blocks`, `seed_releases`, `active_seed`의 `SELECT`만 부여하며
 inactive `block_versions`와 쓰기 권한은 노출하지 않는다.
+runtime readiness와 exact verification도 `blocks` active view, `active_seed`,
+`seed_releases`만 사용한다. master-only stage/promotion/rollback transaction만
+inactive `block_versions`를 직접 검증한다.
 
 운영 반영 순서는 다음과 같다. 한 단계가 실패하면 다음 단계로 진행하지 않는다.
 
@@ -112,6 +115,12 @@ pwsh -File .\deploy\aws-pilot\Rollback-PilotPrecedentSeed.ps1 `
 없으면 변경 없이 실패한다. 성공 시 active/previous를 원자적으로 교환하고 SSM을
 반환된 active version으로 갱신·재조회한 뒤 master와 app credential로 다시
 검증한다. app image/release rollback은 계속 `Rollback-Pilot.ps1`이 담당한다.
+
+전용 rollback은 root-only journal로 상태를 남긴다. `verified`만 정상 성공이고,
+`compensated`는 오류 후 original DB pointer와 SSM을 복원·재검증했지만 명령은
+실패로 끝난 상태다. `recovery_required` 또는 journal을 확정할 수 없는 상태에서는
+database-maintenance profile과 marker를 유지하므로 운영 traffic을 수동으로
+재개하지 않는다.
 
 ## 검색 연결
 

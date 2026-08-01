@@ -778,9 +778,11 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
   stage → promote → exact verify → SSM read-back → app read-only verify 순서 구현
 - [x] app role은 `precedent_newplusplus` schema `USAGE`와 `blocks`,
   `seed_releases`, `active_seed` `SELECT`만 허용; inactive `block_versions`와 쓰기
-  권한은 비공개
+  권한은 비공개. app exact verification/readiness도 active view만 조회
 - [x] `Rollback-PilotPrecedentSeed.ps1`을 image rollback과 분리하고 active mismatch,
-  previous unavailable, SSM read-back/사후 verify 실패를 fail-closed 처리
+  previous unavailable, SSM read-back/사후 verify 실패를 fail-closed 처리. DB 교환
+  이후 실패는 original pointer·SSM을 보상 복구하고, 보상 미확정 시 maintenance
+  profile·marker 유지
 - [x] legal seed loader와 app-release target image가 NEW++ exact version/readiness를
   통과하기 전 marker·descriptor·container·evidence 승격을 차단
 - [x] 코드 경계 커밋 `05b27861`, `e0e5dc50`, `513e2f51`, `eb056fe7`,
@@ -804,6 +806,25 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
   bootstrap 적재는 고정 NPY·metadata만 사용
 - [x] 전체 AWS PowerShell parser, app-release/watcher 원격 Bash 문법,
   Terraform `fmt -check -recursive`, 금지된 유료·loader 문자열 0건
+
+publish 전 권한·롤백 후속 hardening 검증 증거(2026-08-01,
+`4fc6eb46` 기반 working tree):
+
+- [x] app-visible active-view SQL·domain error 보존 TDD — RED `3 failed` →
+  GREEN `3 passed`, Task 1 집중 `40 passed`
+- [x] rollback journal·compensation·safe-release TDD — RED `2 failed` →
+  GREEN `2 passed`; AWS/deployment 계약 `111 passed`
+- [x] 실제 렌더링된 rollback SSM Bash `64 commands` — `bash -n` 성공;
+  PowerShell parser 오류 0건
+- [x] seed·Django command·readiness·AWS·CodeBuild 집중 회귀 — `180 passed`
+- [x] 전체 Python 회귀 — `1519 passed`, `37 skipped`, `4 subtests passed`,
+  기존 LangChain warning 1건
+- [x] 프런트 Node 회귀 — `66/66 passed`; Vite `7.3.6` production build —
+  `44 modules transformed`, 성공
+- [x] maintenance/rollback provider 호출 경로와 추가 민감정보 패턴 — 0건
+- [ ] 운영 DB maintenance·immutable image/app release·600초 acceptance·G8 smoke·
+  배포 후 13개 E2E — 별도 운영 승인 전까지 대기
+
 - [ ] Terraform `validate` — 로컬 `.terraform/providers`에
   `archive 2.8.0`, `aws 6.54.0`, `random 3.9.0` package가 없어 실행 차단.
   구성 변경이나 임의 provider 다운로드 없이 G7 환경 검증으로 이관
