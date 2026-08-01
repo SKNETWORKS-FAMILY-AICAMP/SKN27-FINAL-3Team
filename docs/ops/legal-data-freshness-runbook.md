@@ -39,9 +39,14 @@ run summary에는 원문, 비밀값, 임베딩 벡터를 저장하지 않는다.
 최대 허용 경과시간은 코드에 고정하지 않는다. release 승인 기록에 실제 사용값을
 남긴다.
 
-### 2. 법령 수집 또는 승인 seed 재구축
+### 2. 기존 검증 seed를 기준으로 최신 source를 dry-run 대조
 
-법령 공급자 API를 사용하는 경우:
+기존 검증 manifest는 저장소 밖의 읽기 전용 경로에 둔다. 법제처 자격증명은
+환경에만 주입하고 명령·로그·증적에 값을 기록하지 않는다.
+
+수집기 자체의 source 연결과 run summary 생성만 독립적으로 진단해야 하면 별도의
+빈 출력 경로에서 다음 명령을 사용할 수 있다. 이 단독 실행 결과만으로 승인 seed가
+완성됐거나 운영 배포가 승인됐다고 판단하지 않는다.
 
 ```powershell
 python -m etl.legal.ingestion.run `
@@ -50,7 +55,29 @@ python -m etl.legal.ingestion.run `
   --output-dir output/law_ingestion
 ```
 
-승인된 embedding baseline을 재구축하는 경우:
+```powershell
+$ExistingManifest = "C:\secure\existing-rag-seed\rag-seed-manifest.json"
+$PreviewRoot = "C:\secure\legal-seed-preview-$(Get-Date -Format yyyyMMdd-HHmmss)"
+
+$PreviewJson = (& python backend/manage.py build_approved_legal_rag_seed `
+  --source-config etl/legal/manifests/traffic_law_manifest.yaml `
+  --existing-manifest $ExistingManifest `
+  --output-root $PreviewRoot `
+  --max-age-hours 168 `
+  --client law_go_kr `
+  --dry-run `
+  --format json) | Out-String
+if ($LASTEXITCODE -ne 0) { throw "Approved legal seed dry-run failed." }
+$Preview = $PreviewJson | ConvertFrom-Json
+$Preview | ConvertTo-Json -Depth 6
+```
+
+`--dry-run`은 법제처 source를 실제 수집하고 기존 embedding을
+`chunk_id + embedding_text_hash`로 대조하지만 OpenAI, S3, 운영 DB는 호출하지
+않는다. 출력의 `dataset_version`, `plan_sha256`, `reused`, `changed`, `new`,
+`removed`, `pending`을 승인 기록에 남긴다.
+기존 embedding baseline만으로 freshness를 갱신하지 않는다. 다음 명령만 실행해 현재 시각을 새 검증 시각으로
+주장하는 것은 금지한다.
 
 ```powershell
 python -m etl.legal.rebuild_artifacts_from_embeddings `
@@ -59,10 +86,72 @@ python -m etl.legal.rebuild_artifacts_from_embeddings `
   --output-dir output/law_ingestion
 ```
 
-실행이 실패했거나 `output/law_ingestion/reports/run_summary.json`이 생성되지 않으면
-배포를 중단한다.
+### 3. 변경분 비용 승인 후 exact plan만 실행
 
-### 3. 최신성 자동 판정
+`pending`이 0이면 유료 호출 없이 final build를 실행할 수 있다. 1개 이상이면
+model `text-embedding-3-large`, dimensions `1024`, pending 건수와 예상 batch 수를
+운영 책임자가 승인한다. dry-run 이후 source나 pending identity가 바뀌면
+`plan_sha256`이 달라지고 기존 승인은 무효다.
+
+```powershell
+$FinalRoot = "C:\secure\legal-seed-final-$(Get-Date -Format yyyyMMdd-HHmmss)"
+
+python backend/manage.py build_approved_legal_rag_seed `
+  --source-config etl/legal/manifests/traffic_law_manifest.yaml `
+  --existing-manifest $ExistingManifest `
+  --output-root $FinalRoot `
+  --dataset-version $Preview.dataset_version `
+  --approved-plan-sha256 $Preview.plan_sha256 `
+  --max-age-hours 168 `
+  --client law_go_kr `
+  --allow-paid-embedding `
+  --format json
+if ($LASTEXITCODE -ne 0) { throw "Approved legal seed final build failed." }
+
+python backend/manage.py verify_production_rag_seed_manifest `
+  --manifest "$FinalRoot\rag-seed-manifest.json" `
+  --format json
+if ($LASTEXITCODE -ne 0) { throw "Final seed verification failed." }
+```
+
+`pending`이 0이면 `--approved-plan-sha256`와 `--allow-paid-embedding`을 생략한다.
+OpenAI 호출 승인은 법령 변경분에만 적용된다. 이후 Pilot seed maintenance가
+수행할 수 있는 review-case 최대 904개 embedding은 별도 비용 승인 항목이다.
+
+### 4. immutable S3 prefix에 승인 bundle 업로드
+
+manifest SHA를 새 versioned prefix로 사용한다. final bundle의 `data/` 네 artifact와
+manifest만 올리며 local planning work file은 올리지 않는다.
+
+```powershell
+$NewManifestSha = (Get-FileHash "$FinalRoot\rag-seed-manifest.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+$SeedPrefix = "s3://skn27-pilot-908708651753-clean/_rag-seed/$NewManifestSha/"
+
+aws s3 cp "$FinalRoot\rag-seed-manifest.json" "${SeedPrefix}rag-seed-manifest.json" `
+  --region ap-northeast-2 --only-show-errors --no-cli-pager
+aws s3 cp "$FinalRoot\data" "${SeedPrefix}data/" --recursive `
+  --region ap-northeast-2 --only-show-errors --no-cli-pager
+if ($LASTEXITCODE -ne 0) { throw "Immutable seed upload failed." }
+```
+
+### 5. candidate stage, seed maintenance, promotion 순서
+
+새 `LEGAL_DATASET_VERSION`, 보수적인 `LEGAL_DATASET_VERIFIED_AT`,
+`LEGAL_RAG_SEED_MANIFEST_SHA256`를 넣은 안전한 runtime env를 준비한다. 현재 release를
+직접 수정하지 않는다.
+
+1. `Deploy-Pilot.ps1 -StageForReleaseUpdate`로 candidate private services를 stage한다.
+2. 별도 review-case 비용 승인 후 `Load-Rag-Seed-Pilot.ps1`을 새 S3 prefix와 manifest
+   SHA로 실행한다.
+3. `.production-rag-seed.complete`, release-local evidence, 법령 graph, pgvector와 검색
+   smoke가 모두 성공했는지 확인한다.
+4. 동일 release tag와 `-SkipBuild`로 `Deploy-Pilot.ps1` promotion을 실행한다.
+5. transaction gate 성공 뒤 `Confirm-PilotOperationalAcceptance.ps1`로 600초 연속
+   acceptance를 확인한다.
+6. 이 성공 증거가 확보된 후에만 후속 CodePipeline **App Release** 수동 승인을
+   재개한다. 이전에 descriptor 부재로 실패한 실행을 그대로 재시도하지 않는다.
+
+### 6. 최신성 자동 판정
 
 운영 책임자가 승인한 정수 시간값을 입력한다.
 

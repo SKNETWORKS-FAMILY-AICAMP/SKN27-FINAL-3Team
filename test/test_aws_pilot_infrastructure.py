@@ -653,6 +653,26 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
     assert positions == sorted(positions)
 
 
+def test_legal_seed_refresh_runbook_orders_reuse_cost_and_release_gates() -> None:
+    runbook = (
+        ROOT / "docs" / "ops" / "legal-data-freshness-runbook.md"
+    ).read_text(encoding="utf-8")
+
+    required_steps = (
+        "build_approved_legal_rag_seed",
+        "--dry-run",
+        "plan_sha256",
+        "--allow-paid-embedding",
+        "_rag-seed/",
+        "Load-Rag-Seed-Pilot.ps1",
+        "Confirm-PilotOperationalAcceptance.ps1",
+        "App Release",
+    )
+    positions = [runbook.index(step) for step in required_steps]
+    assert positions == sorted(positions)
+    assert "기존 embedding baseline만으로 freshness를 갱신하지 않는다" in runbook
+
+
 def test_rag_seed_builds_release_bound_operational_evidence_after_readiness() -> None:
     loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
     load_failed = next(

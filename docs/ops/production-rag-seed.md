@@ -16,6 +16,27 @@ a safe relative path, SHA-256 digest, byte count, and JSONL row count. The
 legal embedding space must use one provider/model/dimension combination and
 every vector must have 1024 finite, non-zero coordinates.
 
+## Incremental approved legal refresh
+
+For a freshness refresh, collect the official legal sources again before
+claiming a new verification time. Compare fresh embedding inputs with the
+verified existing bundle using the exact `chunk_id + embedding_text_hash`
+identity. Reuse matching OpenAI vectors, exclude removed identities, and send
+only changed or new identities to the provider after an operator approves the
+exact `plan_sha256` emitted by `build_approved_legal_rag_seed --dry-run`.
+
+The approved plan digest binds the fresh dataset version, existing manifest
+SHA-256, embedding space, and sorted pending identities. A count-only match is
+not sufficient. If the digest changes, repeat review and approval. Never use
+`rebuild_artifacts_from_embeddings` alone to assign a current freshness time to
+an old baseline.
+
+The final command must build and reload the new manifest before the bundle is
+uploaded. Upload only `rag-seed-manifest.json` and the four `data/*.jsonl`
+artifacts to a new immutable `_rag-seed/<manifest-sha256>/` prefix. Planning,
+pending-input, and duplicate work files remain local evidence and are not seed
+artifacts.
+
 ## Build and validate the manifest
 
 Create the manifest outside Git after source extraction:
