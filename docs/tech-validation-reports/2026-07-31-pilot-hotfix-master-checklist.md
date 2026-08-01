@@ -829,6 +829,45 @@ publish 전 권한·롤백 후속 hardening 검증 증거(2026-08-01,
   `archive 2.8.0`, `aws 6.54.0`, `random 3.9.0` package가 없어 실행 차단.
   구성 변경이나 임의 provider 다운로드 없이 G7 환경 검증으로 이관
 
+### 2026-08-02 runtime CRLF 복구와 Neo4j 분리 진단
+
+- [x] Windows AWS CLI/PowerShell 경계에서 SecureString runtime text가 CRLF로
+  반환되면 interior line의
+  `PRECEDENT_NEWPLUSPLUS_SEED_VERSION=sha256:<64-hex>` 정규식이 실패하는 결함을
+  RED fixture로 재현
+- [x] `Deploy-Pilot.ps1`에서 runtime text를 LF로 정규화한 뒤 기존 exact-single-line
+  검증을 수행하도록 최소 수정 — 커밋 `927c8f93`
+- [x] LF 1건·CRLF 1건은 승인하고 duplicate 2건·malformed 0건은 거부하는
+  PowerShell fixture와 배포 계약 회귀 통과 — `128 passed`, PowerShell parse 성공
+- [x] exact release `76c713ec92d6`, manifest
+  `9bb155067bdbff2792ff1ceb17002b99431454b31c52029f7cee8af75f2294ac`로
+  initial private stage 재생성 — SSM `693f2ea8-8b50-4bf0-8e1a-7f6c7a8f9315`
+- [x] 독립 stage invariant 검증 — SSM
+  `3f88bdf9-2f79-4661-a660-b4672b8eab7a`; public `current` 없음,
+  exact stage marker 일치, `redis`·`clamav`·`law-neo4j`·`backend` running,
+  complete marker·release/shared evidence·source descriptor 없음
+- [x] credential-safe 분리 진단을 batch size `500`으로 정확히 1회 실행 — SSM
+  `a7c69647-cbf8-47f6-8d15-5fdc2668c435`, status `Success`, response code `0`,
+  stderr `0 bytes`, failure event `0`
+- [x] 실제 단계 결과 — bundle validation, seed build, connectivity, constraints,
+  private graph clear, sources `35`, versions `341`, chunks `98,664`/`198 batches`,
+  relations 합계 `309,132`/`620 batches`, hints `27`, dataset metadata 모두 통과
+- [x] 최종 graph identity — dataset
+  `sha256:8e5964db77c3b69e16ec046b02f606f734a20e741f930a0b874aa320182c2ea3`,
+  canonical chunk SHA
+  `67676426f3b922748e91fb9a788a2e47f8dfc5426dfc7abeb05251b4e5f200d1`,
+  manifest SHA exact 일치
+- [x] 진단 후에도 public cutover·complete marker·evidence·descriptor 생성 없음,
+  private `law-neo4j` running, embedding/provider 호출 `0`
+- [x] 과거 `CommandError: Neo4j legal graph load failed`의 내부 예외는 당시
+  catch-all 변환과 실패 cleanup으로 class/code/log가 보존되지 않았음을 확정.
+  동일 데이터의 현재 분리 진단에서는 재현되지 않았으므로 특정 Neo4j 서버·쿼리·
+  데이터 결함을 원인으로 단정하지 않음
+- [ ] 다음 승인 작업 — production graph loader가 원본 exception class,
+  `code`, `gql_status`, redacted message와 phase/batch를 cleanup 전에 내구적으로
+  보존하도록 TDD 핫픽스한 뒤 full seed load를 재시도. 그 전에는 descriptor/evidence
+  생성, public promotion, G8/G9를 진행하지 않음
+
 ### 배포 중단 조건
 
 - precheck 실패
@@ -942,6 +981,7 @@ publish 전 권한·롤백 후속 hardening 검증 증거(2026-08-01,
 | DISC-003 | G6 Django 전체 discovery | public law projector·law adapter의 최신 계약과 구형 Django fixture 2건이 불일치해 383건 중 1 failure·1 error | 기존 HFX 외 / Django test debt | integration gate | 포함·해결. production 코드는 유지하고 source-backed law fixture와 `llm_extractor` keyword 수용 mock으로 정렬 | 단독 RED 2건, 집중 GREEN `2 tests / OK`, 전체 GREEN `383 tests / OK` |
 | DISC-004 | G6 pilot Compose render | `docker compose config --quiet`가 `OPERATIONAL_LOG_GROUP` 필수 변수 누락으로 실패 | 기존 HFX 외 / deployment template defect | release gate | 포함·해결. Compose 필수 키와 runtime template의 집합 계약을 추가하고 deploy-script 주입 placeholder 한 줄 보완 | 신규 RED 1건, GREEN `1 passed`; AWS pilot `85 passed`; local·pilot Compose render 성공 |
 | DISC-005 | G7 candidate seed | manifest 98,664개와 PostgreSQL 98,869개가 불일치하고 removed 205개가 검색 가능 상태로 잔존; zero-target review job은 running 유지; fault-ratio unavailable을 optional로 통과 | HFX-013 release integrity 확장 | P0 data/release gate | 포함 승인·로컬 해결. 운영은 기존 97,394개 exact seed로 원복하고 invalid marker/descriptor 격리. exact replacement·사후 건수·zero-job·fault-ratio fail-closed·NEW++ readiness를 TDD 적용 | 원복 SSM `3392c914-3c0f-41d5-95ab-108e2d5a3968` success; 독립 검증 `d9a514a3-722b-477e-bfd4-41183f89fcd1` success; NEW++ focused `59 passed`; 배포·인프라 `220 passed`; 전체 `1517 passed`; Node `66/66 passed`; Vite 성공 |
+| DISC-006 | G7 initial recovery와 exact seed load | Windows CRLF runtime parsing이 다음 stage를 차단했고, 이후 graph loader가 내부 exception을 generic `Neo4j legal graph load failed`로 소실 | HFX-013 release observability 확장 | P0 release gate | CRLF parser는 포함 승인·해결. graph 원인 특정은 보류하고 exception/phase/batch 내구적 보존 핫픽스를 다음 승인 경계로 분리 | parser `128 passed`; private stage SSM `693f2ea8-...`; 분리 진단 SSM `a7c69647-...` success, graph `98,664` chunks/`309,132` relations, failure 0; public cutover/provider 호출 0 |
 
 ### 범위 변경 규칙
 
