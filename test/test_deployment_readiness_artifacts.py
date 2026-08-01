@@ -261,9 +261,11 @@ def test_operational_runbook_documents_bootstrap_and_two_gate_acceptance():
         / "2026-07-31-pilot-hotfix-master-checklist.md"
     )
     for hold_item in (
-        "- [ ] 현재 운영 SHA `818199aee975` evidence-only 복구",
-        "- [ ] app-release pipeline 승인",
-        "- [ ] 후보 릴리스 600초 연속 acceptance 통과",
+        "- [ ] 기존 stale seed로 evidence-only 복구를 반복하지 않음",
+        "- [ ] 새 dataset version·verified time·manifest SHA로 candidate update stage",
+        "- [ ] `Load-Rag-Seed-Pilot.ps1` 성공 및 descriptor·release evidence 생성",
+        "- [ ] candidate promotion transaction gate 및 600초 연속 acceptance 통과",
+        "- [ ] 성공 후 후속 app-release pipeline 승인 재개",
         "- [ ] G8 운영 재배포·smoke 완료",
         "- [ ] 배포 후 13개 E2E 13/13 통과",
     ):

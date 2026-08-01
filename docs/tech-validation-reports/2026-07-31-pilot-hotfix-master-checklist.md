@@ -692,6 +692,10 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 - [ ] immutable frontend/backend image digest 기록
 - [ ] DB migration 목록 확인
 - [ ] data seed·run summary 확인
+- [ ] 최신 법령 source dry-run과 기존 97,394개 embedding 재사용 대조 완료
+- [ ] `dataset_version`·`plan_sha256`·reused/changed/new/removed/pending 기록
+- [ ] pending이 있으면 exact plan 비용 승인, 없으면 provider 무호출 증거 기록
+- [ ] 새 manifest 이중 검증과 immutable `_rag-seed/<manifest-sha256>/` 업로드 확인
 - [ ] secret·환경 변수 존재 여부만 확인하고 값은 기록하지 않음
 - [ ] rollback 대상 이전 release SHA/digest 기록
 - [ ] 운영 비용 발생 provider 실행 범위 확인
@@ -704,11 +708,11 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 현재 운영 복구 입력(S3 URI, manifest 상대 경로, manifest SHA-256)과 실제 AWS
 변경 명령은 실행 직전에 별도 승인한다.
 
-- [ ] 현재 운영 SHA `818199aee975` evidence-only 복구
-- [ ] 현재 운영 SHA transaction gate 및 600초 연속 acceptance 통과
-- [ ] app-release pipeline 승인
-- [ ] 후보 릴리스 transaction gate 통과
-- [ ] 후보 릴리스 600초 연속 acceptance 통과
+- [ ] 기존 stale seed로 evidence-only 복구를 반복하지 않음
+- [ ] 새 dataset version·verified time·manifest SHA로 candidate update stage
+- [ ] `Load-Rag-Seed-Pilot.ps1` 성공 및 descriptor·release evidence 생성
+- [ ] candidate promotion transaction gate 및 600초 연속 acceptance 통과
+- [ ] 성공 후 후속 app-release pipeline 승인 재개
 - [ ] G8 운영 재배포·smoke 완료
 - [ ] 배포 후 13개 E2E 13/13 통과
 
