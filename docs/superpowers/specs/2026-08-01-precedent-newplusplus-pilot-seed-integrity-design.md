@@ -197,6 +197,10 @@ provider 호출 명령, `precedent_embedding.build_embeddings`, model download �
 ### runtime env와 readiness
 
 - `PRECEDENT_NEWPLUSPLUS_SEED_VERSION`을 필수 runtime evidence 값으로 기록한다.
+- database maintenance가 promotion 후 SSM runtime parameter에 실제 version을
+  기록한다. 이후 `Deploy-Pilot.ps1`은 로컬 template의 `INJECTED_` placeholder를
+  기존 SSM의 검증된 version으로 치환한 뒤 나머지 generated runtime 값을 합친다.
+  따라서 로컬 template이 maintenance 결과를 과거 값으로 덮어쓰지 않는다.
 - `_verify_fault_ratio_precedent`는 active seed version, 3,339 blocks, 825 cases,
   2,560 dimensions를 확인한다.
 - runtime expected version과 DB active version이 다르면
