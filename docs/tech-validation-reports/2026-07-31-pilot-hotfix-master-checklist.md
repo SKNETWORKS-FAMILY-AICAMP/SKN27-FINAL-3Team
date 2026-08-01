@@ -752,26 +752,56 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
   `3,339 blocks / 825 cases / 2,560 dimensions` 계약에 연결
 - [x] 저장소의 고정 Qwen bootstrap vectors를 확인해 문서 embedding provider
   재호출이 필요 없음을 확인
-- [ ] legacy manifest의 343-row `precedent_fault_ratio_chunks` 역할을 active NEW++
+- [x] legacy manifest의 343-row `precedent_fault_ratio_chunks` 역할을 active NEW++
   corpus와 명시적으로 분리하고, 3,339-block bootstrap의 파일럿 schema·DSN·exact
-  loader·rollback 배포 계약을 별도 승인 후 구현
-- [ ] 위 필수 corpus가 ready가 되기 전에는 새 seed marker/descriptor 생성 및
-  candidate promotion을 승인하지 않음
+  loader·rollback 배포 계약을 승인된 별도 계획으로 구현
+- [x] 위 필수 corpus가 ready가 되기 전에는 새 seed marker/descriptor 생성 및
+  app candidate promotion을 차단하는 fail-closed gate 구현
 
 `Recover-PilotOperationalEvidence.ps1`과
 `Confirm-PilotOperationalAcceptance.ps1`은 provider·seed loader를 실행하지
 않는다. immutable seed 검증 실패 시 자동 재적재하지 않고, 유료/전체 seed
 작업이 필요한 경우 정확한 범위로 별도 승인받는다.
 
-로컬 구현 검증 증거(2026-07-31):
+### 2026-08-01 NEW++ versioned seed 구현 경계
 
-- [x] 공통 transaction/acceptance gate와 Django command 계약 — 집중 pytest
-  `130 passed`, Django `16 passed`
-- [x] AWS 파일럿 배포·복구·수동 롤백·watcher 계약 — `89 passed`
-- [x] CodeBuild app-release 계약 — `14 passed`
-- [x] 전체 Python 회귀 — `1473 passed`, `37 skipped`, 기존 LangChain warning 1건
-- [x] 프런트 Node 회귀 — `node --test *.test.js`, `66 passed`
-- [x] Vite production build — 성공
+- [x] provider-free bootstrap source 고정
+  - NPY `bc4bc1146b76784f2ba95f9287e7f1b8d0280e41fa249d0154c94789d453126c`
+  - metadata `ab6ab0bedafd3152f9b5ee668b503c35d28288e0c6b421e872866b2f014ff9ff`
+  - model revision `5cf2132abc99cad020ac570b19d031efec650f2b`
+- [x] deterministic seed version
+  `sha256:af0a4a40f983dcdaeaaeb57e54962a514338b8644c33a6a807f1e6214878b2db`
+  및 exact `3,339 blocks / 825 cases / 2,560 dimensions` 계약 고정
+- [x] immutable `seed_releases`·`block_versions`, CAS `active_seed`, active-only
+  `blocks` view와 stage/promote/verify/rollback command 구현
+- [x] database-maintenance role·host lock·private credential file을 사용해 schema →
+  stage → promote → exact verify → SSM read-back → app read-only verify 순서 구현
+- [x] app role은 `precedent_newplusplus` schema `USAGE`와 `blocks`,
+  `seed_releases`, `active_seed` `SELECT`만 허용; inactive `block_versions`와 쓰기
+  권한은 비공개
+- [x] `Rollback-PilotPrecedentSeed.ps1`을 image rollback과 분리하고 active mismatch,
+  previous unavailable, SSM read-back/사후 verify 실패를 fail-closed 처리
+- [x] legal seed loader와 app-release target image가 NEW++ exact version/readiness를
+  통과하기 전 marker·descriptor·container·evidence 승격을 차단
+- [x] 코드 경계 커밋 `05b27861`, `e0e5dc50`, `513e2f51`, `eb056fe7`,
+  `2dab587c`, `54ba7e89`, `7acfbeed`
+- [ ] 현재 운영 DB에 NEW++ maintenance 실행 — 별도 운영 승인 필요
+- [ ] immutable image build/push와 app-release 실행
+- [ ] 후보 release 600초 acceptance 통과
+- [ ] G8 운영 smoke 완료
+- [ ] 배포 후 13개 E2E 13/13과 최종 GO/NO-GO
+
+로컬 구현 최종 검증 증거(2026-08-01, `HEAD 7acfbeed`):
+
+- [x] NEW++ schema·identity·lifecycle command·retriever 집중 회귀 — `59 passed`
+- [x] production seed·review embedding·AWS 배포·readiness·CodeBuild 회귀 —
+  `220 passed`
+- [x] 전체 Python 회귀 — `1517 passed`, `37 skipped`, `4 subtests passed`,
+  기존 LangChain warning 1건
+- [x] 프런트 Node 회귀 — `node --test *.test.js`, `66/66 passed`
+- [x] Vite `7.3.6` production build — `44 modules transformed`, 성공
+- [x] maintenance·rollback script의 embedding/provider 호출 문자열 0건;
+  bootstrap 적재는 고정 NPY·metadata만 사용
 - [x] 전체 AWS PowerShell parser, app-release/watcher 원격 Bash 문법,
   Terraform `fmt -check -recursive`, 금지된 유료·loader 문자열 0건
 - [ ] Terraform `validate` — 로컬 `.terraform/providers`에
@@ -890,7 +920,7 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 | DISC-002 | G2 종료 검증 | UI PR #354의 최신 Node 계약과 과거 Python source-contract 2건이 상충하여 전체 `pytest` 2건 실패 | 기존 HFX 외 / UI test debt | integration gate | 포함 승인·해결. production UI는 유지하고 구형 Python 단정만 최신 UI 계약에 맞춰 조정 | `HEAD(9db7ccb5)` 동일 재현, 집중 2/2 및 전체 `1318 passed / 0 failed` |
 | DISC-003 | G6 Django 전체 discovery | public law projector·law adapter의 최신 계약과 구형 Django fixture 2건이 불일치해 383건 중 1 failure·1 error | 기존 HFX 외 / Django test debt | integration gate | 포함·해결. production 코드는 유지하고 source-backed law fixture와 `llm_extractor` keyword 수용 mock으로 정렬 | 단독 RED 2건, 집중 GREEN `2 tests / OK`, 전체 GREEN `383 tests / OK` |
 | DISC-004 | G6 pilot Compose render | `docker compose config --quiet`가 `OPERATIONAL_LOG_GROUP` 필수 변수 누락으로 실패 | 기존 HFX 외 / deployment template defect | release gate | 포함·해결. Compose 필수 키와 runtime template의 집합 계약을 추가하고 deploy-script 주입 placeholder 한 줄 보완 | 신규 RED 1건, GREEN `1 passed`; AWS pilot `85 passed`; local·pilot Compose render 성공 |
-| DISC-005 | G7 candidate seed | manifest 98,664개와 PostgreSQL 98,869개가 불일치하고 removed 205개가 검색 가능 상태로 잔존; zero-target review job은 running 유지; fault-ratio unavailable을 optional로 통과 | HFX-013 release integrity 확장 | P0 data/release gate | 포함 승인·로컬 해결. 운영은 기존 97,394개 exact seed로 원복하고 invalid marker/descriptor 격리. exact replacement·사후 건수·zero-job·fault-ratio fail-closed·NEW++ readiness를 TDD 적용 | 원복 SSM `3392c914-3c0f-41d5-95ab-108e2d5a3968` success; 독립 검증 `d9a514a3-722b-477e-bfd4-41183f89fcd1` success; focused `200 passed`; 전체 `1494 passed`; Node `66 passed`; Vite 성공 |
+| DISC-005 | G7 candidate seed | manifest 98,664개와 PostgreSQL 98,869개가 불일치하고 removed 205개가 검색 가능 상태로 잔존; zero-target review job은 running 유지; fault-ratio unavailable을 optional로 통과 | HFX-013 release integrity 확장 | P0 data/release gate | 포함 승인·로컬 해결. 운영은 기존 97,394개 exact seed로 원복하고 invalid marker/descriptor 격리. exact replacement·사후 건수·zero-job·fault-ratio fail-closed·NEW++ readiness를 TDD 적용 | 원복 SSM `3392c914-3c0f-41d5-95ab-108e2d5a3968` success; 독립 검증 `d9a514a3-722b-477e-bfd4-41183f89fcd1` success; NEW++ focused `59 passed`; 배포·인프라 `220 passed`; 전체 `1517 passed`; Node `66/66 passed`; Vite 성공 |
 
 ### 범위 변경 규칙
 
@@ -912,6 +942,7 @@ G8 재배포와 G9 13개 E2E·운영 관찰에서 실제 증거를 수집해야 
 | P0 실행 계획 | `docs/superpowers/plans/2026-07-31-p0-safety-boundary-hotfix.md` | HFX-009~011을 TDD와 커밋 경계로 분리 | 검증 완료 |
 | G2 실행 계획 | `docs/superpowers/plans/2026-07-31-auth-new-conversation-state-hotfix.md` | HFX-012 startup auth 검증·session gate·원자적 새 상담을 TDD로 분리 | 검증 완료 |
 | DISC-005 운영 대응 | invalid marker/descriptor 격리 → SSM 기존값 복원 → 97,394 exact seed 원복 → 코드 핫픽스 | 불완전한 candidate promotion과 잔존 검색 row를 동시에 차단 | 운영 원복 완료 / 코드 로컬 검증 완료 |
+| NEW++ 운영 반영 | versioned schema + CAS pointer + SSM expected version + 전용 seed rollback | legal 97,394 seed와 판례 3,339-block corpus를 독립적으로 검증·복구 | 코드 구현 완료 / 운영 maintenance·재배포·E2E 대기 |
 
 ## 19. 단계별 상세 계획 문서 전환 조건
 
