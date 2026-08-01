@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import importlib
+import sys
+import types
+
 import pytest
 
 from etl.fault_cases.src.traffic_precedents.precedent_search.newplusplus import db
@@ -82,8 +86,9 @@ def test_database_readiness_is_scoped_to_the_active_seed(monkeypatch) -> None:
 
     result = db.database_readiness()
 
-    assert "JOIN precedent_newplusplus.active_seed" in statements[0]
-    assert "active.active_seed_version = blocks.seed_version" in statements[0]
+    assert "FROM precedent_newplusplus.blocks AS blocks" in statements[0]
+    assert "CROSS JOIN precedent_newplusplus.active_seed AS active" in statements[0]
+    assert "block_versions" not in statements[0]
     assert result == {
         "ready": True,
         "active_seed_version": active_seed_version,
@@ -126,3 +131,34 @@ def test_database_readiness_fails_closed_without_an_active_seed(monkeypatch) -> 
         "cases": 0,
         "vector_dims": None,
     }
+
+
+def test_connect_database_preserves_domain_errors_from_transaction_body(
+    monkeypatch,
+) -> None:
+    service = importlib.import_module(
+        "etl.fault_cases.src.traffic_precedents.precedent_db_loading.seed_integrity"
+    )
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+    monkeypatch.setitem(
+        sys.modules,
+        "psycopg",
+        types.SimpleNamespace(connect=lambda *args, **kwargs: FakeConnection()),
+    )
+    monkeypatch.setenv("PRECEDENT_NEWPLUSPLUS_DSN", "postgresql://explicit")
+
+    with pytest.raises(service.SeedIntegrityError) as exc_info:
+        with db.connect_database():
+            raise service.SeedIntegrityError(
+                "ACTIVE_SEED_CHANGED",
+                "active seed changed before promotion",
+            )
+
+    assert exc_info.value.code == "ACTIVE_SEED_CHANGED"

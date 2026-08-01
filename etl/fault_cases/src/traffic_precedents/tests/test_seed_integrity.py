@@ -224,6 +224,12 @@ def test_stage_reuses_an_exact_existing_seed_without_inserting(monkeypatch) -> N
         for event in events
         if event[0] == "execute"
     )
+    assert any(
+        "FROM precedent_newplusplus.seed_releases AS release" in event[1]
+        and "precedent_newplusplus.block_versions" in event[1]
+        for event in events
+        if event[0] == "execute"
+    )
 
 
 def test_stage_checks_exact_counts_before_transaction_exit(monkeypatch) -> None:
@@ -258,6 +264,9 @@ def test_verify_seed_returns_exact_credential_safe_evidence() -> None:
 
     def response(sql: str, _params: Any):
         if "FROM precedent_newplusplus.seed_releases AS release" in sql:
+            assert "JOIN precedent_newplusplus.active_seed AS active" in sql
+            assert "LEFT JOIN precedent_newplusplus.blocks AS blocks" in sql
+            assert "block_versions" not in sql
             return _snapshot(status="active")
         return None
 

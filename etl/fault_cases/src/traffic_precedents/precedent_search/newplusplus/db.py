@@ -68,14 +68,14 @@ def connect_database() -> Iterator[Any]:
         connection_context = (
             psycopg.connect(dsn) if dsn is not None else psycopg.connect(**kwargs)
         )
-        with connection_context as connection:
-            yield connection
     except SearchStageError:
         raise
     except Exception as exc:
         raise SearchStageError(
             "DATABASE_NOT_READY", "판례 테스트 DB에 연결할 수 없습니다.", "database", True
         ) from exc
+    with connection_context as connection:
+        yield connection
 
 
 def database_readiness() -> dict[str, Any]:
@@ -86,9 +86,8 @@ def database_readiness() -> dict[str, Any]:
           count(DISTINCT blocks.record_id)::int AS cases,
           min(vector_dims(blocks.embedding))::int AS min_dims,
           max(vector_dims(blocks.embedding))::int AS max_dims
-        FROM precedent_newplusplus.block_versions AS blocks
-        JOIN precedent_newplusplus.active_seed AS active
-          ON active.active_seed_version = blocks.seed_version
+        FROM precedent_newplusplus.blocks AS blocks
+        CROSS JOIN precedent_newplusplus.active_seed AS active
         WHERE active.singleton IS TRUE
         GROUP BY active.active_seed_version
     """

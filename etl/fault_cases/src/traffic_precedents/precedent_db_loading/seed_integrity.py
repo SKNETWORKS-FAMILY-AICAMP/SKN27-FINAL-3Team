@@ -162,7 +162,7 @@ def verify_seed(
     connection_factory: ConnectionFactory,
 ) -> dict[str, Any]:
     with connection_factory() as connection, connection.cursor() as cursor:
-        verified = _read_verified_seed(cursor, expected_seed_version)
+        verified = _read_active_verified_seed(cursor, expected_seed_version)
     if verified is None:
         raise SeedIntegrityError(
             "SEED_NOT_FOUND",
@@ -345,6 +345,62 @@ def _read_verified_seed(cursor: Any, seed_version: str) -> dict[str, Any] | None
     row = cursor.fetchone()
     if row is None:
         return None
+    return _verified_seed_from_row(row, seed_version)
+
+
+def _read_active_verified_seed(
+    cursor: Any,
+    seed_version: str,
+) -> dict[str, Any] | None:
+    cursor.execute(
+        """
+        SELECT release.status,
+               release.source_npy_sha256,
+               release.source_metadata_sha256,
+               release.model_id,
+               release.model_revision,
+               release.block_count,
+               release.case_count,
+               release.embedding_dimension,
+               count(blocks.block_id)::int,
+               count(DISTINCT blocks.record_id)::int,
+               min(vector_dims(blocks.embedding))::int,
+               max(vector_dims(blocks.embedding))::int,
+               count(*) FILTER (
+                 WHERE blocks.internal_grade NOT IN (
+                   'GENERAL_READY_DIRECT', 'SEED_READY'
+                 )
+               )::int
+          FROM precedent_newplusplus.seed_releases AS release
+          JOIN precedent_newplusplus.active_seed AS active
+            ON active.singleton IS TRUE
+           AND active.active_seed_version = release.seed_version
+          LEFT JOIN precedent_newplusplus.blocks AS blocks ON TRUE
+         WHERE release.seed_version = %s
+         GROUP BY release.seed_version, release.status,
+                  release.source_npy_sha256, release.source_metadata_sha256,
+                  release.model_id, release.model_revision,
+                  release.block_count, release.case_count,
+                  release.embedding_dimension
+        """,
+        (seed_version,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    verified = _verified_seed_from_row(row, seed_version)
+    if verified["release_status"] != "active":
+        raise SeedIntegrityError(
+            "SEED_EXACT_VERIFICATION_FAILED",
+            "precedent exact seed verification failed",
+        )
+    return verified
+
+
+def _verified_seed_from_row(
+    row: Any,
+    seed_version: str,
+) -> dict[str, Any]:
     (
         release_status,
         source_npy_sha256,
