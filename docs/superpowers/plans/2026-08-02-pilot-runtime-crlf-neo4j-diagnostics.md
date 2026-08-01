@@ -33,7 +33,7 @@
 - Consumes: decrypted SSM `Parameter.Value` returned as a PowerShell string.
 - Produces: `Normalize-RuntimeEnvText([string]$Content) -> string` and the unchanged return contract `Get-VerifiedPrecedentSeedVersion(...) -> string` with the exact `sha256:` prefix plus 64 lowercase hexadecimal characters.
 
-- [ ] **Step 1: Write the failing source-contract regression test**
+- [x] **Step 1: Write the failing source-contract regression test**
 
 Add a focused test next to the existing precedent seed deployment assertions:
 
@@ -55,7 +55,7 @@ def test_deploy_normalizes_runtime_line_endings_before_precedent_seed_regex():
 
 This test intentionally requires normalization before the strict regex and retains the single-match gate.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -65,7 +65,7 @@ python -m pytest test/test_aws_pilot_infrastructure.py::test_deploy_normalizes_r
 
 Expected: FAIL because `Normalize-RuntimeEnvText` and its call do not exist.
 
-- [ ] **Step 3: Add a behavior-level PowerShell fixture check before production code**
+- [x] **Step 3: Add a behavior-level PowerShell fixture check before production code**
 
 Run this local fixture with the desired parsing contract, not AWS:
 
@@ -88,7 +88,7 @@ foreach ($name in $fixtures.Keys) {
 
 Expected: exit `0`; LF and interior CRLF pass, duplicate and malformed fixtures fail the exact-one contract.
 
-- [ ] **Step 4: Implement the minimal normalization**
+- [x] **Step 4: Implement the minimal normalization**
 
 Add immediately before `Get-VerifiedPrecedentSeedVersion`:
 
@@ -107,7 +107,7 @@ $pattern = "(?m)^PRECEDENT_NEWPLUSPLUS_SEED_VERSION=(sha256:[0-9a-f]{64})$"
 
 Do not relax the regex, change the error text, or log parameter contents.
 
-- [ ] **Step 5: Run focused tests and PowerShell parsing**
+- [x] **Step 5: Run focused tests and PowerShell parsing**
 
 Run:
 
@@ -118,7 +118,7 @@ pwsh -NoProfile -Command '$tokens=$null; $errors=$null; [System.Management.Autom
 
 Expected: pytest PASS and PowerShell parser exit `0`.
 
-- [ ] **Step 6: Run the deployment-contract regression group**
+- [x] **Step 6: Run the deployment-contract regression group**
 
 Run:
 
@@ -128,7 +128,7 @@ python -m pytest test/test_aws_pilot_infrastructure.py test/test_deployment_read
 
 Expected: all tests PASS.
 
-- [ ] **Step 7: Commit the parser fix**
+- [x] **Step 7: Commit the parser fix**
 
 ```powershell
 git add deploy/aws-pilot/Deploy-Pilot.ps1 test/test_aws_pilot_infrastructure.py
@@ -149,7 +149,7 @@ git commit -m "fix: normalize pilot runtime line endings"
 - Consumes: the verified local runtime candidate, exact release images, and exact manifest SHA.
 - Produces: `/opt/skn27-pilot/releases/76c713ec92d6` with the exact `.initial-rag-bootstrap.staged` marker and four healthy private services.
 
-- [ ] **Step 1: Re-run local preflight without mutating the stage on parser failure**
+- [x] **Step 1: Re-run local preflight without mutating the stage on parser failure**
 
 Run the focused tests from Task 1 and confirm the worktree contains only intentional changes. Then run:
 
@@ -159,7 +159,7 @@ git status --short
 
 Expected: clean after the parser commit.
 
-- [ ] **Step 2: Stage the exact release without public cutover**
+- [x] **Step 2: Stage the exact release without public cutover**
 
 Run:
 
@@ -176,7 +176,7 @@ pwsh -File .\deploy\aws-pilot\Deploy-Pilot.ps1 `
 
 Expected: `Pilot release 76c713ec92d6 staged private services for initial RAG bootstrap; no public current release was promoted.`
 
-- [ ] **Step 3: Verify exact private-stage invariants with a redacted SSM check**
+- [x] **Step 3: Verify exact private-stage invariants with a redacted SSM check**
 
 The check must assert and output only booleans/counts for:
 
@@ -199,8 +199,8 @@ Expected: every invariant matches exactly. Stop if any value differs.
 ### Task 3: Run a credential-safe phase and batch diagnostic of the Neo4j load
 
 **Files:**
-- Generate temporarily: `%TEMP%\skn27-legal-graph-diagnostic-{GUID}.py`
-- Generate temporarily: `%TEMP%\skn27-legal-graph-runner-{GUID}.sh`
+- Generate temporarily and delete before handoff: `deploy/aws-pilot/.diagnostics/skn27-legal-graph-diagnostic.py`
+- Generate the remote runner in memory when submitting the SSM command; do not retain it in Git.
 - Use unchanged: `backend/chatbot/management/commands/load_legal_graph_seed.py`
 - Use unchanged: `etl/legal/export_neo4j.py`
 
@@ -208,7 +208,7 @@ Expected: every invariant matches exactly. Stop if any value differs.
 - Consumes: the exact S3 bundle and private stage from Task 2.
 - Produces: a whitelist-only diagnostic record containing phase, batch index, batch row count, exception class, Neo4j error/status code, and redacted message.
 
-- [ ] **Step 1: Generate the diagnostic Python wrapper locally**
+- [x] **Step 1: Generate the diagnostic Python wrapper locally**
 
 The wrapper must import the real bundle/seed and Neo4j functions, classify queries without printing rows, and replace `run_batches` only inside the diagnostic process:
 
@@ -240,7 +240,7 @@ def diagnostic_run_batches(session, query, rows, batch_size):
 
 `emit_failure` must whitelist `type(exc).__name__`, `exc.code`, and `exc.gql_status`. Its message sanitizer must replace the actual Neo4j URI, user, password, and any URI/userinfo pattern before truncating to 500 characters. It must never serialize `rows`, the runtime environment, or source text.
 
-- [ ] **Step 2: Wrap non-batch phases explicitly**
+- [x] **Step 2: Wrap non-batch phases explicitly**
 
 Use the real driver and emit start/pass/failure for these exact boundaries:
 
@@ -258,7 +258,7 @@ metadata
 
 Call the real `load_and_validate_rag_seed_manifest`, `build_law_graph_seed`, `create_constraints`, `_clear_legal_graph`, `import_law_graph_seed`, `import_hint_terms`, and `_write_dataset_metadata`. Do not call `execute_legal_graph_seed_load`, because its catch-all handler deletes the original exception.
 
-- [ ] **Step 3: Validate the wrapper offline before upload**
+- [x] **Step 3: Validate the wrapper offline before upload**
 
 Run:
 
@@ -274,7 +274,7 @@ rg -n "print\(.*password|os\.environ|rows=|chunk_text|provision_text|normalized_
 
 Expected: compilation succeeds; the scan shows no output statement for secrets or payloads. `rows=` may appear only in the real `session.run` call, never in diagnostic serialization.
 
-- [ ] **Step 4: Download and verify the exact bundle on the private host**
+- [x] **Step 4: Download and verify the exact bundle on the private host**
 
 The runner must:
 
@@ -288,7 +288,7 @@ The runner must:
 
 Do not create `.production-rag-seed.complete`, evidence, or a descriptor.
 
-- [ ] **Step 5: Execute the diagnostic once and preserve the stage**
+- [x] **Step 5: Execute the diagnostic once and preserve the stage**
 
 Run the wrapper with the exact dataset version:
 
@@ -300,7 +300,11 @@ Use batch size `500`, matching the production loader. Do not install an error tr
 
 Expected: either all phases pass or one exact failure record identifies the first failing phase and batch with a Neo4j error/status code.
 
-- [ ] **Step 6: Collect bounded server evidence if and only if the diagnostic fails**
+- [x] **Step 6: Collect bounded server evidence if and only if the diagnostic fails**
+
+No server failure evidence was collected because the isolated diagnostic completed with
+response code `0`, zero failure events, and zero stderr bytes. The private stage was
+preserved for the next approved decision.
 
 Collect and redact:
 
@@ -311,7 +315,7 @@ docker compose ... logs --tail 200 law-neo4j
 
 Also read `/logs/neo4j.log` and `/logs/debug.log` from the preserved volume with a maximum of 200 trailing lines. Replace the actual Neo4j password, runtime user, URIs with userinfo, and authorization headers before output. Do not delete the container, release directory, or volumes.
 
-- [ ] **Step 7: Record the confirmed root-cause evidence**
+- [x] **Step 7: Record the confirmed root-cause evidence**
 
 Update the master checklist with only:
 
@@ -336,7 +340,7 @@ Do not implement the Neo4j correction in this task. The failure category determi
 - Consumes: Task 1 test evidence and Task 3 diagnostic result.
 - Produces: an evidence-backed root-cause handoff and one bounded next decision.
 
-- [ ] **Step 1: Run final local verification for committed code**
+- [x] **Step 1: Run final local verification for committed code**
 
 ```powershell
 python -m pytest test/test_aws_pilot_infrastructure.py test/test_deployment_readiness_artifacts.py test/test_codebuild_pilot_contract.py -q
@@ -346,7 +350,7 @@ git status --short
 
 Expected: all tests pass, no whitespace errors, and only the intentional checklist update remains uncommitted.
 
-- [ ] **Step 2: Commit the diagnostic record separately**
+- [x] **Step 2: Commit the diagnostic record separately**
 
 ```powershell
 git add docs/tech-validation-reports/2026-07-31-pilot-hotfix-master-checklist.md
@@ -354,7 +358,7 @@ git diff --cached --check
 git commit -m "docs: record legal graph load root cause"
 ```
 
-- [ ] **Step 3: Stop at the next production decision**
+- [x] **Step 3: Stop at the next production decision**
 
 Report:
 
