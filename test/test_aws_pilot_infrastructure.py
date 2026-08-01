@@ -596,6 +596,20 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
     assert "chmod 0555" in deploy
     assert "chmod 0444" in deploy
 
+    runtime_version = deploy.index("PRECEDENT_NEWPLUSPLUS_SEED_VERSION")
+    seed_verify = deploy.index("verify_precedent_newplusplus_seed", runtime_version)
+    readiness = deploy.index("verify_pgvector_rag_readiness", seed_verify)
+    evidence_move = deploy.index("mv -f `$EVIDENCE_TMP `$EVIDENCE_FILE", readiness)
+    marker_move = deploy.index(
+        "mv -f `$RELEASE_STATE_FILE.tmp `$RELEASE_STATE_FILE", readiness
+    )
+    descriptor_move = deploy.index("mv -f `$SEED_SOURCE_TMP `$SEED_SOURCE_FILE", readiness)
+    assert runtime_version < seed_verify < readiness
+    assert readiness < evidence_move < marker_move < descriptor_move
+    assert '--expected-seed-version `"`$PRECEDENT_NEWPLUSPLUS_SEED_VERSION`"' in deploy
+    assert "^sha256:[0-9a-f]{64}$" in deploy
+    assert "PRECEDENT_SEED_LINES" in deploy
+
 
 def test_database_maintenance_applies_review_case_schema_before_app_grants() -> None:
     maintenance = _read_deploy("Maintain-PilotDatabase.ps1")

@@ -561,6 +561,7 @@ git commit -m "fix: provision precedent seed with rollback evidence"
 ### Task 6: Seed and App-Release Fail-Closed Gates
 
 **Files:**
+- Modify: `.gitattributes`
 - Modify: `deploy/aws-pilot/Load-Rag-Seed-Pilot.ps1`
 - Modify: `deploy/aws-pilot/Release-PilotApp-FromPipeline.sh`
 - Modify: `test/test_aws_pilot_infrastructure.py`
@@ -607,7 +608,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 6**
 
 ```powershell
-git add deploy/aws-pilot/Load-Rag-Seed-Pilot.ps1 deploy/aws-pilot/Release-PilotApp-FromPipeline.sh test/test_aws_pilot_infrastructure.py test/test_codebuild_pilot_contract.py
+git add .gitattributes deploy/aws-pilot/Load-Rag-Seed-Pilot.ps1 deploy/aws-pilot/Release-PilotApp-FromPipeline.sh test/test_aws_pilot_infrastructure.py test/test_codebuild_pilot_contract.py docs/superpowers/plans/2026-08-01-precedent-newplusplus-pilot-seed-integrity.md
 git commit -m "fix: gate releases on active precedent seed"
 ```
 
