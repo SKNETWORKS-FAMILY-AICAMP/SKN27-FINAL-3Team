@@ -704,6 +704,15 @@ def test_precedent_seed_rollback_is_explicit_verified_and_fail_closed() -> None:
         "verify_precedent_newplusplus_seed",
         "cleanup_db_secrets",
         "trap cleanup_db_secrets EXIT",
+        "precedent-seed-rollback.state",
+        "prepared",
+        "db_swapped",
+        "ssm_synced",
+        "verified",
+        "compensated",
+        "recovery_required",
+        "compensate_precedent_seed_rollback",
+        "trap compensate_precedent_seed_rollback ERR",
     ):
         assert token in rollback
 
@@ -717,6 +726,48 @@ def test_precedent_seed_rollback_is_explicit_verified_and_fail_closed() -> None:
     assert "ln -sfn" not in rollback
     assert "docker compose" in rollback  # maintenance fence only
     assert " up -d" not in rollback
+
+    compensation = rollback.index("compensate_precedent_seed_rollback")
+    compensation_rollback = rollback.index(
+        "rollback_precedent_newplusplus_seed",
+        compensation,
+    )
+    compensation_ssm = rollback.index("aws ssm put-parameter", compensation)
+    compensation_readback = rollback.index("aws ssm get-parameter", compensation)
+    compensation_verify = rollback.index(
+        "verify_precedent_newplusplus_seed",
+        compensation,
+    )
+    assert (
+        compensation
+        < compensation_rollback
+        < compensation_ssm
+        < compensation_readback
+        < compensation_verify
+    )
+
+
+def test_precedent_rollback_only_releases_maintenance_after_verified_state() -> None:
+    rollback = _read_deploy("Rollback-PilotPrecedentSeed.ps1")
+
+    assert "$databaseMaintenanceCommandSucceeded = $false" in rollback
+    assert "$databaseMaintenanceSafeToRelease = $false" in rollback
+    terminal = rollback.index(
+        "$script:databaseMaintenanceTerminalConfirmed = $true"
+    )
+    status_gate = rollback.index('$result.Status -eq "Success"', terminal)
+    success = rollback.index(
+        "$script:databaseMaintenanceCommandSucceeded = $true",
+        status_gate,
+    )
+    assert terminal < status_gate < success
+
+    assert "Get verified precedent rollback journal state" in rollback
+    assert "precedent-seed-rollback.state" in rollback
+    assert "compensated" in rollback
+    assert "recovery_required" in rollback
+    assert "if ($databaseMaintenanceSafeToRelease)" in rollback
+    assert "maintenance profile and marker remain active" in rollback
 
 
 def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() -> None:
