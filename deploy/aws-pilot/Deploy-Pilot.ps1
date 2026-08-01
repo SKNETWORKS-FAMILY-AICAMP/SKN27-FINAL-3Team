@@ -102,6 +102,27 @@ function Set-EnvValue([string]$Content, [string]$Name, [string]$Value) {
     return $Content.TrimEnd() + "`n" + $line + "`n"
 }
 
+function Get-VerifiedPrecedentSeedVersion(
+    [string]$Region,
+    [string]$ParameterName
+) {
+    $parameterValue = ((& aws ssm get-parameter `
+        --region $Region `
+        --name $ParameterName `
+        --with-decryption `
+        --query Parameter.Value `
+        --output text `
+        --no-cli-pager 2>$null) | Out-String).TrimEnd("`r", "`n")
+    Assert-LastExitCode "Read promoted precedent seed version"
+
+    $pattern = "(?m)^PRECEDENT_NEWPLUSPLUS_SEED_VERSION=(sha256:[0-9a-f]{64})$"
+    $matches = [regex]::Matches($parameterValue, $pattern)
+    if ($matches.Count -ne 1) {
+        throw "Runtime SSM parameter must contain exactly one verified precedent seed version. Run Maintain-PilotDatabase.ps1 first."
+    }
+    return $matches[0].Groups[1].Value
+}
+
 function Get-SsmCommandResult(
     [string]$Region,
     [string]$CommandId,
@@ -351,6 +372,8 @@ if (-not $isStageMode) {
     }
 }
 
+$parameterName = Get-TerraformValue $outputs "runtime_env_parameter_name"
+$precedentSeedVersion = Get-VerifiedPrecedentSeedVersion $region $parameterName
 $appDatabaseSecretArn = Get-TerraformValue $outputs "app_database_credential_arn"
 $appDatabaseCredentialText = (& aws secretsmanager get-secret-value `
     --region $region `
@@ -379,6 +402,7 @@ $generatedValues = [ordered]@{
     RELEASE_TAG                     = $ReleaseTag
     OPERATIONAL_LOG_GROUP           = $operationalLogGroup
     LEGAL_RAG_SEED_MANIFEST_SHA256  = $ExpectedRagSeedManifestSha256
+    PRECEDENT_NEWPLUSPLUS_SEED_VERSION = $precedentSeedVersion
 }
 foreach ($entry in $generatedValues.GetEnumerator()) {
     $runtimeEnv = Set-EnvValue $runtimeEnv $entry.Key $entry.Value
@@ -413,6 +437,7 @@ $requiredRuntimeValues = @(
     "NEO4J_DATABASE",
     "LAW_GRAPH_REQUIRED",
     "LEGAL_RAG_SEED_MANIFEST_SHA256",
+    "PRECEDENT_NEWPLUSPLUS_SEED_VERSION",
     "OPERATIONAL_LOG_GROUP"
 )
 foreach ($name in $requiredRuntimeValues) {
@@ -438,7 +463,6 @@ if ($runtimeBytes -gt 4096) {
     throw "Runtime env is $runtimeBytes bytes; an SSM Standard parameter is limited to 4096 bytes."
 }
 
-$parameterName = Get-TerraformValue $outputs "runtime_env_parameter_name"
 $parameterRequest = Join-Path ([IO.Path]::GetTempPath()) "skn27-ssm-$([guid]::NewGuid().ToString('N')).json"
 try {
     @{

@@ -614,6 +614,97 @@ def test_database_maintenance_applies_review_case_schema_before_app_grants() -> 
     assert schema_position < grant_position
 
 
+def test_database_maintenance_promotes_precedent_seed_before_ssm_evidence() -> None:
+    runtime_env = _read_deploy("runtime.env.example")
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+    iam = (TERRAFORM_DIR / "iam.tf").read_text(encoding="utf-8")
+
+    assert (
+        "PRECEDENT_NEWPLUSPLUS_SEED_VERSION="
+        "INJECTED_BY_DATABASE_MAINTENANCE"
+    ) in runtime_env
+
+    schema = maintenance.index("precedent_db_loading/schema.sql")
+    stage = maintenance.index("stage_precedent_newplusplus_seed", schema)
+    promote = maintenance.index("promote_precedent_newplusplus_seed", stage)
+    ssm_update = maintenance.index("aws ssm put-parameter", promote)
+    read_back = maintenance.index("aws ssm get-parameter", ssm_update)
+    master_verify = maintenance.index("verify_precedent_newplusplus_seed", promote)
+    app_verify = maintenance.index("verify_precedent_newplusplus_seed", master_verify + 1)
+    assert schema < stage < promote < master_verify < ssm_update < read_back < app_verify
+
+    grant_usage = "GRANT USAGE ON SCHEMA precedent_newplusplus"
+    grant_select = (
+        "GRANT SELECT ON precedent_newplusplus.blocks, "
+        "precedent_newplusplus.seed_releases, precedent_newplusplus.active_seed"
+    )
+    assert grant_usage in maintenance
+    assert grant_select in maintenance
+    grant_segment = maintenance[
+        maintenance.index(grant_usage) : app_verify
+    ].upper()
+    for privilege in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "CREATE"):
+        assert f"GRANT {privilege}" not in grant_segment
+        assert f", {privilege}" not in grant_segment
+    assert "BLOCK_VERSIONS" not in grant_segment
+
+    assert "Get-VerifiedPrecedentSeedVersion" in deploy
+    assert "PRECEDENT_NEWPLUSPLUS_SEED_VERSION" in deploy
+    helper = deploy.index("function Get-VerifiedPrecedentSeedVersion")
+    generated = deploy.index("$generatedValues =", helper)
+    unresolved = deploy.index('if ($runtimeEnv -match "(?m)=(REPLACE_|INJECTED_)")')
+    assert helper < generated < unresolved
+    assert "--with-decryption" in deploy[helper:generated]
+
+    policy_start = iam.index('sid    = "SynchronizeRuntimeEnvironmentForMigration"')
+    policy_end = iam.index("  }", policy_start)
+    policy = iam[policy_start:policy_end]
+    assert '"ssm:GetParameter"' in policy
+    assert '"ssm:PutParameter"' in policy
+    assert "parameter${var.runtime_env_parameter_name}" in policy
+    assert iam.count('"ssm:PutParameter"') == 1
+
+
+def test_precedent_seed_rollback_is_explicit_verified_and_fail_closed() -> None:
+    rollback = _read_deploy("Rollback-PilotPrecedentSeed.ps1")
+
+    for token in (
+        "[Parameter(Mandatory = $true)]",
+        "$ExpectedActiveSeedVersion",
+        "database_runtime_instance_profile_name",
+        "database_maintenance_instance_profile_name",
+        "database_maintenance_role_name",
+        "/var/lock/skn27-pilot-maintenance.lock",
+        "database-maintenance.active",
+        "Maintenance role identity check failed.",
+        "rollback_precedent_newplusplus_seed",
+        "--expected-active-seed-version",
+        "PREVIOUS_SEED_UNAVAILABLE",
+        "PRECEDENT_NEWPLUSPLUS_SEED_VERSION",
+        "aws ssm put-parameter",
+        "--type SecureString",
+        "--overwrite",
+        "aws ssm get-parameter",
+        "--with-decryption",
+        "verify_precedent_newplusplus_seed",
+        "cleanup_db_secrets",
+        "trap cleanup_db_secrets EXIT",
+    ):
+        assert token in rollback
+
+    rollback_command = rollback.index("rollback_precedent_newplusplus_seed")
+    ssm_update = rollback.index("aws ssm put-parameter", rollback_command)
+    read_back = rollback.index("aws ssm get-parameter", ssm_update)
+    verify = rollback.index("verify_precedent_newplusplus_seed", read_back)
+    assert rollback_command < ssm_update < read_back < verify
+    assert "Rollback-Pilot.ps1" not in rollback
+    assert "/opt/skn27-pilot/releases/$ReleaseTag" not in rollback
+    assert "ln -sfn" not in rollback
+    assert "docker compose" in rollback  # maintenance fence only
+    assert " up -d" not in rollback
+
+
 def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() -> None:
     loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
 
@@ -1303,6 +1394,7 @@ def test_all_runtime_mutations_share_one_bounded_maintenance_lock() -> None:
             "Load-Rag-Seed-Pilot.ps1",
             "Maintain-PilotDatabase.ps1",
             "Rollback-Pilot.ps1",
+            "Rollback-PilotPrecedentSeed.ps1",
             "Remove-Pilot.ps1",
         )
     }
@@ -1643,6 +1735,7 @@ def test_all_ssm_waiters_use_terminal_allowlists_and_wait_through_cancelling() -
         "Load-Rag-Seed-Pilot.ps1",
         "Maintain-PilotDatabase.ps1",
         "Rollback-Pilot.ps1",
+        "Rollback-PilotPrecedentSeed.ps1",
         "Remove-Pilot.ps1",
     ):
         script = _read_deploy(name)
@@ -1830,6 +1923,7 @@ def test_ssm_timeout_minimum_covers_slow_initial_service_start() -> None:
         "Load-Rag-Seed-Pilot.ps1",
         "Maintain-PilotDatabase.ps1",
         "Rollback-Pilot.ps1",
+        "Rollback-PilotPrecedentSeed.ps1",
     ):
         script = _read_deploy(name)
         assert re.search(r"\[ValidateRange\(600,\s*\d+\)\]", script), name

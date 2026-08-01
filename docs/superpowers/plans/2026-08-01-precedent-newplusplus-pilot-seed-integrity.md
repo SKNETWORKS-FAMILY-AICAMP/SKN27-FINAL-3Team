@@ -471,6 +471,7 @@ git commit -m "feat: add precedent seed lifecycle commands"
 - Modify: `deploy/aws-pilot/Maintain-PilotDatabase.ps1`
 - Modify: `deploy/aws-pilot/Deploy-Pilot.ps1`
 - Create: `deploy/aws-pilot/Rollback-PilotPrecedentSeed.ps1`
+- Modify: `infra/terraform-pilot/iam.tf`
 - Modify: `test/test_aws_pilot_infrastructure.py`
 - Modify: `test/test_deployment_readiness_artifacts.py`
 
@@ -524,6 +525,10 @@ Within the existing maintenance SSM command and master environment:
    `active_seed`; do not expose inactive `block_versions` directly;
 9. run verify with app credentials.
 
+The transient database-maintenance role must receive `ssm:PutParameter` only for the
+existing `runtime_env_parameter_name` ARN. Do not add this mutation permission to the
+normal runtime or app-release roles.
+
 Do not place passwords or full runtime env values in stdout/stderr.
 
 Implement `Get-VerifiedPrecedentSeedVersion` in `Deploy-Pilot.ps1`: after Terraform
@@ -549,7 +554,7 @@ Expected: PASS and parser error list empty.
 - [ ] **Step 7: Commit Task 5**
 
 ```powershell
-git add deploy/aws-pilot/runtime.env.example deploy/aws-pilot/Maintain-PilotDatabase.ps1 deploy/aws-pilot/Deploy-Pilot.ps1 deploy/aws-pilot/Rollback-PilotPrecedentSeed.ps1 test/test_aws_pilot_infrastructure.py test/test_deployment_readiness_artifacts.py
+git add deploy/aws-pilot/runtime.env.example deploy/aws-pilot/Maintain-PilotDatabase.ps1 deploy/aws-pilot/Deploy-Pilot.ps1 deploy/aws-pilot/Rollback-PilotPrecedentSeed.ps1 infra/terraform-pilot/iam.tf test/test_aws_pilot_infrastructure.py test/test_deployment_readiness_artifacts.py docs/superpowers/plans/2026-08-01-precedent-newplusplus-pilot-seed-integrity.md
 git commit -m "fix: provision precedent seed with rollback evidence"
 ```
 

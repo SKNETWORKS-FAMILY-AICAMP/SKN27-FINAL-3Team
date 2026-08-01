@@ -28,6 +28,16 @@ def test_required_operations_documents_exist():
     assert missing == []
 
 
+def test_precedent_seed_rollback_is_a_separate_deployment_artifact():
+    rollback = ROOT / "deploy" / "aws-pilot" / "Rollback-PilotPrecedentSeed.ps1"
+
+    assert rollback.is_file()
+    content = read_text(rollback)
+    assert "rollback_precedent_newplusplus_seed" in content
+    assert "PRECEDENT_NEWPLUSPLUS_SEED_VERSION" in content
+    assert "Rollback-Pilot.ps1" not in content
+
+
 def test_deployment_readiness_review_has_required_sections():
     content = read_text(ROOT / "docs" / "deployment-readiness-review-2026-06-22.md")
     required_sections = [
