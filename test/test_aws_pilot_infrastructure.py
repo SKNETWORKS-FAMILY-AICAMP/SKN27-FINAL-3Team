@@ -588,6 +588,7 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
     )
     positions = [deploy.index(step) for step in expected_steps]
     assert positions == sorted(positions)
+    assert "--replace-legal --skip-legal-schema" in deploy
     assert "--replace-legal --recreate-es" not in deploy
     assert "verify_pgvector_rag_readiness" in deploy
     assert "--region '$region'" in deploy[deploy.index("aws s3 cp '$RagSeedS3Uri'") :]
@@ -632,7 +633,7 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
         "run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro "
         "rag-loader python backend/manage.py load_production_rag_seed "
         "--manifest /run/production-rag-seed/$RagSeedManifestRelativePath "
-        "--skip-legal-schema --format json"
+        "--replace-legal --skip-legal-schema --format json"
     )
     completion = (
         "printf '%s\\n' '$RagSeedManifestSha256' > "

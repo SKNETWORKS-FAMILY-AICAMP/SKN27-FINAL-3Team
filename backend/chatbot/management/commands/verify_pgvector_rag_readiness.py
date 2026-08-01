@@ -10,14 +10,14 @@ from django.db import connection
 
 
 def verify_pgvector_rag_readiness() -> dict[str, Any]:
-    """Return a credential-safe readiness report for required and optional corpora."""
+    """Return a credential-safe readiness report for every required corpus."""
 
     domains = {
         "legal": _safe_verify(_verify_legal),
         "review_case": _safe_verify(_verify_review_case),
         "fault_ratio_precedent": _safe_verify(_verify_fault_ratio_precedent),
     }
-    required_domains = ("legal", "review_case")
+    required_domains = ("legal", "review_case", "fault_ratio_precedent")
     for domain, payload in domains.items():
         payload["required"] = domain in required_domains
 
@@ -68,8 +68,8 @@ def _shared_embedding_space(
 
 class Command(BaseCommand):
     help = (
-        "Verify required legal/review-case pgvector stores and report the optional "
-        "fault-ratio store without performing writes."
+        "Verify required legal, review-case, and fault-ratio pgvector stores "
+        "without performing writes."
     )
 
     def add_arguments(self, parser):
@@ -167,42 +167,26 @@ def _verify_review_case() -> dict[str, Any]:
 
 
 def _verify_fault_ratio_precedent() -> dict[str, Any]:
-    from etl.fault_cases.src.traffic_precedents.precedent_db_loading.db import get_connection
-    from etl.fault_cases.src.traffic_precedents.precedent_search.pgvector.create_indexes import (
-        count_embedding_rows,
+    from etl.fault_cases.src.traffic_precedents.precedent_search.newplusplus.config import (
+        ServiceSettings,
     )
-    from etl.fault_cases.src.traffic_precedents.precedent_search.search_config import (
-        DATASET_SEARCH_CONFIGS,
-        SEARCH_SETTINGS,
+    from etl.fault_cases.src.traffic_precedents.precedent_search.newplusplus.db import (
+        database_readiness,
     )
 
-    config = DATASET_SEARCH_CONFIGS["fault_ratio"]
-    embedding_count = count_embedding_rows(
-        config["db_name"],
-        config["embedding_table"],
-        SEARCH_SETTINGS,
-    )
-    with get_connection(config["db_name"]) as db_connection:
-        with db_connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM pg_indexes
-                    WHERE schemaname = 'public' AND indexname = %s
-                )
-                """,
-                (config["index_name"],),
-            )
-            hnsw_index = bool(cursor.fetchone()[0])
+    settings = ServiceSettings()
+    readiness = database_readiness()
+    ready = bool(readiness.get("ready"))
     return {
-        "status": "ready" if embedding_count > 0 and hnsw_index else "unavailable",
-        "error_code": "" if embedding_count > 0 and hnsw_index else "fault_ratio_pgvector_not_ready",
-        "embedding_count": embedding_count,
-        "hnsw_index": hnsw_index,
+        "status": "ready" if ready else "unavailable",
+        "error_code": "" if ready else "fault_ratio_pgvector_not_ready",
+        "embedding_count": int(readiness.get("blocks") or 0),
+        "case_count": int(readiness.get("cases") or 0),
         "embedding_space": {
-            "model": SEARCH_SETTINGS.embedding_model,
-            "dimensions": SEARCH_SETTINGS.embedding_dim,
-            "version": SEARCH_SETTINGS.embedding_version,
+            "provider": "huggingface",
+            "model": settings.qwen_model_id,
+            "dimensions": settings.embedding_dimension,
+            "revision": settings.qwen_revision,
         },
     }
 

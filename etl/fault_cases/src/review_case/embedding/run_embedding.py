@@ -283,8 +283,14 @@ def create_embeddings(
     job_id = create_embedding_job(settings, target_count=len(pending_rows), dry_run=dry_run)
     report["embedding_job_id"] = job_id
 
-    if dry_run or not pending_rows:
+    if dry_run:
         report["embedding_count_after"] = before_embedding_count
+        write_report(report)
+        return report
+
+    if not pending_rows:
+        report["embedding_count_after"] = before_embedding_count
+        finish_embedding_job(job_id, 0, 0, 0, "success")
         write_report(report)
         return report
 
