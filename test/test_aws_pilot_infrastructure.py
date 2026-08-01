@@ -1430,6 +1430,22 @@ def test_database_maintenance_writes_env_files_with_real_newlines() -> None:
     assert r'`"\\n`".join(out)' not in maintenance
 
 
+def test_database_maintenance_streams_precedent_schema_without_secret_work_mount() -> None:
+    maintenance = _read_deploy("Maintain-PilotDatabase.ps1")
+    schema_commands = [
+        line
+        for line in maintenance.splitlines()
+        if "precedent_db_loading/schema.sql" in line
+    ]
+
+    assert len(schema_commands) == 1
+    schema_command = schema_commands[0]
+    assert " cat /app/etl/fault_cases/" in schema_command
+    assert "schema.sql | docker run --rm -i " in schema_command
+    assert " psql -v ON_ERROR_STOP=1" in schema_command
+    assert "`$WORK:/work" not in schema_command
+
+
 def test_native_s3_lockfile_requires_terraform_1_11_or_newer() -> None:
     versions = (TERRAFORM_DIR / "versions.tf").read_text(encoding="utf-8")
     runbook = _read_deploy("README.ko.md")
