@@ -82,9 +82,12 @@ python -m etl.legal.validate_run_summary `
 
 ## 현재 운영 복구와 두 단계 인수 게이트
 
-현재 운영 SHA `818199aee975`에는 새 app release가 요구하는 seed source
-descriptor가 없다. 따라서 새 앱을 먼저 배포하지 않는다. 다음 순서를
-고정하며 한 단계가 실패하면 다음 단계로 진행하지 않는다.
+2026-08-01 incident 당시 운영 SHA `818199aee975`에는 새 app release가 요구하는
+seed source descriptor가 없었다. invalid candidate marker/descriptor 격리와 기존
+legal 97,394건 exact seed 복구는 완료됐지만, 새 app release는 NEW++ active seed와
+SSM version까지 일치해야 한다. 따라서 database maintenance보다 새 앱을 먼저
+배포하지 않는다. 다음 순서를 고정하며 한 단계가 실패하면 다음 단계로 진행하지
+않는다.
 
 1. 이 구현을 `dev`에 병합하고 로컬 회귀 결과와 대상 SHA를 고정한다.
 2. 승인된 S3 URI, manifest 상대 경로, manifest SHA-256을 사용해 현재 운영
@@ -104,12 +107,19 @@ descriptor가 없다. 따라서 새 앱을 먼저 배포하지 않는다. 다음
      -MaxWaitSeconds 1200
    ```
 
-4. 위 복구와 600초 관찰이 모두 성공한 뒤에만 app-release pipeline 승인을
-   수행한다. 후보 배포는 release-bound evidence를 검증·원자 승격하고
-   transaction gate를 통과해야 한다.
-5. 후보 SHA에도 `Confirm-PilotOperationalAcceptance.ps1`을 실행해 다시
+4. 고정 bootstrap
+   `sha256:af0a4a40f983dcdaeaaeb57e54962a514338b8644c33a6a807f1e6214878b2db`를
+   `Maintain-PilotDatabase.ps1`로 stage·promote한다. 이 경로는 provider를
+   호출하지 않으며 `3,339 blocks / 825 cases / 2,560 dimensions`, app read-only
+   접근과 SSM `PRECEDENT_NEWPLUSPLUS_SEED_VERSION` 일치를 검증한다.
+5. 위 복구와 600초 관찰, NEW++ maintenance가 모두 성공한 뒤에만
+   app-release pipeline 승인을 수행한다. target backend image는 container 교체 전에
+   `verify_precedent_newplusplus_seed`와 `verify_pgvector_rag_readiness`를 통과해야
+   하며, 후보 배포는 release-bound evidence를 검증·원자 승격하고 transaction
+   gate를 통과해야 한다.
+6. 후보 SHA에도 `Confirm-PilotOperationalAcceptance.ps1`을 실행해 다시
    600초 연속 `pass`를 확인한다.
-6. 그 다음에만 G8 운영 smoke와 배포 후 `13개 E2E`를 시작한다.
+7. 그 다음에만 G8 운영 smoke와 배포 후 `13개 E2E`를 시작한다.
 
 복구와 acceptance 명령에는 유료 공급자 동의 switch나 seed 적재 명령이
 없다. 승인된 immutable seed의 URI·경로·SHA 검증이 실패하면 자동 적재로
@@ -121,6 +131,21 @@ release의 evidence를 서비스 변경 전에 검증하고, shared evidence를 
 전환한 뒤 transaction gate를 통과한 경우에만 `current` 링크를 바꾼다.
 실패 시 명령 시작 전 release, shared evidence의 존재/내용, 심볼릭 링크를
 복원한다. DB migration과 seed 데이터 자체는 자동으로 되돌리지 않는다.
+
+NEW++ seed pointer만 되돌릴 때는 `Rollback-PilotPrecedentSeed.ps1`에 현재 active
+seed version과 해당 command를 포함한 immutable release tag를 명시한다. 실제
+active가 다르거나 verified previous가 없으면 `ACTIVE_SEED_CHANGED` 또는
+`PREVIOUS_SEED_UNAVAILABLE`로 중단한다. 성공 시 DB pointer, SSM expected version,
+master/app read-only verification까지 일치시킨다. 이 명령은 app image나 legal
+97,394 seed를 변경하지 않는다.
+
+app 검증과 readiness는 `blocks` active view, `active_seed`, `seed_releases`만
+조회하며 inactive `block_versions` 권한을 요구하지 않는다. rollback journal이
+`verified`면 정상 완료다. DB 교환 뒤 오류가 발생했지만 original DB pointer와 SSM을
+되돌려 재검증한 `compensated`는 marker/profile을 안전하게 정리한 뒤에도 명령을
+실패로 보고하므로 원인을 조사해야 한다. `recovery_required`, 중간 상태, journal
+probe 실패, timeout·cancel 미확정이면 database-maintenance profile과 marker를
+유지하며 운영 traffic을 재개하지 않는다.
 
 ## CloudWatch와 SNS
 

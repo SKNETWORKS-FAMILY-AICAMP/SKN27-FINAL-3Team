@@ -135,22 +135,6 @@ if (-not $SkipBuild) {
     }
 }
 
-$parameterRequest = Join-Path ([IO.Path]::GetTempPath()) "skn27-db-runtime-$([guid]::NewGuid().ToString('N')).json"
-try {
-    @{
-        Name      = $parameterName
-        Type      = "SecureString"
-        Tier      = "Standard"
-        Value     = $runtimeEnv
-        Overwrite = $true
-    } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $parameterRequest -Encoding utf8NoBOM
-    & aws ssm put-parameter --region $region --cli-input-json "file://$parameterRequest" --no-cli-pager | Out-Null
-    Assert-LastExitCode "Store migration runtime environment"
-}
-finally {
-    Remove-Item -LiteralPath $parameterRequest -Force -ErrorAction SilentlyContinue
-}
-
 $associationId = (& aws ec2 describe-iam-instance-profile-associations --region $region --filters "Name=instance-id,Values=$instanceId" --query "IamInstanceProfileAssociations[0].AssociationId" --output text --no-cli-pager).Trim()
 Assert-LastExitCode "Discover runtime instance profile association"
 
@@ -194,6 +178,7 @@ try {
         "if ! aws secretsmanager get-secret-value --region '$region' --secret-id '$appSecretArn' --query SecretString --output text > `$WORK/app.json 2>/dev/null; then export APP_USERNAME='$appUsername' DB_HOST='$databaseHost' DB_PORT='$databasePort' DB_NAME='$databaseName' APP_JSON=`$WORK/app.json APP_PASSWORD=`$(openssl rand -base64 48 | tr -d '\n'); python3 -c 'import json,os; json.dump({`"username`":os.environ[`"APP_USERNAME`"],`"password`":os.environ[`"APP_PASSWORD`"],`"host`":os.environ[`"DB_HOST`"],`"port`":int(os.environ[`"DB_PORT`"]),`"dbname`":os.environ[`"DB_NAME`"]},open(os.environ[`"APP_JSON`"],`"w`"))'; aws secretsmanager put-secret-value --region '$region' --secret-id '$appSecretArn' --secret-string file://`$WORK/app.json >/dev/null; unset APP_PASSWORD; fi",
         "aws ssm get-parameter --region '$region' --name '$parameterName' --with-decryption --query Parameter.Value --output text > `$WORK/base.env",
         "python3 -c 'import json,sys; b=open(sys.argv[1]).read().splitlines(); m=json.load(open(sys.argv[2])); u=m[`"username`"]; p=m[`"password`"]; out=[x for x in b if not x.startswith(`"POSTGRES_`") and not x.startswith(`"DJANGO_DATABASE_ENGINE=`") and not x.startswith(`"PGSSLMODE=`")]; out += [`"DJANGO_DATABASE_ENGINE=postgres`",`"PGSSLMODE=require`",f`"POSTGRES_HOST={sys.argv[4]}`",f`"POSTGRES_PORT={sys.argv[5]}`",f`"POSTGRES_DB={sys.argv[6]}`",f`"POSTGRES_USER={u}`",f`"POSTGRES_PASSWORD={p}`"]; open(sys.argv[3],`"w`").write(`"\n`".join(out)+`"\n`")' `$WORK/base.env `$WORK/master.json `$WORK/master.env '$databaseHost' '$databasePort' '$databaseName'",
+        "python3 -c 'import json,sys; b=open(sys.argv[1]).read().splitlines(); a=json.load(open(sys.argv[2])); u=a[`"username`"]; p=a[`"password`"]; out=[x for x in b if not x.startswith(`"POSTGRES_`") and not x.startswith(`"DJANGO_DATABASE_ENGINE=`") and not x.startswith(`"PGSSLMODE=`")]; out += [`"DJANGO_DATABASE_ENGINE=postgres`",`"PGSSLMODE=require`",f`"POSTGRES_HOST={sys.argv[4]}`",f`"POSTGRES_PORT={sys.argv[5]}`",f`"POSTGRES_DB={sys.argv[6]}`",f`"POSTGRES_USER={u}`",f`"POSTGRES_PASSWORD={p}`"]; open(sys.argv[3],`"w`").write(`"\n`".join(out)+`"\n`")' `$WORK/base.env `$WORK/app.json `$WORK/app.env '$databaseHost' '$databasePort' '$databaseName'",
         "python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); u=m[`"username`"]; p=m[`"password`"]; out=[f`"PGHOST={sys.argv[3]}`",f`"PGPORT={sys.argv[4]}`",f`"PGDATABASE={sys.argv[5]}`",f`"PGUSER={u}`",f`"PGPASSWORD={p}`",`"PGSSLMODE=require`"] ; open(sys.argv[2],`"w`").write(`"\n`".join(out)+`"\n`")' `$WORK/master.json `$WORK/libpq.env '$databaseHost' '$databasePort' '$databaseName'",
         "python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); open(sys.argv[2],`"w`").write(a[`"password`"])' `$WORK/app.json `$WORK/app-password",
         "aws ecr get-login-password --region '$region' | docker login --username AWS --password-stdin '$registry'",
@@ -205,7 +190,23 @@ try {
         "docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python backend/manage.py shell -c `"from django.db import connection; assert connection.vendor == 'postgresql'; cursor = connection.cursor(); cursor.execute('select current_database()'); assert cursor.fetchone()[0] == '$databaseName'`"",
         "docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python backend/manage.py migrate --noinput",
         "docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python -m etl.fault_cases.src.review_case.db_loading.schema_manager --apply-schema",
+        "docker run --rm -v `"`$WORK:/work`" '${backendRepository}:${maintenanceImageTag}' sh -c 'cp /app/etl/fault_cases/src/traffic_precedents/precedent_db_loading/schema.sql /work/precedent-newplusplus-schema.sql'",
+        "docker run --rm --env-file `$WORK/libpq.env -v `"`$WORK:/work:ro`" '$postgresMaintenanceImageRef' psql -v ON_ERROR_STOP=1 -f /work/precedent-newplusplus-schema.sql",
+        "docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python backend/manage.py stage_precedent_newplusplus_seed --format json > `$WORK/precedent-stage.json",
+        "python3 -c 'import json,re,sys; v=json.load(open(sys.argv[1])).get(`"seed_version`",`"`"); assert re.fullmatch(r`"sha256:[0-9a-f]{64}`",v); open(sys.argv[2],`"w`").write(v)' `$WORK/precedent-stage.json `$WORK/precedent-seed-version",
+        "CURRENT_ACTIVE=`$(docker run --rm --env-file `$WORK/libpq.env '$postgresMaintenanceImageRef' psql -Atqc 'SELECT active_seed_version FROM precedent_newplusplus.active_seed WHERE singleton IS TRUE'); if [ -z `"`$CURRENT_ACTIVE`" ]; then CURRENT_ACTIVE=none; else printf '%s' `"`$CURRENT_ACTIVE`" | grep -Eq '^sha256:[0-9a-f]{64}$'; fi",
+        "SEED_VERSION=`$(cat `$WORK/precedent-seed-version); docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python backend/manage.py promote_precedent_newplusplus_seed --seed-version `"`$SEED_VERSION`" --expected-active-seed-version `"`$CURRENT_ACTIVE`" --format json > `$WORK/precedent-promote.json",
+        "python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r.get(`"active_seed_version`")==open(sys.argv[2]).read(); assert r.get(`"status`") in {`"promoted`",`"reused`"}' `$WORK/precedent-promote.json `$WORK/precedent-seed-version",
+        "SEED_VERSION=`$(cat `$WORK/precedent-seed-version); docker run --rm --env-file `$WORK/master.env '${backendRepository}:${maintenanceImageTag}' python backend/manage.py verify_precedent_newplusplus_seed --expected-seed-version `"`$SEED_VERSION`" --format json > `$WORK/precedent-master-verify.json",
+        "python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r.get(`"status`")==`"verified`"; assert r.get(`"seed_version`")==open(sys.argv[2]).read()' `$WORK/precedent-master-verify.json `$WORK/precedent-seed-version",
+        "python3 -c 'import sys; p=sys.argv[1]; v=open(sys.argv[2]).read(); lines=open(p).read().splitlines(); hits=[i for i,x in enumerate(lines) if x.startswith(`"PRECEDENT_NEWPLUSPLUS_SEED_VERSION=`")]; assert len(hits)<=1; line=f`"PRECEDENT_NEWPLUSPLUS_SEED_VERSION={v}`"; (lines.__setitem__(hits[0],line) if hits else lines.append(line)); open(sys.argv[3],`"w`").write(`"\n`".join(lines)+`"\n`")' `$WORK/base.env `$WORK/precedent-seed-version `$WORK/runtime-next.env",
+        "aws ssm put-parameter --region '$region' --name '$parameterName' --type SecureString --overwrite --value file://`$WORK/runtime-next.env --no-cli-pager > /dev/null",
+        "aws ssm get-parameter --region '$region' --name '$parameterName' --with-decryption --query Parameter.Value --output text > `$WORK/runtime-readback.env",
+        "python3 -c 'import re,sys; v=open(sys.argv[2]).read(); m=re.findall(r`"(?m)^PRECEDENT_NEWPLUSPLUS_SEED_VERSION=(sha256:[0-9a-f]{64})$`",open(sys.argv[1]).read()); assert m==[v]' `$WORK/runtime-readback.env `$WORK/precedent-seed-version",
         "docker run --rm --env-file `$WORK/libpq.env '$postgresMaintenanceImageRef' psql -v ON_ERROR_STOP=1 -c 'GRANT CONNECT ON DATABASE $databaseName TO $appUsername' -c 'GRANT USAGE ON SCHEMA public TO $appUsername' -c 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $appUsername' -c 'GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO $appUsername' -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $appUsername' -c 'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $appUsername'",
+        "docker run --rm --env-file `$WORK/libpq.env '$postgresMaintenanceImageRef' psql -v ON_ERROR_STOP=1 -c 'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA precedent_newplusplus FROM $appUsername' -c 'GRANT USAGE ON SCHEMA precedent_newplusplus TO $appUsername' -c 'GRANT SELECT ON precedent_newplusplus.blocks, precedent_newplusplus.seed_releases, precedent_newplusplus.active_seed TO $appUsername'",
+        "SEED_VERSION=`$(cat `$WORK/precedent-seed-version); docker run --rm --env-file `$WORK/app.env '${backendRepository}:${maintenanceImageTag}' python backend/manage.py verify_precedent_newplusplus_seed --expected-seed-version `"`$SEED_VERSION`" --format json > `$WORK/precedent-app-verify.json",
+        "python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); assert r.get(`"status`")==`"verified`"; assert r.get(`"seed_version`")==open(sys.argv[2]).read()' `$WORK/precedent-app-verify.json `$WORK/precedent-seed-version",
         "cleanup_db_secrets",
         "trap - EXIT"
     )

@@ -26,7 +26,7 @@ def test_review_case_defaults_to_the_validated_legal_embedding_space(monkeypatch
     assert settings.dim == 1024
 
 
-def test_pgvector_readiness_requires_law_and_review_case_in_one_space(monkeypatch) -> None:
+def test_pgvector_readiness_fails_closed_when_fault_ratio_is_unavailable(monkeypatch) -> None:
     assert importlib.util.find_spec(MODULE_NAME) is not None, (
         "pgvector readiness command must exist before ES readiness is removed"
     )
@@ -68,14 +68,19 @@ def test_pgvector_readiness_requires_law_and_review_case_in_one_space(monkeypatc
     result = command.verify_pgvector_rag_readiness()
 
     assert result["contract_version"] == "pgvector_rag_readiness.v1"
-    assert result["status"] == "ready"
-    assert result["required_domains"] == ["legal", "review_case"]
+    assert result["status"] == "fail"
+    assert result["error_code"] == "required_pgvector_domain_not_ready"
+    assert result["required_domains"] == [
+        "legal",
+        "review_case",
+        "fault_ratio_precedent",
+    ]
     assert result["shared_embedding_space"] == {
         "provider": "openai",
         "model": "text-embedding-3-large",
         "dimensions": 1024,
     }
-    assert result["domains"]["fault_ratio_precedent"]["required"] is False
+    assert result["domains"]["fault_ratio_precedent"]["required"] is True
 
 
 def test_pgvector_readiness_fails_when_law_and_review_case_spaces_differ(
@@ -119,6 +124,70 @@ def test_pgvector_readiness_fails_when_law_and_review_case_spaces_differ(
 
     assert result["status"] == "fail"
     assert result["error_code"] == "shared_embedding_space_mismatch"
+
+
+def test_fault_ratio_readiness_uses_current_newplusplus_store(monkeypatch) -> None:
+    command = importlib.import_module(MODULE_NAME)
+    database = importlib.import_module(
+        "etl.fault_cases.src.traffic_precedents.precedent_search.newplusplus.db"
+    )
+    active_seed_version = "sha256:" + "a" * 64
+    monkeypatch.setenv("PRECEDENT_NEWPLUSPLUS_SEED_VERSION", active_seed_version)
+    monkeypatch.setattr(
+        database,
+        "database_readiness",
+        lambda: {
+            "ready": True,
+            "active_seed_version": active_seed_version,
+            "blocks": 3339,
+            "cases": 825,
+            "vector_dims": 2560,
+        },
+    )
+
+    result = command._verify_fault_ratio_precedent()
+
+    assert result["status"] == "ready"
+    assert result["active_seed_version"] == active_seed_version
+    assert result["embedding_count"] == 3339
+    assert result["case_count"] == 825
+    assert result["embedding_space"] == {
+        "provider": "huggingface",
+        "model": "Qwen/Qwen3-Embedding-4B",
+        "dimensions": 2560,
+        "revision": "5cf2132abc99cad020ac570b19d031efec650f2b",
+    }
+
+
+def test_fault_ratio_readiness_rejects_runtime_seed_version_mismatch(
+    monkeypatch,
+) -> None:
+    command = importlib.import_module(MODULE_NAME)
+    database = importlib.import_module(
+        "etl.fault_cases.src.traffic_precedents.precedent_search.newplusplus.db"
+    )
+    actual_seed_version = "sha256:" + "a" * 64
+    monkeypatch.setenv(
+        "PRECEDENT_NEWPLUSPLUS_SEED_VERSION",
+        "sha256:" + "b" * 64,
+    )
+    monkeypatch.setattr(
+        database,
+        "database_readiness",
+        lambda: {
+            "ready": True,
+            "active_seed_version": actual_seed_version,
+            "blocks": 3339,
+            "cases": 825,
+            "vector_dims": 2560,
+        },
+    )
+
+    result = command._verify_fault_ratio_precedent()
+
+    assert result["status"] == "unavailable"
+    assert result["error_code"] == "fault_ratio_precedent_seed_version_mismatch"
+    assert result["active_seed_version"] == actual_seed_version
 
 
 def test_review_case_schema_uses_1024_dimensions() -> None:

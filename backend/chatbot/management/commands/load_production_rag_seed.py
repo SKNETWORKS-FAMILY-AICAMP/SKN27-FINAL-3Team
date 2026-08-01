@@ -33,7 +33,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--replace-legal",
             action="store_true",
-            help="Truncate legal pgvector tables before loading. Omit for an idempotent upsert.",
+            help="Delete existing legal pgvector rows before loading. Omit for an idempotent upsert.",
         )
         parser.add_argument(
             "--skip-legal-schema",
@@ -146,19 +146,33 @@ def _load_legal_pgvector(
     counts = payload.get("counts") or {}
     loaded_chunks = int(loaded.get("chunks") or 0)
     loaded_embeddings = int(loaded.get("embeddings") or 0)
+    expected_chunks = bundle.artifacts["legal_chunks"].row_count
+    expected_embeddings = bundle.artifacts["legal_embeddings"].row_count
     if (
-        loaded_chunks != bundle.artifacts["legal_chunks"].row_count
-        or loaded_embeddings != bundle.artifacts["legal_embeddings"].row_count
+        loaded_chunks != expected_chunks
+        or loaded_embeddings != expected_embeddings
     ):
         raise SeedLoadError(
             "PostgreSQL legal RAG load count did not match the verified artifact"
+        )
+    law_chunks_after = int(counts.get("law_chunks") or 0)
+    searchable_law_chunks_after = int(counts.get("searchable_law_chunks") or 0)
+    law_embeddings_after = int(counts.get("law_embeddings") or 0)
+    if (
+        law_chunks_after != expected_chunks
+        or searchable_law_chunks_after != expected_chunks
+        or law_embeddings_after != expected_embeddings
+    ):
+        raise SeedLoadError(
+            "PostgreSQL legal RAG table count did not match the verified artifact"
         )
     return {
         "target": "postgresql_pgvector",
         "loaded_chunks": loaded_chunks,
         "loaded_embeddings": loaded_embeddings,
-        "law_chunks_after": int(counts.get("law_chunks") or 0),
-        "law_embeddings_after": int(counts.get("law_embeddings") or 0),
+        "law_chunks_after": law_chunks_after,
+        "searchable_law_chunks_after": searchable_law_chunks_after,
+        "law_embeddings_after": law_embeddings_after,
     }
 
 

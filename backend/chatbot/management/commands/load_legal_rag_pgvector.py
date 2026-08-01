@@ -28,7 +28,7 @@ class Command(BaseCommand):
         parser.add_argument("--schema", default=str(DEFAULT_SCHEMA_PATH), help="Path to pgvector schema SQL.")
         parser.add_argument("--schema-only", action="store_true", help="Create schema and indexes without loading data.")
         parser.add_argument("--skip-schema", action="store_true", help="Skip DDL when schema maintenance already ran.")
-        parser.add_argument("--replace", action="store_true", help="Truncate legal RAG tables before loading JSONL data.")
+        parser.add_argument("--replace", action="store_true", help="Delete existing legal RAG rows before loading JSONL data.")
         parser.add_argument("--batch-size", type=int, default=500, help="Rows per insert batch.")
         parser.add_argument("--smoke-query", default="", help="Optional query to run through legal_rag_service after load.")
         parser.add_argument("--top-k", type=int, default=3, help="Top K for the optional smoke query.")
@@ -56,9 +56,7 @@ class Command(BaseCommand):
             if not skip_schema:
                 _execute_schema(schema_path)
             if options["replace"] and not schema_only:
-                with connection.cursor() as cursor:
-                    cursor.execute("TRUNCATE TABLE law_embeddings CASCADE;")
-                    cursor.execute("TRUNCATE TABLE law_chunks CASCADE;")
+                _delete_legal_rows()
             loaded = (
                 {"chunks": 0, "embeddings": 0}
                 if schema_only
@@ -68,8 +66,10 @@ class Command(BaseCommand):
                     batch_size=max(1, int(options["batch_size"] or 500)),
                 )
             )
+            counts = _table_counts()
+            if options["replace"] and not schema_only:
+                _validate_replacement_counts(loaded=loaded, counts=counts)
 
-        counts = _table_counts()
         smoke = None
         if str(options["smoke_query"] or "").strip():
             smoke = search_legal_rag(
@@ -97,6 +97,31 @@ def _execute_schema(schema_path: Path) -> None:
     sql = schema_path.read_text(encoding="utf-8")
     with connection.cursor() as cursor:
         cursor.execute(sql)
+
+
+def _delete_legal_rows() -> None:
+    """Replace legal rows using privileges granted to the production app role."""
+
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM law_embeddings;")
+        cursor.execute("DELETE FROM law_chunks;")
+
+
+def _validate_replacement_counts(
+    *,
+    loaded: dict[str, int],
+    counts: dict[str, int],
+) -> None:
+    expected_chunks = int(loaded.get("chunks") or 0)
+    expected_embeddings = int(loaded.get("embeddings") or 0)
+    if (
+        int(counts.get("law_chunks") or 0) != expected_chunks
+        or int(counts.get("searchable_law_chunks") or 0) != expected_chunks
+        or int(counts.get("law_embeddings") or 0) != expected_embeddings
+    ):
+        raise CommandError(
+            "Legal RAG exact replacement table counts did not match loaded artifacts"
+        )
 
 
 def _load_jsonl_artifacts(*, chunks_path: Path, embeddings_path: Path, batch_size: int) -> dict[str, int]:

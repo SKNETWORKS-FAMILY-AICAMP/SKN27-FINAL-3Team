@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Iterable, Iterator
 
 import numpy as np
 
@@ -66,51 +66,25 @@ def validate_load_inputs(
     return rows
 
 
-def load_records(
+def iter_versioned_record_params(
     records: Iterable[dict[str, Any]],
     embeddings: np.ndarray,
     *,
-    connection_factory: Callable[[], Any],
-    expected_blocks: int,
-    expected_cases: int,
-) -> int:
-    rows = validate_load_inputs(
-        records,
-        embeddings,
-        expected_blocks=expected_blocks,
-        expected_cases=expected_cases,
-    )
-    statement = """
-    INSERT INTO precedent_newplusplus.blocks (
-      block_id, record_id, block_type, semantic_role, block_text,
-      case_number, case_name, court_name, decision_date, internal_grade,
-      source_metadata, embedding
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::vector)
-    ON CONFLICT (block_id) DO UPDATE SET
-      record_id=EXCLUDED.record_id, block_type=EXCLUDED.block_type,
-      semantic_role=EXCLUDED.semantic_role, block_text=EXCLUDED.block_text,
-      case_number=EXCLUDED.case_number, case_name=EXCLUDED.case_name,
-      court_name=EXCLUDED.court_name, decision_date=EXCLUDED.decision_date,
-      internal_grade=EXCLUDED.internal_grade,
-      source_metadata=EXCLUDED.source_metadata, embedding=EXCLUDED.embedding
-    """
-    with connection_factory() as connection, connection.cursor() as cursor:
-        for row, vector in zip(rows, embeddings, strict=True):
-            cursor.execute(
-                statement,
-                (
-                    row["block_id"],
-                    row["record_id"],
-                    row.get("block_type") or row.get("semantic_role"),
-                    row["semantic_role"],
-                    row["text"],
-                    row.get("case_number"),
-                    row.get("case_name"),
-                    row.get("court_name"),
-                    row.get("decision_date"),
-                    row["internal_grade"],
-                    json.dumps(row, ensure_ascii=False),
-                    vector_literal(vector),
-                ),
-            )
-    return len(rows)
+    seed_version: str,
+) -> Iterator[tuple[Any, ...]]:
+    for row, vector in zip(records, embeddings, strict=True):
+        yield (
+            seed_version,
+            row["block_id"],
+            row["record_id"],
+            row.get("block_type") or row.get("semantic_role"),
+            row["semantic_role"],
+            row["text"],
+            row.get("case_number"),
+            row.get("case_name"),
+            row.get("court_name"),
+            row.get("decision_date"),
+            row["internal_grade"],
+            json.dumps(row, ensure_ascii=False, sort_keys=True),
+            vector_literal(vector),
+        )

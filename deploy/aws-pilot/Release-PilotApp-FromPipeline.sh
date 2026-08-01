@@ -116,6 +116,16 @@ legal_dataset_version="$(sed -n 's/^LEGAL_DATASET_VERSION=//p' .runtime.env)"
 legal_dataset_verified_at="$(sed -n 's/^LEGAL_DATASET_VERIFIED_AT=//p' .runtime.env)"
 legal_max_age_hours="$(sed -n 's/^OPERATIONAL_LEGAL_MAX_AGE_HOURS=//p' .runtime.env)"
 [[ -n "$legal_dataset_version" && -n "$legal_dataset_verified_at" && -n "$legal_max_age_hours" ]]
+mapfile -t PRECEDENT_SEED_LINES < <(grep '^PRECEDENT_NEWPLUSPLUS_SEED_VERSION=' .runtime.env)
+[[ ${#PRECEDENT_SEED_LINES[@]} -eq 1 ]] || {
+  echo 'Runtime environment must contain exactly one verified precedent seed version.' >&2
+  exit 78
+}
+PRECEDENT_NEWPLUSPLUS_SEED_VERSION="${PRECEDENT_SEED_LINES[0]#*=}"
+[[ "$PRECEDENT_NEWPLUSPLUS_SEED_VERSION" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo 'Runtime precedent seed version is invalid.' >&2
+  exit 78
+}
 
 release_evidence_dir="$release_dir/operational-evidence"
 release_evidence_file="$release_evidence_dir/run_summary.json"
@@ -205,6 +215,8 @@ trap rollback_app_release ERR
 aws ecr get-login-password --region '__AWS_REGION__' | docker login --username AWS --password-stdin "$registry"
 RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend agent-worker file-scan-worker ops-monitor
 PILOT_BACKEND_IP="${PILOT_MIGRATION_CHECK_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py migrate --check
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py verify_precedent_newplusplus_seed --expected-seed-version "$PRECEDENT_NEWPLUSPLUS_SEED_VERSION" --format json
+PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py verify_pgvector_rag_readiness --format json
 
 test ! -e "$rag_dir" && test ! -L "$rag_dir"
 test ! -e "$candidate_dir" && test ! -L "$candidate_dir"

@@ -831,6 +831,36 @@ def test_legal_pgvector_load_rejects_manifest_count_mismatch(
         load_production_rag_seed._load_legal_pgvector(bundle, replace=False, batch_size=50)
 
 
+def test_legal_pgvector_load_rejects_post_load_table_count_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundle = load_and_validate_rag_seed_manifest(_write_valid_bundle(tmp_path))
+
+    def fake_call_command(*_args, **kwargs):
+        kwargs["stdout"].write(
+            json.dumps(
+                {
+                    "loaded": {"chunks": 1, "embeddings": 1},
+                    "counts": {
+                        "law_chunks": 2,
+                        "searchable_law_chunks": 2,
+                        "law_embeddings": 2,
+                    },
+                }
+            )
+        )
+
+    monkeypatch.setattr(load_production_rag_seed, "call_command", fake_call_command)
+
+    with pytest.raises(load_production_rag_seed.SeedLoadError, match="table count"):
+        load_production_rag_seed._load_legal_pgvector(
+            bundle,
+            replace=True,
+            batch_size=50,
+        )
+
+
 @pytest.mark.parametrize(
     "malformed_role",
     [["legal_chunks"], {"name": "legal_chunks"}],
@@ -976,6 +1006,47 @@ def test_legal_loader_keeps_jsonl_memory_bounded_to_batch_size(
         "embedding_produced": 5,
         "embedding_consumed": 5,
     }
+
+
+def test_legal_replace_uses_app_role_delete_privileges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statements: list[str] = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def execute(self, sql):
+            statements.append(" ".join(sql.split()))
+
+    class FakeConnection:
+        def cursor(self):
+            return FakeCursor()
+
+    monkeypatch.setattr(load_legal_rag_pgvector, "connection", FakeConnection())
+
+    load_legal_rag_pgvector._delete_legal_rows()
+
+    assert statements == [
+        "DELETE FROM law_embeddings;",
+        "DELETE FROM law_chunks;",
+    ]
+
+
+def test_legal_replace_rejects_inexact_counts_before_transaction_commit() -> None:
+    with pytest.raises(CommandError, match="exact replacement"):
+        load_legal_rag_pgvector._validate_replacement_counts(
+            loaded={"chunks": 1, "embeddings": 1},
+            counts={
+                "law_chunks": 2,
+                "searchable_law_chunks": 2,
+                "law_embeddings": 2,
+            },
+        )
 
 
 def test_legal_pgvector_loader_preserves_embedding_space(tmp_path: Path) -> None:

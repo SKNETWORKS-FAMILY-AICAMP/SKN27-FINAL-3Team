@@ -326,3 +326,30 @@ def test_app_release_verifies_descriptor_and_switches_candidate_evidence_atomica
         "load_legal_graph_seed",
     ):
         assert forbidden not in runner
+
+
+def test_app_release_gates_target_image_on_active_precedent_seed() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    runtime_version = runner.index("PRECEDENT_NEWPLUSPLUS_SEED_VERSION")
+    pull = runner.index('"${compose[@]}" pull', runtime_version)
+    seed_verify = runner.index("verify_precedent_newplusplus_seed", pull)
+    readiness = runner.index("verify_pgvector_rag_readiness", seed_verify)
+    container_replace = runner.index('"${compose[@]}" rm -sf', readiness)
+    evidence_promote = runner.index(
+        'mv -f "$candidate_evidence_tmp" "$shared_evidence_file"',
+        container_replace,
+    )
+
+    assert runtime_version < pull < seed_verify < readiness
+    assert readiness < container_replace < evidence_promote
+    assert (
+        'python backend/manage.py verify_precedent_newplusplus_seed '
+        '--expected-seed-version "$PRECEDENT_NEWPLUSPLUS_SEED_VERSION" '
+        '--format json'
+    ) in runner
+    assert "python backend/manage.py verify_pgvector_rag_readiness --format json" in runner
+    assert "PRECEDENT_SEED_LINES" in runner
+    assert "^sha256:[0-9a-f]{64}$" in runner
