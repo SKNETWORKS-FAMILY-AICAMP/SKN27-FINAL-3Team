@@ -68,7 +68,7 @@ services:
     logging: *default-logging
     user: "0:0"
     cap_drop: [ALL]
-    cap_add: [CHOWN]
+    cap_add: [CHOWN, DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
     read_only: true
     tmpfs: [/tmp]
