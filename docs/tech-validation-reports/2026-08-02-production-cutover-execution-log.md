@@ -259,3 +259,67 @@
   - 수정 파일은 backend image에 포함되는 management command이므로 기존 `76c713ec92d6` 이미지를 SSM으로 재시도하는 것만으로는 수정이 반영되지 않는다.
   - 다음 단계는 수정된 backend image를 포함한 새 immutable release를 만든 뒤, 단일 SSM deployment 경로로 cutover를 다시 실행하는 것이다.
   - Google authorization code는 재시도 시 새 일회용 code가 필요하다.
+
+### S7 — 새 immutable release 및 exact seed 복구
+
+- 대상 release: `d8de5915f463`
+- backend image digest: `sha256:df535682fe4b0eabcf33a065449f599a52f5ce3efedd36caab298bafff72c069`
+- frontend image digest: `sha256:39777a3ab78dc26260322c60073f0dfad431de38a84b8cf683bbd561e9737517`
+- exact seed manifest SHA-256: `9bb155067bdbff2792ff1ceb17002b99431454b31c52029f7cee8af75f2294ac`
+- seed S3 URI: `s3://skn27-pilot-908708651753-clean/_rag-seed/9bb155067bdbff2792ff1ceb17002b99431454b31c52029f7cee8af75f2294ac/`
+- seed maintenance SSM command: `86b9e317-2bfd-4c44-8b4f-f9e848d0b865`
+  - 상태: `Success`, 종료 코드 `0`
+  - manifest hash 및 artifact count 검증: 통과
+  - 법령 chunk/embedding: `98,664 / 98,664`
+  - 상담사례 embedding: `904`
+  - 판례 seed: `825 cases / 3,339 blocks`
+  - Neo4j: 법령 source `35`, version `341`, chunk `98,664`, relation `309,132`
+  - 법령 검색 및 text-ML 검색 smoke: `pass`
+  - 법령 evidence: missing/failed/stale source `0`, release version exact match
+- post-seed snapshot SSM command: `79e1165b-af01-4127-914a-0efa2bad982a`
+  - private 서비스 4개: 모두 healthy
+  - complete marker, release evidence, exact descriptor: 존재 및 일치
+  - public current link: 없음
+  - forbidden public 서비스: `0`
+
+### S8 — Caddy volume initializer capability 실패
+
+- public cutover SSM command: `2777e14d-598d-4daa-83a4-c8e4265ade20`
+- 상태: `Failed`, 종료 코드 `1`
+- 실행 시각: `2026-08-02T04:25:49.578Z` ~ `2026-08-02T04:27:56.578Z`
+- 통과한 게이트:
+  - release-bound 법령 evidence validation 2회: `success`
+  - production Redis, ClamAV, law-Neo4j, backend, frontend, edge-rate-limit: healthy 또는 정상 시작
+- 최초 실패:
+  - service: `caddy-volume-init`
+  - 결과: `service "caddy-volume-init" didn't complete successfully: exit 1`
+- 실패 경계:
+  - Google code exchange 전
+  - paid Supervisor/non-DL smoke 전
+  - public current symlink 생성 전
+  - 따라서 이 실행의 유료 provider 호출은 `0`이며 public release는 생성되지 않았다.
+- rollback 및 capability 진단 SSM command: `44ccdb10-96ae-4c8c-8a41-89f513c92363`
+  - current link: 없음
+  - production/stage container: `0 / 0`
+  - release, stage marker, complete marker, release evidence: 보존
+  - shared evidence: rollback으로 제거
+  - Caddy data/config/log volume root: 모두 mode `750`, owner `10001:10001`
+  - 현재 initializer와 같은 `cap_drop: ALL`, `cap_add: CHOWN` 조건: 세 경로 모두 traverse 실패
+  - 기본 root capability 조건: 세 경로 모두 traverse 성공
+- 확정 원인:
+  - `caddy-volume-init`는 기존 Caddy volume을 `chown -R`하지만 `CHOWN`만 복원한다.
+  - mode `750`, owner `10001:10001`인 기존 volume을 root UID `0`이 재귀 탐색하려면 `DAC_OVERRIDE`가 필요하다.
+  - 최초 빈 volume이 아니라 재사용 volume에서만 발생하는 capability 회귀다.
+- TDD 수정:
+  - initializer에 `CHOWN`과 `DAC_OVERRIDE`가 모두 필요하다는 contract test를 먼저 변경했다.
+  - 수정 전 RED: actual `{'CHOWN'}`, expected `{'CHOWN', 'DAC_OVERRIDE'}`
+  - `docker-compose.pilot.yml`의 `caddy-volume-init.cap_add`에 `DAC_OVERRIDE` 한 개만 추가했다.
+  - focused GREEN: `1 passed`
+  - AWS pilot/deployment readiness/CodeBuild contract: `131 passed`
+  - 최소 capability 운영 증명 SSM command: `6384c75a-0ffb-4ac7-973a-7761cb87f92f`
+    - `cap_drop: ALL`, `cap_add: CHOWN, DAC_OVERRIDE`, 실제 Caddy volume read-only 조건
+    - data/config/log 세 경로 재귀 탐색: 모두 성공
+    - `minimal_capability_proof=pass`
+- release 경계:
+  - normal promotion은 기존 staged release의 Compose를 새 로컬 bundle로 덮어쓰지 않는다.
+  - 따라서 수정은 새 immutable release로 병합·빌드·stage한 뒤 재검증해야 하며, 기존 `d8de5915f463`의 blind retry는 금지한다.

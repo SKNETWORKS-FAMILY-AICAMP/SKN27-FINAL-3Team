@@ -370,7 +370,7 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     assert initializer["network_mode"] == "none"
     assert initializer["user"] == "0:0"
     assert initializer["cap_drop"] == ["ALL"]
-    assert initializer["cap_add"] == ["CHOWN"]
+    assert set(initializer["cap_add"]) == {"CHOWN", "DAC_OVERRIDE"}
     assert caddy["depends_on"]["caddy-volume-init"]["condition"] == "service_completed_successfully"
     for name, config in services.items():
         if name != "caddy":
