@@ -8,6 +8,46 @@ export const CASE_READY_FACTS = [
   ["collision_location", "충돌 부위"],
 ];
 
+const CASE_READY_ACTIVE_STEPS = new Set([
+  "creating_case",
+  "confirming_facts",
+  "starting_analysis",
+  "polling",
+  "loading_report",
+  "ready",
+]);
+
+const CASE_READY_PROGRESS_MESSAGES = {
+  idle: "핵심 사실 4건을 확인한 뒤 사건 분석을 시작합니다.",
+  creating_case: "상담 내용을 사건으로 저장하고 있습니다.",
+  confirming_facts: "확인한 사실을 사건 기록에 반영하고 있습니다.",
+  starting_analysis: "사건 분석 작업을 시작하고 있습니다.",
+  polling: "과실 쟁점과 법률 근거를 분석하고 있습니다.",
+  loading_report: "완료된 리포트를 불러오고 있습니다.",
+  ready: "사건 분석 리포트가 준비되었습니다.",
+  failed: "사건 분석 리포트를 완료하지 못했습니다.",
+};
+
+
+export function buildCaseReadyActionUi({
+  model,
+  progress = {},
+  authenticated = false,
+}) {
+  const step = text(progress.step) || "idle";
+  return {
+    visible: model?.eligible === true,
+    facts: Array.isArray(model?.facts) ? model.facts : [],
+    buttonLabel: authenticated
+      ? "사건 생성·분석 시작"
+      : "로그인 후 사건 생성·분석 시작",
+    disabled: CASE_READY_ACTIVE_STEPS.has(step),
+    progressMessage: CASE_READY_PROGRESS_MESSAGES[step]
+      || CASE_READY_PROGRESS_MESSAGES.idle,
+    error: text(progress.error),
+  };
+}
+
 
 export function buildCaseReadyViewModel(
   analysisResponse = {},
@@ -143,6 +183,7 @@ export async function pollCaseReadyReport({
   wait,
   maxAttempts,
   onUpdate = () => {},
+  onStep = () => {},
 }) {
   const jobId = text(startResponse?.job?.job_id);
   const workerResult = await pollWorkerResult({
@@ -162,6 +203,7 @@ export async function pollCaseReadyReport({
     return { workerResult, report: null };
   }
 
+  onStep("loading_report");
   const detail = await api.getReportDetail({
     reportId,
     sessionId,

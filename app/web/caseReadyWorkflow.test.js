@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildCaseReadyActionUi,
   buildCaseReadyViewModel,
   pollCaseReadyReport,
   runCaseReadyWorkflow,
@@ -281,6 +282,7 @@ test("hydrates a persisted report after case analysis succeeds", async () => {
     }),
   };
   const updates = [];
+  const steps = [];
 
   const result = await pollCaseReadyReport({
     api,
@@ -290,6 +292,7 @@ test("hydrates a persisted report after case analysis succeeds", async () => {
     wait: async () => {},
     maxAttempts: 2,
     onUpdate: (value) => updates.push(value.status),
+    onStep: (step) => steps.push(step),
   });
 
   assert.equal(result.workerResult.status, "success");
@@ -299,6 +302,7 @@ test("hydrates a persisted report after case analysis succeeds", async () => {
     "fault_ratio_analysis",
   );
   assert.deepEqual(updates, ["queued", "success"]);
+  assert.deepEqual(steps, ["loading_report"]);
 });
 
 
@@ -378,4 +382,68 @@ test("rejects report detail without a server reporting payload", async () => {
   });
 
   assert.equal(result.report, null);
+});
+
+
+test("offers one explicit case start action for an eligible idle consultation", () => {
+  const model = buildCaseReadyViewModel(completeResponse());
+
+  const guestUi = buildCaseReadyActionUi({
+    model,
+    progress: { step: "idle", error: "" },
+    authenticated: false,
+  });
+  const authenticatedUi = buildCaseReadyActionUi({
+    model,
+    progress: { step: "idle", error: "" },
+    authenticated: true,
+  });
+
+  assert.equal(guestUi.visible, true);
+  assert.equal(guestUi.buttonLabel, "로그인 후 사건 생성·분석 시작");
+  assert.equal(guestUi.disabled, false);
+  assert.equal(guestUi.facts.length, 4);
+  assert.equal(authenticatedUi.buttonLabel, "사건 생성·분석 시작");
+});
+
+
+test("disables case start while a server workflow stage is active", () => {
+  const model = buildCaseReadyViewModel(completeResponse());
+
+  for (const step of [
+    "creating_case",
+    "confirming_facts",
+    "starting_analysis",
+    "polling",
+    "loading_report",
+    "ready",
+  ]) {
+    const ui = buildCaseReadyActionUi({
+      model,
+      progress: { step, error: "" },
+      authenticated: true,
+    });
+
+    assert.equal(ui.disabled, true, step);
+    assert.ok(ui.progressMessage, step);
+  }
+});
+
+
+test("hides case start for an ineligible consultation and permits a failed retry", () => {
+  const hidden = buildCaseReadyActionUi({
+    model: buildCaseReadyViewModel({ status: "needs_input" }),
+    progress: { step: "idle", error: "" },
+    authenticated: false,
+  });
+  const retry = buildCaseReadyActionUi({
+    model: buildCaseReadyViewModel(completeResponse()),
+    progress: { step: "failed", error: "다시 시도해 주세요." },
+    authenticated: true,
+  });
+
+  assert.equal(hidden.visible, false);
+  assert.equal(retry.visible, true);
+  assert.equal(retry.disabled, false);
+  assert.equal(retry.error, "다시 시도해 주세요.");
 });

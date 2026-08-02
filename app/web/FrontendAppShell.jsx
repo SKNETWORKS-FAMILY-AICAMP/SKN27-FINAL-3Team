@@ -4,6 +4,7 @@ import { createFrontendApi } from "./apiClient.js";
 import { buildAnalysisProgressUi } from "./analysisProgressUi.js";
 import { buildAppealDecisionUi } from "./appealDecisionUi.js";
 import { buildAttachmentWorkflowUi } from "./attachmentWorkflowUi.js";
+import { CaseReadyPanel } from "./CaseReadyPanel.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
 import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
 import { reportsForCase } from "./caseReports.js?null-case-v1";
@@ -47,6 +48,11 @@ import {
 } from "./chatResponsePresentation.js";
 import { SafeMarkdown } from "./SafeMarkdown.js";
 import { composerKeyAction } from "./composerInteraction.js";
+import {
+  buildCaseReadyViewModel,
+  pollCaseReadyReport,
+  runCaseReadyWorkflow,
+} from "./caseReadyWorkflow.js";
 
 const TAB_ROUTES = [
   { id: "chatbot", label: "사고·과태료 상담" },
@@ -71,10 +77,16 @@ const ATTACHMENT_PURPOSE_LABELS = {
 };
 const CHAT_ATTACHMENT_OPTIONS = [
   {
-    label: "고지서·문서",
-    description: "고지서, 사실확인원 또는 보조 문서",
+    label: "과태료 고지서",
+    description: "과태료 사전통지서 또는 납부고지서",
     purpose: "fine_notice",
     accept: "image/jpeg,image/png,image/webp,application/pdf",
+  },
+  {
+    label: "교통사고 사실확인원",
+    description: "경찰서 발급 사실확인원 1페이지 이미지",
+    purpose: "traffic_accident_confirmation",
+    accept: "image/jpeg,image/png",
   },
   {
     label: "사고 현장 사진",
@@ -304,6 +316,10 @@ export default function FrontendAppShell({
   const [isReportWorkspaceLoading, setIsReportWorkspaceLoading] = useState(false);
   const [reportWorkspaceLoadError, setReportWorkspaceLoadError] = useState("");
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
+  const [caseReadyProgress, setCaseReadyProgress] = useState({
+    step: "idle",
+    error: "",
+  });
   const [guestDetailedReportUsed, setGuestDetailedReportUsed] = useState(false);
   const [acknowledgedAppealKey, setAcknowledgedAppealKey] = useState("");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -399,6 +415,10 @@ export default function FrontendAppShell({
   const visibleAnalysisCards = isLiveReportingReady
     ? analysisCards
     : analysisCards.filter((card) => card?.card_type !== "reporting_preview");
+  const caseReadyModel = buildCaseReadyViewModel(
+    analysisResponse,
+    registeredAttachments,
+  );
   const attachmentOptions = Array.from(
     new Set([
       ...(capabilityCatalog?.capabilities || []).flatMap(
@@ -813,6 +833,7 @@ export default function FrontendAppShell({
     setCurrentReport(null);
     setReportList([]);
     setPendingAuthAction(null);
+    setCaseReadyProgress({ step: "idle", error: "" });
     setReportActionStatus("");
     setSavePromptVisible(false);
     setSaveDecision("undecided");
@@ -1220,6 +1241,84 @@ export default function FrontendAppShell({
         logDeveloperDiagnostic(`worker.${event}`, payload);
       },
     });
+  }
+
+  async function startCaseReadyAnalysis() {
+    if (
+      !caseReadyModel.eligible
+      || !["idle", "failed"].includes(caseReadyProgress.step)
+    ) {
+      return;
+    }
+
+    let requestIdentity = identity;
+    let activeSessionId = sessionId;
+    try {
+      if (!authSessionId) {
+        setPendingAuthAction({ type: "case_ready_analysis" });
+        setStatusMessage(
+          "사건 분석을 위해 Google 로그인 후 같은 상담으로 이어갑니다.",
+        );
+        const loginState = await loginAndBindCurrentSession({
+          source: "case_ready_analysis",
+          nextRoute: "chatbot",
+        });
+        requestIdentity = loginState.identity;
+        activeSessionId = loginState.sessionId;
+      }
+
+      const model = buildCaseReadyViewModel(
+        {
+          ...analysisResponse,
+          session_id: activeSessionId,
+        },
+        registeredAttachments,
+      );
+      const started = await runCaseReadyWorkflow({
+        api,
+        identity: requestIdentity,
+        model,
+        onStep: (step) => setCaseReadyProgress({ step, error: "" }),
+      });
+
+      setCaseReadyProgress({ step: "polling", error: "" });
+      const completed = await pollCaseReadyReport({
+        api,
+        identity: requestIdentity,
+        sessionId: activeSessionId,
+        startResponse: started.startResponse,
+        wait: waitForWorkerPoll,
+        maxAttempts: WORKER_POLL_MAX_ATTEMPTS,
+        onStep: (step) => setCaseReadyProgress({ step, error: "" }),
+      });
+      if (!completed.report) {
+        throw new Error("persisted_report_missing");
+      }
+
+      setAnalysisResponse(completed.workerResult);
+      setCurrentReport(completed.report);
+      setReportList((items) => [
+        completed.report,
+        ...items.filter(
+          (item) => item?.report_id !== completed.report.report_id,
+        ),
+      ]);
+      setCaseReadyProgress({ step: "ready", error: "" });
+      setPendingAuthAction(null);
+      setReportActionStatus("사건 분석 리포트가 저장되었습니다.");
+      setStatusMessage("사건 분석과 리포트 저장이 완료되었습니다.");
+      setActiveRoute("reporting");
+    } catch {
+      setCaseReadyProgress({
+        step: "failed",
+        error:
+          "사건 분석 리포트를 완료하지 못했습니다. 현재 단계에서 다시 시도해 주세요.",
+      });
+      setPendingAuthAction(null);
+      setStatusMessage(
+        "사건 분석 리포트를 완료하지 못했습니다. 입력과 자료 상태를 확인해 주세요.",
+      );
+    }
   }
 
   function updateOcrConfirmationField(field, value) {
@@ -1673,6 +1772,7 @@ export default function FrontendAppShell({
       setOcrConfirmationFields(reset.ocrConfirmationFields);
       setPendingOcrConfirmation(reset.pendingOcrConfirmation);
       setPendingAuthAction(reset.pendingAuthAction);
+      setCaseReadyProgress({ step: "idle", error: "" });
       setAcknowledgedAppealKey(reset.acknowledgedAppealKey);
       setMypageSummary(reset.mypageSummary);
       setHistoryEvents(reset.historyEvents);
@@ -1969,6 +2069,8 @@ export default function FrontendAppShell({
               chatSafetyGuidance={chatSafetyGuidance}
               authSessionId={authSessionId}
               chatMessages={chatMessages}
+              caseReadyModel={caseReadyModel}
+              caseReadyProgress={caseReadyProgress}
               currentReport={currentReport}
               onOpenCaseResult={(route) => setActiveRoute(route)}
               isRegisteringAttachment={isRegisteringAttachment}
@@ -1987,6 +2089,7 @@ export default function FrontendAppShell({
               onRunReportAction={runCurrentReportAction}
               onRetryAppealDecision={() => setQuestion("운전자 신원 노출 위험과 사유 인정 가능성을 다시 판단해줘")}
               onSaveConversation={saveConversationAfterLogin}
+              onStartCaseReadyAnalysis={startCaseReadyAnalysis}
               onNewChat={startNewConversation}
               onSubmit={submitServiceMessage}
               pendingAuthAction={pendingAuthAction}
@@ -2960,6 +3063,8 @@ function ChatScreenV2({
   chatSafetyGuidance,
   authSessionId,
   chatMessages,
+  caseReadyModel,
+  caseReadyProgress,
   currentReport,
   onAttachmentDragOver,
   onAttachmentDrop,
@@ -2978,6 +3083,7 @@ function ChatScreenV2({
   onRunReportAction,
   onRetryAppealDecision,
   onSaveConversation,
+  onStartCaseReadyAnalysis,
   onNewChat,
   onSubmit,
   pendingAuthAction,
@@ -3322,7 +3428,14 @@ function ChatScreenV2({
               isSubmitting={isSubmitting}
               onConfirm={onConfirmAttachmentClassification}
             />
-          )}
+            )}
+
+          <CaseReadyPanel
+            model={caseReadyModel}
+            progress={caseReadyProgress}
+            authenticated={Boolean(authSessionId)}
+            onStart={onStartCaseReadyAnalysis}
+          />
 
           <div className="chat-input">
             <div className="input-stack">
