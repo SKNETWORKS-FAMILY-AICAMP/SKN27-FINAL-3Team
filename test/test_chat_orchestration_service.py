@@ -133,6 +133,7 @@ def test_empty_message_requests_input_without_creating_an_agent_plan() -> None:
     response = submit_message({"session_id": "ses_1", "user_text": ""})
 
     assert response["status"] == "needs_input"
+    assert response["assistant_message"]["answer"].strip()
     assert response["pending_questions"]
     assert response["analysis_plan"]["steps"] == []
     assert "mock" not in str(response).lower()
@@ -859,6 +860,7 @@ def test_low_information_input_stops_before_enabled_supervisor(monkeypatch) -> N
     )
 
     assert response["status"] == "needs_clarification"
+    assert response["assistant_message"]["answer"].strip()
     assert response["progress"]["status"] == "needs_clarification"
     assert response["pending_questions"]
     assert response["analysis_plan"]["steps"] == []

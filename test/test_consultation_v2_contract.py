@@ -68,7 +68,7 @@ def test_chat_attachment_bar_has_one_compact_accessible_dropzone() -> None:
     assert ".chat-attachment-bar .attachment-dropzone" in styles
 
 
-def test_chat_report_ready_notice_uses_a_locally_declared_gated_payload() -> None:
+def test_chat_inline_report_entry_uses_a_locally_declared_gated_payload() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     chat_start = shell.index("function ChatScreenV2(")
     next_component = re.search(r"\nfunction [A-Za-z0-9_]+\(", shell[chat_start + 1 :])
@@ -80,10 +80,11 @@ def test_chat_report_ready_notice_uses_a_locally_declared_gated_payload() -> Non
         "const visibleReportingPayload = "
         "isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;"
     ) in chat_screen
-    assert re.search(
-        r"\{(?:canGenerateReport && )?visibleReportingPayload && \(\s*<ReportReadyNotice",
-        chat_screen,
-    )
+    assert "const hasInlineReportEntry = Boolean(" in chat_screen
+    assert "(message.reportLink || currentReport || visibleReportingPayload)" in chat_screen
+    assert 'className="assistant-report-entry"' in chat_screen
+    assert "현재 리포트 보기" in chat_screen
+    assert "onClick={onOpenReporting}" in chat_screen
 
 
 def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_it() -> None:
@@ -200,20 +201,30 @@ def test_download_report_never_returns_pdf_for_the_legacy_non_api_path() -> None
 
 def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    presentation = read_text(
+        ROOT / "app" / "web" / "chatResponsePresentation.js"
+    )
 
     for token in (
-        'function assistantMessageText(value, fallback = "")',
-        'typeof value === "string"',
-        "value.answer || value.summary",
-        "analysisResponse?.assistant_message?.core_answer ||",
-        "assistantMessageText(analysisResponse?.assistant_message);",
-        "workerResult?.assistant_message?.core_answer ||",
-        "workerResult?.analysis_progress?.user_message ||",
-        "workerResult?.polling_notice?.message ||",
-        "const assistantMessage = assistantMessageText(",
-        "assistant_message: assistantMessageText(",
+        "normalizeChatResponsePresentation,",
+        'from "./chatResponsePresentation.js";',
+        "normalizeChatResponsePresentation(analysisResponse)",
+        "normalizeChatResponsePresentation(workerResult)",
+        "const responsePresentation = normalizeChatResponsePresentation({",
     ):
         assert token in shell
+
+    for token in (
+        "export function asNonEmptyText(value)",
+        "export function normalizeChatResponsePresentation(result = {})",
+        "assistant.core_answer",
+        "safeResult.polling_notice?.message",
+        "safeResult.analysis_progress?.user_message",
+        'requestedStatus === "success" && !directAnswer',
+    ):
+        assert token in presentation
+
+    assert "String(value.answer" not in shell
 
 
 def test_frontend_polls_guest_worker_jobs_until_a_terminal_result() -> None:

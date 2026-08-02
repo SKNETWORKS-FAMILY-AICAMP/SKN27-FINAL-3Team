@@ -130,6 +130,34 @@ def _server_authoritative_chat_response(*, session_id: str, message_id: str, pla
     return response
 
 
+def _synchronous_chat_response(
+    *,
+    status: str,
+    session_id: str,
+    message_id: str,
+) -> dict:
+    response = _chat_response(
+        session_id=session_id,
+        message_id=message_id,
+        plan_id=f"plan_{message_id}",
+    )
+    response.update(
+        {
+            "status": status,
+            "assistant_message": {
+                "answer": f"{status} 상태의 사용자 안내입니다.",
+            },
+            "pending_questions": (
+                []
+                if status in {"high_risk_handoff", "case_ready"}
+                else [{"question": "추가 내용을 알려 주세요."}]
+            ),
+        }
+    )
+    response["analysis_plan"]["steps"] = []
+    return response
+
+
 def _queue_payload(*, owner_id: str, session_id: str, job_id: str) -> tuple[dict, dict]:
     plan_id = f"plan_{job_id}"
     request_payload = {
@@ -160,6 +188,55 @@ def _queue_payload(*, owner_id: str, session_id: str, job_id: str) -> tuple[dict
 
 @override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)
 class AnalysisJobQueueTests(TestCase):
+    def test_public_chat_synchronous_states_return_display_text_without_queueing(
+        self,
+    ) -> None:
+        expected_execution_modes = {
+            "needs_input": "input_collection",
+            "needs_clarification": "input_clarification",
+            "high_risk_handoff": "expert_handoff",
+            "case_ready": "case_creation_required",
+        }
+
+        for status, execution_mode in expected_execution_modes.items():
+            with self.subTest(status=status):
+                user_id = f"usr_sync_{status}"
+                session_id = f"ses_sync_{status}"
+                client = _authenticated_client(user_id)
+                ChatSession.objects.create(
+                    session_id=session_id,
+                    owner_id=user_id,
+                    status=ChatSessionStatus.ACTIVE,
+                )
+                chat_response = _synchronous_chat_response(
+                    status=status,
+                    session_id=session_id,
+                    message_id=f"msg_sync_{status}",
+                )
+
+                with patch(
+                    "chatbot.views.submit_message",
+                    return_value=chat_response,
+                ):
+                    response = client.post(
+                        "/api/chat/messages/",
+                        data={
+                            "session_id": session_id,
+                            "user_text": "동기 상태 계약 확인",
+                        },
+                        content_type="application/json",
+                    )
+
+                payload = response.json()
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(payload["status"], status)
+                self.assertEqual(payload["execution_mode"], execution_mode)
+                self.assertTrue(payload["assistant_message"]["answer"].strip())
+                self.assertNotIn("work_item", payload)
+
+        self.assertFalse(AnalysisJob.objects.exists())
+        self.assertFalse(AgentWorkItem.objects.exists())
+
     def test_client_job_id_requires_session_before_reservation(self) -> None:
         client = _authenticated_client("usr_job_without_session")
 

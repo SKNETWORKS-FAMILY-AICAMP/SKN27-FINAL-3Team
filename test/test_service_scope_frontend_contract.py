@@ -11,7 +11,9 @@ def test_frontend_renders_scope_and_partial_result_safe_guidance() -> None:
     assert "function SafetyGuidancePanel({ guidance })" in shell
     assert "const serviceScope = analysisResponse?.service_scope || null;" in shell
     assert "const responseNextActions = stringList(analysisResponse?.next_actions);" in shell
-    assert "<SafetyGuidancePanel guidance={chatSafetyGuidance} />" in shell
+    assert "function AssistantLimitationsDisclosure({ guidance })" in shell
+    assert "<AssistantLimitationsDisclosure guidance={chatSafetyGuidance} />" in shell
+    assert "<summary>한계·주의사항</summary>" in shell
     assert "<SafetyGuidancePanel guidance={resultSafetyGuidance} />" in shell
     assert "function ServiceInformationNotice()" in shell
     assert ".safety-guidance-panel" in styles

@@ -1,7 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
+import { compactUniqueStrings, deriveReportWorkbenchState } from "./reportWorkbenchState.js";
+
+test("normalizes structured missing items without object coercion", () => {
+  const items = compactUniqueStrings([
+    "보험사",
+    { question: "사고 일시는 언제인가요?" },
+    { label: "차량 번호" },
+    { description: "현장 사진" },
+    { unexpected: true },
+  ]);
+
+  assert.deepEqual(items, [
+    "보험사",
+    "사고 일시는 언제인가요?",
+    "차량 번호",
+    "현장 사진",
+    "추가 확인이 필요한 항목",
+  ]);
+  assert.ok(items.every((item) => !item.includes("[object Object]")));
+});
+
+test("normalizes nested text, skips empty values, and keeps stable unique order", () => {
+  const items = compactUniqueStrings([
+    null,
+    "  ",
+    { question: { label: "진입 순서" } },
+    { description: "진입 순서" },
+    { metadata: { title: "보험사 주장" } },
+    [],
+    {},
+    { label: "차량 번호" },
+  ], 10);
+
+  assert.deepEqual(items, [
+    "진입 순서",
+    "보험사 주장",
+    "추가 확인이 필요한 항목",
+    "차량 번호",
+  ]);
+});
 
 test("describes unresolved supervisor facts as the next workbench action", () => {
   const state = deriveReportWorkbenchState({
