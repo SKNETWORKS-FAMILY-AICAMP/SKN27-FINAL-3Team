@@ -96,6 +96,34 @@ def test_fact_reducer_accepts_unconfirmed_llm_candidates_without_treating_them_a
     }
 
 
+def test_fact_reducer_prefers_confirmed_followup_over_unconfirmed_llm_candidate() -> None:
+    reduced = reduce_consultation_fact_state(
+        {
+            "fact_candidates": [
+                {
+                    "field": "road_layout",
+                    "value": "four_way_intersection",
+                    "confidence": 0.8,
+                    "source_message_id": "msg_followup",
+                }
+            ],
+            "conversation_history": [
+                {"role": "assistant", "content": "사고 장소의 도로 형태를 알려주세요."},
+                {"role": "user", "content": "교차로"},
+            ],
+        }
+    )
+
+    assert reduced["conflicts"] == []
+    assert reduced["facts"]["road_layout"] == {
+        "field": "road_layout",
+        "value": "교차로",
+        "source_message_id": "history:1",
+        "confidence": 1.0,
+        "confirmed": True,
+    }
+
+
 def test_fact_reducer_does_not_conflict_on_confirmed_answer_sentence_ending() -> None:
     reduced = reduce_consultation_fact_state(
         {
