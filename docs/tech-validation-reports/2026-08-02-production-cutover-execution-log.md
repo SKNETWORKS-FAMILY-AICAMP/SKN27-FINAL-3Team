@@ -521,3 +521,53 @@
   - 기존 `b54ef1a0071d`의 blind retry는 금지한다.
   - 새 private stage와 exact seed reuse를 먼저 검증한다.
   - 새 Google 일회용 code와 non-DL 1회 및 Supervisor 1회의 명시 승인을 받은 뒤 단일 cutover를 실행한다.
+
+### S13 — non-DL acceptance fixture worker hydration 누락
+
+- 대상 release: `fcda18980c53`
+- private stage 및 seed:
+  - stage SSM command: `3899260b-e71e-477c-a50b-70aba91e02da`
+  - exact seed reuse SSM command: `a394b70f-0926-4922-88be-24107c0f3b44`
+  - post-seed snapshot: `db596e48-4c6d-4afe-bbbc-4e6cc4f7f178`
+  - exact manifest SHA: `9bb155067bdbff2792ff1ceb17002b99431454b31c52029f7cee8af75f2294ac`
+- strict public cutover SSM command: `8cf5ef2f-a15e-4562-911b-a62debaeeed5`
+- 상태: `Failed`, 종료 코드 `1`
+- 실행 시각: `2026-08-02T08:43:47Z` ~ `2026-08-02T08:46:59Z`
+- 통과한 게이트:
+  - release-bound 법령 evidence 및 production readiness: pass `10`, warn `0`, fail `0`
+  - object-storage smoke
+  - Google OAuth 실제 code 교환 HTTP `200` 및 replay 거부
+  - production 서비스 health
+- 최초 실패:
+  - non-DL job: `job_non_dl_smoke_9e4a04326bb5`
+  - work item: `awork_job_non_dl_smoke_9e4a04326bb5`
+  - `fine_notice_analysis`: `failed`, `error_category=image_missing`
+  - adapter input source: `missing`
+  - law-ground 및 text-ML 결과는 성공했지만 필수 fine-notice 결과 실패로 reporting handoff가 차단됐다.
+  - Supervisor smoke는 시작되지 않았다.
+- 확정 원인:
+  - smoke request payload에는 operator-reviewed S3 fixture metadata가 있었다.
+  - canonical worker queue는 실행 payload의 첨부를 `job_payload.attachments`로 덮어쓴다.
+  - non-DL smoke command는 `job_payload`에 첨부를 넣지 않았고 canonical `UploadedFile` 행도 만들지 않았다.
+  - 따라서 worker의 scan gate 이후 attachment가 비어 OCR adapter가 provider 호출 전에 `image_missing`으로 종료됐다.
+  - S3 object, IAM, provider OCR, timeout 또는 RAG failure가 최초 원인이 아니다.
+- 유료 실행 상태:
+  - 승인된 non-DL smoke 1회는 시작됐으므로 소비된 것으로 취급한다.
+  - Supervisor smoke는 시작되지 않아 실행되지 않았다.
+  - paid smoke는 새 명시 승인 전 재실행하지 않는다.
+- rollback 상태:
+  - post-failure snapshot: `2e991a7f-036b-4031-8bc8-fe27553c4149`
+  - public current link 없음, production container/network 없음
+  - private release, exact complete marker, release evidence, seed descriptor 보존
+  - Google live-smoke SecureString은 복호화 없이 재확인했으며 `absent`다.
+- TDD 핫픽스:
+  - 수정 전 RED: `job_payload.attachments` 누락 `1 error`, OCR `_input_source=missing` `1 failed`
+  - 수정 전 object-storage preflight RED: unreadable fixture 차단 경계 부재 `1 error`
+  - S3 fixture가 read 가능하지 않으면 session/queue/provider 실행 전에 fail-closed 한다.
+  - non-DL smoke 전용 세션에 operator-reviewed fixture를 `UploadedFile(READY/clean)`로 등록한다.
+  - worker queue에는 canonical attachment ID만 전달해 기존 owner/session 및 scan gate를 그대로 통과시킨다.
+  - 공용 queue, public upload scan policy, production OCR adapter는 완화하지 않는다.
+  - focused GREEN: Django smoke tests `8 tests`, `OK`
+  - 인접 회귀: Django non-DL/Supervisor/reporting/scan `99 tests`, `OK`; agent/attachment pytest `72 passed`
+  - 전체 회귀: pytest `1,373 passed`, `37 skipped`, subtests `4 passed`; Django chatbot `392 tests`, `OK`
+  - Ruff, `git diff --check`, secret-pattern scan: 통과

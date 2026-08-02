@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from io import StringIO
 from unittest.mock import patch
@@ -84,7 +85,10 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
 
         self.assertNotIn("context", payload)
         self.assertEqual(payload["attachments"], [fixture])
-        self.assertNotIn("attachments", job_payload)
+        self.assertEqual(
+            job_payload["attachments"],
+            [{"attachment_id": fixture["attachment_id"]}],
+        )
         self.assertEqual(server_context["query"]["search_query"], payload["user_text"])
         self.assertEqual(server_context["temporal_basis"], {"mode": "current"})
         self.assertEqual(server_context["scope"], {"jurisdiction": "KR"})
@@ -147,6 +151,29 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
             ),
         ):
             call_command("smoke_non_dl_analysis_reporting_pipeline")
+
+        enqueue.assert_not_called()
+        process.assert_not_called()
+        self.assertFalse(AnalysisJob.objects.exists())
+        self.assertFalse(ChatSession.objects.exists())
+
+    def test_command_fails_before_enqueue_when_acceptance_fixture_is_unavailable(self) -> None:
+        with (
+            patch(
+                "chatbot.management.commands.smoke_non_dl_analysis_reporting_pipeline.object_exists",
+                return_value=False,
+            ),
+            patch("chatbot.repositories.enqueue_analysis_job_work") as enqueue,
+            patch("chatbot.repositories.process_agent_work_item") as process,
+            self.assertRaisesMessage(CommandError, "not readable from object storage"),
+        ):
+            call_command(
+                "smoke_non_dl_analysis_reporting_pipeline",
+                allow_paid_provider_call=True,
+                fine_notice_fixture_s3_uri=(
+                    "s3://clean-bucket/canonical/acceptance/fine-notice-smoke.png"
+                ),
+            )
 
         enqueue.assert_not_called()
         process.assert_not_called()
@@ -297,6 +324,10 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
                 "app.services.agent_node_service.read_object_bytes",
                 return_value=b"operator-reviewed-fine-notice-fixture",
             ),
+            patch(
+                "chatbot.management.commands.smoke_non_dl_analysis_reporting_pipeline.object_exists",
+                return_value=True,
+            ),
         ):
             call_command(
                 "smoke_non_dl_analysis_reporting_pipeline",
@@ -340,6 +371,11 @@ class NonDlAnalysisReportingSmokeTests(TestCase):
         self.assertEqual(len(text_calls), 1)
         self.assertEqual(len(fine_notice_calls), 1)
         self.assertEqual(len(appeal_calls), 1)
+        self.assertEqual(fine_notice_calls[0]["_input_source"], "attachment")
+        self.assertEqual(
+            base64.b64decode(fine_notice_calls[0]["notice_image"]),
+            b"operator-reviewed-fine-notice-fixture",
+        )
 
         job = AnalysisJob.objects.get(job_id=result["job_id"])
         work_item = AgentWorkItem.objects.get(work_item_id=result["work_item_id"])
