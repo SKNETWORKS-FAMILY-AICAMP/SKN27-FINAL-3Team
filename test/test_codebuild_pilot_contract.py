@@ -404,6 +404,15 @@ def test_app_release_verifies_descriptor_and_switches_candidate_evidence_atomica
         assert forbidden not in runner
 
 
+def test_app_release_candidate_evidence_is_traversable_by_non_root_validator() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'install -d -m 0755 "$candidate_dir"' in runner
+    assert 'install -d -m 0700 "$rag_dir"' in runner
+
+
 def test_app_release_gates_target_image_on_active_precedent_seed() -> None:
     runner = (
         ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"

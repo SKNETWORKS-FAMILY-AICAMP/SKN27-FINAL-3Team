@@ -249,7 +249,7 @@ PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" RELEASE_TAG="$targ
 test ! -e "$rag_dir" && test ! -L "$rag_dir"
 test ! -e "$candidate_dir" && test ! -L "$candidate_dir"
 install -d -m 0700 "$rag_dir"
-install -d -m 0700 "$candidate_dir"
+install -d -m 0755 "$candidate_dir"
 aws s3 cp "$rag_seed_s3_uri" "$rag_dir/" --region '__AWS_REGION__' --recursive --only-show-errors
 test -f "$rag_dir/$manifest_relative_path"
 printf '%s  %s\n' "$manifest_sha256" "$rag_dir/$manifest_relative_path" | sha256sum -c -
