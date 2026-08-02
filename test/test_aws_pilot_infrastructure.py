@@ -410,7 +410,12 @@ def test_compose_runs_private_legal_graph_and_exposes_only_caddy() -> None:
     }
     assert "$${NEO4J_AUTH%%/*}" in services["law-neo4j"]["healthcheck"]["test"][1]
     assert "$${NEO4J_AUTH#*/}" in services["law-neo4j"]["healthcheck"]["test"][1]
-    assert set(services["redis"]["cap_add"]) == {"SETGID", "SETUID"}
+    assert set(services["redis"]["cap_add"]) == {
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "SETGID",
+        "SETUID",
+    }
     assert set(services["clamav"]["cap_add"]) == {
         "CHOWN",
         "DAC_OVERRIDE",
@@ -586,7 +591,12 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
         "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py verify_pgvector_rag_readiness --format json",
         "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py smoke_text_ml_case_search --require-pgvector --require-results",
     )
-    positions = [deploy.index(step) for step in expected_steps]
+    positions = []
+    cursor = 0
+    for step in expected_steps:
+        position = deploy.index(step, cursor)
+        positions.append(position)
+        cursor = position + len(step)
     assert positions == sorted(positions)
     assert "--replace-legal --skip-legal-schema" in deploy
     assert "--replace-legal --recreate-es" not in deploy
@@ -609,6 +619,26 @@ def test_rag_seed_maintenance_path_is_explicit_integrity_checked_and_fail_closed
     assert '--expected-seed-version `"`$PRECEDENT_NEWPLUSPLUS_SEED_VERSION`"' in deploy
     assert "^sha256:[0-9a-f]{64}$" in deploy
     assert "PRECEDENT_SEED_LINES" in deploy
+
+
+def test_rag_seed_resume_reuses_only_exact_verified_pgvector_state() -> None:
+    deploy = _read_deploy("Load-Rag-Seed-Pilot.ps1")
+
+    assert "[switch]$ReuseVerifiedPgvectorLoad" in deploy
+    assert "if (-not $ReuseVerifiedPgvectorLoad -and -not $AllowPaidReviewCaseEmbedding)" in deploy
+    assert "$dataLoadCommands = if ($ReuseVerifiedPgvectorLoad)" in deploy
+    assert "assert law_chunks == 98664" in deploy
+    assert "assert law_embeddings == 98664" in deploy
+    assert "assert review_embeddings == 904" in deploy
+    assert "assert owned_nodes == 0" in deploy
+    resume_readiness = deploy.index("verify_pgvector_rag_readiness --format json")
+    graph_load = deploy.index(
+        "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_legal_graph_seed"
+    )
+    assert resume_readiness < graph_load
+    assert "$runnerCommands = @(" in deploy
+    assert "$runnerCommands += $dataLoadCommands" in deploy
+    assert "$runnerCommands += @(" in deploy
 
 
 def test_database_maintenance_applies_review_case_schema_before_app_grants() -> None:
@@ -795,7 +825,9 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
     loader = _read_deploy("Load-Rag-Seed-Pilot.ps1")
 
     assert "[switch]$AllowPaidReviewCaseEmbedding" in loader
-    guard = loader.index("if (-not $AllowPaidReviewCaseEmbedding)")
+    guard = loader.index(
+        "if (-not $ReuseVerifiedPgvectorLoad -and -not $AllowPaidReviewCaseEmbedding)"
+    )
     terraform = loader.index("$terraformPath =")
     ssm = loader.index("aws ssm send-command")
     assert guard < terraform < ssm
@@ -827,7 +859,12 @@ def test_rag_seed_loader_requires_paid_review_case_consent_and_orders_sources() 
         "smoke_text_ml_case_search --require-pgvector --require-results",
         completion,
     )
-    positions = [loader.index(step) for step in expected_steps]
+    positions = []
+    cursor = 0
+    for step in expected_steps:
+        position = loader.index(step, cursor)
+        positions.append(position)
+        cursor = position + len(step)
     assert positions == sorted(positions)
 
 
@@ -864,7 +901,7 @@ def test_rag_seed_builds_release_bound_operational_evidence_after_readiness() ->
         "smoke_law_ground_search --require-results --format json"
     )
     pgvector_readiness = loader.index(
-        "verify_pgvector_rag_readiness --format json"
+        "verify_pgvector_rag_readiness --format json", law_smoke
     )
     text_search_smoke = loader.index(
         "smoke_text_ml_case_search --require-pgvector --require-results --format json"
@@ -906,6 +943,22 @@ def test_rag_seed_builds_release_bound_operational_evidence_after_readiness() ->
     ):
         assert token in loader
     assert "cleanup_rag_seed" in load_failed
+
+
+def test_normal_promotion_enters_release_dir_before_relative_compose_evidence_check() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+    normal_promotion = deploy.index(
+        '"test -d `$RELEASE_DIR && test ! -L `$RELEASE_DIR"'
+    )
+    evidence_validation = deploy.index(
+        "$stageComposeCommand --profile seed run --rm --no-deps "
+        "-v `$RELEASE_DIR/operational-evidence:/run/release-evidence:ro "
+        "rag-loader python -m etl.legal.validate_run_summary",
+        normal_promotion,
+    )
+    release_directory = deploy.index('"cd `$RELEASE_DIR"', normal_promotion)
+
+    assert normal_promotion < release_directory < evidence_validation
 
 
 def test_full_seed_load_persists_root_only_seed_descriptor_after_validation() -> None:
@@ -2081,6 +2134,19 @@ def test_first_normal_promotion_requires_google_live_smoke_remotely() -> None:
     promote = deploy.index("ln -sfn `$RELEASE_DIR /opt/skn27-pilot/current", target_up)
     assert "GOOGLE_LIVE_SMOKE_ENABLED" in deploy[previous:google_gate]
     assert previous < google_gate < target_up < promote
+
+
+def test_first_normal_promotion_treats_absent_current_symlink_as_no_previous_release() -> None:
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+
+    previous = deploy.index("PREVIOUS_RELEASE=`$(readlink")
+    marker_gate = deploy.index(".initial-rag-bootstrap.staged", previous)
+    previous_detection = deploy[previous:marker_gate]
+
+    assert (
+        "[ -L /opt/skn27-pilot/current ] || PREVIOUS_RELEASE=''"
+        in previous_detection
+    )
 
 
 def test_normal_promotion_requires_validated_fine_notice_fixture_and_exact_smoke() -> None:

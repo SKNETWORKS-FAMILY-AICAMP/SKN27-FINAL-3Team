@@ -1,0 +1,261 @@
+# 2026-08-02 Production Cutover Execution Log
+
+## 목적과 범위
+
+- 실행 경로: AWS Systems Manager(SSM) 단일 경로
+- 대상 release: `76c713ec92d6`
+- 대상 manifest SHA-256: `9bb155067bdbff2792ff1ceb17002b99431454b31c52029f7cee8af75f2294ac`
+- 범위: 초기 public cutover, Google live smoke 1회, paid non-DL smoke 1회, paid Supervisor smoke 1회, 배포 후 13개 E2E
+- 기록 원칙: 각 SSM command ID, UTC 시각, 상태, 종료 코드, 자격증명 마스킹 stdout/stderr, 오류 원인과 후속 조치를 기록한다.
+- 보안 원칙: Google authorization code, 비밀번호, secret, token, credential 값은 문서와 사용자 메시지에 기록하지 않는다.
+
+## 기준 Git 상태
+
+- 캡처 시각: `2026-08-02T01:55:58.2533878Z`
+- 브랜치: `feat-neo4j-exception-observability-hotfix`
+- HEAD: `8091ce9c08c8310e6d6c7f9c459331fb6546568e`
+- AWS account: `908708651753`
+- 리전: `ap-northeast-2`
+- pilot instance: `i-08457b1c0bef7d17b`
+- 로컬 미커밋 변경:
+  - `deploy/aws-pilot/Deploy-Pilot.ps1`
+  - `deploy/aws-pilot/Load-Rag-Seed-Pilot.ps1`
+  - `test/test_aws_pilot_infrastructure.py`
+
+## 배포 스크립트 사전 회귀 검증
+
+### 이전 public cutover 실패
+
+- SSM command: `38b3d89f-61f6-4c7e-91f3-996382c35c1e`
+- 상태: `Failed`
+- 종료 코드: `1`
+- 마스킹 stderr: `couldn't find env file: /usr/bin/.compose.env`
+- 확정 원인: `Deploy-Pilot.ps1`의 normal promotion 분기가 release directory로 이동하기 전에 상대 경로 `.compose.env`를 사용하는 Compose evidence validation을 실행했다. SSM 기본 작업 디렉터리가 `/usr/bin`이므로 `/usr/bin/.compose.env`를 잘못 조회했다.
+- 영향: stage shutdown, public symlink cutover, Google code 교환, paid provider smoke 전에 중단됐다. 따라서 공개 서비스와 유료 호출은 실행되지 않았다.
+- 수정: evidence validation 앞에 `cd $RELEASE_DIR`를 추가했다.
+- 검증:
+  - focused regression: `1 passed`
+  - PowerShell parser: `PASS`
+  - deployment contract suite: `130 passed`
+  - `git diff --check`: 통과
+
+## 실행 기록
+
+### S0 — 사전 상태 스냅샷
+
+- SSM command: `037afeec-70cd-4c80-8ed4-fface64c101f`
+- 실행 시각: `2026-08-02T01:57:08.878Z`
+- 상태: `Success`
+- 종료 코드: `0`
+- 확인 결과:
+  - release directory: 존재
+  - initial marker: 존재
+  - release evidence: 존재
+  - seed descriptor: 존재
+  - descriptor manifest SHA-256: 기대값과 일치
+- 관측상 주의점: 최초 조회는 잘못 가정한 Compose project명 `skn27-pilot-stage-76c713ec92d6`으로 필터링해 stage 컨테이너를 0개로 표시했다. `readlink -f` 역시 링크 존재 여부 판정에 부적절했다.
+- 판정: 원격 상태 문제가 아니라 스냅샷 조회 조건 문제이므로 정확한 project marker와 `test -L` 기반 추가 진단을 실행했다.
+
+### 로컬 진단 명령 구성 오류 2건
+
+- 상태: SSM command 생성 전 로컬 PowerShell parser가 차단
+- 원인: Docker label format과 `$PROJECT`를 포함한 중첩 따옴표를 PowerShell 문자열 안에서 잘못 구성했다.
+- 운영 영향: 없음. SSM command ID가 생성되지 않았고 원격 명령도 실행되지 않았다.
+- 조치: label 출력 의존성을 제거하고 release path와 project marker 기반 고정 문자열 조합으로 변경했다.
+
+### S1 — current 링크 및 실제 stage 진단
+
+- SSM command: `136ca1e1-565b-4ff3-b868-f2554ee4b9f9`
+- 실행 시각: `2026-08-02T01:58:32.918Z`
+- 상태: `Success`
+- 종료 코드: `0`
+- 확인 결과:
+  - `/opt/skn27-pilot/current`: 없음
+  - 실제 stage project: `skn27-stage-76c713ec92d6`
+  - initial marker: release tag, manifest SHA-256, stage project가 모두 exact match
+  - complete marker: manifest SHA-256 exact match
+  - stage backend: healthy
+  - stage law-neo4j: healthy
+  - stage redis: healthy
+  - stage clamav: healthy
+- 추가 관측:
+  - `skn27-pilot-*` 이름의 3일 전 구형 컨테이너 일부가 unhealthy 또는 exited 상태로 남아 있다.
+  - 이 컨테이너들은 `current` 링크가 없는 상태이며 이번 exact stage와 분리되어 있다.
+- 판정: 초기 public cutover 전 private stage는 정상이며 exact seed/release marker를 보유한다. 구형 컨테이너 존재 여부는 cutover 스크립트의 host port 해제와 production Compose 전환 과정에서 다시 검증한다.
+
+### S2 — public cutover 재시도
+
+- SSM command: `5863d1f4-4ebb-48b2-8f43-0479ebf136a8`
+- 요청 시각: `2026-08-02T11:01:39.408+09:00`
+- 상태: `Failed`
+- 로컬에서 확인된 선행 단계:
+  - Google 일회용 code를 SSM SecureString으로 저장: 성공
+  - 클립보드 삭제: 성공
+  - parameter metadata 존재 확인: 성공
+  - deployment bundle 업로드: 성공
+  - deployment manifest 업로드: 성공
+- 실패 후 Google code parameter metadata: 없음. 배포 스크립트의 `finally` 정리가 정상 수행된 것으로 판정한다.
+- stdout/stderr: 보안 검토가 새 command ID에 대한 별도 명시 승인을 요구해 아직 조회하지 않았다.
+- 전체 로그 조회 결과:
+  - 법령 evidence validation: `success`
+  - stage backend, law-neo4j, redis, clamav: 정상 종료 및 제거
+  - 최초 실패: `_script.sh: line 39: cd: /opt/skn27-pilot/current: No such file or directory`
+  - 종료 코드: `1`
+- 확정 원인: `/opt/skn27-pilot/current` symlink가 없는 초기 배포에서 `readlink -f`가 경로 문자열 자체를 반환했다. 스크립트가 이를 이전 release로 오판해 stage 종료 후 존재하지 않는 `/opt/skn27-pilot/current`로 이동했다.
+- 영향 범위: public symlink promotion, Google live smoke, paid non-DL smoke, paid Supervisor smoke 전에 실패했다. 유료 호출은 실행되지 않았다.
+- TDD 수정:
+  - absent current symlink를 no previous release로 처리하는 regression test가 수정 전 RED임을 확인했다.
+  - `readlink` 직후 실제 symlink가 아니면 `PREVIOUS_RELEASE=''`로 정규화했다.
+  - focused regression: `1 passed`
+  - PowerShell parser: `PASS`
+  - deployment contract suite: `131 passed`
+
+## 현재 게이트
+
+- `G0 Git/로컬 상태`: 확인 완료
+- `G1 release/seed/evidence`: 통과
+- `G2 private stage health`: 통과
+- `G3 Google 일회용 코드`: 새 코드 필요
+- `G4 public cutover 및 live/paid smoke`: 대기
+- `G5 배포 후 13개 E2E`: 대기
+
+### S3 — 실패 후 보존 상태 확인
+
+- SSM command: `99be99eb-1878-486b-a2c1-0b1da50b566a`
+- 상태: `Success`
+- 종료 코드: `0`
+- 확인 결과:
+  - current link: 없음
+  - release directory: 보존
+  - initial marker: 보존
+  - complete marker: exact manifest SHA-256 일치
+  - seed descriptor: 보존
+  - stage running containers: `0`
+- 판정: 재시도에 필요한 불변 release/seed 증거는 보존됐고, 이전 실패가 남긴 실행 중 stage는 없다.
+
+### D1 — 디스크 용량 진단
+
+- SSM command: `45f329b1-28c9-4180-af4b-d3397a743e9f`
+- 상태: `Success`
+- 종료 코드: `0`
+- filesystem: `80G` 중 `69G` 사용, `12G` 가용, 사용률 `86%`
+- inode: 사용률 `4%`
+- Docker images: `41.94GB`, 이 중 `41.26GB` reclaimable
+- Docker volumes: `7.448GB`, 이 중 `7.37GB` reclaimable
+- 판정: 디스크 압박과 정리 여지는 크지만 현재 가용 공간과 inode가 남아 있으므로 이 수치만으로 새 cutover 실패를 `ENOSPC`로 확정할 수 없다. 실패 command의 stderr에서 `no space left on device` 여부를 확인하기 전에는 Docker prune이나 volume 삭제를 실행하지 않는다.
+
+### S4 — capability 수정 전 public cutover 재시도
+
+- SSM command: `4b07a613-d56d-4716-83c0-cbfe3815b47b`
+- 상태: `Failed`
+- 종료 코드: `1`
+- evidence validation: 2회 성공
+- image pull: 성공
+- production network 및 Redis container 생성: 성공
+- 최초 서비스 실패: production Redis 재시작 루프
+- 최종 오류: `Redis did not become ready during bootstrap.`
+- public symlink, Google live smoke, paid smoke: 실행 전 실패
+- 실패 후 Google code parameter: 자동 삭제 확인
+
+### D2 — Redis 재시작 원인 확정
+
+- volume/permission snapshot: `4beb7607-fa95-4fc7-afc5-0ae45101b124`
+  - volume 및 persistence 파일 존재
+  - Redis 데이터 UID/GID: `999:1000`
+  - 구형 Redis는 별도 volume/network 사용
+- persistence integrity:
+  - 잘못된 진단 옵션 command `66ff0562-14c9-4489-b35a-e39d1ec6e8b5`: 데이터 검사 전 종료, 원본 변경 없음
+  - read-only open 제약 command `dc4b8ee5-4666-44c2-b483-cf5e419e8497`: 원본 변경 없음
+  - tmpfs 복사본 검사 `8d9b9fcc-bef5-4472-9607-1eb403a32054`: AOF/RDB 모두 valid
+- OOM/event snapshot: `0708ecc1-35f6-4c05-9bed-d5963aae834b`
+  - kernel OOM 기록 없음
+- 동일 설정 격리 재현: `c0e4470e-5c6e-4497-9a41-ed683a786378`
+  - 종료 코드 `1`
+  - 로그: `find: ./appendonlydir: Permission denied`
+- image entrypoint 확인: `790a38c7-60c1-4fb3-b99d-a882922ce9d5`
+  - Redis UID/GID: `999:1000`
+  - entrypoint가 root로 `find`/`chown` 후 Redis 사용자로 강등
+- capability 가설 검증: `edf14d65-a146-480f-a1ab-5d4149e1176c`
+  - `CHOWN`, `DAC_OVERRIDE` 추가 시 Redis 7.4.9 정상 기동
+  - `PING=PONG`
+- 확정 원인: Compose가 `cap_drop: ALL`을 적용하면서 Redis entrypoint의 기존 `700` persistence directory 탐색과 소유권 정리에 필요한 `DAC_OVERRIDE`, `CHOWN`을 복원하지 않았다. 최초 빈 volume 기동은 성공하지만 stop/start 후 실패하는 재기동 전용 결함이다.
+- TDD 수정:
+  - Redis capability contract RED 확인
+  - Redis에만 `CHOWN`, `DAC_OVERRIDE` 추가
+  - focused test `1 passed`
+  - deployment contract suite `131 passed`
+  - PowerShell parser 및 `git diff --check` 통과
+
+### S5 — Redis capability 로컬 수정 후 cutover 재시도
+
+- SSM command: `6524d02e-39ee-4500-a639-0e003c906da3`
+- 상태: `Failed`
+- 종료 코드: `1`
+- 결과: production Redis가 이전과 동일한 재시작 루프에 진입
+- 원격 staged compose 확인:
+  - SSM `7fc9bf63-4775-42fe-9794-9792b91ac390`: staged compose SHA-256 `430549fcc55c69c8b9b88946109e0b8b3553f65829d820c33e65fdccd8abc2fa`
+  - SSM `1aaf25b8-9e8d-4400-949d-fd7d182a1c81`: Redis `cap_add: [SETGID, SETUID]`
+- 확정 원인: normal promotion은 새 bundle을 S3에 업로드하지만 이미 seed/evidence가 완료된 release directory를 다시 materialize하지 않는다. 따라서 로컬 capability 수정이 staged release에 반영되지 않았고, 이전 Redis 결함이 그대로 재현됐다.
+- 판정: 이 실패는 capability 수정 자체의 실패가 아니라 immutable staged artifact와 local orchestration fix 사이의 반영 경로 부재다.
+
+### H1 — controlled staged Compose hotpatch
+
+- 최초 hotpatch `5ec35b43-1e8f-4b46-ab00-de7e935615a0`: ZIP entry를 `deploy/aws-pilot/docker-compose.pilot.yml`로 잘못 지정해 파일 교체 전 종료. rollback 상태, 운영 영향 없음.
+- bundle path 확인 `c7ff177a-a831-4a8c-9018-245e63c324fb`: 정확한 entry는 ZIP root의 `docker-compose.pilot.yml`.
+- 두 번째 hotpatch `cb00e02b-872a-4789-8ce4-8e17a0b8cab6`: CRLF 파일에 exact-line `grep -Fx` guard를 사용해 파일 교체 전 종료. rollback 상태.
+- guard 진단 `fdd0a536-58c9-4415-99bf-b0846352265b`:
+  - target/backup SHA: `430549fcc55c69c8b9b88946109e0b8b3553f65829d820c33e65fdccd8abc2fa`
+  - bundle Compose SHA: `0eb3afad2328285e8c13a52bd49ba2321c51511b6249b7f5ca829a9639fad405`
+  - bundle Redis capability: 수정값 확인
+  - residual production containers: 없음
+  - Compose config: 통과
+- CRLF-safe hotpatch `1b7c8533-f812-4486-b35b-ab6bad3194ab`:
+  - 상태: `Success`, 종료 코드 `0`
+  - 기존 Compose 백업 SHA 검증
+  - bundle Compose exact SHA 검증
+  - 원자적 단일 파일 교체
+  - 실제 stage Redis volume로 production Compose Redis 기동
+  - `REDIS_PREFLIGHT=PONG`
+  - preflight 컨테이너 및 network 정상 제거
+  - staged Compose 최종 SHA: `0eb3afad2328285e8c13a52bd49ba2321c51511b6249b7f5ca829a9639fad405`
+- 비차단 경고: Redis가 host `vm.overcommit_memory=1` 권고를 출력했다. 이번 기동과 PING에는 영향이 없었으며 cutover 후 운영 hardening 항목으로 추적한다.
+
+### S6 — Redis hotpatch 후 public cutover 및 live smoke
+
+- SSM command: `a36264d8-313c-4018-ab01-0aa8a16ce3ec`
+- 상태: `Failed`
+- 종료 코드: `1`
+- 실행 시각: `2026-08-02T02:46:41.811Z` ~ `2026-08-02T02:49:11.811Z`
+- 통과한 게이트:
+  - 법령 evidence validation 2회: `success`
+  - production Redis, ClamAV, Neo4j, backend, frontend, edge rate limit, Caddy: healthy
+  - production readiness: 통과
+  - object storage smoke: 통과
+  - Google OAuth authorization-code live smoke: exchange HTTP `200`, replay rejection 확인
+  - agent/file-scan worker 기동: 성공
+- 최초 실패:
+  - command: `smoke_supervisor_conversation_runtime`
+  - 예외: `chatbot.repositories.SessionBindingError`
+  - reason: `session_unbound`
+  - 종료: `failed to run commands: exit status 1`
+- 타임아웃 판정:
+  - SSM 상태는 `TimedOut`이 아니라 `Failed`이고 명시적인 Python 예외로 종료됐다.
+  - 배포 polling 제한은 `1800`초, Supervisor smoke 자체 제한은 `600`초다.
+  - `law_ground_search_sync` 이후 object storage와 Google OAuth smoke가 통과했으므로 해당 readiness 항목에서 멈춘 것이 아니다.
+- 확정 원인:
+  - Supervisor smoke fixture가 세션을 `metadata.guest_id`로 생성했다.
+  - 현재 repository 소유권 계약은 `metadata.auth_context.guest_id`만 canonical guest binding으로 인정한다.
+  - 따라서 요청의 검증된 guest identity와 기존 smoke 세션을 결합하지 않고 fail-closed 처리했다.
+- TDD 수정:
+  - chat 제출 직전 실제 smoke session의 canonical `auth_context`를 검사하는 regression test 추가
+  - 수정 전 RED: `auth_context`가 `None`
+  - smoke fixture에 `auth_state`, `subject_id`, `subject_type`, `guest_id`를 포함한 `auth_context` 저장
+  - focused GREEN: `1 test`, `OK`
+  - 관련 Supervisor/guest/session 회귀: `28 tests`, `OK`
+  - 전체 Django chatbot 회귀: `388 tests`, `OK`
+  - AWS pilot deployment contract: `99 passed`
+  - `git diff --check`: 통과
+- release 경계:
+  - 수정 파일은 backend image에 포함되는 management command이므로 기존 `76c713ec92d6` 이미지를 SSM으로 재시도하는 것만으로는 수정이 반영되지 않는다.
+  - 다음 단계는 수정된 backend image를 포함한 새 immutable release를 만든 뒤, 단일 SSM deployment 경로로 cutover를 다시 실행하는 것이다.
+  - Google authorization code는 재시도 시 새 일회용 code가 필요하다.
