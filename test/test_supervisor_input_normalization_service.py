@@ -85,3 +85,49 @@ def test_policy_rules_and_wiki_rule_ids_are_bidirectionally_synchronized() -> No
     )
 
     assert documented_ids == policy_ids
+
+
+def test_normalizes_registered_accident_and_objection_phrases() -> None:
+    service = _service()
+
+    result = service.normalize_supervisor_input(
+        user_text="제가 직진했고 상대 차량은 좌해전했어요. 이의 재기하고 싶어요.",
+        source_message_id="msg_normalize_1",
+    )
+
+    projected = {
+        (item["field"], item["value"]): item
+        for item in result["candidates"]
+    }
+    assert projected[("vehicle_actions.self", "straight")]["decision"] == (
+        "auto_applied"
+    )
+    assert projected[("vehicle_actions.other", "left_turn")][
+        "normalized_expression"
+    ] == "좌회전"
+    assert projected[("requested_action", "objection")]["rule_id"] == (
+        "objection.requested_action.objection.typo_01"
+    )
+    assert all(
+        item["source_message_id"] == "msg_normalize_1"
+        for item in projected.values()
+    )
+
+
+def test_normalizes_notice_typo_and_preserves_source_span() -> None:
+    service = _service()
+    text = "1챠 고지서를 받고 의견 제출을 준비 중입니다."
+
+    result = service.normalize_supervisor_input(
+        user_text=text,
+        source_message_id="msg_normalize_2",
+    )
+
+    stage = next(
+        item for item in result["candidates"] if item["field"] == "notice_stage"
+    )
+    assert stage["value"] == "first_notice"
+    assert stage["decision"] == "auto_applied"
+    assert text[stage["source_span"]["start"]:stage["source_span"]["end"]] == (
+        stage["source_text"]
+    )

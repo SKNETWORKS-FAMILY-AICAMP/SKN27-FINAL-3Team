@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import unicodedata
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,12 @@ EXPECTED_DOMAINS = frozenset({"accident", "fine_notice", "objection"})
 ALLOWED_TOKEN_CLASSES = frozenset(
     {"entity", "action", "state", "modifier", "negation", "uncertainty", "particle"}
 )
+NORMALIZED_INPUT_CONTRACT_VERSION = "normalized_supervisor_input.v1"
+MATCH_CONFIDENCE = {
+    "exact": 1.0,
+    "alias": 0.99,
+    "approved_typo": 0.99,
+}
 
 
 @lru_cache(maxsize=1)
@@ -41,6 +49,200 @@ def normalization_policy_metadata() -> dict[str, str]:
     return {
         "contract_version": str(policy["contract_version"]),
         "source": str(policy["_source"]),
+    }
+
+
+def normalize_supervisor_input(
+    *,
+    user_text: str,
+    source_message_id: str,
+) -> dict[str, Any]:
+    """Return only deterministic candidates registered in the policy."""
+
+    original = str(user_text or "")
+    normalized, original_indexes = _nfkc_with_index_map(original)
+    matches = _registered_matches(normalized)
+    selected = _prefer_longest_non_overlapping(matches)
+    return {
+        "contract_version": NORMALIZED_INPUT_CONTRACT_VERSION,
+        "policy_version": POLICY_CONTRACT_VERSION,
+        "candidates": [
+            _candidate_from_match(
+                item,
+                original=original,
+                original_indexes=original_indexes,
+                source_message_id=str(source_message_id or ""),
+            )
+            for item in selected
+        ],
+        "clarifications": [],
+    }
+
+
+def _nfkc_with_index_map(value: str) -> tuple[str, list[int]]:
+    normalized: list[str] = []
+    original_indexes: list[int] = []
+    for index, character in enumerate(value):
+        converted = unicodedata.normalize("NFKC", character)
+        for converted_character in converted:
+            if converted_character.isspace():
+                if normalized and normalized[-1] == " ":
+                    continue
+                converted_character = " "
+            normalized.append(converted_character)
+            original_indexes.append(index)
+    return "".join(normalized), original_indexes
+
+
+def _registered_matches(normalized: str) -> list[dict[str, Any]]:
+    policy = normalization_policy()
+    matches: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, int, str]] = set()
+    variant_groups = (
+        ("exact", "expressions"),
+        ("alias", "aliases"),
+        ("approved_typo", "approved_typos"),
+    )
+    for rule in policy["rules"]:
+        for match_kind, key in variant_groups:
+            for variant in rule.get(key) or []:
+                normalized_variant, _ = _nfkc_with_index_map(str(variant))
+                if not normalized_variant:
+                    continue
+                for match in re.finditer(re.escape(normalized_variant), normalized):
+                    identity = (
+                        str(rule["rule_id"]),
+                        match.start(),
+                        match.end(),
+                        match_kind,
+                    )
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    matches.append(
+                        {
+                            "rule": rule,
+                            "start": match.start(),
+                            "end": match.end(),
+                            "match_kind": match_kind,
+                            "confidence": MATCH_CONFIDENCE[match_kind],
+                        }
+                    )
+
+    matches.extend(_particle_stripped_matches(normalized, policy, seen=seen))
+    return matches
+
+
+def _particle_stripped_matches(
+    normalized: str,
+    policy: dict[str, Any],
+    *,
+    seen: set[tuple[str, int, int, str]],
+) -> list[dict[str, Any]]:
+    """Match registered one-token expressions after removing registered particles."""
+
+    particles = sorted(policy["token_classes"]["particles"], key=len, reverse=True)
+    variants: dict[str, list[tuple[dict[str, Any], str]]] = {}
+    for rule in policy["rules"]:
+        for match_kind, key in (
+            ("exact", "expressions"),
+            ("alias", "aliases"),
+            ("approved_typo", "approved_typos"),
+        ):
+            for variant in rule.get(key) or []:
+                normalized_variant, _ = _nfkc_with_index_map(str(variant))
+                if normalized_variant and " " not in normalized_variant:
+                    variants.setdefault(normalized_variant, []).append((rule, match_kind))
+
+    matches: list[dict[str, Any]] = []
+    for token_match in re.finditer(r"[가-힣A-Za-z0-9]+", normalized):
+        token = token_match.group(0)
+        for particle in particles:
+            if not token.endswith(particle):
+                continue
+            stripped = token[: -len(particle)]
+            if len(stripped) < 2:
+                continue
+            for rule, match_kind in variants.get(stripped, []):
+                start = token_match.start()
+                end = start + len(stripped)
+                identity = (str(rule["rule_id"]), start, end, match_kind)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                matches.append(
+                    {
+                        "rule": rule,
+                        "start": start,
+                        "end": end,
+                        "match_kind": match_kind,
+                        "confidence": MATCH_CONFIDENCE[match_kind],
+                    }
+                )
+            break
+    return matches
+
+
+def _prefer_longest_non_overlapping(
+    matches: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    occupied: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    ordered = sorted(
+        matches,
+        key=lambda item: (
+            -(int(item["end"]) - int(item["start"])),
+            int(item["start"]),
+            str(item["rule"]["rule_id"]),
+        ),
+    )
+    for item in ordered:
+        rule = item["rule"]
+        group = (str(rule["schema"]), str(rule["field"]))
+        span = (int(item["start"]), int(item["end"]))
+        if any(span[0] < end and start < span[1] for start, end in occupied.get(group, [])):
+            continue
+        occupied.setdefault(group, []).append(span)
+        selected.append(item)
+    return sorted(
+        selected,
+        key=lambda item: (
+            int(item["start"]),
+            int(item["end"]),
+            str(item["rule"]["field"]),
+        ),
+    )
+
+
+def _candidate_from_match(
+    item: dict[str, Any],
+    *,
+    original: str,
+    original_indexes: list[int],
+    source_message_id: str,
+) -> dict[str, Any]:
+    start = int(item["start"])
+    end = int(item["end"])
+    original_start = original_indexes[start]
+    original_end = original_indexes[end - 1] + 1
+    rule = item["rule"]
+    return {
+        "domain": str(rule["domain"]),
+        "schema": str(rule["schema"]),
+        "field": str(rule["field"]),
+        "value": str(rule["value"]),
+        "source_span": {"start": original_start, "end": original_end},
+        "source_text": original[original_start:original_end],
+        "source_message_id": source_message_id,
+        "normalized_expression": str(rule["canonical_expression"]),
+        "rule_id": str(rule["rule_id"]),
+        "token_class": str(rule["token_class"]),
+        "match_kind": str(item["match_kind"]),
+        "confidence": float(item["confidence"]),
+        "decision": str(rule["decision"]),
+        "routing_intent": str(rule.get("routing_intent") or ""),
+        "negated": False,
+        "uncertain": False,
     }
 
 
