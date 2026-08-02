@@ -11,6 +11,7 @@ from uuid import uuid4
 from django.core.management.base import BaseCommand, CommandError
 
 from chatbot import repositories
+from chatbot.object_storage import object_exists
 from chatbot.models import (
     AgentInvocation,
     AgentResult,
@@ -20,8 +21,12 @@ from chatbot.models import (
     AnalysisDisplayResult,
     AnalysisJob,
     AnalysisJobStatus,
+    ChatSession,
+    ChatSessionStatus,
     Report,
     ReportStatus,
+    UploadedFile,
+    UploadedFileStatus,
 )
 
 
@@ -126,10 +131,18 @@ class Command(BaseCommand):
         fine_notice_fixture = _fine_notice_fixture(
             str(options.get("fine_notice_fixture_s3_uri") or "")
         )
+        if not object_exists(fine_notice_fixture["object_storage"]):
+            raise CommandError(
+                "The operator-reviewed fine-notice fixture is not readable from object storage."
+            )
 
         timeout_seconds = max(1, min(int(options["timeout_seconds"] or 1), 900))
         poll_interval_seconds = max(0.0, float(options["poll_interval_seconds"] or 0.0))
         identifiers = _unique_identifiers()
+        _register_fine_notice_fixture(
+            identifiers,
+            fine_notice_fixture=fine_notice_fixture,
+        )
         payload, job_payload, server_execution_context = _smoke_payloads(
             identifiers,
             fine_notice_fixture=fine_notice_fixture,
@@ -239,6 +252,48 @@ def _fine_notice_fixture(storage_uri: str) -> dict[str, Any]:
     }
 
 
+def _register_fine_notice_fixture(
+    identifiers: dict[str, str],
+    *,
+    fine_notice_fixture: dict[str, Any],
+) -> None:
+    session = ChatSession.objects.create(
+        session_id=identifiers["session_id"],
+        owner_id=identifiers["owner_id"],
+        status=ChatSessionStatus.ACTIVE.value,
+        metadata={
+            "auth_context": {
+                "auth_state": "authenticated",
+                "subject_id": identifiers["owner_id"],
+                "subject_type": "user",
+                "user_id": identifiers["owner_id"],
+            }
+        },
+    )
+    UploadedFile.objects.create(
+        attachment_id=fine_notice_fixture["attachment_id"],
+        owner_id=identifiers["owner_id"],
+        session=session,
+        purpose="fine_notice",
+        file_type=(
+            "document"
+            if fine_notice_fixture["content_type"] == "application/pdf"
+            else "image"
+        ),
+        original_filename=fine_notice_fixture["filename"],
+        content_type=fine_notice_fixture["content_type"],
+        size_bytes=1,
+        storage_uri=fine_notice_fixture["storage_uri"],
+        privacy_risk=False,
+        status=UploadedFileStatus.READY.value,
+        scan_status="clean",
+        metadata={
+            "metadata_source": "operator_reviewed_acceptance_fixture",
+            "object_storage": fine_notice_fixture["object_storage"],
+        },
+    )
+
+
 def _smoke_payloads(
     identifiers: dict[str, str],
     *,
@@ -339,6 +394,9 @@ def _smoke_payloads(
         "analysis_plan": analysis_plan,
         "chat_response": {},
         "node_execution": {},
+        "attachments": [
+            {"attachment_id": fine_notice_fixture["attachment_id"]}
+        ],
     }
     return payload, job_payload, server_execution_context
 
