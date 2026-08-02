@@ -201,9 +201,12 @@ data "aws_iam_policy_document" "pilot_app_release" {
   }
 
   statement {
-    sid       = "ReadReleaseCommandInvocation"
-    effect    = "Allow"
-    actions   = ["ssm:GetCommandInvocation"]
+    sid    = "ManageReleaseCommandInvocation"
+    effect = "Allow"
+    actions = [
+      "ssm:CancelCommand",
+      "ssm:GetCommandInvocation",
+    ]
     resources = ["*"]
   }
 }
@@ -219,7 +222,7 @@ resource "aws_codebuild_project" "pilot_app_release" {
   count          = local.pilot_app_release_enabled ? 1 : 0
   name           = "${local.name_prefix}-pilot-app-release"
   service_role   = aws_iam_role.pilot_app_release[0].arn
-  build_timeout  = 30
+  build_timeout  = 40
   queued_timeout = 30
 
   artifacts {

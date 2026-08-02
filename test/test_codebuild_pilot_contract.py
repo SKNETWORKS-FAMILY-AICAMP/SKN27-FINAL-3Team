@@ -153,6 +153,7 @@ def test_pilot_app_release_requires_manual_approval_and_scoped_ssm_access() -> N
     release_policy = codebuild[policy_start:policy_end]
     assert '"ssm:SendCommand"' in release_policy
     assert '"ssm:GetCommandInvocation"' in release_policy
+    assert '"ssm:CancelCommand"' in release_policy
     assert 'data "aws_instance" "pilot_app_release_target"' in codebuild
     assert "data.aws_instance.pilot_app_release_target[0].arn" in release_policy
     assert "aws_instance.app.arn" not in release_policy
@@ -170,6 +171,58 @@ def test_pilot_app_release_requires_manual_approval_and_scoped_ssm_access() -> N
         "ecr:PutImage",
     ):
         assert forbidden not in release_policy
+
+
+def test_build_codebuild_role_has_no_ssm_release_permissions() -> None:
+    codebuild = (
+        ROOT / "infra" / "terraform-pilot" / "codebuild.tf"
+    ).read_text(encoding="utf-8")
+
+    build_start = codebuild.index('data "aws_iam_policy_document" "codebuild"')
+    build_end = codebuild.index(
+        'resource "aws_iam_role_policy" "codebuild"', build_start
+    )
+    build_policy = codebuild[build_start:build_end]
+
+    for forbidden in (
+        "ssm:SendCommand",
+        "ssm:GetCommandInvocation",
+        "ssm:CancelCommand",
+    ):
+        assert forbidden not in build_policy
+
+
+def test_app_release_uses_layered_ssm_and_codebuild_timeouts() -> None:
+    codebuild = (
+        ROOT / "infra" / "terraform-pilot" / "codebuild.tf"
+    ).read_text(encoding="utf-8")
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    release_start = codebuild.index(
+        'resource "aws_codebuild_project" "pilot_app_release"'
+    )
+    release_project = codebuild[release_start:]
+
+    assert "build_timeout  = 40" in release_project
+    assert "queued_timeout = 30" in release_project
+    assert "readonly ssm_timeout_seconds=1500" in runner
+    assert "readonly polling_timeout_seconds=1680" in runner
+    assert '"TimeoutSeconds": int(ssm_timeout_seconds)' in runner
+
+
+def test_app_release_collects_timeout_evidence_before_cancelling_ssm() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    timeout_branch = runner.index("SSM command exceeded")
+    evidence = runner.index("StandardOutputContent", timeout_branch)
+    cancel = runner.index("aws ssm cancel-command", evidence)
+    cancel_result = runner.index("SSM_CANCEL_STATUS=", cancel)
+
+    assert timeout_branch < evidence < cancel < cancel_result
 
 
 def test_pilot_app_release_does_not_depend_on_the_managed_ec2_resource() -> None:
@@ -271,7 +324,7 @@ def test_app_release_runner_overrides_frontend_image_ref_for_release_and_rollbac
         in runner
     )
     assert (
-        f'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${{compose[@]}}" rm -sf {runtime_services} >/dev/null 2>&1 || true'
+        f'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${{compose[@]}}" rm -sf {runtime_services} >/dev/null 2>&1'
         in runner
     )
     assert (
@@ -282,6 +335,29 @@ def test_app_release_runner_overrides_frontend_image_ref_for_release_and_rollbac
         'FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor'
         in runner
     )
+
+
+def test_app_release_reports_complete_or_incomplete_rollback() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    rollback_start = runner.index("rollback_app_release()")
+    rollback_end = runner.index("trap rollback_app_release ERR", rollback_start)
+    rollback = runner[rollback_start:rollback_end]
+
+    assert "rollback_failures=()" in rollback
+    assert "ROLLBACK_STATUS=complete" in rollback
+    assert "ROLLBACK_STATUS=incomplete" in rollback
+    for step in (
+        "restore_tag",
+        "restore_previous_evidence",
+        "remove_runtime_services",
+        "start_frontend_backend",
+        "start_workers",
+        "cleanup_seed_and_evidence",
+    ):
+        assert step in rollback
 
 
 def test_app_release_verifies_descriptor_and_switches_candidate_evidence_atomically() -> None:
