@@ -60,17 +60,6 @@ def reduce_fine_notice_intake(payload: Mapping[str, Any]) -> dict[str, Any]:
             source_message_id=source_message_id,
         )
 
-    if "attachment_available" not in slots and any(
-        isinstance(item, Mapping)
-        and str(item.get("attachment_id") or "").strip()
-        for item in payload.get("attachments") or []
-    ):
-        slots["attachment_available"] = _slot_record(
-            True,
-            source_type="server_attachment",
-            source_message_id=source_message_id,
-        )
-
     question_to_field = {
         question: field for field, question in FINE_NOTICE_QUESTIONS.items()
     }
@@ -96,12 +85,42 @@ def reduce_fine_notice_intake(payload: Mapping[str, Any]) -> dict[str, Any]:
             )
         pending_field = ""
 
+    normalized_fields: list[str] = []
+    normalized_slots = payload.get("normalized_slots")
+    normalized_slots = (
+        normalized_slots if isinstance(normalized_slots, Mapping) else {}
+    )
+    for field in FINE_NOTICE_REQUIRED_SLOTS:
+        if field in slots:
+            continue
+        record = _normalized_rule_slot(
+            field,
+            normalized_slots.get(field),
+            default_source_message_id=source_message_id,
+        )
+        if record is None:
+            continue
+        slots[field] = record
+        normalized_fields.append(field)
+
+    if "attachment_available" not in slots and any(
+        isinstance(item, Mapping)
+        and str(item.get("attachment_id") or "").strip()
+        for item in payload.get("attachments") or []
+    ):
+        slots["attachment_available"] = _slot_record(
+            True,
+            source_type="server_attachment",
+            source_message_id=source_message_id,
+        )
+
     missing_fields = [
         field for field in FINE_NOTICE_REQUIRED_SLOTS if field not in slots
     ]
     return {
         "contract_version": "fine_notice_intake.v1",
         "slots": slots,
+        "normalized_fields": normalized_fields,
         "missing_fields": missing_fields,
         "next_questions": [
             {"field": field, "question": FINE_NOTICE_QUESTIONS[field]}
@@ -138,4 +157,34 @@ def _slot_record(
         "source_message_id": source_message_id,
         "confidence": 1.0,
         "confirmed": True,
+    }
+
+
+def _normalized_rule_slot(
+    field: str,
+    value: Any,
+    *,
+    default_source_message_id: str,
+) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("source_type") != "rule_normalization":
+        return None
+    normalized_value = _slot_value(field, value.get("value"))
+    if normalized_value is None:
+        return None
+    try:
+        confidence = float(value.get("confidence"))
+    except (TypeError, ValueError):
+        return None
+    if not 0.0 <= confidence <= 1.0:
+        return None
+    return {
+        "value": normalized_value,
+        "source_type": "rule_normalization",
+        "source_message_id": str(
+            value.get("source_message_id") or default_source_message_id
+        ),
+        "confidence": confidence,
+        "confirmed": False,
     }

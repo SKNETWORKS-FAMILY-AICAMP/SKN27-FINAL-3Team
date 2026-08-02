@@ -1,0 +1,320 @@
+{
+  "contract_version": "supervisor_input_normalization_policy.v1",
+  "decisions": [
+    "auto_applied",
+    "confirmation_required",
+    "clarification_required"
+  ],
+  "domains": {
+    "accident": {
+      "schemas": {
+        "accident_fact": [
+          "road_layout",
+          "vehicle_actions.self",
+          "vehicle_actions.other",
+          "signal_priority",
+          "collision_location"
+        ]
+      }
+    },
+    "fine_notice": {
+      "schemas": {
+        "fine_notice_intake": [
+          "fine_type",
+          "notice_stage",
+          "issuing_authority",
+          "notice_date",
+          "due_date",
+          "amount",
+          "alleged_violation"
+        ]
+      }
+    },
+    "objection": {
+      "schemas": {
+        "objection_intake": [
+          "requested_action",
+          "disputed_facts",
+          "objection_reason",
+          "evidence_references",
+          "deadline_clarification_required",
+          "legal_issue_terms"
+        ]
+      }
+    }
+  },
+  "token_classes": {
+    "negation": ["않", "아니", "못", "없"],
+    "uncertainty": ["것 같다", "같아요", "아마", "모르겠다", "기억나지 않는다"],
+    "particles": ["은", "는", "이", "가", "을", "를", "에서", "에게", "으로", "로"]
+  },
+  "fuzzy_confirmation_threshold": 0.9,
+  "rules": [
+    {
+      "rule_id": "accident.road_layout.intersection.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "road_layout",
+      "value": "intersection",
+      "token_class": "entity",
+      "canonical_expression": "교차로",
+      "expressions": ["교차로"],
+      "aliases": ["사거리"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
+      "rule_id": "accident.vehicle_actions.self.straight.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "vehicle_actions.self",
+      "value": "straight",
+      "token_class": "action",
+      "canonical_expression": "본인 차량 직진",
+      "expressions": ["본인 차량 직진", "제가 직진", "저는 직진"],
+      "aliases": ["내 차 직진", "제 차 직진"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
+      "rule_id": "accident.vehicle_actions.other.left_turn.typo_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "vehicle_actions.other",
+      "value": "left_turn",
+      "token_class": "action",
+      "canonical_expression": "좌회전",
+      "expressions": ["상대 차량 좌회전"],
+      "aliases": ["상대차 좌회전", "상대는 좌회전"],
+      "approved_typos": ["상대 차량 좌해전", "상대 차량은 좌해전", "상대차 좌해전", "상대는 좌해전"],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
+      "rule_id": "accident.vehicle_actions.other.right_turn.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "vehicle_actions.other",
+      "value": "right_turn",
+      "token_class": "action",
+      "canonical_expression": "상대 차량 우회전",
+      "expressions": ["상대 차량 우회전"],
+      "aliases": ["상대차 우회전", "상대는 우회전"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
+      "rule_id": "accident.collision_location.rear_end.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "collision_location",
+      "value": "rear_end",
+      "token_class": "entity",
+      "canonical_expression": "후방 추돌",
+      "expressions": ["후방 추돌", "후미 추돌"],
+      "aliases": ["뒤에서 추돌"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
+      "rule_id": "accident.signal_priority.self_green_signal.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "signal_priority",
+      "value": "self_green_signal",
+      "token_class": "state",
+      "canonical_expression": "본인 차량 녹색 신호",
+      "expressions": ["본인 차량 녹색 신호", "제 신호는 녹색", "제가 녹색 신호"],
+      "aliases": ["내 차 녹색 신호"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
+      "rule_id": "accident.signal_priority.other_left_turn_signal.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "signal_priority",
+      "value": "other_left_turn_signal",
+      "token_class": "state",
+      "canonical_expression": "상대 차량 좌회전 신호",
+      "expressions": ["상대 차량 좌회전 신호"],
+      "aliases": ["상대 좌회전 신호"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
+      "rule_id": "fine_notice.fine_type.fine.exact_01",
+      "domain": "fine_notice",
+      "schema": "fine_notice_intake",
+      "field": "fine_type",
+      "value": "fine",
+      "token_class": "entity",
+      "canonical_expression": "과태료",
+      "expressions": ["과태료"],
+      "aliases": [],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "fine_notice.fine_type.penalty.exact_01",
+      "domain": "fine_notice",
+      "schema": "fine_notice_intake",
+      "field": "fine_type",
+      "value": "penalty",
+      "token_class": "entity",
+      "canonical_expression": "범칙금",
+      "expressions": ["범칙금"],
+      "aliases": [],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "fine_notice.notice_stage.pre_notice.exact_01",
+      "domain": "fine_notice",
+      "schema": "fine_notice_intake",
+      "field": "notice_stage",
+      "value": "pre_notice",
+      "token_class": "state",
+      "canonical_expression": "사전통지서",
+      "expressions": ["과태료 사전통지서", "사전통지서"],
+      "aliases": ["사전 통지서"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "fine_notice.notice_stage.first_notice.typo_01",
+      "domain": "fine_notice",
+      "schema": "fine_notice_intake",
+      "field": "notice_stage",
+      "value": "first_notice",
+      "token_class": "state",
+      "canonical_expression": "1차 고지서",
+      "expressions": ["1차 고지서", "제1차 고지서"],
+      "aliases": ["첫 고지서"],
+      "approved_typos": ["1챠 고지서"],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "fine_notice.notice_stage.payment_notice.exact_01",
+      "domain": "fine_notice",
+      "schema": "fine_notice_intake",
+      "field": "notice_stage",
+      "value": "payment_notice",
+      "token_class": "state",
+      "canonical_expression": "납부고지서",
+      "expressions": ["과태료 납부고지서", "납부고지서"],
+      "aliases": ["납부 고지서"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "objection.requested_action.opinion_submission.exact_01",
+      "domain": "objection",
+      "schema": "objection_intake",
+      "field": "requested_action",
+      "value": "opinion_submission",
+      "token_class": "action",
+      "canonical_expression": "의견 제출",
+      "expressions": ["의견 제출", "의견제출"],
+      "aliases": [],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "objection.requested_action.objection.typo_01",
+      "domain": "objection",
+      "schema": "objection_intake",
+      "field": "requested_action",
+      "value": "objection",
+      "token_class": "action",
+      "canonical_expression": "이의 제기",
+      "expressions": ["이의 제기", "이의신청"],
+      "aliases": ["이의를 제기"],
+      "approved_typos": ["이의 재기"],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "objection.requested_action.payment_guidance.exact_01",
+      "domain": "objection",
+      "schema": "objection_intake",
+      "field": "requested_action",
+      "value": "payment_guidance",
+      "token_class": "action",
+      "canonical_expression": "납부 안내",
+      "expressions": ["납부 안내"],
+      "aliases": ["납부 방법"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "objection.legal_issue_terms.signal_violation.exact_01",
+      "domain": "objection",
+      "schema": "objection_intake",
+      "field": "legal_issue_terms",
+      "value": "signal_violation",
+      "token_class": "entity",
+      "canonical_expression": "신호위반",
+      "expressions": ["신호위반", "신호 위반"],
+      "aliases": [],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_analysis"
+    },
+    {
+      "rule_id": "objection.legal_issue_terms.parking_violation.exact_01",
+      "domain": "objection",
+      "schema": "objection_intake",
+      "field": "legal_issue_terms",
+      "value": "parking_violation",
+      "token_class": "entity",
+      "canonical_expression": "주정차 위반",
+      "expressions": ["주정차 위반", "주정차위반", "주차 위반"],
+      "aliases": [],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_analysis"
+    },
+    {
+      "rule_id": "objection.legal_issue_terms.school_zone.exact_01",
+      "domain": "objection",
+      "schema": "objection_intake",
+      "field": "legal_issue_terms",
+      "value": "school_zone",
+      "token_class": "entity",
+      "canonical_expression": "어린이 보호구역",
+      "expressions": ["어린이 보호구역", "어린이보호구역"],
+      "aliases": ["스쿨존"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_analysis"
+    },
+    {
+      "rule_id": "objection.legal_issue_terms.driver_identity_dispute.exact_01",
+      "domain": "objection",
+      "schema": "objection_intake",
+      "field": "legal_issue_terms",
+      "value": "driver_identity_dispute",
+      "token_class": "entity",
+      "canonical_expression": "운전자 본인 여부 다툼",
+      "expressions": ["운전자 본인 여부", "운전자 신원 다툼"],
+      "aliases": ["제가 운전하지 않음", "운전자가 아님"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_analysis"
+    }
+  ]
+}

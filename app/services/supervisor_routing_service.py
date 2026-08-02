@@ -8,6 +8,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from app.services.supervisor_input_projection_service import (
+    normalization_routing_hints,
+)
+
 
 POLICY_CONTRACT_VERSION = "supervisor_routing_policy.v1"
 DOCUMENT_CLASSIFICATION_TYPES = frozenset({"image", "pdf"})
@@ -72,6 +76,8 @@ def _plans_from_policy() -> dict[str, tuple[str, ...]]:
 def route_supervisor_input(
     user_text: str,
     attachments: list[dict[str, Any]],
+    *,
+    normalized_input: dict[str, Any] | None = None,
 ) -> str:
     """Classify input with attachment rules taking precedence over text rules."""
 
@@ -94,6 +100,9 @@ def route_supervisor_input(
             return intent
         if keywords and any(keyword in normalized_text for keyword in keywords):
             return _promote_fine_notice_report_intent(intent, user_text)
+    normalized_hints = normalization_routing_hints(normalized_input or {})
+    if normalized_hints:
+        return normalized_hints[0]
     return _text(policy["default_intent"])
 
 

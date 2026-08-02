@@ -193,3 +193,22 @@ def test_uncertain_slot_values_remain_missing_instead_of_becoming_facts() -> Non
         "attachment_available",
     ]
     assert "추정" not in repr(intake)
+
+
+def test_confirmed_ocr_and_structured_slots_outrank_rule_normalization() -> None:
+    result = reduce_fine_notice_intake(
+        {
+            "message_id": "msg_notice_priority",
+            "fine_notice_slots": {"document_disposition_type": "사전통지"},
+            "normalized_slots": {
+                "document_disposition_type": {
+                    "value": "first_notice",
+                    "source_type": "rule_normalization",
+                    "confidence": 0.99,
+                    "confirmed": False,
+                }
+            },
+        }
+    )
+
+    assert result["slots"]["document_disposition_type"]["value"] == "사전통지"

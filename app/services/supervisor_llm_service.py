@@ -16,6 +16,9 @@ from app.services.supervisor_llm_contract import (
     enrich_supervisor_state,
     normalize_candidate_packages,
 )
+from app.services.supervisor_input_projection_service import (
+    policy_allowed_llm_facts,
+)
 
 
 FallbackBuilder = Callable[[dict[str, Any], str], dict[str, Any]]
@@ -462,7 +465,10 @@ def _normalize_llm_state(
 
     state = deepcopy(fallback_state)
     state["conversation_summary"] = candidate["conversation_summary"].strip()
-    state["collected_facts"] = _list_of_dicts(candidate["collected_facts"])
+    state["collected_facts"] = policy_allowed_llm_facts(
+        _list_of_dicts(candidate["collected_facts"]),
+        scenario=str(fallback_state.get("scenario") or ""),
+    )
     state["fact_conflicts"] = normalize_fact_conflicts(
         candidate["fact_conflicts"],
         default_source_message_id=default_source_message_id,

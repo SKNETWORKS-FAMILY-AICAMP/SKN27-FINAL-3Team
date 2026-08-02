@@ -59,6 +59,70 @@ def test_general_consultation_plan_does_not_default_to_law_search() -> None:
     )
 
 
+def test_registered_notice_typo_routes_to_fine_notice_procedure() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_normalized_route",
+            "user_text": "과태료 1챠 고지서를 받고 이의 재기하려고 합니다.",
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert response["input_normalization"]["contract_version"] == (
+        "normalized_supervisor_input.v1"
+    )
+
+
+def test_normalized_legal_slots_are_shared_by_agent_packages() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_normalized_legal_slots",
+            "user_text": "과태료 1챠 고지서를 받아서 이의 재기하려고 합니다.",
+        }
+    )
+
+    slot_state = response["supervisor_state"]["slot_state"]
+    assert slot_state["slots"]["fine_type"]["value"] == "fine"
+    assert slot_state["slots"]["notice_stage"]["value"] == "first_notice"
+    assert slot_state["slots"]["requested_action"]["value"] == "objection"
+    assert all(
+        package["payload"]["slot_state"] == slot_state
+        for package in response["supervisor_state"]["agent_input_packages"]
+    )
+
+
+def test_uncertain_normalized_value_stops_before_agent_plan() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_normalized_question",
+            "user_text": "범칙금인지 과태료인지 모르겠고 이의 재기하고 싶어요.",
+        }
+    )
+
+    assert response["status"] == "needs_input"
+    assert response["pending_questions"]
+    assert response["analysis_plan"]["steps"] == []
+    assert response["reporting_payload"] is None
+
+
+def test_normalizer_failure_keeps_original_routing_without_logging_raw_text(
+    monkeypatch, caplog
+) -> None:
+    marker = "과태료-private-marker"
+    monkeypatch.setattr(
+        "app.services.chat_orchestration_service.normalize_supervisor_input",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("failed")),
+    )
+
+    response = submit_message(
+        {"session_id": "ses_normalizer_error", "user_text": marker}
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert response["input_normalization"]["candidates"] == []
+    assert marker not in caplog.text
+
+
 def test_text_only_fine_notice_draft_request_enters_verified_intake_without_bypassing_ocr_gate() -> None:
     routing_intent = route_supervisor_input(
         "과태료 고지서에 대한 이의신청서 초안을 작성해 주세요.",
@@ -1181,6 +1245,47 @@ def test_fault_ratio_followup_answer_is_accumulated_before_next_question() -> No
     reduced = response["consultation_state"]["fact_state"]
     assert reduced["facts"]["road_layout"]["value"] == "신호등이 있는 사거리 교차로입니다."
     assert response["pending_questions"][0]["field"] == "vehicle_actions"
+
+
+def test_normalized_typo_fact_is_collected_and_confirmed_followup_wins() -> None:
+    first = submit_message(
+        {
+            "session_id": "ses_normalized_accident_first",
+            "user_text": "저는 직진했고 상대 차량은 좌해전했습니다.",
+        }
+    )
+    initial_fact = first["consultation_state"]["fact_state"]["facts"][
+        "vehicle_actions"
+    ]
+
+    assert initial_fact["value"] == "본인 차량 직진, 상대 차량 좌회전"
+    assert initial_fact["confirmed"] is False
+
+    followup = submit_message(
+        {
+            "session_id": "ses_normalized_accident_followup",
+            "user_text": "본인 차량 직진, 상대 차량 좌회전",
+            "fact_candidates": [initial_fact],
+            "conversation_history": [
+                {
+                    "role": "assistant",
+                    "content": "충돌 직전 양쪽 차량의 진행 방향과 행동을 알려주세요.",
+                },
+                {
+                    "role": "user",
+                    "content": "본인 차량 직진, 상대 차량 좌회전",
+                },
+            ],
+        },
+        routing_intent_override="accident_initial_consultation",
+    )
+
+    reduced = followup["consultation_state"]["fact_state"]
+    assert reduced["conflicts"] == []
+    assert reduced["facts"]["vehicle_actions"]["confirmed"] is True
+    assert reduced["facts"]["vehicle_actions"]["value"] == (
+        "본인 차량 직진, 상대 차량 좌회전"
+    )
 
 
 @patch("app.services.chat_orchestration_service.build_supervisor_state_with_optional_llm")

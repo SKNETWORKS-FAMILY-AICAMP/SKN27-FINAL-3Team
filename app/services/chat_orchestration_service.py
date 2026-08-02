@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -29,6 +30,18 @@ from app.services.supervisor_control_service import (
 from app.services.supervisor_llm_service import build_supervisor_state_with_optional_llm
 from app.services.supervisor_llm_contract import enrich_agent_package
 from app.services.supervisor_execution_input_service import canonical_attachment_selectors
+from app.services.supervisor_input_normalization_service import (
+    NORMALIZED_INPUT_CONTRACT_VERSION,
+    POLICY_CONTRACT_VERSION as NORMALIZATION_POLICY_VERSION,
+    normalize_supervisor_input,
+)
+from app.services.supervisor_input_projection_service import (
+    accident_fact_candidates,
+    accident_fact_sources,
+    fine_notice_intake_slots,
+    normalization_pending_questions,
+    normalized_slot_state,
+)
 from app.services.supervisor_routing_service import (
     BASE_NODE_PLANS,
     PUBLIC_AGENT_NODE_CODES,
@@ -40,6 +53,7 @@ from app.services.supervisor_routing_service import (
 
 # Compatibility export for callers that inspect the declarative policy.
 NODE_PLANS = BASE_NODE_PLANS
+logger = logging.getLogger(__name__)
 
 
 NO_MATCH_REPHRASE_PROMPT = (
@@ -119,6 +133,7 @@ def build_scope_guidance_response(
     user_text: str,
     attachments: list[dict[str, Any]],
     routing_intent: str = "",
+    input_normalization: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return a non-executable response when the declared service boundary applies."""
 
@@ -138,6 +153,7 @@ def build_scope_guidance_response(
         routing_intent=routing_intent,
         attachments=attachments,
         service_scope=service_scope,
+        input_normalization=input_normalization,
     )
 
 
@@ -177,7 +193,16 @@ def submit_message(
         "safe_user_text": user_text,
         "input_understanding": input_understanding["public_metadata"],
     }
-    detected_routing_intent = route_supervisor_input(user_text, attachments)
+    input_normalization = _normalize_input_safely(
+        user_text=user_text,
+        message_id=message_id,
+    )
+    payload = {**payload, "input_normalization": input_normalization}
+    detected_routing_intent = route_supervisor_input(
+        user_text,
+        attachments,
+        normalized_input=input_normalization,
+    )
     routing_intent = (
         detected_routing_intent
         if routing_intent_override in {"", "general_consultation"}
@@ -189,9 +214,24 @@ def submit_message(
         user_text=user_text,
         attachments=attachments,
         routing_intent=routing_intent,
+        input_normalization=input_normalization,
     )
     if scope_guidance is not None:
         return scope_guidance
+    normalization_questions = normalization_pending_questions(input_normalization)
+    if (
+        routing_intent != "attachment_document_classification"
+        and normalization_questions
+        and _normalization_requires_input_hold(input_normalization)
+    ):
+        return _normalization_needs_input_response(
+            session_id=session_id,
+            message_id=message_id,
+            routing_intent=routing_intent,
+            attachments=attachments,
+            input_normalization=input_normalization,
+            pending_questions=normalization_questions,
+        )
     ocr_confirmation = _normalized_ocr_confirmation(payload.get("ocr_confirmation"))
     fine_notice_intake = (
         reduce_fine_notice_intake(
@@ -200,6 +240,9 @@ def submit_message(
                 "user_text": user_text,
                 "attachments": attachments,
                 "ocr_confirmation": ocr_confirmation,
+                "normalized_slots": fine_notice_intake_slots(
+                    input_normalization
+                ),
             }
         )
         if routing_intent in {"fine_notice_procedure", "fine_notice_analysis"}
@@ -249,9 +292,19 @@ def submit_message(
             }
         )
         fact_sources = [
-            dict(item)
-            for item in payload.get("fact_sources") or []
-            if isinstance(item, dict)
+            *[
+                item
+                for item in accident_fact_sources(
+                    input_normalization,
+                    source_message_id=source_message_id,
+                )
+                if item.get("field") not in _explicit_accident_fact_fields(payload)
+            ],
+            *[
+                dict(item)
+                for item in payload.get("fact_sources") or []
+                if isinstance(item, dict)
+            ],
         ]
         consultation_state = build_consultation_state_v2(
             user_text=user_text,
@@ -321,6 +374,7 @@ def submit_message(
             promotion_gate=promotion_gate,
             supervisor_state=accident_supervisor_state,
             status=status_by_decision[promotion_gate["decision"]],
+            input_normalization=input_normalization,
         )
 
     supervisor_state = build_supervisor_state_with_optional_llm(
@@ -356,6 +410,7 @@ def submit_message(
             routing_intent=routing_intent,
             attachments=attachments,
             supervisor_state=supervisor_state,
+            input_normalization=input_normalization,
         )
     if supervisor_state.get("stage") == "need_more_input":
         return _supervisor_needs_input_response(
@@ -364,6 +419,7 @@ def submit_message(
             routing_intent=routing_intent,
             attachments=attachments,
             supervisor_state=supervisor_state,
+            input_normalization=input_normalization,
         )
     if supervisor_state.get("stage") != "agent_execution_ready":
         blocked_state = dict(supervisor_state)
@@ -384,6 +440,7 @@ def submit_message(
             routing_intent=routing_intent,
             attachments=attachments,
             supervisor_state=blocked_state,
+            input_normalization=input_normalization,
         )
     analysis_plan = _analysis_plan(
         session_id=session_id,
@@ -439,6 +496,7 @@ def submit_message(
         "scan_gate": dict(payload.get("scan_gate") or {}),
         "supervisor_state": supervisor_state,
         "fine_notice_intake": fine_notice_intake,
+        "input_normalization": input_normalization,
         "reporting_payload": supervisor_state.get("reporting_payload"),
         "analysis_plan": analysis_plan,
         "limitations": [],
@@ -726,6 +784,49 @@ def _missing_info_categories(user_text: str, attachments: list[dict[str, Any]]) 
     return missing
 
 
+def _normalize_input_safely(*, user_text: str, message_id: str) -> dict[str, Any]:
+    try:
+        return normalize_supervisor_input(
+            user_text=user_text,
+            source_message_id=message_id,
+        )
+    except Exception:
+        logger.warning(
+            "supervisor_input_normalization_failed",
+            extra={"reason_code": "normalization_unavailable"},
+        )
+        return {
+            "contract_version": NORMALIZED_INPUT_CONTRACT_VERSION,
+            "policy_version": NORMALIZATION_POLICY_VERSION,
+            "candidates": [],
+            "clarifications": [],
+        }
+
+
+def _normalization_requires_input_hold(value: Mapping[str, Any]) -> bool:
+    candidates = [
+        item for item in value.get("candidates", []) if isinstance(item, Mapping)
+    ]
+    if any(item.get("decision") != "auto_applied" for item in candidates):
+        return True
+    values_by_field: dict[str, set[str]] = {}
+    for item in candidates:
+        field = str(item.get("field") or "")
+        candidate_value = str(item.get("value") or "")
+        if field and candidate_value:
+            values_by_field.setdefault(field, set()).add(candidate_value)
+    exclusive_fields = {
+        "fine_type",
+        "notice_stage",
+        "vehicle_actions.self",
+        "vehicle_actions.other",
+    }
+    return any(
+        field in exclusive_fields and len(values) > 1
+        for field, values in values_by_field.items()
+    )
+
+
 def _needs_input_response(*, session_id: str, message_id: str) -> dict[str, Any]:
     question = "상담할 교통분쟁 내용이나 고지서 정보를 입력해 주세요."
     return {
@@ -793,6 +894,43 @@ def _input_clarification_response(
     return response
 
 
+def _normalization_needs_input_response(
+    *,
+    session_id: str,
+    message_id: str,
+    routing_intent: str,
+    attachments: list[dict[str, Any]],
+    input_normalization: dict[str, Any],
+    pending_questions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    response = _needs_input_response(session_id=session_id, message_id=message_id)
+    question = str(pending_questions[0]["question"])
+    response.update(
+        {
+            "routing_intent": routing_intent,
+            "status": "needs_input",
+            "assistant_message": {"answer": question, "summary": question},
+            "progress": {
+                "status": "needs_input",
+                "active_node": "",
+                "message": question,
+            },
+            "pending_questions": pending_questions,
+            "attachments": attachments,
+            "input_normalization": input_normalization,
+            "reporting_payload": None,
+        }
+    )
+    response["analysis_plan"].update(
+        {
+            "routing_intent": routing_intent,
+            "status": "needs_input",
+            "steps": [],
+        }
+    )
+    return response
+
+
 def _merge_fine_notice_questions(
     existing: Any,
     intake: Mapping[str, Any] | None,
@@ -825,9 +963,10 @@ def _scope_guidance_response(
     routing_intent: str,
     attachments: list[dict[str, Any]],
     service_scope: dict[str, Any],
+    input_normalization: dict[str, Any] | None,
 ) -> dict[str, Any]:
     message = str(service_scope["reason"])
-    return {
+    response = {
         "contract_version": "chat_message_accepted.v2",
         "message_id": message_id,
         "session_id": session_id,
@@ -856,6 +995,9 @@ def _scope_guidance_response(
         "limitations": list(service_scope["limitations"]),
         "next_actions": list(service_scope["next_actions"]),
     }
+    if input_normalization is not None:
+        response["input_normalization"] = input_normalization
+    return response
 
 
 def _supervisor_unavailable_response(
@@ -865,6 +1007,7 @@ def _supervisor_unavailable_response(
     routing_intent: str,
     attachments: list[dict[str, Any]],
     supervisor_state: dict[str, Any],
+    input_normalization: dict[str, Any],
 ) -> dict[str, Any]:
     message = "Supervisor planning is temporarily unavailable. Please retry shortly."
     return {
@@ -882,6 +1025,7 @@ def _supervisor_unavailable_response(
         "attachments": attachments,
         "blocked_attachments": [],
         "supervisor_state": supervisor_state,
+        "input_normalization": input_normalization,
         "reporting_payload": None,
         "analysis_plan": {
             "contract_version": "analysis_plan.v2",
@@ -905,6 +1049,7 @@ def _supervisor_needs_input_response(
     routing_intent: str,
     attachments: list[dict[str, Any]],
     supervisor_state: dict[str, Any],
+    input_normalization: dict[str, Any],
 ) -> dict[str, Any]:
     response = _needs_input_response(session_id=session_id, message_id=message_id)
     pending_questions = [
@@ -930,6 +1075,7 @@ def _supervisor_needs_input_response(
             "pending_questions": pending_questions,
             "attachments": attachments,
             "supervisor_state": sanitized_state,
+            "input_normalization": input_normalization,
             "reporting_payload": None,
         }
     )
@@ -953,6 +1099,7 @@ def _consultation_hold_response(
     promotion_gate: dict[str, Any],
     supervisor_state: dict[str, Any],
     status: str,
+    input_normalization: dict[str, Any],
 ) -> dict[str, Any]:
     high_risk = status == "high_risk_handoff"
     pending_questions = list(consultation_state.get("next_questions") or [])
@@ -977,6 +1124,7 @@ def _consultation_hold_response(
         "attachments": [],
         "blocked_attachments": [],
         "supervisor_state": supervisor_state,
+        "input_normalization": input_normalization,
         "reporting_payload": None,
         "consultation_state": {
             "v2": consultation_state,
@@ -1107,6 +1255,9 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
     )
     node_codes = plan_node_codes(routing_intent, report_requested=report_requested)
     public_node_codes = [code for code in node_codes if code in PUBLIC_AGENT_NODE_CODES]
+    projected_slot_state = normalized_slot_state(
+        payload.get("input_normalization") or {}
+    )
     slot_state = {
         "contract_version": "slot_filling_state.v1",
         "slots": {
@@ -1118,7 +1269,8 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
                 },
                 "confidence": 1.0,
                 "editable": True,
-            }
+            },
+            **dict(projected_slot_state.get("slots") or {}),
         },
     }
     return {
@@ -1161,6 +1313,7 @@ def _fallback_accident_supervisor_state(
     payload: dict[str, Any],
     routing_intent: str,
 ) -> dict[str, Any]:
+    explicit_fact_fields = _explicit_accident_fact_fields(payload)
     fact_state = reduce_consultation_fact_state(
         {
             **payload,
@@ -1170,10 +1323,18 @@ def _fallback_accident_supervisor_state(
                     for item in payload.get("fact_candidates") or []
                     if isinstance(item, dict)
                 ],
-                *_same_message_accident_fact_candidates(
-                    str(payload.get("user_text") or ""),
-                    str(payload.get("message_id") or payload.get("session_id") or ""),
-                ),
+                *[
+                    item
+                    for item in accident_fact_candidates(
+                        payload.get("input_normalization") or {},
+                        source_message_id=str(
+                            payload.get("message_id")
+                            or payload.get("session_id")
+                            or ""
+                        ),
+                    )
+                    if item.get("field") not in explicit_fact_fields
+                ],
             ],
         }
     )
@@ -1224,28 +1385,16 @@ def _fallback_accident_supervisor_state(
     }
 
 
-def _same_message_accident_fact_candidates(
-    user_text: str,
-    source_message_id: str,
-) -> list[dict[str, Any]]:
-    text = str(user_text or "")
-    has_self_straight = bool(
-        re.search(r"(?:저는|제가|나는|내가|제\s*차(?:량)?)\s*[^.!?]{0,20}직진", text)
-    )
-    has_other_left_turn = bool(
-        re.search(r"상대(?:방|차|차량)?(?:는|가)?\s*[^.!?]{0,24}좌회전", text)
-    )
-    if not has_self_straight or not has_other_left_turn:
-        return []
-    return [
-        {
-            "field": "vehicle_actions",
-            "value": "본인 차량 직진, 상대 차량 좌회전",
-            "source_message_id": source_message_id,
-            "confidence": 0.9,
-            "confirmed": False,
-        }
-    ]
+def _explicit_accident_fact_fields(payload: Mapping[str, Any]) -> set[str]:
+    facts = payload.get("facts")
+    if not isinstance(facts, Mapping):
+        return set()
+    allowed = {field for field, _question in CORE_FACT_QUESTIONS}
+    return {
+        str(field)
+        for field, value in facts.items()
+        if str(field) in allowed and str(value or "").strip()
+    }
 
 
 def _analysis_plan(
