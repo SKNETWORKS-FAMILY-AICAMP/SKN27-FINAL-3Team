@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly timeout_seconds=1800
+readonly ssm_timeout_seconds=1500
+readonly polling_timeout_seconds=1680
 readonly poll_seconds=10
 
 require_env() {
@@ -198,15 +199,42 @@ restore_tag() {
   sed -i "s/^RELEASE_TAG=.*/RELEASE_TAG=$previous_tag/" .compose.env
 }
 
+remove_runtime_services() {
+  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" rm -sf backend frontend agent-worker file-scan-worker ops-monitor >/dev/null 2>&1
+}
+
+start_frontend_backend() {
+  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend >/dev/null 2>&1
+}
+
+start_workers() {
+  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor >/dev/null 2>&1
+}
+
+record_rollback_step() {
+  local step="$1"
+  shift
+  if ! "$@"; then
+    rollback_failures+=("$step")
+    echo "Rollback step failed: $step" >&2
+  fi
+}
+
 rollback_app_release() {
   local status=$?
+  local rollback_failures=()
   trap - ERR
-  restore_tag
-  restore_previous_evidence 2>/dev/null || true
-  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" rm -sf backend frontend agent-worker file-scan-worker ops-monitor >/dev/null 2>&1 || true
-  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps backend frontend >/dev/null 2>&1 || true
-  FRONTEND_IMAGE_REF="$rollback_frontend_image_ref" "${compose[@]}" up -d --no-deps agent-worker file-scan-worker ops-monitor >/dev/null 2>&1 || true
-  cleanup_seed_and_evidence 2>/dev/null || true
+  record_rollback_step restore_tag restore_tag
+  record_rollback_step restore_previous_evidence restore_previous_evidence
+  record_rollback_step remove_runtime_services remove_runtime_services
+  record_rollback_step start_frontend_backend start_frontend_backend
+  record_rollback_step start_workers start_workers
+  record_rollback_step cleanup_seed_and_evidence cleanup_seed_and_evidence
+  if (( ${#rollback_failures[@]} == 0 )); then
+    echo "ROLLBACK_STATUS=complete" >&2
+  else
+    printf 'ROLLBACK_STATUS=incomplete steps=%s\n' "${rollback_failures[*]}" >&2
+  fi
   exit "$status"
 }
 
@@ -260,17 +288,18 @@ remote_script="${remote_script//__BACKEND_REPOSITORY__/$BACKEND_REPOSITORY_URL}"
 remote_script="${remote_script//__FRONTEND_REPOSITORY__/$FRONTEND_REPOSITORY_URL}"
 remote_script="${remote_script//__AWS_REGION__/$AWS_DEFAULT_REGION}"
 
-python3 - "$request_path" "$PILOT_INSTANCE_ID" "$remote_script" <<'PY'
+python3 - "$request_path" "$PILOT_INSTANCE_ID" "$remote_script" "$ssm_timeout_seconds" <<'PY'
 import json
 import sys
 
-request_path, instance_id, command = sys.argv[1:]
+request_path, instance_id, command, ssm_timeout_seconds = sys.argv[1:]
 with open(request_path, "w", encoding="utf-8") as handle:
     json.dump(
         {
             "DocumentName": "AWS-RunShellScript",
             "InstanceIds": [instance_id],
             "Comment": "Release immutable Pilot app images",
+            "TimeoutSeconds": int(ssm_timeout_seconds),
             "Parameters": {"commands": [command]},
         },
         handle,
@@ -284,7 +313,7 @@ command_id="$(aws ssm send-command \
   --output text \
   --no-cli-pager)"
 
-deadline=$((SECONDS + timeout_seconds))
+deadline=$((SECONDS + polling_timeout_seconds))
 while (( SECONDS < deadline )); do
   status="$(aws ssm get-command-invocation \
     --region "$AWS_DEFAULT_REGION" \
@@ -313,9 +342,21 @@ while (( SECONDS < deadline )); do
   sleep "$poll_seconds"
 done
 
-aws ssm cancel-command \
+echo "SSM command exceeded ${polling_timeout_seconds} seconds." >&2
+aws ssm get-command-invocation \
   --region "$AWS_DEFAULT_REGION" \
   --command-id "$command_id" \
-  --no-cli-pager >/dev/null
-echo "Pilot app release SSM command exceeded $timeout_seconds seconds." >&2
+  --instance-id "$PILOT_INSTANCE_ID" \
+  --query '{Status:Status,StandardOutputContent:StandardOutputContent,StandardErrorContent:StandardErrorContent}' \
+  --output json \
+  --no-cli-pager >&2 || true
+
+if aws ssm cancel-command \
+  --region "$AWS_DEFAULT_REGION" \
+  --command-id "$command_id" \
+  --no-cli-pager >/dev/null; then
+  echo "SSM_CANCEL_STATUS=complete" >&2
+else
+  echo "SSM_CANCEL_STATUS=incomplete" >&2
+fi
 exit 1

@@ -76,6 +76,18 @@ immutable commit tag가 올라간 경우에만 사용한다.
    rollback 한다. SSM 결과와 Deploy CodeBuild log를 보관하고, 새 승인은 문제를
    해결한 commit에서만 다시 진행한다.
 
+Release timeout은 안쪽 단계가 먼저 종료되도록 계층화한다. SSM command는 최대
+1,500초, release runner polling은 최대 1,680초, Deploy CodeBuild는 최대 40분이다.
+polling timeout이 발생하면 runner는 SSM stdout/stderr를 수집한 뒤 command 취소를
+시도한다. Deploy CodeBuild log에서 `SSM_CANCEL_STATUS=complete` 또는
+`SSM_CANCEL_STATUS=incomplete`를 확인한다.
+
+원격 전환 실패 시 rollback은 evidence 복원과 서비스별 복구를 끝까지 시도한다.
+`ROLLBACK_STATUS=complete`는 모든 복구 단계가 성공했다는 의미이고,
+`ROLLBACK_STATUS=incomplete steps=...`는 나열된 단계에 수동 개입이 필요하다는
+의미다. incomplete 상태에서는 Pipeline을 다시 승인하지 말고 대상 EC2의 현재
+release tag, backend/frontend/worker 컨테이너와 shared evidence를 먼저 확인한다.
+
 이 경로는 RAG seed, paid smoke, Vision Worker, DB schema 변경, Compose 또는 Caddy
 변경을 실행하지 않는다. 위 항목이나 법령/그래프 적재가 필요한 release는 반드시
 기존 `Deploy-Pilot.ps1`의 검토된 전체 절차를 사용한다.
