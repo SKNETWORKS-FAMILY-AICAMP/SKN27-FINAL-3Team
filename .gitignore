@@ -77,6 +77,8 @@ storage/vision/models/**/*.safetensors
 # Generated PDF/export scratch artifacts not already tracked
 output/pdf/SKN27_*.pdf
 output/pptx/*.inspect.ndjson
+output/pdf/pilot-fine-notice-prior-notice-valid-through-20260831-v1.pdf
+output/pdf/pilot-fine-notice-prior-notice-valid-through-20260831-v1.png
 
 # Ponytail Skills
 .agents/
