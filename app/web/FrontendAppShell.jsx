@@ -11,6 +11,7 @@ import { shouldDiscardRejectedChatInput } from "./chatPrivacyUi.js";
 import {
   createNewConversationResetState,
   issueNewConversationSession,
+  submitWithGuestSessionRecovery,
 } from "./newConversationState.js";
 import {
   buildAuthContext,
@@ -34,7 +35,10 @@ import {
   buildConsultationRequestContext,
   createEmptyConsultationIntake,
 } from "./consultationIntake.js";
-import { shouldPromptGuestConversationSave } from "./guestConversationPolicy.js";
+import {
+  guestConversationFailureState,
+  shouldPromptGuestConversationSave,
+} from "./guestConversationPolicy.js";
 import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
 import { pollWorkerResult } from "./workerPolling.js";
 import {
@@ -50,14 +54,6 @@ const TAB_ROUTES = [
   { id: "reporting", label: "리포트" },
 ];
 
-const FALLBACK_ANALYSIS_CARDS = [
-  {
-    card_type: "상담 접수",
-    title: "입력 내용을 확인했습니다",
-    status: "partial",
-    summary: "상담 입력을 접수했습니다. 자료 분석은 로그인 후 이어서 진행할 수 있습니다.",
-  },
-];
 const EXECUTION_MODE = "async_worker";
 const WORKER_POLL_INTERVAL_MS = 500;
 const WORKER_POLL_MAX_ATTEMPTS = 60;
@@ -1356,29 +1352,47 @@ export default function FrontendAppShell({
         executionMode,
         sessionId: activeSession,
       });
-      const result = await api.submitChatMessage(
-        {
-          session_id: activeSession,
-          auth_context: activeAuthContext,
-          conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
-          user_text: composedQuestion,
-          consultation_type: consultationRequestContext.consultation_type || undefined,
-          facts: consultationRequestContext.facts,
-          fine_notice_slots: consultationRequestContext.fine_notice_slots,
-          ocr_confirmation: confirmationForRequest || undefined,
-          attachment_classification_confirmation:
-            attachmentClassificationConfirmation || undefined,
-          execution_mode: executionMode,
-          conversation_history: requestConversationHistory,
-          attachments: registeredAttachments.map((attachment) => ({
-            attachment_id: attachment.attachment_id,
-            purpose: attachment.purpose,
-            type: attachment.type,
-            storage_uri: attachment.storage_uri,
-          })),
-        },
-        submitIdentity
-      );
+      const chatPayload = {
+        session_id: activeSession,
+        auth_context: activeAuthContext,
+        conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
+        user_text: composedQuestion,
+        consultation_type: consultationRequestContext.consultation_type || undefined,
+        facts: consultationRequestContext.facts,
+        fine_notice_slots: consultationRequestContext.fine_notice_slots,
+        ocr_confirmation: confirmationForRequest || undefined,
+        attachment_classification_confirmation:
+          attachmentClassificationConfirmation || undefined,
+        execution_mode: executionMode,
+        conversation_history: requestConversationHistory,
+        attachments: registeredAttachments.map((attachment) => ({
+          attachment_id: attachment.attachment_id,
+          purpose: attachment.purpose,
+          type: attachment.type,
+          storage_uri: attachment.storage_uri,
+        })),
+      };
+      const submission = await submitWithGuestSessionRecovery({
+        currentSessionId: activeSession,
+        identity: submitIdentity,
+        payload: chatPayload,
+        createSession: () => api.createChatSession({}, submitIdentity),
+        submitMessage: (payload) => api.submitChatMessage(payload, submitIdentity),
+      });
+      const result = submission.result;
+      if (submission.recovered) {
+        const stored = readStoredAuthSession();
+        setSessionId(submission.sessionId);
+        persistAuthSession({
+          accessToken: activeAuthToken,
+          authSessionId: effectiveAuthSessionId,
+          guestId: activeGuestId,
+          guestCredential: activeGuestCredential,
+          googleProfile: readStoredGoogleProfile(),
+          sessionId: submission.sessionId,
+          userId: stored.user_id,
+        });
+      }
       const workerResult = await pollQueuedWorkerResult(result, submitIdentity);
       logDeveloperDiagnostic("chat.result", buildDeveloperDiagnostic(workerResult));
       const responsePresentation = normalizeChatResponsePresentation(workerResult);
@@ -1469,14 +1483,10 @@ export default function FrontendAppShell({
           pending_questions: [],
         },
       ]);
-      setAnalysisResponse(
-        isRateLimitExceeded || discardRejectedInput
-          ? null
-          : { cards: FALLBACK_ANALYSIS_CARDS }
-      );
-      setSavePromptVisible(
-        !isRateLimitExceeded && !discardRejectedInput && !authSessionId
-      );
+      const failureState = guestConversationFailureState();
+      setAnalysisResponse(failureState.analysisResponse);
+      setSavePromptVisible(failureState.savePromptVisible);
+      setGuestDetailedReportUsed(failureState.guestDetailedReportUsed);
       setStatusMessage(errorMessage);
     } finally {
       setIsSubmitting(false);

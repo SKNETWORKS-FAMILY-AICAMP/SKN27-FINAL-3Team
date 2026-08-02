@@ -22,6 +22,48 @@ export async function issueNewConversationSession({
   return nextSessionId;
 }
 
+export async function submitWithGuestSessionRecovery({
+  currentSessionId,
+  identity = {},
+  payload = {},
+  createSession,
+  submitMessage,
+} = {}) {
+  if (typeof submitMessage !== "function") {
+    throw new TypeError("A chat-message submitter is required.");
+  }
+
+  try {
+    return {
+      recovered: false,
+      result: await submitMessage(payload),
+      sessionId: currentSessionId,
+    };
+  } catch (error) {
+    if (!isRecoverableGuestSessionAccessError(error, identity, currentSessionId)) {
+      throw error;
+    }
+
+    const nextSessionId = await issueNewConversationSession({
+      currentSessionId,
+      createSession,
+    });
+    const retryPayload = {
+      ...payload,
+      session_id: nextSessionId,
+      auth_context: {
+        ...(payload.auth_context || {}),
+        session_id: nextSessionId,
+      },
+    };
+    return {
+      recovered: true,
+      result: await submitMessage(retryPayload),
+      sessionId: nextSessionId,
+    };
+  }
+}
+
 export function createNewConversationResetState() {
   return {
     acknowledgedAppealKey: "",
@@ -55,4 +97,16 @@ function conversationSessionError(code, message) {
   const error = new Error(message);
   error.code = code;
   return error;
+}
+
+function isRecoverableGuestSessionAccessError(error, identity, currentSessionId) {
+  return Boolean(
+    currentSessionId &&
+    identity?.guestId &&
+    identity?.guestCredential &&
+    !identity?.authSessionId &&
+    Number(error?.status) === 403 &&
+    error?.code === "object_access_denied" &&
+    error?.requiredAction === "login_or_owner_match"
+  );
 }

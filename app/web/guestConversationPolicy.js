@@ -7,3 +7,11 @@ export function shouldPromptGuestConversationSave({ authSessionId = "", result =
     result?.persistence?.job_id || result?.session_id || result?.message_id,
   );
 }
+
+export function guestConversationFailureState() {
+  return {
+    analysisResponse: null,
+    guestDetailedReportUsed: false,
+    savePromptVisible: false,
+  };
+}
