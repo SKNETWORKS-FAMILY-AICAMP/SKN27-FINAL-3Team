@@ -1504,6 +1504,8 @@ def _run_appeal_decision_flow_adapter(
             "next_actions": ["check_appeal_decision_agent_output"],
             "limitations": ["The appeal decision graph did not return a complete envelope."],
         }
+    raw_output = deepcopy(raw_output)
+    raw_output["evidence"] = _appeal_decision_evidence(raw_output, agent_input)
     return _complete_adapter_output(
         raw_output,
         node=adapter_context["node"],
@@ -1543,6 +1545,32 @@ def _appeal_decision_state(agent_input: dict[str, Any]) -> dict[str, Any]:
         state["user_appeal_reason"] = str(agent_input["user_text"])
     state["agent_results"] = {}
     return state
+
+
+def _appeal_decision_evidence(
+    raw_output: dict[str, Any],
+    agent_input: dict[str, Any],
+) -> list[dict[str, Any]]:
+    records = [
+        deepcopy(item)
+        for item in raw_output.get("evidence") or []
+        if isinstance(item, dict)
+    ]
+    upstream_results = (
+        agent_input.get("upstream_results")
+        if isinstance(agent_input.get("upstream_results"), dict)
+        else {}
+    )
+    for node_code in ("fine_notice_analysis", "law_ground_search"):
+        output = upstream_results.get(node_code)
+        if not isinstance(output, dict) or output.get("status") not in {"success", "partial"}:
+            continue
+        records.extend(
+            deepcopy(item)
+            for item in output.get("evidence") or []
+            if isinstance(item, dict)
+        )
+    return _dedupe_evidence_records(records)
 
 
 def _run_fine_notice_analysis_adapter(
@@ -1601,6 +1629,17 @@ def _run_fine_notice_analysis_adapter(
     raw_output = _apply_ocr_confirmation_to_fine_notice_output(
         raw_output,
         agent_input=agent_input,
+    )
+    raw_output = deepcopy(raw_output)
+    raw_output["evidence"] = _dedupe_evidence_records(
+        [
+            *[
+                deepcopy(item)
+                for item in raw_output.get("evidence") or []
+                if isinstance(item, dict)
+            ],
+            *_fine_notice_evidence_records(agent_input),
+        ]
     )
     return _complete_adapter_output(
         raw_output,
@@ -1931,6 +1970,53 @@ def _fine_notice_state(agent_input: dict[str, Any]) -> dict[str, Any]:
         "agent_results": {},
         "_input_source": input_source if notice_image else "missing",
     }
+
+
+def _fine_notice_evidence_records(agent_input: dict[str, Any]) -> list[dict[str, Any]]:
+    attachment = next(
+        (
+            item
+            for item in agent_input.get("attachments") or []
+            if isinstance(item, dict)
+            and item.get("purpose") == "fine_notice"
+            and str(item.get("attachment_id") or "").strip()
+        ),
+        None,
+    )
+    if attachment is None:
+        return []
+    metadata = {
+        "attachment_id": str(attachment.get("attachment_id") or ""),
+        "storage_uri": str(attachment.get("storage_uri") or ""),
+        "content_type": str(
+            attachment.get("content_type") or attachment.get("mime_type") or ""
+        ),
+        "purpose": "fine_notice",
+    }
+    return [
+        {
+            "source_type": "user_uploaded_file",
+            "title": "과태료 고지서 첨부파일",
+            "source_reference": metadata["attachment_id"],
+            "metadata": metadata,
+            "confidence": None,
+        }
+    ]
+
+
+def _dedupe_evidence_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in records:
+        source_reference = str(item.get("source_reference") or "").strip()
+        if not source_reference:
+            continue
+        key = (str(item.get("source_type") or ""), source_reference)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(deepcopy(item))
+    return deduped
 
 
 def _attachment_base64(attachment: dict[str, Any]) -> str | None:
