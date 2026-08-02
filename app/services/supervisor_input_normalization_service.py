@@ -6,6 +6,7 @@ import json
 import os
 import re
 import unicodedata
+from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -62,20 +63,46 @@ def normalize_supervisor_input(
     original = str(user_text or "")
     normalized, original_indexes = _nfkc_with_index_map(original)
     matches = _registered_matches(normalized)
+    matches.extend(_contextual_vehicle_action_matches(normalized))
     selected = _prefer_longest_non_overlapping(matches)
-    return {
-        "contract_version": NORMALIZED_INPUT_CONTRACT_VERSION,
-        "policy_version": POLICY_CONTRACT_VERSION,
-        "candidates": [
+    candidates = [
+        _apply_semantic_guards(
             _candidate_from_match(
                 item,
                 original=original,
                 original_indexes=original_indexes,
                 source_message_id=str(source_message_id or ""),
-            )
-            for item in selected
-        ],
-        "clarifications": [],
+            ),
+            normalized=normalized,
+            start=int(item["start"]),
+            end=int(item["end"]),
+        )
+        for item in selected
+    ]
+    clarifications = [
+        _clarification_from_candidate(candidate)
+        for candidate in candidates
+        if candidate["decision"] != "auto_applied"
+    ]
+    if "고지서" in normalized and not any(
+        candidate["field"] == "notice_stage" for candidate in candidates
+    ):
+        clarifications.append(
+            {
+                "domain": "fine_notice",
+                "schema": "fine_notice_intake",
+                "field": "notice_stage",
+                "value": None,
+                "decision": "clarification_required",
+                "reason": "ambiguous_notice_stage",
+                "source_message_id": str(source_message_id or ""),
+            }
+        )
+    return {
+        "contract_version": NORMALIZED_INPUT_CONTRACT_VERSION,
+        "policy_version": POLICY_CONTRACT_VERSION,
+        "candidates": candidates,
+        "clarifications": clarifications,
     }
 
 
@@ -183,6 +210,148 @@ def _particle_stripped_matches(
     return matches
 
 
+def _contextual_vehicle_action_matches(normalized: str) -> list[dict[str, Any]]:
+    """Match an action only when the same clause identifies the vehicle."""
+
+    policy = normalization_policy()
+    rules_by_field: dict[str, list[dict[str, Any]]] = {}
+    for rule in policy["rules"]:
+        field = str(rule["field"])
+        if field in {"vehicle_actions.self", "vehicle_actions.other"}:
+            rules_by_field.setdefault(field, []).append(rule)
+
+    matches: list[dict[str, Any]] = []
+    for clause_start, clause_end in _clause_ranges(normalized):
+        clause = normalized[clause_start:clause_end]
+        tokens = list(re.finditer(r"[가-힣A-Za-z0-9]+", clause))
+        for subject_index, subject_match in enumerate(tokens):
+            subject = _strip_registered_particle(subject_match.group(0), policy)
+            field = _vehicle_action_field_for_subject(subject_match.group(0), subject)
+            if not field:
+                continue
+            possible: list[dict[str, Any]] = []
+            for token_match in tokens[subject_index + 1:subject_index + 4]:
+                for rule in rules_by_field.get(field, []):
+                    action = str(rule["canonical_expression"]).split()[-1]
+                    observed_token = token_match.group(0)
+                    if len(observed_token) < len(action):
+                        continue
+                    observed_action = observed_token[:len(action)]
+                    if not observed_action.startswith(action[0]):
+                        continue
+                    start = clause_start + token_match.start()
+                    end = start + len(observed_action)
+                    if observed_action == action:
+                        possible.append(
+                            {
+                                "rule": rule,
+                                "start": start,
+                                "end": end,
+                                "match_kind": "alias",
+                                "confidence": MATCH_CONFIDENCE["alias"],
+                            }
+                        )
+                        continue
+
+                    observed_phrase = _normalized_phrase_for_fuzzy_match(
+                        tokens[subject_index:tokens.index(token_match) + 1],
+                        policy,
+                        final_token=observed_action,
+                    )
+                    best_ratio = max(
+                        (
+                            _fuzzy_ratio(
+                                observed_phrase,
+                                _normalized_policy_variant(variant, policy),
+                            )
+                            for key in ("expressions", "aliases")
+                            for variant in rule.get(key) or []
+                        ),
+                        default=0.0,
+                    )
+                    if best_ratio >= float(policy["fuzzy_confirmation_threshold"]):
+                        possible.append(
+                            {
+                                "rule": rule,
+                                "start": start,
+                                "end": end,
+                                "match_kind": "fuzzy",
+                                "confidence": round(best_ratio, 4),
+                            }
+                        )
+
+            if not possible:
+                continue
+            highest = max(float(item["confidence"]) for item in possible)
+            best = [item for item in possible if float(item["confidence"]) == highest]
+            identities = {
+                (str(item["rule"]["field"]), str(item["rule"]["value"]))
+                for item in best
+            }
+            if len(identities) == 1:
+                matches.append(best[0])
+    return matches
+
+
+def _clause_ranges(value: str) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    for boundary in re.finditer(r"[.!?。！？\n]+|그리고|하지만|그러나|다만", value):
+        if boundary.start() > start:
+            ranges.append((start, boundary.start()))
+        start = boundary.end()
+    if start < len(value):
+        ranges.append((start, len(value)))
+    return ranges or [(0, len(value))]
+
+
+def _strip_registered_particle(token: str, policy: dict[str, Any]) -> str:
+    for particle in sorted(
+        policy["token_classes"]["particles"], key=len, reverse=True
+    ):
+        if token.endswith(particle) and len(token) - len(particle) >= 2:
+            return token[:-len(particle)]
+    return token
+
+
+def _vehicle_action_field_for_subject(raw: str, stripped: str) -> str | None:
+    if raw in {"제가", "저는"} or stripped in {"저", "본인", "내", "제"}:
+        return "vehicle_actions.self"
+    if raw.startswith("상대") or stripped.startswith("상대"):
+        return "vehicle_actions.other"
+    return None
+
+
+def _normalized_phrase_for_fuzzy_match(
+    token_matches: list[re.Match[str]],
+    policy: dict[str, Any],
+    *,
+    final_token: str,
+) -> str:
+    tokens = [
+        _strip_registered_particle(match.group(0), policy)
+        for match in token_matches[:-1]
+    ]
+    tokens.append(final_token)
+    return " ".join(tokens)
+
+
+def _normalized_policy_variant(value: str, policy: dict[str, Any]) -> str:
+    normalized, _ = _nfkc_with_index_map(str(value))
+    return " ".join(
+        _strip_registered_particle(match.group(0), policy)
+        for match in re.finditer(r"[가-힣A-Za-z0-9]+", normalized)
+    )
+
+
+def _fuzzy_ratio(left: str, right: str) -> float:
+    return SequenceMatcher(
+        None,
+        unicodedata.normalize("NFD", left),
+        unicodedata.normalize("NFD", right),
+    ).ratio()
+
+
 def _prefer_longest_non_overlapping(
     matches: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -243,6 +412,70 @@ def _candidate_from_match(
         "routing_intent": str(rule.get("routing_intent") or ""),
         "negated": False,
         "uncertain": False,
+    }
+
+
+def _apply_semantic_guards(
+    candidate: dict[str, Any],
+    *,
+    normalized: str,
+    start: int,
+    end: int,
+) -> dict[str, Any]:
+    clause_start, clause_end = _clause_range_for_span(normalized, start, end)
+    relative_start = start - clause_start
+    relative_end = end - clause_start
+    clause = normalized[clause_start:clause_end]
+    before = clause[max(0, relative_start - 8):relative_start]
+    after = clause[relative_end:relative_end + 12]
+    local_context = f"{before}{after}"
+    token_classes = normalization_policy()["token_classes"]
+    negated = any(token in local_context for token in token_classes["negation"])
+    uncertain = any(
+        token in local_context for token in token_classes["uncertainty"]
+    )
+    decision = str(candidate["decision"])
+    if candidate.get("match_kind") == "fuzzy":
+        decision = "confirmation_required"
+    if negated:
+        decision = "clarification_required"
+    elif uncertain:
+        decision = "confirmation_required"
+    return {
+        **candidate,
+        "negated": negated,
+        "uncertain": uncertain,
+        "decision": decision,
+    }
+
+
+def _clause_range_for_span(
+    value: str,
+    start: int,
+    end: int,
+) -> tuple[int, int]:
+    for clause_start, clause_end in _clause_ranges(value):
+        if clause_start <= start and end <= clause_end:
+            return clause_start, clause_end
+    return 0, len(value)
+
+
+def _clarification_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "domain": candidate["domain"],
+        "schema": candidate["schema"],
+        "field": candidate["field"],
+        "value": candidate["value"],
+        "decision": candidate["decision"],
+        "rule_id": candidate["rule_id"],
+        "source_message_id": candidate["source_message_id"],
+        "reason": (
+            "negated_expression"
+            if candidate["negated"]
+            else "uncertain_expression"
+            if candidate["uncertain"]
+            else "unregistered_similar_expression"
+        ),
     }
 
 

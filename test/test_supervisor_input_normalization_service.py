@@ -131,3 +131,62 @@ def test_normalizes_notice_typo_and_preserves_source_span() -> None:
     assert text[stage["source_span"]["start"]:stage["source_span"]["end"]] == (
         stage["source_text"]
     )
+
+
+def test_negated_action_is_never_auto_applied() -> None:
+    service = _service()
+    result = service.normalize_supervisor_input(
+        user_text="상대 차량은 좌회전하지 않았습니다.",
+        source_message_id="msg_negated",
+    )
+    action = next(
+        item for item in result["candidates"] if item["value"] == "left_turn"
+    )
+
+    assert action["negated"] is True
+    assert action["decision"] == "clarification_required"
+    assert result["clarifications"][0]["field"] == "vehicle_actions.other"
+
+
+def test_uncertain_action_requires_confirmation() -> None:
+    service = _service()
+    result = service.normalize_supervisor_input(
+        user_text="상대가 좌회전한 것 같아요.",
+        source_message_id="msg_uncertain",
+    )
+    action = next(
+        item for item in result["candidates"] if item["value"] == "left_turn"
+    )
+
+    assert action["uncertain"] is True
+    assert action["decision"] == "confirmation_required"
+
+
+def test_unique_unregistered_typo_is_confirmation_only() -> None:
+    service = _service()
+    result = service.normalize_supervisor_input(
+        user_text="상대 차량이 좌회잔했어요.",
+        source_message_id="msg_fuzzy",
+    )
+    action = next(
+        item for item in result["candidates"] if item["value"] == "left_turn"
+    )
+
+    assert action["match_kind"] == "fuzzy"
+    assert action["decision"] == "confirmation_required"
+
+
+def test_bare_notice_does_not_guess_legal_stage() -> None:
+    service = _service()
+    result = service.normalize_supervisor_input(
+        user_text="고지서를 받았습니다.",
+        source_message_id="msg_ambiguous",
+    )
+
+    assert not any(
+        item["field"] == "notice_stage" and item["decision"] == "auto_applied"
+        for item in result["candidates"]
+    )
+    assert any(
+        item["field"] == "notice_stage" for item in result["clarifications"]
+    )
