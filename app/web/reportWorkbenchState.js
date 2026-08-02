@@ -1,9 +1,41 @@
-function compactUniqueStrings(values, limit = 3) {
+const MISSING_ITEM_FALLBACK = "추가 확인이 필요한 항목";
+const MISSING_ITEM_TEXT_KEYS = ["question", "label", "description", "title"];
+
+function missingItemText(value, visited = new Set()) {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (!value || typeof value !== "object" || visited.has(value)) {
+    return "";
+  }
+  visited.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nestedText = missingItemText(item, visited);
+      if (nestedText) return nestedText;
+    }
+    return "";
+  }
+
+  for (const key of MISSING_ITEM_TEXT_KEYS) {
+    const prioritizedText = missingItemText(value[key], visited);
+    if (prioritizedText) return prioritizedText;
+  }
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (MISSING_ITEM_TEXT_KEYS.includes(key)) continue;
+    const nestedText = missingItemText(nestedValue, visited);
+    if (nestedText) return nestedText;
+  }
+  return MISSING_ITEM_FALLBACK;
+}
+
+export function compactUniqueStrings(values, limit = 5) {
   const seen = new Set();
   const items = [];
 
   for (const value of Array.isArray(values) ? values : []) {
-    const normalized = String(value || "").trim();
+    const normalized = missingItemText(value);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     items.push(normalized);
@@ -71,7 +103,7 @@ export function deriveReportWorkbenchState({
     };
   }
 
-  const stage = String(supervisorState?.stage || "").trim();
+  const stage = typeof supervisorState?.stage === "string" ? supervisorState.stage.trim() : "";
   if (canGenerateReport && stage) {
     return {
       kind: "persisting",

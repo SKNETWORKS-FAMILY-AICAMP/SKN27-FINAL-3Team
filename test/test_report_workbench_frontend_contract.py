@@ -11,7 +11,7 @@ def test_report_workspace_is_reachable_from_the_global_rail_and_explains_empty_s
     styles = (ROOT / "app" / "web" / "styles.css").read_text(encoding="utf-8")
 
     assert 'id: "reporting"' in shell
-    assert 'label: "리포트 작업대"' in shell
+    assert 'label: "리포트"' in shell
     assert 'import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";' in shell
     assert "function ReportWorkbenchEmptyState" in shell
     assert "<ReportWorkbenchEmptyState" in shell

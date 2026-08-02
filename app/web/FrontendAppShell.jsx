@@ -37,6 +37,12 @@ import {
 import { shouldPromptGuestConversationSave } from "./guestConversationPolicy.js";
 import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
 import { pollWorkerResult } from "./workerPolling.js";
+import {
+  normalizeChatResponsePresentation,
+  selectPrimaryFollowUpQuestion,
+} from "./chatResponsePresentation.js";
+import { SafeMarkdown } from "./SafeMarkdown.js";
+import { composerKeyAction } from "./composerInteraction.js";
 
 const TAB_ROUTES = [
   { id: "chatbot", label: "사고·과태료 상담" },
@@ -178,8 +184,10 @@ function assistantMessageText(value, fallback = "") {
   if (typeof value === "string") {
     return value.trim() || fallback;
   }
-  if (value && typeof value === "object") {
-    return String(value.answer || value.summary || "").trim() || fallback;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const message = [value.core_answer, value.answer, value.summary]
+      .find((item) => typeof item === "string" && item.trim());
+    return message?.trim() || fallback;
   }
   return fallback;
 }
@@ -347,10 +355,11 @@ export default function FrontendAppShell({
   const analysisCards = analysisResponse?.cards?.length
     ? normalizeAnalysisCards(analysisResponse.cards)
     : [];
-  const assistantAnswer =
-    analysisResponse?.assistant_message?.core_answer ||
-    assistantMessageText(analysisResponse?.assistant_message);
-  const assistantFollowUp = analysisResponse?.assistant_message?.follow_up || null;
+  const responsePresentation = analysisResponse
+    ? normalizeChatResponsePresentation(analysisResponse)
+    : null;
+  const assistantAnswer = responsePresentation?.answerMarkdown || "";
+  const assistantFollowUp = responsePresentation?.followUp || null;
   const serviceScope = analysisResponse?.service_scope || null;
   const responseLimitations = stringList(analysisResponse?.limitations);
   const responseNextActions = stringList(analysisResponse?.next_actions);
@@ -1372,16 +1381,17 @@ export default function FrontendAppShell({
       );
       const workerResult = await pollQueuedWorkerResult(result, submitIdentity);
       logDeveloperDiagnostic("chat.result", buildDeveloperDiagnostic(workerResult));
+      const responsePresentation = normalizeChatResponsePresentation(workerResult);
       const assistantMessage = {
         role: "assistant",
-        content:
-          workerResult?.assistant_message?.core_answer ||
-          workerResult?.polling_notice?.message ||
-          workerResult?.analysis_progress?.user_message ||
-          assistantMessageText(workerResult?.assistant_message),
-        status: workerResult?.status || "partial",
-        pending_questions: workerResult?.pending_questions || [],
-        followUp: workerResult?.assistant_message?.follow_up || null,
+        content: responsePresentation.answerMarkdown,
+        status: responsePresentation.semanticStatus,
+        tone: responsePresentation.tone,
+        pending_questions: responsePresentation.pendingQuestions,
+        followUp: responsePresentation.followUp || null,
+        retryAction: responsePresentation.retryAction,
+        reportLink: responsePresentation.reportLink,
+        originalQuestion: displayText,
       };
       await streamAssistantMessage(conversationHistory, assistantMessage);
       setAnalysisResponse(workerResult);
@@ -1483,9 +1493,17 @@ export default function FrontendAppShell({
 
     if (!isMountedRef.current) return;
     if (!tokens.length) {
+      const fallbackPresentation = normalizeChatResponsePresentation({
+        status: assistantMessage.status || "partial",
+      });
       setChatMessages([
         ...conversationHistory,
-        { ...assistantMessage, content: "", streaming: false },
+        {
+          ...assistantMessage,
+          content: fallbackPresentation.answerMarkdown,
+          status: fallbackPresentation.semanticStatus,
+          streaming: false,
+        },
       ]);
       return;
     }
@@ -1861,7 +1879,9 @@ export default function FrontendAppShell({
         onNavigate={navigateToRoute}
         onOpenChat={() => ensureGuestSession("chatbot")}
         authAction={
-          authSessionId ? (
+          activeRoute === "mypage" && !authSessionId
+            ? null
+            : authSessionId ? (
             <button className="button ghost small" type="button" onClick={logoutAndResetSession}>
               로그아웃
             </button>
@@ -1874,7 +1894,7 @@ export default function FrontendAppShell({
             >
               {isSavingConversation ? "연결 중" : "Google 로그인"}
             </button>
-          )
+            )
         }
       />
       <div className="app-shell__body">
@@ -1957,6 +1977,7 @@ export default function FrontendAppShell({
               onRunReportAction={runCurrentReportAction}
               onRetryAppealDecision={() => setQuestion("운전자 신원 노출 위험과 사유 인정 가능성을 다시 판단해줘")}
               onSaveConversation={saveConversationAfterLogin}
+              onNewChat={startNewConversation}
               onSubmit={submitServiceMessage}
               pendingAuthAction={pendingAuthAction}
               ocrConfirmationFields={ocrConfirmationFields}
@@ -2010,21 +2031,28 @@ export default function FrontendAppShell({
           )}
 
           {activeRoute === "mypage" && (
-            <MyPageScreen
-              cases={cases}
-              onOpenChat={() => setActiveRoute("chatbot")}
-              onOpenCase={openSavedCase}
-              onOpenReport={async (report) => {
-                await openReportDetail(report);
-                setActiveRoute("reporting");
-              }}
-              onRefresh={async () => {
-                await loadMyPageSummary();
-                await loadReports({ hydrateLatest: true });
-              }}
-              reports={effectiveReportList}
-              summary={effectiveMypageSummary}
-            />
+            authSessionId ? (
+              <MyPageScreen
+                cases={cases}
+                onOpenChat={() => setActiveRoute("chatbot")}
+                onOpenCase={openSavedCase}
+                onOpenReport={async (report) => {
+                  await openReportDetail(report);
+                  setActiveRoute("reporting");
+                }}
+                onRefresh={async () => {
+                  await loadMyPageSummary();
+                  await loadReports({ hydrateLatest: true });
+                }}
+                reports={effectiveReportList}
+                summary={effectiveMypageSummary}
+              />
+            ) : (
+              <GuestCasesGate
+                isLoading={isSavingConversation}
+                onLogin={saveConversationAfterLogin}
+              />
+            )
           )}
 
           {activeRoute === "history" && (
@@ -2061,6 +2089,18 @@ export default function FrontendAppShell({
         </main>
       </div>
       </div>
+      {activeRoute !== "entry" && (
+        <MobileGlobalNavigation
+          activeRoute={activeRoute}
+          onNavigate={(routeId) => {
+            if (routeId === "chatbot") {
+              ensureGuestSession("chatbot");
+              return;
+            }
+            navigateToRoute(routeId);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2303,7 +2343,7 @@ function Reveal({ children, className = "", as = "div", ...rest }) {
 const RAIL_ITEMS = [
   {
     id: "guide",
-    label: "사고 가이드",
+    label: "가이드",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
@@ -2313,7 +2353,7 @@ const RAIL_ITEMS = [
   },
   {
     id: "chatbot",
-    label: "AI 상담",
+    label: "상담",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 5h16v11H8l-4 4V5z" />
@@ -2322,7 +2362,7 @@ const RAIL_ITEMS = [
   },
   {
     id: "reporting",
-    label: "리포트 작업대",
+    label: "리포트",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
@@ -2332,11 +2372,11 @@ const RAIL_ITEMS = [
   },
   {
     id: "mypage",
-    label: "마이페이지",
+    label: "내 사건",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="8" r="3.4" />
-        <path d="M5 20c1.4-3.6 4.2-5.5 7-5.5s5.6 1.9 7 5.5" />
+        <path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+        <path d="M3 11h18" />
       </svg>
     ),
   },
@@ -2379,6 +2419,68 @@ function AppTopNavigation({ activeRoute, onNavigate, onOpenChat, authAction }) {
   );
 }
 
+function MobileGlobalNavigation({ activeRoute, onNavigate }) {
+  const items = [
+    {
+      id: "guide",
+      label: "가이드",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 4h10a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Z" />
+          <path d="M8 16h10M9 8h6M9 11h5" />
+        </svg>
+      ),
+    },
+    {
+      id: "chatbot",
+      label: "상담",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 5h16v11H8l-4 4V5Z" />
+          <path d="M8 9h8M8 12h5" />
+        </svg>
+      ),
+    },
+    {
+      id: "reporting",
+      label: "리포트",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 3h9l5 5v13H6V3Z" />
+          <path d="M14 3v6h6M9 13h7M9 17h7" />
+        </svg>
+      ),
+    },
+    {
+      id: "mypage",
+      label: "내 사건",
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+          <path d="M3 11h18" />
+        </svg>
+      ),
+    },
+  ];
+
+  return (
+    <nav className="mobile-bottom-nav" aria-label="모바일 주요 메뉴">
+      {items.map((item) => (
+        <button
+          className={activeRoute === item.id ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
+          type="button"
+          key={item.id}
+          onClick={() => onNavigate(item.id)}
+          aria-current={activeRoute === item.id ? "page" : undefined}
+        >
+          <span aria-hidden="true">{item.icon}</span>
+          <strong>{item.label}</strong>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }) {
   return (
     <main className="service-landing">
@@ -2388,7 +2490,7 @@ function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }
           <h1>복잡한 사고 분석,<br />자료 등록부터 시작하세요</h1>
           <p>블랙박스·CCTV·현장 사진과 상황 설명을 바탕으로 사고 쟁점과 다음 행동을 정리합니다.</p>
           <div className="hero-actions">
-            <button className="button primary large service-hero__cta" type="button" onClick={onGuestStart}>사고 접수하기</button>
+            <button className="button primary large service-hero__cta" type="button" onClick={onGuestStart}>AI 상담 시작</button>
           </div>
         </Reveal>
         <Reveal className="service-hero__visual service-reveal--right">
@@ -2412,7 +2514,7 @@ function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }
           <p>사고 상황을 입력하면 자료 정리부터 분석 결과 확인까지 한 흐름으로 안내합니다.</p>
         </Reveal>
         <div className="service-detail-grid">
-          <Reveal as="article" style={{ "--reveal-delay": "0ms" }}><span className="service-detail-emoji" aria-hidden="true">🚗</span><b>01</b><h3>사고 접수</h3><p>사고 상황과 기본 정보를 입력해 분석을 시작합니다.</p></Reveal>
+          <Reveal as="article" style={{ "--reveal-delay": "0ms" }}><span className="service-detail-emoji" aria-hidden="true">🚗</span><b>01</b><h3>상담 시작</h3><p>사고 상황과 기본 정보를 입력해 분석을 시작합니다.</p></Reveal>
           <Reveal as="article" style={{ "--reveal-delay": "90ms" }}><span className="service-detail-emoji" aria-hidden="true">📎</span><b>02</b><h3>자료 등록</h3><p>영상, 사진, 문서 등 보유한 사고 자료를 한곳에 등록합니다.</p></Reveal>
           <Reveal as="article" style={{ "--reveal-delay": "180ms" }}><span className="service-detail-emoji" aria-hidden="true">🔎</span><b>03</b><h3>AI 분석</h3><p>사고 장면과 주요 쟁점을 확인 가능한 근거와 함께 정리합니다.</p></Reveal>
           <Reveal as="article" style={{ "--reveal-delay": "270ms" }}><span className="service-detail-emoji" aria-hidden="true">📄</span><b>04</b><h3>결과 확인</h3><p>분석 리포트와 추가 확인 사항, 후속 조치를 살펴봅니다.</p></Reveal>
@@ -2429,9 +2531,9 @@ function EntryScreenV2({ isAuthenticated, onGuestStart, onOpenChat, onNavigate }
       </section>
 
       <section className="service-closing">
-        <Reveal className="service-reveal--left"><span>차분해와 함께 시작하세요</span><h2>사고 자료가 준비되었다면 지금 접수하세요</h2></Reveal>
+        <Reveal className="service-reveal--left"><span>차분해와 함께 시작하세요</span><h2>사고 자료가 준비되었다면 지금 AI 상담을 시작하세요</h2></Reveal>
         <Reveal className="hero-actions service-reveal--right">
-          <button className="button primary large" type="button" onClick={onGuestStart}>사고 접수하기</button>
+          <button className="button primary large" type="button" onClick={onGuestStart}>AI 상담 시작</button>
           {isAuthenticated && (
             <button className="button ghost large" type="button" onClick={() => onNavigate("reporting")}>내 리포트</button>
           )}
@@ -2829,28 +2931,6 @@ function ConversationSidebar({
       </>
       )}
       </aside>
-      <nav className="mobile-bottom-nav" aria-label="모바일 주요 메뉴">
-        <button className="mobile-bottom-nav__item" type="button" onClick={onNewChat}>
-          <span aria-hidden="true">＋</span>
-          <strong>새 상담</strong>
-        </button>
-        <button
-          className={activeRoute === "mypage" ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
-          type="button"
-          onClick={() => onNavigate("mypage")}
-        >
-          <span aria-hidden="true">▣</span>
-          <strong>내 사건</strong>
-        </button>
-        <button
-          className={activeRoute === "guide" ? "mobile-bottom-nav__item active" : "mobile-bottom-nav__item"}
-          type="button"
-          onClick={() => onNavigate("guide")}
-        >
-          <span aria-hidden="true">!</span>
-          <strong>사고 가이드</strong>
-        </button>
-      </nav>
     </>
   );
 }
@@ -2888,6 +2968,7 @@ function ChatScreenV2({
   onRunReportAction,
   onRetryAppealDecision,
   onSaveConversation,
+  onNewChat,
   onSubmit,
   pendingAuthAction,
   ocrConfirmationFields,
@@ -2909,6 +2990,9 @@ function ChatScreenV2({
   uploadInputResetKey,
 }) {
   const attachmentInputRef = useRef(null);
+  const attachmentMenuRef = useRef(null);
+  const attachmentTriggerRef = useRef(null);
+  const attachmentMenuItemRefs = useRef([]);
   const questionInputRef = useRef(null);
   const quickExamplesRef = useRef(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -2936,9 +3020,56 @@ function ChatScreenV2({
   const isAuthenticated = Boolean(authSessionId);
   const visibleReportingPayload = isReportingPayloadReady(reportingPayload, supervisorState) ? reportingPayload : null;
   const canGenerateReport = hasReportGenerationNode(supervisorState);
+
+  useEffect(() => {
+    if (!attachmentMenuOpen) return undefined;
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      attachmentMenuItemRefs.current.find(Boolean)?.focus();
+    });
+    const closeAndRestoreFocus = () => {
+      setAttachmentMenuOpen(false);
+      window.requestAnimationFrame(() => attachmentTriggerRef.current?.focus());
+    };
+    const handleOutsidePointerDown = (event) => {
+      if (!attachmentMenuRef.current?.contains(event.target)) {
+        setAttachmentMenuOpen(false);
+      }
+    };
+    const handleAttachmentMenuKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeAndRestoreFocus();
+        return;
+      }
+
+      const navigationKeys = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
+      if (!navigationKeys.has(event.key)) return;
+      const items = attachmentMenuItemRefs.current.filter(Boolean);
+      if (!items.length) return;
+      event.preventDefault();
+      const currentIndex = items.indexOf(document.activeElement);
+      let nextIndex = currentIndex < 0 ? 0 : currentIndex;
+      if (event.key === "ArrowDown") nextIndex = (nextIndex + 1) % items.length;
+      if (event.key === "ArrowUp") nextIndex = (nextIndex - 1 + items.length) % items.length;
+      if (event.key === "Home") nextIndex = 0;
+      if (event.key === "End") nextIndex = items.length - 1;
+      items[nextIndex]?.focus();
+    };
+
+    document.addEventListener("pointerdown", handleOutsidePointerDown);
+    document.addEventListener("keydown", handleAttachmentMenuKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("pointerdown", handleOutsidePointerDown);
+      document.removeEventListener("keydown", handleAttachmentMenuKeyDown);
+    };
+  }, [attachmentMenuOpen]);
+
   const openAttachmentPicker = (option) => {
     setAttachmentPurpose(option.purpose);
     setAttachmentMenuOpen(false);
+    attachmentTriggerRef.current?.focus();
     if (attachmentInputRef.current) {
       attachmentInputRef.current.accept = option.accept;
       attachmentInputRef.current.click();
@@ -2964,7 +3095,12 @@ function ChatScreenV2({
     <section className="screen">
       <div className="screen-header">
         <div className="screen-title">
-          <h2>AI 교통 상담</h2>
+          <h2>AI 상담</h2>
+        </div>
+        <div className="screen-actions">
+          <button className="button chat-new-conversation" type="button" onClick={onNewChat}>
+            새 상담
+          </button>
         </div>
       </div>
 
@@ -3060,43 +3196,73 @@ function ChatScreenV2({
                 {visibleMessages.map((message, index) => {
                   const isUser = message.role === "user";
                   const isLatestAssistant = !isUser && index === latestAssistantIndex;
+                  const primaryFollowUpQuestion = selectPrimaryFollowUpQuestion({
+                    pendingQuestions: message.pending_questions,
+                    followUp: message.followUp,
+                    supervisorQuestions: isLatestAssistant ? supervisorState?.next_questions : [],
+                  });
+                  const hasInlineReportEntry = Boolean(
+                    isLatestAssistant &&
+                    (message.reportLink || currentReport || visibleReportingPayload),
+                  );
                   return (
                     <article className={isUser ? "message user" : "message"} key={`${message.role}-${index}`}>
                       <span className="message-avatar">{isUser ? "나" : "AI"}</span>
                       <div className={`${isUser ? "bubble" : "bubble wide"}${message.streaming ? " is-streaming" : ""}`}>
-                        <p>{message.content}</p>
-                        {!isUser && !message.streaming && message.followUp && <FollowUpNote followUp={message.followUp} />}
-                        {!isUser && !message.streaming && isLatestAssistant && (
+                        {isUser ? <p>{message.content}</p> : <SafeMarkdown content={message.content} />}
+                        {!isUser && !message.streaming && (
                           <>
-                            {appealDecisionUi && (
-                              <AppealDecisionPanel
-                                ui={appealDecisionUi}
-                                riskAcknowledged={appealRiskAcknowledged}
-                                onAcknowledge={onAcknowledgeAppealRisk}
-                                onEdit={() => setQuestion("이의 사유 내용을 수정하고 싶어")}
-                                onRetry={onRetryAppealDecision}
-                              />
-                            )}
-                            {chatSafetyGuidance && <SafetyGuidancePanel guidance={chatSafetyGuidance} />}
-                            <MissingFieldsPrompt supervisorState={supervisorState} />
-                            {canGenerateReport && (reportingPayload || analysisCards.length > 0) && (
-                              <ReportActionPanel
-                                currentReport={currentReport}
-                                isAuthenticated={Boolean(authSessionId)}
-                                onConfirmDocument={onConfirmReportDocument}
-                                onRunReportAction={onRunReportAction}
-                                reportingPayload={visibleReportingPayload}
-                                reportActionStatus={reportActionStatus}
-                              />
-                            )}
-                            {canGenerateReport && visibleReportingPayload && (
-                              <ReportReadyNotice
-                                isAuthenticated={Boolean(authSessionId)}
-                                onOpenReporting={onOpenReporting}
-                                onRunReportAction={onRunReportAction}
-                                reportingPayload={visibleReportingPayload}
-                                reportActionStatus={reportActionStatus}
-                              />
+                            <div className="assistant-turn-support">
+                              {isLatestAssistant && (
+                                <AssistantLimitationsDisclosure guidance={chatSafetyGuidance} />
+                              )}
+                              <AssistantPrimaryQuestion question={primaryFollowUpQuestion} />
+                              {message.retryAction && (
+                                <button
+                                  className="assistant-retry-action"
+                                  type="button"
+                                  onClick={() => {
+                                    setQuestion(message.originalQuestion || submittedQuestion || "");
+                                    questionInputRef.current?.focus();
+                                  }}
+                                >
+                                  {message.retryAction.label}
+                                </button>
+                              )}
+                              {hasInlineReportEntry && (
+                                <div className="assistant-report-entry" aria-label="현재 리포트">
+                                  <div>
+                                    <span>현재 리포트</span>
+                                    <strong>{currentReport?.title || "상담 결과 리포트"}</strong>
+                                  </div>
+                                  <button className="button" type="button" onClick={onOpenReporting}>
+                                    현재 리포트 보기
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            {isLatestAssistant && (
+                              <>
+                                {appealDecisionUi && (
+                                  <AppealDecisionPanel
+                                    ui={appealDecisionUi}
+                                    riskAcknowledged={appealRiskAcknowledged}
+                                    onAcknowledge={onAcknowledgeAppealRisk}
+                                    onEdit={() => setQuestion("이의 사유 내용을 수정하고 싶어")}
+                                    onRetry={onRetryAppealDecision}
+                                  />
+                                )}
+                                {canGenerateReport && (reportingPayload || analysisCards.length > 0) && (
+                                  <ReportActionPanel
+                                    currentReport={currentReport}
+                                    isAuthenticated={Boolean(authSessionId)}
+                                    onConfirmDocument={onConfirmReportDocument}
+                                    onRunReportAction={onRunReportAction}
+                                    reportingPayload={visibleReportingPayload}
+                                    reportActionStatus={reportActionStatus}
+                                  />
+                                )}
+                              </>
                             )}
                           </>
                         )}
@@ -3167,25 +3333,47 @@ function ChatScreenV2({
                 <textarea
                   ref={questionInputRef}
                   aria-label="상담 메시지 입력"
+                  aria-describedby="composer-keyboard-hint"
                   placeholder={composerPlaceholder}
                   value={question}
                   onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    const action = composerKeyAction(event, {
+                      hasContent: Boolean(question.trim()),
+                      isSubmitting,
+                    });
+                    if (action === "submit") {
+                      event.preventDefault();
+                      onSubmit();
+                    }
+                  }}
                 />
                 <div className="composer-toolbar">
-                  <div className="attachment-menu-wrap">
+                  <div className="attachment-menu-wrap" ref={attachmentMenuRef}>
                     <button
+                      ref={attachmentTriggerRef}
                       className="attachment-plus"
                       type="button"
                       aria-label="자료 첨부"
+                      aria-haspopup="menu"
                       aria-expanded={attachmentMenuOpen}
+                      aria-controls="chat-attachment-menu"
                       onClick={() => setAttachmentMenuOpen((open) => !open)}
                     >
                       +
                     </button>
                     {attachmentMenuOpen && (
-                      <div className="attachment-menu" role="menu">
-                        {attachmentOptions.map((option) => (
-                          <button type="button" role="menuitem" key={option.label} onClick={() => openAttachmentPicker(option)}>
+                      <div className="attachment-menu" id="chat-attachment-menu" role="menu">
+                        {attachmentOptions.map((option, index) => (
+                          <button
+                            ref={(element) => {
+                              attachmentMenuItemRefs.current[index] = element;
+                            }}
+                            type="button"
+                            role="menuitem"
+                            key={option.label}
+                            onClick={() => openAttachmentPicker(option)}
+                          >
                             <strong>{option.label}</strong>
                             <span>{option.description}</span>
                           </button>
@@ -3223,15 +3411,32 @@ function ChatScreenV2({
                   <button
                     className="button primary composer-send"
                     type="button"
-                    aria-label="전송"
-                    title={isSubmitting ? "답변 정리 중" : "전송"}
+                    aria-label="메시지 보내기"
+                    title={isSubmitting ? "답변 정리 중" : "메시지 보내기"}
                     onClick={onSubmit}
                     disabled={isSubmitting}
                   >
                     {isSubmitting
                       ? <span aria-hidden="true">…</span>
-                      : <span aria-hidden="true">↑</span>}
+                      : (
+                        <svg
+                          className="composer-send-icon"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="m22 2-7 20-4-9-9-4 20-7Z" />
+                          <path d="M22 2 11 13" />
+                        </svg>
+                      )}
                   </button>
+                  <span className="composer-key-hint" id="composer-keyboard-hint">
+                    Enter 전송 · Shift+Enter 줄바꿈
+                  </span>
                 </div>
                 {selectedUploadFile && (
                   <span className="composer-file-status" role="status">
@@ -3335,6 +3540,47 @@ function AttachmentClassificationConfirmationCard({
         자료 분류 확인 후 다음 분석 진행
       </button>
     </section>
+  );
+}
+
+function AssistantLimitationsDisclosure({ guidance }) {
+  if (!guidance) return null;
+  const limitations = stringList(guidance.limitations);
+  const nextActions = stringList(guidance.nextActions);
+
+  return (
+    <details className="assistant-limitations">
+      <summary>한계·주의사항</summary>
+      <div>
+        {guidance.title && <strong>{guidance.title}</strong>}
+        {guidance.reason && <p>{guidance.reason}</p>}
+        {limitations.length > 0 && (
+          <ul>
+            {limitations.map((item, index) => (
+              <li key={`assistant-limitation-${index}`}>{item}</li>
+            ))}
+          </ul>
+        )}
+        {nextActions.length > 0 && (
+          <ul>
+            {nextActions.map((item, index) => (
+              <li key={`assistant-next-action-${index}`}>{item}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function AssistantPrimaryQuestion({ question }) {
+  if (!question) return null;
+  return (
+    <div className="assistant-primary-question" role="status">
+      <span>추가 확인</span>
+      <strong>{question}</strong>
+      <p>알고 계신 내용만 이어서 입력해 주세요.</p>
+    </div>
   );
 }
 
@@ -3963,6 +4209,28 @@ function ReportActionPanel({ currentReport, isAuthenticated, onConfirmDocument, 
           {isAuthenticated ? "이의신청서 DOCX" : "로그인 후 이의신청서 DOCX"}
         </button>
         )}
+      </div>
+    </section>
+  );
+}
+
+function GuestCasesGate({ isLoading, onLogin }) {
+  return (
+    <section className="screen guest-cases-gate">
+      <div className="guest-cases-gate__card">
+        <span className="guest-cases-gate__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 7h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+            <path d="M3 11h18" />
+          </svg>
+        </span>
+        <div>
+          <h2>내 사건</h2>
+          <p>로그인하면 저장한 상담과 리포트를 이어서 확인할 수 있습니다.</p>
+        </div>
+        <button className="button primary large" type="button" onClick={onLogin} disabled={isLoading}>
+          {isLoading ? "연결 중" : "Google 로그인"}
+        </button>
       </div>
     </section>
   );
@@ -4691,6 +4959,7 @@ function ReportingScreen({
   supervisorState = null,
 }) {
   const [isReportListCollapsed, setIsReportListCollapsed] = useState(false);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
   const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
   const isPersistedReport = Boolean(currentReport?.report_id && currentReport?.content?.reporting_payload);
@@ -4786,6 +5055,11 @@ function ReportingScreen({
         findReportText(sections, /제출 기한|납부 기한|의견제출|마감|D-/, "확인된 자료 없음"),
     },
   ];
+  const workbenchClassName = [
+    "report-workbench",
+    isReportListCollapsed ? "is-list-collapsed" : "",
+    isInspectorCollapsed ? "is-inspector-collapsed" : "",
+  ].filter(Boolean).join(" ");
 
   return (
     <section className="screen">
@@ -4794,13 +5068,15 @@ function ReportingScreen({
           <h2>리포트 작업대</h2>
           <p>상담 결과에서 생성한 과태료·과실비율·사고 리포트를 검토하고 내려받는 화면입니다.</p>
         </div>
-        <div className="screen-actions">
-          <button className="button" type="button" onClick={onRefresh}>목록 새로고침</button>
-          <button className="button primary" type="button" onClick={onOpenChat}>리포트 생성 준비</button>
-        </div>
+        {hasReport && (
+          <div className="screen-actions">
+            <button className="button" type="button" onClick={onRefresh}>목록 새로고침</button>
+            <button className="button primary" type="button" onClick={onOpenChat}>리포트 생성 준비</button>
+          </div>
+        )}
       </div>
 
-      <div className={isReportListCollapsed ? "report-workbench is-list-collapsed" : "report-workbench"}>
+      <div className={workbenchClassName}>
         <aside className={isReportListCollapsed ? "report-list is-collapsed" : "report-list"} aria-label="리포트 목록">
           <div className="panel-head compact">
             {!isReportListCollapsed && <strong>리포트 목록</strong>}
@@ -4818,7 +5094,6 @@ function ReportingScreen({
               </button>
             </div>
           </div>
-          {!isReportListCollapsed && !hasSavedReports && <ServiceInformationNotice />}
           {!isReportListCollapsed && hasSavedReports && (
             <div className="report-saved-list">
               {reportList.map((report) => {
@@ -4841,7 +5116,6 @@ function ReportingScreen({
               })}
             </div>
           )}
-          {!isReportListCollapsed && hasSavedReports && <ServiceInformationNotice />}
         </aside>
 
         <article className="report-canvas" aria-label="리포트 미리보기">
@@ -5015,13 +5289,26 @@ function ReportingScreen({
           )}
         </article>
 
-        <aside className="report-inspector" aria-label="상태와 다운로드">
+        <aside className={isInspectorCollapsed ? "report-inspector is-collapsed" : "report-inspector"} aria-label="상태와 다운로드">
           <div className="panel-head compact">
-            <strong>상태·다운로드</strong>
+            {!isInspectorCollapsed && <strong>상태·다운로드</strong>}
+            <button
+              className="report-inspector-collapse-toggle"
+              type="button"
+              onClick={() => setIsInspectorCollapsed((value) => !value)}
+              aria-label={isInspectorCollapsed ? "상태·다운로드 펼치기" : "상태·다운로드 접기"}
+              title={isInspectorCollapsed ? "상태·다운로드 펼치기" : "상태·다운로드 접기"}
+            >
+              <span>{isInspectorCollapsed ? "«" : "»"}</span>
+              {!isInspectorCollapsed && <strong>접기</strong>}
+            </button>
           </div>
-          <ReportActionAlert status={reportActionStatus} />
-          {hasReport ? (
+          {!isInspectorCollapsed && (
             <>
+              <ReportActionAlert status={reportActionStatus} />
+              {hasReport ? (
+                <>
+              <ServiceInformationNotice />
               <DocumentConfirmationPanel
                 confirmation={confirmation}
                 isAuthenticated={isAuthenticated}
@@ -5063,14 +5350,16 @@ function ReportingScreen({
               </div>
               {faultRatioNode && <FaultRatioInsightPanel compact node={faultRatioNode} />}
               {lawGroundNode && <LawGroundInsightPanel compact node={lawGroundNode} />}
+                </>
+              ) : (
+                <div className="inspector-section">
+                  <span className="tag amber">{workbenchState.stageLabel}</span>
+                  <strong>{workbenchState.title}</strong>
+                  <p>{workbenchState.description}</p>
+                  {reportWorkspaceLoadError && <p className="report-workbench-load-error" role="alert">{reportWorkspaceLoadError}</p>}
+                </div>
+              )}
             </>
-          ) : (
-            <div className="inspector-section">
-              <span className="tag amber">{workbenchState.stageLabel}</span>
-              <strong>{workbenchState.title}</strong>
-              <p>{workbenchState.description}</p>
-              {reportWorkspaceLoadError && <p className="report-workbench-load-error" role="alert">{reportWorkspaceLoadError}</p>}
-            </div>
           )}
         </aside>
       </div>
@@ -5139,10 +5428,13 @@ function restoreConversationMessages(job = {}, item = {}) {
       status: message?.metadata?.response_status || job.status || "success",
     }))
     .filter((message) => message.content);
-  const assistantMessage = assistantMessageText(
-    job.assistant_message || job.assistant_message_payload,
-    job.progress_message || "저장된 상담 결과를 불러왔습니다."
-  );
+  const responsePresentation = normalizeChatResponsePresentation({
+    ...job,
+    assistant_message: job.assistant_message || job.assistant_message_payload,
+    analysis_progress: {
+      user_message: job.progress_message || "저장된 상담 결과를 불러왔습니다.",
+    },
+  });
 
   if (!messages.some((message) => message.role === "user")) {
     messages.unshift({
@@ -5153,9 +5445,13 @@ function restoreConversationMessages(job = {}, item = {}) {
   if (!messages.some((message) => message.role === "assistant")) {
     messages.push({
       role: "assistant",
-      content: assistantMessage,
-      status: job.status || "success",
-      pending_questions: job.pending_questions || [],
+      content: responsePresentation.answerMarkdown,
+      status: responsePresentation.semanticStatus,
+      tone: responsePresentation.tone,
+      pending_questions: responsePresentation.pendingQuestions,
+      followUp: responsePresentation.followUp || null,
+      retryAction: responsePresentation.retryAction,
+      reportLink: responsePresentation.reportLink,
     });
   }
   return messages;
@@ -5163,14 +5459,20 @@ function restoreConversationMessages(job = {}, item = {}) {
 
 function restoreAnalysisResponse(job = {}, item = {}) {
   const reportingPayload = job.reporting_payload || job.supervisor_state?.reporting_payload || null;
+  const responsePresentation = normalizeChatResponsePresentation({
+    ...job,
+    assistant_message: job.assistant_message || job.assistant_message_payload,
+    analysis_progress: {
+      user_message: job.progress_message || "저장된 상담 결과를 불러왔습니다.",
+    },
+    reporting_payload: reportingPayload,
+  });
   return {
     ...job,
     cards: Array.isArray(job.cards) ? job.cards : [],
-    assistant_message: assistantMessageText(
-      job.assistant_message || job.assistant_message_payload,
-      job.progress_message || "저장된 상담 결과를 불러왔습니다."
-    ),
-    pending_questions: Array.isArray(job.pending_questions) ? job.pending_questions : [],
+    status: responsePresentation.semanticStatus,
+    assistant_message: responsePresentation.answerMarkdown,
+    pending_questions: responsePresentation.pendingQuestions,
     reporting_payload: reportingPayload,
     supervisor_state: job.supervisor_state || null,
     supervisor_execution: job.supervisor_execution || null,
