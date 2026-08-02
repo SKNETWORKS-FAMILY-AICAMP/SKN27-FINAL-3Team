@@ -292,10 +292,14 @@ def submit_message(
             }
         )
         fact_sources = [
-            *accident_fact_sources(
-                input_normalization,
-                source_message_id=source_message_id,
-            ),
+            *[
+                item
+                for item in accident_fact_sources(
+                    input_normalization,
+                    source_message_id=source_message_id,
+                )
+                if item.get("field") not in _explicit_accident_fact_fields(payload)
+            ],
             *[
                 dict(item)
                 for item in payload.get("fact_sources") or []
@@ -1309,6 +1313,7 @@ def _fallback_accident_supervisor_state(
     payload: dict[str, Any],
     routing_intent: str,
 ) -> dict[str, Any]:
+    explicit_fact_fields = _explicit_accident_fact_fields(payload)
     fact_state = reduce_consultation_fact_state(
         {
             **payload,
@@ -1318,12 +1323,18 @@ def _fallback_accident_supervisor_state(
                     for item in payload.get("fact_candidates") or []
                     if isinstance(item, dict)
                 ],
-                *accident_fact_candidates(
-                    payload.get("input_normalization") or {},
-                    source_message_id=str(
-                        payload.get("message_id") or payload.get("session_id") or ""
-                    ),
-                ),
+                *[
+                    item
+                    for item in accident_fact_candidates(
+                        payload.get("input_normalization") or {},
+                        source_message_id=str(
+                            payload.get("message_id")
+                            or payload.get("session_id")
+                            or ""
+                        ),
+                    )
+                    if item.get("field") not in explicit_fact_fields
+                ],
             ],
         }
     )
@@ -1372,6 +1383,19 @@ def _fallback_accident_supervisor_state(
         "agent_input_packages": [],
         "reporting_payload": None,
     }
+
+
+def _explicit_accident_fact_fields(payload: Mapping[str, Any]) -> set[str]:
+    facts = payload.get("facts")
+    if not isinstance(facts, Mapping):
+        return set()
+    allowed = {field for field, _question in CORE_FACT_QUESTIONS}
+    return {
+        str(field)
+        for field, value in facts.items()
+        if str(field) in allowed and str(value or "").strip()
+    }
+
 
 def _analysis_plan(
     *,
