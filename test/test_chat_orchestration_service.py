@@ -73,6 +73,24 @@ def test_registered_notice_typo_routes_to_fine_notice_procedure() -> None:
     )
 
 
+def test_normalized_legal_slots_are_shared_by_agent_packages() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_normalized_legal_slots",
+            "user_text": "과태료 1챠 고지서를 받아서 이의 재기하려고 합니다.",
+        }
+    )
+
+    slot_state = response["supervisor_state"]["slot_state"]
+    assert slot_state["slots"]["fine_type"]["value"] == "fine"
+    assert slot_state["slots"]["notice_stage"]["value"] == "first_notice"
+    assert slot_state["slots"]["requested_action"]["value"] == "objection"
+    assert all(
+        package["payload"]["slot_state"] == slot_state
+        for package in response["supervisor_state"]["agent_input_packages"]
+    )
+
+
 def test_uncertain_normalized_value_stops_before_agent_plan() -> None:
     response = submit_message(
         {

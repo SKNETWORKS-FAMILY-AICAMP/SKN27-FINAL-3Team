@@ -28,6 +28,14 @@ MATCH_CONFIDENCE = {
     "alias": 0.99,
     "approved_typo": 0.99,
 }
+DATE_PATTERN = re.compile(
+    r"(?:20\d{2}[./-]\d{1,2}[./-]\d{1,2}|20\d{2}년\s*\d{1,2}월\s*\d{1,2}일)"
+)
+AMOUNT_PATTERN = re.compile(r"\d{1,3}(?:,\d{3})*\s*원")
+AUTHORITY_PATTERN = re.compile(
+    r"[가-힣]{2,20}(?:경찰서|시청|구청|군청|도로교통공단)"
+)
+DUE_DATE_CONTEXT_MARKERS = ("납부기한", "의견제출기한", "까지")
 
 
 @lru_cache(maxsize=1)
@@ -64,6 +72,7 @@ def normalize_supervisor_input(
     normalized, original_indexes = _nfkc_with_index_map(original)
     matches = _registered_matches(normalized)
     matches.extend(_contextual_vehicle_action_matches(normalized))
+    matches.extend(_structured_legal_matches(normalized))
     selected = _prefer_longest_non_overlapping(matches)
     candidates = [
         _apply_semantic_guards(
@@ -293,6 +302,85 @@ def _contextual_vehicle_action_matches(normalized: str) -> list[dict[str, Any]]:
     return matches
 
 
+def _structured_legal_matches(normalized: str) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    for pattern, field, token_class, rule_id in (
+        (
+            AUTHORITY_PATTERN,
+            "issuing_authority",
+            "entity",
+            "fine_notice.issuing_authority.pattern_01",
+        ),
+        (
+            AMOUNT_PATTERN,
+            "amount",
+            "entity",
+            "fine_notice.amount.pattern_01",
+        ),
+    ):
+        for match in pattern.finditer(normalized):
+            matches.append(
+                _structured_match(
+                    match=match,
+                    field=field,
+                    decision="auto_applied",
+                    token_class=token_class,
+                    rule_id=rule_id,
+                )
+            )
+
+    for match in DATE_PATTERN.finditer(normalized):
+        clause_start, clause_end = _clause_range_for_span(
+            normalized,
+            match.start(),
+            match.end(),
+        )
+        clause = normalized[clause_start:clause_end]
+        is_due_date = any(marker in clause for marker in DUE_DATE_CONTEXT_MARKERS)
+        matches.append(
+            _structured_match(
+                match=match,
+                field="due_date" if is_due_date else "notice_date",
+                decision=("auto_applied" if is_due_date else "confirmation_required"),
+                token_class="state",
+                rule_id=(
+                    "fine_notice.due_date.pattern_01"
+                    if is_due_date
+                    else "fine_notice.notice_date.pattern_01"
+                ),
+            )
+        )
+    return matches
+
+
+def _structured_match(
+    *,
+    match: re.Match[str],
+    field: str,
+    decision: str,
+    token_class: str,
+    rule_id: str,
+) -> dict[str, Any]:
+    return {
+        "rule": {
+            "rule_id": rule_id,
+            "domain": "fine_notice",
+            "schema": "fine_notice_intake",
+            "field": field,
+            "value": match.group(0),
+            "token_class": token_class,
+            "canonical_expression": match.group(0),
+            "decision": decision,
+            "routing_intent": "fine_notice_procedure",
+        },
+        "start": match.start(),
+        "end": match.end(),
+        "match_kind": "exact",
+        "confidence": 0.99,
+        "preserve_source_value": True,
+    }
+
+
 def _clause_ranges(value: str) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     start = 0
@@ -395,13 +483,14 @@ def _candidate_from_match(
     original_start = original_indexes[start]
     original_end = original_indexes[end - 1] + 1
     rule = item["rule"]
+    source_text = original[original_start:original_end]
     return {
         "domain": str(rule["domain"]),
         "schema": str(rule["schema"]),
         "field": str(rule["field"]),
-        "value": str(rule["value"]),
+        "value": source_text if item.get("preserve_source_value") else str(rule["value"]),
         "source_span": {"start": original_start, "end": original_end},
-        "source_text": original[original_start:original_end],
+        "source_text": source_text,
         "source_message_id": source_message_id,
         "normalized_expression": str(rule["canonical_expression"]),
         "rule_id": str(rule["rule_id"]),

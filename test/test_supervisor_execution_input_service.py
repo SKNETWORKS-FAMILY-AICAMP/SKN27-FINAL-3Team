@@ -173,6 +173,36 @@ def test_bind_step_uses_matching_server_package_and_runtime_upstream_results() -
     assert "agent_input" not in result
 
 
+def test_bind_step_preserves_server_normalized_slots_over_public_values() -> None:
+    supervisor_state = _server_supervisor_state()
+    server_slots = {
+        "fine_type": {"value": "fine"},
+        "notice_stage": {"value": "first_notice"},
+        "requested_action": {"value": "objection"},
+        "legal_issue_terms": {"value": "signal_violation"},
+    }
+    supervisor_state["slot_state"]["slots"] = server_slots
+    supervisor_state["agent_input_packages"][0]["payload"]["slot_state"] = (
+        supervisor_state["slot_state"]
+    )
+
+    result = bind_supervisor_plan_step_payload(
+        {
+            "user_text": "client text",
+            "slot_state": {
+                "slots": {
+                    field: {"value": "client override"} for field in server_slots
+                }
+            },
+            "context": {"supervisor_handoff": supervisor_state},
+        },
+        step={"node_code": "law_ground_search", "status": "ready"},
+        upstream_results={},
+    )
+
+    assert result["slot_state"]["slots"] == server_slots
+
+
 def test_bind_step_accepts_llm_handoff_with_legacy_raw_user_text() -> None:
     supervisor_state = _server_supervisor_state()
     supervisor_state["contract_version"] = "supervisor_conversation.v1"

@@ -6,8 +6,10 @@ from app.services.supervisor_input_normalization_service import (
 from app.services.supervisor_input_projection_service import (
     accident_fact_candidates,
     accident_fact_sources,
+    fine_notice_intake_slots,
     normalization_pending_questions,
     normalization_routing_hints,
+    normalized_slot_state,
 )
 
 
@@ -97,3 +99,22 @@ def test_accident_fact_sources_keep_rule_provenance_without_raw_text() -> None:
     }
     assert all(item["source_type"] == "rule_normalization" for item in sources)
     assert all("source_text" not in item for item in sources)
+
+
+def test_projects_notice_and_objection_slots_without_legal_conclusions() -> None:
+    normalized = normalize_supervisor_input(
+        user_text="과태료 1챠 고지서를 받아서 이의 재기하려고 합니다.",
+        source_message_id="msg_notice_projection",
+    )
+
+    slot_state = normalized_slot_state(normalized)
+
+    assert slot_state["contract_version"] == "slot_filling_state.v1"
+    assert slot_state["slots"]["fine_type"]["value"] == "fine"
+    assert slot_state["slots"]["notice_stage"]["value"] == "first_notice"
+    assert slot_state["slots"]["requested_action"]["value"] == "objection"
+    assert "legal_conclusion" not in slot_state["slots"]
+    assert "law_article" not in slot_state["slots"]
+    assert fine_notice_intake_slots(normalized)["document_disposition_type"][
+        "value"
+    ] == "first_notice"

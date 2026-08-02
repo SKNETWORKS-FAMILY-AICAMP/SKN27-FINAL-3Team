@@ -5,6 +5,12 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Mapping
 
+from app.services.supervisor_input_normalization_service import (
+    AMOUNT_PATTERN,
+    AUTHORITY_PATTERN,
+    DATE_PATTERN,
+)
+
 
 DOMAIN_INTENT_ORDER = {
     "objection": "fine_notice_procedure",
@@ -27,6 +33,26 @@ ACCIDENT_CORE_FIELDS = {
     "road_layout",
     "signal_priority",
     "collision_location",
+}
+FINE_NOTICE_INTAKE_FIELD_MAP = {
+    "notice_stage": "document_disposition_type",
+    "issuing_authority": "issuing_authority",
+    "due_date": "response_deadline",
+}
+NORMALIZED_AGENT_SLOT_FIELDS = {
+    "fine_type",
+    "notice_stage",
+    "issuing_authority",
+    "notice_date",
+    "due_date",
+    "amount",
+    "alleged_violation",
+    "requested_action",
+    "disputed_facts",
+    "objection_reason",
+    "evidence_references",
+    "deadline_clarification_required",
+    "legal_issue_terms",
 }
 
 
@@ -122,6 +148,49 @@ def accident_fact_candidates(
     return projected
 
 
+def fine_notice_intake_slots(
+    value: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    slots: dict[str, dict[str, Any]] = {}
+    for candidate in _eligible_legal_slot_candidates(value):
+        target = FINE_NOTICE_INTAKE_FIELD_MAP.get(
+            str(candidate.get("field") or "")
+        )
+        if not target:
+            continue
+        slots[target] = {
+            "value": candidate["value"],
+            "source_type": "rule_normalization",
+            "source_message_id": candidate["source_message_id"],
+            "confidence": candidate["confidence"],
+            "confirmed": False,
+        }
+    return slots
+
+
+def normalized_slot_state(value: Mapping[str, Any]) -> dict[str, Any]:
+    slots: dict[str, dict[str, Any]] = {}
+    for candidate in _eligible_legal_slot_candidates(value):
+        field = str(candidate.get("field") or "")
+        if field not in NORMALIZED_AGENT_SLOT_FIELDS:
+            continue
+        slots[field] = {
+            "value": candidate["value"],
+            "source": {
+                "type": "rule_normalization",
+                "reference": candidate["source_message_id"],
+            },
+            "confidence": candidate["confidence"],
+            "editable": True,
+            "confirmed": False,
+            "rule_id": candidate["rule_id"],
+        }
+    return {
+        "contract_version": "slot_filling_state.v1",
+        "slots": slots,
+    }
+
+
 def accident_fact_sources(
     value: Mapping[str, Any],
     *,
@@ -175,3 +244,36 @@ def _eligible_accident_candidates(
         and item.get("negated") is not True
         and item.get("uncertain") is not True
     ]
+
+
+def _eligible_legal_slot_candidates(
+    value: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    candidates: list[Mapping[str, Any]] = []
+    for item in value.get("candidates", []):
+        if (
+            not isinstance(item, Mapping)
+            or item.get("domain") not in {"fine_notice", "objection"}
+            or item.get("decision") != "auto_applied"
+            or item.get("negated") is True
+            or item.get("uncertain") is True
+        ):
+            continue
+        field = str(item.get("field") or "")
+        candidate_value = str(item.get("value") or "").strip()
+        if not _valid_structured_legal_value(field, candidate_value):
+            continue
+        candidates.append(item)
+    return candidates
+
+
+def _valid_structured_legal_value(field: str, value: str) -> bool:
+    if not value:
+        return False
+    if field == "amount":
+        return AMOUNT_PATTERN.fullmatch(value) is not None
+    if field == "issuing_authority":
+        return AUTHORITY_PATTERN.fullmatch(value) is not None
+    if field in {"notice_date", "due_date"}:
+        return DATE_PATTERN.fullmatch(value) is not None
+    return True

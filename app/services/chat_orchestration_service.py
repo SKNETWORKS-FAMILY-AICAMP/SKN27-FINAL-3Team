@@ -38,7 +38,9 @@ from app.services.supervisor_input_normalization_service import (
 from app.services.supervisor_input_projection_service import (
     accident_fact_candidates,
     accident_fact_sources,
+    fine_notice_intake_slots,
     normalization_pending_questions,
+    normalized_slot_state,
 )
 from app.services.supervisor_routing_service import (
     BASE_NODE_PLANS,
@@ -238,6 +240,9 @@ def submit_message(
                 "user_text": user_text,
                 "attachments": attachments,
                 "ocr_confirmation": ocr_confirmation,
+                "normalized_slots": fine_notice_intake_slots(
+                    input_normalization
+                ),
             }
         )
         if routing_intent in {"fine_notice_procedure", "fine_notice_analysis"}
@@ -1246,6 +1251,9 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
     )
     node_codes = plan_node_codes(routing_intent, report_requested=report_requested)
     public_node_codes = [code for code in node_codes if code in PUBLIC_AGENT_NODE_CODES]
+    projected_slot_state = normalized_slot_state(
+        payload.get("input_normalization") or {}
+    )
     slot_state = {
         "contract_version": "slot_filling_state.v1",
         "slots": {
@@ -1257,7 +1265,8 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
                 },
                 "confidence": 1.0,
                 "editable": True,
-            }
+            },
+            **dict(projected_slot_state.get("slots") or {}),
         },
     }
     return {

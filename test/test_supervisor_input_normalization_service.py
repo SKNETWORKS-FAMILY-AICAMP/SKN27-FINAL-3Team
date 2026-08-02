@@ -190,3 +190,32 @@ def test_bare_notice_does_not_guess_legal_stage() -> None:
     assert any(
         item["field"] == "notice_stage" for item in result["clarifications"]
     )
+
+
+def test_extracts_only_limited_authority_amount_and_due_date_patterns() -> None:
+    service = _service()
+    result = service.normalize_supervisor_input(
+        user_text="서울시청 과태료 50,000원 납부기한은 2026-08-07까지입니다.",
+        source_message_id="msg_limited_patterns",
+    )
+
+    projected = {
+        (item["field"], item["value"]): item for item in result["candidates"]
+    }
+    assert projected[("issuing_authority", "서울시청")]["decision"] == (
+        "auto_applied"
+    )
+    assert projected[("amount", "50,000원")]["decision"] == "auto_applied"
+    assert projected[("due_date", "2026-08-07")]["decision"] == "auto_applied"
+
+
+def test_single_unqualified_date_requires_confirmation() -> None:
+    service = _service()
+    result = service.normalize_supervisor_input(
+        user_text="문서에는 2026-08-07이라고 적혀 있습니다.",
+        source_message_id="msg_unqualified_date",
+    )
+
+    date = next(item for item in result["candidates"] if item["field"] == "notice_date")
+    assert date["decision"] == "confirmation_required"
+    assert any(item["field"] == "notice_date" for item in result["clarifications"])
