@@ -1229,6 +1229,47 @@ def test_fault_ratio_followup_answer_is_accumulated_before_next_question() -> No
     assert response["pending_questions"][0]["field"] == "vehicle_actions"
 
 
+def test_normalized_typo_fact_is_collected_and_confirmed_followup_wins() -> None:
+    first = submit_message(
+        {
+            "session_id": "ses_normalized_accident_first",
+            "user_text": "저는 직진했고 상대 차량은 좌해전했습니다.",
+        }
+    )
+    initial_fact = first["consultation_state"]["fact_state"]["facts"][
+        "vehicle_actions"
+    ]
+
+    assert initial_fact["value"] == "본인 차량 직진, 상대 차량 좌회전"
+    assert initial_fact["confirmed"] is False
+
+    followup = submit_message(
+        {
+            "session_id": "ses_normalized_accident_followup",
+            "user_text": "본인 차량 직진, 상대 차량 좌회전",
+            "fact_candidates": [initial_fact],
+            "conversation_history": [
+                {
+                    "role": "assistant",
+                    "content": "충돌 직전 양쪽 차량의 진행 방향과 행동을 알려주세요.",
+                },
+                {
+                    "role": "user",
+                    "content": "본인 차량 직진, 상대 차량 좌회전",
+                },
+            ],
+        },
+        routing_intent_override="accident_initial_consultation",
+    )
+
+    reduced = followup["consultation_state"]["fact_state"]
+    assert reduced["conflicts"] == []
+    assert reduced["facts"]["vehicle_actions"]["confirmed"] is True
+    assert reduced["facts"]["vehicle_actions"]["value"] == (
+        "본인 차량 직진, 상대 차량 좌회전"
+    )
+
+
 @patch("app.services.chat_orchestration_service.build_supervisor_state_with_optional_llm")
 def test_structured_fault_facts_do_not_repeat_core_questions(build_supervisor_state) -> None:
     build_supervisor_state.return_value = {

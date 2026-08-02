@@ -36,6 +36,8 @@ from app.services.supervisor_input_normalization_service import (
     normalize_supervisor_input,
 )
 from app.services.supervisor_input_projection_service import (
+    accident_fact_candidates,
+    accident_fact_sources,
     normalization_pending_questions,
 )
 from app.services.supervisor_routing_service import (
@@ -285,9 +287,15 @@ def submit_message(
             }
         )
         fact_sources = [
-            dict(item)
-            for item in payload.get("fact_sources") or []
-            if isinstance(item, dict)
+            *accident_fact_sources(
+                input_normalization,
+                source_message_id=source_message_id,
+            ),
+            *[
+                dict(item)
+                for item in payload.get("fact_sources") or []
+                if isinstance(item, dict)
+            ],
         ]
         consultation_state = build_consultation_state_v2(
             user_text=user_text,
@@ -1301,9 +1309,11 @@ def _fallback_accident_supervisor_state(
                     for item in payload.get("fact_candidates") or []
                     if isinstance(item, dict)
                 ],
-                *_same_message_accident_fact_candidates(
-                    str(payload.get("user_text") or ""),
-                    str(payload.get("message_id") or payload.get("session_id") or ""),
+                *accident_fact_candidates(
+                    payload.get("input_normalization") or {},
+                    source_message_id=str(
+                        payload.get("message_id") or payload.get("session_id") or ""
+                    ),
                 ),
             ],
         }
@@ -1353,31 +1363,6 @@ def _fallback_accident_supervisor_state(
         "agent_input_packages": [],
         "reporting_payload": None,
     }
-
-
-def _same_message_accident_fact_candidates(
-    user_text: str,
-    source_message_id: str,
-) -> list[dict[str, Any]]:
-    text = str(user_text or "")
-    has_self_straight = bool(
-        re.search(r"(?:저는|제가|나는|내가|제\s*차(?:량)?)\s*[^.!?]{0,20}직진", text)
-    )
-    has_other_left_turn = bool(
-        re.search(r"상대(?:방|차|차량)?(?:는|가)?\s*[^.!?]{0,24}좌회전", text)
-    )
-    if not has_self_straight or not has_other_left_turn:
-        return []
-    return [
-        {
-            "field": "vehicle_actions",
-            "value": "본인 차량 직진, 상대 차량 좌회전",
-            "source_message_id": source_message_id,
-            "confidence": 0.9,
-            "confirmed": False,
-        }
-    ]
-
 
 def _analysis_plan(
     *,
