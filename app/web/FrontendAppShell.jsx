@@ -5,6 +5,7 @@ import { buildAnalysisProgressUi } from "./analysisProgressUi.js";
 import { buildAppealDecisionUi } from "./appealDecisionUi.js";
 import { buildAttachmentWorkflowUi } from "./attachmentWorkflowUi.js";
 import { CaseReadyPanel } from "./CaseReadyPanel.js";
+import { TrafficAccidentOcrPanel } from "./TrafficAccidentOcrPanel.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
 import homeAccidentAnalysisUrl from "./assets/home-accident-analysis.png";
 import { reportsForCase } from "./caseReports.js?null-case-v1";
@@ -36,6 +37,7 @@ import {
   buildConsultationRequestContext,
   createEmptyConsultationIntake,
 } from "./consultationIntake.js";
+import { buildTrafficAccidentOcrUi } from "./trafficAccidentOcrPresentation.js";
 import {
   guestConversationFailureState,
   shouldPromptGuestConversationSave,
@@ -400,6 +402,12 @@ export default function FrontendAppShell({
   const appealRiskAcknowledged =
     !appealDecisionUi?.requiresAcknowledgement || acknowledgedAppealKey === appealDecisionKey;
   const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
+  const trafficAccidentOcrUi = buildTrafficAccidentOcrUi({
+    structuredResult:
+      analysisResponse?.structured_results?.traffic_accident_confirmation_ocr,
+    semanticStatus: analysisResponse?.status,
+    nextActions: analysisResponse?.next_actions,
+  });
   const attachmentClassificationResult =
     analysisResponse?.structured_results?.attachment_document_classification || null;
   const attachmentWorkflowUi = buildAttachmentWorkflowUi(analysisResponse?.attachment_workflows);
@@ -2095,6 +2103,7 @@ export default function FrontendAppShell({
               pendingAuthAction={pendingAuthAction}
               ocrConfirmationFields={ocrConfirmationFields}
               ocrResult={ocrResult}
+              trafficAccidentOcrUi={trafficAccidentOcrUi}
               attachmentClassificationResult={attachmentClassificationResult}
               attachmentWorkflowUi={attachmentWorkflowUi}
               question={question}
@@ -3089,6 +3098,7 @@ function ChatScreenV2({
   pendingAuthAction,
   ocrConfirmationFields,
   ocrResult,
+  trafficAccidentOcrUi,
   question,
   registeredAttachments,
   reportActionStatus,
@@ -3429,6 +3439,8 @@ function ChatScreenV2({
               onConfirm={onConfirmAttachmentClassification}
             />
             )}
+
+          <TrafficAccidentOcrPanel ui={trafficAccidentOcrUi} />
 
           <CaseReadyPanel
             model={caseReadyModel}

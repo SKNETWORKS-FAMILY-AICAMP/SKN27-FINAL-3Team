@@ -8681,6 +8681,101 @@ body,
 }
 
 /* Case-ready explicit action */
+.traffic-accident-ocr {
+  order: 3;
+  margin: 0 28px 18px;
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  border: 1px solid #cbd5ee;
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.traffic-accident-ocr.is-failed {
+  border-color: #f3c6c6;
+  background: #fffafa;
+}
+
+.traffic-accident-ocr__header {
+  display: grid;
+  gap: 4px;
+}
+
+.traffic-accident-ocr__header span {
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.traffic-accident-ocr__header h3,
+.traffic-accident-ocr__header p,
+.traffic-accident-ocr__header small,
+.traffic-accident-ocr__next ul {
+  margin: 0;
+}
+
+.traffic-accident-ocr__header p,
+.traffic-accident-ocr__header small,
+.traffic-accident-ocr__next {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.traffic-accident-ocr__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.traffic-accident-ocr__meta span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #edf2ff;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.traffic-accident-ocr__fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.traffic-accident-ocr__field {
+  min-width: 0;
+  padding: 12px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid #e0e5f1;
+  border-radius: 12px;
+  background: #f8faff;
+}
+
+.traffic-accident-ocr__field dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.traffic-accident-ocr__field dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.traffic-accident-ocr__next {
+  display: grid;
+  gap: 6px;
+}
+
+.traffic-accident-ocr__next ul {
+  padding-left: 20px;
+}
+
 .case-ready-panel {
   order: 3;
   margin: 0 28px 18px;
@@ -8765,6 +8860,15 @@ body,
 }
 
 @media (max-width: 860px) {
+  .traffic-accident-ocr {
+    margin: 0 16px 14px;
+    padding: 14px;
+  }
+
+  .traffic-accident-ocr__fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .case-ready-panel {
     margin: 0 16px 14px;
     padding: 14px;
