@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { shouldPromptGuestConversationSave } from "./guestConversationPolicy.js";
+import {
+  guestConversationFailureState,
+  shouldPromptGuestConversationSave,
+} from "./guestConversationPolicy.js";
 
 test("keeps a guest conversation open while the assistant is asking follow-up questions", () => {
   assert.equal(
@@ -40,4 +43,12 @@ test("does not show the guest save prompt for an authenticated conversation", ()
     }),
     false,
   );
+});
+
+test("does not present a failed guest submission as saveable or report-ready", () => {
+  assert.deepEqual(guestConversationFailureState(), {
+    analysisResponse: null,
+    guestDetailedReportUsed: false,
+    savePromptVisible: false,
+  });
 });

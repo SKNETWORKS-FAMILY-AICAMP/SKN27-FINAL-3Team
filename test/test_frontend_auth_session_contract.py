@@ -319,18 +319,21 @@ def test_guest_bootstrap_rebinds_server_session_before_follow_up_workflows() -> 
     assert "{ guestId: initialGuestId, guestCredential: initialGuestCredential }" in block
 
 
-def test_chat_submit_recovery_uses_structured_auth_error_metadata() -> None:
+def test_chat_submit_recovers_stale_guest_session_and_clears_failure_state() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     submit_start = shell.index("async function submitServiceMessage({")
     submit_end = shell.index("async function streamAssistantMessage", submit_start)
     block = shell[submit_start:submit_end]
 
     for required in (
+        "submitWithGuestSessionRecovery({",
         '_error?.requiredAction === "login"',
         '_error?.requiredAction === "refresh_guest_session"',
         '_error?.code === "guest_session_invalid"',
-        "isRateLimitExceeded || discardRejectedInput",
-        ": { cards: FALLBACK_ANALYSIS_CARDS }",
+        "const failureState = guestConversationFailureState();",
+        "setAnalysisResponse(failureState.analysisResponse);",
+        "setSavePromptVisible(failureState.savePromptVisible);",
+        "setGuestDetailedReportUsed(failureState.guestDetailedReportUsed);",
     ):
         assert required in block
 
