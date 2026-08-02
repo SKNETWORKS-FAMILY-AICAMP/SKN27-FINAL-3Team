@@ -57,6 +57,53 @@ test("builds existing Case API payloads from four confirmed facts", () => {
 });
 
 
+test("uses only target-document OCR evidence when upload state is still stale", () => {
+  const targetResponse = completeResponse();
+  targetResponse.structured_results = {
+    traffic_accident_confirmation_ocr: {
+      document_check: { is_target_document: true },
+      ocr_evidence: [
+        {
+          attachment_id: "att_scanned_confirmation",
+          storage_uri: "s3://must-not-enter-case-payload/private.png",
+        },
+      ],
+    },
+  };
+  const targetModel = buildCaseReadyViewModel(targetResponse, [
+    {
+      attachment_id: "att_scanned_confirmation",
+      status: "uploaded",
+      scan_status: "not_started",
+    },
+  ]);
+
+  assert.deepEqual(targetModel.confirmationPayload.sources, [
+    {
+      source_type: "official_document",
+      source_ref: "att_scanned_confirmation",
+    },
+  ]);
+  assert.equal(
+    JSON.stringify(targetModel.confirmationPayload).includes("storage_uri"),
+    false,
+  );
+
+  const nonTargetResponse = completeResponse();
+  nonTargetResponse.structured_results = {
+    traffic_accident_confirmation_ocr: {
+      document_check: { is_target_document: false },
+      ocr_evidence: [{ attachment_id: "att_wrong_document" }],
+    },
+  };
+
+  assert.deepEqual(
+    buildCaseReadyViewModel(nonTargetResponse).confirmationPayload.sources,
+    [],
+  );
+});
+
+
 for (const [name, mutate] of [
   ["non-case-ready response", (value) => {
     value.status = "needs_input";

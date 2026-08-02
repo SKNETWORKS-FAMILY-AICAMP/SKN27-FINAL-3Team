@@ -74,16 +74,28 @@ export function buildCaseReadyViewModel(
       && conflicts.length === 0
       && facts.every((fact) => fact.confirmed && nonEmpty(fact.value)),
   );
-  const sources = (Array.isArray(registeredAttachments) ? registeredAttachments : [])
+  const readyAttachmentIds = (Array.isArray(registeredAttachments) ? registeredAttachments : [])
     .filter((item) => (
       item
       && typeof item === "object"
       && item.status === "ready"
       && nonEmpty(item.attachment_id)
     ))
-    .map((item) => ({
+    .map((item) => String(item.attachment_id).trim());
+  const trafficAccidentOcr = record(
+    analysisResponse?.structured_results?.traffic_accident_confirmation_ocr,
+  );
+  const ocrEvidenceIds =
+    trafficAccidentOcr.document_check?.is_target_document === true
+      && Array.isArray(trafficAccidentOcr.ocr_evidence)
+      ? trafficAccidentOcr.ocr_evidence
+        .map((item) => text(item?.attachment_id))
+        .filter(Boolean)
+      : [];
+  const sources = [...new Set([...readyAttachmentIds, ...ocrEvidenceIds])]
+    .map((attachmentId) => ({
       source_type: "official_document",
-      source_ref: String(item.attachment_id).trim(),
+      source_ref: attachmentId,
     }));
 
   return {

@@ -1,8 +1,8 @@
 # Pilot Case-Ready, OCR, Persisted Report Hotfix Design
 
-> 기준일: 2026-08-03  
-> 기준 브랜치: `origin/dev`  
-> 기준 SHA: `dd9931b3af369de41a4a9c563d4ced07ed29612e`  
+> 기준일: 2026-08-03
+> 기준 브랜치: `origin/dev`
+> 기준 SHA: `dd9931b3af369de41a4a9c563d4ced07ed29612e`
 > 상태: 사용자 승인 범위를 구현 가능한 설계로 고정
 
 ## 1. 목표
