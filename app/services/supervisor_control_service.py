@@ -511,6 +511,17 @@ def _merge_fact_candidate(
 ) -> None:
     field = candidate["field"]
     existing = facts.get(field)
+    if (
+        existing
+        and candidate.get("confirmed")
+        and not existing.get("confirmed")
+        and _text(existing.get("source_message_id")) != "payload:facts"
+    ):
+        facts[field] = candidate
+        conflicts[:] = [
+            item for item in conflicts if _text(item.get("field")) != field
+        ]
+        return
     if existing and _normalized(existing.get("value")) != _normalized(candidate["value"]):
         conflict = {
             "field": field,
