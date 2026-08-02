@@ -47,7 +47,10 @@ Build CodeBuild와 Release CodeBuild는 역할과 IAM 권한이 분리돼 있다
 
 - 저장소 구현: `ssm:CancelCommand`, 계층형 timeout 및 rollback 상태 기록 반영 완료
 - 로컬 검증: 관련 AWS Pilot 테스트 121개, Bash 구문 및 Terraform validate 통과
-- 실제 AWS 적용: 미적용
+- 실제 AWS 적용: Release CodeBuild 40분 및 `ssm:CancelCommand` 반영 완료
+- 소스 배포 상태: PR #368로 `dev` 병합 및 Build 성공
+- 운영 검증: release `518b1e7a6abc`는 non-root validator의 candidate evidence 접근 권한 오류로 실패했으며 `ROLLBACK_STATUS=complete` 확인
+- 후속 수정: candidate evidence 디렉터리를 `0755`로 생성하는 회귀 수정은 로컬 검증 완료, `dev` 미병합
 - 2차 release class 분리: 1차 AWS 적용 및 정상·timeout 운영 검증 후 진행
 
 저장소 구현 완료와 실제 AWS 반영 완료를 같은 상태로 간주하지 않는다. 실제 적용은
