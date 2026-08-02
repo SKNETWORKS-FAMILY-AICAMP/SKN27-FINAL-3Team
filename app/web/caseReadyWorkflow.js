@@ -1,0 +1,131 @@
+export const CASE_READY_FACTS = [
+  ["road_layout", "도로 형태"],
+  ["vehicle_actions", "양쪽 차량 행동"],
+  ["signal_priority", "신호·우선권"],
+  ["collision_location", "충돌 부위"],
+];
+
+
+export function buildCaseReadyViewModel(
+  analysisResponse = {},
+  registeredAttachments = [],
+) {
+  const consultationState = record(analysisResponse?.consultation_state?.v2);
+  const factState = record(analysisResponse?.consultation_state?.fact_state);
+  const factRecords = record(factState.facts);
+  const conflicts = Array.isArray(factState.conflicts)
+    ? factState.conflicts.filter((item) => item && typeof item === "object")
+    : [];
+  const facts = CASE_READY_FACTS.map(([field, label]) => {
+    const fact = record(factRecords[field]);
+    return {
+      field,
+      label,
+      value: fact.value,
+      confirmed: fact.confirmed === true,
+    };
+  });
+  const eligible = Boolean(
+    analysisResponse?.status === "case_ready"
+      && consultationState?.risk_gate?.level !== "high_risk"
+      && conflicts.length === 0
+      && facts.every((fact) => fact.confirmed && nonEmpty(fact.value)),
+  );
+  const sources = (Array.isArray(registeredAttachments) ? registeredAttachments : [])
+    .filter((item) => (
+      item
+      && typeof item === "object"
+      && item.status === "ready"
+      && nonEmpty(item.attachment_id)
+    ))
+    .map((item) => ({
+      source_type: "official_document",
+      source_ref: String(item.attachment_id).trim(),
+    }));
+
+  return {
+    eligible,
+    facts,
+    casePayload: {
+      session_id: nonEmpty(analysisResponse?.session_id)
+        ? String(analysisResponse.session_id).trim()
+        : "",
+      title: "교통사고 과실 상담",
+      case_type: "accident_fault",
+      consultation_state: consultationState,
+      location: {},
+    },
+    confirmationPayload: {
+      facts: Object.fromEntries(facts.map((fact) => [fact.field, fact.value])),
+      sources,
+      conflicts,
+      user_edit_history: [],
+    },
+  };
+}
+
+
+export async function runCaseReadyWorkflow({
+  api,
+  identity,
+  model,
+  onStep = () => {},
+}) {
+  if (!model?.eligible) {
+    throw new Error("case_ready_required");
+  }
+
+  onStep("creating_case");
+  const created = await api.createConsultationCase(model.casePayload, identity);
+  const caseId = text(created?.case?.case_id);
+  if (!caseId) {
+    throw new Error("case_id_missing");
+  }
+
+  onStep("confirming_facts");
+  const confirmed = await api.confirmConsultationCaseFacts({
+    caseId,
+    payload: model.confirmationPayload,
+    identity,
+  });
+  const factVersionId = text(confirmed?.fact_version?.fact_version_id);
+  if (!factVersionId) {
+    throw new Error("fact_version_id_missing");
+  }
+
+  onStep("starting_analysis");
+  const startResponse = await api.startConsultationCaseAnalysis({
+    caseId,
+    payload: { fact_version_id: factVersionId },
+    identity,
+  });
+  const jobId = text(startResponse?.job?.job_id);
+  if (!jobId) {
+    throw new Error("analysis_job_id_missing");
+  }
+
+  return {
+    caseId,
+    factVersionId,
+    jobId,
+    workItemId: text(startResponse?.work_item?.work_item_id),
+    startResponse,
+  };
+}
+
+
+function record(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+
+function text(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+
+function nonEmpty(value) {
+  return typeof value === "string"
+    ? Boolean(value.trim())
+    : value !== undefined && value !== null;
+}
