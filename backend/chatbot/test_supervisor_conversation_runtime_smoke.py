@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -102,6 +103,7 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
                 },
             },
             {
+                "allow_report_needs_input": False,
                 "require_llm_used": True,
                 "require_real_agent_results": True,
                 "require_persisted_handoff": True,
@@ -110,6 +112,88 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
         )
 
         self.assertEqual(failed, ["llm_used", "real_agent_results"])
+
+    def test_strict_checks_accept_only_exact_user_facts_needs_input_contract(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        failed = smoke._failed_checks(
+            {
+                "chat": {"status": "queued"},
+                "llm": {"status": "used"},
+                "checks": {
+                    "job_success": False,
+                    "all_agent_results_success": False,
+                    "real_agent_results": False,
+                    "persisted_handoff_consumed": False,
+                    "report_ready": False,
+                    "analysis_agent_results_success": True,
+                    "real_analysis_agent_results": True,
+                    "persisted_handoff_trace_matches": True,
+                    "report_needs_user_facts": True,
+                    "analysis_display_persisted": True,
+                    "public_result_loaded": True,
+                    "worker_loop_consumed": True,
+                    "worker_completed": True,
+                },
+            },
+            {
+                "allow_report_needs_input": True,
+                "require_llm_used": True,
+                "require_real_agent_results": True,
+                "require_persisted_handoff": True,
+                "require_report": True,
+            },
+        )
+
+        self.assertEqual(failed, [])
+
+    def test_report_needs_input_contract_rejects_any_field_other_than_user_facts(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        reporting_result = SimpleNamespace(
+            status="partial",
+            structured_result={
+                "missing_fields": ["notice_image"],
+                "readiness": {
+                    "ready_for_download": False,
+                    "requires_user_review": True,
+                },
+            },
+        )
+        report = SimpleNamespace(status="draft")
+        display = SimpleNamespace(
+            pending_questions=[{"field": "notice_image"}],
+            assistant_message={"report_status": "draft"},
+            report_links=[],
+        )
+
+        self.assertFalse(
+            smoke._report_needs_user_facts(reporting_result, report=report, display=display)
+        )
+
+    def test_report_needs_input_contract_accepts_exact_safe_user_facts_draft(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        reporting_result = SimpleNamespace(
+            status="partial",
+            structured_result={
+                "missing_fields": ["user_facts"],
+                "readiness": {
+                    "ready_for_download": False,
+                    "requires_user_review": True,
+                },
+            },
+        )
+        report = SimpleNamespace(status="draft")
+        display = SimpleNamespace(
+            pending_questions=[{"field": "user_facts"}],
+            assistant_message={"report_status": "draft"},
+            report_links=[],
+        )
+
+        self.assertTrue(
+            smoke._report_needs_user_facts(reporting_result, report=report, display=display)
+        )
 
     def test_report_requested_supervisor_plan_keeps_reporting_step_final(self) -> None:
         from app.services.chat_orchestration_service import _analysis_plan

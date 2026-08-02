@@ -746,7 +746,8 @@ try {
             )
         }
         $commands += @(
-            "$productionComposeCommand exec -T backend python backend/manage.py smoke_supervisor_conversation_runtime --allow-paid-provider-call --require-llm-used --require-real-agent-results --require-persisted-handoff --require-report --fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --timeout-seconds 600 --format json",
+            "$productionComposeCommand exec -T backend python backend/manage.py smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call --require-real-agent-results --require-persisted-handoff --require-report --fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --timeout-seconds 600 --format json",
+            "$productionComposeCommand exec -T backend python backend/manage.py smoke_supervisor_conversation_runtime --allow-paid-provider-call --require-llm-used --require-real-agent-results --require-persisted-handoff --require-report --allow-report-needs-input --fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' --timeout-seconds 600 --format json",
             "curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve '${appDomain}:443:127.0.0.1' https://${appDomain}/api/health/live/ >/dev/null",
             "curl --fail --silent --show-error --retry 10 --retry-delay 6 --resolve '${appDomain}:443:127.0.0.1' https://${appDomain}/api/health/ready/ >/dev/null",
             "PILOT_OPS_MONITOR_IP='172.31.0.11' $productionComposeCommand run --rm --no-deps ops-monitor python backend/manage.py observe_operational_health --once --gate-mode transaction",

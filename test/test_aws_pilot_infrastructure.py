@@ -2169,11 +2169,19 @@ def test_normal_promotion_requires_validated_fine_notice_fixture_and_exact_smoke
     expected = (
         "smoke_supervisor_conversation_runtime --allow-paid-provider-call "
         "--require-llm-used --require-real-agent-results "
-        "--require-persisted-handoff --require-report "
+        "--require-persisted-handoff --require-report --allow-report-needs-input "
         "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
         "--timeout-seconds 600 --format json"
     )
     assert expected in deploy
+
+    non_dl_expected = (
+        "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call "
+        "--require-real-agent-results --require-persisted-handoff --require-report "
+        "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
+        "--timeout-seconds 600 --format json"
+    )
+    assert non_dl_expected in deploy
 
     for marker in (
         "--fine-notice-fixture-s3-uri",
@@ -2206,18 +2214,22 @@ def test_normal_promotion_uses_one_production_supervisor_runtime_smoke() -> None
     expected = (
         "smoke_supervisor_conversation_runtime --allow-paid-provider-call "
         "--require-llm-used --require-real-agent-results "
-        "--require-persisted-handoff --require-report "
+        "--require-persisted-handoff --require-report --allow-report-needs-input "
+        "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
+        "--timeout-seconds 600 --format json"
+    )
+    non_dl_expected = (
+        "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call "
+        "--require-real-agent-results --require-persisted-handoff --require-report "
         "--fine-notice-fixture-s3-uri '$FineNoticeSmokeS3Uri' "
         "--timeout-seconds 600 --format json"
     )
 
     assert normal_segment.count(expected) == 1
+    assert normal_segment.count(non_dl_expected) == 1
+    assert normal_segment.index(non_dl_expected) < normal_segment.index(expected)
     assert "help smoke_supervisor_conversation_runtime" in normal_segment
     assert "smoke_supervisor_llm --require-used" not in normal_segment
-    assert (
-        "smoke_non_dl_analysis_reporting_pipeline --allow-paid-provider-call"
-        not in normal_segment
-    )
 
 
 def test_normal_promotion_bootstraps_redis_before_waiting_for_core_services() -> None:

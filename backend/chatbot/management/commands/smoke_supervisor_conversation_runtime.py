@@ -63,6 +63,14 @@ class Command(BaseCommand):
         parser.add_argument("--require-persisted-handoff", action="store_true")
         parser.add_argument("--require-report", action="store_true")
         parser.add_argument(
+            "--allow-report-needs-input",
+            action="store_true",
+            help=(
+                "Allow only the exact safe draft state where persisted real analysis "
+                "succeeds and Reporting asks for user_facts before download."
+            ),
+        )
+        parser.add_argument(
             "--timeout-seconds",
             type=int,
             default=600,
@@ -185,6 +193,9 @@ def _run_smoke(fixture: dict, *, timeout_seconds: int = 600) -> dict:
         ),
         None,
     )
+    analysis_agent_results = [
+        item for item in agent_results if item.node_code != "objection_report_generation"
+    ]
     handoff = ((job.metadata if job else {}) or {}).get("supervisor_reporting_handoff")
     result["checks"] = {
         "queued": bool(job and work_item),
@@ -196,6 +207,18 @@ def _run_smoke(fixture: dict, *, timeout_seconds: int = 600) -> dict:
             reporting_result,
         ),
         "report_ready": bool(report and report.status == "ready"),
+        "analysis_agent_results_success": bool(analysis_agent_results)
+        and all(item.status == "success" for item in analysis_agent_results),
+        "real_analysis_agent_results": _real_agent_results(analysis_agent_results),
+        "persisted_handoff_trace_matches": _persisted_handoff_trace_matches(
+            handoff,
+            reporting_result,
+        ),
+        "report_needs_user_facts": _report_needs_user_facts(
+            reporting_result,
+            report=report,
+            display=display,
+        ),
         "analysis_display_persisted": display is not None,
         "public_result_loaded": public_result.status_code == 200,
         "worker_completed": bool(
@@ -309,6 +332,14 @@ def _real_agent_results(agent_results: list[AgentResult]) -> bool:
 
 
 def _persisted_handoff_consumed(handoff, reporting_result: AgentResult | None) -> bool:
+    return bool(
+        reporting_result is not None
+        and reporting_result.status == "success"
+        and _persisted_handoff_trace_matches(handoff, reporting_result)
+    )
+
+
+def _persisted_handoff_trace_matches(handoff, reporting_result: AgentResult | None) -> bool:
     handoff = handoff if isinstance(handoff, dict) else {}
     source = handoff.get("source")
     source = source if isinstance(source, dict) else {}
@@ -327,13 +358,46 @@ def _persisted_handoff_consumed(handoff, reporting_result: AgentResult | None) -
         and source.get("persisted") is True
         and gate.get("status") == "ready"
         and reporting_result is not None
-        and reporting_result.status == "success"
         and trace
         and trace.get("contract_version") == handoff.get("contract_version")
         and trace.get("handoff_id") == handoff.get("handoff_id")
         and trace.get("gate_status") == gate.get("status")
         and trace.get("source_fingerprint") == source.get("fingerprint")
         and trace.get("source_result_ids") == source.get("result_ids")
+    )
+
+
+def _report_needs_user_facts(
+    reporting_result: AgentResult | None,
+    *,
+    report: Report | None,
+    display: AnalysisDisplayResult | None,
+) -> bool:
+    structured = (
+        reporting_result.structured_result
+        if reporting_result is not None
+        and isinstance(reporting_result.structured_result, dict)
+        else {}
+    )
+    readiness = structured.get("readiness")
+    readiness = readiness if isinstance(readiness, dict) else {}
+    assistant_message = (
+        display.assistant_message
+        if display is not None and isinstance(display.assistant_message, dict)
+        else {}
+    )
+    return bool(
+        reporting_result is not None
+        and reporting_result.status == "partial"
+        and structured.get("missing_fields") == ["user_facts"]
+        and readiness.get("ready_for_download") is False
+        and readiness.get("requires_user_review") is True
+        and report is not None
+        and report.status == "draft"
+        and display is not None
+        and display.pending_questions == [{"field": "user_facts"}]
+        and assistant_message.get("report_status") == "draft"
+        and display.report_links == []
     )
 
 
@@ -347,19 +411,37 @@ def _failed_checks(result: dict, options: dict) -> list[str]:
         for name in ("worker_loop_consumed", "worker_completed")
         if not checks.get(name)
     )
-    if options["require_llm_used"] and result["llm"].get("status") != "used":
+    if options.get("require_llm_used") and result["llm"].get("status") != "used":
         failed.append("llm_used")
-    requirement_checks = {
-        "require_real_agent_results": (
-            "job_success",
-            "all_agent_results_success",
-            "real_agent_results",
-        ),
-        "require_persisted_handoff": ("persisted_handoff_consumed",),
-        "require_report": ("report_ready", "analysis_display_persisted", "public_result_loaded"),
-    }
+    if options.get("allow_report_needs_input"):
+        requirement_checks = {
+            "require_real_agent_results": (
+                "analysis_agent_results_success",
+                "real_analysis_agent_results",
+            ),
+            "require_persisted_handoff": ("persisted_handoff_trace_matches",),
+            "require_report": (
+                "report_needs_user_facts",
+                "analysis_display_persisted",
+                "public_result_loaded",
+            ),
+        }
+    else:
+        requirement_checks = {
+            "require_real_agent_results": (
+                "job_success",
+                "all_agent_results_success",
+                "real_agent_results",
+            ),
+            "require_persisted_handoff": ("persisted_handoff_consumed",),
+            "require_report": (
+                "report_ready",
+                "analysis_display_persisted",
+                "public_result_loaded",
+            ),
+        }
     for option, names in requirement_checks.items():
-        if options[option]:
+        if options.get(option):
             failed.extend(name for name in names if not checks.get(name))
     return failed
 
