@@ -1,0 +1,54 @@
+{
+  "contract_version": "pilot_ocr_scenarios.v1",
+  "scenarios": [
+    {
+      "id": "OCR-A-01",
+      "filename": "22-11-18-_.png",
+      "purpose": "traffic_accident_confirmation",
+      "expected_classification": "traffic_accident_confirmation",
+      "allowed_statuses": [
+        "success",
+        "partial"
+      ],
+      "required_safe_fields": [
+        "accident_datetime",
+        "accident_location",
+        "accident_type",
+        "accident_cause"
+      ]
+    },
+    {
+      "id": "OCR-A-02",
+      "filename": "15-07-18-.jpg",
+      "purpose": "traffic_accident_confirmation",
+      "expected_classification": "traffic_accident_confirmation",
+      "allowed_statuses": [
+        "partial",
+        "failed"
+      ],
+      "required_next_action": "reupload_complete_page"
+    },
+    {
+      "id": "OCR-F-01",
+      "filename": "form2_별지154_위반사실통지및과태료사전통지서.pdf",
+      "purpose": "fine_notice",
+      "expected_classification": "fine_notice",
+      "expected_notice_stage": "사전통지",
+      "allowed_statuses": [
+        "success",
+        "partial"
+      ]
+    },
+    {
+      "id": "OCR-F-02",
+      "filename": "form3_별지152_과태료납부고지서원부_운전자.pdf",
+      "purpose": "fine_notice",
+      "expected_classification": "fine_notice",
+      "expected_notice_stage": "1차 고지서",
+      "allowed_statuses": [
+        "success",
+        "partial"
+      ]
+    }
+  ]
+}
