@@ -50,7 +50,10 @@ Build CodeBuild와 Release CodeBuild는 역할과 IAM 권한이 분리돼 있다
 - 실제 AWS 적용: Release CodeBuild 40분 및 `ssm:CancelCommand` 반영 완료
 - 소스 배포 상태: PR #368로 `dev` 병합 및 Build 성공
 - 운영 검증: release `518b1e7a6abc`는 non-root validator의 candidate evidence 접근 권한 오류로 실패했으며 `ROLLBACK_STATUS=complete` 확인
-- 후속 수정: candidate evidence 디렉터리를 `0755`로 생성하는 회귀 수정은 로컬 검증 완료, `dev` 미병합
+- 1차 후속 수정: candidate evidence 디렉터리를 `0755`로 생성하는 수정은 PR #369로 `dev` 병합 완료
+- 재검증: release `9b3bb993a207`는 RAG seed 다운로드 중 EC2 루트 디스크 부족으로 실패했으며 `ROLLBACK_STATUS=complete` 확인
+- 디스크 진단: 루트 볼륨은 80 GiB 중 78 GiB(97%) 사용, 가용 2.9 GiB였고 RAG seed는 3,073,760,620 bytes였다. Docker 이미지 50.8 GB 중 48.05 GB가 회수 가능 상태였다.
+- 2차 후속 수정: current, target, 최근 3개 SHA를 보존하는 앱 이미지 정리와 `seed 크기 + 5 GiB` 사전 용량 gate 구현 및 계약 검증 완료, `dev` 병합 전
 - 2차 release class 분리: 1차 AWS 적용 및 정상·timeout 운영 검증 후 진행
 
 저장소 구현 완료와 실제 AWS 반영 완료를 같은 상태로 간주하지 않는다. 실제 적용은
@@ -149,6 +152,42 @@ best-effort 복구는 필요하지만 서비스별 복구 실패 여부가 최�
 - `ROLLBACK_OK` 또는 실패 항목 배열을 사용해 결과를 누적한다.
 - rollback이 불완전하면 명확한 별도 메시지와 종료 코드를 사용한다.
 - CloudWatch/SNS 알림에 `deployment_failed`와 `rollback_incomplete`를 구분한다.
+
+### 4.4 경량 앱 Release가 오래된 이미지 태그를 정리하지 않음
+
+#### 확인된 상태
+
+전체 인프라 배포 스크립트 `Deploy-Pilot.ps1`에는 latest 3 releases와 rollback tag를
+보존하는 이미지 정리가 있지만, 경량 앱 Release 스크립트에는 같은 정리가 없었다.
+따라서 앱 Release와 실패 후 rollback을 반복할수록 immutable SHA 태그와 과거
+`pipeline-rollback-*` 태그가 EC2 Docker 저장소에 계속 남는다.
+
+실제 두 번째 운영 검증 시 다음 상태가 확인됐다.
+
+- 루트 볼륨: 80 GiB 중 78 GiB 사용, 2.9 GiB 가용, 사용률 97%
+- Docker 이미지: 50.8 GB, 그중 48.05 GB 회수 가능
+- RAG seed: 3,073,760,620 bytes
+- 실패 지점: `legal_embeddings.jsonl` 다운로드 중 `No space left on device`
+- rollback: `ROLLBACK_STATUS=complete`, 기존 release `21da8f9df8a1` 유지
+
+#### 판정
+
+**과한 제약이 아니라 경량 Release 경로의 정리·사전 점검 누락이다.**
+
+S3 다운로드를 시작한 뒤 디스크 부족을 발견하면 네트워크와 실행 시간을 낭비하고,
+루트 볼륨을 100%에 가깝게 채워 정상 서비스에도 영향을 줄 수 있다.
+
+#### 개선안
+
+- backend/frontend 저장소의 current tag와 target tag는 항상 보존한다.
+- 각 저장소의 최근 immutable SHA 3개를 추가로 보존한다.
+- 그 외 12자리 SHA와 과거 `pipeline-rollback-*` 태그만 `docker image rm`으로 제거한다.
+- `docker image prune`과 Docker volume 정리는 사용하지 않는다.
+- target image pull 후 S3 prefix의 실제 합계를 조회한다.
+- `RAG seed 크기 + 5 GiB`보다 가용 공간이 작으면 다운로드 전에 fail-closed 한다.
+
+이 방식은 rollback 자산과 운영 데이터를 보존하면서 반복 Release로 인한 이미지 누적을
+제한하고, 용량 부족을 파괴적 작업 전에 명확한 오류로 전환한다.
 
 ## 5. 과도하거나 운영을 불편하게 만드는 제약
 

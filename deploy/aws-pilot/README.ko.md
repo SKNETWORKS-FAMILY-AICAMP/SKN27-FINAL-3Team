@@ -118,6 +118,10 @@ reload나 유료 smoke가 정말 필요할 때만 별도 승인받는다.
 - 모든 외부 이미지 주소는 `@sha256:` digest여야 하며, PostgreSQL maintenance에는
   `POSTGRES_MAINTENANCE_IMAGE_REF`를 사용한다. Docker volume은 release 전환 동안 유지한다.
 - image cleanup은 latest 3 releases와 rollback tag를 보존한다.
+- 경량 app release도 backend/frontend의 current, target, 최근 immutable SHA 3개를
+  보존하고 과거 release tag만 정리한다. Docker volume과 운영 RAG 디렉터리는 정리하지 않는다.
+- 경량 app release는 target image pull 후 RAG seed의 S3 실제 크기와 5 GiB 운영 여유를
+  합산해 확인하며, 가용 디스크가 부족하면 seed 다운로드 전에 실패한다.
 - deployment gate는 fail-closed이다. `.compose.env`에는 이미지 주소와 release tag만 두고,
   application secret은 `.runtime.env`에서만 주입한다.
 - acceptance window 동안에는 pgvector readiness와 서비스 health를 확인하고, 승인된 경우에만
