@@ -18,6 +18,7 @@ from app.services.agent_node_service import (
 )
 from app.services.attachment_mock_service import register_attachment
 from app.services.chatbot_mock_service import build_analysis_plan
+from app.services.supervisor_control_service import validate_agent_results
 
 
 def test_agent_node_registry_lists_all_integration_nodes():
@@ -367,8 +368,31 @@ def test_appeal_decision_runtime_invokes_real_graph_with_upstream_results(monkey
             "context": {"fine_type": "administrative_fine", "notice_stage": "first_notice"},
             "upstream_results": {
                 "fine_notice_analysis": {
-                    "structured_result": {"violation_text": "신호위반"}
-                }
+                    "status": "success",
+                    "structured_result": {"violation_text": "신호위반"},
+                    "evidence": [
+                        {
+                            "source_type": "user_uploaded_file",
+                            "title": "과태료 고지서 첨부파일",
+                            "source_reference": "att_appeal_notice",
+                            "metadata": {"purpose": "fine_notice"},
+                            "confidence": None,
+                        }
+                    ],
+                },
+                "law_ground_search": {
+                    "status": "success",
+                    "structured_result": {"matched_laws": []},
+                    "evidence": [
+                        {
+                            "source_type": "law",
+                            "title": "도로교통법 제160조",
+                            "source_reference": "law:road_traffic:160",
+                            "metadata": {"article": "제160조"},
+                            "confidence": 0.91,
+                        }
+                    ],
+                },
             },
         }
     )
@@ -379,6 +403,42 @@ def test_appeal_decision_runtime_invokes_real_graph_with_upstream_results(monkey
     assert execution["agent_output"]["structured_result"]["adapter_trace"]["adapter"] == (
         "ai.agents.appeal_decision_flow.graph"
     )
+    assert execution["agent_output"]["evidence"] == [
+        {
+            "source_type": "user_uploaded_file",
+            "title": "과태료 고지서 첨부파일",
+            "source_reference": "att_appeal_notice",
+            "metadata": {"purpose": "fine_notice"},
+            "confidence": None,
+        },
+        {
+            "source_type": "law",
+            "title": "도로교통법 제160조",
+            "source_reference": "law:road_traffic:160",
+            "metadata": {"article": "제160조"},
+            "confidence": 0.91,
+        },
+    ]
+    validation = validate_agent_results(
+        {
+            **execution["agent_input"]["upstream_results"],
+            "appeal_decision_flow": execution["agent_output"],
+        },
+        routing_intent="fine_notice_analysis",
+        expected_node_codes=[
+            "fine_notice_analysis",
+            "law_ground_search",
+            "appeal_decision_flow",
+        ],
+        report_requested=True,
+    )
+    assert validation["accepted_results"] == [
+        "fine_notice_analysis",
+        "law_ground_search",
+        "appeal_decision_flow",
+    ]
+    assert validation["rejected_results"] == []
+    assert validation["report_ready"] is True
     assert received_states == [
         {
             "fine_type": "administrative_fine",
@@ -842,6 +902,82 @@ def test_execute_sync_fine_notice_adapter_reads_canonical_object_attachment(monk
     assert output["structured_result"]["adapter_trace"]["input_source"] == "attachment"
     assert output["structured_result"]["ocr_status"] == "failed"
     assert validate_agent_output_envelope(output, expected_node_code="fine_notice_analysis")["valid"]
+
+
+def test_fine_notice_adapter_emits_attachment_evidence_after_successful_ocr(monkeypatch):
+    import importlib
+
+    fine_notice_graph_module = importlib.import_module("ai.agents.fine_notice_analysis.graph")
+    monkeypatch.setattr(agent_node_service, "read_object_bytes", lambda _reference: b"notice")
+    monkeypatch.setattr(
+        fine_notice_graph_module.graph,
+        "invoke",
+        lambda _state: {
+            "agent_results": {
+                "fine_notice_analysis": {
+                    "status": "success",
+                    "summary": "OCR completed",
+                    "structured_result": {
+                        "ocr_status": "success",
+                        "fine_type": "과태료",
+                        "notice_stage": "사전통지",
+                        "opinion_deadline": "2026-08-31",
+                    },
+                    "evidence": [],
+                    "next_actions": [],
+                    "limitations": [],
+                }
+            }
+        },
+    )
+
+    execution = execute_mock_node(
+        {
+            "execution_mode": "sync",
+            "node_code": "fine_notice_analysis",
+            "analysis_plan_id": "plan_notice_evidence",
+            "job_id": "job_notice_evidence",
+            "session_id": "ses_notice_evidence",
+            "message_id": "msg_notice_evidence",
+            "user_text": "고지서 분석해줘",
+            "context": {
+                "ocr_confirmation": {
+                    "confirmed": True,
+                    "fields": {"fine_type": "과태료", "notice_stage": "사전통지"},
+                }
+            },
+            "attachments": [
+                {
+                    "attachment_id": "att_notice_evidence",
+                    "purpose": "fine_notice",
+                    "content_type": "application/pdf",
+                    "storage_uri": "s3://private-bucket/canonical/notice.pdf",
+                    "object_storage": {
+                        "provider": "mock_s3",
+                        "bucket": "private-bucket",
+                        "key": "canonical/notice.pdf",
+                        "storage_uri": "s3://private-bucket/canonical/notice.pdf",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert execution["agent_output"]["status"] == "success"
+    assert execution["agent_output"]["evidence"] == [
+        {
+            "source_type": "user_uploaded_file",
+            "title": "과태료 고지서 첨부파일",
+            "source_reference": "att_notice_evidence",
+            "metadata": {
+                "attachment_id": "att_notice_evidence",
+                "storage_uri": "s3://private-bucket/canonical/notice.pdf",
+                "content_type": "application/pdf",
+                "purpose": "fine_notice",
+            },
+            "confidence": None,
+        }
+    ]
 
 
 def test_legacy_plan_entrypoint_does_not_mock_supervisor_steps():

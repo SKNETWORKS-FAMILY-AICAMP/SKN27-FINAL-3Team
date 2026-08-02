@@ -398,3 +398,67 @@
   - 원격 byte read-back용 임시 파일은 exact match 확인 후 제거했다.
   - Google code는 아직 발급·저장하지 않았다.
   - 추가 paid Supervisor/provider smoke는 별도 명시 승인 전에는 실행하지 않는다.
+
+### S11 — 새 fixture strict cutover와 Agent evidence 계약 충돌
+
+- 대상 release: `908e844fd6fa`
+- strict public cutover SSM command: `ebf7973c-9bce-49ab-a3dd-8b95af1329f8`
+- 상태: `Failed`, 종료 코드 `1`
+- 실행 시각: `2026-08-02T06:17:23Z` ~ `2026-08-02T06:20:37Z`
+- 재실행 여부: 없음. 이 실행으로 승인된 paid Supervisor/non-DL smoke 1회를 소비했다.
+- 통과한 게이트:
+  - release-bound 법령 evidence validation 2회: `success`
+  - production readiness: pass `10`, warn `0`, fail `0`
+  - IMDS 허용/거부 계약 및 object-storage smoke
+  - Google OAuth authorization-code 교환 HTTP `200`, replay HTTP `401`
+  - production Redis, ClamAV, law-Neo4j, backend, frontend, Caddy health
+  - 실제 Agent 결과 확인: `real_agent_results=true`
+- strict Supervisor 실패:
+  - job: `job_3ce12641079d`
+  - work item: `awork_job_3ce12641079d`
+  - `job_success=false`
+  - `all_agent_results_success=false`
+  - `persisted_handoff_consumed=false`
+  - `report_ready=false`
+- DB read-only 진단 SSM command: `9c3cbaec-1161-48d8-ac20-1f2141f924a3`
+  - `fine_notice_analysis`: `success`, evidence `0`
+    - OCR `success`, `notice_stage=사전통지`, `opinion_deadline=2026-08-31`
+  - `law_ground_search`: `success`, evidence `5`
+  - `appeal_decision_flow`: `success`, evidence `0`
+    - `deadline_passed=false`, `judgment_status=success`
+    - 필수 입력 누락 및 확인 요구 없음
+  - `agent_result_validation`: `partial`
+    - accepted: `law_ground_search`
+    - rejected: `fine_notice_analysis=required_evidence_missing`
+    - rejected: `appeal_decision_flow=required_evidence_missing`
+  - `final_response_merge`: `success`
+  - `objection_report_generation`: 실행되지 않음
+  - report row 없음, display result 존재
+  - handoff: `draft`, `ready_for_reporting=false`, reason `required_result_partial`
+- 확정 원인:
+  - `supervisor_routing_policy.v1`은 `fine_notice_analysis`와 `appeal_decision_flow`에 비어 있지 않은 evidence를 요구한다.
+  - 두 실제 Agent의 envelope 생성 함수는 성공 시에도 `evidence=[]`를 고정 반환했다.
+  - 공통 adapter contract는 evidence의 list 타입만 검사해 이 의미 계약 충돌을 실행 전 발견하지 못했다.
+  - 따라서 새 fixture, OCR 날짜, worker, RAG, provider, Caddy 문제가 아니라 Agent adapter 경계에서 provenance가 유실된 것이 최초 원인이다.
+- TDD 핫픽스:
+  - 수정 전 RED: 실제 fine-notice 성공 결과의 첨부 evidence와 appeal 성공 결과의 상위 evidence 승계를 각각 검증하는 테스트 `2 failed`
+  - `fine_notice_analysis` adapter가 사용한 고지서의 `attachment_id` 기반 `user_uploaded_file` evidence를 생성한다.
+  - `appeal_decision_flow` adapter가 success/partial 상위 fine-notice 및 law-ground evidence를 승계한다.
+  - 비어 있는 `source_reference`는 제외하고 `(source_type, source_reference)` 기준으로 중복 제거한다.
+  - evidence 필수 정책과 strict report gate는 완화하지 않았다.
+  - focused GREEN: `2 passed`
+  - Agent/Supervisor 서비스 회귀: `70 passed`
+  - Django Supervisor runtime/reporting 회귀: `52 tests`, `OK`
+  - 로컬 `test/` 전체 회귀: `1,373 passed`, `37 skipped`, subtests `4 passed`
+  - Django `chatbot` 전체 회귀: `388 tests`, `OK`
+  - Ruff 및 `git diff --check`: 통과
+- rollback 상태:
+  - post-failure snapshot SSM command: `b29bf40e-196c-47b4-8588-5ce1528941fe`
+  - public current link 없음, production/stage container `0`, production network 없음
+  - release, exact stage marker, complete marker, release evidence, exact seed descriptor 보존
+  - Google live-smoke SecureString은 실패 종료 시 자동 삭제됨
+- 다음 재시도 조건:
+  - 이 코드 수정은 backend image 변경이므로 release `908e844fd6fa` blind retry로 반영되지 않는다.
+  - 브랜치 검토·commit·PR 병합 후 새 immutable backend/frontend image와 새 release tag를 확인한다.
+  - exact seed descriptor를 유지한 private stage/readiness를 먼저 검증한다.
+  - 그 뒤 새 Google 일회용 code와 별도 paid smoke 승인을 받아 단일 SSM cutover를 정확히 1회 실행한다.
