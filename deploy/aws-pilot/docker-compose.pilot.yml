@@ -266,7 +266,7 @@ services:
     mem_limit: 160m
     logging: *default-logging
     cap_drop: [ALL]
-    cap_add: [SETGID, SETUID]
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
     security_opt: [no-new-privileges:true]
     tmpfs: [/tmp]
     volumes:

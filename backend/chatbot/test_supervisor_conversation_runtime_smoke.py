@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import inspect
+import json
 from io import StringIO
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.http import JsonResponse
 from django.test import TestCase
 
 from chatbot.models import (
@@ -147,6 +149,57 @@ class SupervisorConversationRuntimeSmokeTests(TestCase):
         self.assertFalse(AnalysisJob.objects.exists())
         self.assertFalse(AgentWorkItem.objects.exists())
         self.assertFalse(Report.objects.exists())
+
+    def test_runtime_binds_smoke_session_to_issued_guest_before_chat_submission(self) -> None:
+        from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke
+
+        def inspect_session_binding(request):
+            session_id = json.loads(request.body)["session_id"]
+            session = ChatSession.objects.get(session_id=session_id)
+            guest_id = request.headers["X-Guest-Id"]
+
+            self.assertEqual(
+                session.metadata.get("auth_context"),
+                {
+                    "auth_state": "guest",
+                    "subject_id": f"guest:{guest_id}",
+                    "subject_type": "guest",
+                    "guest_id": guest_id,
+                },
+            )
+            return JsonResponse(
+                {
+                    "status": "supervisor_unavailable",
+                    "execution_mode": "planning_blocked",
+                    "supervisor_state": {
+                        "llm": {
+                            "status": "failed",
+                            "reason": "provider_unavailable",
+                        }
+                    },
+                },
+                status=503,
+            )
+
+        with patch.object(
+            smoke,
+            "submit_chat_message",
+            side_effect=inspect_session_binding,
+        ):
+            result = smoke._run_smoke(
+                {
+                    "content_type": "image/png",
+                    "storage_uri": "s3://clean-bucket/canonical/acceptance/fixture.png",
+                    "object_storage": {
+                        "resource_type": "uploaded_file",
+                        "provider": "s3",
+                        "bucket": "clean-bucket",
+                        "key": "canonical/acceptance/fixture.png",
+                    },
+                }
+            )
+
+        self.assertEqual(result["chat"]["http_status"], 503)
 
     def test_supervisor_failure_creates_no_followup_rows_for_smoke_session(self) -> None:
         from chatbot.management.commands import smoke_supervisor_conversation_runtime as smoke

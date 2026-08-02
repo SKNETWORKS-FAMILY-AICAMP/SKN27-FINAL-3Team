@@ -19,13 +19,14 @@ param(
     [string]$TerraformDirectory = (Join-Path $PSScriptRoot "..\..\infra\terraform-pilot"),
     [ValidateRange(600, 7200)]
     [int]$SsmTimeoutSeconds = 1800,
-    [switch]$AllowPaidReviewCaseEmbedding
+    [switch]$AllowPaidReviewCaseEmbedding,
+    [switch]$ReuseVerifiedPgvectorLoad
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if (-not $AllowPaidReviewCaseEmbedding) {
+if (-not $ReuseVerifiedPgvectorLoad -and -not $AllowPaidReviewCaseEmbedding) {
     throw "RAG seed maintenance requires explicit -AllowPaidReviewCaseEmbedding consent."
 }
 
@@ -132,14 +133,28 @@ $runnerCommands = @(
     "find `$RAG_DIR -type d -exec chmod 0555 {} +",
     "find `$RAG_DIR -type f -exec chmod 0444 {} +",
     "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py verify_production_rag_seed_manifest --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --format json",
-    "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python -c `"from pathlib import Path; production=Path('backend/chatbot/management/commands/load_production_rag_seed.py').read_text(); legal=Path('backend/chatbot/management/commands/load_legal_rag_pgvector.py').read_text(); assert 'load_and_validate_rag_seed_manifest' in production; assert 'load_legal_rag_pgvector' in production; assert 'transaction.atomic' in legal`"",
-    "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_review_case_pgvector_seed --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --replace --allow-paid-provider-call --format json",
-    "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_production_rag_seed --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --replace-legal --skip-legal-schema --format json",
+    "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python -c `"from pathlib import Path; production=Path('backend/chatbot/management/commands/load_production_rag_seed.py').read_text(); legal=Path('backend/chatbot/management/commands/load_legal_rag_pgvector.py').read_text(); assert 'load_and_validate_rag_seed_manifest' in production; assert 'load_legal_rag_pgvector' in production; assert 'transaction.atomic' in legal`""
+)
+$dataLoadCommands = if ($ReuseVerifiedPgvectorLoad) {
+    @(
+        "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py verify_pgvector_rag_readiness --format json",
+        "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py shell -c `"from django.db import connection; from etl.fault_cases.src.review_case.search.pgvector.create_index import count_embedding_rows; import json; cursor=connection.cursor(); cursor.execute('SELECT COUNT(*) FROM law_chunks'); law_chunks=int(cursor.fetchone()[0]); cursor.execute('SELECT COUNT(*) FROM law_embeddings'); law_embeddings=int(cursor.fetchone()[0]); review_embeddings=int(count_embedding_rows()); assert law_chunks == 98664; assert law_embeddings == 98664; assert review_embeddings == 904; print(json.dumps({'law_chunks': law_chunks, 'law_embeddings': law_embeddings, 'review_embeddings': review_embeddings}, sort_keys=True))`""
+    )
+}
+else {
+    @(
+        "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_review_case_pgvector_seed --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --replace --allow-paid-provider-call --format json",
+        "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_production_rag_seed --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --replace-legal --skip-legal-schema --format json"
+    )
+}
+$runnerCommands += $dataLoadCommands
+$runnerCommands += @(
     "test `"`$(sed -n 's/^LEGAL_RAG_SEED_MANIFEST_SHA256=//p' .runtime.env)`" = '$RagSeedManifestSha256'",
     "LEGAL_DATASET_VERSION=`$(sed -n 's/^LEGAL_DATASET_VERSION=//p' .runtime.env); test -n `"`$LEGAL_DATASET_VERSION`"",
     "LEGAL_DATASET_VERIFIED_AT=`$(sed -n 's/^LEGAL_DATASET_VERIFIED_AT=//p' .runtime.env); test -n `"`$LEGAL_DATASET_VERIFIED_AT`"",
     "LEGAL_MAX_AGE_HOURS=`$(sed -n 's/^OPERATIONAL_LEGAL_MAX_AGE_HOURS=//p' .runtime.env); test -n `"`$LEGAL_MAX_AGE_HOURS`"",
     "mapfile -t PRECEDENT_SEED_LINES < <(grep '^PRECEDENT_NEWPLUSPLUS_SEED_VERSION=' .runtime.env); test `${#PRECEDENT_SEED_LINES[@]} -eq 1; PRECEDENT_NEWPLUSPLUS_SEED_VERSION=`${PRECEDENT_SEED_LINES[0]#*=}; printf '%s' `"`$PRECEDENT_NEWPLUSPLUS_SEED_VERSION`" | grep -Eq '^sha256:[0-9a-f]{64}$'",
+    "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py shell -c `"import json, os; from neo4j import GraphDatabase; driver=GraphDatabase.driver(os.environ['NEO4J_URI'], auth=(os.environ['NEO4J_USER'], os.environ['NEO4J_PASSWORD'])); driver.verify_connectivity(); session=driver.session(database=os.environ['NEO4J_DATABASE']); record=session.run('MATCH (node) WHERE node:LegalGraphDataset OR node:LegalSource OR node:LawVersion OR node:LawChunk OR node:UserTerm OR node:LegalTerm OR node:LawSearchTerm OR node:VehicleType OR node:ViolationType OR node:PenaltyType RETURN count(node) AS owned_nodes').single(); owned_nodes=int(record['owned_nodes']); assert owned_nodes == 0; session.close(); driver.close(); print(json.dumps({'owned_nodes': owned_nodes, 'status': 'empty'}, sort_keys=True))`"",
     "$stageComposeCommand --profile seed run --rm --no-deps -v `$RAG_DIR:/run/production-rag-seed:ro rag-loader python backend/manage.py load_legal_graph_seed --manifest /run/production-rag-seed/$RagSeedManifestRelativePath --dataset-version `"`$LEGAL_DATASET_VERSION`" --replace --format json",
     "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py verify_legal_graph_readiness --format json",
     "$stageComposeCommand --profile seed run --rm --no-deps rag-loader python backend/manage.py smoke_law_ground_search --require-results --format json",

@@ -100,7 +100,14 @@ def _run_smoke(fixture: dict, *, timeout_seconds: int = 600) -> dict:
     session = ChatSession.objects.create(
         session_id=session_id,
         status=ChatSessionStatus.ACTIVE.value,
-        metadata={"guest_id": guest_id},
+        metadata={
+            "auth_context": {
+                "auth_state": "guest",
+                "subject_id": f"guest:{guest_id}",
+                "subject_type": "guest",
+                "guest_id": guest_id,
+            }
+        },
     )
     UploadedFile.objects.create(
         attachment_id=attachment_id,
