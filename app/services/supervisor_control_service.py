@@ -751,7 +751,11 @@ def _dedupe_strings(values: list[str]) -> list[str]:
 
 
 def _normalized(value: Any) -> str:
-    return "".join(_text(value).lower().split())
+    normalized = "".join(_text(value).lower().split()).rstrip(".,!?…。！？")
+    for sentence_ending in ("이었습니다", "였습니다", "입니다"):
+        if normalized.endswith(sentence_ending):
+            return normalized[: -len(sentence_ending)]
+    return normalized
 
 
 def _dict(value: Any) -> dict[str, Any]:
