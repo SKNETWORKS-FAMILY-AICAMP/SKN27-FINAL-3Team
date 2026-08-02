@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildCaseReadyViewModel,
+  pollCaseReadyReport,
   runCaseReadyWorkflow,
 } from "./caseReadyWorkflow.js";
 
@@ -229,4 +230,152 @@ test("rejects an ineligible response before calling a Case API", async () => {
     /case_ready_required/,
   );
   assert.equal(calls, 0);
+});
+
+
+function queuedStartResponse() {
+  return {
+    contract_version: "case_analysis_job.v2",
+    job: { job_id: "job_1", status: "queued" },
+    work_item: { work_item_id: "work_1", status: "queued" },
+    analysis_plan: {
+      plan_id: "plan_1",
+      node_codes: [
+        "text_ml_case_search",
+        "law_ground_search",
+        "objection_report_generation",
+      ],
+    },
+  };
+}
+
+
+test("hydrates a persisted report after case analysis succeeds", async () => {
+  const api = {
+    getAnalysisResult: async () => ({
+      result: {
+        status: "success",
+        analysis_progress: {
+          contract_version: "analysis_progress.v1",
+          semantic_status: "success",
+          terminal: true,
+          retryable: false,
+          next_action: "review_result",
+          job_id: "job_1",
+          correlation_id: "work_1",
+        },
+        report_links: [{ report_id: "rep_1" }],
+      },
+    }),
+    getReportDetail: async () => ({
+      report: {
+        report_id: "rep_1",
+        session_id: "ses_case_ready",
+        status: "ready",
+        content: {
+          reporting_payload: {
+            report_type: "fault_ratio_analysis",
+          },
+        },
+      },
+    }),
+  };
+  const updates = [];
+
+  const result = await pollCaseReadyReport({
+    api,
+    identity: { authToken: "token" },
+    sessionId: "ses_case_ready",
+    startResponse: queuedStartResponse(),
+    wait: async () => {},
+    maxAttempts: 2,
+    onUpdate: (value) => updates.push(value.status),
+  });
+
+  assert.equal(result.workerResult.status, "success");
+  assert.equal(result.report.report_id, "rep_1");
+  assert.equal(
+    result.report.content.reporting_payload.report_type,
+    "fault_ratio_analysis",
+  );
+  assert.deepEqual(updates, ["queued", "success"]);
+});
+
+
+test("does not accept an in-session reporting payload as a persisted report", async () => {
+  let detailCalls = 0;
+  const api = {
+    getAnalysisResult: async () => ({
+      result: {
+        status: "success",
+        analysis_progress: {
+          contract_version: "analysis_progress.v1",
+          semantic_status: "success",
+          terminal: true,
+          retryable: false,
+          next_action: "review_result",
+          job_id: "job_1",
+          correlation_id: "work_1",
+        },
+        reporting_payload: { report_type: "fault_ratio_analysis" },
+        report_links: [],
+      },
+    }),
+    getReportDetail: async () => {
+      detailCalls += 1;
+      return {};
+    },
+  };
+
+  const result = await pollCaseReadyReport({
+    api,
+    identity: {},
+    sessionId: "ses_case_ready",
+    startResponse: queuedStartResponse(),
+    wait: async () => {},
+    maxAttempts: 1,
+  });
+
+  assert.equal(result.report, null);
+  assert.equal(detailCalls, 0);
+});
+
+
+test("rejects report detail without a server reporting payload", async () => {
+  const api = {
+    getAnalysisResult: async () => ({
+      result: {
+        status: "success",
+        analysis_progress: {
+          contract_version: "analysis_progress.v1",
+          semantic_status: "success",
+          terminal: true,
+          retryable: false,
+          next_action: "review_result",
+          job_id: "job_1",
+          correlation_id: "work_1",
+        },
+        report_links: [{ report_id: "rep_1" }],
+      },
+    }),
+    getReportDetail: async () => ({
+      report: {
+        report_id: "rep_1",
+        session_id: "ses_case_ready",
+        status: "ready",
+        content: {},
+      },
+    }),
+  };
+
+  const result = await pollCaseReadyReport({
+    api,
+    identity: {},
+    sessionId: "ses_case_ready",
+    startResponse: queuedStartResponse(),
+    wait: async () => {},
+    maxAttempts: 1,
+  });
+
+  assert.equal(result.report, null);
 });

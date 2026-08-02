@@ -1,3 +1,6 @@
+import { pollWorkerResult } from "./workerPolling.js";
+
+
 export const CASE_READY_FACTS = [
   ["road_layout", "도로 형태"],
   ["vehicle_actions", "양쪽 차량 행동"],
@@ -111,6 +114,64 @@ export async function runCaseReadyWorkflow({
     workItemId: text(startResponse?.work_item?.work_item_id),
     startResponse,
   };
+}
+
+
+export function initialCaseAnalysisResult(startResponse = {}) {
+  const jobId = text(startResponse?.job?.job_id);
+  const status = text(startResponse?.job?.status) || "queued";
+  return {
+    status,
+    analysis_progress: {
+      contract_version: "analysis_progress.v1",
+      semantic_status: status,
+      terminal: false,
+      retryable: true,
+      next_action: "continue_polling",
+      job_id: jobId,
+      correlation_id: text(startResponse?.work_item?.work_item_id) || null,
+    },
+  };
+}
+
+
+export async function pollCaseReadyReport({
+  api,
+  identity,
+  sessionId,
+  startResponse,
+  wait,
+  maxAttempts,
+  onUpdate = () => {},
+}) {
+  const jobId = text(startResponse?.job?.job_id);
+  const workerResult = await pollWorkerResult({
+    initialResult: initialCaseAnalysisResult(startResponse),
+    loadResult: () => api.getAnalysisResult({ jobId, identity }),
+    wait,
+    maxAttempts,
+    onDiagnostic: () => {},
+    onUpdate,
+  });
+  const reportId = text(
+    (Array.isArray(workerResult?.report_links) ? workerResult.report_links : [])
+      .find((link) => text(link?.report_id))
+      ?.report_id,
+  );
+  if (!reportId) {
+    return { workerResult, report: null };
+  }
+
+  const detail = await api.getReportDetail({
+    reportId,
+    sessionId,
+    identity,
+  });
+  const report = record(detail?.report);
+  if (!text(report.report_id) || !record(report.content).reporting_payload) {
+    return { workerResult, report: null };
+  }
+  return { workerResult, report };
 }
 
 
