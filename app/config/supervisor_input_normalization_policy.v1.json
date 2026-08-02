@@ -1,0 +1,68 @@
+{
+  "contract_version": "supervisor_input_normalization_policy.v1",
+  "decisions": [
+    "auto_applied",
+    "confirmation_required",
+    "clarification_required"
+  ],
+  "domains": {
+    "accident": {
+      "schemas": {
+        "accident_fact": [
+          "road_layout",
+          "vehicle_actions.self",
+          "vehicle_actions.other",
+          "signal_priority",
+          "collision_location"
+        ]
+      }
+    },
+    "fine_notice": {
+      "schemas": {
+        "fine_notice_intake": [
+          "fine_type",
+          "notice_stage",
+          "issuing_authority",
+          "notice_date",
+          "due_date",
+          "amount",
+          "alleged_violation"
+        ]
+      }
+    },
+    "objection": {
+      "schemas": {
+        "objection_intake": [
+          "requested_action",
+          "disputed_facts",
+          "objection_reason",
+          "evidence_references",
+          "deadline_clarification_required",
+          "legal_issue_terms"
+        ]
+      }
+    }
+  },
+  "token_classes": {
+    "negation": ["않", "아니", "못", "없"],
+    "uncertainty": ["것 같다", "같아요", "아마", "모르겠다", "기억나지 않는다"],
+    "particles": ["은", "는", "이", "가", "을", "를", "에서", "에게", "으로", "로"]
+  },
+  "fuzzy_confirmation_threshold": 0.9,
+  "rules": [
+    {
+      "rule_id": "accident.road_layout.intersection.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "road_layout",
+      "value": "intersection",
+      "token_class": "entity",
+      "canonical_expression": "교차로",
+      "expressions": ["교차로"],
+      "aliases": ["사거리"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    }
+  ]
+}
