@@ -70,6 +70,8 @@ target_tag='__IMAGE_TAG__'
   echo 'Target release already matches the current release.' >&2
   exit 78
 }
+readonly release_image_retention_count=3
+readonly release_reserved_free_bytes=$((5 * 1024 * 1024 * 1024))
 registry='__BACKEND_REGISTRY__'
 backend_repository='__BACKEND_REPOSITORY__'
 frontend_repository='__FRONTEND_REPOSITORY__'
@@ -173,6 +175,80 @@ cleanup_seed_and_evidence() {
   rm -f "$release_evidence_backup" "$shared_evidence_backup"
 }
 
+cleanup_release_images() {
+  local repository image_ref tag protected_tag
+  local protected retained
+  local -a protected_tags
+
+  for repository in "$backend_repository" "$frontend_repository"; do
+    protected_tags=("$previous_tag" "$target_tag")
+    retained=0
+    while IFS= read -r tag; do
+      [[ "$tag" =~ ^[0-9a-f]{12}$ ]] || continue
+      protected_tags+=("$tag")
+      retained=$((retained + 1))
+      if (( retained >= release_image_retention_count )); then
+        break
+      fi
+    done < <(docker images "$repository" --format '{{.Tag}}')
+
+    while IFS= read -r image_ref; do
+      [[ -n "$image_ref" ]] || continue
+      tag="${image_ref##*:}"
+      if [[ ! "$tag" =~ ^[0-9a-f]{12}$ && ! "$tag" =~ ^pipeline-rollback-[0-9a-f]{12}$ ]]; then
+        continue
+      fi
+      protected=0
+      for protected_tag in "${protected_tags[@]}"; do
+        if [[ "$tag" == "$protected_tag" ]]; then
+          protected=1
+          break
+        fi
+      done
+      if (( protected )); then
+        continue
+      fi
+      if docker image rm "$image_ref"; then
+        echo "Removed stale release image $image_ref."
+      else
+        echo "Retained release image $image_ref because Docker reports it is in use." >&2
+      fi
+    done < <(docker images "$repository" --format '{{.Repository}}:{{.Tag}}')
+  done
+}
+
+require_release_disk_headroom() {
+  local rag_seed_location rag_seed_bucket rag_seed_prefix
+  local seed_size_bytes available_bytes required_free_bytes
+
+  rag_seed_location="${rag_seed_s3_uri#s3://}"
+  rag_seed_bucket="${rag_seed_location%%/*}"
+  rag_seed_prefix="${rag_seed_location#*/}"
+  seed_size_bytes="$(aws s3api list-objects-v2 \
+    --bucket "$rag_seed_bucket" \
+    --prefix "$rag_seed_prefix" \
+    --region '__AWS_REGION__' \
+    --query 'sum(Contents[].Size)' \
+    --output text)"
+  [[ "$seed_size_bytes" =~ ^[1-9][0-9]*$ ]] || {
+    echo 'Unable to determine a positive RAG seed size.' >&2
+    return 70
+  }
+  available_bytes="$(df -B1 --output=avail "$release_dir" | tail -n 1 | tr -d '[:space:]')"
+  [[ "$available_bytes" =~ ^[0-9]+$ ]] || {
+    echo 'Unable to determine available release disk space.' >&2
+    return 70
+  }
+  required_free_bytes=$((seed_size_bytes + release_reserved_free_bytes))
+  if (( available_bytes < required_free_bytes )); then
+    printf 'Insufficient disk space for app release: available=%s required=%s seed=%s reserve=%s bytes.\n' \
+      "$available_bytes" "$required_free_bytes" "$seed_size_bytes" "$release_reserved_free_bytes" >&2
+    return 70
+  fi
+  printf 'Release disk preflight passed: available=%s required=%s bytes.\n' \
+    "$available_bytes" "$required_free_bytes"
+}
+
 snapshot_rollback_image() {
   local service="$1"
   local repository="$2"
@@ -240,8 +316,10 @@ rollback_app_release() {
 
 trap rollback_app_release ERR
 
+cleanup_release_images
 aws ecr get-login-password --region '__AWS_REGION__' | docker login --username AWS --password-stdin "$registry"
 RELEASE_TAG="$target_tag" FRONTEND_IMAGE_REF="$frontend_image_ref" "${compose[@]}" pull backend frontend agent-worker file-scan-worker ops-monitor
+require_release_disk_headroom
 PILOT_BACKEND_IP="${PILOT_MIGRATION_CHECK_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py migrate --check
 PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py verify_precedent_newplusplus_seed --expected-seed-version "$PRECEDENT_NEWPLUSPLUS_SEED_VERSION" --format json
 PILOT_BACKEND_IP="${PILOT_ONE_OFF_CONTAINER_IP:-172.31.0.11}" RELEASE_TAG="$target_tag" "${compose[@]}" run --rm --no-deps backend python backend/manage.py verify_pgvector_rag_readiness --format json

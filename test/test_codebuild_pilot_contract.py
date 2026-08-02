@@ -285,14 +285,17 @@ def test_app_release_runner_snapshots_images_under_actual_previous_release_tag()
     runner = (
         ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
     ).read_text(encoding="utf-8")
+    snapshot_start = runner.index("snapshot_rollback_image()")
+    snapshot_end = runner.index("restore_tag()", snapshot_start)
+    snapshot = runner[snapshot_start:snapshot_end]
 
     assert '[[ "$previous_tag" =~ ^[0-9a-f]{12}$ ]]' in runner
-    assert "pipeline-rollback-" not in runner
-    assert '"${compose[@]}" ps -q "$service"' in runner
-    assert "docker inspect --format '{{.Image}}'" in runner
-    assert 'docker tag "$image_id" "$repository:$previous_tag"' in runner
-    assert 'snapshot_rollback_image backend "$backend_repository"' in runner
-    assert 'snapshot_rollback_image frontend "$frontend_repository"' in runner
+    assert "pipeline-rollback-" not in snapshot
+    assert '"${compose[@]}" ps -q "$service"' in snapshot
+    assert "docker inspect --format '{{.Image}}'" in snapshot
+    assert 'docker tag "$image_id" "$repository:$previous_tag"' in snapshot
+    assert 'snapshot_rollback_image backend "$backend_repository"' in snapshot
+    assert 'snapshot_rollback_image frontend "$frontend_repository"' in snapshot
     assert 'RELEASE_TAG=$previous_tag' in runner
     assert "Current release tag is not an immutable" in runner
     assert "StandardOutputContent" in runner
@@ -411,6 +414,45 @@ def test_app_release_candidate_evidence_is_traversable_by_non_root_validator() -
 
     assert 'install -d -m 0755 "$candidate_dir"' in runner
     assert 'install -d -m 0700 "$rag_dir"' in runner
+
+
+def test_app_release_reclaims_only_unprotected_release_images_before_pull() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    cleanup_start = runner.index("cleanup_release_images()")
+    cleanup_end = runner.index("snapshot_rollback_image()", cleanup_start)
+    cleanup = runner[cleanup_start:cleanup_end]
+    snapshot = runner.index('snapshot_rollback_image frontend "$frontend_repository"')
+    cleanup_call = runner.index("cleanup_release_images", snapshot)
+    pull = runner.index('"${compose[@]}" pull', cleanup_call)
+
+    assert 'release_image_retention_count=3' in runner
+    assert 'protected_tags=("$previous_tag" "$target_tag")' in cleanup
+    assert "^[0-9a-f]{12}$" in cleanup
+    assert "^pipeline-rollback-[0-9a-f]{12}$" in cleanup
+    assert 'docker image rm "$image_ref"' in cleanup
+    assert "docker image prune" not in cleanup
+    assert snapshot < cleanup_call < pull
+
+
+def test_app_release_requires_seed_size_plus_reserved_disk_before_download() -> None:
+    runner = (
+        ROOT / "deploy" / "aws-pilot" / "Release-PilotApp-FromPipeline.sh"
+    ).read_text(encoding="utf-8")
+
+    pull = runner.index('"${compose[@]}" pull')
+    headroom = runner.index("require_release_disk_headroom", pull)
+    download = runner.index("aws s3 cp", headroom)
+
+    assert 'release_reserved_free_bytes=$((5 * 1024 * 1024 * 1024))' in runner
+    assert "aws s3api list-objects-v2" in runner
+    assert "sum(Contents[].Size)" in runner
+    assert 'df -B1 --output=avail "$release_dir"' in runner
+    assert 'required_free_bytes=$((seed_size_bytes + release_reserved_free_bytes))' in runner
+    assert "Insufficient disk space for app release" in runner
+    assert pull < headroom < download
 
 
 def test_app_release_gates_target_image_on_active_precedent_seed() -> None:
