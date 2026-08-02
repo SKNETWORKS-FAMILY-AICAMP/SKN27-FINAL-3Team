@@ -462,3 +462,62 @@
   - 브랜치 검토·commit·PR 병합 후 새 immutable backend/frontend image와 새 release tag를 확인한다.
   - exact seed descriptor를 유지한 private stage/readiness를 먼저 검증한다.
   - 그 뒤 새 Google 일회용 code와 별도 paid smoke 승인을 받아 단일 SSM cutover를 정확히 1회 실행한다.
+
+### S12 — evidence provenance 수정 검증 후 needs-input 배포 게이트 충돌
+
+- 대상 release: `b54ef1a0071d`
+- strict public cutover SSM command: `3ca007f5-0b68-4feb-b692-5fb3c4d1e10e`
+- 상태: `Failed`, 종료 코드 `1`
+- 실행 시각: `2026-08-02T06:39:08Z` ~ `2026-08-02T06:42:34Z`
+- 통과한 게이트:
+  - release-bound 법령 evidence validation 및 production readiness: pass `10`, warn `0`, fail `0`
+  - IMDS 허용/거부, object-storage smoke
+  - Google OAuth 실제 code 교환 HTTP `200` 및 replay 거부
+  - production 서비스 health
+  - Supervisor LLM 사용, 실제 분석 Agent 결과, persisted handoff 생성과 정확한 provenance trace
+- strict Supervisor 실패:
+  - job: `job_2a74615aff65`
+  - work item: `awork_job_2a74615aff65`
+  - 분석 Agent와 handoff까지는 성공했으나 reporting 결과가 `partial`
+  - report는 `draft`, download readiness는 `false`
+- DB read-only 진단 SSM commands:
+  - 전체 결과 및 handoff: `100701fe-c1a9-4466-9e6a-121fe0bbd293`
+  - exact needs-input 상태: `8960b08b-606e-463f-abf6-19f0ba0ae5b1`
+  - reporting `missing_fields`: 정확히 `user_facts` 한 개
+  - display pending question: 정확히 `user_facts` 한 개
+  - persisted handoff contract/fingerprint/result IDs와 reporting trace: 일치
+  - provider 분석 및 reporting 실행: 완료, provider error 없음
+- 확정 원인:
+  - public Supervisor smoke는 첨부와 OCR 확인만 제출하고 server-authoritative `user_facts`는 제공하지 않는다.
+  - Reporting Agent가 원문 사용자 메시지를 검증된 사실로 승격하지 않고 역질문용 draft를 만든 것은 의도한 안전 동작이다.
+  - 기존 strict gate는 이 안전한 `user_facts` needs-input 상태를 일반 실패와 구분하지 못했다.
+  - `-AllowPaidNonDlSmoke` 승인 플래그와 help preflight는 있었지만 실제 non-DL reporting smoke 명령은 normal promotion에서 실행되지 않았다.
+  - 따라서 이 cutover에서 Supervisor provider smoke 1회만 소비됐고 승인된 non-DL smoke는 실행되지 않았다.
+- rollback 상태:
+  - post-failure snapshot SSM command: `cc3cf766-8af4-4787-9359-f25d12fd2c5b`
+  - public current link 없음, production container/network 없음
+  - private release, stage network/volumes, exact complete marker, release evidence, seed descriptor 보존
+- TDD 핫픽스:
+  - 수정 전 배포 계약 RED: `2 failed, 97 passed`
+  - 수정 전 Supervisor 계약 RED: helper 부재 `1 error`, strict 오판 `1 failed`
+  - 기본 strict 모드는 유지한다.
+  - 명시적인 `--allow-report-needs-input` 모드에서만 다음 exact 계약을 모두 요구한다.
+    - reporting 외 실제 분석 Agent 전부 성공
+    - persisted handoff provenance trace exact match
+    - reporting `partial`, `missing_fields=[user_facts]`
+    - report/display 모두 `draft`, pending question은 `user_facts` 한 개
+    - download readiness `false`, report link 없음
+  - normal promotion은 실제 non-DL reporting smoke를 정확히 1회 먼저 실행해 ready report와 download 계약을 검증한다.
+  - 그 뒤 public Supervisor smoke를 정확히 1회 실행해 실제 LLM/분석/handoff/안전 역질문 계약을 검증한다.
+  - raw public user text의 verified facts 승격이나 Reporting Agent 안전 경계 완화는 없다.
+- 로컬 검증:
+  - AWS pilot infrastructure: `99 passed`
+  - Supervisor/non-DL/reporting Django 회귀: `62 tests`, `OK`
+  - evidence provenance 인접 회귀: `42 passed`
+  - deployment readiness 및 CodeBuild 계약: `32 passed`
+  - PowerShell parser, Ruff, `git diff --check`: 통과
+- 다음 재시도 조건:
+  - 브랜치 검토·commit·PR 병합 후 새 immutable image/release tag를 사용한다.
+  - 기존 `b54ef1a0071d`의 blind retry는 금지한다.
+  - 새 private stage와 exact seed reuse를 먼저 검증한다.
+  - 새 Google 일회용 code와 non-DL 1회 및 Supervisor 1회의 명시 승인을 받은 뒤 단일 cutover를 실행한다.
