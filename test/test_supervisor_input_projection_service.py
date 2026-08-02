@@ -10,6 +10,7 @@ from app.services.supervisor_input_projection_service import (
     normalization_pending_questions,
     normalization_routing_hints,
     normalized_slot_state,
+    policy_allowed_llm_facts,
 )
 
 
@@ -118,3 +119,22 @@ def test_projects_notice_and_objection_slots_without_legal_conclusions() -> None
     assert fine_notice_intake_slots(normalized)["document_disposition_type"][
         "value"
     ] == "first_notice"
+
+
+def test_policy_allowlist_discards_unknown_accident_llm_fact() -> None:
+    assert policy_allowed_llm_facts(
+        [
+            {"field": "road_layout", "value": "교차로"},
+            {"field": "legal_conclusion", "value": "상대방이 전적으로 위법"},
+        ],
+        scenario="accident_initial_consultation",
+    ) == [{"field": "road_layout", "value": "교차로"}]
+
+
+def test_policy_allowlist_does_not_expand_general_consultation() -> None:
+    facts = [{"field": "user_text", "value": "일반 교통 문의"}]
+
+    assert policy_allowed_llm_facts(
+        facts,
+        scenario="general_consultation",
+    ) == facts

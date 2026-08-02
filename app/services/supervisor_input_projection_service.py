@@ -9,6 +9,7 @@ from app.services.supervisor_input_normalization_service import (
     AMOUNT_PATTERN,
     AUTHORITY_PATTERN,
     DATE_PATTERN,
+    normalization_policy,
 )
 
 
@@ -54,6 +55,44 @@ NORMALIZED_AGENT_SLOT_FIELDS = {
     "deadline_clarification_required",
     "legal_issue_terms",
 }
+TARGETED_SCENARIO_FIELDS = {
+    "accident_initial_consultation": {
+        "road_layout",
+        "vehicle_actions",
+        "signal_priority",
+        "collision_location",
+    },
+    "fine_notice_procedure": {
+        "fine_type",
+        "notice_stage",
+        "issuing_authority",
+        "notice_date",
+        "due_date",
+        "amount",
+        "alleged_violation",
+        "requested_action",
+        "disputed_facts",
+        "objection_reason",
+        "evidence_references",
+        "deadline_clarification_required",
+        "legal_issue_terms",
+    },
+    "fine_notice_analysis": {
+        "fine_type",
+        "notice_stage",
+        "issuing_authority",
+        "notice_date",
+        "due_date",
+        "amount",
+        "alleged_violation",
+        "requested_action",
+        "disputed_facts",
+        "objection_reason",
+        "evidence_references",
+        "deadline_clarification_required",
+        "legal_issue_terms",
+    },
+}
 
 
 def normalization_routing_hints(value: Mapping[str, Any]) -> list[str]:
@@ -65,6 +104,65 @@ def normalization_routing_hints(value: Mapping[str, Any]) -> list[str]:
         if intent and intent not in hints:
             hints.append(intent)
     return hints
+
+
+def policy_allowed_llm_facts(
+    items: Any,
+    *,
+    scenario: str,
+) -> list[dict[str, Any]]:
+    allowed = TARGETED_SCENARIO_FIELDS.get(scenario)
+    facts = [dict(item) for item in items or [] if isinstance(item, Mapping)]
+    if allowed is None:
+        return facts
+    projected: list[dict[str, Any]] = []
+    for item in facts:
+        field = str(item.get("field") or "").strip()
+        if field not in allowed:
+            continue
+        value = canonical_policy_value(field=field, value=item.get("value"))
+        if value is not None:
+            projected.append({**item, "field": field, "value": value})
+    return projected
+
+
+def canonical_policy_value(*, field: str, value: Any) -> str | None:
+    normalized_value = str(value or "").strip()
+    if not normalized_value:
+        return None
+    if field == "vehicle_actions":
+        canonical_actions = "본인 차량 직진, 상대 차량 좌회전"
+        return canonical_actions if normalized_value == canonical_actions else None
+    if field == "issuing_authority":
+        return (
+            normalized_value
+            if AUTHORITY_PATTERN.fullmatch(normalized_value)
+            else None
+        )
+    if field in {"notice_date", "due_date"}:
+        return normalized_value if DATE_PATTERN.fullmatch(normalized_value) else None
+    if field == "amount":
+        return normalized_value if AMOUNT_PATTERN.fullmatch(normalized_value) else None
+
+    for rule in normalization_policy()["rules"]:
+        if str(rule.get("field") or "") != field:
+            continue
+        accepted = {
+            str(rule.get("value") or "").strip(),
+            str(rule.get("canonical_expression") or "").strip(),
+            *{
+                str(item).strip()
+                for key in ("expressions", "aliases", "approved_typos")
+                for item in rule.get(key) or []
+                if str(item).strip()
+            },
+        }
+        if normalized_value not in accepted:
+            continue
+        if rule.get("domain") == "accident":
+            return str(rule["canonical_expression"])
+        return str(rule["value"])
+    return None
 
 
 def normalization_pending_questions(
