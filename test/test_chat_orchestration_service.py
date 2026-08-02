@@ -59,6 +59,52 @@ def test_general_consultation_plan_does_not_default_to_law_search() -> None:
     )
 
 
+def test_registered_notice_typo_routes_to_fine_notice_procedure() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_normalized_route",
+            "user_text": "과태료 1챠 고지서를 받고 이의 재기하려고 합니다.",
+        }
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert response["input_normalization"]["contract_version"] == (
+        "normalized_supervisor_input.v1"
+    )
+
+
+def test_uncertain_normalized_value_stops_before_agent_plan() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_normalized_question",
+            "user_text": "범칙금인지 과태료인지 모르겠고 이의 재기하고 싶어요.",
+        }
+    )
+
+    assert response["status"] == "needs_input"
+    assert response["pending_questions"]
+    assert response["analysis_plan"]["steps"] == []
+    assert response["reporting_payload"] is None
+
+
+def test_normalizer_failure_keeps_original_routing_without_logging_raw_text(
+    monkeypatch, caplog
+) -> None:
+    marker = "과태료-private-marker"
+    monkeypatch.setattr(
+        "app.services.chat_orchestration_service.normalize_supervisor_input",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("failed")),
+    )
+
+    response = submit_message(
+        {"session_id": "ses_normalizer_error", "user_text": marker}
+    )
+
+    assert response["routing_intent"] == "fine_notice_procedure"
+    assert response["input_normalization"]["candidates"] == []
+    assert marker not in caplog.text
+
+
 def test_text_only_fine_notice_draft_request_enters_verified_intake_without_bypassing_ocr_gate() -> None:
     routing_intent = route_supervisor_input(
         "과태료 고지서에 대한 이의신청서 초안을 작성해 주세요.",
