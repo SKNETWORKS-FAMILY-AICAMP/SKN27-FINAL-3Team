@@ -30,6 +30,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+. (Join-Path $PSScriptRoot "Vision-Runtime.ps1")
+
 function Assert-LastExitCode([string]$Step) {
     if ($LASTEXITCODE -ne 0) {
         throw "$Step failed with exit code $LASTEXITCODE."
@@ -76,30 +78,6 @@ function Get-TerraformValue([object]$Outputs, [string]$Name) {
         throw "Terraform output '$Name' is missing. Apply the reviewed pilot plan first."
     }
     return [string]$property.Value.value
-}
-
-function Get-EnvValue([string]$Content, [string]$Name) {
-    $match = [regex]::Match($Content, "(?m)^$([regex]::Escape($Name))=(.*)$")
-    if (-not $match.Success) {
-        throw "Runtime environment is missing '$Name'."
-    }
-    return $match.Groups[1].Value.Trim()
-}
-
-function Set-EnvValue([string]$Content, [string]$Name, [string]$Value) {
-    if ($Value.Contains("`r") -or $Value.Contains("`n")) {
-        throw "Environment value '$Name' must be one line."
-    }
-    $line = "$Name=$Value"
-    $pattern = "(?m)^$([regex]::Escape($Name))=.*$"
-    if ([regex]::IsMatch($Content, $pattern)) {
-        $literalReplacement = [Text.RegularExpressions.MatchEvaluator]{
-            param($match)
-            return $line
-        }
-        return [regex]::Replace($Content, $pattern, $literalReplacement)
-    }
-    return $Content.TrimEnd() + "`n" + $line + "`n"
 }
 
 function Normalize-RuntimeEnvText([string]$Content) {
@@ -412,6 +390,19 @@ $generatedValues = [ordered]@{
 foreach ($entry in $generatedValues.GetEnumerator()) {
     $runtimeEnv = Set-EnvValue $runtimeEnv $entry.Key $entry.Value
 }
+
+$visionProvider = Get-EnvValue $runtimeEnv "VISION_RUNTIME_PROVIDER"
+$visionRuntimeParameters = @{
+    Content  = $runtimeEnv
+    Provider = $visionProvider
+}
+if ($visionProvider -ceq "aws_queue") {
+    $visionRuntimeParameters.QueueUrl = Get-TerraformValue $outputs "vision_worker_queue_url"
+    $visionRuntimeParameters.ResultBucket = Get-TerraformValue $outputs "vision_worker_result_bucket_name"
+    $visionRuntimeParameters.WorkerInstanceId = Get-TerraformValue $outputs "vision_worker_instance_id"
+    $visionRuntimeParameters.WorkerRepositoryUrl = Get-TerraformValue $outputs "vision_worker_ecr_repository_url"
+}
+$runtimeEnv = Set-AwsVisionRuntimeValues @visionRuntimeParameters
 
 if ($runtimeEnv -match "(?m)=(REPLACE_|INJECTED_)") {
     throw "Unresolved template value remains in the runtime environment."

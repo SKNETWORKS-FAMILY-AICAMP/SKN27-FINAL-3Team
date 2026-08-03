@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -20,6 +22,45 @@ def _terraform_source() -> str:
 
 def _read_deploy(name: str) -> str:
     return (DEPLOY_DIR / name).read_text(encoding="utf-8")
+
+
+def _run_vision_runtime(
+    content: str,
+    *,
+    provider: str,
+    queue_url: str = "",
+    result_bucket: str = "",
+    worker_instance_id: str = "",
+    worker_repository_url: str = "",
+) -> subprocess.CompletedProcess[str]:
+    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    helper = (DEPLOY_DIR / "Vision-Runtime.ps1").as_posix().replace("'", "''")
+    command = f"""
+. '{helper}'
+$content = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}'))
+$result = Set-AwsVisionRuntimeValues `
+  -Content $content `
+  -Provider '{provider}' `
+  -QueueUrl '{queue_url}' `
+  -ResultBucket '{result_bucket}' `
+  -WorkerInstanceId '{worker_instance_id}' `
+  -WorkerRepositoryUrl '{worker_repository_url}'
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($result))
+"""
+    return subprocess.run(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+
+def _decoded_vision_runtime(completed: subprocess.CompletedProcess[str]) -> str:
+    assert completed.returncode == 0, completed.stderr
+    return base64.b64decode(completed.stdout.strip()).decode("utf-8")
 
 
 def test_production_gate_formats_and_validates_pilot_terraform() -> None:
@@ -196,6 +237,65 @@ def test_pilot_runtime_declares_runpod_vision_without_secret_values() -> None:
     ]
 
 
+def test_aws_vision_runtime_uses_terraform_owned_queue_and_bucket() -> None:
+    content = "\n".join(
+        (
+            "VISION_RUNTIME_PROVIDER=aws_queue",
+            "AWS_VISION_QUEUE_URL=https://caller.invalid/stale.fifo",
+            "AWS_VISION_RESULT_BUCKET=stale-bucket",
+            "AWS_VISION_RESULT_PREFIX=stale-prefix",
+            "AWS_VISION_TIMEOUT_SECONDS=900",
+            "AWS_VISION_POLL_INTERVAL_SECONDS=2",
+            "",
+        )
+    )
+
+    completed = _run_vision_runtime(
+        content,
+        provider="aws_queue",
+        queue_url=(
+            "https://sqs.ap-northeast-2.amazonaws.com/"
+            "123456789012/skn27-vision.fifo"
+        ),
+        result_bucket="skn27-clean-results",
+        worker_instance_id="i-0123456789abcdef0",
+        worker_repository_url=(
+            "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/"
+            "skn27/vision-worker"
+        ),
+    )
+
+    result = _decoded_vision_runtime(completed)
+    assert (
+        "AWS_VISION_QUEUE_URL=https://sqs.ap-northeast-2.amazonaws.com/"
+        "123456789012/skn27-vision.fifo" in result
+    )
+    assert "AWS_VISION_RESULT_BUCKET=skn27-clean-results" in result
+    assert "AWS_VISION_RESULT_PREFIX=vision/aws-queue/v1" in result
+    assert "caller.invalid" not in result
+    assert "stale-bucket" not in result
+
+
+def test_deploy_resolves_aws_vision_terraform_outputs_before_ssm() -> None:
+    outputs = (TERRAFORM_DIR / "outputs.tf").read_text(encoding="utf-8")
+    deploy = _read_deploy("Deploy-Pilot.ps1")
+
+    assert 'output "vision_worker_result_bucket_name"' in outputs
+    assert "var.vision_worker_enabled ? aws_s3_bucket.clean.id : null" in outputs
+    assert '. (Join-Path $PSScriptRoot "Vision-Runtime.ps1")' in deploy
+    for output_name in (
+        "vision_worker_queue_url",
+        "vision_worker_result_bucket_name",
+        "vision_worker_instance_id",
+        "vision_worker_ecr_repository_url",
+    ):
+        assert f'Get-TerraformValue $outputs "{output_name}"' in deploy
+    assert "$runtimeEnv = Set-AwsVisionRuntimeValues" in deploy
+    assert deploy.index("$runtimeEnv = Set-AwsVisionRuntimeValues") < deploy.index(
+        "aws ssm put-parameter"
+    )
+
+
 def test_runtime_template_declares_every_required_compose_interpolation() -> None:
     compose = _read_deploy("docker-compose.pilot.yml")
     runtime_env = _read_deploy("runtime.env.example")
@@ -324,7 +424,7 @@ def test_budget_and_ssm_secret_contract_are_present_without_secret_outputs() -> 
     assert "--with-decryption" in deploy
     assert "--value $runtimeEnv" not in deploy
     assert "--cli-input-json" in deploy
-    assert "MatchEvaluator" in deploy
+    assert "MatchEvaluator" in _read_deploy("Vision-Runtime.ps1")
     assert "requiredRuntimeValues" in deploy
     assert "Unresolved template value" in deploy
 
