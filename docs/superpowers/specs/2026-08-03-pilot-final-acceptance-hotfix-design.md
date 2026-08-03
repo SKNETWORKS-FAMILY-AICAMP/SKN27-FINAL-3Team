@@ -42,7 +42,10 @@ Alternatives considered:
 Add a pure frontend transport selector in `consultationIntake.js`.
 
 - Initial consultation requests keep the existing structured request text.
-- When the current server response contains a pending follow-up question, the transport text for `user_text` and the current `conversation_history` turn is the user's trimmed display text only.
+- Distinguish manual composer submissions from automatic attachment, OCR, and classification service messages. Only a manual submission can be treated as the user's answer to a pending core-fact question.
+- Detect a pending follow-up from either the normalized top-level `pending_questions` presentation or `supervisor_state.next_questions`, including restored and worker-backed responses.
+- When a manual submission answers a pending follow-up question, the transport text for `user_text` and the current `conversation_history` turn is the user's trimmed display text only.
+- Automatic service messages retain their existing request construction and are never silently reclassified as manual follow-up answers.
 - Existing `consultation_type`, `facts`, and `fine_notice_slots` remain separate request fields and are not changed.
 - The visible chat message remains the display text.
 - No server reducer or Supervisor engine change is required.
@@ -51,6 +54,8 @@ Add a pure frontend transport selector in `consultationIntake.js`.
 
 - A structured initial request still contains its approved sections.
 - A follow-up answer such as `2차로 회전교차로` reaches the server exactly as that text.
+- A restored or worker-backed pending question uses the same manual-answer transport rule.
+- Attachment scan, OCR confirmation, and classification confirmation messages do not take the manual-answer branch.
 - The resulting `road_layout` fact never contains the structured section labels.
 - Existing initial accident and fine-notice normalization tests continue to pass.
 
@@ -64,6 +69,7 @@ Add a pure frontend transport selector in `consultationIntake.js`.
 
 - Build material sources before calculating eligibility.
 - Require at least one ready attachment or accepted target-document OCR evidence source for `eligible: true`.
+- Merge current React attachments with restored public job attachments. Treat current `status: ready` and restored `scan_status: clean` as ready indicators, then deduplicate by `attachment_id`.
 - `uploaded`, `scanning`, rejected, missing, or stale attachments do not satisfy the gate.
 - Keep the backend material-evidence policy unchanged.
 - Map `fact_readiness_not_met` to one fixed public message that tells the user to finish the attachment safety check. Other failures keep the existing safe generic message.
@@ -74,6 +80,7 @@ Add a pure frontend transport selector in `consultationIntake.js`.
 - Four confirmed facts with no source are ineligible.
 - Four confirmed facts with an uploaded but non-ready attachment are ineligible.
 - Four confirmed facts with a ready attachment are eligible.
+- Four confirmed facts with a restored `scan_status: clean` attachment are eligible without adding a new API call.
 - Accepted target-document OCR evidence remains eligible even when the upload state in React is stale.
 - A readiness rejection does not claim that report generation is in progress.
 
@@ -87,13 +94,13 @@ Any truthy `reporting_payload` is treated as a report. A skeletal payload can th
 
 Add a pure meaningful-payload predicate in `reportWorkbenchState.js` and reuse it at both live-response and workbench boundaries.
 
-A temporary payload is meaningful only when it contains at least one of:
+A temporary live payload is meaningful only when it contains at least one of:
 
 - a non-empty summary;
 - a non-empty `sections` array;
 - a non-empty `document_cards` array.
 
-A persisted report with `report_id` and `content.reporting_payload` remains valid under the existing persisted-report contract.
+A persisted report with `report_id` and `content.reporting_payload` remains authoritative under the existing persisted-report contract and is not rejected by the temporary-payload predicate.
 
 An empty or skeletal payload is not a report and renders the existing not-started, needs-information, or not-reportable state derived from Supervisor state. Do not add a new polling loop. Existing chat worker polling and explicit report-list refresh remain unchanged.
 
