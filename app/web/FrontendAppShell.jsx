@@ -17,6 +17,7 @@ import {
   submitWithGuestSessionRecovery,
 } from "./newConversationState.js";
 import {
+  authRestoreBlocksUserActions,
   buildAuthContext,
   buildGoogleLoginPayload,
   clearStoredAuthSession,
@@ -361,6 +362,7 @@ export default function FrontendAppShell({
     userId: null,
   });
   const isGuestReady = Boolean(guestId && guestCredential);
+  const authRestoreIsBlocking = authRestoreBlocksUserActions(authRestoreStatus);
   const sessionLabel =
     authRestoreStatus === "checking"
       ? "로그인 확인 중"
@@ -732,7 +734,7 @@ export default function FrontendAppShell({
   }, [api, activeAuthToken, authSessionId]);
 
   async function bootstrapGuestSession(nextRoute = "chatbot") {
-    if (authRestoreStatus !== "ready" || authSessionId || activeAuthToken) {
+    if (authRestoreIsBlocking || authSessionId || activeAuthToken) {
       setStatusMessage(
         authRestoreStatus === "ready"
           ? "로그인된 계정의 상담 세션을 확인하고 있습니다."
@@ -792,7 +794,7 @@ export default function FrontendAppShell({
   }
 
   async function ensureGuestSession(nextRoute = "chatbot") {
-    if (authRestoreStatus !== "ready") {
+    if (authRestoreIsBlocking) {
       setStatusMessage("저장된 로그인 상태를 확인한 뒤 상담을 시작할 수 있습니다.");
       return null;
     }
@@ -967,7 +969,7 @@ export default function FrontendAppShell({
   }
 
   async function registerAttachmentMetadata() {
-    if (authRestoreStatus !== "ready") {
+    if (authRestoreIsBlocking) {
       setStatusMessage("로그인 상태 확인이 끝난 뒤 자료를 첨부할 수 있습니다.");
       return;
     }
@@ -1532,7 +1534,7 @@ export default function FrontendAppShell({
     requestContext = {},
     submissionKind = "manual",
   } = {}) {
-    if (authRestoreStatus !== "ready") {
+    if (authRestoreIsBlocking) {
       setStatusMessage("로그인 상태 확인이 끝난 뒤 상담 내용을 보낼 수 있습니다.");
       return;
     }
@@ -1912,7 +1914,7 @@ export default function FrontendAppShell({
   }
 
   async function startNewConversation() {
-    if (authRestoreStatus !== "ready") {
+    if (authRestoreIsBlocking) {
       setStatusMessage("로그인 상태 확인이 끝난 뒤 새 상담을 시작할 수 있습니다.");
       return;
     }
