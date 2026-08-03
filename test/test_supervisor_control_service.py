@@ -404,6 +404,47 @@ def test_fine_notice_procedure_renders_practical_guidance_from_verified_law_resu
     ]
 
 
+def test_fine_notice_procedure_omits_malformed_pipe_table_summary() -> None:
+    merged = merge_final_response(
+        {
+            "law_ground_search": {
+                "status": "success",
+                "summary": "조문 1건 검색됨",
+                "structured_result": {
+                    "matched_laws": [
+                        {
+                            "law_name": "도로교통법 시행령",
+                            "article": "별표10",
+                            "summary": "| | 3) 이륜자동차등: 6만원 |\n| | | |",
+                            "source_reference": "law:verified:appendix-10",
+                        }
+                    ]
+                },
+                "evidence": [{"source_reference": "law:verified:appendix-10"}],
+                "limitations": [],
+            },
+            "agent_result_validation": {
+                "status": "success",
+                "structured_result": {
+                    "merge_ready": True,
+                    "report_ready": False,
+                    "accepted_results": ["law_ground_search"],
+                    "rejected_results": [],
+                    "missing_fields": [],
+                    "limitations": [],
+                },
+            },
+        },
+        routing_intent="fine_notice_procedure",
+        user_text="과태료 고지서를 받았는데 어떻게 해야 하나요?",
+    )
+
+    answer = merged["assistant_message"]["answer"]
+    assert "도로교통법 시행령 별표10" in answer
+    assert "|" not in answer
+    assert "이륜자동차등: 6만원" not in answer
+
+
 def test_fine_notice_procedure_normalizes_persisted_agent_law_fields_before_rendering() -> None:
     merged = merge_final_response(
         {

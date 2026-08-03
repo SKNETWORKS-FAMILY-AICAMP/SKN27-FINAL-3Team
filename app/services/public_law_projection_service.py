@@ -55,11 +55,24 @@ def project_public_law_items(
             and len(summary) <= MAX_PUBLIC_LAW_SUMMARY_LENGTH
             and not _PATH_OR_URI_RE.search(summary)
             and not detect_text_categories(summary)
+            and not _contains_pipe_table_fragment(summary)
         ):
             item["summary"] = summary
         if item not in public:
             public.append(item)
     return public[:3]
+
+
+def _contains_pipe_table_fragment(value: str) -> bool:
+    for line in value.splitlines() or [value]:
+        stripped = line.strip()
+        if line.count("|") < 2:
+            continue
+        if stripped.startswith("|") or stripped.endswith("|"):
+            return True
+        if re.search(r"\|\s*\|", line):
+            return True
+    return False
 
 
 def _first_text(value: Mapping[str, Any], *keys: str) -> str:

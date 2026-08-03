@@ -78,3 +78,21 @@ def test_public_law_projection_omits_summary_with_private_path_or_pii() -> None:
     assert public == [{"law_name": "도로교통법", "article": "제160조"}]
     assert "s3://" not in repr(public)
     assert "900101-1234567" not in repr(public)
+
+
+def test_public_law_projection_omits_malformed_pipe_table_summary() -> None:
+    public = project_public_law_items(
+        {
+            "matched_laws": [
+                {
+                    "law_name": "도로교통법 시행령",
+                    "article": "별표10",
+                    "summary": "| | 3) 이륜자동차등: 6만원 |\n| | | |",
+                    "source_reference": "law:verified:appendix-10",
+                }
+            ]
+        }
+    )
+
+    assert public == [{"law_name": "도로교통법 시행령", "article": "별표10"}]
+    assert "|" not in repr(public)
