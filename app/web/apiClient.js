@@ -98,9 +98,8 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     runReportAction(payload = {}, identity = {}) {
       return postJson(joinApiPath(apiBase, "reports/"), payload, identity);
     },
-    listReports({ sessionId, identity } = {}) {
-      const url = withQuery(joinApiPath(apiBase, "reports/"), { session_id: sessionId });
-      return getJson(url, identity);
+    listReports({ identity } = {}) {
+      return getJson(joinApiPath(apiBase, "reports/"), identity);
     },
     getReportDetail({ reportId, sessionId, identity } = {}) {
       const url = withQuery(joinApiPath(apiBase, `reports/${encodeURIComponent(reportId || "")}/`), {

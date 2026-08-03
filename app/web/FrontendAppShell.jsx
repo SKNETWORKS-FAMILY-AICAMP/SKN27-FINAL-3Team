@@ -2033,7 +2033,7 @@ export default function FrontendAppShell({
     }
     setStatusMessage("리포트 목록을 불러오고 있습니다.");
     try {
-      const result = await api.listReports({ sessionId: requestSessionId, identity: requestIdentity });
+      const result = await api.listReports({ identity: requestIdentity });
       const reports = Array.isArray(result?.reports) ? result.reports : [];
       setReportList(reports);
       if (hydrateLatest) {
@@ -3839,7 +3839,7 @@ function OcrConfirmationCard({ fields, isSubmitting, onChange, onConfirm }) {
         ))}
       </div>
       <button className="button primary" type="button" onClick={onConfirm} disabled={isSubmitting}>
-        OCR 추출값 확인 후 후속 절차 진행
+        OCR 추출값 확인 후 이의신청서 초안 생성
       </button>
     </section>
   );

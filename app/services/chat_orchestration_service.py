@@ -82,7 +82,6 @@ OCR_CONFIRMATION_FIELDS = frozenset(
         "issuing_authority",
     }
 )
-OCR_CONFIRMATION_REQUIRED_FIELDS = frozenset({"fine_type", "notice_stage"})
 
 
 def _has_datetime_or_location(user_text: str) -> bool:
@@ -110,10 +109,7 @@ def _normalized_ocr_confirmation(value: Any) -> dict[str, Any]:
 
 
 def _has_valid_ocr_confirmation(value: dict[str, Any]) -> bool:
-    return bool(
-        value.get("confirmed") is True
-        and OCR_CONFIRMATION_REQUIRED_FIELDS.issubset(set(value.get("fields") or {}))
-    )
+    return value.get("confirmed") is True
 
 
 def create_session(user_id: str | None = None) -> dict[str, Any]:
@@ -261,26 +257,6 @@ def submit_message(
         routing_intent=routing_intent,
         ocr_confirmation=ocr_confirmation,
     )
-    if (
-        routing_intent == "fine_notice_analysis"
-        and report_requested
-        and not str(confirmed_report_user_facts or "").strip()
-    ):
-        response = _normalization_needs_input_response(
-            session_id=session_id,
-            message_id=message_id,
-            routing_intent=routing_intent,
-            attachments=attachments,
-            input_normalization=input_normalization,
-            pending_questions=[
-                {
-                    "field": "user_facts",
-                    "question": "이의제기를 하고 싶은 이유와 당시 상황을 한두 문장으로 알려 주세요.",
-                }
-            ],
-        )
-        response["fine_notice_intake"] = fine_notice_intake
-        return response
     if routing_intent == "accident_initial_consultation":
         accident_supervisor_state = build_supervisor_state_with_optional_llm(
             payload={**payload, "user_text": user_text, "attachments": attachments},
@@ -1372,7 +1348,7 @@ def _report_requested_for_payload(
     }:
         return False
     if routing_intent == "fine_notice_analysis":
-        return requested and _has_valid_ocr_confirmation(ocr_confirmation)
+        return _has_valid_ocr_confirmation(ocr_confirmation)
     return requested
 
 

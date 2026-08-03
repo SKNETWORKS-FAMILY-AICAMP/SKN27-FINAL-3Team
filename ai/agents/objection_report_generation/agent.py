@@ -170,6 +170,16 @@ def run_objection_report_generation(
     combined_missing_fields = _unique([*missing_fields, *document_missing_fields])
     appeal_decision = _appeal_decision(appeal_result)
     appeal_gate = _appeal_gate(appeal_decision)
+    report_actions = _report_actions(
+        document_variant=document_variant,
+        ready_for_docx=document_readiness["ready_for_docx"],
+    )
+    if appeal_gate["blocked"]:
+        report_actions = [
+            action
+            for action in report_actions
+            if action.get("type") == "copy_objection_draft"
+        ]
     petition_purpose = ""
     petition_reason = ""
     drafting_source = ""
@@ -221,10 +231,7 @@ def run_objection_report_generation(
             required_attachments=required_attachments,
             document_variant=document_variant,
         ),
-        "report_actions": _report_actions(
-            document_variant=document_variant,
-            ready_for_docx=document_readiness["ready_for_docx"],
-        ) if not appeal_gate["blocked"] else [],
+        "report_actions": report_actions,
         "appeal_decision": appeal_decision,
         "appeal_gate": appeal_gate,
         "petition_purpose": petition_purpose,

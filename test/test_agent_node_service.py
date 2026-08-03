@@ -1599,7 +1599,9 @@ def test_reporting_agent_blocks_download_actions_when_appeal_deadline_has_passed
 
     assert structured["appeal_decision"]["deadline_passed"] is True
     assert structured["readiness"]["ready_for_download"] is False
-    assert structured["report_actions"] == []
+    assert [action["type"] for action in structured["report_actions"]] == [
+        "copy_objection_draft"
+    ]
     assert "download_objection" not in execution["agent_output"]["next_actions"]
     assert "download_report" not in execution["agent_output"]["next_actions"]
 

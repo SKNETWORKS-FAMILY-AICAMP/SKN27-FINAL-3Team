@@ -137,6 +137,9 @@ test("keeps completed general guidance out of the report generation path", () =>
 
   assert.equal(state.kind, "not_reportable");
   assert.equal(state.stageLabel, "절차 안내 완료");
+  assert.match(state.title, /아직 생성되지 않았습니다/);
+  assert.match(state.description, /OCR/);
+  assert.match(state.description, /초안/);
   assert.equal(state.ctaLabel, "AI 상담으로 이동");
 });
 

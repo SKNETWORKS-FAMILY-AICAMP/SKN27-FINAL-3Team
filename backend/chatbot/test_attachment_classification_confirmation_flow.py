@@ -305,7 +305,7 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
         self.assertNotIn("scan_snapshot_sha256", repr(confirmed_attachment))
         self.assertNotIn("execution_id", repr(confirmed_attachment))
 
-    def test_report_waits_for_user_facts_then_queues_with_trusted_context(self) -> None:
+    def test_ocr_confirmation_queues_report_without_keywords_or_user_facts(self) -> None:
         session_id, attachment_id = self._upload_clean_photo()
         uploaded_file = UploadedFile.objects.get(attachment_id=attachment_id)
         uploaded_file.purpose = "fine_notice"
@@ -324,14 +324,6 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
             session_id=session_id,
             attachment_id=attachment_id,
         )
-        ChatMessage.objects.create(
-            message_id="msg_report_request_before_ocr_confirmation",
-            session=ChatSession.objects.get(session_id=session_id),
-            role=MessageRole.USER,
-            content="이의신청서 초안과 리포트를 생성해 주세요.",
-            routing_intent="fine_notice_analysis",
-        )
-
         response = self.client.post(
             "/api/chat/messages/",
             data={
@@ -353,48 +345,20 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.json()["status"], "needs_input")
-        self.assertEqual(
-            [item["field"] for item in response.json()["pending_questions"]],
-            ["user_facts"],
-        )
-        session = ChatSession.objects.get(session_id=session_id)
-        followup_state = session.metadata["chat_followup_state"]
-        self.assertEqual(
-            [item["field"] for item in followup_state["pending_questions"]],
-            ["user_facts"],
-        )
-        self.assertTrue(followup_state["ocr_confirmation"]["confirmed"])
-
-        user_facts = "당시 표지판 식별이 어려웠고 안전을 위해 잠시 정차했습니다."
-        queued = self.client.post(
-            "/api/chat/messages/",
-            data={
-                "session_id": session_id,
-                "user_text": user_facts,
-                "attachments": [{"attachment_id": attachment_id}],
-            },
-            content_type="application/json",
-        )
-
-        self.assertEqual(queued.status_code, 202, queued.content)
+        self.assertEqual(response.status_code, 202, response.content)
         node_codes = [
             step["node_code"]
-            for step in queued.json()["analysis_plan"]["steps"]
+            for step in response.json()["analysis_plan"]["steps"]
         ]
         self.assertIn("fine_notice_analysis", node_codes)
         self.assertIn("appeal_decision_flow", node_codes)
         self.assertIn("objection_report_generation", node_codes)
         work_item = AgentWorkItem.objects.get(
-            work_item_id=queued.json()["work_item"]["work_item_id"]
+            work_item_id=response.json()["work_item"]["work_item_id"]
         )
-        self.assertEqual(
-            work_item.payload["server_execution_context"],
-            {
-                "contract_version": "server_execution_context.v1",
-                "context": {"user_facts": user_facts},
-            },
+        self.assertNotIn(
+            "user_facts",
+            work_item.payload.get("server_execution_context", {}).get("context", {}),
         )
         self.assertNotIn(
             "user_facts",

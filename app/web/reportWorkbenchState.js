@@ -135,11 +135,11 @@ export function deriveReportWorkbenchState({
       stageLabel: stage === "agent_execution_ready" ? "절차 안내 완료" : "상담 분석 중",
       title:
         stage === "agent_execution_ready"
-          ? "이번 상담은 별도 리포트 문서를 만들지 않습니다."
+          ? "이의신청서 초안이 아직 생성되지 않았습니다."
           : "상담 분석이 진행 중입니다.",
       description:
         stage === "agent_execution_ready"
-          ? "일반 법령·절차 안내는 상담 결과에서 바로 확인할 수 있습니다."
+          ? "과태료 고지서의 OCR 추출값을 확인하면 이의신청서 초안이 자동으로 준비됩니다."
           : "상담 화면에서 현재 진행 상태와 다음 안내를 확인할 수 있습니다.",
       missingItems: [],
       ctaLabel: "AI 상담으로 이동",

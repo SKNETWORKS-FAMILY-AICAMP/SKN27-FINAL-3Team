@@ -165,6 +165,47 @@ class ReportApiContractTests(TestCase):
             [{"title": "Facts", "body": "Confirmed facts", "items": ["Verified"]}],
         )
 
+    def test_owner_list_spans_owned_sessions_without_cross_owner_leakage(self) -> None:
+        second_owner_session = ChatSession.objects.create(
+            session_id="ses_report_api_owner_second",
+            owner_id=self.owner_id,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        second_owner_report = Report.objects.create(
+            report_id="rep_report_api_owner_second",
+            owner_id=self.owner_id,
+            session=second_owner_session,
+            report_type=ReportType.FINE_NOTICE_OBJECTION,
+            status=ReportStatus.READY,
+            title="Second owner report",
+            content={},
+            metadata={},
+        )
+        other_session = ChatSession.objects.create(
+            session_id="ses_report_api_other",
+            owner_id=self.other_id,
+            status=ChatSessionStatus.ACTIVE,
+        )
+        Report.objects.create(
+            report_id="rep_report_api_other",
+            owner_id=self.other_id,
+            session=other_session,
+            report_type=ReportType.FINE_NOTICE_OBJECTION,
+            status=ReportStatus.READY,
+            title="Other user report",
+            content={},
+            metadata={},
+        )
+
+        response = self.owner_client.get("/api/reports/")
+
+        self.assertEqual(response.status_code, 200)
+        report_ids = {item["report_id"] for item in response.json()["reports"]}
+        self.assertEqual(
+            report_ids,
+            {self.report.report_id, second_owner_report.report_id},
+        )
+
     def test_report_detail_exposes_only_public_quality_summary_fields(self) -> None:
         response = self.owner_client.get(f"/api/reports/{self.report.report_id}/")
         detail = response.json()["report"]

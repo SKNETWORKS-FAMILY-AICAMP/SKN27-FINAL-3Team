@@ -118,7 +118,7 @@ def test_frontend_renders_editable_ocr_confirmation_before_follow_up() -> None:
 
     assert "ocr_confirmation" in shell
     assert "requires_confirmation" in shell
-    assert "OCR 추출값 확인 후 후속 절차 진행" in shell
+    assert "OCR 추출값 확인 후 이의신청서 초안 생성" in shell
     assert "fine_type" in shell
     assert "notice_stage" in shell
 
