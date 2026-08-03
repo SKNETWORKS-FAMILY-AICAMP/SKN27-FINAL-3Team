@@ -50,3 +50,20 @@ def test_pilot_application_role_can_read_only_safe_vision_result_records() -> No
     assert "SendVisionQueueJobs" in iam
     assert '"sqs:SendMessage"' in iam
     assert "var.vision_worker_enabled" in iam
+
+
+def test_vision_worker_mounts_prepared_models_read_only_and_stays_offline() -> None:
+    user_data = (TERRAFORM / "vision_worker_user_data.sh.tftpl").read_text(
+        encoding="utf-8"
+    )
+
+    assert "test -f '${checkpoint_path}/config.json'" in user_data
+    assert "test -f '${checkpoint_path}/model.safetensors'" in user_data
+    assert "test -f '${checkpoint_path}/pytorch_model.bin'" in user_data
+    assert "test -d /vision-volume/huggingface/hub" in user_data
+    assert (
+        "--mount type=bind,source=/vision-volume,target=/vision-volume,readonly"
+        in user_data
+    )
+    assert "-e HF_HUB_OFFLINE='1'" in user_data
+    assert "-e TRANSFORMERS_OFFLINE='1'" in user_data

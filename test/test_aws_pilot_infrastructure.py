@@ -39,13 +39,18 @@ def _run_vision_runtime(
     command = f"""
 . '{helper}'
 $content = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}'))
-$result = Set-AwsVisionRuntimeValues `
-  -Content $content `
-  -Provider '{provider}' `
-  -QueueUrl '{queue_url}' `
-  -ResultBucket '{result_bucket}' `
-  -WorkerInstanceId '{worker_instance_id}' `
-  -WorkerRepositoryUrl '{worker_repository_url}'
+try {{
+    $result = Set-AwsVisionRuntimeValues `
+      -Content $content `
+      -Provider '{provider}' `
+      -QueueUrl '{queue_url}' `
+      -ResultBucket '{result_bucket}' `
+      -WorkerInstanceId '{worker_instance_id}' `
+      -WorkerRepositoryUrl '{worker_repository_url}'
+}} catch {{
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}}
 [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($result))
 """
     return subprocess.run(

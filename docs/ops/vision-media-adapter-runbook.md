@@ -101,6 +101,11 @@ AWS 경로는 `VISION_RUNTIME_PROVIDER=aws_queue`를 사용하며, SQS FIFO 요�
 
 1. GPU-ready AMI, immutable Vision ECR tag, 준비된 모델 볼륨, 허용 S3 host,
    예산 승인을 검토합니다.
+   - `/vision-volume/models/videomae`에는 `config.json`과
+     `model.safetensors` 또는 `pytorch_model.bin`을 둡니다.
+   - `/vision-volume/huggingface/hub`에는 승인된 Qwen 모델 cache를 완전히
+     준비합니다. private worker는 이 경로를 read-only로 mount하고
+     `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`로 실행합니다.
 2. 별도 승인된 Terraform plan에서 `vision_registry_enabled=true`,
    `vision_worker_enabled=true`를 설정합니다.
 3. `terraform apply` 후 `vision_worker_queue_url`,
