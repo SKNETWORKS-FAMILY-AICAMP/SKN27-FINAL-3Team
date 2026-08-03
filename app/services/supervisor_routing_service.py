@@ -6,7 +6,7 @@ import json
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from app.services.supervisor_input_projection_service import (
     normalization_routing_hints,
@@ -16,6 +16,8 @@ from app.services.supervisor_input_projection_service import (
 POLICY_CONTRACT_VERSION = "supervisor_routing_policy.v1"
 DOCUMENT_CLASSIFICATION_TYPES = frozenset({"image", "pdf"})
 SPECIALIZED_DOCUMENT_PURPOSES = frozenset({"traffic_accident_confirmation"})
+CONFIRMED_DOCUMENT_CLASSIFICATIONS = frozenset({"fine_notice", "accident_evidence"})
+CONFIRMED_DOCUMENT_CONFIDENCE_BANDS = frozenset({"high", "medium"})
 DEFAULT_POLICY_PATH = (
     Path(__file__).resolve().parents[1]
     / "config"
@@ -117,7 +119,21 @@ def requires_attachment_document_classification(attachments: list[dict[str, Any]
         and _text(item.get("scan_status")) == "clean"
         and _text(item.get("type")).lower() in DOCUMENT_CLASSIFICATION_TYPES
         and _text(item.get("purpose")).lower() not in SPECIALIZED_DOCUMENT_PURPOSES
+        and not _has_server_confirmed_document_classification(item)
         for item in attachments
+    )
+
+
+def _has_server_confirmed_document_classification(item: Mapping[str, Any]) -> bool:
+    confirmation = item.get("classification_confirmation")
+    if not isinstance(confirmation, Mapping):
+        return False
+    return bool(
+        _text(confirmation.get("source")) == "server_record"
+        and _text(confirmation.get("classification"))
+        in CONFIRMED_DOCUMENT_CLASSIFICATIONS
+        and _text(confirmation.get("confidence_band"))
+        in CONFIRMED_DOCUMENT_CONFIDENCE_BANDS
     )
 
 

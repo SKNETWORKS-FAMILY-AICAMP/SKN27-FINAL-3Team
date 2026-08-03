@@ -327,6 +327,52 @@ def test_canonical_scan_ready_image_or_pdf_queues_document_classification_before
     ]
 
 
+def test_server_confirmed_fine_notice_skips_reclassification_after_ocr_confirmation() -> None:
+    routing_intent = route_supervisor_input(
+        "OCR 추출값을 확인했습니다.",
+        [
+            {
+                "metadata_source": "canonical_scan_gate",
+                "resolution_status": "scan_ready",
+                "status": "ready",
+                "scan_status": "clean",
+                "type": "pdf",
+                "purpose": "fine_notice",
+                "classification_confirmation": {
+                    "source": "server_record",
+                    "classification": "fine_notice",
+                    "confidence_band": "high",
+                },
+            }
+        ],
+    )
+
+    assert routing_intent == "fine_notice_analysis"
+
+
+def test_client_claimed_classification_cannot_bypass_document_classification() -> None:
+    routing_intent = route_supervisor_input(
+        "OCR 추출값을 확인했습니다.",
+        [
+            {
+                "metadata_source": "canonical_scan_gate",
+                "resolution_status": "scan_ready",
+                "status": "ready",
+                "scan_status": "clean",
+                "type": "pdf",
+                "purpose": "fine_notice",
+                "classification_confirmation": {
+                    "source": "client",
+                    "classification": "fine_notice",
+                    "confidence_band": "high",
+                },
+            }
+        ],
+    )
+
+    assert routing_intent == "attachment_document_classification"
+
+
 def test_composed_response_exposes_safe_ocr_confirmation_workflow() -> None:
     result = compose_agent_response(
         {
