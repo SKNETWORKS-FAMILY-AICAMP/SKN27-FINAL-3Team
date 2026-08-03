@@ -86,6 +86,9 @@ def test_pending_result_uses_the_v2_contract_without_calling_composer() -> None:
         "progress_state": {},
         "attachment_workflows": [],
         "attachment_processing": [],
+        "public_results": {
+            "contract_version": "public_agent_results.v1",
+        },
         "analysis_progress": {
             "contract_version": "analysis_progress.v1",
             "semantic_status": "queued",
@@ -258,6 +261,9 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
         "supervisor_state": {"stage": "finalize"},
         "user_claims": [],
         "supervisor_execution": {"status": "success", "node_results": []},
+        "public_results": {
+            "contract_version": "public_agent_results.v1",
+        },
         "work_item": {},
         "progress_state": {},
         "analysis_progress": {
@@ -476,6 +482,150 @@ def test_completed_result_projects_only_public_agent_display_fields() -> None:
     ):
         assert field not in outcome.payload
     assert stored == original
+
+
+def test_completed_result_projects_safe_public_agent_results_for_frontend() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    stored = {
+        "job_id": "job_public_agent_results",
+        "status": "partial",
+        "attachments": [{
+            "attachment_id": "att_public_result",
+            "purpose": "traffic_accident_confirmation",
+            "status": "ready",
+            "scan_status": "clean",
+            "storage_uri": "s3://private-bucket/confirmation.png",
+        }],
+        "agent_results": [
+            {
+                "node_code": "attachment_document_classification",
+                "status": "success",
+                "structured_result": {
+                    "attachment_id": "att_public_result",
+                    "classification": "fine_notice",
+                    "confidence_band": "high",
+                    "requires_confirmation": True,
+                    "raw_model_output": "must-not-appear",
+                },
+            },
+            {
+                "node_code": "fine_notice_analysis",
+                "status": "partial",
+                "structured_result": {
+                    "attachment_id": "att_public_result",
+                    "requires_confirmation": True,
+                    "fine_type": "과태료",
+                    "notice_stage": "사전통지",
+                    "law_code": "도로교통법 제160조",
+                    "violation_text": "신호위반",
+                    "opinion_deadline": "2026-08-12",
+                    "issuing_authority": "서울시",
+                    "missing_fields": [],
+                    "raw_ocr_text": "must-not-appear",
+                },
+            },
+            {
+                "node_code": "traffic_accident_confirmation_ocr",
+                "status": "success",
+                "structured_result": {
+                    "document_check": {"is_target_document": True, "document_name": "교통사고사실확인원"},
+                    "extracted_fields": {
+                        "accident_datetime": "2022-11-18 14:10",
+                        "accident_location": "경기도 안산시",
+                        "accident_type": {"value": "차대차", "raw_text": "차대차"},
+                        "accident_cause": "신호 또는 지시 위반",
+                        "damage": {"raw_text": "부상 1명", "injury_count": 1},
+                        "accident_description": "교차로 충돌",
+                        "resident_registration_number": "must-not-appear",
+                    },
+                    "quality": {"image_quality": "readable", "ocr_confidence": 0.91},
+                    "privacy": {"masking_applied": True},
+                    "ocr_evidence": [{"attachment_id": "att_public_result", "storage_uri": "s3://must-not-appear/private.png"}],
+                    "raw_text_redacted": "must-not-appear",
+                },
+            },
+            {
+                "node_code": "appeal_decision_flow",
+                "status": "success",
+                "structured_result": {
+                    "risk_flag": True,
+                    "risk_judgment_failed": False,
+                    "risk_trigger_category": "A_제3자운전주장",
+                    "risk_confidence": 0.92,
+                    "merit": "강함",
+                    "merit_judgment_failed": False,
+                    "merit_basis": "제160조 기준",
+                    "merit_relief_type": "면제",
+                    "relief_type_judgment_failed": False,
+                    "guide": {"disclaimer": "위험과 인정 가능성을 함께 검토하세요.", "internal_prompt": "must-not-appear"},
+                    "provider_trace": "must-not-appear",
+                },
+            },
+        ],
+    }
+
+    outcome = load_analysis_result(
+        "job_public_agent_results",
+        load_job=lambda _job_id: stored,
+        compose_response=lambda _payload: {
+            "contract_version": "analysis_result.v2",
+            "status": "partial",
+            "assistant_message": {"answer": "확인할 결과가 있습니다."},
+            "structured_results": {"internal": "must-not-appear"},
+        },
+    )
+
+    assert outcome.payload["public_results"] == {
+        "contract_version": "public_agent_results.v1",
+        "attachment_document_classification": {
+            "attachment_id": "att_public_result",
+            "classification": "fine_notice",
+            "confidence_band": "high",
+            "requires_confirmation": True,
+        },
+        "fine_notice_analysis": {
+            "attachment_id": "att_public_result",
+            "requires_confirmation": True,
+            "fine_type": "과태료",
+            "notice_stage": "사전통지",
+            "law_code": "도로교통법 제160조",
+            "violation_text": "신호위반",
+            "opinion_deadline": "2026-08-12",
+            "issuing_authority": "서울시",
+            "missing_fields": [],
+        },
+        "traffic_accident_confirmation_ocr": {
+            "document_check": {"is_target_document": True},
+            "extracted_fields": {
+                "accident_datetime": "2022-11-18 14:10",
+                "accident_location": "경기도 안산시",
+                "accident_type": {"value": "차대차"},
+                "accident_cause": "신호 또는 지시 위반",
+                "damage": {"raw_text": "부상 1명"},
+                "accident_description": "교차로 충돌",
+            },
+            "quality": {"image_quality": "readable"},
+            "privacy": {"masking_applied": True},
+            "ocr_evidence": [{"attachment_id": "att_public_result"}],
+        },
+        "appeal_decision_flow": {
+            "risk_flag": True,
+            "risk_judgment_failed": False,
+            "risk_trigger_category": "A_제3자운전주장",
+            "risk_confidence": 0.92,
+            "merit": "강함",
+            "merit_judgment_failed": False,
+            "merit_basis": "제160조 기준",
+            "merit_relief_type": "면제",
+            "relief_type_judgment_failed": False,
+            "guide": {"disclaimer": "위험과 인정 가능성을 함께 검토하세요."},
+        },
+    }
+    serialized = repr(outcome.payload)
+    assert "structured_results" not in outcome.payload
+    assert "must-not-appear" not in serialized
+    assert "s3://" not in serialized
 
 
 def test_detail_projects_only_public_restore_fields() -> None:

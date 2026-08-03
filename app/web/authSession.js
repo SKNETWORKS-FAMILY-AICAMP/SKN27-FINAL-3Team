@@ -488,7 +488,8 @@ export function persistAuthSession({
   sessionId,
   userId,
 }) {
-  writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
+  const authenticationRequested = Boolean(accessToken || authSessionId);
+  const sessionWriteSucceeded = writeStoredJson(AUTH_SESSION_STORAGE_KEY, {
     guest_id: guestId || null,
     guest_credential: guestCredential || null,
     auth_session_id: authSessionId || null,
@@ -496,7 +497,43 @@ export function persistAuthSession({
     session_id: sessionId || null,
     access_token: accessToken || null,
   });
-  writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null);
+  const profileWriteSucceeded = writeStoredJson(
+    GOOGLE_PROFILE_STORAGE_KEY,
+    googleProfile || null,
+  );
+  const readBack = readStoredAuthSession();
+  const stored = {
+    access_token: Boolean(readBack.access_token),
+    auth_session_id: Boolean(readBack.auth_session_id),
+    guest_id: Boolean(readBack.guest_id),
+    guest_credential: Boolean(readBack.guest_credential),
+    session_id: Boolean(readBack.session_id),
+    user_id: Boolean(readBack.user_id),
+  };
+  const authenticatedTupleComplete = Boolean(
+    stored.access_token && stored.auth_session_id,
+  );
+  const writeSucceeded = sessionWriteSucceeded && profileWriteSucceeded;
+  const status = !writeSucceeded
+    ? "failed"
+    : authenticationRequested && !authenticatedTupleComplete
+      ? "incomplete"
+      : "persisted";
+  const reason = status === "failed"
+    ? "storage_write_failed"
+    : status === "incomplete"
+      ? "authenticated_tuple_incomplete"
+      : null;
+  return {
+    contract_version: "auth_session_persistence.v1",
+    status,
+    reason,
+    authentication_requested: authenticationRequested,
+    authenticated_tuple_complete: authenticatedTupleComplete,
+    session_write_succeeded: sessionWriteSucceeded,
+    profile_write_succeeded: profileWriteSucceeded,
+    stored,
+  };
 }
 
 export function clearStoredAuthSession() {
@@ -517,23 +554,25 @@ export function readStoredValue(key) {
 
 export function writeStoredValue(key, value) {
   if (typeof window === "undefined" || !value) {
-    return;
+    return false;
   }
   try {
     window.localStorage.setItem(key, value);
+    return true;
   } catch (_error) {
-    // Ignore storage failures; in-memory auth state still works for this session.
+    return false;
   }
 }
 
 export function removeStoredValue(key) {
   if (typeof window === "undefined") {
-    return;
+    return false;
   }
   try {
     window.localStorage.removeItem(key);
+    return true;
   } catch (_error) {
-    // Ignore storage failures.
+    return false;
   }
 }
 
@@ -551,8 +590,7 @@ export function readStoredJson(key) {
 
 export function writeStoredJson(key, value) {
   if (!value) {
-    removeStoredValue(key);
-    return;
+    return removeStoredValue(key);
   }
-  writeStoredValue(key, JSON.stringify(value));
+  return writeStoredValue(key, JSON.stringify(value));
 }

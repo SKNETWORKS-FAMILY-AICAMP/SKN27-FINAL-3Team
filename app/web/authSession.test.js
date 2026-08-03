@@ -14,6 +14,111 @@ function appJwtWithExpiration(expiresAtSeconds) {
   return `${encode({ alg: "HS256", typ: "JWT" })}.${encode({ exp: expiresAtSeconds })}.signature`;
 }
 
+test("reports a complete authenticated storage read-back without exposing values", () => {
+  const storage = new Map();
+  global.window = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+    },
+  };
+  try {
+    const result = authSession.persistAuthSession({
+      accessToken: "private-token",
+      authSessionId: "auth_private",
+      guestId: "gst_lineage",
+      sessionId: "ses_current",
+      userId: "usr_private",
+      googleProfile: { email: "private@example.com" },
+    });
+
+    assert.deepEqual(result, {
+      contract_version: "auth_session_persistence.v1",
+      status: "persisted",
+      reason: null,
+      authentication_requested: true,
+      authenticated_tuple_complete: true,
+      session_write_succeeded: true,
+      profile_write_succeeded: true,
+      stored: {
+        access_token: true,
+        auth_session_id: true,
+        guest_id: true,
+        guest_credential: false,
+        session_id: true,
+        user_id: true,
+      },
+    });
+    assert.equal(JSON.stringify(result).includes("private-token"), false);
+    assert.equal(JSON.stringify(result).includes("private@example.com"), false);
+  } finally {
+    delete global.window;
+  }
+});
+
+test("reports storage write failure instead of silently claiming persistence", () => {
+  global.window = {
+    localStorage: {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("quota or security error with private detail");
+      },
+      removeItem: () => {
+        throw new Error("private removal detail");
+      },
+    },
+  };
+  try {
+    const result = authSession.persistAuthSession({
+      accessToken: "private-token",
+      authSessionId: "auth_private",
+      sessionId: "ses_current",
+    });
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.reason, "storage_write_failed");
+    assert.equal(result.authenticated_tuple_complete, false);
+    assert.equal(result.session_write_succeeded, false);
+    assert.equal(JSON.stringify(result).includes("private"), false);
+  } finally {
+    delete global.window;
+  }
+});
+
+test("reports an incomplete authenticated tuple when storage read-back drops a field", () => {
+  const storage = new Map();
+  global.window = {
+    localStorage: {
+      getItem: (key) => storage.get(key) ?? null,
+      setItem(key, value) {
+        const parsed = JSON.parse(String(value));
+        if (key === authSession.AUTH_SESSION_STORAGE_KEY) {
+          delete parsed.auth_session_id;
+        }
+        storage.set(key, JSON.stringify(parsed));
+      },
+      removeItem: (key) => storage.delete(key),
+    },
+  };
+  try {
+    const result = authSession.persistAuthSession({
+      accessToken: "private-token",
+      authSessionId: "auth_private",
+      sessionId: "ses_current",
+    });
+
+    assert.equal(result.status, "incomplete");
+    assert.equal(result.reason, "authenticated_tuple_incomplete");
+    assert.equal(result.authentication_requested, true);
+    assert.equal(result.authenticated_tuple_complete, false);
+    assert.equal(result.stored.access_token, true);
+    assert.equal(result.stored.auth_session_id, false);
+  } finally {
+    delete global.window;
+  }
+});
+
 test("recovers a stored authenticated session only after auth/me verifies it", async () => {
   const nowMs = 1770000000000;
   const storedToken = appJwtWithExpiration(Math.floor(nowMs / 1000) + 1800);

@@ -296,6 +296,9 @@ export default function FrontendAppShell({
   const [authRestoreStatus, setAuthRestoreStatus] = useState(
     hasStoredAuthenticatedSession ? "checking" : "ready"
   );
+  const [authRecoveryStage, setAuthRecoveryStage] = useState(
+    hasStoredAuthenticatedSession ? "verification_pending" : "not_started"
+  );
   const [mypageSummary, setMypageSummary] = useState(null);
   const [historyEvents, setHistoryEvents] = useState(null);
   const [question, setQuestion] = useState("");
@@ -361,6 +364,10 @@ export default function FrontendAppShell({
   const sessionLabel =
     authRestoreStatus === "checking"
       ? "로그인 확인 중"
+      : authRecoveryStage === "storage_failure"
+        ? "로그인 저장 확인 필요"
+        : authRecoveryStage === "resume_failed"
+          ? "상담 복원 재시도 필요"
       : authRestoreStatus === "verification_unavailable"
         ? "로그인 확인 필요"
         : authSessionId
@@ -395,8 +402,12 @@ export default function FrontendAppShell({
   const deadlineGuidance = isDeadlineGuidance(analysisResponse?.deadline_guidance)
     ? analysisResponse.deadline_guidance
     : null;
+  const publicResults =
+    analysisResponse?.public_results?.contract_version === "public_agent_results.v1"
+      ? analysisResponse.public_results
+      : {};
   const appealDecision =
-    analysisResponse?.structured_results?.appeal_decision_flow || null;
+    publicResults.appeal_decision_flow || null;
   const appealDecisionUi = buildAppealDecisionUi(appealDecision);
   const appealDecisionKey = appealDecisionUi?.requiresAcknowledgement
     ? [
@@ -408,15 +419,14 @@ export default function FrontendAppShell({
     : "";
   const appealRiskAcknowledged =
     !appealDecisionUi?.requiresAcknowledgement || acknowledgedAppealKey === appealDecisionKey;
-  const ocrResult = analysisResponse?.structured_results?.fine_notice_analysis || null;
+  const ocrResult = publicResults.fine_notice_analysis || null;
   const trafficAccidentOcrUi = buildTrafficAccidentOcrUi({
-    structuredResult:
-      analysisResponse?.structured_results?.traffic_accident_confirmation_ocr,
+    structuredResult: publicResults.traffic_accident_confirmation_ocr,
     semanticStatus: analysisResponse?.status,
     nextActions: analysisResponse?.next_actions,
   });
   const attachmentClassificationResult =
-    analysisResponse?.structured_results?.attachment_document_classification || null;
+    publicResults.attachment_document_classification || null;
   const attachmentWorkflowUi = buildAttachmentWorkflowUi(analysisResponse?.attachment_workflows);
   const analysisProgressUi = buildAnalysisProgressUi(
     analysisResponse?.analysis_progress
@@ -480,11 +490,13 @@ export default function FrontendAppShell({
   useEffect(() => {
     if (!hasStoredAuthenticatedSession) {
       setAuthRestoreStatus("ready");
+      setAuthRecoveryStage("not_started");
       return undefined;
     }
 
     let recoveryActive = true;
     setAuthRestoreStatus("checking");
+    setAuthRecoveryStage("verification_pending");
     recoverStoredAuthSession({
       storedSession: storedAuthSession,
       getCurrentAuthSubject: (options) => api.getCurrentAuthSubject(options),
@@ -508,7 +520,7 @@ export default function FrontendAppShell({
           setGuestId(recovered.guest_id || "");
           setGuestCredential(recovered.guest_credential || "");
           setSessionId(recovered.session_id || "");
-          persistAuthSession({
+          const persistenceResult = persistAuthSession({
             accessToken: recovered.access_token,
             authSessionId: recovered.auth_session_id,
             guestId: recovered.guest_id,
@@ -517,6 +529,12 @@ export default function FrontendAppShell({
             sessionId: recovered.session_id,
             userId: recovered.user_id,
           });
+          const persistenceComplete =
+            persistenceResult.status === "persisted"
+            && persistenceResult.authenticated_tuple_complete === true;
+          setAuthRecoveryStage(
+            persistenceComplete ? "verified" : "storage_failure"
+          );
           let resumeManifest;
           try {
             resumeManifest = await api.getResumeManifest({ identity: recoveredIdentity });
@@ -528,6 +546,7 @@ export default function FrontendAppShell({
               return;
             }
             setAuthRestoreStatus("ready");
+            setAuthRecoveryStage("resume_failed");
             setStatusMessage(
               "저장된 상담을 일시적으로 불러오지 못했지만 로그인과 현재 상담은 유지됩니다."
             );
@@ -557,8 +576,13 @@ export default function FrontendAppShell({
             });
           }
           setAuthRestoreStatus("ready");
+          if (persistenceComplete) {
+            setAuthRecoveryStage("ready");
+          }
           setStatusMessage(
-            resumed.hasResume
+            !persistenceComplete
+              ? "로그인은 확인됐지만 브라우저 저장소에 인증 정보를 보존하지 못했습니다. 브라우저 저장소 설정을 확인해 주세요."
+              : resumed.hasResume
               ? "저장된 상담과 분석 결과를 복원했습니다."
               : result.refreshed
               ? "로그인 상태를 안전하게 갱신했습니다."
@@ -579,6 +603,7 @@ export default function FrontendAppShell({
           setGuestCredential(recovered.guest_credential || "");
           setSessionId(recovered.session_id || "");
           setAuthRestoreStatus("ready");
+          setAuthRecoveryStage("reauthentication_required");
           setStatusMessage(
             "로그인 확인이 만료되었습니다. 기존 상담은 유지되며 Google 로그인 후 계속할 수 있습니다."
           );
@@ -587,6 +612,7 @@ export default function FrontendAppShell({
         setActiveAuthToken("");
         setAuthSessionId("");
         setAuthRestoreStatus("verification_unavailable");
+        setAuthRecoveryStage("verification_unavailable");
         setStatusMessage(
           "로그인 상태를 확인하지 못했습니다. 기존 상담을 보존했으며 잠시 후 새로고침해 주세요."
         );
@@ -608,12 +634,14 @@ export default function FrontendAppShell({
           setGuestCredential(storedAuthSession.guest_credential || "");
           setSessionId(storedAuthSession.session_id || "");
           setAuthRestoreStatus("ready");
+          setAuthRecoveryStage("reauthentication_required");
           setStatusMessage("로그인이 만료되었습니다. Google 계정으로 다시 로그인해 주세요.");
           return;
         }
         setActiveAuthToken("");
         setAuthSessionId("");
         setAuthRestoreStatus("verification_unavailable");
+        setAuthRecoveryStage("verification_unavailable");
         setStatusMessage(
           "로그인 상태를 확인하지 못했습니다. 기존 상담을 보존했으며 잠시 후 새로고침해 주세요."
         );
@@ -844,12 +872,7 @@ export default function FrontendAppShell({
       const nextGuestId = subject.guest_id || activeGuestId;
       const nextUserId = subject.user_id || loginResult?.user?.user_id || null;
 
-      setActiveAuthToken(nextToken);
-      setAuthSessionId(nextAuthSessionId);
-      setGuestId(nextGuestId);
-      setGuestCredential("");
-      setSessionId(activeSessionId);
-      persistAuthSession({
+      const persistenceResult = persistAuthSession({
         accessToken: nextToken,
         googleProfile: loginResult?.user || null,
         authSessionId: nextAuthSessionId,
@@ -858,6 +881,19 @@ export default function FrontendAppShell({
         sessionId: activeSessionId,
         userId: nextUserId,
       });
+      const persistenceComplete =
+        persistenceResult.status === "persisted"
+        && persistenceResult.authenticated_tuple_complete === true;
+      if (persistenceComplete) {
+        setAuthRecoveryStage("ready");
+      } else {
+        setAuthRecoveryStage("storage_failure");
+      }
+      setActiveAuthToken(nextToken);
+      setAuthSessionId(nextAuthSessionId);
+      setGuestId(nextGuestId);
+      setGuestCredential("");
+      setSessionId(activeSessionId);
 
       const nextIdentity = {
         authToken: nextToken,
@@ -879,6 +915,7 @@ export default function FrontendAppShell({
         guestCredential: "",
         identity: nextIdentity,
         loginResult,
+        persistenceResult,
         sessionId: activeSessionId,
         source,
         userId: nextUserId,

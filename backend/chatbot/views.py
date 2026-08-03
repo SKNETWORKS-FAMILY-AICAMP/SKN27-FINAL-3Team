@@ -89,6 +89,7 @@ from app.services.history_event_mock_service import (
 from app.services.public_consultation_routing_service import (
     resolve_public_consultation_intent,
 )
+from app.services.supervisor_routing_service import route_supervisor_input
 from app.services.resume_manifest_service import build_resume_manifest
 from app.services.report_query_service import (
     WORKER_REPORT_SOURCE,
@@ -1345,9 +1346,18 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     stored_followup_state = None
     if requested_session_id and session_access is not None:
         stored_followup_state = load_chat_followup_state(requested_session_id)
+        current_routing_intent = route_supervisor_input(
+            str(identity_body.get("user_text") or ""),
+            [
+                item
+                for item in identity_body.get("attachments") or []
+                if isinstance(item, dict)
+            ],
+        )
         identity_body = merge_chat_followup_payload(
             identity_body,
             stored_followup_state,
+            current_routing_intent=current_routing_intent,
         )
 
     public_consultation_routing_intent = resolve_public_consultation_intent(
@@ -1360,9 +1370,9 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     try:
         chat_response = submit_message(
             identity_body,
-            routing_intent_override=(
-                classification_routing_intent
-                or followup_routing_intent(stored_followup_state)
+            routing_intent_override=classification_routing_intent,
+            continuation_routing_intent=(
+                followup_routing_intent(stored_followup_state)
                 or public_consultation_routing_intent
             ),
         )

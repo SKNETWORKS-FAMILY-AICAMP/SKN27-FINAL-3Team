@@ -7,6 +7,7 @@ const EXHAUSTED_NOTICE = {
   retryable: true,
   polling_exhausted: true,
   polling_interrupted: false,
+  next_action: "check_status",
   message: "분석 상태 확인이 지연되고 있습니다. 잠시 후 다시 확인할 수 있습니다.",
 };
 
@@ -69,7 +70,11 @@ export async function pollWorkerResult({
   onDiagnostic(diagnostic("polling_exhausted", currentUi));
   const exhaustedResult = {
     ...latestResult,
-    polling_notice: { ...EXHAUSTED_NOTICE },
+    polling_notice: {
+      ...EXHAUSTED_NOTICE,
+      job_id: currentUi?.jobId || null,
+      correlation_id: currentUi?.correlationId || null,
+    },
   };
   onUpdate(exhaustedResult);
   return exhaustedResult;

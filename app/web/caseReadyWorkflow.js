@@ -61,6 +61,10 @@ export function buildCaseReadyViewModel(
   analysisResponse = {},
   registeredAttachments = [],
 ) {
+  const publicResults =
+    analysisResponse?.public_results?.contract_version === "public_agent_results.v1"
+      ? analysisResponse.public_results
+      : {};
   const consultationState = record(analysisResponse?.consultation_state?.v2);
   const factState = record(analysisResponse?.consultation_state?.fact_state);
   const factRecords = record(factState.facts);
@@ -95,7 +99,7 @@ export function buildCaseReadyViewModel(
     ))
     .map((item) => String(item.attachment_id).trim());
   const trafficAccidentOcr = record(
-    analysisResponse?.structured_results?.traffic_accident_confirmation_ocr,
+    publicResults.traffic_accident_confirmation_ocr,
   );
   const ocrEvidenceIds =
     trafficAccidentOcr.document_check?.is_target_document === true

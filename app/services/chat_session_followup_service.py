@@ -8,17 +8,39 @@ from typing import Any
 
 CHAT_SESSION_FOLLOWUP_STATE_VERSION = "chat_session_followup_state.v1"
 MAX_FOLLOWUP_HISTORY_TURNS = 16
+_TOPIC_SCOPED_FIELDS = frozenset(
+    {
+        "facts",
+        "fact_sources",
+        "fact_conflicts",
+        "pending_questions",
+        "case_memory",
+        "fine_notice_intake",
+        "stored_fine_notice_intake_slots",
+        "consultation_state",
+        "conversation_history",
+    }
+)
 
 
 def merge_chat_followup_payload(
     payload: dict[str, Any],
     stored_state: dict[str, Any] | None,
+    *,
+    current_routing_intent: str = "",
 ) -> dict[str, Any]:
     """Merge a safe request with the authoritative state stored for its session."""
 
     merged = deepcopy(payload)
     state = _valid_state(stored_state)
     if state is None:
+        return merged
+    if _is_topic_switch(
+        current_routing_intent=current_routing_intent,
+        stored_routing_intent=_text(state.get("routing_intent")),
+    ):
+        for field in _TOPIC_SCOPED_FIELDS:
+            merged.pop(field, None)
         return merged
 
     server_facts = _dict(state.get("facts"))
@@ -94,6 +116,21 @@ def followup_routing_intent(stored_state: dict[str, Any] | None) -> str:
 
     state = _valid_state(stored_state)
     return _text(state.get("routing_intent")) if state else ""
+
+
+def _is_topic_switch(
+    *,
+    current_routing_intent: str,
+    stored_routing_intent: str,
+) -> bool:
+    current = _text(current_routing_intent)
+    stored = _text(stored_routing_intent)
+    return bool(
+        current
+        and current != "general_consultation"
+        and stored
+        and current != stored
+    )
 
 
 def _valid_state(stored_state: dict[str, Any] | None) -> dict[str, Any] | None:

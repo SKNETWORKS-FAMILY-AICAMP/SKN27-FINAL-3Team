@@ -84,6 +84,68 @@ def test_attachment_workflow_state_table(
 
 
 @pytest.mark.parametrize(
+    ("structured_result", "active_node", "overall_status", "expected_state", "expected_action"),
+    [
+        ({}, "traffic_accident_confirmation_ocr", "running", "ocr_running", "wait_for_ocr"),
+        (
+            {"status": "success", "document_check": {"is_target_document": True}},
+            "",
+            "success",
+            "analysis_ready",
+            "review_analysis",
+        ),
+        (
+            {"status": "partial", "document_check": {"is_target_document": True}},
+            "",
+            "partial",
+            "partial",
+            "provide_missing_information",
+        ),
+        (
+            {"status": "failed"},
+            "",
+            "failed",
+            "failed",
+            "retry_or_reupload",
+        ),
+    ],
+)
+def test_traffic_accident_confirmation_bypasses_generic_classification(
+    structured_result: dict[str, object],
+    active_node: str,
+    overall_status: str,
+    expected_state: str,
+    expected_action: str,
+) -> None:
+    from app.services.attachment_workflow_service import build_attachment_workflows
+
+    structured_results = {}
+    if structured_result:
+        structured_results["traffic_accident_confirmation_ocr"] = {
+            "attachment_id": "att_accident",
+            **structured_result,
+        }
+
+    [workflow] = build_attachment_workflows(
+        attachments=[
+            {
+                "attachment_id": "att_accident",
+                "purpose": "traffic_accident_confirmation",
+                "status": "ready",
+                "scan_status": "clean",
+            }
+        ],
+        structured_results=structured_results,
+        active_node=active_node,
+        overall_status=overall_status,
+    )
+
+    assert workflow["state"] == expected_state
+    assert workflow["next_action"] == expected_action
+    assert workflow["state"] != "classification_running"
+
+
+@pytest.mark.parametrize(
     ("structured", "overall_status", "expected_state", "expected_action"),
     [
         (

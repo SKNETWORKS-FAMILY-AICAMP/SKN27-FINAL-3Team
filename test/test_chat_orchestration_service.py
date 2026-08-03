@@ -49,6 +49,31 @@ def test_pedestrian_crosswalk_law_question_routes_to_law_search_without_handoff(
     assert response.get("service_scope", {}).get("decision") != "expert_handoff"
 
 
+def test_specific_law_question_overrides_stored_accident_continuation_route() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_topic_switch",
+            "user_text": "횡단보도 앞 일시정지 의무의 도로교통법 근거와 적용 한계를 알려주세요.",
+        },
+        continuation_routing_intent="accident_initial_consultation",
+    )
+
+    assert response["routing_intent"] == "traffic_law_search"
+    assert response["status"] == "queued"
+
+
+def test_ambiguous_short_answer_uses_stored_accident_continuation_route() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_accident_continuation",
+            "user_text": "녹색 신호였습니다.",
+        },
+        continuation_routing_intent="accident_initial_consultation",
+    )
+
+    assert response["routing_intent"] == "accident_initial_consultation"
+
+
 def test_general_consultation_plan_does_not_default_to_law_search() -> None:
     node_codes = plan_node_codes("general_consultation", report_requested=False)
 

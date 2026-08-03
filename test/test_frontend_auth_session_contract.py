@@ -189,9 +189,36 @@ def test_app_auth_session_persists_authenticated_identity_for_reload_and_report_
         "user_id: userId || null",
         "session_id: sessionId || null",
         "access_token: accessToken || null",
-        "writeStoredJson(GOOGLE_PROFILE_STORAGE_KEY, googleProfile || null)",
+        "const profileWriteSucceeded = writeStoredJson(",
+        "GOOGLE_PROFILE_STORAGE_KEY",
+        "googleProfile || null",
     ):
         assert required in persistence
+
+
+def test_google_login_checks_storage_readback_before_exposing_authenticated_state() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    start = shell.index("async function loginAndBindCurrentSession")
+    end = shell.index("async function logoutAndResetSession", start)
+    block = shell[start:end]
+
+    persistence_index = block.index("const persistenceResult = persistAuthSession({")
+    authenticated_state_index = block.index("setActiveAuthToken(nextToken)")
+
+    assert persistence_index < authenticated_state_index
+    assert 'persistenceResult.status === "persisted"' in block
+    assert "persistenceResult.authenticated_tuple_complete" in block
+    assert 'setAuthRecoveryStage("storage_failure")' in block
+
+
+def test_frontend_consumes_only_versioned_public_agent_results() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    case_ready = read_text(ROOT / "app" / "web" / "caseReadyWorkflow.js")
+
+    assert 'contract_version === "public_agent_results.v1"' in shell
+    assert 'contract_version === "public_agent_results.v1"' in case_ready
+    assert "analysisResponse?.structured_results" not in shell
+    assert "analysisResponse?.structured_results" not in case_ready
 
 
 def test_frontend_verifies_stored_auth_before_exposing_authenticated_state() -> None:
