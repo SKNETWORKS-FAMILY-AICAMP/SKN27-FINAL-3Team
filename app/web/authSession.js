@@ -4,6 +4,10 @@ export const GOOGLE_IDENTITY_SCRIPT_SRC = "https://accounts.google.com/gsi/clien
 export const GOOGLE_LOGIN_SCOPE = "openid email profile";
 export const APP_JWT_REFRESH_EARLY_MS = 5 * 60 * 1000;
 
+export function authRestoreBlocksUserActions(status) {
+  return !["ready", "verification_unavailable"].includes(String(status || ""));
+}
+
 export function millisecondsUntilAppJwtRefresh(
   token,
   { nowMs = Date.now(), refreshEarlyMs = APP_JWT_REFRESH_EARLY_MS } = {}

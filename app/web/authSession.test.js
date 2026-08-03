@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as authSession from "./authSession.js";
 
 import {
+  authRestoreBlocksUserActions,
   googleLoginFailureMessage,
   recoverStoredAuthSession,
   resolveGuestBootstrapSessionId,
@@ -13,6 +14,14 @@ function appJwtWithExpiration(expiresAtSeconds) {
   const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "HS256", typ: "JWT" })}.${encode({ exp: expiresAtSeconds })}.signature`;
 }
+
+test("blocks user actions only while stored authentication is actively being checked", () => {
+  assert.equal(authRestoreBlocksUserActions("checking"), true);
+  assert.equal(authRestoreBlocksUserActions("ready"), false);
+  assert.equal(authRestoreBlocksUserActions("verification_unavailable"), false);
+  assert.equal(authRestoreBlocksUserActions(""), true);
+  assert.equal(authRestoreBlocksUserActions("unexpected_future_status"), true);
+});
 
 test("reports a complete authenticated storage read-back without exposing values", () => {
   const storage = new Map();

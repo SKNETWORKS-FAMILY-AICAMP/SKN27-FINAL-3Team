@@ -230,6 +230,8 @@ def test_frontend_verifies_stored_auth_before_exposing_authenticated_state() -> 
     assert 'const [authSessionId, setAuthSessionId] = useState("");' in shell
     assert 'const [activeAuthToken, setActiveAuthToken] = useState("");' in shell
     assert 'authRestoreStatus === "checking"' in shell
+    assert "authRestoreBlocksUserActions" in shell
+    assert "authRestoreIsBlocking" in shell
 
 
 def test_frontend_session_gate_never_bootstraps_guest_for_authenticated_identity() -> None:
@@ -244,9 +246,9 @@ def test_frontend_session_gate_never_bootstraps_guest_for_authenticated_identity
 
     assert 'createChatSession(payload = {}, identity = {})' in api_client
     assert '"chat/sessions/"' in api_client
-    assert 'authRestoreStatus !== "ready"' in bootstrap
+    assert "authRestoreIsBlocking" in bootstrap
     assert "authSessionId || activeAuthToken" in bootstrap
-    assert 'authRestoreStatus !== "ready"' in ensure
+    assert "authRestoreIsBlocking" in ensure
     assert "authSessionId && activeAuthToken" in ensure
     assert "api.createChatSession" in ensure
     assert shell.count("await bootstrapGuestSession(") == 1
@@ -262,7 +264,7 @@ def test_frontend_aborts_message_and_attachment_requests_when_session_gate_is_cl
     submit = shell[submit_start:submit_end]
 
     for block in (registration, submit):
-        assert 'authRestoreStatus !== "ready"' in block
+        assert "authRestoreIsBlocking" in block
         assert "`ses_web_${Date.now()}`" not in block
         assert "guestSessionResult?.sessionId" in block
 
