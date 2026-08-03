@@ -18,6 +18,7 @@ from chatbot.attachment_classification_service import (
 )
 from chatbot.file_scan_service import process_uploaded_file_scans
 from chatbot.models import (
+    AgentWorkItem,
     AuthSession,
     AuthSessionStatus,
     ChatMessage,
@@ -304,7 +305,7 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
         self.assertNotIn("scan_snapshot_sha256", repr(confirmed_attachment))
         self.assertNotIn("execution_id", repr(confirmed_attachment))
 
-    def test_server_report_request_survives_the_ocr_confirmation_turn(self) -> None:
+    def test_report_waits_for_user_facts_then_queues_with_trusted_context(self) -> None:
         session_id, attachment_id = self._upload_clean_photo()
         uploaded_file = UploadedFile.objects.get(attachment_id=attachment_id)
         uploaded_file.purpose = "fine_notice"
@@ -352,59 +353,52 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(response.status_code, 202, response.content)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["status"], "needs_input")
+        self.assertEqual(
+            [item["field"] for item in response.json()["pending_questions"]],
+            ["user_facts"],
+        )
+        session = ChatSession.objects.get(session_id=session_id)
+        followup_state = session.metadata["chat_followup_state"]
+        self.assertEqual(
+            [item["field"] for item in followup_state["pending_questions"]],
+            ["user_facts"],
+        )
+        self.assertTrue(followup_state["ocr_confirmation"]["confirmed"])
+
+        user_facts = "당시 표지판 식별이 어려웠고 안전을 위해 잠시 정차했습니다."
+        queued = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": user_facts,
+                "attachments": [{"attachment_id": attachment_id}],
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(queued.status_code, 202, queued.content)
         node_codes = [
             step["node_code"]
-            for step in response.json()["analysis_plan"]["steps"]
+            for step in queued.json()["analysis_plan"]["steps"]
         ]
         self.assertIn("fine_notice_analysis", node_codes)
         self.assertIn("appeal_decision_flow", node_codes)
         self.assertIn("objection_report_generation", node_codes)
-
-        captured: dict = {}
-
-        def submit_fixture(payload: dict, **_kwargs) -> dict:
-            captured["payload"] = payload
-            return {
-                "contract_version": "chat_message_accepted.v2",
-                "session_id": session_id,
-                "message_id": "msg_report_request_after_ocr_confirmation",
-                "routing_intent": "fine_notice_analysis",
-                "status": "needs_input",
-                "assistant_message": {
-                    "role": "assistant",
-                    "answer": "확인된 고지서 정보로 후속 요청을 이어갑니다.",
-                },
-                "pending_questions": [],
-                "consultation_state": {},
-                "fine_notice_intake": {},
-            }
-
-        with patch("chatbot.views.submit_message", side_effect=submit_fixture):
-            followup = self.client.post(
-                "/api/chat/messages/",
-                data={
-                    "session_id": session_id,
-                    "user_text": "같은 고지서로 이의신청서 초안과 리포트를 생성해 주세요.",
-                    "attachments": [{"attachment_id": attachment_id}],
-                },
-                content_type="application/json",
-            )
-
-        self.assertEqual(followup.status_code, 200, followup.content)
+        work_item = AgentWorkItem.objects.get(
+            work_item_id=queued.json()["work_item"]["work_item_id"]
+        )
         self.assertEqual(
-            captured["payload"]["ocr_confirmation"],
+            work_item.payload["server_execution_context"],
             {
-                "confirmed": True,
-                "fields": {
-                    "fine_type": "과태료",
-                    "notice_stage": "사전통지",
-                    "law_code": "도로교통법 제32조 제1호",
-                    "violation_text": "소화전 5m 이내 정차 위반",
-                    "opinion_deadline": "2026-08-10",
-                    "issuing_authority": "경찰서장",
-                },
+                "contract_version": "server_execution_context.v1",
+                "context": {"user_facts": user_facts},
             },
+        )
+        self.assertNotIn(
+            "user_facts",
+            work_item.payload["execution_payload"].get("context", {}),
         )
 
     def test_stale_confirmation_fails_closed_before_planning(self) -> None:

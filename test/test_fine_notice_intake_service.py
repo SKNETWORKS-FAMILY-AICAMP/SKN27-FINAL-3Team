@@ -103,6 +103,37 @@ def test_confirmed_ocr_fields_fill_only_matching_fine_notice_slots() -> None:
     assert "ocr_text" not in repr(intake)
 
 
+def test_confirmed_canonical_ocr_fields_fill_intake_alias_slots() -> None:
+    intake = reduce_fine_notice_intake(
+        {
+            "message_id": "msg_canonical_ocr",
+            "attachments": [{"attachment_id": "att_notice"}],
+            "ocr_confirmation": {
+                "confirmed": True,
+                "fields": {
+                    "fine_type": "과태료",
+                    "notice_stage": "사전통지",
+                    "issuing_authority": "경찰서장",
+                    "opinion_deadline": "2026-08-10",
+                },
+            },
+        }
+    )
+
+    assert intake["missing_fields"] == []
+    assert intake["next_questions"] == []
+    assert intake["slots"]["document_disposition_type"]["value"] == "과태료 사전통지"
+    assert intake["slots"]["response_deadline"]["value"] == "2026-08-10"
+    assert {
+        intake["slots"][field]["source_type"]
+        for field in (
+            "document_disposition_type",
+            "issuing_authority",
+            "response_deadline",
+        )
+    } == {"user_confirmed_ocr"}
+
+
 def test_registered_attachment_confirms_only_attachment_availability() -> None:
     intake = reduce_fine_notice_intake(
         {

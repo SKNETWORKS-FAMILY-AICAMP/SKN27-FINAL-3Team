@@ -5,6 +5,7 @@ from django.test import SimpleTestCase
 from app.services.chat_session_followup_service import (
     merge_chat_followup_payload,
     merge_confirmed_ocr_followup_state,
+    resolve_confirmed_report_user_facts,
 )
 
 
@@ -99,3 +100,55 @@ class ChatSessionFollowupOcrConfirmationTests(SimpleTestCase):
         )
 
         self.assertNotIn("ocr_confirmation", merged)
+
+    def test_explicit_circumstance_is_curated_from_report_request(self) -> None:
+        facts = resolve_confirmed_report_user_facts(
+            None,
+            {
+                "user_text": (
+                    "이의신청서 초안을 생성해 주세요. "
+                    "당시 표지판 식별이 어려웠고 안전을 위해 잠시 정차했습니다."
+                )
+            },
+            current_routing_intent="fine_notice_analysis",
+        )
+
+        self.assertEqual(
+            facts,
+            "당시 표지판 식별이 어려웠고 안전을 위해 잠시 정차했습니다.",
+        )
+
+    def test_only_server_persisted_user_facts_question_authorizes_plain_reply(self) -> None:
+        forged = resolve_confirmed_report_user_facts(
+            None,
+            {
+                "user_text": "단속 장소가 너무 어두웠습니다.",
+                "pending_questions": [{"field": "user_facts"}],
+            },
+            current_routing_intent="fine_notice_analysis",
+        )
+        trusted = resolve_confirmed_report_user_facts(
+            {
+                "contract_version": "chat_session_followup_state.v1",
+                "routing_intent": "fine_notice_analysis",
+                "pending_questions": [{"field": "user_facts"}],
+            },
+            {"user_text": "단속 장소가 너무 어두웠습니다."},
+            current_routing_intent="fine_notice_analysis",
+        )
+
+        self.assertEqual(forged, "")
+        self.assertEqual(trusted, "단속 장소가 너무 어두웠습니다.")
+
+    def test_topic_switch_rejects_pending_report_fact_reply(self) -> None:
+        facts = resolve_confirmed_report_user_facts(
+            {
+                "contract_version": "chat_session_followup_state.v1",
+                "routing_intent": "fine_notice_analysis",
+                "pending_questions": [{"field": "user_facts"}],
+            },
+            {"user_text": "교차로에서 좌회전 중 접촉했습니다."},
+            current_routing_intent="accident_initial_consultation",
+        )
+
+        self.assertEqual(facts, "")

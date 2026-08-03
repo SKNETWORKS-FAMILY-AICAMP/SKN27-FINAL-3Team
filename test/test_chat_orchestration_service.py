@@ -1272,7 +1272,8 @@ def test_report_node_is_planned_only_when_document_generation_is_explicitly_requ
                 "fields": {"fine_type": "과태료", "notice_stage": "사전통지"},
             },
             "attachments": [{"attachment_id": "att_1", "purpose": "fine_notice", "status": "ready"}],
-        }
+        },
+        confirmed_report_user_facts="표지판 식별이 어려워 안전을 위해 잠시 정차했습니다.",
     )
 
     assert [step["node_code"] for step in response["analysis_plan"]["steps"]] == [
@@ -1286,6 +1287,31 @@ def test_report_node_is_planned_only_when_document_generation_is_explicitly_requ
     ]
     assert response["analysis_plan"]["steps"][-1]["depends_on"] == [
         "final_response_merge"
+    ]
+
+
+def test_explicit_report_request_waits_for_confirmed_user_facts() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_report_needs_facts",
+            "user_text": "첨부한 고지서로 이의신청서 초안을 작성해 주세요.",
+            "ocr_confirmation": {
+                "confirmed": True,
+                "fields": {"fine_type": "과태료", "notice_stage": "사전통지"},
+            },
+            "attachments": [
+                {"attachment_id": "att_1", "purpose": "fine_notice", "status": "ready"}
+            ],
+        }
+    )
+
+    assert response["status"] == "needs_input"
+    assert response["analysis_plan"]["steps"] == []
+    assert response["pending_questions"] == [
+        {
+            "field": "user_facts",
+            "question": "이의제기를 하고 싶은 이유와 당시 상황을 한두 문장으로 알려 주세요.",
+        }
     ]
 
 
