@@ -1,6 +1,17 @@
 const MISSING_ITEM_FALLBACK = "추가 확인이 필요한 항목";
 const MISSING_ITEM_TEXT_KEYS = ["question", "label", "description", "title"];
 
+export function hasMeaningfulReportingPayload(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const hasSummary = typeof value.summary === "string" && Boolean(value.summary.trim());
+  const hasSections = Array.isArray(value.sections) && value.sections.length > 0;
+  const hasDocumentCards =
+    Array.isArray(value.document_cards) && value.document_cards.length > 0;
+  return hasSummary || hasSections || hasDocumentCards;
+}
+
 function missingItemText(value, visited = new Set()) {
   if (typeof value === "string") {
     return value.trim();
@@ -55,7 +66,10 @@ export function deriveReportWorkbenchState({
   savedReportDetailLoaded = true,
   supervisorState = null,
 } = {}) {
-  if (hasSavedReports && !savedReportDetailLoaded && !reportingPayload) {
+  const hasMeaningfulPayload = hasMeaningfulReportingPayload(reportingPayload);
+  const effectiveHasReport = isPersistedReport || hasMeaningfulPayload;
+
+  if (hasSavedReports && !savedReportDetailLoaded && !hasMeaningfulPayload) {
     return {
       kind: "loading_saved_report",
       stageLabel: "저장 리포트 불러오는 중",
@@ -66,7 +80,7 @@ export function deriveReportWorkbenchState({
     };
   }
 
-  if (reportingPayload && !isPersistedReport) {
+  if (hasMeaningfulPayload && !isPersistedReport) {
     return {
       kind: "temporary_preview",
       stageLabel: "임시 리포트 미리보기",
@@ -79,7 +93,7 @@ export function deriveReportWorkbenchState({
     };
   }
 
-  if (hasReport || hasSavedReports) {
+  if (effectiveHasReport || hasSavedReports) {
     return {
       kind: "available",
       stageLabel: "리포트 확인 가능",

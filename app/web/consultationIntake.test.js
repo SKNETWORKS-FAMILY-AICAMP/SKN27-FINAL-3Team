@@ -25,6 +25,80 @@ test("keeps structured context in the request but shows only the user's free tex
   );
 });
 
+test("uses plain display text for a manual pending-question answer", () => {
+  assert.equal(typeof consultationIntakeModule.selectConsultationTransportText, "function");
+  const pair = consultationIntakeModule.buildConsultationMessagePair({
+    freeText: "2차로 회전교차로",
+    intake: { consultationType: "fault_ratio", accidentType: "intersection" },
+  });
+
+  const transportText = consultationIntakeModule.selectConsultationTransportText({
+    ...pair,
+    hasPendingQuestion: true,
+    submissionKind: "manual",
+  });
+
+  assert.equal(transportText, "2차로 회전교차로");
+  assert.doesNotMatch(transportText, /\[상담 유형\]|\[사고 유형\]|\[자유 입력\]/);
+});
+
+test("keeps structured transport for an initial manual request", () => {
+  const pair = consultationIntakeModule.buildConsultationMessagePair({
+    freeText: "사고 상황을 확인해 주세요.",
+    intake: { consultationType: "fault_ratio", accidentType: "intersection" },
+  });
+
+  assert.equal(
+    consultationIntakeModule.selectConsultationTransportText({
+      ...pair,
+      hasPendingQuestion: false,
+      submissionKind: "manual",
+    }),
+    pair.requestText,
+  );
+});
+
+test("keeps structured transport for an automatic service message", () => {
+  const pair = consultationIntakeModule.buildConsultationMessagePair({
+    freeText: "첨부한 자료를 확인해 주세요.",
+    intake: { consultationType: "fault_ratio", accidentType: "intersection" },
+  });
+
+  assert.equal(
+    consultationIntakeModule.selectConsultationTransportText({
+      ...pair,
+      hasPendingQuestion: true,
+      submissionKind: "service",
+    }),
+    pair.requestText,
+  );
+});
+
+test("detects pending questions from live and restored response shapes", () => {
+  assert.equal(typeof consultationIntakeModule.hasPendingConsultationQuestion, "function");
+  assert.equal(
+    consultationIntakeModule.hasPendingConsultationQuestion({
+      pendingQuestions: [{ field: "road_layout" }],
+      supervisorQuestions: [],
+    }),
+    true,
+  );
+  assert.equal(
+    consultationIntakeModule.hasPendingConsultationQuestion({
+      pendingQuestions: [],
+      supervisorQuestions: [{ field: "vehicle_actions" }],
+    }),
+    true,
+  );
+  assert.equal(
+    consultationIntakeModule.hasPendingConsultationQuestion({
+      pendingQuestions: [],
+      supervisorQuestions: [],
+    }),
+    false,
+  );
+});
+
 test("fine notice request label does not create a fine versus penalty conflict", () => {
   const message = buildStructuredConsultationMessage({
     freeText: "과태료입니다.",

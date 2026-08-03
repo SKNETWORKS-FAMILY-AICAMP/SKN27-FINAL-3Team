@@ -169,6 +169,29 @@ export function buildConsultationMessagePair({ freeText = "", intake } = {}) {
   return { displayText: displayText || requestText, requestText };
 }
 
+export function hasPendingConsultationQuestion({
+  pendingQuestions = [],
+  supervisorQuestions = [],
+} = {}) {
+  return [pendingQuestions, supervisorQuestions].some(
+    (questions) => Array.isArray(questions) && questions.length > 0,
+  );
+}
+
+export function selectConsultationTransportText({
+  displayText = "",
+  requestText = "",
+  hasPendingQuestion = false,
+  submissionKind = "manual",
+} = {}) {
+  const display = normalizeText(displayText);
+  const request = normalizeText(requestText);
+  if (submissionKind === "manual" && hasPendingQuestion && display) {
+    return display;
+  }
+  return request || display;
+}
+
 export function buildConsultationRequestContext({ intake } = {}) {
   const normalizedIntake = normalizeConsultationIntake(intake);
   const context = {

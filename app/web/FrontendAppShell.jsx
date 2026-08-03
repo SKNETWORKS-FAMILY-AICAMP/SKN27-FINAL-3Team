@@ -37,6 +37,8 @@ import {
   buildConsultationMessagePair,
   buildConsultationRequestContext,
   createEmptyConsultationIntake,
+  hasPendingConsultationQuestion,
+  selectConsultationTransportText,
 } from "./consultationIntake.js";
 import { buildTrafficAccidentOcrUi } from "./trafficAccidentOcrPresentation.js";
 import {
@@ -44,6 +46,7 @@ import {
   shouldPromptGuestConversationSave,
 } from "./guestConversationPolicy.js";
 import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
+import { hasMeaningfulReportingPayload } from "./reportWorkbenchState.js";
 import { pollWorkerResult } from "./workerPolling.js";
 import {
   normalizeChatResponsePresentation,
@@ -53,6 +56,7 @@ import { SafeMarkdown } from "./SafeMarkdown.js";
 import { composerKeyAction } from "./composerInteraction.js";
 import {
   buildCaseReadyViewModel,
+  caseReadyWorkflowErrorMessage,
   pollCaseReadyReport,
   runCaseReadyWorkflow,
 } from "./caseReadyWorkflow.js";
@@ -946,6 +950,7 @@ export default function FrontendAppShell({
             startAnalysis: ({ attachment: readyAttachment, userText }) => (
               submitServiceMessage({
                 userText,
+                submissionKind: "service",
                 requestContext: {
                   attachments: upsertAttachment(registeredAttachments, readyAttachment),
                   authSessionId: nextIdentity.authSessionId || authSessionId,
@@ -1361,16 +1366,14 @@ export default function FrontendAppShell({
       setReportActionStatus("사건 분석 리포트가 저장되었습니다.");
       setStatusMessage("사건 분석과 리포트 저장이 완료되었습니다.");
       setActiveRoute("reporting");
-    } catch {
+    } catch (error) {
+      const publicMessage = caseReadyWorkflowErrorMessage(error);
       setCaseReadyProgress({
         step: "failed",
-        error:
-          "사건 분석 리포트를 완료하지 못했습니다. 현재 단계에서 다시 시도해 주세요.",
+        error: publicMessage,
       });
       setPendingAuthAction(null);
-      setStatusMessage(
-        "사건 분석 리포트를 완료하지 못했습니다. 입력과 자료 상태를 확인해 주세요.",
-      );
+      setStatusMessage(publicMessage);
     }
   }
 
@@ -1392,6 +1395,7 @@ export default function FrontendAppShell({
     void submitServiceMessage({
       userText: followUpMessage,
       ocrConfirmation: confirmation,
+      submissionKind: "service",
     });
   }
 
@@ -1409,6 +1413,7 @@ export default function FrontendAppShell({
         confirmed: true,
         attachment_id: attachmentId,
       },
+      submissionKind: "service",
     });
   }
 
@@ -1417,6 +1422,7 @@ export default function FrontendAppShell({
     ocrConfirmation,
     attachmentClassificationConfirmation,
     requestContext = {},
+    submissionKind = "manual",
   } = {}) {
     if (authRestoreStatus !== "ready") {
       setStatusMessage("로그인 상태 확인이 끝난 뒤 상담 내용을 보낼 수 있습니다.");
@@ -1430,8 +1436,18 @@ export default function FrontendAppShell({
     const consultationRequestContext = buildConsultationRequestContext({
       intake: consultationIntake,
     });
+    const hasPendingQuestion = hasPendingConsultationQuestion({
+      pendingQuestions: responsePresentation?.pendingQuestions,
+      supervisorQuestions: supervisorState?.next_questions,
+    });
+    const transportText = selectConsultationTransportText({
+      displayText,
+      requestText: composedQuestion,
+      hasPendingQuestion,
+      submissionKind,
+    });
     const confirmationForRequest = ocrConfirmation || pendingOcrConfirmation;
-    if (!composedQuestion) {
+    if (!transportText) {
       setStatusMessage("상담 내용을 입력하거나 구조화 입력 항목을 작성해 주세요.");
       return;
     }
@@ -1490,7 +1506,7 @@ export default function FrontendAppShell({
     }));
     const requestConversationHistory = [
       ...conversationHistory.slice(0, -1),
-      { role: "user", content: composedQuestion },
+      { role: "user", content: transportText },
     ];
     const activeAuthContext = buildAuthContext({
       authState: effectiveAuthSessionId ? "authenticated" : activeGuestId ? "guest" : "anonymous",
@@ -1520,7 +1536,7 @@ export default function FrontendAppShell({
         session_id: activeSession,
         auth_context: activeAuthContext,
         conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
-        user_text: composedQuestion,
+        user_text: transportText,
         consultation_type: consultationRequestContext.consultation_type || undefined,
         facts: consultationRequestContext.facts,
         fine_notice_slots: consultationRequestContext.fine_notice_slots,
@@ -5153,7 +5169,11 @@ function ReportingScreen({
   const [isReportListCollapsed, setIsReportListCollapsed] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
-  const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
+  const liveReportingPayload = hasMeaningfulReportingPayload(reportingPayload)
+    ? reportingPayload
+    : null;
+  const activeReportingPayload =
+    currentReport?.content?.reporting_payload || liveReportingPayload;
   const isPersistedReport = Boolean(currentReport?.report_id && currentReport?.content?.reporting_payload);
   const savedReportDetailLoaded = !hasSavedReports || isPersistedReport;
   const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
@@ -5172,7 +5192,7 @@ function ReportingScreen({
     appealBlocked: appealDownloadBlocked,
     reportId: currentReport?.report_id || activeReportingPayload?.report_id || null,
   };
-  const hasReport = Boolean(activeReportingPayload);
+  const hasReport = isPersistedReport || hasMeaningfulReportingPayload(activeReportingPayload);
   const workbenchState = deriveReportWorkbenchState({
     hasReport,
     hasSavedReports,
@@ -5819,7 +5839,7 @@ function caseStatusTone(value) {
 }
 
 function isReportingPayloadReady(reportingPayload, supervisorState) {
-  if (!reportingPayload) {
+  if (!hasMeaningfulReportingPayload(reportingPayload)) {
     return false;
   }
   const pendingQuestions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
