@@ -111,6 +111,12 @@ After loading Terraform outputs and before writing the SSM SecureString,
 `Deploy-Pilot.ps1` will inspect `VISION_RUNTIME_PROVIDER` from the operator's
 runtime template.
 
+Provider-specific transformation and validation will live in the side-effect-
+free `deploy/aws-pilot/Vision-Runtime.ps1` helper. `Deploy-Pilot.ps1` will
+resolve Terraform outputs and pass their literal values to that helper. This
+keeps AWS calls and SSM mutation outside the transformation boundary so tests
+can execute the real PowerShell behavior with controlled inputs.
+
 For `aws_queue`, the script will:
 
 1. require non-empty queue URL, result bucket, worker instance ID, and Vision
@@ -192,8 +198,11 @@ The resulting production flow is:
 
 - `infra/terraform-pilot/outputs.tf`: expose the explicit Vision result bucket
   output.
+- `deploy/aws-pilot/Vision-Runtime.ps1`: transform and validate runtime env text
+  without AWS or filesystem side effects.
 - `deploy/aws-pilot/Deploy-Pilot.ps1`: resolve and validate provider-specific
-  runtime values before the SSM update.
+  Terraform outputs, invoke the pure runtime helper, and update SSM only after
+  the helper succeeds.
 - `deploy/aws-pilot/runtime.env.example`: document the AWS selection and retain
   empty non-secret placeholders.
 - `.env.production.example`: expose the AWS queue provider variables for
@@ -204,7 +213,7 @@ The resulting production flow is:
 - `test/test_aws_pilot_infrastructure.py`: assert the Terraform-to-runtime
   deployment contract.
 - `test/test_deployment_readiness_artifacts.py`: assert complete secret-free AWS
-  production documentation.
+  production environment templates.
 - Existing AWS queue, worker, adapter, Supervisor, and attachment tests remain
   the behavioral regression suite.
 
@@ -212,12 +221,13 @@ The resulting production flow is:
 
 Implementation will follow test-first cycles.
 
-1. Add a failing deployment contract test requiring the result bucket output
-   and `Deploy-Pilot.ps1` consumption of every AWS Vision output.
-2. Add a failing deployment contract test requiring automatic queue, bucket,
-   and prefix generation plus fail-closed checks.
-3. Add a failing readiness-artifact test requiring AWS provider variables and
-   activation documentation in both production examples and the runbook.
+1. Add failing behavior tests that execute the PowerShell runtime helper and
+   require Terraform-owned queue, bucket, and prefix generation.
+2. Add failing behavior tests for malformed FIFO URLs, absent worker outputs,
+   non-positive polling values, and unchanged non-AWS provider content.
+3. Add a failing readiness-artifact test requiring AWS provider variables in
+   both machine-consumed production examples; review the human-facing runbook
+   directly instead of pinning prose tokens in tests.
 4. Implement the minimal Terraform, PowerShell, example, and documentation
    changes to make each test pass.
 5. Run the AWS Vision queue client, worker, adapter, infrastructure, Supervisor

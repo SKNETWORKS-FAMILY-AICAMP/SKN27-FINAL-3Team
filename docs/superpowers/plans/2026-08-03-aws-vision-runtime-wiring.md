@@ -24,67 +24,192 @@
 ## File Map
 
 - `infra/terraform-pilot/outputs.tf` — publishes the result bucket name used by the optional AWS Vision worker.
+- `deploy/aws-pilot/Vision-Runtime.ps1` — performs provider-specific runtime transformation and validation without AWS or filesystem side effects.
 - `deploy/aws-pilot/Deploy-Pilot.ps1` — validates provider-specific AWS outputs and injects generated runtime values before the SSM update.
 - `deploy/aws-pilot/runtime.env.example` — documents the operator-controlled provider switch and generated AWS values.
 - `.env.production.example` — declares the complete AWS queue provider contract without real identifiers.
 - `docs/ops/vision-media-adapter-runbook.md` — explains AWS activation, observation, failure recovery, and rollback.
-- `test/test_aws_pilot_infrastructure.py` — pins the Terraform-to-deployment wiring and fail-closed PowerShell contract.
-- `test/test_deployment_readiness_artifacts.py` — pins production environment and runbook completeness without secrets.
+- `test/test_aws_pilot_infrastructure.py` — executes the real PowerShell runtime transformer with controlled inputs and pins the Terraform-to-deployment assembly contract.
+- `test/test_deployment_readiness_artifacts.py` — pins machine-consumed production environment templates without secrets.
 
 ---
 
-### Task 1: Publish and consume the AWS Vision result bucket
+### Task 1: Build a real, side-effect-free AWS runtime transformer
 
 **Files:**
-- Modify: `test/test_aws_pilot_infrastructure.py:162-197`
+- Modify: `test/test_aws_pilot_infrastructure.py:1-22, 162-197`
+- Create: `deploy/aws-pilot/Vision-Runtime.ps1`
 - Modify: `infra/terraform-pilot/outputs.tf:104-127`
-- Modify: `deploy/aws-pilot/Deploy-Pilot.ps1:73-107, 327-418`
+- Modify: `deploy/aws-pilot/Deploy-Pilot.ps1:29-107, 327-418`
 
 **Interfaces:**
-- Consumes: Terraform outputs `vision_worker_queue_url`, `vision_worker_instance_id`, and `vision_worker_ecr_repository_url`; runtime text accessed by `Get-EnvValue` and `Set-EnvValue`.
-- Produces: Terraform output `vision_worker_result_bucket_name`; PowerShell function `Set-AwsVisionRuntimeValues([string]$Content, [object]$Outputs) -> string`.
+- Consumes: runtime env text plus literal provider, queue URL, result bucket, worker instance ID, and worker ECR repository URL values.
+- Produces: Terraform output `vision_worker_result_bucket_name`; PowerShell function `Set-AwsVisionRuntimeValues([string]$Content, [string]$Provider, [string]$QueueUrl, [string]$ResultBucket, [string]$WorkerInstanceId, [string]$WorkerRepositoryUrl) -> string`.
 
-- [ ] **Step 1: Write the failing Terraform-to-runtime contract test**
+- [ ] **Step 1: Add a test utility that executes the real PowerShell helper**
 
-Add this test to `test/test_aws_pilot_infrastructure.py`:
+Add `base64` and `subprocess` imports to `test/test_aws_pilot_infrastructure.py`, then add:
 
 ```python
-def test_deploy_generates_aws_vision_runtime_from_terraform_outputs() -> None:
+def _run_vision_runtime(
+    content: str,
+    *,
+    provider: str,
+    queue_url: str = "",
+    result_bucket: str = "",
+    worker_instance_id: str = "",
+    worker_repository_url: str = "",
+) -> subprocess.CompletedProcess[str]:
+    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    helper = (DEPLOY_DIR / "Vision-Runtime.ps1").as_posix().replace("'", "''")
+    command = f"""
+. '{helper}'
+$content = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}'))
+$result = Set-AwsVisionRuntimeValues `
+  -Content $content `
+  -Provider '{provider}' `
+  -QueueUrl '{queue_url}' `
+  -ResultBucket '{result_bucket}' `
+  -WorkerInstanceId '{worker_instance_id}' `
+  -WorkerRepositoryUrl '{worker_repository_url}'
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($result))
+"""
+    return subprocess.run(
+        ["pwsh", "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _decoded_vision_runtime(completed: subprocess.CompletedProcess[str]) -> str:
+    assert completed.returncode == 0, completed.stderr
+    return base64.b64decode(completed.stdout.strip()).decode("utf-8")
+```
+
+The production change that makes these helpers useful is the new pure PowerShell transformation boundary; the helpers themselves contain no expected-value logic.
+
+- [ ] **Step 2: Write the failing successful-transformation behavior test**
+
+Add:
+
+```python
+def test_aws_vision_runtime_uses_terraform_owned_queue_and_bucket() -> None:
+    content = "\n".join(
+        (
+            "VISION_RUNTIME_PROVIDER=aws_queue",
+            "AWS_VISION_QUEUE_URL=https://caller.invalid/stale.fifo",
+            "AWS_VISION_RESULT_BUCKET=stale-bucket",
+            "AWS_VISION_RESULT_PREFIX=stale-prefix",
+            "AWS_VISION_TIMEOUT_SECONDS=900",
+            "AWS_VISION_POLL_INTERVAL_SECONDS=2",
+            "",
+        )
+    )
+
+    completed = _run_vision_runtime(
+        content,
+        provider="aws_queue",
+        queue_url="https://sqs.ap-northeast-2.amazonaws.com/123456789012/skn27-vision.fifo",
+        result_bucket="skn27-clean-results",
+        worker_instance_id="i-0123456789abcdef0",
+        worker_repository_url="123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/skn27/vision-worker",
+    )
+
+    result = _decoded_vision_runtime(completed)
+    assert "AWS_VISION_QUEUE_URL=https://sqs.ap-northeast-2.amazonaws.com/123456789012/skn27-vision.fifo" in result
+    assert "AWS_VISION_RESULT_BUCKET=skn27-clean-results" in result
+    assert "AWS_VISION_RESULT_PREFIX=vision/aws-queue/v1" in result
+    assert "caller.invalid" not in result
+    assert "stale-bucket" not in result
+```
+
+- [ ] **Step 3: Run the behavior test and verify RED**
+
+Run:
+
+```powershell
+python -m pytest test/test_aws_pilot_infrastructure.py::test_aws_vision_runtime_uses_terraform_owned_queue_and_bucket -q
+```
+
+Expected: FAIL because `deploy/aws-pilot/Vision-Runtime.ps1` does not exist.
+
+- [ ] **Step 4: Implement the minimal pure transformer**
+
+Create `deploy/aws-pilot/Vision-Runtime.ps1` with `Get-EnvValue` and `Set-EnvValue` moved unchanged from `Deploy-Pilot.ps1`, plus:
+
+```powershell
+Set-StrictMode -Version Latest
+
+function Set-AwsVisionRuntimeValues {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Content,
+        [Parameter(Mandatory = $true)]
+        [string]$Provider,
+        [string]$QueueUrl = "",
+        [string]$ResultBucket = "",
+        [string]$WorkerInstanceId = "",
+        [string]$WorkerRepositoryUrl = ""
+    )
+
+    if ($Provider -cne "aws_queue") {
+        return $Content
+    }
+
+    $Content = Set-EnvValue $Content "AWS_VISION_QUEUE_URL" $QueueUrl
+    $Content = Set-EnvValue $Content "AWS_VISION_RESULT_BUCKET" $ResultBucket
+    $Content = Set-EnvValue $Content "AWS_VISION_RESULT_PREFIX" "vision/aws-queue/v1"
+    return $Content
+}
+```
+
+- [ ] **Step 5: Run the behavior test and verify GREEN**
+
+Run the Step 3 command again.
+
+Expected: PASS.
+
+- [ ] **Step 6: Write the failing deployment assembly test**
+
+Add:
+
+```python
+def test_deploy_resolves_aws_vision_terraform_outputs_before_ssm() -> None:
     outputs = (TERRAFORM_DIR / "outputs.tf").read_text(encoding="utf-8")
     deploy = _read_deploy("Deploy-Pilot.ps1")
 
     assert 'output "vision_worker_result_bucket_name"' in outputs
     assert "var.vision_worker_enabled ? aws_s3_bucket.clean.id : null" in outputs
-    assert "function Set-AwsVisionRuntimeValues" in deploy
+    assert '. (Join-Path $PSScriptRoot "Vision-Runtime.ps1")' in deploy
     for output_name in (
         "vision_worker_queue_url",
         "vision_worker_result_bucket_name",
         "vision_worker_instance_id",
         "vision_worker_ecr_repository_url",
     ):
-        assert f'Get-TerraformValue $Outputs "{output_name}"' in deploy
-    for runtime_name in (
-        "AWS_VISION_QUEUE_URL",
-        "AWS_VISION_RESULT_BUCKET",
-        "AWS_VISION_RESULT_PREFIX",
-    ):
-        assert f"Set-EnvValue $Content \"{runtime_name}\"" in deploy
-    assert "$runtimeEnv = Set-AwsVisionRuntimeValues $runtimeEnv $outputs" in deploy
+        assert f'Get-TerraformValue $outputs "{output_name}"' in deploy
+    assert "$runtimeEnv = Set-AwsVisionRuntimeValues" in deploy
+    assert deploy.index("$runtimeEnv = Set-AwsVisionRuntimeValues") < deploy.index("aws ssm put-parameter")
 ```
 
-- [ ] **Step 2: Run the new test and verify RED**
+This narrow static assembly check is retained because Terraform outputs and the top-level deployment script cannot be executed without live state; transformation behavior remains covered by the real helper execution.
+
+- [ ] **Step 7: Run the assembly test and verify RED**
 
 Run:
 
 ```powershell
-python -m pytest test/test_aws_pilot_infrastructure.py::test_deploy_generates_aws_vision_runtime_from_terraform_outputs -q
+python -m pytest test/test_aws_pilot_infrastructure.py::test_deploy_resolves_aws_vision_terraform_outputs_before_ssm -q
 ```
 
-Expected: FAIL because `vision_worker_result_bucket_name` and `Set-AwsVisionRuntimeValues` do not exist.
+Expected: FAIL because the output and deployment assembly do not exist.
 
-- [ ] **Step 3: Add the conditional Terraform result bucket output**
+- [ ] **Step 8: Wire Terraform outputs into the pure transformer**
 
-Add this block after `vision_worker_queue_url` in `infra/terraform-pilot/outputs.tf`:
+Add this output after `vision_worker_queue_url` in `infra/terraform-pilot/outputs.tf`:
 
 ```hcl
 output "vision_worker_result_bucket_name" {
@@ -93,59 +218,40 @@ output "vision_worker_result_bucket_name" {
 }
 ```
 
-- [ ] **Step 4: Add minimal AWS runtime generation to the deployment script**
-
-Add this function after `Set-EnvValue` in `deploy/aws-pilot/Deploy-Pilot.ps1`:
+In `Deploy-Pilot.ps1`, dot-source `Vision-Runtime.ps1` after setting strict mode and preferences, remove the now-duplicated `Get-EnvValue` and `Set-EnvValue` definitions, and add after the `$generatedValues` loop:
 
 ```powershell
-function Set-AwsVisionRuntimeValues([string]$Content, [object]$Outputs) {
-    $provider = Get-EnvValue $Content "VISION_RUNTIME_PROVIDER"
-    if ($provider -cne "aws_queue") {
-        return $Content
-    }
-
-    $queueUrl = Get-TerraformValue $Outputs "vision_worker_queue_url"
-    $resultBucket = Get-TerraformValue $Outputs "vision_worker_result_bucket_name"
-    [void](Get-TerraformValue $Outputs "vision_worker_instance_id")
-    [void](Get-TerraformValue $Outputs "vision_worker_ecr_repository_url")
-
-    $Content = Set-EnvValue $Content "AWS_VISION_QUEUE_URL" $queueUrl
-    $Content = Set-EnvValue $Content "AWS_VISION_RESULT_BUCKET" $resultBucket
-    $Content = Set-EnvValue $Content "AWS_VISION_RESULT_PREFIX" "vision/aws-queue/v1"
-    return $Content
+$visionProvider = Get-EnvValue $runtimeEnv "VISION_RUNTIME_PROVIDER"
+$visionRuntimeParameters = @{
+    Content  = $runtimeEnv
+    Provider = $visionProvider
 }
+if ($visionProvider -ceq "aws_queue") {
+    $visionRuntimeParameters.QueueUrl = Get-TerraformValue $outputs "vision_worker_queue_url"
+    $visionRuntimeParameters.ResultBucket = Get-TerraformValue $outputs "vision_worker_result_bucket_name"
+    $visionRuntimeParameters.WorkerInstanceId = Get-TerraformValue $outputs "vision_worker_instance_id"
+    $visionRuntimeParameters.WorkerRepositoryUrl = Get-TerraformValue $outputs "vision_worker_ecr_repository_url"
+}
+$runtimeEnv = Set-AwsVisionRuntimeValues @visionRuntimeParameters
 ```
 
-After the existing `$generatedValues` loop, add:
-
-```powershell
-$runtimeEnv = Set-AwsVisionRuntimeValues $runtimeEnv $outputs
-```
-
-- [ ] **Step 5: Run the focused contract test and verify GREEN**
+- [ ] **Step 9: Run both Task 1 tests and verify GREEN**
 
 Run:
 
 ```powershell
-python -m pytest test/test_aws_pilot_infrastructure.py::test_deploy_generates_aws_vision_runtime_from_terraform_outputs -q
+python -m pytest `
+  test/test_aws_pilot_infrastructure.py::test_aws_vision_runtime_uses_terraform_owned_queue_and_bucket `
+  test/test_aws_pilot_infrastructure.py::test_deploy_resolves_aws_vision_terraform_outputs_before_ssm `
+  -q
 ```
 
-Expected: PASS.
+Expected: 2 passed.
 
-- [ ] **Step 6: Run the complete AWS Pilot infrastructure test file**
-
-Run:
+- [ ] **Step 10: Commit Task 1**
 
 ```powershell
-python -m pytest test/test_aws_pilot_infrastructure.py -q
-```
-
-Expected: PASS with no warnings or failures.
-
-- [ ] **Step 7: Commit Task 1**
-
-```powershell
-git add test/test_aws_pilot_infrastructure.py infra/terraform-pilot/outputs.tf deploy/aws-pilot/Deploy-Pilot.ps1
+git add test/test_aws_pilot_infrastructure.py deploy/aws-pilot/Vision-Runtime.ps1 infra/terraform-pilot/outputs.tf deploy/aws-pilot/Deploy-Pilot.ps1
 git commit -m "feat: wire AWS vision runtime outputs"
 ```
 
@@ -155,63 +261,135 @@ git commit -m "feat: wire AWS vision runtime outputs"
 
 **Files:**
 - Modify: `test/test_aws_pilot_infrastructure.py`
-- Modify: `deploy/aws-pilot/Deploy-Pilot.ps1`
+- Modify: `deploy/aws-pilot/Vision-Runtime.ps1`
 
 **Interfaces:**
-- Consumes: `Set-AwsVisionRuntimeValues([string]$Content, [object]$Outputs) -> string` from Task 1.
-- Produces: validation of HTTPS FIFO queue shape, non-empty Terraform-owned result bucket, and positive AWS timeout and polling interval values before returning generated runtime text.
+- Consumes: `Set-AwsVisionRuntimeValues(...) -> string` from Task 1.
+- Produces: observable non-zero PowerShell results for malformed HTTPS FIFO URLs, missing worker outputs, and non-positive AWS timeout or polling values; byte-for-byte pass-through for non-AWS providers.
 
-- [ ] **Step 1: Write the failing fail-closed contract test**
+- [ ] **Step 1: Write the failing pass-through and invalid-input behavior tests**
 
-Add this test to `test/test_aws_pilot_infrastructure.py`:
+Add `import pytest`, then add:
 
 ```python
-def test_deploy_fails_closed_before_ssm_for_invalid_aws_vision_runtime() -> None:
-    deploy = _read_deploy("Deploy-Pilot.ps1")
-    function_start = deploy.index("function Set-AwsVisionRuntimeValues")
-    function_end = deploy.index("function Normalize-RuntimeEnvText", function_start)
-    function = deploy[function_start:function_end]
-    ssm_update = deploy.index("aws ssm put-parameter")
+def test_non_aws_vision_runtime_is_unchanged() -> None:
+    content = "VISION_RUNTIME_PROVIDER=runpod\nRUNPOD_VISION_ENDPOINT_ID=endpoint-1\n"
+    completed = _run_vision_runtime(content, provider="runpod")
+    assert _decoded_vision_runtime(completed) == content
 
-    assert function_start < ssm_update
-    assert '[Uri]::TryCreate($queueUrl' in function
-    assert '$queueUri.Scheme -cne "https"' in function
-    assert '$queueUri.AbsolutePath.EndsWith(".fifo"' in function
-    assert "AWS Vision queue output must be an HTTPS FIFO queue URL." in function
-    assert "AWS Vision result bucket output must not be empty." in function
-    for runtime_name in (
-        "AWS_VISION_TIMEOUT_SECONDS",
-        "AWS_VISION_POLL_INTERVAL_SECONDS",
-    ):
-        assert runtime_name in function
-    assert "AWS Vision runtime value '$name' must be a positive number." in function
+
+@pytest.mark.parametrize(
+    ("overrides", "error_fragment"),
+    (
+        ({"queue_url": "http://sqs.invalid/not-fifo"}, "HTTPS FIFO queue URL"),
+        ({"result_bucket": ""}, "result bucket"),
+        ({"worker_instance_id": ""}, "worker instance ID"),
+        ({"worker_repository_url": ""}, "worker ECR repository URL"),
+    ),
+)
+def test_aws_vision_runtime_rejects_missing_or_malformed_worker_outputs(
+    overrides: dict[str, str],
+    error_fragment: str,
+) -> None:
+    parameters = {
+        "provider": "aws_queue",
+        "queue_url": "https://sqs.ap-northeast-2.amazonaws.com/123456789012/skn27-vision.fifo",
+        "result_bucket": "skn27-clean-results",
+        "worker_instance_id": "i-0123456789abcdef0",
+        "worker_repository_url": "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/skn27/vision-worker",
+    }
+    parameters.update(overrides)
+    content = "\n".join(
+        (
+            "VISION_RUNTIME_PROVIDER=aws_queue",
+            "AWS_VISION_QUEUE_URL=",
+            "AWS_VISION_RESULT_BUCKET=",
+            "AWS_VISION_RESULT_PREFIX=vision/aws-queue/v1",
+            "AWS_VISION_TIMEOUT_SECONDS=900",
+            "AWS_VISION_POLL_INTERVAL_SECONDS=2",
+            "",
+        )
+    )
+
+    completed = _run_vision_runtime(content, **parameters)
+
+    assert completed.returncode != 0
+    assert error_fragment in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    (
+        ("AWS_VISION_TIMEOUT_SECONDS", "0"),
+        ("AWS_VISION_POLL_INTERVAL_SECONDS", "-1"),
+        ("AWS_VISION_TIMEOUT_SECONDS", "not-a-number"),
+    ),
+)
+def test_aws_vision_runtime_rejects_non_positive_polling_values(
+    name: str,
+    value: str,
+) -> None:
+    content = "\n".join(
+        (
+            "VISION_RUNTIME_PROVIDER=aws_queue",
+            "AWS_VISION_QUEUE_URL=",
+            "AWS_VISION_RESULT_BUCKET=",
+            "AWS_VISION_RESULT_PREFIX=vision/aws-queue/v1",
+            f"AWS_VISION_TIMEOUT_SECONDS={value if name == 'AWS_VISION_TIMEOUT_SECONDS' else '900'}",
+            f"AWS_VISION_POLL_INTERVAL_SECONDS={value if name == 'AWS_VISION_POLL_INTERVAL_SECONDS' else '2'}",
+            "",
+        )
+    )
+    completed = _run_vision_runtime(
+        content,
+        provider="aws_queue",
+        queue_url="https://sqs.ap-northeast-2.amazonaws.com/123456789012/skn27-vision.fifo",
+        result_bucket="skn27-clean-results",
+        worker_instance_id="i-0123456789abcdef0",
+        worker_repository_url="123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/skn27/vision-worker",
+    )
+
+    assert completed.returncode != 0
+    assert f"AWS Vision runtime value '{name}' must be a positive number." in completed.stderr
 ```
 
-- [ ] **Step 2: Run the new test and verify RED**
+- [ ] **Step 2: Run the new behavior tests and verify RED**
 
 Run:
 
 ```powershell
-python -m pytest test/test_aws_pilot_infrastructure.py::test_deploy_fails_closed_before_ssm_for_invalid_aws_vision_runtime -q
+python -m pytest `
+  test/test_aws_pilot_infrastructure.py::test_non_aws_vision_runtime_is_unchanged `
+  test/test_aws_pilot_infrastructure.py::test_aws_vision_runtime_rejects_missing_or_malformed_worker_outputs `
+  test/test_aws_pilot_infrastructure.py::test_aws_vision_runtime_rejects_non_positive_polling_values `
+  -q
 ```
 
-Expected: FAIL because Task 1 only injects values and does not validate their shapes.
+Expected: pass-through passes, while seven invalid AWS cases FAIL because validation is missing.
 
-- [ ] **Step 3: Add queue, bucket, and numeric validation**
+- [ ] **Step 3: Add minimal validation to the pure helper**
 
-Expand `Set-AwsVisionRuntimeValues` before its three `Set-EnvValue` calls:
+Before transforming AWS values in `Set-AwsVisionRuntimeValues`, validate:
 
 ```powershell
+    $requiredOutputs = [ordered]@{
+        "result bucket" = $ResultBucket
+        "worker instance ID" = $WorkerInstanceId
+        "worker ECR repository URL" = $WorkerRepositoryUrl
+    }
+    foreach ($entry in $requiredOutputs.GetEnumerator()) {
+        if ([string]::IsNullOrWhiteSpace([string]$entry.Value)) {
+            throw "AWS Vision $($entry.Key) output must not be empty."
+        }
+    }
+
     $queueUri = $null
     if (
-        -not [Uri]::TryCreate($queueUrl, [UriKind]::Absolute, [ref]$queueUri) -or
+        -not [Uri]::TryCreate($QueueUrl, [UriKind]::Absolute, [ref]$queueUri) -or
         $queueUri.Scheme -cne "https" -or
         -not $queueUri.AbsolutePath.EndsWith(".fifo", [StringComparison]::Ordinal)
     ) {
         throw "AWS Vision queue output must be an HTTPS FIFO queue URL."
-    }
-    if ([string]::IsNullOrWhiteSpace($resultBucket)) {
-        throw "AWS Vision result bucket output must not be empty."
     }
 
     foreach ($name in @("AWS_VISION_TIMEOUT_SECONDS", "AWS_VISION_POLL_INTERVAL_SECONDS")) {
@@ -231,35 +409,30 @@ Expand `Set-AwsVisionRuntimeValues` before its three `Set-EnvValue` calls:
     }
 ```
 
-Keep the `local` and `runpod` return path byte-for-byte unchanged.
-
-- [ ] **Step 4: Run both focused deployment tests and verify GREEN**
+- [ ] **Step 4: Run all Task 1 and Task 2 behavior tests and verify GREEN**
 
 Run:
 
 ```powershell
-python -m pytest `
-  test/test_aws_pilot_infrastructure.py::test_deploy_generates_aws_vision_runtime_from_terraform_outputs `
-  test/test_aws_pilot_infrastructure.py::test_deploy_fails_closed_before_ssm_for_invalid_aws_vision_runtime `
-  -q
+python -m pytest test/test_aws_pilot_infrastructure.py -q
 ```
 
-Expected: 2 passed.
+Expected: the complete infrastructure test file passes, including all real PowerShell executions.
 
-- [ ] **Step 5: Parse the PowerShell script without executing deployment**
+- [ ] **Step 5: Parse both PowerShell files without executing deployment**
 
 Run:
 
 ```powershell
-pwsh -NoProfile -Command '$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "deploy/aws-pilot/Deploy-Pilot.ps1"), [ref]$null, [ref]$errors) > $null; if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }'
+pwsh -NoProfile -Command '$errors = @(); foreach ($path in @("deploy/aws-pilot/Vision-Runtime.ps1", "deploy/aws-pilot/Deploy-Pilot.ps1")) { [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$null, [ref]$errors) > $null }; if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }'
 ```
 
-Expected: exit code 0 and no parser errors. This command must not receive deployment parameters and therefore cannot contact AWS.
+Expected: exit code 0 and no parser errors.
 
 - [ ] **Step 6: Commit Task 2**
 
 ```powershell
-git add test/test_aws_pilot_infrastructure.py deploy/aws-pilot/Deploy-Pilot.ps1
+git add test/test_aws_pilot_infrastructure.py deploy/aws-pilot/Vision-Runtime.ps1
 git commit -m "fix: fail closed on invalid AWS vision wiring"
 ```
 
@@ -282,7 +455,7 @@ git commit -m "fix: fail closed on invalid AWS vision wiring"
 Add this test to `test/test_deployment_readiness_artifacts.py`:
 
 ```python
-def test_aws_queue_vision_runtime_is_documented_without_committed_identifiers():
+def test_aws_queue_vision_runtime_templates_are_complete_and_secret_free():
     required_keys = {
         "AWS_VISION_QUEUE_URL",
         "AWS_VISION_RESULT_BUCKET",
@@ -304,29 +477,21 @@ def test_aws_queue_vision_runtime_is_documented_without_committed_identifiers():
         assert "https://sqs." not in content
         assert "arn:aws:" not in content
 
-    runbook = read_text(ROOT / "docs" / "ops" / "vision-media-adapter-runbook.md")
-    for token in (
-        "VISION_RUNTIME_PROVIDER=aws_queue",
-        "vision_worker_enabled=true",
-        "vision_worker_result_bucket_name",
-        "g5.xlarge",
-        "vision/aws-queue/v1",
-        "DLQ",
-        "terraform apply",
-        "별도 승인",
-    ):
-        assert token in runbook
 ```
+
+The environment templates are executable configuration inputs, so their key
+contract is tested. Do not add brittle assertions for individual runbook prose;
+review that human-facing document directly in Step 5.
 
 - [ ] **Step 2: Run the new test and verify RED**
 
 Run:
 
 ```powershell
-python -m pytest test/test_deployment_readiness_artifacts.py::test_aws_queue_vision_runtime_is_documented_without_committed_identifiers -q
+python -m pytest test/test_deployment_readiness_artifacts.py::test_aws_queue_vision_runtime_templates_are_complete_and_secret_free -q
 ```
 
-Expected: FAIL because `.env.production.example` lacks the AWS variables and the current runbook is RunPod-only.
+Expected: FAIL because `.env.production.example` lacks the AWS variables.
 
 - [ ] **Step 3: Extend the production environment template**
 
@@ -397,13 +562,16 @@ AWS 경로는 `VISION_RUNTIME_PROVIDER=aws_queue`를 사용하며, SQS FIFO 요�
 ```
 
 Retain the existing RunPod operations section as a compatibility path.
+Review the rendered section directly for the activation, observation, recovery,
+rollback, and separate-approval procedures; prose is not treated as executable
+test behavior.
 
 - [ ] **Step 6: Run the focused documentation test and verify GREEN**
 
 Run:
 
 ```powershell
-python -m pytest test/test_deployment_readiness_artifacts.py::test_aws_queue_vision_runtime_is_documented_without_committed_identifiers -q
+python -m pytest test/test_deployment_readiness_artifacts.py::test_aws_queue_vision_runtime_templates_are_complete_and_secret_free -q
 ```
 
 Expected: PASS.
