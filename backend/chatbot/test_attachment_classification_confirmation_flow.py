@@ -17,7 +17,15 @@ from chatbot.attachment_classification_service import (
     resolve_confirmed_attachment_classification,
 )
 from chatbot.file_scan_service import process_uploaded_file_scans
-from chatbot.models import AuthSession, AuthSessionStatus, UploadedFile, UserAccount
+from chatbot.models import (
+    AuthSession,
+    AuthSessionStatus,
+    ChatMessage,
+    ChatSession,
+    MessageRole,
+    UploadedFile,
+    UserAccount,
+)
 from chatbot.repositories import process_agent_work_item
 
 
@@ -295,6 +303,63 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
         )
         self.assertNotIn("scan_snapshot_sha256", repr(confirmed_attachment))
         self.assertNotIn("execution_id", repr(confirmed_attachment))
+
+    def test_server_report_request_survives_the_ocr_confirmation_turn(self) -> None:
+        session_id, attachment_id = self._upload_clean_photo()
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment_id)
+        uploaded_file.purpose = "fine_notice"
+        uploaded_file.save(update_fields=["purpose", "updated_at"])
+        persist_attachment_document_classification(
+            attachment_id=attachment_id,
+            storage_uri=uploaded_file.storage_uri,
+            execution_id="exec_report_continuation",
+            structured_result={
+                "classification": "fine_notice",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+            },
+        )
+        resolve_confirmed_attachment_classification(
+            session_id=session_id,
+            attachment_id=attachment_id,
+        )
+        ChatMessage.objects.create(
+            message_id="msg_report_request_before_ocr_confirmation",
+            session=ChatSession.objects.get(session_id=session_id),
+            role=MessageRole.USER,
+            content="이의신청서 초안과 리포트를 생성해 주세요.",
+            routing_intent="fine_notice_analysis",
+        )
+
+        response = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "OCR 추출값을 확인했습니다. 후속 절차를 진행해 주세요.",
+                "attachments": [{"attachment_id": attachment_id}],
+                "ocr_confirmation": {
+                    "confirmed": True,
+                    "fields": {
+                        "fine_type": "과태료",
+                        "notice_stage": "사전통지",
+                        "law_code": "도로교통법 제32조 제1호",
+                        "violation_text": "소화전 5m 이내 정차 위반",
+                        "opinion_deadline": "2026-08-10",
+                        "issuing_authority": "경찰서장",
+                    },
+                },
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        node_codes = [
+            step["node_code"]
+            for step in response.json()["analysis_plan"]["steps"]
+        ]
+        self.assertIn("fine_notice_analysis", node_codes)
+        self.assertIn("appeal_decision_flow", node_codes)
+        self.assertIn("objection_report_generation", node_codes)
 
     def test_stale_confirmation_fails_closed_before_planning(self) -> None:
         session_id, attachment_id = self._upload_clean_photo()

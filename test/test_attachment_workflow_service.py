@@ -313,3 +313,29 @@ def test_results_are_correlated_by_attachment_id() -> None:
         "classified_waiting_confirmation",
         "ocr_needs_confirmation",
     ]
+
+
+def test_completed_ocr_result_does_not_regress_to_classification_running() -> None:
+    from app.services.attachment_workflow_service import build_attachment_workflows
+
+    [workflow] = build_attachment_workflows(
+        attachments=[
+            {
+                "attachment_id": "att_notice",
+                "status": "ready",
+                "scan_status": "clean",
+            }
+        ],
+        structured_results={
+            "fine_notice_analysis": {
+                "attachment_id": "att_notice",
+                "status": "success",
+            }
+        },
+        overall_status="partial",
+        ocr_confirmation={"attachment_id": "att_notice", "confirmed": True},
+    )
+
+    assert workflow["state"] == "partial"
+    assert workflow["next_action"] == "provide_missing_information"
+    assert workflow["state"] != "classification_running"

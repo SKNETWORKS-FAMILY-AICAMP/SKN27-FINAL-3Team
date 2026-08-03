@@ -254,14 +254,12 @@ def submit_message(
         if routing_intent in {"fine_notice_procedure", "fine_notice_analysis"}
         else None
     )
-    ocr_follow_up_allowed = _has_valid_ocr_confirmation(ocr_confirmation)
-    report_requested = (
-        report_generation_requested(user_text)
-        and routing_intent
-        not in {"accident_evidence_analysis", "accident_photo_evidence_analysis"}
+    report_requested = _report_requested_for_payload(
+        payload,
+        user_text=user_text,
+        routing_intent=routing_intent,
+        ocr_confirmation=ocr_confirmation,
     )
-    if routing_intent == "fine_notice_analysis" and not ocr_follow_up_allowed:
-        report_requested = False
     if routing_intent == "accident_initial_consultation":
         accident_supervisor_state = build_supervisor_state_with_optional_llm(
             payload={**payload, "user_text": user_text, "attachments": attachments},
@@ -1256,8 +1254,11 @@ def _apply_ocr_confirmation_to_supervisor_state(
 def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> dict[str, Any]:
     user_text = str(payload.get("user_text") or "").strip()
     ocr_confirmation = _normalized_ocr_confirmation(payload.get("ocr_confirmation"))
-    report_requested = report_generation_requested(user_text) and (
-        routing_intent != "fine_notice_analysis" or _has_valid_ocr_confirmation(ocr_confirmation)
+    report_requested = _report_requested_for_payload(
+        payload,
+        user_text=user_text,
+        routing_intent=routing_intent,
+        ocr_confirmation=ocr_confirmation,
     )
     node_codes = plan_node_codes(routing_intent, report_requested=report_requested)
     public_node_codes = [code for code in node_codes if code in PUBLIC_AGENT_NODE_CODES]
@@ -1313,6 +1314,27 @@ def _fallback_supervisor_state(payload: dict[str, Any], routing_intent: str) -> 
             else None
         ),
     }
+
+
+def _report_requested_for_payload(
+    payload: Mapping[str, Any],
+    *,
+    user_text: str,
+    routing_intent: str,
+    ocr_confirmation: Mapping[str, Any] | None,
+) -> bool:
+    requested = (
+        report_generation_requested(user_text)
+        or payload.get("_server_report_generation_requested") is True
+    )
+    if routing_intent in {
+        "accident_evidence_analysis",
+        "accident_photo_evidence_analysis",
+    }:
+        return False
+    if routing_intent == "fine_notice_analysis":
+        return requested and _has_valid_ocr_confirmation(ocr_confirmation)
+    return requested
 
 
 def _fallback_accident_supervisor_state(

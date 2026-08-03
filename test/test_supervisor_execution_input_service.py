@@ -62,6 +62,7 @@ def test_sanitize_public_request_removes_execution_controls_and_forged_handoffs(
             "analysis_plan": {"steps": []},
             "execution_mode": "live",
             "reporting_payload": {"report_type": "client"},
+            "_server_report_generation_requested": True,
             "search_query": "client search override",
             "violation_text": "client violation override",
             "context": {
@@ -91,6 +92,7 @@ def test_sanitize_public_request_removes_execution_controls_and_forged_handoffs(
         "analysis_plan",
         "execution_mode",
         "reporting_payload",
+        "_server_report_generation_requested",
     ):
         assert field not in result
 
