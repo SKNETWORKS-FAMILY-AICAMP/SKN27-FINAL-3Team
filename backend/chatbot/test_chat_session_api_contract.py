@@ -105,6 +105,10 @@ class ChatSessionApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(
             submit_message.call_args.kwargs["routing_intent_override"],
+            "",
+        )
+        self.assertEqual(
+            submit_message.call_args.kwargs["continuation_routing_intent"],
             "accident_initial_consultation",
         )
         self.assertEqual(

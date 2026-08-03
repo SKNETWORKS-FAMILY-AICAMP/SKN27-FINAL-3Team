@@ -25,6 +25,9 @@ from django.utils import timezone
 
 from app.security.pii_masking import sanitize_pii
 from app.services.attachment_mock_service import CANONICAL_SCAN_GATE_MARKER
+from chatbot.attachment_classification_service import (
+    confirmed_attachment_classification_handoff,
+)
 from chatbot.models import UploadedFile, UploadedFileStatus
 from chatbot.object_storage import (
     delete_object,
@@ -891,7 +894,7 @@ def _handoff_with_scan(agent_handoff: Any, result: dict[str, Any]) -> dict[str, 
 def _attachment_handoff(uploaded_file: UploadedFile) -> dict[str, Any]:
     metadata = uploaded_file.metadata if isinstance(uploaded_file.metadata, dict) else {}
     object_storage = metadata.get("object_storage")
-    return {
+    handoff = {
         "_canonical_scan_gate": CANONICAL_SCAN_GATE_MARKER,
         "attachment_id": uploaded_file.attachment_id,
         "purpose": uploaded_file.purpose,
@@ -906,6 +909,12 @@ def _attachment_handoff(uploaded_file: UploadedFile) -> dict[str, Any]:
         "privacy_risk": uploaded_file.privacy_risk,
         "resolution_status": "scan_ready",
     }
+    classification_confirmation = confirmed_attachment_classification_handoff(
+        uploaded_file
+    )
+    if classification_confirmation:
+        handoff["classification_confirmation"] = classification_confirmation
+    return handoff
 
 
 def _attachment_access_allowed(
