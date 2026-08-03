@@ -358,6 +358,30 @@ def test_runpod_vision_runtime_is_documented_without_committed_secrets():
     assert "실영상" in checklist
 
 
+def test_aws_queue_vision_runtime_templates_are_complete_and_secret_free():
+    required_keys = {
+        "AWS_VISION_QUEUE_URL",
+        "AWS_VISION_RESULT_BUCKET",
+        "AWS_VISION_RESULT_PREFIX",
+        "AWS_VISION_TIMEOUT_SECONDS",
+        "AWS_VISION_POLL_INTERVAL_SECONDS",
+    }
+    for relative_path in (
+        ".env.production.example",
+        "deploy/aws-pilot/runtime.env.example",
+    ):
+        content = read_text(ROOT / relative_path)
+        keys = {
+            line.split("=", 1)[0]
+            for line in content.splitlines()
+            if line and not line.startswith("#") and "=" in line
+        }
+
+        assert required_keys.issubset(keys), required_keys - keys
+        assert "https://sqs." not in content
+        assert "arn:aws:" not in content
+
+
 def test_analysis_execution_provenance_is_wired_to_runtime_and_runbook():
     root_compose = read_text(ROOT / "docker-compose.yml")
     pilot_compose = read_text(ROOT / "deploy" / "aws-pilot" / "docker-compose.pilot.yml")
