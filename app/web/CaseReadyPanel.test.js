@@ -9,25 +9,28 @@ import { buildCaseReadyViewModel } from "./caseReadyWorkflow.js";
 
 
 function eligibleModel() {
-  return buildCaseReadyViewModel({
-    status: "case_ready",
-    session_id: "ses_panel",
-    consultation_state: {
-      v2: {
-        schema_version: "consultation_state.v2",
-        risk_gate: { level: "standard" },
-      },
-      fact_state: {
-        facts: {
-          road_layout: { value: "four_way_intersection", confirmed: true },
-          vehicle_actions: { value: "ego_straight_other_left_turn", confirmed: true },
-          signal_priority: { value: "ego_green", confirmed: true },
-          collision_location: { value: "front_left", confirmed: true },
+  return buildCaseReadyViewModel(
+    {
+      status: "case_ready",
+      session_id: "ses_panel",
+      consultation_state: {
+        v2: {
+          schema_version: "consultation_state.v2",
+          risk_gate: { level: "standard" },
         },
-        conflicts: [],
+        fact_state: {
+          facts: {
+            road_layout: { value: "four_way_intersection", confirmed: true },
+            vehicle_actions: { value: "ego_straight_other_left_turn", confirmed: true },
+            signal_priority: { value: "ego_green", confirmed: true },
+            collision_location: { value: "front_left", confirmed: true },
+          },
+          conflicts: [],
+        },
       },
     },
-  });
+    [{ attachment_id: "att_panel", status: "ready" }],
+  );
 }
 
 
