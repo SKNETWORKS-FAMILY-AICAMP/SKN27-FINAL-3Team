@@ -23,7 +23,7 @@ def test_official_report_builds_three_copyable_document_cards() -> None:
     assert all(card["copy_text"] for card in cards)
 
 
-def test_blocked_appeal_never_exposes_copyable_objection_draft() -> None:
+def test_blocked_appeal_keeps_reviewable_copy_draft_but_marks_it_partial() -> None:
     cards = build_report_document_cards(
         document_variant="fine_notice",
         sections=[{"title": "1. 이의신청 취지", "body": "처분 재검토를 요청합니다."}],
@@ -34,8 +34,10 @@ def test_blocked_appeal_never_exposes_copyable_objection_draft() -> None:
     objection = cards[0]
 
     assert objection["type"] == "objection_draft"
-    assert objection["status"] == "unavailable"
-    assert "copy_text" not in objection
+    assert objection["status"] == "partial"
+    assert "처분 재검토를 요청합니다." in objection["copy_text"]
+    assert "기한이 지났습니다." in objection["notice"]
+    assert "다운로드" in objection["notice"]
 
 
 def test_cards_drop_private_section_keys_and_keep_partial_reports_useful() -> None:

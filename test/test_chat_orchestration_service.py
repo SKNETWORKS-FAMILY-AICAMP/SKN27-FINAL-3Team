@@ -556,9 +556,6 @@ def test_id4_synthetic_fine_notice_handoff_blocks_later_nodes_until_ocr_confirma
                 "confirmed": True,
                 "fields": {
                     "fine_type": "과태료",
-                    "notice_stage": "사전통지",
-                    "issuing_authority": fixture["issuing_authority"],
-                    "opinion_deadline": fixture["response_deadline"],
                 },
             },
         },
@@ -569,7 +566,7 @@ def test_id4_synthetic_fine_notice_handoff_blocks_later_nodes_until_ocr_confirma
     ]
     assert "law_ground_search" in confirmed_nodes
     assert "appeal_decision_flow" in confirmed_nodes
-    assert "objection_report_generation" not in confirmed_nodes
+    assert "objection_report_generation" in confirmed_nodes
 
     final = compose_agent_response(
         {
@@ -761,7 +758,7 @@ def test_traffic_accident_confirmation_keeps_its_specialized_ocr_route() -> None
     assert response["routing_intent"] == "traffic_accident_confirmation_ocr"
 
 
-def test_confirmed_ocr_fields_enable_law_and_appeal_only_after_first_pass() -> None:
+def test_confirmed_ocr_fields_enable_law_appeal_and_report_after_first_pass() -> None:
     response = submit_message(
         {
             "session_id": "ses_ocr_confirmed",
@@ -785,6 +782,7 @@ def test_confirmed_ocr_fields_enable_law_and_appeal_only_after_first_pass() -> N
         "appeal_decision_flow",
         "agent_result_validation",
         "final_response_merge",
+        "objection_report_generation",
     ]
     fine_step = next(
         step for step in response["analysis_plan"]["steps"] if step["node_code"] == "fine_notice_analysis"
@@ -795,7 +793,7 @@ def test_confirmed_ocr_fields_enable_law_and_appeal_only_after_first_pass() -> N
     }
 
 
-def test_incomplete_ocr_confirmation_keeps_follow_up_nodes_out_of_the_plan() -> None:
+def test_confirmed_sparse_ocr_plans_follow_up_nodes_and_partial_report() -> None:
     response = submit_message(
         {
             "session_id": "ses_ocr_incomplete",
@@ -809,11 +807,12 @@ def test_incomplete_ocr_confirmation_keeps_follow_up_nodes_out_of_the_plan() -> 
     assert node_codes == [
         "input_context_validation",
         "fine_notice_analysis",
+        "law_ground_search",
+        "appeal_decision_flow",
         "agent_result_validation",
         "final_response_merge",
+        "objection_report_generation",
     ]
-    assert "law_ground_search" not in node_codes
-    assert "appeal_decision_flow" not in node_codes
 
 
 def test_first_pass_ocr_result_surfaces_an_editable_confirmation_requirement(monkeypatch) -> None:
@@ -1307,7 +1306,7 @@ def test_report_node_is_planned_only_when_document_generation_is_explicitly_requ
     assert law_package["payload"]["violation_text"] == "소화전 5m 이내 정차 위반"
 
 
-def test_explicit_report_request_waits_for_confirmed_user_facts() -> None:
+def test_confirmed_ocr_plans_partial_report_without_confirmed_user_facts() -> None:
     response = submit_message(
         {
             "session_id": "ses_report_needs_facts",
@@ -1322,13 +1321,9 @@ def test_explicit_report_request_waits_for_confirmed_user_facts() -> None:
         }
     )
 
-    assert response["status"] == "needs_input"
-    assert response["analysis_plan"]["steps"] == []
-    assert response["pending_questions"] == [
-        {
-            "field": "user_facts",
-            "question": "이의제기를 하고 싶은 이유와 당시 상황을 한두 문장으로 알려 주세요.",
-        }
+    assert response["status"] == "queued"
+    assert "objection_report_generation" in [
+        step["node_code"] for step in response["analysis_plan"]["steps"]
     ]
 
 

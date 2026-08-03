@@ -10,7 +10,7 @@ def test_frontend_report_client_declares_canonical_read_detail_and_pdf_routes() 
     client = (ROOT / "app" / "web" / "apiClient.js").read_text(encoding="utf-8")
 
     for required in (
-        "listReports({ sessionId, identity } = {})",
+        "listReports({ identity } = {})",
         'joinApiPath(apiBase, "reports/")',
         "getReportDetail({ reportId, sessionId, identity } = {})",
         '`reports/${encodeURIComponent(reportId || "")}/`',
@@ -21,6 +21,11 @@ def test_frontend_report_client_declares_canonical_read_detail_and_pdf_routes() 
         "Authorization: `Bearer ${authToken}`",
     ):
         assert required in client
+
+    list_method = client.split("listReports", maxsplit=1)[1].split(
+        "getReportDetail", maxsplit=1
+    )[0]
+    assert "session_id" not in list_method
 
 
 def test_frontend_report_views_consume_only_public_report_detail_fields() -> None:

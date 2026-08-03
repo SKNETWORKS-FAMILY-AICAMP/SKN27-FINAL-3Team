@@ -91,12 +91,19 @@ def _objection_draft_card(
             notice="현재 리포트는 이의신청서 초안 대상이 아닙니다.",
         )
     if blocked:
-        return _unavailable_card(
+        card = _card(
             card_type="objection_draft",
             title="이의신청서 초안",
-            description="이의신청 가능 여부를 확인한 뒤 초안을 제공합니다.",
-            notice=gate_reason or "현재 절차 상태에서는 이의신청서 초안을 제공할 수 없습니다.",
+            description="제출 가능 여부와 별개로 확인된 내용까지 검토용 초안으로 정리합니다.",
+            sections=sections,
+            notice=(
+                f"{gate_reason} 공식 DOCX 다운로드는 제공하지 않습니다."
+                if gate_reason
+                else "현재 절차 상태에서는 공식 DOCX 다운로드를 제공하지 않습니다."
+            ),
         )
+        card["status"] = "partial"
+        return card
 
     card = _card(
         card_type="objection_draft",
