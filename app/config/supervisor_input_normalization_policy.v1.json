@@ -26,7 +26,8 @@
           "notice_date",
           "due_date",
           "amount",
-          "alleged_violation"
+          "alleged_violation",
+          "attachment_available"
         ]
       }
     },
@@ -107,6 +108,20 @@
       "routing_intent": "accident_initial_consultation"
     },
     {
+      "rule_id": "accident.vehicle_actions.other.lane_change.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "vehicle_actions.other",
+      "value": "lane_change",
+      "token_class": "action",
+      "canonical_expression": "상대 차량 차선 변경",
+      "expressions": ["상대 차량 차선 변경"],
+      "aliases": ["상대차 차선변경", "상대차는 차선변경", "상대는 차선변경"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
       "rule_id": "accident.collision_location.rear_end.exact_01",
       "domain": "accident",
       "schema": "accident_fact",
@@ -116,6 +131,20 @@
       "canonical_expression": "후방 추돌",
       "expressions": ["후방 추돌", "후미 추돌"],
       "aliases": ["뒤에서 추돌"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "accident_initial_consultation"
+    },
+    {
+      "rule_id": "accident.collision_location.self_front_other_side.exact_01",
+      "domain": "accident",
+      "schema": "accident_fact",
+      "field": "collision_location",
+      "value": "self_front_other_side",
+      "token_class": "entity",
+      "canonical_expression": "본인 차량 앞범퍼와 상대 차량 측면",
+      "expressions": ["제차 앞범퍼랑 상대차 옆문"],
+      "aliases": ["제 차 앞범퍼와 상대 차 옆문", "제차 앞범퍼와 상대차 측면"],
       "approved_typos": [],
       "decision": "auto_applied",
       "routing_intent": "accident_initial_consultation"
@@ -214,6 +243,20 @@
       "canonical_expression": "납부고지서",
       "expressions": ["과태료 납부고지서", "납부고지서"],
       "aliases": ["납부 고지서"],
+      "approved_typos": [],
+      "decision": "auto_applied",
+      "routing_intent": "fine_notice_procedure"
+    },
+    {
+      "rule_id": "fine_notice.attachment_available.yes.exact_01",
+      "domain": "fine_notice",
+      "schema": "fine_notice_intake",
+      "field": "attachment_available",
+      "value": "yes",
+      "token_class": "state",
+      "canonical_expression": "첨부 가능",
+      "expressions": ["첨부 가능"],
+      "aliases": ["첨부도 가능", "문서 첨부도 가능"],
       "approved_typos": [],
       "decision": "auto_applied",
       "routing_intent": "fine_notice_procedure"

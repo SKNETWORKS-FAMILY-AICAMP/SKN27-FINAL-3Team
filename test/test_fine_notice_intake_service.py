@@ -212,3 +212,39 @@ def test_confirmed_ocr_and_structured_slots_outrank_rule_normalization() -> None
     )
 
     assert result["slots"]["document_disposition_type"]["value"] == "사전통지"
+
+
+def test_server_stored_slots_survive_followup_and_keep_provenance() -> None:
+    result = reduce_fine_notice_intake(
+        {
+            "message_id": "msg_notice_followup",
+            "fine_notice_slots": {"document_disposition_type": "client overwrite"},
+            "stored_fine_notice_intake_slots": {
+                "document_disposition_type": {
+                    "value": "pre_notice",
+                    "source_type": "rule_normalization",
+                    "source_message_id": "msg_notice_first",
+                    "confidence": 1.0,
+                    "confirmed": False,
+                }
+            },
+            "normalized_slots": {
+                "issuing_authority": {
+                    "value": "서울특별시",
+                    "source_type": "rule_normalization",
+                    "source_message_id": "msg_notice_followup",
+                    "confidence": 0.99,
+                    "confirmed": False,
+                }
+            },
+        }
+    )
+
+    assert result["slots"]["document_disposition_type"] == {
+        "value": "pre_notice",
+        "source_type": "rule_normalization",
+        "source_message_id": "msg_notice_first",
+        "confidence": 1.0,
+        "confirmed": False,
+    }
+    assert result["slots"]["issuing_authority"]["value"] == "서울특별시"

@@ -25,6 +25,16 @@ test("keeps structured context in the request but shows only the user's free tex
   );
 });
 
+test("fine notice request label does not create a fine versus penalty conflict", () => {
+  const message = buildStructuredConsultationMessage({
+    freeText: "과태료입니다.",
+    intake: { consultationType: "fine_notice" },
+  });
+
+  assert.doesNotMatch(message, /\[상담 유형\]\n과태료·범칙금/);
+  assert.match(message, /\[자유 입력\]\n과태료입니다\./);
+});
+
 test("builds a bounded fault-ratio request context with canonical fact keys", () => {
   assert.equal(typeof consultationIntakeModule.buildConsultationRequestContext, "function");
   assert.deepEqual(

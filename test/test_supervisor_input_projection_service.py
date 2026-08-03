@@ -71,6 +71,29 @@ def test_projects_both_vehicle_actions_as_one_accident_fact() -> None:
     ]
 
 
+def test_projects_browser_lane_change_and_collision_sentence() -> None:
+    normalized = normalize_supervisor_input(
+        user_text=(
+            "사고 과실이 궁굼해요. 사거리 교차로에서 저는 직진중이고 "
+            "상대차는 차선변경, 제 신호는 녹색이었고 "
+            "제차 앞범퍼랑 상대차 옆문이 부딪혔어요."
+        ),
+        source_message_id="msg_browser_accident",
+    )
+
+    facts = accident_fact_candidates(
+        normalized,
+        source_message_id="msg_browser_accident",
+    )
+
+    assert {item["field"]: item["value"] for item in facts} == {
+        "road_layout": "교차로",
+        "vehicle_actions": "본인 차량 직진, 상대 차량 차선 변경",
+        "signal_priority": "본인 차량 녹색 신호",
+        "collision_location": "본인 차량 앞범퍼와 상대 차량 측면",
+    }
+
+
 def test_negated_vehicle_action_is_not_projected() -> None:
     normalized = normalize_supervisor_input(
         user_text="상대 차량은 좌회전하지 않았습니다.",
@@ -121,6 +144,25 @@ def test_projects_notice_and_objection_slots_without_legal_conclusions() -> None
     ] == "first_notice"
 
 
+def test_projects_all_browser_fine_notice_intake_slots() -> None:
+    normalized = normalize_supervisor_input(
+        user_text=(
+            "과태료 사전통지서고 서울특별시에서 발급했습니다. "
+            "의견제출 기한은 2026년 8월 10일이고 문서 첨부도 가능해요."
+        ),
+        source_message_id="msg_browser_fine_projection",
+    )
+
+    slots = fine_notice_intake_slots(normalized)
+
+    assert {field: record["value"] for field, record in slots.items()} == {
+        "document_disposition_type": "pre_notice",
+        "issuing_authority": "서울특별시",
+        "response_deadline": "2026년 8월 10일",
+        "attachment_available": "yes",
+    }
+
+
 def test_policy_allowlist_discards_unknown_accident_llm_fact() -> None:
     assert policy_allowed_llm_facts(
         [
@@ -129,6 +171,40 @@ def test_policy_allowlist_discards_unknown_accident_llm_fact() -> None:
         ],
         scenario="accident_initial_consultation",
     ) == [{"field": "road_layout", "value": "교차로"}]
+
+
+def test_policy_allowlist_accepts_registered_lane_change_action_pair() -> None:
+    assert policy_allowed_llm_facts(
+        [
+            {
+                "field": "vehicle_actions",
+                "value": "본인 차량 직진, 상대 차량 차선 변경",
+            }
+        ],
+        scenario="accident_initial_consultation",
+    ) == [
+        {
+            "field": "vehicle_actions",
+            "value": "본인 차량 직진, 상대 차량 차선 변경",
+        }
+    ]
+
+
+def test_policy_allowlist_keeps_existing_left_turn_action_pair() -> None:
+    assert policy_allowed_llm_facts(
+        [
+            {
+                "field": "vehicle_actions",
+                "value": "본인 차량 직진, 상대 차량 좌회전",
+            }
+        ],
+        scenario="accident_initial_consultation",
+    ) == [
+        {
+            "field": "vehicle_actions",
+            "value": "본인 차량 직진, 상대 차량 좌회전",
+        }
+    ]
 
 
 def test_policy_allowlist_does_not_expand_general_consultation() -> None:

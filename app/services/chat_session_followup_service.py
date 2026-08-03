@@ -43,6 +43,13 @@ def merge_chat_followup_payload(
     )
     if isinstance(state.get("case_memory"), dict) and not isinstance(merged.get("case_memory"), dict):
         merged["case_memory"] = deepcopy(state["case_memory"])
+    stored_fine_notice_slots = _dict(
+        _dict(state.get("fine_notice_intake")).get("slots")
+    )
+    if stored_fine_notice_slots:
+        merged["stored_fine_notice_intake_slots"] = deepcopy(
+            stored_fine_notice_slots
+        )
     merged["conversation_history"] = _history_with_current_user_turn(state, merged)
     return merged
 
@@ -59,6 +66,7 @@ def build_chat_followup_snapshot(
         consultation_state.get("case_memory")
         or _dict(_dict(consultation_state.get("v2")).get("case_memory"))
     )
+    fine_notice_intake = _dict(chat_response.get("fine_notice_intake"))
     history = _history(payload.get("conversation_history"))
     history = _append_user_turn(history, payload)
     history = _append_assistant_turn(history, chat_response)
@@ -71,6 +79,10 @@ def build_chat_followup_snapshot(
         "fact_conflicts": deepcopy(fact_state.get("conflicts") or _dict_list(payload.get("fact_conflicts"))),
         "pending_questions": _dict_list(chat_response.get("pending_questions")),
         "case_memory": deepcopy(case_memory),
+        "fine_notice_intake": {
+            "contract_version": _text(fine_notice_intake.get("contract_version")),
+            "slots": deepcopy(_dict(fine_notice_intake.get("slots"))),
+        },
         "consultation_state": _safe_consultation_state(consultation_state),
         "conversation_history": history[-MAX_FOLLOWUP_HISTORY_TURNS:],
     }
