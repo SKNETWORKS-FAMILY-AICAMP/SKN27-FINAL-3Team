@@ -96,6 +96,7 @@ def build_attachment_workflows(
         upload_status = str(attachment.get("status") or "").strip().lower()
         scan_status = str(attachment.get("scan_status") or "").strip().lower()
         classification = _for_attachment(classification_results, attachment_id)
+        ocr = _for_attachment(ocr_results, attachment_id)
         if not classification:
             server_confirmation = attachment.get("classification_confirmation")
             if (
@@ -104,7 +105,8 @@ def build_attachment_workflows(
                 and str(server_confirmation.get("classification") or "").strip()
             ):
                 classification = {"status": "success"}
-        ocr = _for_attachment(ocr_results, attachment_id)
+        if not classification and ocr:
+            classification = {"status": "success"}
         confirmation = _for_attachment(ocr_confirmation, attachment_id)
 
         if (

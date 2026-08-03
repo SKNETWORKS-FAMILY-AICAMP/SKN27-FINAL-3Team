@@ -45,6 +45,7 @@ EXECUTION_CONTROL_FIELDS = frozenset(
         "plan_step",
         "reporting_payload",
         "required_inputs",
+        "_server_report_generation_requested",
         REQUIRES_SUPERVISOR_HANDOFF_FIELD,
         SERVER_EXECUTION_CONTEXT_FIELD,
         "slot_state",

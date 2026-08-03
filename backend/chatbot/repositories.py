@@ -921,6 +921,24 @@ def load_chat_followup_state(session_id: str | None) -> dict[str, Any] | None:
     return deepcopy(state)
 
 
+def load_recent_chat_user_message_contents(
+    session_id: str | None,
+    *,
+    limit: int = 16,
+) -> list[str]:
+    """Load recent user text from an authorized server-owned chat session."""
+
+    normalized_session_id = _text(session_id)
+    if not normalized_session_id:
+        return []
+    bounded_limit = max(1, min(int(limit), 64))
+    contents = ChatMessage.objects.filter(
+        session__session_id=normalized_session_id,
+        role=MessageRole.USER,
+    ).order_by("-created_at").values_list("content", flat=True)[:bounded_limit]
+    return [text for value in contents if (text := _text(value))]
+
+
 def persist_chat_followup_state(
     payload: dict[str, Any],
     chat_response: dict[str, Any],
