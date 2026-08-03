@@ -96,3 +96,21 @@ def test_public_law_projection_omits_malformed_pipe_table_summary() -> None:
 
     assert public == [{"law_name": "도로교통법 시행령", "article": "별표10"}]
     assert "|" not in repr(public)
+
+
+def test_public_law_projection_omits_unicode_box_drawing_table_summary() -> None:
+    public = project_public_law_items(
+        {
+            "matched_laws": [
+                {
+                    "law_name": "도로교통법 시행령",
+                    "article": "별표10",
+                    "summary": "┏━━━━━━┳━━━━━━┓\n┃ 구분 ┃ 금액 ┃\n├──────┼──────┤",
+                    "source_reference": "law:verified:appendix-10",
+                }
+            ]
+        }
+    )
+
+    assert public == [{"law_name": "도로교통법 시행령", "article": "별표10"}]
+    assert not any(character in repr(public) for character in "┃├┼┌┏│")

@@ -143,6 +143,7 @@ def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> Non
         ("POST", "/api/auth/refresh/"),
         ("POST", "/api/auth/logout/"),
         ("GET", "/api/auth/me/"),
+        ("GET", "/api/auth/resume/"),
     }
 
     assert actual[("POST", "/api/auth/guest-session/")].response_model is (
@@ -163,6 +164,10 @@ def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> Non
     assert actual[("POST", "/api/auth/refresh/")].auth_optional is True
     assert actual[("POST", "/api/auth/logout/")].auth_optional is True
     assert actual[("GET", "/api/auth/me/")].auth_optional is True
+    assert actual[("GET", "/api/auth/resume/")].response_model is (
+        auth_contracts.ResumeManifestResponse
+    )
+    assert actual[("GET", "/api/auth/resume/")].auth_required is True
     assert all(spec.contract_status == "shadow" for spec in actual.values())
 
 

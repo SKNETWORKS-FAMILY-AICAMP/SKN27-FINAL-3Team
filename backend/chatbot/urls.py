@@ -16,6 +16,7 @@ urlpatterns = [
     path("auth/refresh/", views.auth_refresh, name="auth-refresh"),
     path("auth/logout/", views.auth_logout, name="auth-logout"),
     path("auth/me/", views.auth_me, name="auth-me"),
+    path("auth/resume/", views.auth_resume, name="auth-resume"),
     path("mypage/summary/", views.mypage_summary, name="canonical-mypage-summary"),
     path("history/", views.history_events, name="canonical-history-events"),
     path("chat/sessions/", views.create_chat_session, name="canonical-create-chat-session"),

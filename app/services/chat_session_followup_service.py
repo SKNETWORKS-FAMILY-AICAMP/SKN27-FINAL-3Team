@@ -50,6 +50,7 @@ def merge_chat_followup_payload(
         merged["stored_fine_notice_intake_slots"] = deepcopy(
             stored_fine_notice_slots
         )
+    merged["pending_questions"] = _dict_list(state.get("pending_questions"))
     merged["conversation_history"] = _history_with_current_user_turn(state, merged)
     return merged
 

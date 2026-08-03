@@ -27,6 +27,7 @@ def test_openapi_v1_is_generated_from_promoted_route_specs() -> None:
         "/api/auth/refresh/",
         "/api/auth/logout/",
         "/api/auth/me/",
+        "/api/auth/resume/",
         "/api/chat/sessions/",
         "/api/chat/messages/",
         "/api/chat/save-state/",

@@ -27,8 +27,10 @@ import {
   recoverStoredAuthSession,
   resolveGuestBootstrapSessionId,
   scheduleAppJwtRefresh,
+  shouldClearAuthentication,
   toGoogleLoginError,
 } from "./authSession.js";
+import { hydrateResumeManifest } from "./resumeManifest.js";
 import {
   ACCIDENT_TYPE_OPTIONS,
   CONSULTATION_FACT_FIELDS,
@@ -489,12 +491,18 @@ export default function FrontendAppShell({
       refreshAuthToken: (payload, requestIdentity) =>
         api.refreshAuthToken(payload, requestIdentity),
     })
-      .then((result) => {
+      .then(async (result) => {
         if (!recoveryActive) {
           return;
         }
         const recovered = result.session || {};
         if (result.status === "authenticated") {
+          const recoveredIdentity = {
+            authToken: recovered.access_token || "",
+            authSessionId: recovered.auth_session_id || "",
+            guestId: recovered.guest_id || "",
+            guestCredential: recovered.guest_credential || "",
+          };
           setActiveAuthToken(recovered.access_token || "");
           setAuthSessionId(recovered.auth_session_id || "");
           setGuestId(recovered.guest_id || "");
@@ -509,9 +517,50 @@ export default function FrontendAppShell({
             sessionId: recovered.session_id,
             userId: recovered.user_id,
           });
+          let resumeManifest;
+          try {
+            resumeManifest = await api.getResumeManifest({ identity: recoveredIdentity });
+          } catch (error) {
+            if (shouldClearAuthentication(error)) {
+              throw error;
+            }
+            if (!recoveryActive) {
+              return;
+            }
+            setAuthRestoreStatus("ready");
+            setStatusMessage(
+              "저장된 상담을 일시적으로 불러오지 못했지만 로그인과 현재 상담은 유지됩니다."
+            );
+            return;
+          }
+          if (!recoveryActive) {
+            return;
+          }
+          const resumed = hydrateResumeManifest(resumeManifest);
+          if (resumed.hasResume) {
+            setSessionId(resumed.sessionId);
+            setChatMessages(resumed.chatMessages);
+            setConsultationIntake(resumed.consultationIntake);
+            setRegisteredAttachments(resumed.registeredAttachments);
+            setAnalysisResponse(resumed.analysisResponse);
+            setReportList(resumed.reportList);
+            setCurrentReport(resumed.currentReport);
+            setActiveRoute("chatbot");
+            persistAuthSession({
+              accessToken: recovered.access_token,
+              authSessionId: recovered.auth_session_id,
+              guestId: recovered.guest_id,
+              guestCredential: recovered.guest_credential,
+              googleProfile: readStoredGoogleProfile(),
+              sessionId: resumed.sessionId,
+              userId: recovered.user_id,
+            });
+          }
           setAuthRestoreStatus("ready");
           setStatusMessage(
-            result.refreshed
+            resumed.hasResume
+              ? "저장된 상담과 분석 결과를 복원했습니다."
+              : result.refreshed
               ? "로그인 상태를 안전하게 갱신했습니다."
               : "저장된 로그인 상태를 확인했습니다."
           );
@@ -542,8 +591,24 @@ export default function FrontendAppShell({
           "로그인 상태를 확인하지 못했습니다. 기존 상담을 보존했으며 잠시 후 새로고침해 주세요."
         );
       })
-      .catch(() => {
+      .catch((error) => {
         if (!recoveryActive) {
+          return;
+        }
+        if (shouldClearAuthentication(error)) {
+          clearStoredAuthSession();
+          persistAuthSession({
+            guestId: storedAuthSession.guest_id || "",
+            guestCredential: storedAuthSession.guest_credential || "",
+            sessionId: storedAuthSession.session_id || "",
+          });
+          setActiveAuthToken("");
+          setAuthSessionId("");
+          setGuestId(storedAuthSession.guest_id || "");
+          setGuestCredential(storedAuthSession.guest_credential || "");
+          setSessionId(storedAuthSession.session_id || "");
+          setAuthRestoreStatus("ready");
+          setStatusMessage("로그인이 만료되었습니다. Google 계정으로 다시 로그인해 주세요.");
           return;
         }
         setActiveAuthToken("");
@@ -604,8 +669,14 @@ export default function FrontendAppShell({
             sessionId: refreshContext.sessionId,
             userId: nextUserId,
           });
-        } catch (_error) {
+        } catch (error) {
           if (!refreshEffectActive) {
+            return;
+          }
+          if (!shouldClearAuthentication(error)) {
+            setStatusMessage(
+              "로그인 갱신을 일시적으로 완료하지 못했습니다. 현재 상담은 유지됩니다."
+            );
             return;
           }
           clearStoredAuthSession();

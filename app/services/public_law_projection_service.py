@@ -13,6 +13,7 @@ _PATH_OR_URI_RE = re.compile(
     r"(?:[a-z][a-z0-9+.-]*://|[a-zA-Z]:[\\/])",
     re.IGNORECASE,
 )
+_BOX_DRAWING_RE = re.compile(r"[\u2500-\u257f]")
 
 
 def project_public_law_items(
@@ -55,7 +56,7 @@ def project_public_law_items(
             and len(summary) <= MAX_PUBLIC_LAW_SUMMARY_LENGTH
             and not _PATH_OR_URI_RE.search(summary)
             and not detect_text_categories(summary)
-            and not _contains_pipe_table_fragment(summary)
+            and not _contains_table_fragment(summary)
         ):
             item["summary"] = summary
         if item not in public:
@@ -63,7 +64,9 @@ def project_public_law_items(
     return public[:3]
 
 
-def _contains_pipe_table_fragment(value: str) -> bool:
+def _contains_table_fragment(value: str) -> bool:
+    if _BOX_DRAWING_RE.search(value):
+        return True
     for line in value.splitlines() or [value]:
         stripped = line.strip()
         if line.count("|") < 2:

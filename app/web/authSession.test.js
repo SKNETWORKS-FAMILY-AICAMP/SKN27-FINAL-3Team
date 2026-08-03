@@ -6,6 +6,7 @@ import {
   googleLoginFailureMessage,
   recoverStoredAuthSession,
   resolveGuestBootstrapSessionId,
+  shouldClearAuthentication,
 } from "./authSession.js";
 
 function appJwtWithExpiration(expiresAtSeconds) {
@@ -107,7 +108,7 @@ test("refreshes a still-valid token in the early window before auth/me verificat
   assert.equal(calls[1].identity.authSessionId, "auth_after_refresh");
 });
 
-test("preserves signed guest and chat recovery context when proactive refresh fails", async () => {
+test("preserves authenticated and chat recovery context when proactive refresh has a transient failure", async () => {
   const nowMs = 1770000000000;
   const storedToken = appJwtWithExpiration(Math.floor(nowMs / 1000) - 1);
   let authMeCalled = false;
@@ -135,18 +136,18 @@ test("preserves signed guest and chat recovery context when proactive refresh fa
     },
   });
 
-  assert.equal(result.status, "reauth_required");
-  assert.equal(result.reason, "token_expired");
-  assert.equal(result.session.access_token, null);
-  assert.equal(result.session.auth_session_id, null);
-  assert.equal(result.session.user_id, null);
+  assert.equal(result.status, "verification_unavailable");
+  assert.equal(result.reason, "auth_verification_unavailable");
+  assert.equal(result.session.access_token, storedToken);
+  assert.equal(result.session.auth_session_id, "auth_expired");
+  assert.equal(result.session.user_id, "usr_previous");
   assert.equal(result.session.guest_id, "gst_lineage");
   assert.equal(result.session.guest_credential, "signed-guest-credential");
   assert.equal(result.session.session_id, "ses_current");
-  assert.equal(authMeCalled, false);
+  assert.equal(authMeCalled, true);
 });
 
-test("rejects an auth/me response for a different authenticated session", async () => {
+test("does not clear storage when auth/me returns a mismatched authenticated session", async () => {
   const nowMs = 1770000000000;
   const storedToken = appJwtWithExpiration(Math.floor(nowMs / 1000) + 1800);
 
@@ -173,10 +174,20 @@ test("rejects an auth/me response for a different authenticated session", async 
     }),
   });
 
-  assert.equal(result.status, "reauth_required");
+  assert.equal(result.status, "verification_unavailable");
   assert.equal(result.reason, "auth_session_mismatch");
+  assert.equal(result.session.access_token, storedToken);
+  assert.equal(result.session.auth_session_id, "auth_expected");
   assert.equal(result.session.guest_id, "gst_lineage");
   assert.equal(result.session.session_id, "ses_current");
+});
+
+test("clears authentication only for explicit HTTP 401 or 403 responses", () => {
+  assert.equal(shouldClearAuthentication({ status: 401 }), true);
+  assert.equal(shouldClearAuthentication({ status: 403 }), true);
+  assert.equal(shouldClearAuthentication({ status: 503, code: "auth_required" }), false);
+  assert.equal(shouldClearAuthentication({ code: "token_expired" }), false);
+  assert.equal(shouldClearAuthentication(new TypeError("network unavailable")), false);
 });
 
 test("does not reuse a stale chat session without a valid guest credential", () => {

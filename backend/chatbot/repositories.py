@@ -4811,6 +4811,51 @@ def get_mycase_summary(
     }
 
 
+def get_latest_owned_chat_session_record(owner_id: str) -> dict[str, Any] | None:
+    """Load the latest session owned by one authenticated user for resume."""
+
+    normalized_owner_id = _text(owner_id)
+    if not normalized_owner_id:
+        return None
+    session = (
+        ChatSession.objects.filter(owner_id=normalized_owner_id)
+        .order_by("-updated_at")
+        .first()
+    )
+    if session is None:
+        return None
+    latest_job = session.analysis_jobs.order_by("-updated_at").first()
+    return {
+        "session": {
+            "session_id": session.session_id,
+            "status": session.status,
+            "current_intent": session.current_intent,
+            "updated_at": session.updated_at.isoformat(),
+        },
+        "conversation_messages": [
+            {
+                "message_id": message.message_id,
+                "role": message.role,
+                "content": message.content,
+                "routing_intent": message.routing_intent,
+                "created_at": message.created_at.isoformat(),
+            }
+            for message in session.messages.order_by("created_at")
+            if message.role in {MessageRole.USER, MessageRole.ASSISTANT}
+        ],
+        "followup_state": load_chat_followup_state(session.session_id) or {},
+        "attachments": list_uploaded_files(
+            session_id=session.session_id,
+            owner_id=normalized_owner_id,
+        ),
+        "latest_job_id": latest_job.job_id if latest_job is not None else None,
+        "reports": list_report_records(
+            session_id=session.session_id,
+            owner_id=normalized_owner_id,
+        ),
+    }
+
+
 def get_analysis_job_access_metadata(job_id: str) -> dict[str, Any] | None:
     """Return the minimum ownership record needed before exposing a job."""
 
