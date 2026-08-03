@@ -47,8 +47,16 @@ def test_frontend_uses_canonical_capability_and_async_result_contracts() -> None
 
     for token in ("api.getCapabilities()", "capabilityCatalog", "capabilityError"):
         assert token in shell
-    for token in ("getCapabilities", "getAnalysisResult", "listReports", "downloadReport"):
+    for token in (
+        "getCapabilities",
+        "getAnalysisResult",
+        "getAttachment",
+        "listReports",
+        "downloadReport",
+    ):
         assert token in api_client
+
+    assert "runAttachmentScanWorkflow" in shell
 
     assert "DEMO_PERSONAS" not in shell
     assert "agents/work-items/process/" not in api_client

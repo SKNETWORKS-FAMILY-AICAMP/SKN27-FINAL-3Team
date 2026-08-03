@@ -4,6 +4,7 @@ import { createFrontendApi } from "./apiClient.js";
 import { buildAnalysisProgressUi } from "./analysisProgressUi.js";
 import { buildAppealDecisionUi } from "./appealDecisionUi.js";
 import { buildAttachmentWorkflowUi } from "./attachmentWorkflowUi.js";
+import { runAttachmentScanWorkflow } from "./attachmentScanWorkflow.js";
 import { CaseReadyPanel } from "./CaseReadyPanel.js";
 import { TrafficAccidentOcrPanel } from "./TrafficAccidentOcrPanel.js";
 import brandLogoUrl from "./assets/brand-logo.webp";
@@ -917,10 +918,54 @@ export default function FrontendAppShell({
           ...attachment,
           scan_status: attachment.scan_status || "scan_pending",
         };
-        setRegisteredAttachments((items) => [...items, attachment]);
+        const upsertAttachment = (items, nextAttachment) => [
+          ...items.filter((item) => item?.attachment_id !== nextAttachment.attachment_id),
+          nextAttachment,
+        ];
+        setRegisteredAttachments((items) => upsertAttachment(items, attachment));
         setSelectedUploadFile(null);
         setUploadInputResetKey((value) => value + 1);
-        setStatusMessage(`${attachment.original_filename || attachment.filename || attachment.purpose} 자료를 상담 입력에 연결했습니다. scan=${attachment.scan_status || attachment.status}`);
+        setStatusMessage(`${attachment.original_filename || attachment.filename || attachment.purpose} 자료의 안전 검사를 기다리고 있습니다.`);
+        try {
+          await runAttachmentScanWorkflow({
+            api,
+            attachment,
+            sessionId: activeSession,
+            identity: nextIdentity,
+            wait: waitForWorkerPoll,
+            maxAttempts: WORKER_POLL_MAX_ATTEMPTS,
+            onUpdate: (nextAttachment) => {
+              setRegisteredAttachments((items) => upsertAttachment(items, nextAttachment));
+              const scanStatus = nextAttachment.scan_status || nextAttachment.status;
+              setStatusMessage(
+                scanStatus === "clean"
+                  ? "자료 안전 검사가 완료되어 분석을 시작합니다."
+                  : `자료 안전 검사를 기다리고 있습니다. scan=${scanStatus}`,
+              );
+            },
+            startAnalysis: ({ attachment: readyAttachment, userText }) => (
+              submitServiceMessage({
+                userText,
+                requestContext: {
+                  attachments: upsertAttachment(registeredAttachments, readyAttachment),
+                  authSessionId: nextIdentity.authSessionId || authSessionId,
+                  guestCredential: nextIdentity.guestCredential ?? "",
+                  guestId: nextIdentity.guestId || activeGuestId,
+                  identity: nextIdentity,
+                  sessionId: activeSession,
+                },
+              })
+            ),
+          });
+        } catch (scanError) {
+          if (scanError?.message === "attachment_scan_rejected") {
+            setStatusMessage("자료 안전 검사에서 차단되었습니다. 원본을 확인한 뒤 다시 첨부해 주세요.");
+          } else if (scanError?.message === "attachment_scan_timeout") {
+            setStatusMessage("자료 안전 확인이 지연되고 있습니다. 잠시 후 다시 첨부해 주세요.");
+          } else {
+            throw scanError;
+          }
+        }
       } else {
         setStatusMessage("첨부 등록 응답을 확인하지 못했습니다.");
       }
@@ -1371,6 +1416,7 @@ export default function FrontendAppShell({
     userText,
     ocrConfirmation,
     attachmentClassificationConfirmation,
+    requestContext = {},
   } = {}) {
     if (authRestoreStatus !== "ready") {
       setStatusMessage("로그인 상태 확인이 끝난 뒤 상담 내용을 보낼 수 있습니다.");
@@ -1395,8 +1441,10 @@ export default function FrontendAppShell({
     setStatusMessage("상담 내용을 정리하고 있습니다.");
     setSubmittedQuestion(displayText);
 
+    let effectiveAuthSessionId = requestContext.authSessionId || authSessionId;
+    let effectiveIdentity = requestContext.identity || identity;
     let followupLoginState = null;
-    if (!authSessionId && guestDetailedReportUsed) {
+    if (!effectiveAuthSessionId && guestDetailedReportUsed) {
       setStatusMessage("비로그인 상담은 1회 리포팅까지 제공됩니다. 추가 질문은 Google 로그인 후 이어갑니다.");
       followupLoginState = await saveConversationWithGoogle({
         routeAfterSave: "chatbot",
@@ -1409,12 +1457,13 @@ export default function FrontendAppShell({
       }
     }
 
-    const effectiveAuthSessionId = followupLoginState?.authSessionId || authSessionId;
-    const effectiveIdentity = followupLoginState?.identity || identity;
+    effectiveAuthSessionId = followupLoginState?.authSessionId || effectiveAuthSessionId;
+    effectiveIdentity = followupLoginState?.identity || effectiveIdentity;
+    const requestedSessionId = requestContext.sessionId || sessionId;
     const guestSessionResult =
-      followupLoginState?.sessionId || sessionId ? null : await ensureGuestSession("chatbot");
+      followupLoginState?.sessionId || requestedSessionId ? null : await ensureGuestSession("chatbot");
     const activeSession =
-      followupLoginState?.sessionId || sessionId || guestSessionResult?.sessionId || "";
+      followupLoginState?.sessionId || requestedSessionId || guestSessionResult?.sessionId || "";
     if (!activeSession) {
       setQuestion(trimmedQuestion);
       setSubmittedQuestion("");
@@ -1422,10 +1471,18 @@ export default function FrontendAppShell({
       setStatusMessage("상담 세션을 준비하지 못했습니다. 입력 내용은 유지되며 다시 시도할 수 있습니다.");
       return;
     }
-    const activeGuestId = followupLoginState?.guestId || guestId || guestSessionResult?.guestId || "";
+    const activeGuestId =
+      followupLoginState?.guestId
+      || requestContext.guestId
+      || guestId
+      || guestSessionResult?.guestId
+      || "";
     const activeGuestCredential = followupLoginState
       ? followupLoginState.guestCredential || ""
-      : guestCredential || guestSessionResult?.guestCredential || "";
+      : requestContext.guestCredential ?? guestCredential ?? guestSessionResult?.guestCredential ?? "";
+    const activeAttachments = Array.isArray(requestContext.attachments)
+      ? requestContext.attachments
+      : registeredAttachments;
     const nextUserMessage = { role: "user", content: displayText };
     const conversationHistory = [...chatMessages, nextUserMessage].map((message) => ({
       role: message.role,
@@ -1454,7 +1511,7 @@ export default function FrontendAppShell({
         authSessionId: effectiveAuthSessionId,
       };
       logDeveloperDiagnostic("chat.submit", {
-        attachmentCount: registeredAttachments.length,
+        attachmentCount: activeAttachments.length,
         authenticated: Boolean(effectiveAuthSessionId),
         executionMode,
         sessionId: activeSession,
@@ -1472,7 +1529,7 @@ export default function FrontendAppShell({
           attachmentClassificationConfirmation || undefined,
         execution_mode: executionMode,
         conversation_history: requestConversationHistory,
-        attachments: registeredAttachments.map((attachment) => ({
+        attachments: activeAttachments.map((attachment) => ({
           attachment_id: attachment.attachment_id,
           purpose: attachment.purpose,
           type: attachment.type,
@@ -1491,7 +1548,7 @@ export default function FrontendAppShell({
         const stored = readStoredAuthSession();
         setSessionId(submission.sessionId);
         persistAuthSession({
-          accessToken: activeAuthToken,
+          accessToken: effectiveIdentity.authToken || activeAuthToken,
           authSessionId: effectiveAuthSessionId,
           guestId: activeGuestId,
           guestCredential: activeGuestCredential,
