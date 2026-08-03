@@ -113,6 +113,26 @@ def resolve_confirmed_attachment_classification(
         }
 
 
+def confirmed_attachment_classification_handoff(
+    uploaded_file: UploadedFile,
+) -> dict[str, str]:
+    """Return the narrow current confirmation needed by later attachment turns."""
+
+    metadata = dict(uploaded_file.metadata or {})
+    record = metadata.get(CLASSIFICATION_RECORD_KEY)
+    snapshot_sha256 = _current_snapshot_sha256(metadata)
+    if (
+        not _is_confirmable_current_record(record, snapshot_sha256)
+        or not str(record.get("confirmed_at") or "").strip()
+    ):
+        return {}
+    return {
+        "source": "server_record",
+        "classification": str(record["classification"]),
+        "confidence_band": str(record["confidence_band"]),
+    }
+
+
 def _classification_record(
     *,
     snapshot_sha256: str,

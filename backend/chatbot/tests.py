@@ -4419,3 +4419,43 @@ class AttachmentClassificationPersistenceTests(TestCase):
             )
         self.assertEqual(raised.exception.code, "classification_stale_or_unavailable")
 
+    def test_confirmed_handoff_exposes_only_current_server_record(self):
+        from chatbot.attachment_classification_service import (
+            confirmed_attachment_classification_handoff,
+            persist_attachment_document_classification,
+            resolve_confirmed_attachment_classification,
+        )
+
+        persist_attachment_document_classification(
+            attachment_id=self.upload.attachment_id,
+            storage_uri=self.upload.storage_uri,
+            execution_id="exec_handoff",
+            structured_result={
+                "classification": "fine_notice",
+                "confidence_band": "medium",
+                "requires_confirmation": True,
+            },
+        )
+        self.upload.refresh_from_db()
+        self.assertEqual(confirmed_attachment_classification_handoff(self.upload), {})
+
+        resolve_confirmed_attachment_classification(
+            session_id=self.session.session_id,
+            attachment_id=self.upload.attachment_id,
+        )
+        self.upload.refresh_from_db()
+        self.assertEqual(
+            confirmed_attachment_classification_handoff(self.upload),
+            {
+                "source": "server_record",
+                "classification": "fine_notice",
+                "confidence_band": "medium",
+            },
+        )
+
+        self.upload.metadata["object_storage_write"] = {
+            "snapshot_sha256": "snapshot-next"
+        }
+        self.upload.save(update_fields=["metadata", "updated_at"])
+        self.assertEqual(confirmed_attachment_classification_handoff(self.upload), {})
+

@@ -14,6 +14,7 @@ from django.utils import timezone
 from app.services.google_auth_service import issue_access_token
 from chatbot.attachment_classification_service import (
     persist_attachment_document_classification,
+    resolve_confirmed_attachment_classification,
 )
 from chatbot.file_scan_service import process_uploaded_file_scans
 from chatbot.models import AuthSession, AuthSessionStatus, UploadedFile, UserAccount
@@ -111,7 +112,12 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
         )
         captured: dict = {}
 
-        def submit_fixture(payload: dict, *, routing_intent_override: str = "") -> dict:
+        def submit_fixture(
+            payload: dict,
+            *,
+            routing_intent_override: str = "",
+            **_kwargs,
+        ) -> dict:
             captured["payload"] = payload
             captured["routing_intent_override"] = routing_intent_override
             return {
@@ -216,6 +222,79 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
             "required",
         )
         self.assertNotIn("storage_uri", repr(result["attachment_processing"]))
+
+    def test_confirmed_classification_is_rehydrated_for_later_ocr_confirmation(
+        self,
+    ) -> None:
+        session_id, attachment_id = self._upload_clean_photo()
+        uploaded_file = UploadedFile.objects.get(attachment_id=attachment_id)
+        persist_attachment_document_classification(
+            attachment_id=attachment_id,
+            storage_uri=uploaded_file.storage_uri,
+            execution_id="exec_fine_notice_rehydration",
+            structured_result={
+                "classification": "fine_notice",
+                "confidence_band": "high",
+                "requires_confirmation": True,
+            },
+        )
+        resolve_confirmed_attachment_classification(
+            session_id=session_id,
+            attachment_id=attachment_id,
+        )
+        captured: dict = {}
+
+        def submit_fixture(
+            payload: dict,
+            *,
+            routing_intent_override: str = "",
+            **_kwargs,
+        ) -> dict:
+            captured["payload"] = payload
+            captured["routing_intent_override"] = routing_intent_override
+            return {
+                "contract_version": "chat_message_accepted.v2",
+                "session_id": session_id,
+                "message_id": "msg_ocr_confirmation_followup",
+                "routing_intent": "fine_notice_analysis",
+                "status": "scope_guidance",
+                "analysis_plan": {"contract_version": "analysis_plan.v2", "steps": []},
+            }
+
+        with patch("chatbot.views.submit_message", side_effect=submit_fixture):
+            response = self.client.post(
+                "/api/chat/messages/",
+                data={
+                    "session_id": session_id,
+                    "user_text": "OCR 추출값을 확인했습니다. 후속 절차를 진행해 주세요.",
+                    "attachments": [{"attachment_id": attachment_id}],
+                    "ocr_confirmation": {
+                        "confirmed": True,
+                        "fields": {
+                            "fine_type": "과태료",
+                            "notice_stage": "사전통지",
+                        },
+                    },
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        confirmed_attachment = next(
+            item
+            for item in captured["payload"]["attachments"]
+            if item["attachment_id"] == attachment_id
+        )
+        self.assertEqual(
+            confirmed_attachment["classification_confirmation"],
+            {
+                "source": "server_record",
+                "classification": "fine_notice",
+                "confidence_band": "high",
+            },
+        )
+        self.assertNotIn("scan_snapshot_sha256", repr(confirmed_attachment))
+        self.assertNotIn("execution_id", repr(confirmed_attachment))
 
     def test_stale_confirmation_fails_closed_before_planning(self) -> None:
         session_id, attachment_id = self._upload_clean_photo()
