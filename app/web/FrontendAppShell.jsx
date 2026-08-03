@@ -37,6 +37,8 @@ import {
   buildConsultationMessagePair,
   buildConsultationRequestContext,
   createEmptyConsultationIntake,
+  hasPendingConsultationQuestion,
+  selectConsultationTransportText,
 } from "./consultationIntake.js";
 import { buildTrafficAccidentOcrUi } from "./trafficAccidentOcrPresentation.js";
 import {
@@ -946,6 +948,7 @@ export default function FrontendAppShell({
             startAnalysis: ({ attachment: readyAttachment, userText }) => (
               submitServiceMessage({
                 userText,
+                submissionKind: "service",
                 requestContext: {
                   attachments: upsertAttachment(registeredAttachments, readyAttachment),
                   authSessionId: nextIdentity.authSessionId || authSessionId,
@@ -1392,6 +1395,7 @@ export default function FrontendAppShell({
     void submitServiceMessage({
       userText: followUpMessage,
       ocrConfirmation: confirmation,
+      submissionKind: "service",
     });
   }
 
@@ -1409,6 +1413,7 @@ export default function FrontendAppShell({
         confirmed: true,
         attachment_id: attachmentId,
       },
+      submissionKind: "service",
     });
   }
 
@@ -1417,6 +1422,7 @@ export default function FrontendAppShell({
     ocrConfirmation,
     attachmentClassificationConfirmation,
     requestContext = {},
+    submissionKind = "manual",
   } = {}) {
     if (authRestoreStatus !== "ready") {
       setStatusMessage("로그인 상태 확인이 끝난 뒤 상담 내용을 보낼 수 있습니다.");
@@ -1430,8 +1436,18 @@ export default function FrontendAppShell({
     const consultationRequestContext = buildConsultationRequestContext({
       intake: consultationIntake,
     });
+    const hasPendingQuestion = hasPendingConsultationQuestion({
+      pendingQuestions: responsePresentation?.pendingQuestions,
+      supervisorQuestions: supervisorState?.next_questions,
+    });
+    const transportText = selectConsultationTransportText({
+      displayText,
+      requestText: composedQuestion,
+      hasPendingQuestion,
+      submissionKind,
+    });
     const confirmationForRequest = ocrConfirmation || pendingOcrConfirmation;
-    if (!composedQuestion) {
+    if (!transportText) {
       setStatusMessage("상담 내용을 입력하거나 구조화 입력 항목을 작성해 주세요.");
       return;
     }
@@ -1490,7 +1506,7 @@ export default function FrontendAppShell({
     }));
     const requestConversationHistory = [
       ...conversationHistory.slice(0, -1),
-      { role: "user", content: composedQuestion },
+      { role: "user", content: transportText },
     ];
     const activeAuthContext = buildAuthContext({
       authState: effectiveAuthSessionId ? "authenticated" : activeGuestId ? "guest" : "anonymous",
@@ -1520,7 +1536,7 @@ export default function FrontendAppShell({
         session_id: activeSession,
         auth_context: activeAuthContext,
         conversation_save_state: effectiveAuthSessionId ? "saved" : "pending",
-        user_text: composedQuestion,
+        user_text: transportText,
         consultation_type: consultationRequestContext.consultation_type || undefined,
         facts: consultationRequestContext.facts,
         fine_notice_slots: consultationRequestContext.fine_notice_slots,
