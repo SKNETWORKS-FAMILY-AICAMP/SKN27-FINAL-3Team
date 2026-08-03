@@ -95,6 +95,83 @@ test("reports storage write failure instead of silently claiming persistence", (
   }
 });
 
+test("falls back to same-tab session storage when persistent storage is unavailable", () => {
+  const sessionStorage = new Map();
+  global.window = {
+    localStorage: {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("persistent storage unavailable");
+      },
+      removeItem: () => {
+        throw new Error("persistent storage unavailable");
+      },
+    },
+    sessionStorage: {
+      getItem: (key) => sessionStorage.get(key) ?? null,
+      setItem: (key, value) => sessionStorage.set(key, String(value)),
+      removeItem: (key) => sessionStorage.delete(key),
+    },
+  };
+  try {
+    const result = authSession.persistAuthSession({
+      accessToken: "private-token",
+      authSessionId: "auth_private",
+      sessionId: "ses_current",
+      googleProfile: { email: "private@example.com" },
+    });
+
+    assert.equal(result.status, "persisted");
+    assert.equal(result.authenticated_tuple_complete, true);
+    assert.equal(authSession.readStoredAuthToken(), "private-token");
+
+    authSession.clearStoredAuthSession();
+    assert.equal(authSession.readStoredAuthToken(), "");
+    assert.equal(sessionStorage.size, 0);
+  } finally {
+    delete global.window;
+  }
+});
+
+test("prefers the current tab session mirror over stale persistent authentication", () => {
+  const localStorage = new Map([
+    [
+      authSession.AUTH_SESSION_STORAGE_KEY,
+      JSON.stringify({ access_token: "stale-token", auth_session_id: "auth_stale" }),
+    ],
+  ]);
+  const sessionStorage = new Map([
+    [
+      authSession.AUTH_SESSION_STORAGE_KEY,
+      JSON.stringify({ access_token: "fresh-token", auth_session_id: "auth_fresh" }),
+    ],
+  ]);
+  global.window = {
+    localStorage: {
+      getItem: (key) => localStorage.get(key) ?? null,
+      setItem: (key, value) => localStorage.set(key, String(value)),
+      removeItem: (key) => localStorage.delete(key),
+    },
+    sessionStorage: {
+      getItem: (key) => sessionStorage.get(key) ?? null,
+      setItem: (key, value) => sessionStorage.set(key, String(value)),
+      removeItem: (key) => sessionStorage.delete(key),
+    },
+  };
+  try {
+    assert.deepEqual(authSession.readStoredAuthSession(), {
+      guest_id: null,
+      guest_credential: null,
+      auth_session_id: "auth_fresh",
+      user_id: null,
+      session_id: null,
+      access_token: "fresh-token",
+    });
+  } finally {
+    delete global.window;
+  }
+});
+
 test("reports an incomplete authenticated tuple when storage read-back drops a field", () => {
   const storage = new Map();
   global.window = {
