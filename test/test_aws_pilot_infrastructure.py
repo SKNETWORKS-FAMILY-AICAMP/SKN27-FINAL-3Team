@@ -5,6 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -293,6 +294,109 @@ def test_deploy_resolves_aws_vision_terraform_outputs_before_ssm() -> None:
     assert "$runtimeEnv = Set-AwsVisionRuntimeValues" in deploy
     assert deploy.index("$runtimeEnv = Set-AwsVisionRuntimeValues") < deploy.index(
         "aws ssm put-parameter"
+    )
+
+
+def test_non_aws_vision_runtime_is_unchanged() -> None:
+    content = "VISION_RUNTIME_PROVIDER=runpod\nRUNPOD_VISION_ENDPOINT_ID=endpoint-1\n"
+    completed = _run_vision_runtime(content, provider="runpod")
+
+    assert _decoded_vision_runtime(completed) == content
+
+
+@pytest.mark.parametrize(
+    ("overrides", "error_fragment"),
+    (
+        ({"queue_url": "http://sqs.invalid/not-fifo"}, "HTTPS FIFO queue URL"),
+        ({"result_bucket": ""}, "result bucket"),
+        ({"worker_instance_id": ""}, "worker instance ID"),
+        ({"worker_repository_url": ""}, "worker ECR repository URL"),
+    ),
+)
+def test_aws_vision_runtime_rejects_missing_or_malformed_worker_outputs(
+    overrides: dict[str, str],
+    error_fragment: str,
+) -> None:
+    parameters = {
+        "provider": "aws_queue",
+        "queue_url": (
+            "https://sqs.ap-northeast-2.amazonaws.com/"
+            "123456789012/skn27-vision.fifo"
+        ),
+        "result_bucket": "skn27-clean-results",
+        "worker_instance_id": "i-0123456789abcdef0",
+        "worker_repository_url": (
+            "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/"
+            "skn27/vision-worker"
+        ),
+    }
+    parameters.update(overrides)
+    content = "\n".join(
+        (
+            "VISION_RUNTIME_PROVIDER=aws_queue",
+            "AWS_VISION_QUEUE_URL=",
+            "AWS_VISION_RESULT_BUCKET=",
+            "AWS_VISION_RESULT_PREFIX=vision/aws-queue/v1",
+            "AWS_VISION_TIMEOUT_SECONDS=900",
+            "AWS_VISION_POLL_INTERVAL_SECONDS=2",
+            "",
+        )
+    )
+
+    completed = _run_vision_runtime(content, **parameters)
+
+    assert completed.returncode != 0
+    assert error_fragment in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    (
+        ("AWS_VISION_TIMEOUT_SECONDS", "0"),
+        ("AWS_VISION_POLL_INTERVAL_SECONDS", "-1"),
+        ("AWS_VISION_TIMEOUT_SECONDS", "not-a-number"),
+    ),
+)
+def test_aws_vision_runtime_rejects_non_positive_polling_values(
+    name: str,
+    value: str,
+) -> None:
+    content = "\n".join(
+        (
+            "VISION_RUNTIME_PROVIDER=aws_queue",
+            "AWS_VISION_QUEUE_URL=",
+            "AWS_VISION_RESULT_BUCKET=",
+            "AWS_VISION_RESULT_PREFIX=vision/aws-queue/v1",
+            (
+                "AWS_VISION_TIMEOUT_SECONDS="
+                f"{value if name == 'AWS_VISION_TIMEOUT_SECONDS' else '900'}"
+            ),
+            (
+                "AWS_VISION_POLL_INTERVAL_SECONDS="
+                f"{value if name == 'AWS_VISION_POLL_INTERVAL_SECONDS' else '2'}"
+            ),
+            "",
+        )
+    )
+    completed = _run_vision_runtime(
+        content,
+        provider="aws_queue",
+        queue_url=(
+            "https://sqs.ap-northeast-2.amazonaws.com/"
+            "123456789012/skn27-vision.fifo"
+        ),
+        result_bucket="skn27-clean-results",
+        worker_instance_id="i-0123456789abcdef0",
+        worker_repository_url=(
+            "123456789012.dkr.ecr.ap-northeast-2.amazonaws.com/"
+            "skn27/vision-worker"
+        ),
+    )
+
+    assert completed.returncode != 0
+    assert (
+        f"AWS Vision runtime value '{name}' must be a positive number."
+        in completed.stderr
     )
 
 
