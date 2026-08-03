@@ -4,6 +4,14 @@ set -euo pipefail
 command -v docker >/dev/null
 command -v nvidia-smi >/dev/null
 
+test -f '${checkpoint_path}/config.json'
+if ! test -f '${checkpoint_path}/model.safetensors' && \
+   ! test -f '${checkpoint_path}/pytorch_model.bin'; then
+  echo 'Prepared VideoMAE checkpoint weights are missing.' >&2
+  exit 1
+fi
+test -d /vision-volume/huggingface/hub
+
 aws ecr get-login-password --region '${aws_region}' \
   | docker login --username AWS --password-stdin '${ecr_registry}'
 docker pull '${image_uri}'
@@ -12,6 +20,7 @@ docker run -d \
   --name skn27-vision-worker \
   --restart unless-stopped \
   --gpus all \
+  --mount type=bind,source=/vision-volume,target=/vision-volume,readonly \
   --log-driver awslogs \
   --log-opt awslogs-region='${aws_region}' \
   --log-opt awslogs-group='${log_group_name}' \
@@ -22,5 +31,7 @@ docker run -d \
   -e VISION_TRAINED_CLASSIFIER_CHECKPOINT='${checkpoint_path}' \
   -e VISION_QWEN_MODEL_ID='${qwen_model_id}' \
   -e HF_HOME='/vision-volume/huggingface' \
+  -e HF_HUB_OFFLINE='1' \
+  -e TRANSFORMERS_OFFLINE='1' \
   -e RUNPOD_VISION_ALLOWED_HOSTS='${allowed_hosts}' \
   '${image_uri}'
