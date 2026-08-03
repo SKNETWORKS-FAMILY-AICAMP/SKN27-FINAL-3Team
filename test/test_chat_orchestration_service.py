@@ -1002,6 +1002,30 @@ def test_e2e_3_requests_every_required_fine_notice_slot() -> None:
     ]
 
 
+def test_observed_browser_fine_notice_sentence_does_not_repeat_attachment_question() -> None:
+    response = submit_message(
+        {
+            "session_id": "ses_observed_browser_notice",
+            "user_text": (
+                "과태료 사전통지서고 서울시에서 발급했습니다. "
+                "의견제출 기한은 2026-08-12이며 고지서 첨부가 가능합니다."
+            ),
+        }
+    )
+
+    assert set(response["fine_notice_intake"]["slots"]) == {
+        "document_disposition_type",
+        "issuing_authority",
+        "response_deadline",
+        "attachment_available",
+    }
+    assert response["fine_notice_intake"]["missing_fields"] == []
+    assert not any(
+        item["field"] == "attachment_available"
+        for item in response["pending_questions"]
+    )
+
+
 def test_verified_law_result_keeps_missing_fine_notice_slot_questions() -> None:
     fine_notice_intake = {
         "contract_version": "fine_notice_intake.v1",

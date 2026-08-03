@@ -256,7 +256,15 @@
       "token_class": "state",
       "canonical_expression": "첨부 가능",
       "expressions": ["첨부 가능"],
-      "aliases": ["첨부도 가능", "문서 첨부도 가능"],
+      "aliases": [
+        "첨부도 가능",
+        "문서 첨부도 가능",
+        "첨부가 가능",
+        "고지서 첨부 가능",
+        "고지서 첨부가 가능",
+        "파일 첨부 가능",
+        "파일 첨부가 가능"
+      ],
       "approved_typos": [],
       "decision": "auto_applied",
       "routing_intent": "fine_notice_procedure"
