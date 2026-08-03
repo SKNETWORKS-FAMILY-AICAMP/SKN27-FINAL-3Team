@@ -142,7 +142,13 @@ _PUBLIC_PROGRESS_SNAPSHOT_FIELDS = (
     "updated_at",
     "source_tables",
 )
-_PUBLIC_ATTACHMENT_FIELDS = ("attachment_id", "purpose", "filename", "scan_status")
+_PUBLIC_ATTACHMENT_FIELDS = (
+    "attachment_id",
+    "purpose",
+    "filename",
+    "status",
+    "scan_status",
+)
 _PUBLIC_ATTACHMENT_WORKFLOW_FIELDS = (
     "contract_version",
     "attachment_id",

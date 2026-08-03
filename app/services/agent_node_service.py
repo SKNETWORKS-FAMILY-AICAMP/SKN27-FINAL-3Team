@@ -985,8 +985,16 @@ def _agent_context(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, A
     if node.get("node_code") != "law_ground_search":
         return context
 
-    query_context = context.get("query") if isinstance(context.get("query"), dict) else {}
+    query_context = (
+        dict(context.get("query"))
+        if isinstance(context.get("query"), dict)
+        else {}
+    )
+    law_code = _law_ground_law_code(payload)
     if query_context.get("raw_text") or query_context.get("search_query"):
+        if law_code and not query_context.get("law_code"):
+            query_context["law_code"] = law_code
+            context["query"] = query_context
         return context
 
     query = _law_ground_query(payload)
@@ -994,6 +1002,7 @@ def _agent_context(payload: dict[str, Any], node: dict[str, Any]) -> dict[str, A
         context["query"] = {
             "raw_text": query,
             "search_query": query,
+            **({"law_code": law_code} if law_code else {}),
         }
     return context
 
@@ -2616,22 +2625,45 @@ def _law_ground_query(payload: dict[str, Any]) -> str:
     if direct_query:
         return str(direct_query)
 
+    package_payload = _law_ground_package_payload(payload)
+    query = package_payload.get("search_query") or package_payload.get("violation_text")
+    if query:
+        return str(query)
+
+    return str(payload.get("user_text") or "")
+
+
+def _law_ground_law_code(payload: dict[str, Any]) -> str:
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    query_context = context.get("query") if isinstance(context.get("query"), dict) else {}
+    agent_input = payload.get("agent_input") if isinstance(payload.get("agent_input"), dict) else {}
+    package_payload = _law_ground_package_payload(payload)
+    return str(
+        query_context.get("law_code")
+        or payload.get("law_code")
+        or agent_input.get("law_code")
+        or package_payload.get("law_code")
+        or ""
+    ).strip()
+
+
+def _law_ground_package_payload(payload: dict[str, Any]) -> dict[str, Any]:
     context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
     supervisor = (
         context.get("supervisor_handoff")
         if isinstance(context.get("supervisor_handoff"), dict)
         else {}
     )
-    packages = supervisor.get("agent_input_packages") if isinstance(supervisor.get("agent_input_packages"), list) else []
+    packages = (
+        supervisor.get("agent_input_packages")
+        if isinstance(supervisor.get("agent_input_packages"), list)
+        else []
+    )
     for package in packages:
         if not isinstance(package, dict) or package.get("node_code") != "law_ground_search":
             continue
-        package_payload = package.get("payload") if isinstance(package.get("payload"), dict) else {}
-        query = package_payload.get("search_query") or package_payload.get("violation_text")
-        if query:
-            return str(query)
-
-    return str(payload.get("user_text") or "")
+        return package.get("payload") if isinstance(package.get("payload"), dict) else {}
+    return {}
 
 
 def _attachment_purposes(payload: dict[str, Any]) -> list[str]:

@@ -1235,20 +1235,38 @@ def _apply_ocr_confirmation_to_supervisor_state(
         if str(attachment.get("attachment_id") or "").strip()
     ]
     existing_codes = {str(package.get("node_code") or "") for package in packages}
+    confirmed_fields = (
+        ocr_confirmation.get("fields")
+        if isinstance(ocr_confirmation.get("fields"), dict)
+        else {}
+    )
+    law_code = str(confirmed_fields.get("law_code") or "").strip()
+    violation_text = str(confirmed_fields.get("violation_text") or "").strip()
+    law_search_query = " ".join(
+        value for value in (law_code, violation_text) if value
+    )
     for node_code in ("law_ground_search", "appeal_decision_flow"):
         if node_code in existing_codes:
             continue
+        package_payload = {
+            "user_text": user_text,
+            "attachments": attachment_selectors,
+            "slot_state": slot_state,
+        }
+        if node_code == "law_ground_search":
+            if law_code:
+                package_payload["law_code"] = law_code
+            if law_search_query:
+                package_payload["search_query"] = law_search_query
+            if violation_text:
+                package_payload["violation_text"] = violation_text
         packages.append(
             {
                 "schema_version": "agent_input_schema.v1",
                 "node_code": node_code,
                 "status": "ready",
                 "required_inputs": ["user_text|attachments"],
-                "payload": {
-                    "user_text": user_text,
-                    "attachments": attachment_selectors,
-                    "slot_state": slot_state,
-                },
+                "payload": package_payload,
             }
         )
     enriched_packages: list[dict[str, Any]] = []

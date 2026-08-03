@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pollWorkerResult } from "./workerPolling.js";
+import {
+  DEFAULT_WORKER_POLL_INTERVAL_MS,
+  DEFAULT_WORKER_POLL_MAX_ATTEMPTS,
+  pollWorkerResult,
+} from "./workerPolling.js";
 
 
 function result(semanticStatus, extra = {}) {
@@ -21,6 +25,13 @@ function result(semanticStatus, extra = {}) {
     ...extra,
   };
 }
+
+
+test("default poll budget covers a 90 second worker run", () => {
+  assert.ok(
+    DEFAULT_WORKER_POLL_INTERVAL_MS * DEFAULT_WORKER_POLL_MAX_ATTEMPTS >= 90_000
+  );
+});
 
 
 test("polls queued and running states until semantic success", async () => {

@@ -1,6 +1,10 @@
 import { buildAnalysisProgressUi } from "./analysisProgressUi.js";
 
 
+export const DEFAULT_WORKER_POLL_INTERVAL_MS = 500;
+export const DEFAULT_WORKER_POLL_MAX_ATTEMPTS = 180;
+
+
 const EXHAUSTED_NOTICE = {
   contract_version: "worker_polling_notice.v1",
   status: "delayed",

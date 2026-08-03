@@ -124,6 +124,18 @@ test("quick examples live quietly inside the empty conversation state", () => {
   assert.doesNotMatch(emptyState, /onSubmit/);
 });
 
+test("empty consultation labels the active authentication state", () => {
+  const emptyState = shell.slice(
+    shell.indexOf('className="chat-empty-state"'),
+    shell.indexOf('<div className="chat-input">'),
+  );
+
+  assert.match(
+    emptyState,
+    /\{isAuthenticated \? "로그인 상담 중" : "비회원으로 상담 중"\}/,
+  );
+});
+
 test("quick example disclosure uses a compact borderless hierarchy", () => {
   const compactStyles = styles.slice(styles.lastIndexOf("/* Compact quick examples */"));
 

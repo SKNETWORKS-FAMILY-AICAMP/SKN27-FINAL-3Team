@@ -66,10 +66,18 @@ export function hydrateResumeManifest(manifest) {
 
   const sessionId = String(manifest.session.session_id).trim();
   const pendingQuestions = projectPendingQuestions(manifest.pending_questions);
-  const chatMessages = projectMessages(manifest.conversation_messages, pendingQuestions);
-  const registeredAttachments = projectList(manifest.attachments, ATTACHMENT_FIELDS, "attachment_id");
-  const reportList = projectList(manifest.reports, REPORT_FIELDS, "report_id");
+  let chatMessages = projectMessages(manifest.conversation_messages, pendingQuestions);
   const analysis = projectObject(manifest.latest_analysis, ANALYSIS_FIELDS);
+  const registeredAttachments = mergeProjectedLists(
+    projectList(manifest.attachments, ATTACHMENT_FIELDS, "attachment_id"),
+    projectList(analysis.attachments, ATTACHMENT_FIELDS, "attachment_id"),
+    "attachment_id"
+  );
+  const reportList = mergeProjectedLists(
+    projectList(manifest.reports, REPORT_FIELDS, "report_id"),
+    projectList(analysis.reports, REPORT_FIELDS, "report_id"),
+    "report_id"
+  );
   const analysisResponse = analysis.job_id
     ? {
         ...analysis,
@@ -83,6 +91,7 @@ export function hydrateResumeManifest(manifest) {
         },
       }
     : null;
+  chatMessages = appendLatestAssistantMessage(chatMessages, analysis);
 
   return {
     hasResume: true,
@@ -94,6 +103,37 @@ export function hydrateResumeManifest(manifest) {
     reportList,
     currentReport: reportList.length ? toCurrentReport(reportList[0], analysisResponse) : null,
   };
+}
+
+function mergeProjectedLists(baseItems, latestItems, key) {
+  const merged = new Map();
+  for (const item of [...baseItems, ...latestItems]) {
+    const itemKey = String(item?.[key] || "").trim();
+    if (!itemKey) continue;
+    merged.set(itemKey, { ...(merged.get(itemKey) || {}), ...item });
+  }
+  return [...merged.values()];
+}
+
+function appendLatestAssistantMessage(messages, analysis) {
+  const content = assistantMessageText(
+    analysis.assistant_message_payload || analysis.assistant_message
+  );
+  if (!content) return messages;
+  if (messages.some((message) => message.role === "assistant" && message.content === content)) {
+    return messages;
+  }
+  return [...messages, { role: "assistant", content, status: "saved" }];
+}
+
+function assistantMessageText(value) {
+  if (typeof value === "string") return value.trim();
+  if (!isRecord(value)) return "";
+  for (const field of ["answer", "core_answer", "summary"]) {
+    const content = String(value[field] || "").trim();
+    if (content) return content;
+  }
+  return "";
 }
 
 function emptyResumeState() {

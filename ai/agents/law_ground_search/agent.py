@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from datetime import datetime
 from typing import Any, Protocol
 from .query_understanding import process_query
@@ -7,6 +8,8 @@ from .search import search_law_provisions, evaluate_confidence
 from .rule_guard import validate_input_envelope, validate_and_filter_provisions
 
 logger = logging.getLogger(__name__)
+
+_LAW_CODE_ARTICLE_PATTERN = re.compile(r"^\s*(?P<law_name>.+?)\s+제\s*\d+\s*조")
 
 class LLMExtractor(Protocol):
     def extract_legal_keywords(self, text: str) -> list[str]: ...
@@ -94,6 +97,14 @@ def run_law_ground_search(
         scope=scope,
         neo4j_session=session
     )
+    raw_provisions, excluded_source_count = _filter_confirmed_law_sources(
+        raw_provisions,
+        law_code=query_data.get("law_code"),
+    )
+    if excluded_source_count:
+        output["limitations"].append(
+            f"확인된 법령명과 일치하지 않는 검색 결과 {excluded_source_count}건을 제외했습니다."
+        )
 
     # 4. Confidence Evaluation & LLM Fallback
     conf_res = evaluate_confidence(raw_provisions)
@@ -114,6 +125,14 @@ def run_law_ground_search(
                     scope=scope,
                     neo4j_session=session
                 )
+                raw_provisions, fallback_excluded_count = _filter_confirmed_law_sources(
+                    raw_provisions,
+                    law_code=query_data.get("law_code"),
+                )
+                if fallback_excluded_count and not excluded_source_count:
+                    output["limitations"].append(
+                        f"확인된 법령명과 일치하지 않는 검색 결과 {fallback_excluded_count}건을 제외했습니다."
+                    )
 
     # 5. Rule Guard 필터링
     valid_provisions, limitations = validate_and_filter_provisions(raw_provisions, scope)
@@ -197,6 +216,35 @@ def run_law_ground_search(
         session.close()
 
     return output
+
+
+def _filter_confirmed_law_sources(
+    provisions: list[dict[str, Any]],
+    *,
+    law_code: Any,
+) -> tuple[list[dict[str, Any]], int]:
+    expected_law_name = _law_name_from_code(law_code)
+    if not expected_law_name:
+        return provisions, 0
+
+    filtered = [
+        provision
+        for provision in provisions
+        if _normalized_law_name(provision.get("source_name")) == expected_law_name
+    ]
+    return filtered, len(provisions) - len(filtered)
+
+
+def _law_name_from_code(value: Any) -> str:
+    text = str(value or "").strip()
+    match = _LAW_CODE_ARTICLE_PATTERN.match(text)
+    if not match:
+        return ""
+    return _normalized_law_name(match.group("law_name"))
+
+
+def _normalized_law_name(value: Any) -> str:
+    return " ".join(str(value or "").split())
 
 def _init_output(agent_input: dict) -> dict:
     return {
