@@ -546,38 +546,68 @@ export function clearStoredAuthSession() {
 }
 
 export function readStoredValue(key) {
-  if (typeof window === "undefined") {
-    return null;
+  for (const storage of browserStorageCandidates()) {
+    try {
+      const value = storage.getItem(key);
+      if (value) {
+        return value;
+      }
+    } catch (_error) {
+      // Continue to the next same-origin browser storage backend.
+    }
   }
-  try {
-    return window.localStorage.getItem(key);
-  } catch (_error) {
-    return null;
-  }
+  return null;
 }
 
 export function writeStoredValue(key, value) {
   if (typeof window === "undefined" || !value) {
     return false;
   }
-  try {
-    window.localStorage.setItem(key, value);
-    return true;
-  } catch (_error) {
-    return false;
+  let writeSucceeded = false;
+  for (const storage of browserStorageCandidates()) {
+    try {
+      storage.setItem(key, value);
+      writeSucceeded = true;
+    } catch (_error) {
+      // A same-tab session mirror still preserves reload continuity when
+      // persistent storage is unavailable or rejected by browser policy.
+    }
   }
+  return writeSucceeded;
 }
 
 export function removeStoredValue(key) {
   if (typeof window === "undefined") {
     return false;
   }
-  try {
-    window.localStorage.removeItem(key);
-    return true;
-  } catch (_error) {
-    return false;
+  let removalSucceeded = false;
+  for (const storage of browserStorageCandidates()) {
+    try {
+      storage.removeItem(key);
+      removalSucceeded = true;
+    } catch (_error) {
+      // Continue clearing any other available browser storage backend.
+    }
   }
+  return removalSucceeded;
+}
+
+function browserStorageCandidates() {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  const candidates = [];
+  for (const name of ["sessionStorage", "localStorage"]) {
+    try {
+      const storage = window[name];
+      if (storage) {
+        candidates.push(storage);
+      }
+    } catch (_error) {
+      // Browser policy may reject access to one backend while allowing another.
+    }
+  }
+  return candidates;
 }
 
 export function readStoredJson(key) {
