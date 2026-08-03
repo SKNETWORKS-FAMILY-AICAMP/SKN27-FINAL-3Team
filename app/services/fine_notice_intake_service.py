@@ -66,7 +66,7 @@ def reduce_fine_notice_intake(payload: Mapping[str, Any]) -> dict[str, Any]:
     for field in FINE_NOTICE_REQUIRED_SLOTS[:-1]:
         if field in slots:
             continue
-        value = _slot_value(field, confirmed_fields.get(field))
+        value = _confirmed_ocr_slot_value(field, confirmed_fields)
         if value is None:
             continue
         slots[field] = _slot_record(
@@ -183,6 +183,27 @@ def _slot_record(
         "confidence": 1.0,
         "confirmed": True,
     }
+
+
+def _confirmed_ocr_slot_value(
+    field: str,
+    confirmed_fields: Mapping[str, Any],
+) -> str | bool | None:
+    direct = _slot_value(field, confirmed_fields.get(field))
+    if direct is not None:
+        return direct
+    if field == "response_deadline":
+        return _slot_value(field, confirmed_fields.get("opinion_deadline"))
+    if field != "document_disposition_type":
+        return None
+
+    fine_type = str(confirmed_fields.get("fine_type") or "").strip()
+    notice_stage = str(confirmed_fields.get("notice_stage") or "").strip()
+    if not fine_type:
+        return _slot_value(field, notice_stage)
+    if notice_stage and notice_stage not in fine_type:
+        fine_type = f"{fine_type} {notice_stage}"
+    return _slot_value(field, fine_type)
 
 
 def _pending_question_field(value: Any) -> str:

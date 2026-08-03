@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -33,6 +34,24 @@ _OCR_CONFIRMATION_FIELDS = frozenset(
     }
 )
 _OCR_CONFIRMATION_REQUIRED_FIELDS = frozenset({"fine_type", "notice_stage"})
+_REPORT_USER_FACT_MARKERS = (
+    "당시",
+    "표지판",
+    "식별",
+    "안전",
+    "잠시",
+    "불가피",
+    "응급",
+    "병원",
+    "고장",
+    "비상",
+    "피하기 위해",
+    "때문",
+    "사유로",
+    "상황은",
+    "실제로",
+)
+_MAX_REPORT_USER_FACTS_LENGTH = 2000
 
 
 def merge_chat_followup_payload(
@@ -155,6 +174,47 @@ def followup_routing_intent(stored_state: dict[str, Any] | None) -> str:
 
     state = _valid_state(stored_state)
     return _text(state.get("routing_intent")) if state else ""
+
+
+def resolve_confirmed_report_user_facts(
+    stored_state: dict[str, Any] | None,
+    payload: dict[str, Any],
+    *,
+    current_routing_intent: str = "",
+) -> str:
+    """Return a server-curated report fact statement from the current turn.
+
+    A public request cannot inject worker context directly.  The current text
+    becomes trusted report input only when it answers a server-persisted
+    ``user_facts`` question or contains an explicit circumstance statement.
+    """
+
+    user_text = _text(payload.get("user_text"))
+    if not user_text:
+        return ""
+    state = _valid_state(stored_state)
+    if state is not None and _is_topic_switch(
+        current_routing_intent=current_routing_intent,
+        stored_routing_intent=_text(state.get("routing_intent")),
+    ):
+        return ""
+    if state is not None and any(
+        _text(item.get("field")) == "user_facts"
+        for item in _dict_list(state.get("pending_questions"))
+    ):
+        return user_text[:_MAX_REPORT_USER_FACTS_LENGTH]
+
+    sentences = [
+        part.strip()
+        for part in re.split(r"(?<=[.!?。])\s+|[\r\n]+", user_text)
+        if part.strip()
+    ]
+    explicit_facts = [
+        sentence
+        for sentence in sentences
+        if any(marker in sentence for marker in _REPORT_USER_FACT_MARKERS)
+    ]
+    return " ".join(explicit_facts)[:_MAX_REPORT_USER_FACTS_LENGTH]
 
 
 def _is_topic_switch(

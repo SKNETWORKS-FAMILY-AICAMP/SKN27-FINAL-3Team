@@ -66,6 +66,7 @@ from app.services.chat_orchestration_service import (
 from app.services.chat_session_followup_service import (
     followup_routing_intent,
     merge_chat_followup_payload,
+    resolve_confirmed_report_user_facts,
 )
 from app.services.supervisor_execution_input_service import (
     build_trusted_worker_execution_payload,
@@ -1355,16 +1356,16 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
         return classification_error
 
     stored_followup_state = None
+    current_routing_intent = route_supervisor_input(
+        str(identity_body.get("user_text") or ""),
+        [
+            item
+            for item in identity_body.get("attachments") or []
+            if isinstance(item, dict)
+        ],
+    )
     if requested_session_id and session_access is not None:
         stored_followup_state = load_chat_followup_state(requested_session_id)
-        current_routing_intent = route_supervisor_input(
-            str(identity_body.get("user_text") or ""),
-            [
-                item
-                for item in identity_body.get("attachments") or []
-                if isinstance(item, dict)
-            ],
-        )
         identity_body = merge_chat_followup_payload(
             identity_body,
             stored_followup_state,
@@ -1389,6 +1390,14 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
                 report_generation_requested(previous_user_request)
             )
 
+    confirmed_report_user_facts = resolve_confirmed_report_user_facts(
+        stored_followup_state,
+        identity_body,
+        current_routing_intent=(
+            classification_routing_intent or current_routing_intent
+        ),
+    )
+
     public_consultation_routing_intent = resolve_public_consultation_intent(
         identity_body.get("consultation_type")
     )
@@ -1404,6 +1413,7 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
                 followup_routing_intent(stored_followup_state)
                 or public_consultation_routing_intent
             ),
+            confirmed_report_user_facts=confirmed_report_user_facts,
         )
     except Exception:
         _refund_usage_safely(usage, reason="chat_planning_failed")
@@ -1481,7 +1491,15 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
     job_payload["progress_message"] = "Supervisor chat plan queued for agent worker."
     job_payload["node_execution"] = {}
     try:
-        persistence = enqueue_analysis_job_work(execution_payload, job_payload)
+        persistence = enqueue_analysis_job_work(
+            execution_payload,
+            job_payload,
+            server_execution_context=(
+                {"user_facts": confirmed_report_user_facts}
+                if confirmed_report_user_facts
+                else None
+            ),
+        )
     except Exception:
         _refund_usage_safely(usage, reason="chat_queue_failed")
         raise
