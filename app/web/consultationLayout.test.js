@@ -178,6 +178,33 @@ test("composer owns message, attachment, and accessible icon send without persis
   assert.doesNotMatch(composer, /영상은 Vision 분석/);
 });
 
+test("selected files must be uploaded before manual chat submission", () => {
+  const attachmentSelection = fullShell.slice(
+    fullShell.indexOf("function handleAttachmentFile(file)"),
+    fullShell.indexOf("function handleAttachmentDragOver(event)"),
+  );
+  const submitServiceMessage = fullShell.slice(
+    fullShell.indexOf("async function submitServiceMessage("),
+    fullShell.indexOf("async function retryLastAssistantMessage("),
+  );
+  const composer = shell.slice(
+    shell.indexOf('className="attachment-dropzone"'),
+    shell.indexOf("{capabilityError &&"),
+  );
+
+  assert.match(attachmentSelection, /파일이 선택되었습니다\. ‘업로드 시작’을 눌러 주세요\./);
+  assert.doesNotMatch(attachmentSelection, /대기열에 연결했습니다/);
+  assert.match(submitServiceMessage, /submissionKind === "manual"/);
+  assert.match(submitServiceMessage, /selectedUploadFile \|\| isRegisteringAttachment/);
+  assert.match(submitServiceMessage, /파일 업로드를 완료한 뒤 상담 내용을 보낼 수 있습니다\./);
+  assert.match(composer, /isRegisteringAttachment \? "업로드 중" : isAuthenticated \? "업로드 시작"/);
+  assert.match(
+    composer,
+    /disabled=\{isSubmitting \|\| isRegisteringAttachment \|\| Boolean\(selectedUploadFile\)\}/,
+  );
+  assert.match(composer, /선택됨 · 업로드 필요/);
+});
+
 test("structured intake uses the guest conversation palette", () => {
   const intakeStyles = styles.slice(
     styles.lastIndexOf(".consultation-intake-card {"),

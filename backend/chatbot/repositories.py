@@ -5111,7 +5111,6 @@ def _analysis_job_display_payload(
         _text(assistant_payload.get("answer"))
         or _text(assistant_payload.get("summary"))
         or metadata_assistant_message
-        or job.progress_message
     )
     cards = _list_or_empty(display_result.cards if display_result else metadata.get("cards"))
     pending_questions = _list_or_empty(
@@ -5122,15 +5121,17 @@ def _analysis_job_display_payload(
     limitations = _list_or_empty(display_result.limitations if display_result else metadata.get("limitations"))
     if not limitations:
         limitations = _list_or_empty(metadata.get("limitations"))
-
-    return {
-        "assistant_message": assistant_message,
-        "assistant_message_payload": assistant_payload
-        or {
+    assistant_message_payload = assistant_payload
+    if not assistant_message_payload and assistant_message:
+        assistant_message_payload = {
             "answer": assistant_message,
             "summary": _case_display_summary(display_result) or assistant_message,
             "limitations": limitations,
-        },
+        }
+
+    return {
+        "assistant_message": assistant_message,
+        "assistant_message_payload": assistant_message_payload,
         "cards": cards,
         "pending_questions": pending_questions,
         "attachments": attachments,

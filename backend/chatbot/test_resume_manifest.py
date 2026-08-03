@@ -243,3 +243,22 @@ class ResumeManifestApiTests(TestCase):
 
         self.assertEqual(response.status_code, 401, response.content)
         self.assertEqual(response.json()["error"]["code"], "auth_required")
+
+    def test_does_not_project_worker_progress_as_an_assistant_answer(self) -> None:
+        job = AnalysisJob.objects.get(job_id="job_resume_latest")
+        Report.objects.filter(job=job).update(display_result=None)
+        AnalysisDisplayResult.objects.filter(job=job).delete()
+        job.progress_message = "Agent worker item completed with partial results."
+        job.metadata = {
+            **job.metadata,
+            "assistant_message": None,
+        }
+        job.save(update_fields=["progress_message", "metadata", "updated_at"])
+
+        response = self.client.get("/api/auth/resume/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        latest_analysis = response.json()["latest_analysis"]
+        self.assertEqual(latest_analysis["progress_message"], job.progress_message)
+        self.assertEqual(latest_analysis["assistant_message"], "")
+        self.assertEqual(latest_analysis["assistant_message_payload"], {})

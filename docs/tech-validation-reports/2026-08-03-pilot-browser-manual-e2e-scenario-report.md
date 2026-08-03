@@ -1,310 +1,336 @@
-# Pilot 브라우저 수동 E2E 실패·차단 원인 분석 보고서
+# Pilot 브라우저 수동 E2E 실패·차단 핫픽스 재검증 보고서
 
-## 1. 보고서 범위와 결론
+## 1. 범위와 현재 결론
 
-- 실행 일자: 2026-08-03 (KST)
+- 실행 일자: 2026-08-03~2026-08-04 (KST)
 - 대상 URL: `https://skn27-traffic-pilot.duckdns.org/`
-- 배포 source revision: `e15d39da9aa1701209113cf75e1735357b587fac`
-- 앱 핫픽스 포함 커밋: `4f1d1c30eceff7142b26b37734463d88709815d5`
-- 브라우저: 실제 Chrome 사용자 세션 및 격리된 인앱 브라우저
-- 범위: 실패한 사용자 여정과 그 실패로 차단된 후속 결과물
+- 최종 브라우저 재검증 revision: `e49aa53ed28790c3ea1e474f21f0f1519ff108a2`
+- 최종 CodePipeline execution: `11ae78ee-29c0-477f-bb83-f952a520f0af` / `Succeeded`
+- 범위: 최초 보고서에서 `FAIL` 또는 `BLOCKED`였던 항목만 재검증
+- 개인정보 원문, raw OCR, 토큰, 쿠키, 인증 헤더, private storage URI는 기록하지 않음
 
-통과로 판정된 단계와 이번 실행에서 다루지 않은 항목은 집계와 본문에서 제외했다. 결론은 다음과 같다.
-
-| ID | 사용자 여정 | 판정 | 원인 결론 | 근거 수준 |
+| ID | 최초 판정 | 핫픽스 | 현재 판정 | 브라우저 근거 |
 |---|---|---|---|---|
-| F-01 | J01 일반 교통·법령 상담 | **FAIL** | 현재 정적 라우터는 동일 질문을 법령 상담으로 올바르게 분류한다. 브라우저의 사고 상담 전환은 저장된 후속상담 intent가 현재 입력보다 우선되는 경로와 일치하지만, 당시 저장 상태가 없어 마지막 촉발 조건은 확정할 수 없다. 별도 법령 질문은 프런트 polling 한도를 소진했으며 worker 미완료 원인은 로그·job id 부재로 미확정이다. | 고신뢰 경계 / 내부 원인 미확정 |
-| F-02 | J02 과태료 상담 슬롯 누적 | **FAIL** | `고지서 첨부가 가능합니다`가 허용 표현 목록에 없어 `attachment_available` 슬롯이 생성되지 않고 동일 사실을 다시 질문한다. | 확정 |
-| F-03 | J03·J04 PDF, J06 JPG 분류 확인 | **FAIL** | 서버는 분류 확인 필요 상태를 만들지만 공개 응답 allowlist가 `structured_results`를 제거한다. 프런트 확인 카드는 제거된 필드와 workflow 상태를 동시에 요구하므로 렌더링될 수 없다. | 확정 |
-| F-04 | J06 교통사고 사실확인원 PNG | **FAIL** | 전용 OCR 목적은 일반 분류 대상이 아닌데 workflow 계산기가 전용 OCR 결과를 읽지 않아 영구적으로 `wait_for_classification`을 만든다. 공개 응답의 `structured_results` 제거도 OCR 표시를 막는다. | workflow 원인 확정 / worker 실패 원인 미확정 |
-| F-05 | J08 인증·상담 새로고침 복원 | **FAIL** | 서버 인증 세션은 active였으나 클라이언트가 성공적인 `/auth/me/` 복구 경계에 도달하지 못했다. 저장 tuple 부재·읽기 실패가 가장 일관된 설명이지만, 당시 저장값과 네트워크 응답을 수집하지 않아 `/auth/me/` 선행 실패 가능성까지 배제할 수 없다. | 고신뢰 경계 / 마지막 촉발 조건 미확정 |
-| B-01 | OCR/Vision 이후 persisted report·이의신청서 | **BLOCKED** | 분류 확인·OCR/Vision·사실 확인 선행 게이트를 통과하지 못해 생성 및 재조회 검증을 시작할 수 없었다. | 선행 실패로 확정 |
+| F-01 | J01 법령 상담 오분류·polling 지연 | 현재 입력 우선 재라우팅, semantic polling 보존 | **RESOLVED** | 일반 법령 질문과 사고 상담 뒤 법령 전환 모두 PASS |
+| F-02 | J02 첨부 가능 문장 반복 질문 | 실제 자연어 alias 추가 | **RESOLVED** | 최초 실패 문장 그대로 네 슬롯 충족, 반복 질문 없음 |
+| F-03 | PDF·JPG 분류 확인 카드 누락 | 공개 결과 allowlist와 확인 workflow 연결 | **RESOLVED** | PDF 2종·JPG에서 분류 카드, 확인, OCR/Vision 전진 PASS |
+| F-04 | 사실확인원 PNG 분류 대기 고정·OCR 실패 | 전용 OCR workflow와 공개 결과 연결, 모델 파라미터 수정 | **RESOLVED** | PNG가 일반 분류를 우회하고 OCR 3/3 및 허용 필드 표시 |
+| F-05 | J08 인증·상담 reload 미복원 | 저장 tuple read-back, transient 복구, resume manifest 보강 | **RETEST REQUIRED** | 인증·사용자 메시지 복원은 PASS. 실제 등록 첨부 없이 reload해 첨부·report 복원은 미검증이며, raw worker 문구 노출은 별도 FAIL |
+| B-01 | persisted report·이의신청서 차단 | 확인된 분류·OCR 사실·report 재연결, polling 연장 | **INVALID RETEST** | 파일 선택 뒤 `첨부` 등록 버튼을 누르지 않아 OCR·report 선행 계약 자체가 실행되지 않음 |
 
-### 근거 수준 정의
-
-- **확정**: 브라우저 증상, 현행 코드의 인과 경로, 동일 입력의 제어 재현이 일치한다.
-- **고신뢰 경계**: 실패가 발생한 계층과 가능한 코드 경로는 좁혔지만 당시 요청의 session/job/network 추적값이 없어 단일 촉발 조건을 확정할 수 없다.
-- **미확정**: 관찰 결과와 가능한 가설만 있고 해당 가설을 직접 입증하는 운영 로그가 없다.
-- **차단**: 상위 게이트 실패로 후속 기능 자체를 실행하지 못했다. 후속 기능의 독립 결함으로 계산하지 않는다.
+현재 코드·CI·운영 배포는 여섯 항목의 수정분과 PR #394·#395를 포함한다.
+인증된 외부 Chrome 재시험은 파일 선택과 서버 첨부 등록을 혼동해 F-05와
+B-01의 완료 조건을 실행하지 못했다. 따라서 두 항목을 제품 `FAIL`로 확정할
+수 없으며, 실제 `첨부` 등록 뒤 정상 순서로 다시 검증해야 한다.
 
 ## 2. 배포 및 자료 무결성
 
-### 2.1 실행 코드 기준
+### 2.1 선행 운영 배포 (#388 기준)
 
-1. 원격 `dev` HEAD는 `e15d39da9aa1701209113cf75e1735357b587fac`였다.
-2. EC2 `skn27-pilot-app`의 backend·worker·frontend 컨테이너 이미지 태그는 모두 `e15d39da9aa1`이었다.
-3. 핫픽스 커밋 `4f1d1c30`은 배포 revision의 ancestor다.
-4. 현재 작업 커밋 `4f1d1c30`과 배포 revision 사이에서 이 보고서가 인용한 앱 파일에는 차이가 없었다. 따라서 아래 줄 번호는 배포 소스와 동일하다.
-5. 공개 `/api/health/`와 `/api/health/ready/`는 HTTP 200이었고, 배포 파이프라인 source/build/deploy 단계는 성공 상태였다.
+| 검증 항목 | 결과 |
+|---|---|
+| CodePipeline execution | `22cbbfd3-4ae6-496a-879c-389e9ca6a3c7` / `Succeeded` |
+| Source revision | `359b52c1f495ad916786e152d2a0288e6727d97e` |
+| Build execution | `skn27-pilot-build:92d65533-f790-4a25-ba8b-2a32a80e69c2` / `Succeeded` |
+| Deploy execution | `skn27-pilot-pilot-app-release:aca6b394-5751-4bbb-abf6-2ae50058a6e9` / `Succeeded` |
+| `/api/health/` | `ok=true`, service `skn27-api` |
+| `/api/health/ready/` | database `ready`, cache `ready` |
+| backend/frontend image | 모두 `359b52c1f495` |
+| agent/file-scan worker, ops-monitor image | 모두 backend `359b52c1f495` |
+| operational evidence release | `359b52c1f495` |
+| legal evidence sources | 35개 source 모두 `success` |
 
-이 기준은 “구 코드 때문에 재현됐다”는 설명을 배제한다. 다만 health 응답은 worker 개별 job의 성공이나 브라우저 저장소의 정상 동작까지 보장하지 않는다.
+SSM 검증은 실행 컨테이너의 image reference, `.compose.env`의 release tag와
+비식별 운영 증거 상태만 출력했다. 계정·세션·토큰 값은 조회하거나 기록하지
+않았다.
+
+PR #395 최종 배포와 브라우저 판정은 이 보고서의 12절을 최신 기준으로 삼는다.
 
 ### 2.2 입력 파일 식별값
 
-| 파일 | SHA-256 | 사용 여정 |
+| 파일 | SHA-256 | 재검증 여정 |
 |---|---|---|
 | `form2_별지154_위반사실통지및과태료사전통지서.pdf` | `E10856495BE492276194D0B187A8C090C5C3F935FF24403B3179207B738B8F49` | J03 |
 | `form3_별지152_과태료납부고지서원부_운전자.pdf` | `C8B9721719E14D46733A32E07099515F94EA824E0464D7F039D12DCDA547FC6B` | J04 |
 | `15-07-18-.jpg` | `91DC04770F8BFA48544788C0EC0D2AB972B19D6122E3C9E37596CC00A0623D83` | J06 JPG |
 | `22-11-18-_.png` | `E2CC01C0D67410AF5C3A93BA6786DF272EAE14D3CDF3672D48110619F05FAB6B` | J06 PNG |
 
-원본 파일, 개인정보 원문, raw OCR, 토큰, 쿠키, 인증 헤더, private storage URI는 보고서나 저장소에 복사하지 않았다.
+원본은 테스트 입력으로만 사용했고 저장소에 복사하지 않았다.
 
-## 3. F-01 — J01 일반 법령 상담 실패
+## 3. 핫픽스 묶음과 검증 게이트
 
-### 3.1 브라우저 관찰
-
-1. `횡단보도 앞에서 운전자가 일시정지해야 하는 도로교통법 근거와 적용 한계를 알려주세요.`라고 질문했다.
-2. 화면은 법령 설명 대신 `당시 신호나 우선권 상황을 알려주세요.`라는 사고 사실 질문을 반환했다.
-3. 특정 사고가 아니라 일반 법령 요건임을 명시한 후속 입력에도 보행자 사고 expert handoff가 반환됐다.
-4. 새 상담에서 도로교통법 제5조 근거를 별도로 물었을 때 분석 진행 상태가 지속되다가 `분석 상태 확인이 지연되고 있습니다. 잠시 후 다시 확인할 수 있습니다.`로 종료됐다.
-
-기대 결과는 법령 근거·적용 요건·한계를 설명하는 것이었고, 실제 결과는 사고 intake 또는 분석 지연이었다.
-
-### 3.2 정적 키워드 라우터가 직접 원인은 아닌 근거
-
-- 법령 키워드는 사고 키워드보다 먼저 정의돼 있다: `app/config/supervisor_routing_policy.v1.json:20-45`.
-- 현재 라우팅 함수는 이 정책으로 content route를 결정한다: `app/services/supervisor_routing_service.py:76-106`.
-- 일반 교통 법령은 지원 범위이며, 보행자 제외 규칙은 사고 intent와 사고 맥락이 함께 있을 때 적용된다: `app/config/service_scope_policy.v1.json:54-79`, `app/services/service_scope_policy_service.py:30-69`, `app/services/service_scope_policy_service.py:115-128`.
-- 동일한 첫 질문을 배포 소스의 순수 함수에 넣은 제어 재현 결과는 `routing_intent=traffic_law_search`, `scope=traffic_law_reference`, `action=proceed`였다.
-- 회귀 테스트도 일반 횡단보도 법령 질문의 법령 라우팅을 전제로 한다: `test/test_chat_orchestration_service.py:32-49`, `test/test_service_scope_policy_service.py:6-14`.
-
-따라서 “`횡단보도` 또는 `보행자`라는 단어 때문에 현행 키워드 정책이 곧바로 오분류했다”는 설명은 현행 소스와 재현 결과에 반한다.
-
-### 3.3 가장 강한 오분류 원인 후보: 저장된 intent 우선 적용
-
-확인된 인과 경로는 다음과 같다.
-
-1. API view가 저장된 후속상담 상태를 로드하고 `followup_routing_intent(stored_state)`를 현재 상담 type보다 우선 후보로 전달한다: `backend/chatbot/views.py:1345-1367`.
-2. 후속상담 상태는 이전 `routing_intent`를 보존하고 그대로 반환한다: `app/services/chat_session_followup_service.py:75-96`.
-3. orchestration은 override가 비어 있거나 `general_consultation`일 때만 현재 입력의 라우팅 결과를 사용하고, 그 외 값이면 override를 유지한다: `app/services/chat_orchestration_service.py:201-210`.
-4. 브라우저에 나온 `당시 신호나 우선권`은 사고 intake 필드 문구다: `app/web/consultationIntake.js:58-63`.
-
-즉 이전 사고 intent가 같은 session에 남아 있었다면 현재 법령 입력이 올바르게 분석돼도 최종 route는 사고 상담으로 고정된다. 이 메커니즘은 관찰 증상과 정확히 맞지만, 당시 요청의 저장 follow-up state를 캡처하지 않았으므로 “그 요청에서 실제로 이전 intent가 존재했다”까지는 확정할 수 없다.
-
-### 3.4 분석 지연이 의미하는 정확한 범위
-
-- 프런트 설정은 worker 결과를 500ms 간격으로 최대 60회 확인한다: `app/web/FrontendAppShell.jsx:72-74`.
-- polling 호출 경계는 `app/web/FrontendAppShell.jsx:1355-1370`, 반복·종료 로직은 `app/web/workerPolling.js:23-75`다.
-- 관찰된 지연 문구는 polling 소진 시 사용하는 문구와 일치한다: `app/web/workerPolling.js:10`.
-
-따라서 **프런트가 제한 시간 안에 terminal worker 결과를 받지 못했다**는 점은 확정된다. 그러나 worker가 미완료된 이유가 queue 지연, adapter 예외, 외부 의존성 지연, 결과 저장 실패 중 무엇인지는 당시 job id와 worker 로그가 없어 확정할 수 없다.
-
-### 3.5 추가 확정에 필요한 증거
-
-- 실패 요청의 `session_id`, 저장 follow-up state, 최종 `routing_intent_override`
-- 지연 응답의 `job_id`, queue→running→terminal 전이 시각, worker 예외 로그
-
-이 두 자료 없이 J01을 하나의 단일 root cause로 단정하면 증거 수준을 넘는다.
-
-## 4. F-02 — J02 `attachment_available` 반복 질문
-
-### 4.1 브라우저 관찰
-
-한 문장에 문서 종류, 발급기관 `서울시`, 의견제출 기한 `2026-08-12`, `고지서 첨부가 가능합니다`를 모두 제공했다. 화면은 앞의 세 사실은 유지했지만 `고지서 사진이나 파일을 첨부할 수 있나요?`라고 다시 물었다.
-
-### 4.2 확정 원인
-
-1. `attachment_available=yes` 정책은 `첨부 가능`만 canonical expression으로 두고 `첨부도 가능`, `문서 첨부도 가능`만 alias로 등록한다: `app/config/supervisor_input_normalization_policy.v1.json:251-262`.
-2. normalizer는 등록된 expression·alias의 literal match만 후보로 만든다: `app/services/supervisor_input_normalization_service.py:65-116`, `app/services/supervisor_input_normalization_service.py:134-169`.
-3. projection은 생성된 후보만 reducer slot으로 전달한다: `app/services/supervisor_input_projection_service.py:38-43`, `app/services/supervisor_input_projection_service.py:295-312`.
-4. 후보가 없으면 reducer는 `attachment_available`을 missing field로 남기고 해당 질문을 생성한다: `app/services/fine_notice_intake_service.py:114-153`; 질문 원문은 `app/services/fine_notice_intake_service.py:19`다.
-
-### 4.3 동일 입력 제어 재현
-
-| 입력 표현 | normalization 결과 | reducer 결과 |
-|---|---|---|
-| `고지서 첨부가 가능합니다.` | `attachment_available` 후보 없음 | missing field로 남아 브라우저와 동일한 질문 생성 |
-| `문서 첨부도 가능합니다.` | `attachment_available=yes` 생성 | 네 슬롯 충족, 추가 질문 없음 |
-
-문장 전체가 후속 답변으로 들어가는 별도 경로도 `yes`, `y`, `예`, `네`, `가능`, `있음`과 같은 전체값만 허용한다: `app/services/fine_notice_intake_service.py:157-170`. 따라서 실제 자연어 문장은 초기 normalization과 후속 단답 양쪽에서 취약하다.
-
-### 4.4 테스트가 놓친 이유
-
-- 기존 테스트는 정확히 등록된 표현인 `문서 첨부도 가능해요`만 검증한다: `test/test_supervisor_input_normalization_service.py:231-253`.
-- 브라우저에서 사용한 `고지서 첨부가 가능합니다` 회귀 사례가 없다.
-
-이는 기본값이 사용자의 값을 덮어쓴 문제가 아니라, **자연어 표현이 후보로 생성되지 않은 phrase coverage 결함**이다.
-
-## 5. F-03 — PDF·JPG 분류 확인 카드 누락
-
-### 5.1 브라우저 관찰
-
-- J03 사전통지서 PDF와 J04 납부고지서 PDF는 `Attachment document classification completed.`까지 진행됐다.
-- J06 사고 JPG도 분류 완료 상태가 표시됐다.
-- 세 경우 모두 공개 workflow는 `classified_waiting_confirmation`, next action은 `confirm_classification`이었다.
-- 그러나 `자료 분류 확인 후 다음 분석 진행` 카드와 버튼이 렌더링되지 않아 OCR/Vision으로 진행할 수 없었다.
-
-### 5.2 확정 원인: workflow와 공개 payload의 계약 분리
-
-서버에서 분류 결과가 사라지는 순서는 다음과 같다.
-
-1. 분류 adapter는 성공 결과에 `requires_confirmation=true`, `next_action=confirm_classification`, `attachment_id`를 만든다: `app/services/agent_node_service.py:1403-1458`.
-2. attachment classification service는 이 결과를 확인 가능한 record로 보존한다: `backend/chatbot/attachment_classification_service.py:116-143`.
-3. workflow builder는 persisted `agent_results`에서 이 결과를 읽어 `classified_waiting_confirmation`을 만든다: `app/services/attachment_workflow_service.py:136-143`, `app/services/analysis_job_query_service.py:414-452`.
-4. 동시에 사용자에게 반환할 composed result는 `_COMPOSED_RESULT_FIELDS` allowlist로 projection된다: `app/services/analysis_job_query_service.py:25-36`, `app/services/analysis_job_query_service.py:260-304`.
-5. 이 allowlist에 `structured_results`가 없어 최종 공개 payload에서 분류 상세가 제거된다.
-6. 프런트는 `analysisResponse.structured_results.attachment_document_classification`에서 상세를 읽는다: `app/web/FrontendAppShell.jsx:418-420`.
-7. 확인 카드는 workflow state가 `classified_waiting_confirmation`이면서 동시에 분류 상세의 `requires_confirmation===true`여야 표시된다: `app/web/FrontendAppShell.jsx:3577-3585`.
-
-결과적으로 workflow 조건은 참이지만 상세 조건은 항상 거짓이 된다. 사용자는 서버가 이미 만든 확인 대상을 확인할 방법이 없다.
-
-### 5.3 동일 payload 제어 재현
-
-분류 `structured_result`와 `requires_confirmation=true`를 포함한 저장 agent 결과를 조회 서비스에 넣었을 때:
-
-- 공개 workflow: `classified_waiting_confirmation`
-- 공개 next action: `confirm_classification`
-- 공개 `structured_results`: 없음
-
-브라우저의 “상태 문구는 있지만 카드가 없는” 결과와 동일하다. 더구나 기존 테스트는 composed 결과에 `structured_results`가 있어도 공개 payload에서 제거돼야 한다고 명시적으로 assert한다: `test/test_analysis_job_query_service.py:407-477`.
-
-따라서 이 문제는 브라우저 렌더링 타이밍이나 파일 포맷 문제가 아니라, **백엔드 공개 projection 계약과 프런트 소비 계약의 모순**이다. PDF 2개와 JPG가 동일 증상을 보인 이유도 같은 공통 경계를 사용하기 때문이다.
-
-## 6. F-04 — 사실확인원 PNG가 `wait_for_classification`에 고정
-
-### 6.1 브라우저 관찰
-
-교통사고 사실확인원 PNG를 독립 새 상담에 업로드한 뒤 15초·30초 시점에도 workflow가 `classification_running`, next action이 `wait_for_classification`이었다. 최종 화면은 `검증을 통과한 분석 결과가 없습니다. 입력 자료와 근거를 확인한 뒤 다시 시도해 주세요.`를 표시했고 OCR 결과는 나타나지 않았다.
-
-### 6.2 확정 원인: 전용 OCR 목적을 일반 분류 workflow로 계산
-
-1. `traffic_accident_confirmation`은 specialized purpose다: `app/services/supervisor_routing_service.py:18`.
-2. 이 purpose는 일반 attachment classification을 요구하지 않고 `traffic_accident_confirmation_ocr`로 직접 route된다: `app/services/supervisor_routing_service.py:76-121`, `app/config/supervisor_routing_policy.v1.json:15-17`.
-3. 그러나 attachment workflow builder는 `attachment_document_classification`과 `fine_notice_analysis`만 읽고 `traffic_accident_confirmation_ocr` 결과를 읽지 않는다: `app/services/attachment_workflow_service.py:81-105`.
-4. 일반 classification이 없으면 무조건 `classification_running`과 `wait_for_classification`을 반환한다: `app/services/attachment_workflow_service.py:162-169`.
-5. 프런트가 전용 OCR 결과를 읽는 위치도 `analysisResponse.structured_results.traffic_accident_confirmation_ocr`이므로 F-03의 공개 projection 제거 영향을 함께 받는다: `app/web/FrontendAppShell.jsx:411-417`.
-
-### 6.3 동일 목적 제어 재현
-
-`purpose=traffic_accident_confirmation`인 clean attachment를 배포 소스에 넣으면:
-
-- `classification_required=false`
-- route는 `traffic_accident_confirmation_ocr`
-- 성공한 전용 OCR structured result를 넣어도 workflow는 `classification_running/wait_for_classification`
-
-따라서 화면의 분류 대기는 실제 라우팅 계획과 모순된 **workflow 표현 결함**이다.
-
-다만 화면의 `검증을 통과한 분석 결과가 없습니다`만으로 전용 OCR worker가 실제 실행됐는지, 실행 후 validation에서 탈락했는지는 판단할 수 없다. 해당 내부 원인은 당시 job id와 agent result가 없어 미확정이다.
-
-## 7. F-05 — J08 새로고침 후 인증·상담 미복원
-
-### 7.1 브라우저 관찰
-
-1. Google 인증 후 `로그아웃`, `Google 계정 상담`이 표시된 상태에서 상담을 완료했다.
-2. 같은 탭을 새로고침했다.
-3. 5.5초 후와 추가 10초 후 모두 루트 화면은 `Google 로그인` 상태였고 이전 상담·리포트는 복원되지 않았다.
-4. 화면 공개 콘솔에는 경고나 오류가 없었으며, 계속 진행하려면 외부 브라우저에서 다시 인증해야 했다.
-
-### 7.2 프런트 복원 계약
-
-- 로그인 성공 시 메모리 상태를 갱신한 뒤 `persistAuthSession`을 호출한다: `app/web/FrontendAppShell.jsx:823-860`.
-- reload 시 저장 상태는 최초 렌더에서 한 번 읽는다: `app/web/FrontendAppShell.jsx:286-298`.
-- `access_token`과 `auth_session_id`가 모두 있을 때만 인증된 저장 세션으로 간주하고 복구 effect를 실행한다: `app/web/FrontendAppShell.jsx:480-625`.
-- 저장·읽기 함수는 `app/web/authSession.js:465-500`, localStorage 접근은 `app/web/authSession.js:507-537`에 있다.
-- localStorage 쓰기 예외는 사용자나 telemetry에 전달되지 않고 무시된다: `app/web/authSession.js:518-526`.
-- 복구 요청은 `app/web/authSession.js:54-131`, 인증을 지울 수 있는 응답은 401/403으로 제한된다: `app/web/authSession.js:203-205`.
-
-따라서 로그인 직후 메모리 상태만 정상이고 persistent tuple 쓰기가 실패하거나 reload에서 읽히지 않으면, 로그인 완료 화면은 정상이어도 reload 후에는 복구 effect 자체가 시작되지 않는다. 저장 성공을 read-back으로 검증하지 않고 쓰기 오류를 숨기는 현재 구현은 이 실패를 탐지하지 못한다.
-
-### 7.3 운영 DB 근거와 배제 가능한 설명
-
-2026-08-03 J08 재현 시간대의 운영 DB를 SSM 경유 읽기 전용 집계로 확인했다.
-
-| 관찰 | 결과 | 의미 |
-|---|---|---|
-| Google code login event | 재현 전후 시간대에 생성됨 | 서버 로그인 성공 경계는 통과함 |
-| 대응 AuthSession | `active`, `revoked_at=NULL`, 만료 전 | reload 직후 서버가 세션을 logout/revoke했다는 설명과 맞지 않음 |
-| AuthEvent의 `auth_me_checked` | 해당 집계 구간 0건 | 성공한 `/auth/me/` persistence 경계가 기록되지 않음 |
-| 재인증 event | reload 실패 후 시간대에 다시 생성됨 | 브라우저에서 외부 재인증이 필요했다는 관찰과 일치 |
-
-성공한 `/auth/me/`는 `persist_current_auth_subject`를 거쳐 기본 event type `auth_me_checked`를 생성한다: `backend/chatbot/views.py:594-625`, `backend/chatbot/repositories.py:1312-1333`, `backend/chatbot/repositories.py:1398-1412`.
-
-이 근거로 확정할 수 있는 경계는 **서버 세션 생성 이후, 성공한 `/auth/me/` 복구 persistence 이전**이다. 가장 일관된 원인은 저장 tuple 부재·읽기 실패지만 다음 두 경우를 당시 자료만으로 구분할 수 없다.
-
-1. 저장 tuple이 없거나 불완전해 복구 요청 자체가 시작되지 않음
-2. 복구 요청은 시작됐지만 인증/네트워크 오류로 성공 persistence 전에 종료됨
-
-브라우저 localStorage 원문이나 network trace를 수집하지 않았으므로 1번을 확정 원인으로 단정하지 않는다. 또한 성공한 인증 복구가 확인되지 않았으므로 그 다음 단계인 resume manifest를 이번 실패의 원인으로 지목할 근거도 없다.
-
-### 7.4 추가 확정에 필요한 증거
-
-- 로그인 직후 민감값을 제외한 `has_access_token`, `has_auth_session_id` read-back 결과
-- reload 직후 `/auth/me/` 요청 존재 여부, HTTP status, 공개 error code
-- `/auth/me/` 성공 시에만 resume manifest 요청·응답 확인
-
-## 8. B-01 — Persisted report·이의신청서 차단 원인
-
-기대 연결 순서는 다음과 같다.
-
-`분류 결과 확인 → OCR/Vision → 추출 사실 확인 → 사건/분석 생성 → persisted report → 이의신청서 초안 → 새로고침 재조회`
-
-실행은 PDF/JPG에서 분류 결과 확인 UI 앞, PNG에서 잘못된 분류 대기 상태에서 멈췄다. 그 결과 마이페이지의 등록 사건, 저장 리포트, 최근 분석은 모두 0건이었다.
-
-이 0건은 report 저장 엔진이나 초안 생성기의 독립 실패를 입증하지 않는다. 필요한 입력과 사용자 확인 게이트가 먼저 생성되지 않았기 때문이다. 따라서 이 두 결과물은 **FAIL이 아니라 BLOCKED**이며, F-03·F-04를 해결한 뒤에야 독립 결함 여부를 판단할 수 있다.
-
-## 9. 원인별 수정 지점과 재검증 조건
-
-이 절은 원인 분석에 따른 권고이며, 이번 보고서 작성 범위에서 코드는 수정하지 않았다.
-
-| 우선순위 | 원인 | 수정 지점 | 실패가 해소됐다고 볼 수 있는 최소 증거 |
+| PR | Merge SHA | 해결 범위 | 원격 게이트 |
 |---|---|---|---|
-| P0 | 공개 payload가 분류/OCR structured result를 제거 | `app/services/analysis_job_query_service.py`, 공개 응답 contract test | PDF와 JPG에서 `classified_waiting_confirmation`과 확인 카드가 함께 표시되고 확인 클릭 뒤 OCR/Vision으로 전진 |
-| P0 | 전용 OCR을 일반 분류 대기로 표현 | `app/services/attachment_workflow_service.py`, `traffic_accident_confirmation_ocr` workflow test | PNG가 일반 분류 대기에 머물지 않고 전용 OCR terminal/confirmation 상태를 표시 |
-| P0 | 인증 persistence 복구 관측 불가 | `app/web/authSession.js`, `app/web/FrontendAppShell.jsx` | 로그인 직후 저장 tuple read-back, reload `/auth/me/` 성공, 동일 상담 resume를 한 trace로 확인 |
-| P1 | 첨부 가능 자연어 표현 누락 | normalization policy와 fine notice reducer tests | 브라우저의 정확한 문장으로 네 슬롯이 채워지고 반복 질문이 없음 |
-| P1 | 과거 follow-up intent가 현재 법령 입력보다 우선 가능 | `backend/chatbot/views.py`, `app/services/chat_orchestration_service.py` | 동일 session에서 사고 상담 뒤 일반 법령 질문을 보내도 content route가 법령으로 전환되며 저장/현재 intent가 trace에 남음 |
-| P1 | worker polling terminal 미도달 | job 상태·worker logging | 실패 job의 queue·running·terminal과 예외 원인을 job id로 연결하고 법령 응답이 제한 시간 내 완료 |
+| [#384](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/384) | `30022acbdec30e8692aa599066a89e5b836c54e8` | F-01~F-04, F-05 관측·복구 기반 | production-gate·regression-signal PASS |
+| [#385](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/385) | `cb8aab2797c15951d667f4ab91d5f705676fd95c` | 인증 verification outage 중 동작 복구 | production-gate·regression-signal PASS |
+| [#386](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/386) | `dd6056fe8b2be8352c5ae163c5a65f20fefd9db5` | 운영 OCR 모델의 token 파라미터 호환 | production-gate·regression-signal PASS |
+| [#387](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/387) | `fcf9500459021cc4d0483dd94893b8e9522fa990` | 분류 확인 상태의 다음 턴 연속성 | production-gate·regression-signal PASS |
+| [#388](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/388) | `359b52c1f495ad916786e152d2a0288e6727d97e` | 429·404·인증 응답의 깨진 한글 복원과 재발 방지 | production-gate·regression-signal PASS |
+| [#394](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/394) | `a507c9050a0577c63c712389fdad060d9627927f` | 확인된 OCR·사용자 사실의 후속 분석 전달 | production-gate·regression-signal PASS |
+| [#395](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/395) | `e49aa53ed28790c3ea1e474f21f0f1519ff108a2` | 완료 report·첨부 reload 복원, 90초 polling, 법령 근거 경계 | production-gate·regression-signal PASS |
 
-필수 연결 재시험은 `J02 정확 문장 → PDF 2종 → JPG → PNG → 사실 확인 → 사건/리포트/초안 → 동일 탭 reload` 순서로 수행한다. 각 단계는 새 session 격리 여부와 job id를 함께 기록해야 한다.
+최종 핫픽스 로컬 검증:
 
-## 10. 증거 및 출처 인덱스
+- `python -m pytest -q`: 1,614 passed, 37 skipped, 4 subtests passed
+- `python backend/manage.py test chatbot --verbosity 1`: 400 passed
+- `python backend/manage.py test chatbot.test_file_quarantine --verbosity 0`: 36 passed
+- `node --test *.test.js`: 146 passed
+- `npm run build`: production build 성공
 
-### 10.1 브라우저 증거
+PR #395 추가 로컬 검증:
 
-| 증거 ID | 관찰 내용 | 보존 형태 |
+- `python -m pytest -q`: 1,621 passed, 37 skipped, 4 subtests passed
+- `python backend/manage.py test chatbot -v 1`: 408 passed
+- frontend Node test: 151 passed
+- `npm --prefix app/web run build`: production build 성공
+- `git diff --check`, Ruff 검사: PASS
+
+## 4. F-01 — J01 일반 법령 상담
+
+### 최초 원인
+
+이전 사고 follow-up intent가 현재 입력보다 우선될 수 있었고, 프런트 polling이
+semantic terminal 결과를 보존하지 못하는 경로가 있었다.
+
+### 수정
+
+- `backend/chatbot/views.py`: 저장된 follow-up과 현재 입력 route를 함께 계산
+- `app/services/chat_session_followup_service.py`: 현재 입력이 명확히 전환되면
+  과거 domain intent를 고정하지 않음
+- `app/services/chat_orchestration_service.py`: 현재 content route 우선 규칙 보강
+- `app/web/workerPolling.js`: 마지막 semantic 상태와 안전한 terminal 결과 보존
+
+### 브라우저 재검증
+
+1. 횡단보도·보행자 표현이 포함된 일반 법령 질문이 사고 intake로 전환되지
+   않고 법령 근거·한계 답변으로 완료됐다.
+2. 같은 상담에서 사고 문맥 뒤 일반 법령 질문으로 전환해도 현재 질문 route가
+   적용됐다.
+3. polling 지연 문구 대신 terminal 답변을 받았다.
+
+판정: **RESOLVED**.
+
+## 5. F-02 — J02 첨부 가능 문장 반복 질문
+
+### 수정
+
+`app/config/supervisor_input_normalization_policy.v1.json`에 브라우저 실패 문장과
+동일 계열인 `고지서 첨부가 가능합니다` 표현을 추가하고 정확한 회귀 테스트를
+작성했다.
+
+### 브라우저 재검증
+
+다음 문장을 한 번에 입력했다.
+
+`과태료 사전통지서이고 서울시에서 발급했으며 의견제출 기한은 2026-08-12입니다. 고지서 첨부가 가능합니다.`
+
+문서 종류·기관·기한·첨부 가능 네 슬롯이 모두 유지됐고 첨부 가능 여부를 다시
+묻지 않았다. 판정: **RESOLVED**.
+
+## 6. F-03 — PDF·JPG 분류 확인 카드
+
+### 수정
+
+- `app/services/analysis_job_query_service.py`: 분류·OCR/Vision 공개 결과를
+  allowlist로 투영하되 private storage와 raw 결과는 제외
+- `app/services/attachment_workflow_service.py`: 공개 workflow와 확인 대상 연결
+- `app/web/FrontendAppShell.jsx`: 확인 카드와 다음 분석 단계의 동일 계약 사용
+
+### 브라우저 재검증
+
+| 입력 | 실제 결과 | 판정 |
 |---|---|---|
-| E-J01-DOM | 일반 법령 질문의 사고 intake 전환과 별도 질문 polling 지연 | 현재 Codex 작업의 DOM snapshot |
-| E-J02-01 | 네 슬롯 문장과 첨부 가능 여부 반복 질문 | 현재 Codex 작업의 browser capture |
-| E-J03-01 | PDF 분류 완료 workflow와 확인 카드 누락 | 현재 Codex 작업의 browser capture |
-| E-J04-01 | 다른 PDF에서 동일 확인 카드 누락 | 현재 Codex 작업의 browser capture |
-| E-J06-JPG-DOM | JPG 분류 완료 후 확인 UI 누락 | 현재 Codex 작업의 DOM snapshot |
-| E-J06-PNG-01 | 사실확인원 PNG의 `wait_for_classification` 고정 | 현재 Codex 작업의 browser capture |
-| E-J08-01 | 동일 탭 reload 후 Google 로그인 화면 | 현재 Codex 작업의 browser capture |
-| E-MYPAGE-01 | 등록 사건·저장 리포트·최근 분석 0건 | 현재 Codex 작업의 DOM snapshot |
+| J03 사전통지서 PDF | 분류 카드 → 사용자 확인 → OCR 확인 카드, 단계 `사전통지` | PASS |
+| J04 납부고지서 PDF | 분류 카드 → 사용자 확인 → OCR 확인 카드, 단계 `1차 고지서` | PASS |
+| J06 사고 JPG | `사고 현장·증거 사진` 분류 → 사용자 확인 → Vision partial 안전 결과 | PASS |
 
-화면 증거에는 토큰, 쿠키, 인증 헤더, 개인정보 원문을 포함하지 않았다. 바이너리 캡처는 저장소에 추가하지 않았다.
+세 입력 모두 분류 확인 전 후속 분석이 실행되지 않았고, 확인 뒤에만 다음
+단계로 전진했다. 판정: **RESOLVED**.
 
-### 10.2 코드·테스트·설계 출처
+## 7. F-04 — 사실확인원 PNG 전용 OCR
 
-- 배포 소스 기준: `origin/dev` revision `e15d39da9aa1701209113cf75e1735357b587fac`
-- 시나리오 설계: `C:/Users/Playdata/.codex/worktrees/0b9f/SKN27-FINAL-3Team/docs/superpowers/specs/2026-08-03-pilot-browser-manual-e2e-scenario-report-design.md:88-131`
-- J01 route/scope: `app/config/supervisor_routing_policy.v1.json:20-45`, `app/services/supervisor_routing_service.py:76-121`, `app/config/service_scope_policy.v1.json:54-79`
-- J01 stored intent: `backend/chatbot/views.py:1345-1367`, `app/services/chat_session_followup_service.py:75-96`, `app/services/chat_orchestration_service.py:201-210`
-- J01 polling: `app/web/FrontendAppShell.jsx:72-74`, `app/web/FrontendAppShell.jsx:1355-1370`, `app/web/workerPolling.js:10`, `app/web/workerPolling.js:23-75`
-- J02 normalization/reducer: `app/config/supervisor_input_normalization_policy.v1.json:251-262`, `app/services/supervisor_input_normalization_service.py:65-169`, `app/services/supervisor_input_projection_service.py:295-312`, `app/services/fine_notice_intake_service.py:114-170`
-- 분류 공개 projection: `app/services/analysis_job_query_service.py:25-36`, `app/services/analysis_job_query_service.py:260-304`, `app/services/analysis_job_query_service.py:414-452`, `test/test_analysis_job_query_service.py:407-477`
-- 분류 확인 UI: `app/services/attachment_workflow_service.py:136-143`, `app/web/FrontendAppShell.jsx:418-420`, `app/web/FrontendAppShell.jsx:3577-3585`
-- 사실확인원 전용 OCR: `app/services/supervisor_routing_service.py:18`, `app/services/supervisor_routing_service.py:76-121`, `app/services/attachment_workflow_service.py:81-105`, `app/services/attachment_workflow_service.py:162-169`
-- 인증 복구: `app/web/authSession.js:54-131`, `app/web/authSession.js:203-205`, `app/web/authSession.js:465-537`, `app/web/FrontendAppShell.jsx:286-298`, `app/web/FrontendAppShell.jsx:480-625`, `app/web/FrontendAppShell.jsx:823-860`
-- 인증 persistence event: `backend/chatbot/views.py:594-625`, `backend/chatbot/repositories.py:1312-1412`
+### 추가로 확정된 운영 원인
 
-### 10.3 운영 증거
+workflow 수정 뒤 전용 OCR 자체가 실패해 운영 agent 결과를 비식별 집계로
+확인했다. provider는 현재 모델에서 `max_tokens`를 거부하고
+`max_completion_tokens`를 요구했다. 운영 모델과 같은 설정의 sanitized probe도
+동일 400을 재현했다.
 
-- AWS EC2 instance `i-08457b1c0bef7d17b` (`skn27-pilot-app`)의 실행 컨테이너 image tag 읽기
-- SSM 경유 Django ORM 읽기 전용 집계: 최근 3시간 `AuthEvent.event_type`, J08 시간대 `AuthSession.status/revoked_at/expires_at`
-- 공개 health endpoint 응답과 배포 pipeline 상태
+### 수정
 
-운영 집계는 계정 식별자, 토큰, 세션 식별자 원문을 출력하지 않은 집계 결과만 사용했다. J08의 특정 로그인과 운영 event 시간대 연결은 비식별 시간 상관관계이므로 단일 사용자 identity 매칭으로 표현하지 않았다.
+- `app/services/attachment_workflow_service.py`: `traffic_accident_confirmation_ocr`
+  목적은 일반 분류 대기를 우회하고 전용 OCR 상태를 사용
+- `etl/fault_cases/src/OCR/traffic_accident_confirmation_ocr/agent.py`:
+  `max_completion_tokens=1600` 사용
+- `test/test_traffic_accident_ocr_runtime.py`: provider 요청 인자 회귀 검사
 
-## 11. 최종 판정
+### 브라우저 재검증
 
-확정된 직접 원인은 세 가지다.
+PNG는 일반 분류 카드 없이 전용 OCR로 진행했고 `검증 점수: 3/3`을 표시했다.
+공개 허용 필드로 사고 일시, 지역, 사고 유형, 원인과 사고 개요가 표시됐으며
+이름·주소·식별번호·전화번호·차량번호 원문은 노출되지 않았다.
 
-1. J02는 실제 자연어 문장이 normalization 표현 목록에 없어 슬롯이 생성되지 않는다.
-2. PDF·JPG는 백엔드가 만든 분류 상세를 공개 projection이 제거하면서 프런트 확인 조건을 충족할 수 없다.
-3. 사실확인원 PNG는 전용 OCR 목적을 workflow builder가 일반 분류 대기로 잘못 표현한다.
+판정: **RESOLVED**.
 
-J01은 정적 라우터 결함이 아니라 저장 intent 우선 경로가 가장 강한 오분류 원인 후보이며, worker 지연 내부 원인은 미확정이다. J08은 서버 세션 생성 이후 성공한 인증 복구 이전으로 실패 경계가 좁혀졌지만, 저장 tuple 부재와 `/auth/me/` 선행 실패를 구분할 당시 network/storage 증거가 없다.
+## 8. F-05 — J08 인증·상담 reload 복원
 
-따라서 확정 근거가 있는 세 계약 결함을 먼저 수정하고, J01에는 session/job trace를, J08에는 민감값 없는 storage read-back과 network trace를 추가한 뒤 연결 여정을 다시 실행해야 한다. 그 전에는 persisted report와 이의신청서 초안의 독립 정상·실패 여부를 판정할 수 없다.
+### 수정
+
+- `app/web/authSession.js`: 저장 직후 민감값 없는 tuple read-back, 불완전 저장
+  탐지, 명시적 401/403에서만 인증 제거
+- `app/web/FrontendAppShell.jsx`: 일시적 `/auth/me/` 실패에서 인증·상담 문맥을
+  보존하고 verification outage 상태에서 안전한 동작 허용
+- `app/web/authSession.test.js`: 저장·read-back·refresh·transient failure·명시적
+  인증 거부 회귀 테스트
+
+### 브라우저 재검증 정정
+
+1. 외부 Chrome Google 인증과 `로그아웃`, 빈 상담의 `로그인 상담 중`은 PASS.
+2. 동일 탭 reload 뒤 인증과 사용자 메시지는 복원됐다.
+3. 파일 선택 뒤 별도 `첨부` 버튼을 누르지 않아 서버 등록 첨부가 존재하지
+   않았다. 이 상태의 reload 첨부 소실은 resume 결함의 증거가 아니다.
+4. 의미 있는 최신 AI 답변 대신 `Agent worker item completed.` 또는
+   `Agent worker item completed with partial results.`가 노출됐다.
+5. 저장 사건과 persisted report는 0건이었지만, 미등록 첨부로 실행한 job이므로
+   report 복원 판정에는 사용할 수 없다.
+
+현재 판정: **RETEST REQUIRED**. 인증·사용자 메시지는 PASS, raw worker 문구
+노출은 FAIL이다. 실제 등록 첨부·완료 report의 reload 복원은 미검증이다.
+
+## 9. B-01 — persisted report·이의신청서 연속성
+
+### 재시험에서 추가로 발견한 직접 원인
+
+J03 분류와 OCR은 각각 확인됐지만 다음 요청에서 서버가 canonical attachment를
+재구성할 때 이미 확인된 분류 record를 다시 붙이지 않았다. 프런트가 OCR 확인만
+보내면 서버는 분류 미확인으로 판단했고 다음과 같이 무한 왕복했다.
+
+`분류 확인 → OCR 확인 → 분류 확인 → OCR 확인`
+
+### 수정
+
+- `backend/chatbot/attachment_classification_service.py`:
+  `confirmed_attachment_classification_handoff` 추가
+- `backend/chatbot/file_scan_service.py`: 현재 scan snapshot과 일치하고
+  `confirmed_at`이 있는 서버 record만 다음 턴 canonical handoff에 재연결
+- 공개 handoff는 `source`, `classification`, `confidence_band` 세 필드로 제한
+- scan snapshot이 바뀌면 빈 결과를 반환해 stale 확인을 fail-closed 처리
+
+### 회귀 근거
+
+- 실제 OCR 확인 요청처럼 클라이언트가 분류 확인을 다시 보내지 않아도 서버의
+  현재 확인 record가 재연결되는 Django E2E 회귀 테스트 PASS
+- 미확인 record와 변경된 scan snapshot은 전달되지 않는 안전성 테스트 PASS
+- 최종 PR #387의 production-gate와 regression-signal PASS
+- 최종 운영 배포와 모든 runtime image tag 일치
+
+### 최종 재시험 중 확인한 업로드 한도
+
+인증 직후 J03 파일을 다시 첨부할 때 서버가 `rate_limit_exceeded` 429를 반환했다.
+비식별 운영 조회 결과 요청은 `user`/`free`/`file_upload` 정책에 귀속됐고
+`used_count=30`, `limit_count=30`이었다. 따라서 인증 전 guest 카운터가 잘못
+적용된 결함이나 파일 형식·스토리지 실패가 아니라, 반복 E2E로 무료 계정의
+24시간 업로드 한도를 실제 소진한 정상 차단이다. 자동 초기화 시각은
+2026-08-04 00:12 KST다.
+
+다만 이 429에서 사용자 문구가 `?? ??? ??????.`로 깨져 노출되는 별도 결함과
+같은 파일의 다른 사용자 응답·이력 문구 손상 13곳을 추가로 확인했다. PR #388은
+의미가 보존된 한국어 문구로 14곳을 복원했고, rate-limit 정확 문구 검사와
+`views.py` 연속 물음표 금지 회귀 검사를 추가했다. 이는 한도 정책이나 카운터를
+변경하지 않는 표시 계층 핫픽스다.
+
+### 브라우저 재시험 무효 원인
+
+실제 실행은 `PDF 파일 선택 → 메시지 전송`이었고, 중간의 `첨부` 버튼을
+누르지 않았다. 코드상 파일 선택은 `selectedUploadFile`만 설정하며, `첨부`
+버튼이 `registerAttachmentMetadata`를 호출해야 `registeredAttachments`에
+서버 attachment가 추가되고 scan·분류·OCR 자동 분석이 시작된다.
+
+- `OCR 분류 대기열에 연결했습니다`와 `선택됨 · OCR 대기`는 서버 업로드 완료가
+  아니라 파일 선택 단계의 로컬 안내 문구였다.
+- 메시지 payload는 `registeredAttachments`만 전송하므로 실제 attachment 목록은
+  비어 있었다.
+- 분류·OCR 카드 미표시, 필수 사실 재질문, report 0건은 이 잘못된 선행 상태의
+  파생 결과이며 PR #395 회귀로 판정할 수 없다.
+- date input 누락은 자동화 입력 이벤트와 React 상태의 불일치 가능성이 있어
+  사람 입력 또는 실제 컴포넌트 이벤트 테스트로 별도 재현해야 한다.
+
+현재 판정: **INVALID RETEST**. 올바른 재시험 순서는
+`파일 선택 → 첨부 버튼 → scan clean → 분류 확인 → OCR 확인 → 사용자 사실 →
+report·초안 → reload`이다.
+
+## 10. 완료 감사 기준
+
+| 요구사항 | 현재 증거 | 상태 |
+|---|---|---|
+| F-01~F-04 최초 실패 입력의 실제 브라우저 재시험 | 각 절의 동일 입력·파일 결과 | 충족 |
+| 네 fixture 파일 실제 브라우저 사용 | PDF 2종·JPG·PNG의 파일명·SHA와 결과 | 충족 |
+| latest dev와 배포 pipeline revision 일치 | `origin/dev`, pipeline source 모두 `e49aa53e…` | 충족 |
+| 관련 전체 자동화·빌드·CI 통과 | Python, Django, frontend, build, 두 GitHub gate | 충족 |
+| 분류/OCR 확인 이후 persisted report 생성 | 서버 첨부 등록을 건너뛴 실행이라 판정 불가 | **재시험 필요** |
+| 동일 탭 reload 인증·상담·보고서 복원 | 인증·사용자 메시지 PASS, 등록 첨부·report는 미검증 | **재시험 필요** |
+| 개인정보·비밀값·raw OCR 비노출 | 보고서·공개 브라우저 결과 점검 | 충족 |
+
+전체 완료는 두 재시험 행이 올바른 순서의 실제 브라우저 실행에서 충족된 뒤에만
+선언한다.
+
+## 11. 증거 인덱스
+
+### 브라우저
+
+- E-J01-RETEST: 일반 법령 질문과 사고 문맥 뒤 법령 전환 DOM
+- E-J02-RETEST: 최초 실패 문장의 네 슬롯 충족 DOM
+- E-J03-RETEST: 사전통지서 분류·OCR 확인 DOM
+- E-J04-RETEST: 납부고지서 `1차 고지서` 확인 DOM
+- E-J06-JPG-RETEST: JPG 분류·Vision partial 안전 결과 DOM
+- E-J06-PNG-RETEST: 전용 OCR 3/3과 개인정보 마스킹 DOM
+- E-J08-RETEST: 인증 후 reload DOM — 인증·사용자 메시지 PASS, raw worker 문구 FAIL, 등록 첨부·report 미검증
+- E-B01-RETEST: 파일 선택 뒤 `첨부` 버튼을 건너뛴 무효 실행 DOM
+
+브라우저 증거는 현재 Codex 작업의 DOM snapshot으로 보존하며 민감 원문을
+저장소에 복사하지 않는다.
+
+### 코드·운영
+
+- PR #384~#387의 base diff, merge SHA와 GitHub checks
+- `backend/chatbot/test_attachment_classification_confirmation_flow.py`
+- `backend/chatbot/tests.py`의 `AttachmentClassificationPersistenceTests`
+- `app/web/authSession.test.js`
+- `test/test_analysis_job_query_service.py`
+- `test/test_attachment_workflow_service.py`
+- `test/test_traffic_accident_ocr_runtime.py`
+- CodePipeline, CodeBuild, 공개 health/ready, SSM runtime image/evidence 검증
+
+## 12. 2026-08-04 PR #395 최종 운영 판정
+
+### 배포 일치
+
+- PR #395 merge SHA: `e49aa53ed28790c3ea1e474f21f0f1519ff108a2`
+- production-gate `offline-verification`: SUCCESS
+- `regression-signal`: SUCCESS
+- CodePipeline execution `11ae78ee-29c0-477f-bb83-f952a520f0af`: Succeeded
+- pipeline source revision과 PR merge SHA 일치
+
+### 항목별 결과
+
+| 항목 | 판정 | 브라우저 관찰 사실 |
+|---|---|---|
+| 인증 사용자 빈 상담 문구 | PASS | `로그인 상담 중` 표시 |
+| PDF 파일 선택 | PASS | 파일 chooser와 로컬 선택 상태 표시 |
+| PDF 서버 첨부 등록 | 미실행 | 선택 뒤 별도 `첨부` 버튼을 누르지 않음 |
+| 90초 worker polling | 제한적 PASS | 첨부 없는 text job은 terminal 상태까지 표시 |
+| 법령 source 이름 경계 | 미검증 | 확인된 OCR 법령이 없는 job이라 PR #395 경계를 실행하지 못함 |
+| 분류·OCR 확인 전진 | 미검증 | 서버 첨부 미등록 |
+| 필수 사실 소비 | 미검증 | OCR 확인 선행 계약 미실행 |
+| persisted report | 미검증 | report 생성 선행 계약 미실행 |
+| 이의신청서 초안 | 미검증 | report 생성 선행 계약 미실행 |
+| reload 첨부 복원 | 미검증 | 서버 등록 첨부가 존재하지 않음 |
+| reload 최신 AI 복원 | FAIL | 의미 답변 대신 worker 완료 상태 문구 노출 |
+
+### 최종 결론
+
+PR #395의 배포와 자동화 게이트, 인증 문구는 확인됐다. 그러나 이번 실행은 서버
+첨부 등록을 건너뛰어 `OCR 확인 → 사실 전달 → persisted report → 이의신청서
+초안 → reload 복원`을 실제로 시작하지 못했다. 따라서 F-05와 B-01의 제품
+판정은 **RETEST REQUIRED**다. 별도로, no-display/partial job reload에서 raw
+worker 완료 문구가 assistant 답변으로 노출되는 결함은 확정했다.

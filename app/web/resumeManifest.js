@@ -127,13 +127,21 @@ function appendLatestAssistantMessage(messages, analysis) {
 }
 
 function assistantMessageText(value) {
-  if (typeof value === "string") return value.trim();
+  if (typeof value === "string") return semanticAssistantText(value);
   if (!isRecord(value)) return "";
   for (const field of ["answer", "core_answer", "summary"]) {
-    const content = String(value[field] || "").trim();
+    const content = semanticAssistantText(value[field]);
     if (content) return content;
   }
   return "";
+}
+
+function semanticAssistantText(value) {
+  const content = String(value || "").trim();
+  if (/^Agent worker item completed(?: with partial results)?\.?$/i.test(content)) {
+    return "";
+  }
+  return content;
 }
 
 function emptyResumeState() {
