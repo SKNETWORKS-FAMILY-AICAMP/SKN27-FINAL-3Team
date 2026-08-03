@@ -69,4 +69,3 @@ chat lineage.
 Use red-green TDD for every behavior change. Required gates are focused Python and Node tests,
 full pytest, production Vite build, deployment from the resulting revision, and repeated browser
 verification of J01, J02, J03, J04, J06, J08, persisted report, and appeal draft.
-
