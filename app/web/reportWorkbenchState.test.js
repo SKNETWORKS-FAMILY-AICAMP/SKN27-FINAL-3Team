@@ -1,7 +1,64 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as reportWorkbenchStateModule from "./reportWorkbenchState.js";
 
 import { compactUniqueStrings, deriveReportWorkbenchState } from "./reportWorkbenchState.js";
+
+test("rejects empty and skeletal temporary reporting payloads", () => {
+  assert.equal(typeof reportWorkbenchStateModule.hasMeaningfulReportingPayload, "function");
+  assert.equal(reportWorkbenchStateModule.hasMeaningfulReportingPayload(null), false);
+  assert.equal(reportWorkbenchStateModule.hasMeaningfulReportingPayload({}), false);
+  assert.equal(
+    reportWorkbenchStateModule.hasMeaningfulReportingPayload({
+      report_type: "general",
+      sections: [],
+    }),
+    false,
+  );
+  assert.equal(
+    reportWorkbenchStateModule.hasMeaningfulReportingPayload({ summary: "   " }),
+    false,
+  );
+});
+
+test("accepts temporary payloads with visible report content", () => {
+  assert.equal(typeof reportWorkbenchStateModule.hasMeaningfulReportingPayload, "function");
+  assert.equal(
+    reportWorkbenchStateModule.hasMeaningfulReportingPayload({
+      summary: "사고 분석 요약",
+    }),
+    true,
+  );
+  assert.equal(
+    reportWorkbenchStateModule.hasMeaningfulReportingPayload({
+      sections: [{ title: "사고 개요", items: ["직진 중 충돌"] }],
+    }),
+    true,
+  );
+  assert.equal(
+    reportWorkbenchStateModule.hasMeaningfulReportingPayload({
+      document_cards: [{ type: "objection_draft" }],
+    }),
+    true,
+  );
+});
+
+test("does not turn a skeletal live payload into an active report canvas", () => {
+  const state = deriveReportWorkbenchState({
+    hasReport: true,
+    hasSavedReports: false,
+    canGenerateReport: false,
+    isPersistedReport: false,
+    reportingPayload: { report_type: "general", sections: [] },
+    supervisorState: {
+      stage: "agent_execution_ready",
+      missing_fields: [],
+      next_questions: [],
+    },
+  });
+
+  assert.equal(state.kind, "not_reportable");
+});
 
 test("normalizes structured missing items without object coercion", () => {
   const items = compactUniqueStrings([
@@ -128,7 +185,10 @@ test("waits for persisted report detail instead of rendering a list summary as a
 test("labels an in-session report payload as temporary until a signed-in user saves it", () => {
   const state = deriveReportWorkbenchState({
     hasReport: true,
-    reportingPayload: { report_type: "fault_ratio_analysis", sections: [] },
+    reportingPayload: {
+      report_type: "fault_ratio_analysis",
+      sections: [{ title: "사고 개요", items: ["확인된 사고 사실"] }],
+    },
     isAuthenticated: false,
     isPersistedReport: false,
   });

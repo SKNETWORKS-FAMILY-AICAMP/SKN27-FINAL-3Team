@@ -46,6 +46,7 @@ import {
   shouldPromptGuestConversationSave,
 } from "./guestConversationPolicy.js";
 import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
+import { hasMeaningfulReportingPayload } from "./reportWorkbenchState.js";
 import { pollWorkerResult } from "./workerPolling.js";
 import {
   normalizeChatResponsePresentation,
@@ -5168,7 +5169,11 @@ function ReportingScreen({
   const [isReportListCollapsed, setIsReportListCollapsed] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
-  const activeReportingPayload = currentReport?.content?.reporting_payload || reportingPayload;
+  const liveReportingPayload = hasMeaningfulReportingPayload(reportingPayload)
+    ? reportingPayload
+    : null;
+  const activeReportingPayload =
+    currentReport?.content?.reporting_payload || liveReportingPayload;
   const isPersistedReport = Boolean(currentReport?.report_id && currentReport?.content?.reporting_payload);
   const savedReportDetailLoaded = !hasSavedReports || isPersistedReport;
   const appealDownloadBlocked = activeReportingPayload?.appeal_gate?.blocked === true;
@@ -5187,7 +5192,7 @@ function ReportingScreen({
     appealBlocked: appealDownloadBlocked,
     reportId: currentReport?.report_id || activeReportingPayload?.report_id || null,
   };
-  const hasReport = Boolean(activeReportingPayload);
+  const hasReport = isPersistedReport || hasMeaningfulReportingPayload(activeReportingPayload);
   const workbenchState = deriveReportWorkbenchState({
     hasReport,
     hasSavedReports,
@@ -5834,7 +5839,7 @@ function caseStatusTone(value) {
 }
 
 function isReportingPayloadReady(reportingPayload, supervisorState) {
-  if (!reportingPayload) {
+  if (!hasMeaningfulReportingPayload(reportingPayload)) {
     return false;
   }
   const pendingQuestions = Array.isArray(supervisorState?.next_questions) ? supervisorState.next_questions : [];
