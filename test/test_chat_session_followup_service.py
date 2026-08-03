@@ -56,6 +56,9 @@ def test_merge_appends_current_answer_after_saved_pending_question() -> None:
         {"role": "assistant", "content": "사고 장소의 도로 형태를 알려 주세요."},
         {"role": "user", "content": "신호등 없는 교차로입니다."},
     ]
+    assert merged["pending_questions"] == [
+        {"field": "road_layout", "question": "사고 장소의 도로 형태를 알려 주세요."}
+    ]
 
 
 def test_snapshot_does_not_duplicate_current_user_turn_already_in_merged_history() -> None:

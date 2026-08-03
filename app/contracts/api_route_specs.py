@@ -24,6 +24,7 @@ from app.contracts.auth_session import (
     GuestSessionRequest,
     GuestSessionResponse,
     RateLimitErrorResponse,
+    ResumeManifestResponse,
 )
 from app.contracts.analysis_job import (
     AnalysisJobAcceptedResponse,
@@ -714,6 +715,25 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
                 description="Optional chat session binding identifier.",
             ),
         ),
+    ),
+    RouteSpec(
+        operation_id="getResumeManifest",
+        method="GET",
+        path="/api/auth/resume/",
+        route_name="auth-resume",
+        view_name="auth_resume",
+        request_model=None,
+        response_model=ResumeManifestResponse,
+        success_status=200,
+        errors=_auth_errors(
+            (401, ("auth_required", "token_invalid", "token_expired")),
+            (403, ("forbidden",)),
+        ),
+        auth_required=True,
+        contract_status="shadow",
+        tags=("Auth",),
+        summary="Restore the latest consultation owned by the authenticated user",
+        request_body_required=False,
     ),
 )
 

@@ -185,6 +185,19 @@ class AuthSubjectResponse(AuthResponse):
     persistence: dict[str, Any]
 
 
+class ResumeManifestResponse(AuthResponse):
+    contract_version: Literal["resume_manifest.v1"]
+    has_resume: bool
+    session: dict[str, Any] | None
+    conversation_messages: list[dict[str, Any]]
+    pending_questions: list[dict[str, str]]
+    facts: dict[str, Any]
+    fine_notice_intake: dict[str, Any] | None
+    attachments: list[dict[str, Any]]
+    latest_analysis: dict[str, Any] | None
+    reports: list[dict[str, Any]]
+
+
 class AuthErrorDetail(AuthResponse):
     contract_version: Literal["auth_error.v1"]
     type: Literal["auth"]

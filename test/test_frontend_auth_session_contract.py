@@ -36,6 +36,7 @@ def test_frontend_uses_only_the_canonical_auth_and_job_contracts() -> None:
         "auth/guest-session/",
         "auth/google/code/",
         "auth/me/",
+        "auth/resume/",
         "auth/refresh/",
         "auth/logout/",
         "capabilities/",
@@ -408,7 +409,7 @@ def test_app_jwt_refresh_scheduler_uses_exp_for_timing_and_cleans_up() -> None:
     )
 
 
-def test_frontend_refreshes_app_jwt_and_clears_stale_auth_ui_on_failure() -> None:
+def test_frontend_refreshes_app_jwt_and_clears_auth_only_on_explicit_rejection() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
 
     for required in (
@@ -416,9 +417,22 @@ def test_frontend_refreshes_app_jwt_and_clears_stale_auth_ui_on_failure() -> Non
         "api.refreshAuthToken(",
         "setActiveAuthToken(nextToken)",
         "setAuthSessionId(nextAuthSessionId)",
+        "shouldClearAuthentication",
         "clearStoredAuthSession()",
         'setActiveAuthToken("")',
         'setAuthSessionId("")',
         "다시 로그인",
+        "현재 상담은 유지됩니다",
     ):
         assert required in shell
+
+
+def test_frontend_loads_resume_manifest_after_auth_me_recovery() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    api_client = read_text(ROOT / "app" / "web" / "apiClient.js")
+
+    assert "getResumeManifest" in api_client
+    assert 'joinApiPath(authApiBase, "auth/resume/")' in api_client
+    assert "api.getResumeManifest(" in shell
+    assert "hydrateResumeManifest" in shell
+    assert 'setActiveRoute("chatbot")' in shell

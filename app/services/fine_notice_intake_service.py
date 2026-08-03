@@ -75,6 +75,16 @@ def reduce_fine_notice_intake(payload: Mapping[str, Any]) -> dict[str, Any]:
             source_message_id=source_message_id,
         )
 
+    pending_field = _pending_question_field(payload.get("pending_questions"))
+    if pending_field and pending_field not in slots:
+        value = _slot_value(pending_field, payload.get("user_text"))
+        if value is not None:
+            slots[pending_field] = _slot_record(
+                value,
+                source_type="user_confirmation",
+                source_message_id=source_message_id,
+            )
+
     question_to_field = {
         question: field for field, question in FINE_NOTICE_QUESTIONS.items()
     }
@@ -173,6 +183,18 @@ def _slot_record(
         "confidence": 1.0,
         "confirmed": True,
     }
+
+
+def _pending_question_field(value: Any) -> str:
+    if not isinstance(value, list):
+        return ""
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        field = str(item.get("field") or "").strip()
+        if field in FINE_NOTICE_REQUIRED_SLOTS:
+            return field
+    return ""
 
 
 def _normalized_rule_slot(

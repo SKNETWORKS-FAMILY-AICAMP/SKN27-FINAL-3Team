@@ -85,6 +85,7 @@ def test_pending_result_uses_the_v2_contract_without_calling_composer() -> None:
         "work_item": {},
         "progress_state": {},
         "attachment_workflows": [],
+        "attachment_processing": [],
         "analysis_progress": {
             "contract_version": "analysis_progress.v1",
             "semantic_status": "queued",
@@ -240,6 +241,17 @@ def test_completed_result_preserves_persisted_presentation_fields() -> None:
                 "limitations": [
                     "현재 파일은 안전한 분석 대상으로 사용할 수 없습니다."
                 ],
+            }
+        ],
+        "attachment_processing": [
+            {
+                "contract_version": "attachment_processing.v1",
+                "attachment_id": "attachment_1",
+                "upload": "registered",
+                "scan": "running",
+                "classification": "blocked",
+                "confirmation": "not_ready",
+                "downstream_analysis": "not_started",
             }
         ],
         "reporting_payload": {"report_id": "report_1"},
@@ -994,6 +1006,79 @@ def test_pending_result_projects_only_worker_polling_fields() -> None:
     )
     assert "s3://" not in repr(outcome.payload["attachment_workflows"])
     assert "structured_results" not in outcome.payload
+
+
+def test_pending_attachment_result_exposes_safe_processing_boundaries() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_classification_boundary",
+        load_job=lambda _job_id: {
+            "job_id": "job_classification_boundary",
+            "status": "running",
+            "active_node": "attachment_document_classification",
+            "attachments": [
+                {
+                    "attachment_id": "att_notice_boundary",
+                    "status": "ready",
+                    "scan_status": "clean",
+                    "storage_uri": "s3://private/notice.pdf",
+                    "raw_ocr_text": "must not leak",
+                }
+            ],
+            "agent_results": [],
+        },
+        compose_response=lambda _payload: AssertionError(
+            "pending results do not compose"
+        ),
+    )
+
+    assert outcome.payload["attachment_processing"] == [
+        {
+            "contract_version": "attachment_processing.v1",
+            "attachment_id": "att_notice_boundary",
+            "upload": "registered",
+            "scan": "completed",
+            "classification": "running",
+            "confirmation": "not_ready",
+            "downstream_analysis": "not_started",
+        }
+    ]
+    assert "s3://" not in repr(outcome.payload["attachment_processing"])
+    assert "must not leak" not in repr(outcome.payload["attachment_processing"])
+
+
+def test_accident_attachment_does_not_queue_downstream_before_scan_completion() -> None:
+    from app.services.analysis_job_query_service import load_analysis_result
+
+    outcome = load_analysis_result(
+        "job_accident_scan_boundary",
+        load_job=lambda _job_id: {
+            "job_id": "job_accident_scan_boundary",
+            "status": "queued",
+            "attachments": [
+                {
+                    "attachment_id": "att_accident_pending_scan",
+                    "purpose": "traffic_accident_confirmation",
+                    "status": "uploaded",
+                    "scan_status": "pending",
+                }
+            ],
+        },
+        compose_response=lambda _payload: AssertionError(
+            "pending results do not compose"
+        ),
+    )
+
+    assert outcome.payload["attachment_processing"][0] == {
+        "contract_version": "attachment_processing.v1",
+        "attachment_id": "att_accident_pending_scan",
+        "upload": "registered",
+        "scan": "running",
+        "classification": "not_required",
+        "confirmation": "not_required",
+        "downstream_analysis": "not_started",
+    }
 
 
 def test_pending_result_exposes_server_owned_semantic_progress() -> None:

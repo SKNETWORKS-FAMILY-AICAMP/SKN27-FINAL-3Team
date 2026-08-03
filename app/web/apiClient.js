@@ -23,6 +23,9 @@ export function createFrontendApi({ apiBase = "/api" } = {}) {
     getCurrentAuthSubject({ sessionId, identity } = {}) {
       return getJson(buildAuthMeUrl(authApiBase, sessionId), identity);
     },
+    getResumeManifest({ identity } = {}) {
+      return getJson(joinApiPath(authApiBase, "auth/resume/"), identity);
+    },
     refreshAuthToken(payload = {}, identity = {}) {
       return postJson(joinApiPath(authApiBase, "auth/refresh/"), payload, identity);
     },

@@ -209,6 +209,25 @@ def test_extracts_only_limited_authority_amount_and_due_date_patterns() -> None:
     assert projected[("due_date", "2026-08-07")]["decision"] == "auto_applied"
 
 
+def test_accepts_seoul_city_alias_without_inventing_official_authority_name() -> None:
+    service = _service()
+
+    result = service.normalize_supervisor_input(
+        user_text="사전통지서, 서울시, 2026-08-10, 첨부 가능",
+        source_message_id="msg_seoul_city_alias",
+    )
+
+    authorities = [
+        item
+        for item in result["candidates"]
+        if item["field"] == "issuing_authority"
+    ]
+    assert [(item["value"], item["decision"]) for item in authorities] == [
+        ("서울시", "auto_applied")
+    ]
+    assert "서울특별시" not in repr(authorities)
+
+
 def test_extracts_browser_fine_notice_fields_from_natural_sentence() -> None:
     service = _service()
     result = service.normalize_supervisor_input(

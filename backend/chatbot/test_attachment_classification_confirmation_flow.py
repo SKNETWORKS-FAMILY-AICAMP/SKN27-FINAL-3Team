@@ -17,6 +17,7 @@ from chatbot.attachment_classification_service import (
 )
 from chatbot.file_scan_service import process_uploaded_file_scans
 from chatbot.models import AuthSession, AuthSessionStatus, UploadedFile, UserAccount
+from chatbot.repositories import process_agent_work_item
 
 
 TEST_JWT_SIGNING_KEY = "classification-confirmation-test-signing-key-is-long-enough"
@@ -163,6 +164,58 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
         uploaded_file.refresh_from_db()
         record = uploaded_file.metadata["attachment_document_classification"]
         self.assertIsNotNone(record["confirmed_at"])
+
+    def test_clean_attachment_worker_persists_public_classification_boundary(self) -> None:
+        session_id, attachment_id = self._upload_clean_photo()
+
+        queued = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "첨부한 자료를 확인해 주세요.",
+                "attachments": [{"attachment_id": attachment_id}],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(queued.status_code, 202, queued.content)
+        work_item = queued.json()["work_item"]
+
+        with patch(
+            "app.services.attachment_document_classification_adapter.classify_document_bytes",
+            return_value={
+                "status": "success",
+                "structured_result": {
+                    "classification": "fine_notice",
+                    "confidence_band": "high",
+                    "requires_confirmation": True,
+                    "next_action": "confirm_classification",
+                },
+                "evidence": [],
+                "next_actions": ["confirm_classification"],
+                "limitations": [],
+            },
+        ):
+            processed = process_agent_work_item(work_item["work_item_id"])
+
+        self.assertEqual(processed["status"], "success", processed)
+        result_response = self.client.get(
+            f"/api/analysis/results/{work_item['job_id']}/"
+        )
+        self.assertEqual(result_response.status_code, 200, result_response.content)
+        result = result_response.json()["result"]
+        self.assertEqual(
+            result["attachment_workflows"][0]["state"],
+            "classified_waiting_confirmation",
+        )
+        self.assertEqual(
+            result["attachment_processing"][0]["classification"],
+            "completed",
+        )
+        self.assertEqual(
+            result["attachment_processing"][0]["confirmation"],
+            "required",
+        )
+        self.assertNotIn("storage_uri", repr(result["attachment_processing"]))
 
     def test_stale_confirmation_fails_closed_before_planning(self) -> None:
         session_id, attachment_id = self._upload_clean_photo()

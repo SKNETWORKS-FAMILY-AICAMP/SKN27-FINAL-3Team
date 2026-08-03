@@ -244,6 +244,7 @@ def load_analysis_result(
                     job,
                     job.get("attachment_workflows"),
                 ),
+                "attachment_processing": _attachment_processing_for_job(job),
                 "analysis_progress": build_analysis_progress(job),
             },
         )
@@ -285,6 +286,7 @@ def load_analysis_result(
                 job,
                 composed.get("attachment_workflows"),
             ),
+            "attachment_processing": _attachment_processing_for_job(job),
             "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
             "supervisor_state": _project_supervisor_state(job.get("supervisor_state")),
             "user_claims": _project_user_claims(job.get("supervisor_state")),
@@ -328,6 +330,7 @@ def _project_analysis_job_detail(
                 job,
                 job.get("attachment_workflows"),
             ),
+            "attachment_processing": _attachment_processing_for_job(job),
             "report_links": _project_report_links(job.get("report_links")),
             "limitations": _safe_public_limitations(job.get("limitations")),
             "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
@@ -447,6 +450,184 @@ def _attachment_workflows_for_job(
             else None
         ),
     )
+
+
+def _attachment_processing_for_job(job: dict[str, Any]) -> list[dict[str, str]]:
+    results = [
+        item
+        for item in job.get("agent_results") or []
+        if isinstance(item, dict)
+    ]
+    active_node = str(job.get("active_node") or "").strip()
+    job_status = str(job.get("status") or "").strip().lower()
+    pending = job_status in {"queued", "running"}
+    processing: list[dict[str, str]] = []
+
+    for attachment in job.get("attachments") or []:
+        if not isinstance(attachment, dict):
+            continue
+        attachment_id = str(attachment.get("attachment_id") or "").strip()
+        if not attachment_id:
+            continue
+        scan_status = str(attachment.get("scan_status") or "").strip().lower()
+        upload_status = str(attachment.get("status") or "").strip().lower()
+        classification_result = _node_result_for_attachment(
+            results,
+            node_code="attachment_document_classification",
+            attachment_id=attachment_id,
+        )
+        classification_payload = _dict_or_empty(
+            classification_result.get("structured_result")
+        )
+        downstream_result = _downstream_result_for_attachment(
+            results,
+            attachment_id=attachment_id,
+        )
+
+        scan = (
+            "completed"
+            if upload_status == "ready" and scan_status in {"clean", "ready"}
+            else "failed"
+            if upload_status in {"rejected", "deleted", "failed"}
+            or scan_status in {"infected", "rejected", "failed"}
+            else "running"
+        )
+        classification = _classification_processing_status(
+            classification_result,
+            active_node=active_node,
+            pending=pending,
+            scan=scan,
+            purpose=str(attachment.get("purpose") or "").strip().lower(),
+        )
+        confirmation = _classification_confirmation_status(
+            attachment,
+            classification=classification,
+            classification_payload=classification_payload,
+        )
+        downstream = _downstream_processing_status(
+            downstream_result,
+            active_node=active_node,
+            pending=pending,
+            confirmation=confirmation,
+            scan=scan,
+        )
+        processing.append(
+            {
+                "contract_version": "attachment_processing.v1",
+                "attachment_id": attachment_id,
+                "upload": "failed"
+                if upload_status in {"rejected", "deleted", "failed"}
+                else "registered",
+                "scan": scan,
+                "classification": classification,
+                "confirmation": confirmation,
+                "downstream_analysis": downstream,
+            }
+        )
+    return processing
+
+
+def _node_result_for_attachment(
+    results: list[dict[str, Any]],
+    *,
+    node_code: str,
+    attachment_id: str,
+) -> dict[str, Any]:
+    fallback: dict[str, Any] = {}
+    for result in results:
+        if str(result.get("node_code") or "").strip() != node_code:
+            continue
+        structured = _dict_or_empty(result.get("structured_result"))
+        result_attachment_id = str(structured.get("attachment_id") or "").strip()
+        if result_attachment_id == attachment_id:
+            return result
+        if not result_attachment_id and not fallback:
+            fallback = result
+    return fallback
+
+
+def _downstream_result_for_attachment(
+    results: list[dict[str, Any]],
+    *,
+    attachment_id: str,
+) -> dict[str, Any]:
+    for node_code in (
+        "fine_notice_analysis",
+        "traffic_accident_confirmation_ocr",
+        "vision_media_analysis",
+    ):
+        result = _node_result_for_attachment(
+            results,
+            node_code=node_code,
+            attachment_id=attachment_id,
+        )
+        if result:
+            return result
+    return {}
+
+
+def _classification_processing_status(
+    result: dict[str, Any],
+    *,
+    active_node: str,
+    pending: bool,
+    scan: str,
+    purpose: str,
+) -> str:
+    if purpose == "traffic_accident_confirmation":
+        return "not_required"
+    status = str(result.get("status") or "").strip().lower()
+    if status == "success":
+        return "completed"
+    if status in {"partial", "failed"}:
+        return "failed"
+    if pending and active_node == "attachment_document_classification":
+        return "running"
+    return "not_started" if scan == "completed" else "blocked"
+
+
+def _classification_confirmation_status(
+    attachment: dict[str, Any],
+    *,
+    classification: str,
+    classification_payload: dict[str, Any],
+) -> str:
+    server_confirmation = _dict_or_empty(
+        attachment.get("classification_confirmation")
+    )
+    if server_confirmation.get("source") == "server_record":
+        return "completed"
+    if classification == "not_required":
+        return "not_required"
+    if classification_payload.get("requires_confirmation") is True:
+        return "required"
+    return "not_ready"
+
+
+def _downstream_processing_status(
+    result: dict[str, Any],
+    *,
+    active_node: str,
+    pending: bool,
+    confirmation: str,
+    scan: str,
+) -> str:
+    status = str(result.get("status") or "").strip().lower()
+    if status == "success":
+        return "completed"
+    if status in {"partial", "failed"}:
+        return "failed"
+    if scan != "completed":
+        return "not_started"
+    if pending and active_node in {
+        "fine_notice_analysis",
+        "traffic_accident_confirmation_ocr",
+        "vision_media_analysis",
+    }:
+        return "running"
+    if confirmation in {"completed", "not_required"}:
+        return "queued"
+    return "not_started"
 
 
 def _project_report_links(value: Any) -> list[dict[str, Any]]:

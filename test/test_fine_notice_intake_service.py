@@ -163,6 +163,30 @@ def test_exact_fine_notice_question_maps_the_followup_answer_to_its_slot() -> No
     assert "issuing_authority" not in intake["missing_fields"]
 
 
+def test_pending_question_field_routes_short_answer_without_exact_prompt_text() -> None:
+    intake = reduce_fine_notice_intake(
+        {
+            "message_id": "msg_authority_short_answer",
+            "user_text": "서울시",
+            "pending_questions": [
+                {
+                    "field": "issuing_authority",
+                    "question": "확인 안내를 포함한 다른 발급기관 문구입니다.",
+                }
+            ],
+        }
+    )
+
+    assert intake["slots"]["issuing_authority"] == {
+        "value": "서울시",
+        "source_type": "user_confirmation",
+        "source_message_id": "msg_authority_short_answer",
+        "confidence": 1.0,
+        "confirmed": True,
+    }
+    assert "issuing_authority" not in intake["missing_fields"]
+
+
 def test_uncertain_slot_values_remain_missing_instead_of_becoming_facts() -> None:
     intake = reduce_fine_notice_intake(
         {

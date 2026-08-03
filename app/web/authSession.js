@@ -72,7 +72,6 @@ export async function recoverStoredAuthSession({
 
   let candidate = stored;
   let refreshed = false;
-  const expiresAtMs = readUnverifiedJwtExpirationMs(stored.access_token);
   const refreshDelayMs = millisecondsUntilAppJwtRefresh(stored.access_token, { nowMs });
   if (refreshDelayMs === 0) {
     try {
@@ -86,11 +85,10 @@ export async function recoverStoredAuthSession({
       candidate = sessionFromRefreshResult(stored, refreshResult);
       refreshed = true;
     } catch (error) {
-      const expired = expiresAtMs !== null && expiresAtMs <= Number(nowMs);
-      if (expired || isAuthenticationRejection(error)) {
+      if (shouldClearAuthentication(error)) {
         return reauthRequiredResult(stored, errorReason(error));
       }
-      // A transient refresh failure must not discard a still-valid token.
+      // A transient refresh failure must not discard the stored token.
       candidate = stored;
     }
   }
@@ -107,12 +105,12 @@ export async function recoverStoredAuthSession({
       verifiedSubject?.is_authenticated !== true ||
       String(verifiedSubject?.auth_session_id || "") !== expectedAuthSessionId
     ) {
-      return reauthRequiredResult(stored, "auth_session_mismatch");
+      return verificationUnavailableResult(stored, "auth_session_mismatch", refreshed);
     }
     const expectedUserId = String(candidate.user_id || "");
     const verifiedUserId = String(verifiedSubject?.user_id || "");
     if (expectedUserId && verifiedUserId && expectedUserId !== verifiedUserId) {
-      return reauthRequiredResult(stored, "auth_user_mismatch");
+      return verificationUnavailableResult(stored, "auth_user_mismatch", refreshed);
     }
     return {
       status: "authenticated",
@@ -126,15 +124,10 @@ export async function recoverStoredAuthSession({
       },
     };
   } catch (error) {
-    if (isAuthenticationRejection(error)) {
+    if (shouldClearAuthentication(error)) {
       return reauthRequiredResult(stored, errorReason(error));
     }
-    return {
-      status: "verification_unavailable",
-      reason: errorReason(error),
-      refreshed,
-      session: stored,
-    };
+    return verificationUnavailableResult(stored, errorReason(error), refreshed);
   }
 }
 
@@ -198,11 +191,17 @@ function reauthRequiredResult(stored, reason) {
   };
 }
 
-function isAuthenticationRejection(error) {
-  return (
-    [401, 403].includes(Number(error?.status)) ||
-    ["auth_required", "token_expired", "token_invalid"].includes(String(error?.code || ""))
-  );
+function verificationUnavailableResult(stored, reason, refreshed = false) {
+  return {
+    status: "verification_unavailable",
+    reason: reason || "auth_verification_unavailable",
+    refreshed,
+    session: stored,
+  };
+}
+
+export function shouldClearAuthentication(error) {
+  return [401, 403].includes(Number(error?.status));
 }
 
 function errorReason(error) {
