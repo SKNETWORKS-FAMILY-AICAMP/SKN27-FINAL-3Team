@@ -105,7 +105,7 @@ test("creates complete fresh conversation-owned reset values on every call", () 
     analysisResponse: null,
     attachmentPurpose: "fine_notice",
     chatMessages: [],
-    currentReport: null,
+    currentSessionReport: null,
     guestDetailedReportUsed: false,
     historyEvents: null,
     isRegisteringAttachment: false,
@@ -119,15 +119,14 @@ test("creates complete fresh conversation-owned reset values on every call", () 
     question: "",
     registeredAttachments: [],
     reportActionStatus: "",
-    reportList: [],
     reportWorkspaceLoadError: "",
     saveDecision: "undecided",
     savePromptVisible: false,
     selectedUploadFile: null,
+    selectedSavedReport: null,
     submittedQuestion: "",
   });
   assert.notEqual(first.chatMessages, second.chatMessages);
   assert.notEqual(first.registeredAttachments, second.registeredAttachments);
-  assert.notEqual(first.reportList, second.reportList);
   assert.notEqual(first.ocrConfirmationFields, second.ocrConfirmationFields);
 });

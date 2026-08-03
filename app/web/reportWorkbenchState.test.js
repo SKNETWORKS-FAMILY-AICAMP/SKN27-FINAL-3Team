@@ -157,10 +157,26 @@ test("shows an initial workspace before a user has started any consultation", ()
   assert.equal(state.ctaLabel, "AI 상담 시작");
 });
 
+test("distinguishes an empty current consultation from existing saved reports", () => {
+  const state = deriveReportWorkbenchState({
+    hasCurrentSessionReport: false,
+    hasSelectedSavedReport: false,
+    hasSavedReports: true,
+    reportingPayload: null,
+    supervisorState: null,
+  });
+
+  assert.equal(state.kind, "saved_reports_only");
+  assert.match(state.title, /현재 상담에는.*리포트가 없습니다/);
+  assert.match(state.description, /저장된 리포트/);
+  assert.equal(state.ctaLabel, "저장 리포트 선택");
+});
+
 test("does not replace an existing report with an empty-state instruction", () => {
   const state = deriveReportWorkbenchState({
     hasReport: true,
     hasSavedReports: true,
+    hasCurrentSessionReport: true,
     canGenerateReport: true,
     isPersistedReport: true,
     reportingPayload: { report_id: "report_123" },
@@ -178,6 +194,7 @@ test("waits for persisted report detail instead of rendering a list summary as a
   const state = deriveReportWorkbenchState({
     hasReport: false,
     hasSavedReports: true,
+    hasSelectedSavedReport: true,
     savedReportDetailLoaded: false,
   });
 

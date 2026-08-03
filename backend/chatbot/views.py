@@ -66,6 +66,7 @@ from app.services.chat_orchestration_service import (
 from app.services.chat_session_followup_service import (
     followup_routing_intent,
     merge_chat_followup_payload,
+    normalize_report_generation_request,
     resolve_confirmed_report_user_facts,
 )
 from app.services.supervisor_execution_input_service import (
@@ -90,10 +91,7 @@ from app.services.history_event_mock_service import (
 from app.services.public_consultation_routing_service import (
     resolve_public_consultation_intent,
 )
-from app.services.supervisor_routing_service import (
-    report_generation_requested,
-    route_supervisor_input,
-)
+from app.services.supervisor_routing_service import route_supervisor_input
 from app.services.resume_manifest_service import build_resume_manifest
 from app.services.report_query_service import (
     WORKER_REPORT_SOURCE,
@@ -154,7 +152,6 @@ from chatbot.repositories import (
     list_history_event_records,
     list_report_records,
     list_uploaded_files,
-    load_recent_chat_user_message_contents,
     mark_conversation_save_state,
     normalize_report_download_document_type,
     load_chat_followup_state,
@@ -180,13 +177,6 @@ from chatbot.progress_cache import read_analysis_job_progress, read_chat_session
 
 
 logger = logging.getLogger(__name__)
-_AUTOMATED_CHAT_USER_MESSAGES = frozenset(
-    {
-        "첨부한 자료를 확인해 주세요.",
-        "자료 분류를 확인했습니다. 다음 분석을 진행해 주세요.",
-        "OCR 추출값을 확인했습니다. 후속 절차를 진행해 주세요.",
-    }
-)
 
 
 @require_http_methods(["GET", "OPTIONS"])
@@ -1371,24 +1361,11 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
             stored_followup_state,
             current_routing_intent=current_routing_intent,
         )
-        ocr_confirmation = identity_body.get("ocr_confirmation")
-        if (
-            isinstance(ocr_confirmation, dict)
-            and ocr_confirmation.get("confirmed") is True
-        ):
-            previous_user_request = next(
-                (
-                    message
-                    for message in load_recent_chat_user_message_contents(
-                        requested_session_id
-                    )
-                    if message not in _AUTOMATED_CHAT_USER_MESSAGES
-                ),
-                "",
-            )
-            identity_body["_server_report_generation_requested"] = (
-                report_generation_requested(previous_user_request)
-            )
+    report_generation_action = normalize_report_generation_request(identity_body)
+    if report_generation_action:
+        identity_body["report_generation_requested"] = True
+        identity_body["report_generation_action"] = report_generation_action
+        identity_body["_server_report_generation_requested"] = True
 
     confirmed_report_user_facts = resolve_confirmed_report_user_facts(
         stored_followup_state,

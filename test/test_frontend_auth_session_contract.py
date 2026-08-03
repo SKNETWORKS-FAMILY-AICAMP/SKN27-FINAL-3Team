@@ -123,6 +123,54 @@ def test_frontend_renders_editable_ocr_confirmation_before_follow_up() -> None:
     assert "notice_stage" in shell
 
 
+def test_frontend_separates_current_session_saved_list_and_selected_report_state() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    assert "const [currentSessionReport, setCurrentSessionReport] = useState(null);" in shell
+    assert "const [savedReportList, setSavedReportList] = useState([]);" in shell
+    assert "const [selectedSavedReport, setSelectedSavedReport] = useState(null);" in shell
+    assert "const [currentReport, setCurrentReport] = useState(null);" not in shell
+    assert "const [reportList, setReportList] = useState([]);" not in shell
+
+
+def test_saved_reports_only_cta_opens_a_saved_report_instead_of_chat() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+
+    assert 'state.kind === "saved_reports_only"' in shell
+    assert "onOpenSavedReport={" in shell
+    assert "onOpenReport?.(reportList[0])" in shell
+
+
+def test_authenticated_resume_fetches_owner_reports_independently_of_latest_session() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    recovery_start = shell.index("recoverStoredAuthSession({")
+    recovery_end = shell.index(".catch((error) =>", recovery_start)
+    recovery = shell[recovery_start:recovery_end]
+
+    assert "await loadReports({" in recovery
+    assert "identity: recoveredIdentity" in recovery
+    assert "sessionId: resumed.sessionId" in recovery
+    assert "setSavedReportList(resumed.reportList)" not in recovery
+
+
+def test_ocr_confirmation_sends_a_structured_objection_draft_action() -> None:
+    shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    confirmation_start = shell.index("function submitOcrConfirmation()")
+    confirmation_end = shell.index(
+        "function submitAttachmentClassificationConfirmation", confirmation_start
+    )
+    confirmation = shell[confirmation_start:confirmation_end]
+    submission_start = shell.index("async function submitServiceMessage")
+    submission_end = shell.index("async function", submission_start + 20)
+    submission = shell[submission_start:submission_end]
+
+    assert "reportGenerationRequested: true" in confirmation
+    assert 'type: "generate_objection_draft"' in confirmation
+    assert 'reportType: "fine_notice_objection"' in confirmation
+    assert "report_generation_requested: reportGenerationRequested" in submission
+    assert "report_generation_action: reportGenerationAction" in submission
+
+
 def test_start_new_conversation_issues_server_session_then_resets_conversation_state() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
     start = shell.index("async function startNewConversation() {")
@@ -141,8 +189,9 @@ def test_start_new_conversation_issues_server_session_then_resets_conversation_s
     assert "setOcrConfirmationFields(reset.ocrConfirmationFields)" in block
     assert "setPendingOcrConfirmation(reset.pendingOcrConfirmation)" in block
     assert "setPendingAuthAction(reset.pendingAuthAction)" in block
-    assert "setCurrentReport(reset.currentReport)" in block
-    assert "setReportList(reset.reportList)" in block
+    assert "setCurrentSessionReport(reset.currentSessionReport)" in block
+    assert "setSelectedSavedReport(reset.selectedSavedReport)" in block
+    assert "setSavedReportList" not in block
     assert 'setSessionId("");' not in block
 
 

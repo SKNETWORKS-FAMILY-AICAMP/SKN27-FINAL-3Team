@@ -341,6 +341,13 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
                         "issuing_authority": "경찰서장",
                     },
                 },
+                "report_generation_requested": True,
+                "report_generation_action": {
+                    "contract_version": "report_generation_action.v1",
+                    "type": "generate_objection_draft",
+                    "report_type": "fine_notice_objection",
+                    "source": "ocr_confirmation",
+                },
             },
             content_type="application/json",
         )
@@ -355,6 +362,20 @@ class AttachmentClassificationConfirmationFlowTests(TestCase):
         self.assertIn("objection_report_generation", node_codes)
         work_item = AgentWorkItem.objects.get(
             work_item_id=response.json()["work_item"]["work_item_id"]
+        )
+        expected_action = {
+            "contract_version": "report_generation_action.v1",
+            "type": "generate_objection_draft",
+            "report_type": "fine_notice_objection",
+            "source": "ocr_confirmation",
+        }
+        session = ChatSession.objects.get(session_id=session_id)
+        followup_state = session.metadata["chat_followup_state"]
+        self.assertIs(followup_state["report_generation_requested"], True)
+        self.assertEqual(followup_state["report_generation_action"], expected_action)
+        self.assertIs(work_item.job.metadata["report_generation_requested"], True)
+        self.assertEqual(
+            work_item.job.metadata["report_generation_action"], expected_action
         )
         self.assertNotIn(
             "user_facts",

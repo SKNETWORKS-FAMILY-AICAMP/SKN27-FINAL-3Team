@@ -8,6 +8,9 @@ from typing import Any
 
 
 CHAT_SESSION_FOLLOWUP_STATE_VERSION = "chat_session_followup_state.v1"
+REPORT_GENERATION_ACTION_VERSION = "report_generation_action.v1"
+REPORT_GENERATION_ACTION_TYPE = "generate_objection_draft"
+REPORT_GENERATION_REPORT_TYPE = "fine_notice_objection"
 MAX_FOLLOWUP_HISTORY_TURNS = 16
 _TOPIC_SCOPED_FIELDS = frozenset(
     {
@@ -21,6 +24,9 @@ _TOPIC_SCOPED_FIELDS = frozenset(
         "consultation_state",
         "conversation_history",
         "ocr_confirmation",
+        "report_generation_requested",
+        "report_generation_action",
+        "_server_report_generation_requested",
     }
 )
 _OCR_CONFIRMATION_FIELDS = frozenset(
@@ -109,6 +115,20 @@ def merge_chat_followup_payload(
         restored_confirmation = _restored_ocr_confirmation(state, merged)
         if restored_confirmation:
             merged["ocr_confirmation"] = restored_confirmation
+    if (
+        "report_generation_action" not in merged
+        and state.get("report_generation_requested") is True
+        and isinstance(state.get("report_generation_action"), dict)
+    ):
+        merged["report_generation_requested"] = True
+        merged["report_generation_action"] = deepcopy(
+            state["report_generation_action"]
+        )
+    report_generation_action = normalize_report_generation_request(merged)
+    if report_generation_action:
+        merged["report_generation_requested"] = True
+        merged["report_generation_action"] = report_generation_action
+        merged["_server_report_generation_requested"] = True
     return merged
 
 
@@ -147,6 +167,10 @@ def build_chat_followup_snapshot(
     ocr_confirmation = _stored_ocr_confirmation(payload)
     if ocr_confirmation:
         snapshot["ocr_confirmation"] = ocr_confirmation
+    report_generation_action = normalize_report_generation_request(payload)
+    if report_generation_action:
+        snapshot["report_generation_requested"] = True
+        snapshot["report_generation_action"] = report_generation_action
     return snapshot
 
 
@@ -166,7 +190,43 @@ def merge_confirmed_ocr_followup_state(
     if _text(routing_intent):
         state["routing_intent"] = _text(routing_intent)
     state["ocr_confirmation"] = confirmation
+    report_generation_action = normalize_report_generation_request(payload)
+    if report_generation_action:
+        state["report_generation_requested"] = True
+        state["report_generation_action"] = report_generation_action
+    else:
+        state.pop("report_generation_requested", None)
+        state.pop("report_generation_action", None)
     return state
+
+
+def normalize_report_generation_request(payload: dict[str, Any]) -> dict[str, str]:
+    """Validate and canonicalize the OCR-bound objection-draft action."""
+
+    if payload.get("report_generation_requested") is not True:
+        return {}
+    if not _stored_ocr_confirmation(payload):
+        return {}
+    raw = _dict(payload.get("report_generation_action"))
+    contract_version = _text(
+        raw.get("contract_version") or raw.get("contractVersion")
+    )
+    action_type = _text(raw.get("type"))
+    report_type = _text(raw.get("report_type") or raw.get("reportType"))
+    source = _text(raw.get("source"))
+    if (
+        contract_version != REPORT_GENERATION_ACTION_VERSION
+        or action_type != REPORT_GENERATION_ACTION_TYPE
+        or report_type != REPORT_GENERATION_REPORT_TYPE
+        or source != "ocr_confirmation"
+    ):
+        return {}
+    return {
+        "contract_version": REPORT_GENERATION_ACTION_VERSION,
+        "type": REPORT_GENERATION_ACTION_TYPE,
+        "report_type": REPORT_GENERATION_REPORT_TYPE,
+        "source": "ocr_confirmation",
+    }
 
 
 def followup_routing_intent(stored_state: dict[str, Any] | None) -> str:

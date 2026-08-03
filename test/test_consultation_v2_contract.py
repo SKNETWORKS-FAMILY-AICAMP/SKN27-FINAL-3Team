@@ -129,7 +129,9 @@ def test_worker_report_actions_reuse_the_persisted_report_instead_of_reposting_i
 
     submit_start = shell.index("async function submitServiceMessage")
     submit_end = shell.index("async function saveConversationWithGoogle", submit_start)
-    assert "setCurrentReport(null);" in shell[submit_start:submit_end]
+    assert "setCurrentSessionReport(null);" in shell[submit_start:submit_end]
+    assert "setSelectedSavedReport(null);" in shell[submit_start:submit_end]
+    assert "setSavedReportList([]);" not in shell[submit_start:submit_end]
 
 
 def test_frontend_report_download_actions_use_docx_api_without_pdf_printing() -> None:

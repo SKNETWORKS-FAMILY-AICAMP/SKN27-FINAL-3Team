@@ -328,8 +328,9 @@ export default function FrontendAppShell({
   const [ocrConfirmationFields, setOcrConfirmationFields] = useState({});
   const [pendingOcrConfirmation, setPendingOcrConfirmation] = useState(null);
   const [reportActionStatus, setReportActionStatus] = useState("");
-  const [currentReport, setCurrentReport] = useState(null);
-  const [reportList, setReportList] = useState([]);
+  const [currentSessionReport, setCurrentSessionReport] = useState(null);
+  const [savedReportList, setSavedReportList] = useState([]);
+  const [selectedSavedReport, setSelectedSavedReport] = useState(null);
   const [isReportWorkspaceLoading, setIsReportWorkspaceLoading] = useState(false);
   const [reportWorkspaceLoadError, setReportWorkspaceLoadError] = useState("");
   const [pendingAuthAction, setPendingAuthAction] = useState(null);
@@ -382,7 +383,9 @@ export default function FrontendAppShell({
             ? "비회원 상담"
             : "상담 준비";
   const cases = mypageSummary?.cases?.length ? mypageSummary.cases : [];
-  const effectiveReportList = reportList;
+  const currentReport = selectedSavedReport || currentSessionReport;
+  const reportList = savedReportList;
+  const effectiveReportList = savedReportList;
   const effectiveCurrentReport = currentReport;
   const effectiveMypageSummary = mypageSummary;
   const history = historyEvents?.events || [];
@@ -568,8 +571,8 @@ export default function FrontendAppShell({
             setConsultationIntake(resumed.consultationIntake);
             setRegisteredAttachments(resumed.registeredAttachments);
             setAnalysisResponse(resumed.analysisResponse);
-            setReportList(resumed.reportList);
-            setCurrentReport(resumed.currentReport);
+            setCurrentSessionReport(resumed.currentReport);
+            setSelectedSavedReport(null);
             setActiveRoute("chatbot");
             persistAuthSession({
               accessToken: recovered.access_token,
@@ -579,6 +582,17 @@ export default function FrontendAppShell({
               googleProfile: readStoredGoogleProfile(),
               sessionId: resumed.sessionId,
               userId: recovered.user_id,
+            });
+            await loadReports({
+              identity: recoveredIdentity,
+              sessionId: resumed.sessionId,
+              hydrateLatest: true,
+            });
+          } else {
+            await loadReports({
+              identity: recoveredIdentity,
+              sessionId: recovered.session_id || "",
+              hydrateLatest: true,
             });
           }
           setAuthRestoreStatus("ready");
@@ -957,8 +971,9 @@ export default function FrontendAppShell({
     setHistoryEvents(null);
     setChatMessages([]);
     setAnalysisResponse(null);
-    setCurrentReport(null);
-    setReportList([]);
+    setCurrentSessionReport(null);
+    setSavedReportList([]);
+    setSelectedSavedReport(null);
     setPendingAuthAction(null);
     setCaseReadyProgress({ step: "idle", error: "" });
     setReportActionStatus("");
@@ -1256,7 +1271,11 @@ export default function FrontendAppShell({
           session_id: activeSessionId,
           content: { reporting_payload: activeReportingPayload },
         };
-        setCurrentReport(persistedReport);
+        if (selectedSavedReport) {
+          setSelectedSavedReport(persistedReport);
+        } else {
+          setCurrentSessionReport(persistedReport);
+        }
         let downloadedFilename = "";
         if (reportAction === "download") {
           const confirmation = persistedReport?.content?.reporting_payload?.document_confirmation;
@@ -1333,7 +1352,11 @@ export default function FrontendAppShell({
         sessionId: activeSessionId,
         identity: nextIdentity,
       });
-      setCurrentReport(detailResult?.report || currentReport);
+      if (selectedSavedReport) {
+        setSelectedSavedReport(detailResult?.report || currentReport);
+      } else {
+        setCurrentSessionReport(detailResult?.report || currentReport);
+      }
       setReportActionStatus("최종 확인이 저장되었습니다. 이의신청서 DOCX를 다운로드할 수 있습니다.");
     } catch (_error) {
       setPendingAuthAction(null);
@@ -1466,8 +1489,9 @@ export default function FrontendAppShell({
       }
 
       setAnalysisResponse(completed.workerResult);
-      setCurrentReport(completed.report);
-      setReportList((items) => [
+      setCurrentSessionReport(completed.report);
+      setSelectedSavedReport(null);
+      setSavedReportList((items) => [
         completed.report,
         ...items.filter(
           (item) => item?.report_id !== completed.report.report_id,
@@ -1507,6 +1531,13 @@ export default function FrontendAppShell({
     void submitServiceMessage({
       userText: followUpMessage,
       ocrConfirmation: confirmation,
+      reportGenerationRequested: true,
+      reportGenerationAction: {
+        contractVersion: "report_generation_action.v1",
+        type: "generate_objection_draft",
+        reportType: "fine_notice_objection",
+        source: "ocr_confirmation",
+      },
       submissionKind: "service",
     });
   }
@@ -1533,6 +1564,8 @@ export default function FrontendAppShell({
     userText,
     ocrConfirmation,
     attachmentClassificationConfirmation,
+    reportGenerationRequested = false,
+    reportGenerationAction,
     requestContext = {},
     submissionKind = "manual",
   } = {}) {
@@ -1632,7 +1665,8 @@ export default function FrontendAppShell({
       userId: followupLoginState?.userId || null,
     });
     setChatMessages(conversationHistory);
-    setCurrentReport(null);
+    setCurrentSessionReport(null);
+    setSelectedSavedReport(null);
     setReportActionStatus("");
 
     try {
@@ -1657,6 +1691,8 @@ export default function FrontendAppShell({
         facts: consultationRequestContext.facts,
         fine_notice_slots: consultationRequestContext.fine_notice_slots,
         ocr_confirmation: confirmationForRequest || undefined,
+        report_generation_requested: reportGenerationRequested,
+        report_generation_action: reportGenerationAction,
         attachment_classification_confirmation:
           attachmentClassificationConfirmation || undefined,
         execution_mode: executionMode,
@@ -1953,8 +1989,8 @@ export default function FrontendAppShell({
       setChatMessages(reset.chatMessages);
       setConsultationIntake(createEmptyConsultationIntake());
       setAnalysisResponse(reset.analysisResponse);
-      setCurrentReport(reset.currentReport);
-      setReportList(reset.reportList);
+      setCurrentSessionReport(reset.currentSessionReport);
+      setSelectedSavedReport(reset.selectedSavedReport);
       setReportActionStatus(reset.reportActionStatus);
       setReportWorkspaceLoadError(reset.reportWorkspaceLoadError);
       setIsReportWorkspaceLoading(reset.isReportWorkspaceLoading);
@@ -2019,9 +2055,10 @@ export default function FrontendAppShell({
     const requestSessionId = options?.sessionId || sessionId;
     const hydrateLatest = options?.hydrateLatest === true;
     if (!requestIdentity?.authToken && !requestIdentity?.authSessionId) {
-      setReportList([]);
+      setSavedReportList([]);
       if (hydrateLatest) {
-        setCurrentReport(null);
+        setCurrentSessionReport(null);
+        setSelectedSavedReport(null);
       }
       setStatusMessage("저장 리포트 목록은 로그인 후 확인할 수 있습니다.");
       return { reports: [] };
@@ -2029,30 +2066,32 @@ export default function FrontendAppShell({
     if (hydrateLatest) {
       setIsReportWorkspaceLoading(true);
       setReportWorkspaceLoadError("");
-      setCurrentReport(null);
+      setSelectedSavedReport(null);
     }
     setStatusMessage("리포트 목록을 불러오고 있습니다.");
     try {
       const result = await api.listReports({ identity: requestIdentity });
       const reports = Array.isArray(result?.reports) ? result.reports : [];
-      setReportList(reports);
+      setSavedReportList(reports);
       if (hydrateLatest) {
-        if (!reports[0]?.report_id) {
-          setCurrentReport(null);
+        const currentSessionSummary = reports.find(
+          (report) => report?.session_id && report.session_id === requestSessionId
+        );
+        if (!currentSessionSummary?.report_id) {
+          setCurrentSessionReport(null);
         } else {
           try {
             const detailResult = await api.getReportDetail({
-              reportId: reports[0].report_id,
-              sessionId: reports[0].session_id || requestSessionId,
+              reportId: currentSessionSummary.report_id,
+              sessionId: requestSessionId,
               identity: requestIdentity,
             });
             const detail = detailResult?.report;
             if (!detail?.report_id || !detail?.content?.reporting_payload) {
               throw new Error("report_detail_incomplete");
             }
-            setCurrentReport(detail);
+            setCurrentSessionReport(detail);
           } catch (error) {
-            setCurrentReport(null);
             setReportWorkspaceLoadError(
               error?.message?.includes("login_required")
                 ? "저장 리포트를 확인하려면 Google 로그인이 필요합니다."
@@ -2062,15 +2101,11 @@ export default function FrontendAppShell({
             return result;
           }
         }
-      } else if (!currentReport && reports[0]) {
-        setCurrentReport(reports[0]);
       }
       setStatusMessage("리포트 목록을 업데이트했습니다.");
       return result;
     } catch (error) {
-      setReportList([]);
       if (hydrateLatest) {
-        setCurrentReport(null);
         setReportWorkspaceLoadError(
           error?.message?.includes("login_required")
             ? "저장 리포트를 확인하려면 Google 로그인이 필요합니다."
@@ -2097,7 +2132,7 @@ export default function FrontendAppShell({
     }
     const requestSessionId = report?.session_id || sessionId;
     if (!identity?.authToken && !identity?.authSessionId) {
-      setCurrentReport(report);
+      setSelectedSavedReport(report);
       setReportActionStatus("로그인 후 리포트 상세를 다시 불러올 수 있습니다.");
       setStatusMessage("리포트 상세는 로그인 후 확인할 수 있습니다.");
       return;
@@ -2110,11 +2145,11 @@ export default function FrontendAppShell({
         identity,
       });
       const detail = result?.report || report;
-      setCurrentReport(detail);
+      setSelectedSavedReport(detail);
       setReportActionStatus(`선택한 리포트: ${detail.report_id || reportId}`);
       setStatusMessage("리포트 상세를 미리보기에 반영했습니다.");
     } catch (_error) {
-      setCurrentReport(report);
+      setSelectedSavedReport(report);
       setReportActionStatus("리포트 상세를 불러오지 못해 목록 요약만 표시합니다.");
       setStatusMessage("리포트 상세를 불러오지 못했습니다.");
     }
@@ -2136,7 +2171,8 @@ export default function FrontendAppShell({
         setSubmittedQuestion(firstUserMessage?.content || item?.title || job.progress_message || "");
         setChatMessages(restoredMessages);
         setAnalysisResponse(restoredResponse);
-        setCurrentReport(restoredReport);
+        setCurrentSessionReport(restoredReport);
+        setSelectedSavedReport(null);
         setReportActionStatus(
           restoredReport
             ? "내 사건에서 저장된 상담과 리포트를 불러왔습니다."
@@ -2155,14 +2191,15 @@ export default function FrontendAppShell({
 
     const reportId = item?.latest_report_id || item?.report_id || "";
     if (!reportId) {
-      setCurrentReport(null);
+      setCurrentSessionReport(null);
+      setSelectedSavedReport(null);
       setReportActionStatus("선택한 사건에는 아직 저장된 리포트가 없습니다. 상담 화면에서 이어갈 수 있습니다.");
       setActiveRoute("chatbot");
       return;
     }
 
     const reportStatus = item?.latest_report_status || item?.status || "saved";
-    setCurrentReport({
+    setCurrentSessionReport({
       report_id: reportId,
       status: reportStatus,
       persistence: { status: reportStatus },
@@ -2173,6 +2210,7 @@ export default function FrontendAppShell({
         report_count: item?.report_count || 1,
       },
     });
+    setSelectedSavedReport(null);
     setReportActionStatus("내 사건에서 저장된 리포트를 열었습니다.");
     setActiveRoute("reporting");
   }
@@ -2375,6 +2413,7 @@ export default function FrontendAppShell({
               analysisCards={visibleAnalysisCards}
               canGenerateReport={hasReportGenerationNode(supervisorState)}
               currentReport={effectiveCurrentReport}
+              currentSessionReport={currentSessionReport}
               isAuthenticated={Boolean(authSessionId)}
               isReportWorkspaceLoading={isReportWorkspaceLoading}
               onOpenChat={() => setActiveRoute("chatbot")}
@@ -2390,6 +2429,7 @@ export default function FrontendAppShell({
               onRunReportAction={runCurrentReportAction}
               reportActionStatus={reportActionStatus}
               reportList={effectiveReportList}
+              selectedSavedReport={selectedSavedReport}
               reportingPayload={visibleReportingPayload}
               reportWorkspaceLoadError={reportWorkspaceLoadError}
               supervisorExecution={supervisorExecution}
@@ -5269,6 +5309,7 @@ function ReportingScreen({
   analysisCards = [],
   canGenerateReport = false,
   currentReport = null,
+  currentSessionReport = null,
   isAuthenticated = false,
   isReportWorkspaceLoading = false,
   onOpenChat,
@@ -5281,6 +5322,7 @@ function ReportingScreen({
   onRunReportAction,
   reportActionStatus = "",
   reportList = [],
+  selectedSavedReport = null,
   reportingPayload = null,
   reportWorkspaceLoadError = "",
   supervisorExecution = null,
@@ -5289,6 +5331,8 @@ function ReportingScreen({
   const [isReportListCollapsed, setIsReportListCollapsed] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const hasSavedReports = Array.isArray(reportList) && reportList.length > 0;
+  const hasCurrentSessionReport = Boolean(currentSessionReport?.report_id);
+  const hasSelectedSavedReport = Boolean(selectedSavedReport?.report_id);
   const liveReportingPayload = hasMeaningfulReportingPayload(reportingPayload)
     ? reportingPayload
     : null;
@@ -5316,6 +5360,8 @@ function ReportingScreen({
   const workbenchState = deriveReportWorkbenchState({
     hasReport,
     hasSavedReports,
+    hasCurrentSessionReport,
+    hasSelectedSavedReport,
     canGenerateReport,
     isAuthenticated,
     isPersistedReport,
@@ -5614,6 +5660,7 @@ function ReportingScreen({
             <ReportWorkbenchEmptyState
               state={workbenchState}
               onOpenChat={onOpenChat}
+              onOpenSavedReport={() => onOpenReport?.(reportList[0])}
               onRefresh={onRefresh}
               isLoading={isReportWorkspaceLoading}
               loadError={reportWorkspaceLoadError}
@@ -5699,9 +5746,21 @@ function ReportingScreen({
   );
 }
 
-function ReportWorkbenchEmptyState({ state, onOpenChat, onRefresh, isLoading = false, loadError = "" }) {
+function ReportWorkbenchEmptyState({
+  state,
+  onOpenChat,
+  onOpenSavedReport,
+  onRefresh,
+  isLoading = false,
+  loadError = "",
+}) {
   const refreshesSavedReport = state.kind === "loading_saved_report";
-  const action = refreshesSavedReport ? onRefresh : onOpenChat;
+  const selectsSavedReport = state.kind === "saved_reports_only";
+  const action = refreshesSavedReport
+    ? onRefresh
+    : selectsSavedReport
+      ? onOpenSavedReport
+      : onOpenChat;
   return (
     <section className={`report-page-empty report-workbench-empty is-${state.kind}`} aria-label="리포트 작업대 준비 상태">
       <span className="tag amber">{state.stageLabel}</span>

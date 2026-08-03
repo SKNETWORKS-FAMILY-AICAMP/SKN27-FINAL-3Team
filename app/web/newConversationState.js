@@ -70,7 +70,7 @@ export function createNewConversationResetState() {
     analysisResponse: null,
     attachmentPurpose: "fine_notice",
     chatMessages: [],
-    currentReport: null,
+    currentSessionReport: null,
     guestDetailedReportUsed: false,
     historyEvents: null,
     isRegisteringAttachment: false,
@@ -84,11 +84,11 @@ export function createNewConversationResetState() {
     question: "",
     registeredAttachments: [],
     reportActionStatus: "",
-    reportList: [],
     reportWorkspaceLoadError: "",
     saveDecision: "undecided",
     savePromptVisible: false,
     selectedUploadFile: null,
+    selectedSavedReport: null,
     submittedQuestion: "",
   };
 }

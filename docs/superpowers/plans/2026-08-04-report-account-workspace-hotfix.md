@@ -73,3 +73,61 @@
 - [x] Run the focused frontend tests.
 - [x] Run Django chatbot tests, the complete Python suite, all frontend Node tests, Vite build, and `git diff --check`.
 - [ ] Deploy the verified SHA and run the authenticated browser flow: open the report menu, select a prior report, start a new fine-notice flow, confirm OCR, verify automatic draft generation, and download DOCX when eligible.
+
+### Task 4: Separate current-session, saved-list, and selected-report state
+
+**Files:**
+- Modify: `app/web/FrontendAppShell.jsx`
+- Modify: `app/web/newConversationState.js`
+- Test: `app/web/newConversationState.test.js`
+- Test: `app/web/reportWorkbenchState.test.js`
+- Test: `test/test_frontend_auth_session_contract.py`
+
+**Interfaces:**
+- Consumes: active chat `sessionId`, resume manifest session report, owner-scoped report summaries
+- Produces: independent `currentSessionReport`, `savedReportList`, and `selectedSavedReport` state
+
+- [ ] Add failing tests requiring three independent report states and requiring new-conversation reset to preserve the account list.
+- [ ] Add a failing auth-restore contract test requiring an owner-scoped list request after resume hydration.
+- [ ] Replace the two overloaded report states with the three explicit states and an active-report projection.
+- [ ] Make `loadReports` update the account list, hydrate only a matching current-session report, and never auto-select another session's latest report.
+- [ ] Make explicit list selection update `selectedSavedReport`; reset only conversation-owned report state on new conversation.
+- [ ] Run the focused frontend tests and contract tests.
+
+### Task 5: Persist the structured OCR draft-generation request
+
+**Files:**
+- Modify: `app/web/FrontendAppShell.jsx`
+- Modify: `app/services/chat_session_followup_service.py`
+- Modify: `backend/chatbot/views.py`
+- Modify: `backend/chatbot/repositories.py`
+- Test: `backend/chatbot/test_chat_session_followup_ocr_confirmation.py`
+- Test: `backend/chatbot/test_attachment_classification_confirmation_flow.py`
+- Test: `test/test_frontend_auth_session_contract.py`
+
+**Interfaces:**
+- Consumes: `report_generation_requested: true` and `report_generation_action.v1`
+- Produces: server-normalized action in `chat_followup_state` and `AnalysisJob.metadata`
+
+- [ ] Add failing frontend contract coverage for the boolean and the `generate_objection_draft` action.
+- [ ] Add failing service tests proving valid confirmed-OCR actions persist and topic switches or stale attachments do not restore them.
+- [ ] Add a failing Django E2E assertion for both ChatSession and AnalysisJob persistence.
+- [ ] Normalize and restore the narrow action at the server follow-up boundary; remove previous-message keyword reconstruction.
+- [ ] Persist the same normalized request in queued analysis metadata without granting public execution authority.
+- [ ] Run focused service, E2E, and frontend contract tests.
+
+### Task 6: Distinguish saved-only report workspaces and verify
+
+**Files:**
+- Modify: `app/web/reportWorkbenchState.js`
+- Modify: `app/web/FrontendAppShell.jsx`
+- Test: `app/web/reportWorkbenchState.test.js`
+
+**Interfaces:**
+- Consumes: current-session report presence, explicit saved-report selection, and owner-scoped saved-list presence
+- Produces: `saved_reports_only` workbench state
+
+- [ ] Add a failing test for “현재 상담 리포트 없음 + 내 저장 리포트 있음”.
+- [ ] Add the `saved_reports_only` state and pass the separate state flags from the shell.
+- [ ] Run all frontend Node tests, the complete Python test suite, Django chatbot tests, Vite build, and `git diff --check`.
+- [ ] After deployment, verify login restore, saved-only workspace, prior-report selection, OCR action persistence, automatic draft generation, and eligible DOCX download in the browser.

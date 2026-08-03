@@ -23,6 +23,12 @@ class ChatSessionFollowupOcrConfirmationTests(SimpleTestCase):
                 "unexpected": "must-not-persist",
             },
         }
+        self.report_action = {
+            "contract_version": "report_generation_action.v1",
+            "type": "generate_objection_draft",
+            "report_type": "fine_notice_objection",
+            "source": "ocr_confirmation",
+        }
 
     def test_same_attachment_restores_only_allowed_confirmation_fields(self) -> None:
         state = merge_confirmed_ocr_followup_state(
@@ -57,6 +63,59 @@ class ChatSessionFollowupOcrConfirmationTests(SimpleTestCase):
                 },
             },
         )
+
+    def test_confirmed_ocr_restores_server_persisted_report_generation_action(self) -> None:
+        state = merge_confirmed_ocr_followup_state(
+            None,
+            {
+                "attachments": [{"attachment_id": "att_notice"}],
+                "ocr_confirmation": self.confirmation,
+                "report_generation_requested": True,
+                "report_generation_action": self.report_action,
+            },
+            routing_intent="fine_notice_analysis",
+        )
+
+        self.assertIs(state["report_generation_requested"], True)
+        self.assertEqual(state["report_generation_action"], self.report_action)
+
+        merged = merge_chat_followup_payload(
+            {
+                "user_text": "저장된 요청으로 계속 진행해 주세요.",
+                "attachments": [{"attachment_id": "att_notice"}],
+            },
+            state,
+            current_routing_intent="fine_notice_analysis",
+        )
+
+        self.assertIs(merged["report_generation_requested"], True)
+        self.assertEqual(merged["report_generation_action"], self.report_action)
+        self.assertIs(merged["_server_report_generation_requested"], True)
+
+    def test_report_generation_action_is_not_restored_after_topic_switch(self) -> None:
+        state = merge_confirmed_ocr_followup_state(
+            None,
+            {
+                "attachments": [{"attachment_id": "att_notice"}],
+                "ocr_confirmation": self.confirmation,
+                "report_generation_requested": True,
+                "report_generation_action": self.report_action,
+            },
+            routing_intent="fine_notice_analysis",
+        )
+
+        merged = merge_chat_followup_payload(
+            {
+                "user_text": "교통사고 과실비율을 확인해 주세요.",
+                "attachments": [{"attachment_id": "att_notice"}],
+            },
+            state,
+            current_routing_intent="accident_initial_consultation",
+        )
+
+        self.assertNotIn("report_generation_requested", merged)
+        self.assertNotIn("report_generation_action", merged)
+        self.assertNotIn("_server_report_generation_requested", merged)
 
     def test_replaced_attachment_does_not_restore_stale_confirmation(self) -> None:
         state = merge_confirmed_ocr_followup_state(
