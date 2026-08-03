@@ -1305,7 +1305,6 @@ def _locked_active_auth_session(
 ) -> AuthSession:
     auth_session = (
         AuthSession.objects.select_for_update()
-        .select_related("user")
         .filter(auth_session_id=auth_session_id)
         .first()
     )

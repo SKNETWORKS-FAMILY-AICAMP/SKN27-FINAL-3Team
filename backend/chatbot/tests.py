@@ -11,7 +11,9 @@ from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import connection
 from django.test import Client, RequestFactory, SimpleTestCase, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from app.services.agent_node_service import execute_mock_node
@@ -65,6 +67,7 @@ from chatbot.repositories import (
     build_report_download_pdf_body,
     enqueue_analysis_job_work,
     list_history_event_records,
+    persist_current_auth_subject,
     process_agent_work_item,
     process_agent_work_items,
     record_history_event_record,
@@ -4351,6 +4354,68 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(response["X-API-Surface"], "canonical_mock")
         self.assertEqual(response["X-Execution-Mode"], "mock")
         self.assertNotIn("X-Report-Persistence", response)
+
+
+class AuthSessionPostgresLockRegressionTests(TestCase):
+    def test_auth_me_persistence_lock_does_not_join_nullable_identity_tables(self):
+        session_id = "ses_auth_me_lock_shape"
+        user = UserAccount.objects.create(
+            user_id="usr_auth_me_lock_shape",
+            status=UserAccountStatus.ACTIVE,
+            auth_provider="google",
+        )
+        guest = GuestIdentity.objects.create(
+            guest_id="gst_auth_me_lock_shape",
+            status=GuestIdentityStatus.ACTIVE,
+        )
+        issued_at = timezone.now()
+        auth_session = AuthSession.objects.create(
+            auth_session_id="auth_auth_me_lock_shape",
+            user=user,
+            guest=guest,
+            subject_type="user",
+            subject_id=f"user:{user.user_id}",
+            status=AuthSessionStatus.ACTIVE,
+            issued_at=issued_at,
+            expires_at=issued_at + timedelta(hours=1),
+        )
+        ChatSession.objects.create(
+            session_id=session_id,
+            owner_id=user.user_id,
+            status=ChatSessionStatus.ACTIVE,
+            metadata={"auth_context": {"guest_id": guest.guest_id}},
+        )
+        auth_payload = {
+            "auth_state": "authenticated",
+            "user": {"user_id": user.user_id, "status": "active"},
+            "subject": {
+                "subject_id": f"user:{user.user_id}",
+                "subject_type": "user",
+                "user_id": user.user_id,
+                "guest_id": None,
+                "auth_session_id": auth_session.auth_session_id,
+                "is_authenticated": True,
+            },
+            "auth_session": {
+                "auth_session_id": auth_session.auth_session_id,
+                "status": "active",
+                "verification": "app_jwt_hmac",
+            },
+        }
+
+        with CaptureQueriesContext(connection) as queries:
+            persist_current_auth_subject(auth_payload, session_id=session_id)
+
+        auth_session_reads = [
+            query["sql"]
+            for query in queries.captured_queries
+            if 'FROM "auth_sessions"' in query["sql"]
+        ]
+        self.assertTrue(auth_session_reads)
+        self.assertFalse(
+            any(" JOIN " in query.upper() for query in auth_session_reads),
+            "The locked auth_sessions read must not outer-join nullable user or guest rows.",
+        )
 
 
 class AttachmentClassificationPersistenceTests(TestCase):
