@@ -1,4 +1,7 @@
 import json
+from types import SimpleNamespace
+
+import openai
 
 from app.services import agent_node_service
 from app.services.agent_adapter_contract import validate_agent_output_envelope
@@ -113,6 +116,33 @@ def test_attachment_registry_keeps_traffic_confirmation_purpose():
     )
 
     assert attachment["purpose"] == "traffic_accident_confirmation"
+
+
+def test_traffic_ocr_uses_completion_token_parameter_supported_by_configured_model(
+    monkeypatch,
+):
+    captured = {}
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok": true}'))]
+    )
+
+    def create_completion(**kwargs):
+        captured.update(kwargs)
+        return response
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create_completion),
+        )
+    )
+    monkeypatch.setattr(openai, "OpenAI", lambda: client)
+    monkeypatch.setattr(traffic_ocr_agent, "get_ocr_model_name", lambda: "gpt-5.4-nano")
+
+    result = traffic_ocr_agent._call_gpt_vision("aW1hZ2U=", "image/png")
+
+    assert result == {"ok": True}
+    assert captured["max_completion_tokens"] == 1600
+    assert "max_tokens" not in captured
 
 
 def test_sync_runtime_reaches_actual_ocr_graph_and_excludes_raw_text(monkeypatch):
