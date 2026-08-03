@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as caseReadyWorkflowModule from "./caseReadyWorkflow.js";
 
 import {
   buildCaseReadyActionUi,
@@ -31,6 +32,61 @@ function completeResponse() {
     },
   };
 }
+
+
+function eligibleModel() {
+  return buildCaseReadyViewModel(completeResponse(), [
+    { attachment_id: "att_case_ready", status: "ready", scan_status: "clean" },
+  ]);
+}
+
+
+test("requires material evidence before offering case analysis", () => {
+  const withoutEvidence = buildCaseReadyViewModel(completeResponse());
+  const scanningEvidence = buildCaseReadyViewModel(completeResponse(), [
+    { attachment_id: "att_scanning", status: "scanning", scan_status: "scanning" },
+  ]);
+
+  assert.equal(withoutEvidence.eligible, false);
+  assert.deepEqual(withoutEvidence.confirmationPayload.sources, []);
+  assert.equal(scanningEvidence.eligible, false);
+});
+
+
+test("accepts a restored clean attachment without a new attachment API call", () => {
+  const response = completeResponse();
+  response.attachments = [
+    {
+      attachment_id: "att_restored_clean",
+      purpose: "traffic_accident_confirmation",
+      scan_status: "clean",
+    },
+  ];
+
+  const model = buildCaseReadyViewModel(response, []);
+
+  assert.equal(model.eligible, true);
+  assert.deepEqual(model.confirmationPayload.sources, [
+    { source_type: "official_document", source_ref: "att_restored_clean" },
+  ]);
+});
+
+
+test("maps fact readiness rejection to fixed safe public copy", () => {
+  assert.equal(typeof caseReadyWorkflowModule.caseReadyWorkflowErrorMessage, "function");
+  assert.equal(
+    caseReadyWorkflowModule.caseReadyWorkflowErrorMessage({
+      code: "fact_readiness_not_met",
+    }),
+    "첨부 자료의 안전 검사를 완료한 뒤 사건 분석을 다시 시도해 주세요.",
+  );
+  assert.equal(
+    caseReadyWorkflowModule.caseReadyWorkflowErrorMessage(
+      new Error("private backend detail"),
+    ),
+    "사건 분석 리포트를 완료하지 못했습니다. 입력과 자료 상태를 확인해 주세요.",
+  );
+});
 
 
 test("builds existing Case API payloads from four confirmed facts", () => {
@@ -165,7 +221,7 @@ test("runs case creation, fact confirmation, and analysis start in order", async
     },
   };
   const steps = [];
-  const model = buildCaseReadyViewModel(completeResponse());
+  const model = eligibleModel();
 
   const result = await runCaseReadyWorkflow({
     api,
@@ -225,7 +281,7 @@ test("does not call later Case APIs after case creation fails", async () => {
     runCaseReadyWorkflow({
       api,
       identity: {},
-      model: buildCaseReadyViewModel(completeResponse()),
+      model: eligibleModel(),
     }),
     /create_failed/,
   );
@@ -253,7 +309,7 @@ test("does not start analysis after fact confirmation fails", async () => {
     runCaseReadyWorkflow({
       api,
       identity: {},
-      model: buildCaseReadyViewModel(completeResponse()),
+      model: eligibleModel(),
     }),
     /confirm_failed/,
   );
@@ -433,7 +489,7 @@ test("rejects report detail without a server reporting payload", async () => {
 
 
 test("offers one explicit case start action for an eligible idle consultation", () => {
-  const model = buildCaseReadyViewModel(completeResponse());
+  const model = eligibleModel();
 
   const guestUi = buildCaseReadyActionUi({
     model,
@@ -455,7 +511,7 @@ test("offers one explicit case start action for an eligible idle consultation", 
 
 
 test("disables case start while a server workflow stage is active", () => {
-  const model = buildCaseReadyViewModel(completeResponse());
+  const model = eligibleModel();
 
   for (const step of [
     "creating_case",
@@ -484,7 +540,7 @@ test("hides case start for an ineligible consultation and permits a failed retry
     authenticated: false,
   });
   const retry = buildCaseReadyActionUi({
-    model: buildCaseReadyViewModel(completeResponse()),
+    model: eligibleModel(),
     progress: { step: "failed", error: "다시 시도해 주세요." },
     authenticated: true,
   });

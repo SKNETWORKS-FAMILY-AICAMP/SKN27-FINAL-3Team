@@ -55,6 +55,7 @@ import { SafeMarkdown } from "./SafeMarkdown.js";
 import { composerKeyAction } from "./composerInteraction.js";
 import {
   buildCaseReadyViewModel,
+  caseReadyWorkflowErrorMessage,
   pollCaseReadyReport,
   runCaseReadyWorkflow,
 } from "./caseReadyWorkflow.js";
@@ -1364,16 +1365,14 @@ export default function FrontendAppShell({
       setReportActionStatus("사건 분석 리포트가 저장되었습니다.");
       setStatusMessage("사건 분석과 리포트 저장이 완료되었습니다.");
       setActiveRoute("reporting");
-    } catch {
+    } catch (error) {
+      const publicMessage = caseReadyWorkflowErrorMessage(error);
       setCaseReadyProgress({
         step: "failed",
-        error:
-          "사건 분석 리포트를 완료하지 못했습니다. 현재 단계에서 다시 시도해 주세요.",
+        error: publicMessage,
       });
       setPendingAuthAction(null);
-      setStatusMessage(
-        "사건 분석 리포트를 완료하지 못했습니다. 입력과 자료 상태를 확인해 주세요.",
-      );
+      setStatusMessage(publicMessage);
     }
   }
 

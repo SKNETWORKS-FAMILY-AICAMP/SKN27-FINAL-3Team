@@ -49,6 +49,14 @@ export function buildCaseReadyActionUi({
 }
 
 
+export function caseReadyWorkflowErrorMessage(error) {
+  if (error?.code === "fact_readiness_not_met") {
+    return "첨부 자료의 안전 검사를 완료한 뒤 사건 분석을 다시 시도해 주세요.";
+  }
+  return "사건 분석 리포트를 완료하지 못했습니다. 입력과 자료 상태를 확인해 주세요.";
+}
+
+
 export function buildCaseReadyViewModel(
   analysisResponse = {},
   registeredAttachments = [],
@@ -68,17 +76,21 @@ export function buildCaseReadyViewModel(
       confirmed: fact.confirmed === true,
     };
   });
-  const eligible = Boolean(
-    analysisResponse?.status === "case_ready"
-      && consultationState?.risk_gate?.level !== "high_risk"
-      && conflicts.length === 0
-      && facts.every((fact) => fact.confirmed && nonEmpty(fact.value)),
-  );
   const readyAttachmentIds = (Array.isArray(registeredAttachments) ? registeredAttachments : [])
     .filter((item) => (
       item
       && typeof item === "object"
       && item.status === "ready"
+      && nonEmpty(item.attachment_id)
+    ))
+    .map((item) => String(item.attachment_id).trim());
+  const restoredReadyAttachmentIds = (
+    Array.isArray(analysisResponse?.attachments) ? analysisResponse.attachments : []
+  )
+    .filter((item) => (
+      item
+      && typeof item === "object"
+      && item.scan_status === "clean"
       && nonEmpty(item.attachment_id)
     ))
     .map((item) => String(item.attachment_id).trim());
@@ -92,11 +104,24 @@ export function buildCaseReadyViewModel(
         .map((item) => text(item?.attachment_id))
         .filter(Boolean)
       : [];
-  const sources = [...new Set([...readyAttachmentIds, ...ocrEvidenceIds])]
+  const sources = [
+    ...new Set([
+      ...readyAttachmentIds,
+      ...restoredReadyAttachmentIds,
+      ...ocrEvidenceIds,
+    ]),
+  ]
     .map((attachmentId) => ({
       source_type: "official_document",
       source_ref: attachmentId,
     }));
+  const eligible = Boolean(
+    analysisResponse?.status === "case_ready"
+      && consultationState?.risk_gate?.level !== "high_risk"
+      && conflicts.length === 0
+      && facts.every((fact) => fact.confirmed && nonEmpty(fact.value))
+      && sources.length > 0,
+  );
 
   return {
     eligible,
