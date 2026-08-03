@@ -208,7 +208,7 @@ def _call_gpt_vision(base64_image: str, mime_type: str) -> dict[str, Any]:
     client = OpenAI()
     response = client.chat.completions.create(
         model=get_ocr_model_name(),
-        max_tokens=1600,
+        max_completion_tokens=1600,
         response_format={"type": "json_object"},
         messages=[
             {
