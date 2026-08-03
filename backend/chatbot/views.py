@@ -223,7 +223,7 @@ def guest_session(request: HttpRequest) -> JsonResponse:
         request,
         event_type="guest_session_created",
         status="success",
-        summary="??? guest session? mock ??????.",
+        summary="비회원 상담 세션을 생성했습니다.",
         actor={
             "guest_id": payload.get("guest", {}).get("guest_id"),
             "auth_state": "guest",
@@ -612,7 +612,7 @@ def auth_me(request: HttpRequest) -> JsonResponse:
         request,
         event_type="auth_me_checked",
         status="success" if status < 400 else "failed",
-        summary="?? ?? subject? mock ??????.",
+        summary="현재 인증 주체 상태를 확인했습니다.",
         actor=_actor_from_auth_me_payload(request, payload),
         subject=subject_from_payload({"session_id": request.GET.get("session_id")}),
         source=_history_source(request),
@@ -736,8 +736,8 @@ def history_events(request: HttpRequest) -> JsonResponse:
             "count": len(events),
             "events": events,
             "limitations": [
-                "?? ??, OCR ??, Agent reasoning ??? standard-light history? ?????.",
-                "?? ??? DB table ??? ??? ?? ???? ?? ?????.",
+                "대화 원문, OCR 원문, 에이전트 추론 원문은 표준 경량 이력에 저장하지 않습니다.",
+                "원본 이벤트의 DB 테이블 원문과 민감 필드는 이 응답에 포함하지 않습니다.",
             ],
         },
     )
@@ -853,7 +853,7 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
             {
                 "error": {
                     "code": "attachment_not_found",
-                    "message": "??? attachment metadata? ?? ? ????.",
+                    "message": "요청한 첨부파일 메타데이터를 찾을 수 없습니다.",
                 }
             },
             status=404,
@@ -1208,7 +1208,7 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         request,
         event_type="analysis_job_created",
         status=job.get("status") or "success",
-        summary="?? job? mock ??????.",
+        summary="분석 작업을 생성했습니다.",
         actor=actor,
         subject=subject,
         source=source,
@@ -1249,7 +1249,7 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             {
                 "error": {
                     "code": "analysis_job_not_found",
-                    "message": "??? analysis job? ?? ? ????.",
+                    "message": "요청한 분석 작업을 찾을 수 없습니다.",
                 }
             },
             status=404,
@@ -1296,7 +1296,7 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
         request,
         event_type="chat_session_created",
         status="success",
-        summary="?? session? mock ??????.",
+        summary="상담 세션을 생성했습니다.",
         actor=_history_actor(request, identity_body),
         subject=subject_from_payload(identity_body, session_id=payload.get("session_id")),
         source=_history_source(request),
@@ -1530,7 +1530,7 @@ def update_chat_save_state(request: HttpRequest) -> JsonResponse:
                 request,
                 action="conversation_save",
                 reason="saved_requires_authenticated_user",
-                message="??? ?? ??? ????? ???? ?????.",
+                message="상담 내용을 저장하려면 로그인이 필요합니다.",
                 policy_version="conversation_save_policy.v1",
                 subject=subject,
             )
@@ -1859,7 +1859,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
                     request,
                     action="report_list",
                     reason="report_list_requires_authenticated_user",
-                    message="??? ??? ????? ???? ?????.",
+                    message="저장된 보고서를 조회하려면 로그인이 필요합니다.",
                     policy_version="report_action_policy.v1",
                     subject=subject,
                 )
@@ -1895,7 +1895,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
                 request,
                 action=f"report_{action}",
                 reason=f"guest_report_{action}_requires_login",
-                message="???? ????? ??????? ???? ?????.",
+                message="보고서를 저장하거나 다운로드하려면 로그인이 필요합니다.",
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
@@ -1929,7 +1929,7 @@ def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
                 request,
                 action="report_detail",
                 reason="report_detail_requires_authenticated_user",
-                message="??? ??? ????? ???? ?????.",
+                message="보고서 상세 내용을 조회하려면 로그인이 필요합니다.",
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
@@ -2070,7 +2070,7 @@ def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
                 request,
                 action="report_download",
                 reason="report_download_requires_authenticated_user",
-                message="???? ??????? ???? ?????.",
+                message="보고서를 다운로드하려면 로그인이 필요합니다.",
                 policy_version="report_action_policy.v1",
                 subject=subject,
             )
@@ -2504,7 +2504,7 @@ def _rate_limit_response(request: HttpRequest, usage: dict[str, object]) -> Json
                 "type": "rate_limit",
                 "code": "rate_limit_exceeded",
                 "status": 429,
-                "message": "?? ??? ??????.",
+                "message": "요청 한도를 모두 사용했습니다. 잠시 후 다시 시도해 주세요.",
                 "required_action": required_action,
                 "usage": usage,
             }
@@ -2661,7 +2661,7 @@ def _guest_identity_policy_response(
                 "type": "authorization",
                 "code": "guest_session_invalid",
                 "status": 401,
-                "message": "??? ??? ???? ??? ???????.",
+                "message": "비회원 상담 세션이 만료되었거나 유효하지 않습니다.",
                 "required_action": "refresh_guest_session",
                 "reason": violation.get("reason"),
                 "guest_id": violation.get("guest_id"),
