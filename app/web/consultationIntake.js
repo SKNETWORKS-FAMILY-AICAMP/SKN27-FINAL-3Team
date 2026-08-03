@@ -122,7 +122,7 @@ export function buildStructuredConsultationMessage({ freeText = "", intake } = {
   }
 
   const sections = [];
-  const typeLabel = consultationTypeLabel(normalizedIntake.consultationType);
+  const typeLabel = consultationRequestTypeLabel(normalizedIntake.consultationType);
   if (typeLabel) {
     sections.push(`[상담 유형]\n${typeLabel}`);
   }
@@ -202,6 +202,13 @@ function consultationTypeLabel(value) {
     (option) => option.value === value
   );
   return match ? match.label : "";
+}
+
+function consultationRequestTypeLabel(value) {
+  if (value === "fine_notice") {
+    return "고지서 상담";
+  }
+  return consultationTypeLabel(value);
 }
 
 function normalizeConsultationIntake(value) {

@@ -119,3 +119,39 @@ def test_merge_restores_server_case_memory_when_client_omits_it() -> None:
 
     assert merged["case_memory"]["schema_version"] == "case_memory.v1"
     assert merged["case_memory"]["evidence_refs"] == ["att_blackbox_1"]
+
+
+def test_snapshot_and_merge_preserve_server_fine_notice_slots() -> None:
+    snapshot = build_chat_followup_snapshot(
+        {"user_text": "과태료 사전통지서입니다."},
+        {
+            "status": "needs_input",
+            "assistant_message": {"answer": "고지서를 발급한 기관을 알려주세요."},
+            "fine_notice_intake": {
+                "slots": {
+                    "document_disposition_type": {
+                        "value": "pre_notice",
+                        "source_type": "rule_normalization",
+                        "source_message_id": "msg_notice_1",
+                        "confidence": 1.0,
+                        "confirmed": False,
+                    }
+                }
+            },
+        },
+    )
+
+    merged = merge_chat_followup_payload(
+        {"user_text": "서울특별시에서 발급했습니다."},
+        snapshot,
+    )
+
+    assert merged["stored_fine_notice_intake_slots"] == {
+        "document_disposition_type": {
+            "value": "pre_notice",
+            "source_type": "rule_normalization",
+            "source_message_id": "msg_notice_1",
+            "confidence": 1.0,
+            "confirmed": False,
+        }
+    }

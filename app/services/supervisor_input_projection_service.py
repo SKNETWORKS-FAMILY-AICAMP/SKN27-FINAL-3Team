@@ -39,6 +39,7 @@ FINE_NOTICE_INTAKE_FIELD_MAP = {
     "notice_stage": "document_disposition_type",
     "issuing_authority": "issuing_authority",
     "due_date": "response_deadline",
+    "attachment_available": "attachment_available",
 }
 NORMALIZED_AGENT_SLOT_FIELDS = {
     "fine_type",
@@ -131,8 +132,11 @@ def canonical_policy_value(*, field: str, value: Any) -> str | None:
     if not normalized_value:
         return None
     if field == "vehicle_actions":
-        canonical_actions = "본인 차량 직진, 상대 차량 좌회전"
-        return canonical_actions if normalized_value == canonical_actions else None
+        return (
+            normalized_value
+            if normalized_value in _registered_vehicle_action_pairs()
+            else None
+        )
     if field == "issuing_authority":
         return (
             normalized_value
@@ -206,23 +210,27 @@ def accident_fact_candidates(
     source_message_id: str,
 ) -> list[dict[str, Any]]:
     candidates = _eligible_accident_candidates(value)
-    by_field_value = {
-        (str(item.get("field") or ""), str(item.get("value") or "")): item
-        for item in candidates
-    }
     projected: list[dict[str, Any]] = []
-    self_straight = by_field_value.get(("vehicle_actions.self", "straight"))
-    other_left_turn = by_field_value.get(("vehicle_actions.other", "left_turn"))
-    if self_straight and other_left_turn:
+    self_actions = [
+        item for item in candidates if item.get("field") == "vehicle_actions.self"
+    ]
+    other_actions = [
+        item for item in candidates if item.get("field") == "vehicle_actions.other"
+    ]
+    if len(self_actions) == 1 and len(other_actions) == 1:
+        self_action = self_actions[0]
+        other_action = other_actions[0]
+        self_expression = _canonical_vehicle_action_expression(self_action)
+        other_expression = _canonical_vehicle_action_expression(other_action)
         projected.append(
             {
                 "field": "vehicle_actions",
-                "value": "본인 차량 직진, 상대 차량 좌회전",
+                "value": f"{self_expression}, {other_expression}",
                 "source_message_id": source_message_id,
                 "confidence": round(
                     min(
-                        float(self_straight.get("confidence") or 0.0),
-                        float(other_left_turn.get("confidence") or 0.0),
+                        float(self_action.get("confidence") or 0.0),
+                        float(other_action.get("confidence") or 0.0),
                     ),
                     4,
                 ),
@@ -244,6 +252,44 @@ def accident_fact_candidates(
             }
         )
     return projected
+
+
+def _canonical_vehicle_action_expression(candidate: Mapping[str, Any]) -> str:
+    field = str(candidate.get("field") or "")
+    value = str(candidate.get("value") or "")
+    for rule in normalization_policy()["rules"]:
+        if str(rule.get("field") or "") != field:
+            continue
+        if str(rule.get("value") or "") == value:
+            return _canonical_vehicle_rule_expression(rule)
+    return str(candidate.get("normalized_expression") or "").strip()
+
+
+def _canonical_vehicle_rule_expression(rule: Mapping[str, Any]) -> str:
+    field = str(rule.get("field") or "")
+    expression = str(rule.get("canonical_expression") or "").strip()
+    if field == "vehicle_actions.self" and not expression.startswith("본인"):
+        return f"본인 차량 {expression}"
+    if field == "vehicle_actions.other" and not expression.startswith("상대"):
+        return f"상대 차량 {expression}"
+    return expression
+
+
+def _registered_vehicle_action_pairs() -> set[str]:
+    self_actions: set[str] = set()
+    other_actions: set[str] = set()
+    for rule in normalization_policy()["rules"]:
+        field = str(rule.get("field") or "")
+        expression = _canonical_vehicle_rule_expression(rule)
+        if field == "vehicle_actions.self" and expression:
+            self_actions.add(expression)
+        elif field == "vehicle_actions.other" and expression:
+            other_actions.add(expression)
+    return {
+        f"{self_action}, {other_action}"
+        for self_action in self_actions
+        for other_action in other_actions
+    }
 
 
 def fine_notice_intake_slots(

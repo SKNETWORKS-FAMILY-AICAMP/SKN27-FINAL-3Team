@@ -18,6 +18,13 @@ FINE_NOTICE_QUESTIONS = {
     "response_deadline": "고지서에 적힌 의견제출 또는 이의신청 기한을 알려주세요.",
     "attachment_available": "고지서 사진이나 파일을 첨부할 수 있나요?",
 }
+STORED_SLOT_SOURCE_TYPES = {
+    "user_structured_input",
+    "user_confirmed_ocr",
+    "user_confirmation",
+    "rule_normalization",
+    "server_attachment",
+}
 
 
 def reduce_fine_notice_intake(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -29,7 +36,15 @@ def reduce_fine_notice_intake(payload: Mapping[str, Any]) -> dict[str, Any]:
     explicit = payload.get("fine_notice_slots")
     explicit = explicit if isinstance(explicit, Mapping) else {}
     slots: dict[str, dict[str, Any]] = {}
+    stored = payload.get("stored_fine_notice_intake_slots")
+    stored = stored if isinstance(stored, Mapping) else {}
     for field in FINE_NOTICE_REQUIRED_SLOTS:
+        record = _stored_slot_record(field, stored.get(field))
+        if record is not None:
+            slots[field] = record
+    for field in FINE_NOTICE_REQUIRED_SLOTS:
+        if field in slots:
+            continue
         value = _slot_value(field, explicit.get(field))
         if value is None:
             continue
@@ -187,4 +202,29 @@ def _normalized_rule_slot(
         ),
         "confidence": confidence,
         "confirmed": False,
+    }
+
+
+def _stored_slot_record(field: str, value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    source_type = str(value.get("source_type") or "").strip()
+    if source_type not in STORED_SLOT_SOURCE_TYPES:
+        return None
+    normalized_value = _slot_value(field, value.get("value"))
+    if normalized_value is None:
+        return None
+    try:
+        confidence = float(value.get("confidence"))
+    except (TypeError, ValueError):
+        return None
+    confirmed = value.get("confirmed")
+    if not 0.0 <= confidence <= 1.0 or not isinstance(confirmed, bool):
+        return None
+    return {
+        "value": normalized_value,
+        "source_type": source_type,
+        "source_message_id": str(value.get("source_message_id") or "stored"),
+        "confidence": confidence,
+        "confirmed": confirmed,
     }

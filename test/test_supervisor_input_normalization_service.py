@@ -209,6 +209,32 @@ def test_extracts_only_limited_authority_amount_and_due_date_patterns() -> None:
     assert projected[("due_date", "2026-08-07")]["decision"] == "auto_applied"
 
 
+def test_extracts_browser_fine_notice_fields_from_natural_sentence() -> None:
+    service = _service()
+    result = service.normalize_supervisor_input(
+        user_text=(
+            "과태료 사전통지서고 서울특별시에서 발급했습니다. "
+            "의견제출 기한은 2026년 8월 10일이고 문서 첨부도 가능해요."
+        ),
+        source_message_id="msg_browser_fine_notice",
+    )
+
+    projected = {
+        (item["field"], item["value"]): item for item in result["candidates"]
+    }
+
+    assert projected[("issuing_authority", "서울특별시")]["decision"] == (
+        "auto_applied"
+    )
+    assert projected[("due_date", "2026년 8월 10일")]["decision"] == (
+        "auto_applied"
+    )
+    assert projected[("attachment_available", "yes")]["decision"] == (
+        "auto_applied"
+    )
+    assert not any(item["field"] == "notice_date" for item in result["candidates"])
+
+
 def test_single_unqualified_date_requires_confirmation() -> None:
     service = _service()
     result = service.normalize_supervisor_input(

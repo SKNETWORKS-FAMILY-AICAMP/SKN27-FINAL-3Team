@@ -33,9 +33,10 @@ DATE_PATTERN = re.compile(
 )
 AMOUNT_PATTERN = re.compile(r"\d{1,3}(?:,\d{3})*\s*원")
 AUTHORITY_PATTERN = re.compile(
-    r"[가-힣]{2,20}(?:경찰서|시청|구청|군청|도로교통공단)"
+    r"(?:[가-힣]{2,20}(?:경찰서|시청|구청|군청|도로교통공단)"
+    r"|[가-힣]{2,10}(?:특별시|광역시|특별자치시|특별자치도))"
 )
-DUE_DATE_CONTEXT_MARKERS = ("납부기한", "의견제출기한", "까지")
+DUE_DATE_CONTEXT_MARKERS = ("납부기한", "의견제출기한", "의견제출 기한", "까지")
 
 
 @lru_cache(maxsize=1)
