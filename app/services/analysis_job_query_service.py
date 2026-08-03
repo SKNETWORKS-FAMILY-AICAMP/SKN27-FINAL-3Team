@@ -152,6 +152,39 @@ _PUBLIC_ATTACHMENT_WORKFLOW_FIELDS = (
     "missing_fields",
     "limitations",
 )
+_PUBLIC_CLASSIFICATION_RESULT_FIELDS = (
+    "attachment_id",
+    "classification",
+    "confidence_band",
+    "requires_confirmation",
+)
+_PUBLIC_FINE_NOTICE_RESULT_FIELDS = (
+    "attachment_id",
+    "requires_confirmation",
+    "fine_type",
+    "notice_stage",
+    "law_code",
+    "violation_text",
+    "opinion_deadline",
+    "issuing_authority",
+)
+_PUBLIC_TRAFFIC_ACCIDENT_TEXT_FIELDS = (
+    "accident_datetime",
+    "accident_location",
+    "accident_cause",
+    "accident_description",
+)
+_PUBLIC_APPEAL_RESULT_FIELDS = (
+    "risk_flag",
+    "risk_judgment_failed",
+    "risk_trigger_category",
+    "risk_confidence",
+    "merit",
+    "merit_judgment_failed",
+    "merit_basis",
+    "merit_relief_type",
+    "relief_type_judgment_failed",
+)
 _PUBLIC_REPORT_LINK_FIELDS = ("report_id", "action")
 _PUBLIC_REPORT_SUMMARY_FIELDS = (
     "report_id",
@@ -245,6 +278,7 @@ def load_analysis_result(
                     job.get("attachment_workflows"),
                 ),
                 "attachment_processing": _attachment_processing_for_job(job),
+                "public_results": _project_public_agent_results(job),
                 "analysis_progress": build_analysis_progress(job),
             },
         )
@@ -287,6 +321,7 @@ def load_analysis_result(
                 composed.get("attachment_workflows"),
             ),
             "attachment_processing": _attachment_processing_for_job(job),
+            "public_results": _project_public_agent_results(job),
             "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
             "supervisor_state": _project_supervisor_state(job.get("supervisor_state")),
             "user_claims": _project_user_claims(job.get("supervisor_state")),
@@ -331,6 +366,7 @@ def _project_analysis_job_detail(
                 job.get("attachment_workflows"),
             ),
             "attachment_processing": _attachment_processing_for_job(job),
+            "public_results": _project_public_agent_results(job),
             "report_links": _project_report_links(job.get("report_links")),
             "limitations": _safe_public_limitations(job.get("limitations")),
             "reporting_payload": _project_reporting_payload(job.get("reporting_payload")),
@@ -352,6 +388,127 @@ def _project_assistant_message_payload(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     return _project_mapping(value, _ASSISTANT_MESSAGE_PAYLOAD_FIELDS)
+
+
+def _project_public_agent_results(job: dict[str, Any]) -> dict[str, Any]:
+    projected: dict[str, Any] = {
+        "contract_version": "public_agent_results.v1",
+    }
+    projectors = {
+        "attachment_document_classification": _project_public_classification_result,
+        "fine_notice_analysis": _project_public_fine_notice_result,
+        "traffic_accident_confirmation_ocr": _project_public_traffic_accident_result,
+        "appeal_decision_flow": _project_public_appeal_result,
+    }
+    for item in job.get("agent_results") or []:
+        if not isinstance(item, dict):
+            continue
+        node_code = str(item.get("node_code") or "").strip()
+        projector = projectors.get(node_code)
+        structured_result = item.get("structured_result")
+        if projector is None or not isinstance(structured_result, dict):
+            continue
+        public_result = projector(structured_result)
+        if public_result:
+            projected[node_code] = public_result
+    return projected
+
+
+def _project_public_classification_result(value: dict[str, Any]) -> dict[str, Any]:
+    return _project_public_scalars(value, _PUBLIC_CLASSIFICATION_RESULT_FIELDS)
+
+
+def _project_public_fine_notice_result(value: dict[str, Any]) -> dict[str, Any]:
+    projected = _project_public_scalars(value, _PUBLIC_FINE_NOTICE_RESULT_FIELDS)
+    projected["missing_fields"] = _safe_public_string_list(value.get("missing_fields"))
+    return projected
+
+
+def _project_public_traffic_accident_result(value: dict[str, Any]) -> dict[str, Any]:
+    projected: dict[str, Any] = {}
+    document_check = _dict_or_empty(value.get("document_check"))
+    if isinstance(document_check.get("is_target_document"), bool):
+        projected["document_check"] = {
+            "is_target_document": document_check["is_target_document"],
+        }
+
+    extracted_source = _dict_or_empty(value.get("extracted_fields"))
+    extracted = _project_public_scalars(
+        extracted_source,
+        _PUBLIC_TRAFFIC_ACCIDENT_TEXT_FIELDS,
+    )
+    accident_type = _project_public_scalars(
+        _dict_or_empty(extracted_source.get("accident_type")),
+        ("value",),
+    )
+    if accident_type:
+        extracted["accident_type"] = accident_type
+    damage = _project_public_scalars(
+        _dict_or_empty(extracted_source.get("damage")),
+        ("raw_text",),
+    )
+    if damage:
+        extracted["damage"] = damage
+    if extracted:
+        projected["extracted_fields"] = extracted
+
+    quality = _project_public_scalars(
+        _dict_or_empty(value.get("quality")),
+        ("image_quality",),
+    )
+    if quality:
+        projected["quality"] = quality
+    privacy = _dict_or_empty(value.get("privacy"))
+    if isinstance(privacy.get("masking_applied"), bool):
+        projected["privacy"] = {"masking_applied": privacy["masking_applied"]}
+
+    evidence = []
+    for item in value.get("ocr_evidence") or []:
+        if not isinstance(item, dict):
+            continue
+        attachment_id = _public_text(item.get("attachment_id"))
+        if attachment_id:
+            evidence.append({"attachment_id": attachment_id})
+    if evidence:
+        projected["ocr_evidence"] = evidence
+    failure_reason = _public_text(value.get("failure_reason"))
+    if failure_reason and re.fullmatch(r"[a-z0-9_]+", failure_reason):
+        projected["failure_reason"] = failure_reason
+    return projected
+
+
+def _project_public_appeal_result(value: dict[str, Any]) -> dict[str, Any]:
+    projected = _project_public_scalars(value, _PUBLIC_APPEAL_RESULT_FIELDS)
+    disclaimer = _public_text(_dict_or_empty(value.get("guide")).get("disclaimer"))
+    if disclaimer:
+        projected["guide"] = {"disclaimer": disclaimer}
+    return projected
+
+
+def _project_public_scalars(
+    value: dict[str, Any],
+    fields: tuple[str, ...],
+) -> dict[str, Any]:
+    projected: dict[str, Any] = {}
+    for field in fields:
+        item = value.get(field)
+        if isinstance(item, bool) or isinstance(item, (int, float)):
+            projected[field] = item
+            continue
+        text = _public_text(item)
+        if text:
+            projected[field] = text
+    return projected
+
+
+def _safe_public_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [text for item in value if (text := _public_text(item))]
+
+
+def _public_text(value: Any) -> str:
+    return str(value).strip() if isinstance(value, str) else ""
 
 
 def _project_public_progress_cache(value: Any) -> dict[str, Any]:
@@ -427,6 +584,8 @@ def _attachment_workflows_for_job(
         structured_result = result.get("structured_result")
         if not node_code or not isinstance(structured_result, dict):
             continue
+        structured_result = dict(structured_result)
+        structured_result.setdefault("status", result.get("status"))
         existing = structured_results.get(node_code)
         if existing is None:
             structured_results[node_code] = structured_result

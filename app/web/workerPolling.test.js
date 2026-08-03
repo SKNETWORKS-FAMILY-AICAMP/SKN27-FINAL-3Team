@@ -100,6 +100,9 @@ test("poll budget exhaustion preserves the last running result", async () => {
     retryable: true,
     polling_exhausted: true,
     polling_interrupted: false,
+    next_action: "check_status",
+    job_id: "job_polling",
+    correlation_id: "awork_job_polling",
     message: "분석 상태 확인이 지연되고 있습니다. 잠시 후 다시 확인할 수 있습니다.",
   });
   assert.equal(JSON.stringify(finalResult).includes("상담 내용을 접수했습니다"), false);

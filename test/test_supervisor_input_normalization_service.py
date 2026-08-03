@@ -254,6 +254,49 @@ def test_extracts_browser_fine_notice_fields_from_natural_sentence() -> None:
     assert not any(item["field"] == "notice_date" for item in result["candidates"])
 
 
+def test_extracts_observed_browser_attachment_availability_phrase() -> None:
+    service = _service()
+
+    result = service.normalize_supervisor_input(
+        user_text="고지서 첨부가 가능합니다.",
+        source_message_id="msg_observed_attachment_phrase",
+    )
+
+    attachment = next(
+        item
+        for item in result["candidates"]
+        if item["field"] == "attachment_available"
+    )
+    assert attachment["value"] == "yes"
+    assert attachment["decision"] == "auto_applied"
+
+
+def test_observed_attachment_phrase_keeps_negation_and_uncertainty_guards() -> None:
+    service = _service()
+
+    negated = service.normalize_supervisor_input(
+        user_text="고지서 첨부가 가능하지 않습니다.",
+        source_message_id="msg_negated_attachment_phrase",
+    )
+    uncertain = service.normalize_supervisor_input(
+        user_text="아마 첨부가 가능합니다.",
+        source_message_id="msg_uncertain_attachment_phrase",
+    )
+
+    negated_attachment = next(
+        item
+        for item in negated["candidates"]
+        if item["field"] == "attachment_available"
+    )
+    uncertain_attachment = next(
+        item
+        for item in uncertain["candidates"]
+        if item["field"] == "attachment_available"
+    )
+    assert negated_attachment["decision"] == "clarification_required"
+    assert uncertain_attachment["decision"] == "confirmation_required"
+
+
 def test_single_unqualified_date_requires_confirmation() -> None:
     service = _service()
     result = service.normalize_supervisor_input(

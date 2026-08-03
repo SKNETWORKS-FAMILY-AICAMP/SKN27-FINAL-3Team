@@ -4,6 +4,61 @@ from app.services.chat_session_followup_service import (
 )
 
 
+def test_specific_current_topic_prunes_incompatible_stored_accident_state() -> None:
+    merged = merge_chat_followup_payload(
+        {
+            "user_text": "횡단보도 앞 일시정지 의무의 법적 근거와 한계를 알려주세요.",
+            "facts": {"client_stale_fact": {"value": "stale"}},
+            "pending_questions": [{"question": "client stale question"}],
+            "conversation_history": [{"role": "assistant", "content": "client stale"}],
+        },
+        {
+            "contract_version": "chat_session_followup_state.v1",
+            "routing_intent": "accident_initial_consultation",
+            "facts": {"road_layout": {"value": "교차로", "confirmed": True}},
+            "fact_sources": [{"field": "road_layout", "source_ref": "msg_old"}],
+            "fact_conflicts": [{"field": "signal_priority"}],
+            "pending_questions": [{"question": "당시 신호나 우선권 상황을 알려주세요."}],
+            "case_memory": {"schema_version": "case_memory.v1"},
+            "fine_notice_intake": {"slots": {"fine_type": {"value": "fine"}}},
+            "conversation_history": [{"role": "assistant", "content": "old accident"}],
+        },
+        current_routing_intent="traffic_law_search",
+    )
+
+    for field in (
+        "facts",
+        "fact_sources",
+        "fact_conflicts",
+        "pending_questions",
+        "case_memory",
+        "fine_notice_intake",
+        "stored_fine_notice_intake_slots",
+        "conversation_history",
+    ):
+        assert field not in merged
+    assert merged["user_text"].startswith("횡단보도")
+
+
+def test_ambiguous_short_answer_keeps_stored_accident_continuation() -> None:
+    merged = merge_chat_followup_payload(
+        {"user_text": "녹색 신호였습니다."},
+        {
+            "contract_version": "chat_session_followup_state.v1",
+            "routing_intent": "accident_initial_consultation",
+            "facts": {"road_layout": {"value": "교차로", "confirmed": True}},
+            "pending_questions": [{"question": "당시 신호나 우선권 상황을 알려주세요."}],
+        },
+        current_routing_intent="general_consultation",
+    )
+
+    assert merged["facts"]["road_layout"]["value"] == "교차로"
+    assert merged["conversation_history"][-1] == {
+        "role": "user",
+        "content": "녹색 신호였습니다.",
+    }
+
+
 def test_merge_preserves_server_confirmed_fact_over_client_confirmed_conflict() -> None:
     merged = merge_chat_followup_payload(
         {

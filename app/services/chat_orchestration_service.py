@@ -161,6 +161,7 @@ def submit_message(
     payload: dict[str, Any],
     *,
     routing_intent_override: str = "",
+    continuation_routing_intent: str = "",
 ) -> dict[str, Any]:
     payload = protect_chat_input_payload(payload)
     payload = resolve_attachment_references(payload)
@@ -203,11 +204,16 @@ def submit_message(
         attachments,
         normalized_input=input_normalization,
     )
-    routing_intent = (
-        detected_routing_intent
-        if routing_intent_override in {"", "general_consultation"}
-        else routing_intent_override
-    )
+    forced_routing_intent = str(routing_intent_override or "").strip()
+    continuation_intent = str(continuation_routing_intent or "").strip()
+    if forced_routing_intent not in {"", "general_consultation"}:
+        routing_intent = forced_routing_intent
+    elif detected_routing_intent != "general_consultation":
+        routing_intent = detected_routing_intent
+    elif continuation_intent:
+        routing_intent = continuation_intent
+    else:
+        routing_intent = detected_routing_intent
     scope_guidance = build_scope_guidance_response(
         session_id=session_id,
         message_id=message_id,

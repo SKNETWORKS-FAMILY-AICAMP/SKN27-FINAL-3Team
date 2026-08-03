@@ -115,7 +115,8 @@ test("builds existing Case API payloads from four confirmed facts", () => {
 
 test("uses only target-document OCR evidence when upload state is still stale", () => {
   const targetResponse = completeResponse();
-  targetResponse.structured_results = {
+  targetResponse.public_results = {
+    contract_version: "public_agent_results.v1",
     traffic_accident_confirmation_ocr: {
       document_check: { is_target_document: true },
       ocr_evidence: [
@@ -146,7 +147,8 @@ test("uses only target-document OCR evidence when upload state is still stale", 
   );
 
   const nonTargetResponse = completeResponse();
-  nonTargetResponse.structured_results = {
+  nonTargetResponse.public_results = {
+    contract_version: "public_agent_results.v1",
     traffic_accident_confirmation_ocr: {
       document_check: { is_target_document: false },
       ocr_evidence: [{ attachment_id: "att_wrong_document" }],

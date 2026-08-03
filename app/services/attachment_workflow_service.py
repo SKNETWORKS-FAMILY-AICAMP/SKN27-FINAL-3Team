@@ -81,6 +81,9 @@ def build_attachment_workflows(
     structured = structured_results if isinstance(structured_results, Mapping) else {}
     classification_results = structured.get("attachment_document_classification")
     ocr_results = structured.get("fine_notice_analysis")
+    traffic_accident_ocr_results = structured.get(
+        "traffic_accident_confirmation_ocr"
+    )
     workflows: list[dict[str, Any]] = []
 
     for attachment in attachments:
@@ -131,6 +134,80 @@ def build_attachment_workflows(
                     next_action="wait_for_scan",
                 )
             )
+            continue
+
+        if str(attachment.get("purpose") or "").strip().lower() == (
+            "traffic_accident_confirmation"
+        ):
+            traffic_accident_ocr = _for_attachment(
+                traffic_accident_ocr_results,
+                attachment_id,
+            )
+            traffic_status = str(
+                traffic_accident_ocr.get("status") or overall_status
+            ).strip().lower()
+            if traffic_accident_ocr.get("requires_confirmation") is True:
+                workflows.append(
+                    _workflow(
+                        attachment_id=attachment_id,
+                        state="ocr_needs_confirmation",
+                        next_action="confirm_ocr_fields",
+                        missing_fields=_safe_missing_fields(
+                            traffic_accident_ocr.get("missing_fields")
+                        ),
+                    )
+                )
+            elif (
+                active_node == "traffic_accident_confirmation_ocr"
+                and traffic_status in {"", "queued", "running"}
+            ):
+                workflows.append(
+                    _workflow(
+                        attachment_id=attachment_id,
+                        state="ocr_running",
+                        next_action="wait_for_ocr",
+                    )
+                )
+            elif traffic_status in {"success", "completed"}:
+                workflows.append(
+                    _workflow(
+                        attachment_id=attachment_id,
+                        state="analysis_ready",
+                        next_action="review_analysis",
+                    )
+                )
+            elif traffic_status == "partial":
+                workflows.append(
+                    _workflow(
+                        attachment_id=attachment_id,
+                        state="partial",
+                        next_action="provide_missing_information",
+                        retryable=True,
+                        limitations=[
+                            "교통사고 사실확인원 정보를 추가로 확인해야 합니다."
+                        ],
+                    )
+                )
+            elif traffic_status == "failed":
+                workflows.append(
+                    _workflow(
+                        attachment_id=attachment_id,
+                        state="failed",
+                        next_action="retry_or_reupload",
+                        retryable=True,
+                        limitations=[
+                            "교통사고 사실확인원 분석을 완료하지 못했습니다."
+                        ],
+                    )
+                )
+            else:
+                workflows.append(
+                    _workflow(
+                        attachment_id=attachment_id,
+                        state="ocr_running",
+                        next_action="wait_for_ocr",
+                    )
+                )
             continue
 
         if classification.get("requires_confirmation") is True:

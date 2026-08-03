@@ -10,7 +10,9 @@ def test_frontend_reads_and_prioritizes_appeal_decision_result() -> None:
     shell = SHELL.read_text(encoding="utf-8")
 
     assert "buildAppealDecisionUi" in shell
-    assert "structured_results?.appeal_decision_flow" in shell
+    assert 'contract_version === "public_agent_results.v1"' in shell
+    assert "publicResults.appeal_decision_flow" in shell
+    assert "structured_results?.appeal_decision_flow" not in shell
     assert "function AppealDecisionPanel(" in shell
     assert "<AppealDecisionPanel" in shell
     assert shell.index("<AppealDecisionPanel") < shell.index("<SafetyGuidancePanel")
