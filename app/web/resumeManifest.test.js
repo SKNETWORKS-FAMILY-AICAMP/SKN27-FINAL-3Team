@@ -138,3 +138,28 @@ test("restores the latest analysis snapshot over stale session projections", () 
     status: "saved",
   });
 });
+
+test("does not restore operational worker completion text as an assistant answer", () => {
+  const hydrated = hydrateResumeManifest({
+    contract_version: "resume_manifest.v1",
+    has_resume: true,
+    session: { session_id: "ses_worker_status", status: "active" },
+    conversation_messages: [
+      { message_id: "msg_user", role: "user", content: "분석해 주세요." },
+    ],
+    latest_analysis: {
+      job_id: "job_worker_status",
+      session_id: "ses_worker_status",
+      status: "partial",
+      progress_message: "Agent worker item completed with partial results.",
+      assistant_message_payload: {
+        answer: "Agent worker item completed with partial results.",
+        summary: "Agent worker item completed with partial results.",
+      },
+    },
+  });
+
+  assert.deepEqual(hydrated.chatMessages, [
+    { role: "user", content: "분석해 주세요.", status: "saved" },
+  ]);
+});

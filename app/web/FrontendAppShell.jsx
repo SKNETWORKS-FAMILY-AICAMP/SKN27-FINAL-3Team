@@ -1112,10 +1112,8 @@ export default function FrontendAppShell({
     }
     if (VIDEO_MIME_TYPES.has(contentType)) {
       setAttachmentPurpose("blackbox_video");
-      setStatusMessage(`${file.name} 영상을 Vision 분석 대기열에 연결했습니다.`);
-    } else {
-      setStatusMessage(`${file.name} 파일을 OCR 분류 대기열에 연결했습니다.`);
     }
+    setStatusMessage(`${file.name} 파일이 선택되었습니다. ‘업로드 시작’을 눌러 주세요.`);
     setSelectedUploadFile(file);
   }
 
@@ -1540,6 +1538,10 @@ export default function FrontendAppShell({
   } = {}) {
     if (authRestoreIsBlocking) {
       setStatusMessage("로그인 상태 확인이 끝난 뒤 상담 내용을 보낼 수 있습니다.");
+      return;
+    }
+    if (submissionKind === "manual" && (selectedUploadFile || isRegisteringAttachment)) {
+      setStatusMessage("파일 업로드를 완료한 뒤 상담 내용을 보낼 수 있습니다.");
       return;
     }
     const trimmedQuestion = String(userText ?? question).trim();
@@ -3722,7 +3724,7 @@ function ChatScreenV2({
                         onClick={onRegisterAttachment}
                         disabled={isRegisteringAttachment || Boolean(capabilityError)}
                       >
-                        {isRegisteringAttachment ? "첨부 중" : isAuthenticated ? "첨부" : "로그인 후 첨부"}
+                        {isRegisteringAttachment ? "업로드 중" : isAuthenticated ? "업로드 시작" : "로그인 후 업로드"}
                       </button>
                       <button type="button" aria-label="선택한 파일 제거" onClick={() => onAttachmentFile(null)}>×</button>
                     </div>
@@ -3736,9 +3738,11 @@ function ChatScreenV2({
                     className="button primary composer-send"
                     type="button"
                     aria-label="메시지 보내기"
-                    title={isSubmitting ? "답변 정리 중" : "메시지 보내기"}
+                    title={selectedUploadFile || isRegisteringAttachment
+                      ? "파일 업로드를 완료한 뒤 메시지를 보낼 수 있습니다."
+                      : isSubmitting ? "답변 정리 중" : "메시지 보내기"}
                     onClick={onSubmit}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isRegisteringAttachment || Boolean(selectedUploadFile)}
                   >
                     {isSubmitting
                       ? <span aria-hidden="true">…</span>
@@ -3764,7 +3768,7 @@ function ChatScreenV2({
                 </div>
                 {selectedUploadFile && (
                   <span className="composer-file-status" role="status">
-                    {`${selectedUploadFile.name} 선택됨 · ${VIDEO_MIME_TYPES.has(selectedUploadFile.type) ? "Vision" : "OCR"} 대기`}
+                    {`${selectedUploadFile.name} 선택됨 · 업로드 필요`}
                   </span>
                 )}
               </div>
