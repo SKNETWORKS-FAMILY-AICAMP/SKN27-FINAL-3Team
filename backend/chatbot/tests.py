@@ -11,7 +11,7 @@ from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import Client, SimpleTestCase, TestCase, override_settings
+from django.test import Client, RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
 from app.services.agent_node_service import execute_mock_node
@@ -1216,6 +1216,30 @@ class ProductionReadinessTests(TestCase):
         self.assertEqual(uploaded_file.status, UploadedFileStatus.UPLOADED)
         self.assertEqual(uploaded_file.scan_status, "error")
         self.assertEqual(uploaded_file.metadata["scan_result"]["findings"][0]["reason"], "connection_failed")
+
+    def test_rate_limit_response_has_readable_korean_message(self):
+        from chatbot.views import _rate_limit_response
+
+        response = _rate_limit_response(
+            RequestFactory().post("/api/chat/messages/"),
+            {
+                "subject_type": "user",
+                "scope": "chat_message",
+                "limit_count": 1,
+                "used_count": 1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(
+            json.loads(response.content)["error"]["message"],
+            "요청 한도를 모두 사용했습니다. 잠시 후 다시 시도해 주세요.",
+        )
+
+    def test_chatbot_views_do_not_ship_placeholder_mojibake_strings(self):
+        views_source = Path(__file__).with_name("views.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("??", views_source)
 
     def legacy_persona_catalog_smoke_command_covers_all_demo_personas(self):
         output = StringIO()
