@@ -36,6 +36,7 @@ from app.services.history_event_mock_service import (
 from app.services.chat_session_followup_service import (
     CHAT_SESSION_FOLLOWUP_STATE_VERSION,
     build_chat_followup_snapshot,
+    merge_confirmed_ocr_followup_state,
 )
 from app.services.report_document_card_service import (
     build_report_document_cards,
@@ -2480,11 +2481,19 @@ def enqueue_analysis_job_work(
         if session.owner_id:
             if not owner_id or session.owner_id != owner_id:
                 raise PermissionError("analysis job session belongs to another owner")
-        session.metadata = _metadata_with_conversation_save_state(
+        next_session_metadata = _metadata_with_conversation_save_state(
             session.metadata,
             conversation_save_state,
             raw_payload=persisted_request_payload,
         )
+        confirmed_ocr_followup_state = merge_confirmed_ocr_followup_state(
+            _dict_or_empty(next_session_metadata.get("chat_followup_state")),
+            persisted_request_payload,
+            routing_intent=_text(job_payload.get("routing_intent")),
+        )
+        if confirmed_ocr_followup_state is not None:
+            next_session_metadata["chat_followup_state"] = confirmed_ocr_followup_state
+        session.metadata = next_session_metadata
         session.save(update_fields=["metadata", "updated_at"])
 
         message = None

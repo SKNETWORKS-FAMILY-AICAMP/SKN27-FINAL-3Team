@@ -19,8 +19,20 @@ _TOPIC_SCOPED_FIELDS = frozenset(
         "stored_fine_notice_intake_slots",
         "consultation_state",
         "conversation_history",
+        "ocr_confirmation",
     }
 )
+_OCR_CONFIRMATION_FIELDS = frozenset(
+    {
+        "fine_type",
+        "notice_stage",
+        "law_code",
+        "violation_text",
+        "opinion_deadline",
+        "issuing_authority",
+    }
+)
+_OCR_CONFIRMATION_REQUIRED_FIELDS = frozenset({"fine_type", "notice_stage"})
 
 
 def merge_chat_followup_payload(
@@ -74,6 +86,10 @@ def merge_chat_followup_payload(
         )
     merged["pending_questions"] = _dict_list(state.get("pending_questions"))
     merged["conversation_history"] = _history_with_current_user_turn(state, merged)
+    if "ocr_confirmation" not in merged:
+        restored_confirmation = _restored_ocr_confirmation(state, merged)
+        if restored_confirmation:
+            merged["ocr_confirmation"] = restored_confirmation
     return merged
 
 
@@ -94,7 +110,7 @@ def build_chat_followup_snapshot(
     history = _append_user_turn(history, payload)
     history = _append_assistant_turn(history, chat_response)
 
-    return {
+    snapshot = {
         "contract_version": CHAT_SESSION_FOLLOWUP_STATE_VERSION,
         "routing_intent": _text(chat_response.get("routing_intent")),
         "facts": deepcopy(fact_state.get("facts") or _dict(payload.get("facts"))),
@@ -109,6 +125,29 @@ def build_chat_followup_snapshot(
         "consultation_state": _safe_consultation_state(consultation_state),
         "conversation_history": history[-MAX_FOLLOWUP_HISTORY_TURNS:],
     }
+    ocr_confirmation = _stored_ocr_confirmation(payload)
+    if ocr_confirmation:
+        snapshot["ocr_confirmation"] = ocr_confirmation
+    return snapshot
+
+
+def merge_confirmed_ocr_followup_state(
+    stored_state: dict[str, Any] | None,
+    payload: dict[str, Any],
+    *,
+    routing_intent: str = "",
+) -> dict[str, Any] | None:
+    """Persist a narrow OCR confirmation for the same attachment set only."""
+
+    confirmation = _stored_ocr_confirmation(payload)
+    if not confirmation:
+        return None
+    state = deepcopy(_valid_state(stored_state) or {})
+    state["contract_version"] = CHAT_SESSION_FOLLOWUP_STATE_VERSION
+    if _text(routing_intent):
+        state["routing_intent"] = _text(routing_intent)
+    state["ocr_confirmation"] = confirmation
+    return state
 
 
 def followup_routing_intent(stored_state: dict[str, Any] | None) -> str:
@@ -219,6 +258,66 @@ def _safe_consultation_state(value: dict[str, Any]) -> dict[str, Any]:
         for key in ("v2", "promotion_gate", "case_memory")
         if key in value
     }
+
+
+def _stored_ocr_confirmation(payload: dict[str, Any]) -> dict[str, Any]:
+    raw = _dict(payload.get("ocr_confirmation"))
+    raw_fields = _dict(raw.get("fields"))
+    fields = {
+        field: value
+        for field in _OCR_CONFIRMATION_FIELDS
+        if (value := _text(raw_fields.get(field)))
+    }
+    attachment_ids = _attachment_ids(payload.get("attachments"))
+    if (
+        raw.get("confirmed") is not True
+        or not _OCR_CONFIRMATION_REQUIRED_FIELDS.issubset(fields)
+        or not attachment_ids
+    ):
+        return {}
+    return {
+        "confirmed": True,
+        "fields": fields,
+        "attachment_ids": attachment_ids,
+    }
+
+
+def _restored_ocr_confirmation(
+    state: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    stored = _dict(state.get("ocr_confirmation"))
+    stored_fields = _dict(stored.get("fields"))
+    fields = {
+        field: value
+        for field in _OCR_CONFIRMATION_FIELDS
+        if (value := _text(stored_fields.get(field)))
+    }
+    if (
+        stored.get("confirmed") is not True
+        or not _OCR_CONFIRMATION_REQUIRED_FIELDS.issubset(fields)
+        or _attachment_ids(payload.get("attachments"))
+        != sorted(
+            {
+                attachment_id
+                for value in stored.get("attachment_ids") or []
+                if (attachment_id := _text(value))
+            }
+        )
+    ):
+        return {}
+    return {"confirmed": True, "fields": fields}
+
+
+def _attachment_ids(value: Any) -> list[str]:
+    return sorted(
+        {
+            attachment_id
+            for item in value or []
+            if isinstance(item, dict)
+            if (attachment_id := _text(item.get("attachment_id")))
+        }
+    )
 
 
 def _history(value: Any) -> list[dict[str, str]]:
