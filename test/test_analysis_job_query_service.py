@@ -649,6 +649,8 @@ def test_detail_projects_only_public_restore_fields() -> None:
         "attachments": [{
             "attachment_id": "att_public",
             "filename": "notice.pdf",
+            "status": "ready",
+            "scan_status": "clean",
             "storage_uri": "s3://private-bucket/notice.pdf",
         }],
         "report_links": [{
@@ -707,7 +709,12 @@ def test_detail_projects_only_public_restore_fields() -> None:
         "report_status": "ready",
     }
     assert outcome.payload["attachments"] == [
-        {"attachment_id": "att_public", "filename": "notice.pdf"}
+        {
+            "attachment_id": "att_public",
+            "filename": "notice.pdf",
+            "status": "ready",
+            "scan_status": "clean",
+        }
     ]
     assert outcome.payload["report_links"] == [
         {"report_id": "rep_public", "action": "detail"}

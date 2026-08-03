@@ -77,3 +77,64 @@ test("returns an empty state for an absent or invalid resume manifest", () => {
     assert.equal(hydrated.currentReport, null);
   }
 });
+
+test("restores the latest analysis snapshot over stale session projections", () => {
+  const hydrated = hydrateResumeManifest({
+    contract_version: "resume_manifest.v1",
+    has_resume: true,
+    session: { session_id: "ses_completed", status: "active" },
+    conversation_messages: [
+      { message_id: "msg_user", role: "user", content: "Create the objection report." },
+    ],
+    attachments: [
+      {
+        attachment_id: "att_notice",
+        purpose: "fine_notice",
+        filename: "notice.pdf",
+        status: "uploaded",
+        scan_status: "not_started",
+      },
+    ],
+    reports: [],
+    latest_analysis: {
+      job_id: "job_completed",
+      session_id: "ses_completed",
+      status: "success",
+      assistant_message: { answer: "Draft ready." },
+      attachments: [
+        {
+          attachment_id: "att_notice",
+          purpose: "fine_notice",
+          filename: "notice.pdf",
+          status: "ready",
+          scan_status: "clean",
+        },
+      ],
+      reports: [
+        {
+          report_id: "rep_completed",
+          report_type: "fine_notice_objection",
+          status: "ready",
+          title: "Objection draft",
+        },
+      ],
+      report_links: [
+        {
+          report_id: "rep_completed",
+          action: "detail",
+        },
+      ],
+    },
+  });
+
+  assert.equal(hydrated.analysisResponse.status, "success");
+  assert.equal(hydrated.registeredAttachments[0].status, "ready");
+  assert.equal(hydrated.registeredAttachments[0].scan_status, "clean");
+  assert.equal(hydrated.currentReport.report_id, "rep_completed");
+  assert.equal(hydrated.reportList[0].status, "ready");
+  assert.deepEqual(hydrated.chatMessages.at(-1), {
+    role: "assistant",
+    content: "Draft ready.",
+    status: "saved",
+  });
+});

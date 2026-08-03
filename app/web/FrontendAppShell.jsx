@@ -50,7 +50,11 @@ import {
 } from "./guestConversationPolicy.js";
 import { deriveReportWorkbenchState } from "./reportWorkbenchState.js";
 import { hasMeaningfulReportingPayload } from "./reportWorkbenchState.js";
-import { pollWorkerResult } from "./workerPolling.js";
+import {
+  DEFAULT_WORKER_POLL_INTERVAL_MS,
+  DEFAULT_WORKER_POLL_MAX_ATTEMPTS,
+  pollWorkerResult,
+} from "./workerPolling.js";
 import {
   normalizeChatResponsePresentation,
   selectPrimaryFollowUpQuestion,
@@ -71,8 +75,8 @@ const TAB_ROUTES = [
 ];
 
 const EXECUTION_MODE = "async_worker";
-const WORKER_POLL_INTERVAL_MS = 500;
-const WORKER_POLL_MAX_ATTEMPTS = 60;
+const WORKER_POLL_INTERVAL_MS = DEFAULT_WORKER_POLL_INTERVAL_MS;
+const WORKER_POLL_MAX_ATTEMPTS = DEFAULT_WORKER_POLL_MAX_ATTEMPTS;
 const FINE_NOTICE_DEADLINE_DAYS = 60;
 const ATTACHMENT_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf,video/mp4,video/quicktime";
 const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime"]);
@@ -3460,7 +3464,9 @@ function ChatScreenV2({
           <div className="messages">
             {!hasConversation && (
               <section className="chat-empty-state" aria-label="상담 시작">
-                <span className="chat-session-status">비회원으로 상담 중</span>
+                <span className="chat-session-status">
+                  {isAuthenticated ? "로그인 상담 중" : "비회원으로 상담 중"}
+                </span>
                 <h3>지금 가장 급한 상황부터 적어 주세요.</h3>
                 <p>
                   사고 직후라면 장소, 시간, 상대방 주장, 고지서 내용처럼 기억나는 것만 적어도 됩니다.

@@ -237,16 +237,21 @@ def test_frontend_normalizes_assistant_message_payloads_before_rendering() -> No
 
 def test_frontend_polls_guest_worker_jobs_until_a_terminal_result() -> None:
     shell = read_text(ROOT / "app" / "web" / "FrontendAppShell.jsx")
+    worker_polling = read_text(ROOT / "app" / "web" / "workerPolling.js")
     poll_start = shell.index("async function pollQueuedWorkerResult")
     poll_end = shell.index("async function submitServiceMessage", poll_start)
     polling = shell[poll_start:poll_end]
     submit_end = shell.index("async function streamAssistantMessage", poll_end)
     submit = shell[poll_end:submit_end]
 
-    assert "const WORKER_POLL_MAX_ATTEMPTS = 60;" in shell
+    assert "export const DEFAULT_WORKER_POLL_INTERVAL_MS = 500;" in worker_polling
+    assert "export const DEFAULT_WORKER_POLL_MAX_ATTEMPTS = 180;" in worker_polling
+    assert "const WORKER_POLL_INTERVAL_MS = DEFAULT_WORKER_POLL_INTERVAL_MS;" in shell
+    assert "const WORKER_POLL_MAX_ATTEMPTS = DEFAULT_WORKER_POLL_MAX_ATTEMPTS;" in shell
     assert "setChatMessages(conversationHistory);" in shell
     assert "if (!requestIdentity?.authToken)" not in polling
-    assert 'import { pollWorkerResult } from "./workerPolling.js";' in shell
+    assert 'from "./workerPolling.js";' in shell
+    assert "DEFAULT_WORKER_POLL_MAX_ATTEMPTS" in shell
     assert "return pollWorkerResult({" in polling
     assert "loadResult: () => api.getAnalysisResult({" in polling
     assert "wait: waitForWorkerPoll" in polling

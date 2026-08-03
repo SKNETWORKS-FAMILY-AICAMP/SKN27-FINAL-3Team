@@ -1269,6 +1269,88 @@ def test_law_ground_agent_emits_canonical_provision_source_reference(monkeypatch
     assert output["evidence"][0]["source_reference"] == "law:road-traffic:5"
 
 
+def test_law_ground_agent_excludes_sources_outside_confirmed_law_code(monkeypatch):
+    from ai.agents.law_ground_search import agent as law_agent
+
+    monkeypatch.setattr(law_agent, "_get_neo4j_session", lambda: None)
+    monkeypatch.setattr(
+        law_agent,
+        "search_law_provisions",
+        lambda **_kwargs: [
+            {
+                "source_ref": "law:passenger-transport:1",
+                "chunk_id": "passenger-transport:1",
+                "source_name": "여객자동차 운수사업법",
+                "source_type": "law",
+                "article_no": "제1조",
+                "provision_text": "여객자동차 운수사업에 관한 규정입니다.",
+                "source_url": "https://example.test/law/passenger-transport#1",
+                "score": 0.95,
+            },
+            {
+                "source_ref": "law:road-traffic:32",
+                "chunk_id": "road-traffic:32",
+                "source_name": "도로교통법",
+                "source_type": "law",
+                "article_no": "제32조",
+                "provision_text": "정차 및 주차의 금지 장소에 관한 규정입니다.",
+                "source_url": "https://example.test/law/road-traffic#32",
+                "score": 0.82,
+            },
+        ],
+    )
+
+    output = law_agent.run_law_ground_search(
+        {
+            "session_id": "ses_confirmed_law",
+            "message_id": "msg_confirmed_law",
+            "job_id": "job_confirmed_law",
+            "context": {
+                "query": {
+                    "raw_text": "도로교통법 제32조 소화전 5m 이내 정차 위반",
+                    "search_query": "도로교통법 제32조 소화전 5m 이내 정차 위반",
+                    "law_code": "도로교통법 제32조 제1호",
+                },
+                "temporal_basis": {"mode": "current"},
+                "scope": {"jurisdiction": "KR"},
+            },
+        },
+        {},
+    )
+
+    provisions = output["structured_result"]["law_provisions"]
+    assert [item["source_name"] for item in provisions] == ["도로교통법"]
+    assert "여객자동차 운수사업법" not in repr(output)
+
+
+def test_law_ground_context_carries_confirmed_law_code_from_supervisor_package():
+    context = agent_node_service._agent_context(
+        {
+            "user_text": "표지판 식별이 어려웠습니다.",
+            "context": {
+                "supervisor_handoff": {
+                    "agent_input_packages": [
+                        {
+                            "node_code": "law_ground_search",
+                            "payload": {
+                                "law_code": "도로교통법 제32조 제1호",
+                                "search_query": "도로교통법 제32조 제1호 소화전 정차 위반",
+                            },
+                        }
+                    ]
+                }
+            },
+        },
+        agent_node_service.NODE_REGISTRY["law_ground_search"],
+    )
+
+    assert context["query"] == {
+        "raw_text": "도로교통법 제32조 제1호 소화전 정차 위반",
+        "search_query": "도로교통법 제32조 제1호 소화전 정차 위반",
+        "law_code": "도로교통법 제32조 제1호",
+    }
+
+
 def test_law_ground_search_adapter_passes_llm_extractor(monkeypatch):
     from ai.agents import law_ground_search as law_ground_package
 

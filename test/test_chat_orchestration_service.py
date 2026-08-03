@@ -1269,7 +1269,12 @@ def test_report_node_is_planned_only_when_document_generation_is_explicitly_requ
             "user_text": "첨부한 고지서를 분석하고 이의신청서 초안을 작성해 주세요.",
             "ocr_confirmation": {
                 "confirmed": True,
-                "fields": {"fine_type": "과태료", "notice_stage": "사전통지"},
+                "fields": {
+                    "fine_type": "과태료",
+                    "notice_stage": "사전통지",
+                    "law_code": "도로교통법 제32조 제1호, 제160조 제2항",
+                    "violation_text": "소화전 5m 이내 정차 위반",
+                },
             },
             "attachments": [{"attachment_id": "att_1", "purpose": "fine_notice", "status": "ready"}],
         },
@@ -1288,6 +1293,18 @@ def test_report_node_is_planned_only_when_document_generation_is_explicitly_requ
     assert response["analysis_plan"]["steps"][-1]["depends_on"] == [
         "final_response_merge"
     ]
+    law_package = next(
+        package
+        for package in response["supervisor_state"]["agent_input_packages"]
+        if package["node_code"] == "law_ground_search"
+    )
+    assert law_package["payload"]["search_query"] == (
+        "도로교통법 제32조 제1호, 제160조 제2항 소화전 5m 이내 정차 위반"
+    )
+    assert law_package["payload"]["law_code"] == (
+        "도로교통법 제32조 제1호, 제160조 제2항"
+    )
+    assert law_package["payload"]["violation_text"] == "소화전 5m 이내 정차 위반"
 
 
 def test_explicit_report_request_waits_for_confirmed_user_facts() -> None:
