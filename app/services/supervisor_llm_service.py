@@ -465,10 +465,24 @@ def _normalize_llm_state(
 
     state = deepcopy(fallback_state)
     state["conversation_summary"] = candidate["conversation_summary"].strip()
-    state["collected_facts"] = policy_allowed_llm_facts(
+    llm_facts = policy_allowed_llm_facts(
         _list_of_dicts(candidate["collected_facts"]),
         scenario=str(fallback_state.get("scenario") or ""),
     )
+    fallback_facts = _list_of_dicts(fallback_state.get("collected_facts", []))
+    fallback_fact_fields = {
+        str(item.get("field") or "").strip()
+        for item in fallback_facts
+        if str(item.get("field") or "").strip()
+    }
+    state["collected_facts"] = [
+        *fallback_facts,
+        *[
+            item
+            for item in llm_facts
+            if str(item.get("field") or "").strip() not in fallback_fact_fields
+        ],
+    ]
     state["fact_conflicts"] = normalize_fact_conflicts(
         candidate["fact_conflicts"],
         default_source_message_id=default_source_message_id,

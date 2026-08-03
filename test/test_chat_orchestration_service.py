@@ -1364,6 +1364,52 @@ def test_accident_initial_message_uses_llm_only_for_fact_candidates(build_superv
     assert response["analysis_plan"]["steps"] == []
 
 
+def test_accident_initial_message_keeps_normalized_facts_when_llm_omits_one(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SUPERVISOR_LLM_ENABLED", "1")
+    monkeypatch.setenv("SUPERVISOR_LLM_API_KEY", "sk-test")
+    monkeypatch.setenv("SUPERVISOR_LLM_MODEL", "gpt-test")
+    llm_candidate = {
+        "conversation_summary": "사거리 교차로 차선 변경 사고",
+        "collected_facts": [
+            {
+                "field": "vehicle_actions",
+                "value": "본인 차량 직진, 상대 차량 차선 변경",
+            },
+            {"field": "signal_priority", "value": "본인 차량 녹색 신호"},
+            {
+                "field": "collision_location",
+                "value": "본인 차량 앞범퍼와 상대 차량 측면",
+            },
+        ],
+        "fact_conflicts": [],
+        "missing_fields": [],
+        "next_questions": [],
+        "agent_input_packages": [],
+    }
+
+    with patch(
+        "app.services.supervisor_llm_service._request_supervisor_json",
+        return_value=llm_candidate,
+    ):
+        response = submit_message(
+            {
+                "session_id": "ses_browser_accident_llm",
+                "user_text": (
+                    "사고 과실이 궁굼해요. 사거리 교차로에서 저는 직진중이고 "
+                    "상대차는 차선변경, 제 신호는 녹색이었고 "
+                    "제차 앞범퍼랑 상대차 옆문이 부딪혔어요."
+                ),
+            }
+        )
+
+    fact_state = response["consultation_state"]["fact_state"]
+    assert fact_state["missing_fields"] == []
+    assert fact_state["facts"]["road_layout"]["value"] == "교차로"
+    assert response["pending_questions"][0]["field"] == "material_evidence"
+
+
 def test_accident_consultation_exposes_structured_case_memory() -> None:
     response = submit_message(
         {
