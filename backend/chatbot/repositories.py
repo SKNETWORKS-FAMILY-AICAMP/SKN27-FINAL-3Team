@@ -37,6 +37,7 @@ from app.services.chat_session_followup_service import (
     CHAT_SESSION_FOLLOWUP_STATE_VERSION,
     build_chat_followup_snapshot,
     merge_confirmed_ocr_followup_state,
+    normalize_report_generation_request,
 )
 from app.services.report_document_card_service import (
     build_report_document_cards,
@@ -2542,6 +2543,12 @@ def enqueue_analysis_job_work(
                 "status": AgentWorkItemStatus.QUEUED.value,
             },
         }
+        report_generation_action = normalize_report_generation_request(
+            persisted_request_payload
+        )
+        if report_generation_action:
+            queue_metadata["report_generation_requested"] = True
+            queue_metadata["report_generation_action"] = report_generation_action
         if requested_idempotency:
             queue_metadata["idempotency"] = {
                 **requested_idempotency,

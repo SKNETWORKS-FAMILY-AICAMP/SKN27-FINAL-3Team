@@ -59,6 +59,8 @@ export function compactUniqueStrings(values, limit = 5) {
 export function deriveReportWorkbenchState({
   hasReport = false,
   hasSavedReports = false,
+  hasCurrentSessionReport = false,
+  hasSelectedSavedReport = false,
   canGenerateReport = false,
   isAuthenticated = false,
   isPersistedReport = false,
@@ -69,7 +71,11 @@ export function deriveReportWorkbenchState({
   const hasMeaningfulPayload = hasMeaningfulReportingPayload(reportingPayload);
   const effectiveHasReport = isPersistedReport || hasMeaningfulPayload;
 
-  if (hasSavedReports && !savedReportDetailLoaded && !hasMeaningfulPayload) {
+  if (
+    (hasCurrentSessionReport || hasSelectedSavedReport) &&
+    !savedReportDetailLoaded &&
+    !hasMeaningfulPayload
+  ) {
     return {
       kind: "loading_saved_report",
       stageLabel: "저장 리포트 불러오는 중",
@@ -90,6 +96,17 @@ export function deriveReportWorkbenchState({
         : "현재 접속 중에는 검토할 수 있지만 저장과 제출용 문서는 Google 로그인 후 사용할 수 있습니다.",
       missingItems: [],
       ctaLabel: "AI 상담으로 이동",
+    };
+  }
+
+  if (hasSavedReports && !hasCurrentSessionReport && !hasSelectedSavedReport) {
+    return {
+      kind: "saved_reports_only",
+      stageLabel: "현재 상담 리포트 없음",
+      title: "현재 상담에는 아직 리포트가 없습니다.",
+      description: "내 계정에 저장된 리포트가 있습니다. 왼쪽 목록에서 선택해 확인할 수 있습니다.",
+      missingItems: [],
+      ctaLabel: "저장 리포트 선택",
     };
   }
 
