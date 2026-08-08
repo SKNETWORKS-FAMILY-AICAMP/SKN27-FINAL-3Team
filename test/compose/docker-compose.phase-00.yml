@@ -1,0 +1,49 @@
+services:
+  backend:
+    container_name: "${COMPOSE_PROJECT_NAME}_backend"
+    environment:
+      SUPERVISOR_LLM_ENABLED: "0"
+      LEGAL_RAG_VECTOR_ENABLED: "0"
+      LAW_GROUND_SEARCH_ENABLE_NEO4J: "0"
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      OPENAI_API_KEY: ""
+      SUPERVISOR_LLM_API_KEY: ""
+      LEGAL_RAG_OPENAI_API_KEY: ""
+      RUNPOD_API_KEY: ""
+      FILE_SCAN_PROVIDER: "clamav"
+      FILE_SCAN_CLAMAV_HOST: "clamav"
+    volumes:
+      - ./scripts/refactoring:/app/scripts/refactoring:ro
+      - ./tmp/phase-00-compose-evidence:/app/tmp/phase-00-compose-evidence
+
+  agent-worker:
+    container_name: "${COMPOSE_PROJECT_NAME}_agent-worker"
+    environment:
+      SUPERVISOR_LLM_ENABLED: "0"
+      LEGAL_RAG_VECTOR_ENABLED: "0"
+      LAW_GROUND_SEARCH_ENABLE_NEO4J: "0"
+      GOOGLE_CLIENT_ID: ""
+      GOOGLE_CLIENT_SECRET: ""
+      OPENAI_API_KEY: ""
+      SUPERVISOR_LLM_API_KEY: ""
+      LEGAL_RAG_OPENAI_API_KEY: ""
+      RUNPOD_API_KEY: ""
+
+  file-scan-worker:
+    container_name: "${COMPOSE_PROJECT_NAME}_file-scan-worker"
+    environment:
+      FILE_SCAN_PROVIDER: "clamav"
+      FILE_SCAN_CLAMAV_HOST: "clamav"
+
+  postgres:
+    container_name: "${COMPOSE_PROJECT_NAME}_postgres"
+
+  redis:
+    container_name: "${COMPOSE_PROJECT_NAME}_redis"
+
+  clamav:
+    container_name: "${COMPOSE_PROJECT_NAME}_clamav"
+
+  neo4j:
+    container_name: "${COMPOSE_PROJECT_NAME}_neo4j"
