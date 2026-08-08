@@ -30,6 +30,15 @@ jobs:
           test/test_supervisor_production_contract.py
           test/test_api_route_specs.py
 
+      - name: Phase 0 core user-flow characterization gate
+        timeout-minutes: 10
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_00_core_user_flows \
+            chatbot.test_file_quarantine.FileQuarantinePipelineTests.test_multipart_registration_writes_only_to_quarantine \
+            chatbot.test_consultation_v2.ConsultationCaseApiTests.test_fact_confirmation_precedes_real_worker_queue \
+            --verbosity 1
+
       - name: OpenAPI v1 contract drift
         run: python scripts/generate_openapi_v1.py --check
 
@@ -48,11 +57,17 @@ jobs:
           cache: npm
           cache-dependency-path: app/web/package-lock.json
 
+      - name: Frontend dependency install
+        working-directory: app/web
+        run: npm ci
+
+      - name: Phase 0 frontend characterization gate
+        working-directory: app/web
+        run: node --test ./*.test.js
+
       - name: Frontend production build
         working-directory: app/web
-        run: |
-          npm ci
-          npm run build
+        run: npm run build
 
       - uses: hashicorp/setup-terraform@v3
         with:
@@ -71,3 +86,21 @@ jobs:
         run: |
           docker build -t skn27-production-gate .
           docker run --rm skn27-production-gate python -c "import app.services.chat_orchestration_service; import chatbot.runtime_health"
+
+  compose-integration:
+    needs: offline-verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Phase 0 Compose integration gate
+        run: bash scripts/refactoring/run_phase_00_compose_gate.sh
+
+      - name: Upload Phase 0 Compose evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-00-compose-evidence
+          path: tmp/phase-00-compose-evidence/
+          retention-days: 14
