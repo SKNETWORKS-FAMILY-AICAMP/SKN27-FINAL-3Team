@@ -2494,8 +2494,21 @@ def enqueue_analysis_job_work(
         )
         if confirmed_ocr_followup_state is not None:
             next_session_metadata["chat_followup_state"] = confirmed_ocr_followup_state
+        has_server_pending_question = any(
+            isinstance(question, dict) and _text(question.get("field"))
+            for question in _list_or_empty(chat_response.get("pending_questions"))
+        )
+        if has_server_pending_question:
+            next_session_metadata["chat_followup_state"] = build_chat_followup_snapshot(
+                persisted_request_payload,
+                chat_response,
+            )
         session.metadata = next_session_metadata
-        session.save(update_fields=["metadata", "updated_at"])
+        session_update_fields = ["metadata", "updated_at"]
+        if has_server_pending_question:
+            session.current_intent = _text(chat_response.get("routing_intent"))
+            session_update_fields.append("current_intent")
+        session.save(update_fields=session_update_fields)
 
         message = None
         if message_id:

@@ -30,6 +30,13 @@ jobs:
           test/test_supervisor_production_contract.py
           test/test_api_route_specs.py
 
+      - name: Queued follow-up state regression
+        timeout-minutes: 5
+        run: >
+          python backend/manage.py test
+          chatbot.test_queued_followup_state_persistence
+          --verbosity 1
+
       - name: OpenAPI v1 contract drift
         run: python scripts/generate_openapi_v1.py --check
 
