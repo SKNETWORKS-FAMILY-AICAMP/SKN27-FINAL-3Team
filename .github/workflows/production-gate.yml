@@ -39,6 +39,13 @@ jobs:
             chatbot.test_consultation_v2.ConsultationCaseApiTests.test_fact_confirmation_precedes_real_worker_queue \
             --verbosity 1
 
+      - name: Queued follow-up state regression
+        timeout-minutes: 5
+        run: >
+          python backend/manage.py test
+          chatbot.test_queued_followup_state_persistence
+          --verbosity 1
+
       - name: OpenAPI v1 contract drift
         run: python scripts/generate_openapi_v1.py --check
 
