@@ -1,4 +1,12 @@
 # Phase 0 Verification Matrix
+## C/G blocking verification completion
+
+| Flow | Endpoint/lifecycle | Persistence and ownership boundary | Privacy or replay boundary | Blocking selector |
+|---|---|---|---|---|
+| C | classified upload -> matching OCR confirmation -> short answer -> law worker -> result API | `UploadedFile`, `ChatSession`, `AnalysisJob`, `AgentWorkItem`, `AgentResult`, `RetrievalEvent` | stale/foreign confirmation rejection; raw OCR/storage/auth redaction | `chatbot.test_phase_00_ocr_law_flow` |
+| G | authenticated case -> confirmed facts -> worker report -> confirmation -> DOCX | `Case`, `ConfirmedFactVersion`, `AnalysisJob`, `AgentWorkItem`, `AgentResult`, `AnalysisDisplayResult`, `Report` | foreign/anonymous denial; pre-confirmation and stale denial; no storage material | `chatbot.test_phase_00_report_lifecycle` |
+
+The C/G modules are included in the existing `Phase 0 core user-flow characterization gate` in `.github/workflows/production-gate.yml`; no permissive `continue-on-error` setting is used.
 
 - 기준 SHA: `198efeba3cabacc3a977cfcaf2f8d7e06fd47104`
 - 작성 기준일: 2026-08-08

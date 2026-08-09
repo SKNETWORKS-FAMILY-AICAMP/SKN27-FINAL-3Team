@@ -1,4 +1,12 @@
 # Phase 0 Runtime Authority Map
+## C/G runtime authority detail
+
+| Flow | Runtime authority used by the characterization test | Explicit non-authority |
+|---|---|---|
+| C | `backend/chatbot/views.py` canonical upload/message/result routes; scan service; follow-up service; `process_agent_work_item`; persisted models | `/api/mock/`, UI-only behavior, mocked orchestration or queue functions |
+| G | case/report views; `chatbot.case_repository`; worker reporting-bundle persistence; report models/contracts | direct `Report`/`AgentResult`/`AnalysisDisplayResult` fixture creation, mocked worker/report/auth/download functions |
+
+Provider-free control is limited to classification/OCR/retrieval providers, preserving current production orchestration and durable-state authority without paid APIs or operating AWS dependencies.
 
 Runtime authority is ordered as follows when Phase 0 documents and gates disagree: executable application code and model/repository code; Dockerfile and Compose runtime definitions; CI workflow/package metadata; tests; then explanatory documents.
 

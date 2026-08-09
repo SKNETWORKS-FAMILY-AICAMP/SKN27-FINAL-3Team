@@ -1,5 +1,11 @@
 # Phase 0–9 Migration Status
 
+## Current Phase 0 override
+
+| Phase | Status | Evidence |
+|---|---|---|
+| 0 | IMPLEMENTED | C/G blocking characterization and Compose D2 gate are implemented. Independent review and latest blocking CI are still required; status is not `INDEPENDENT_REVIEW_PASSED`. C: `1ed561ab1a9b2de9b0d043d0ec9e0b27890e598e`; G: `2f41fff12a36d6108d9b928e796a9b2f3ffaad3d`. |
+
 - 기준 SHA: `198efeba3cabacc3a977cfcaf2f8d7e06fd47104`
 - 작성 기준일: 2026-08-08
 

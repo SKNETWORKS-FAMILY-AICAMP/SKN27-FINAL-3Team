@@ -1,4 +1,12 @@
 # Phase 0 Characterization Test Selection
+## C/G completion (supersedes the earlier C/G gap rows)
+
+| Flow | Characterization module and exact tests | Classification | Live production boundaries | Deterministic doubles | Durable/public assertions |
+|---|---|---|---|---|---|
+| C | `chatbot.test_phase_00_ocr_law_flow::{test_phase_00_ocr_confirmation_is_attachment_scoped,test_phase_00_short_answer_routes_real_law_worker_and_persists_retrieval,test_phase_00_stale_or_foreign_confirmation_is_rejected,test_phase_00_law_result_exposes_no_private_ocr_or_storage_data}` | BLOCKING_NEW | canonical upload/message/result API, scan worker, queue, worker | classification, OCR, legal-RAG providers only | attachment/session/owner, persisted follow-up state, law result/retrieval event, public redaction |
+| G | `chatbot.test_phase_00_report_lifecycle::{test_phase_00_worker_result_creates_versioned_report,test_phase_00_owner_confirms_current_report_document,test_phase_00_confirmed_report_download_is_owner_only,test_phase_00_stale_or_foreign_confirmation_is_rejected}` | BLOCKING_NEW | canonical session/file/case/facts/report APIs, queue, worker | text pgvector and legal-RAG providers only | case/fact/job/work/result/display/report provenance, owner access, confirmation and download |
+
+Neither module patches chat submission, routing, planning, enqueueing, worker execution, report persistence, report authorization, or download behavior. `/api/mock/`, mock-sidecar, and string-only evidence remain excluded from this blocking classification.
 
 - 기준 SHA: `198efeba3cabacc3a977cfcaf2f8d7e06fd47104`
 - 작성 기준일: 2026-08-08
