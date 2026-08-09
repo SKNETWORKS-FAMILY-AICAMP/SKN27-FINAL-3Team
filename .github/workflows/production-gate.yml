@@ -35,6 +35,8 @@ jobs:
         run: |
           python backend/manage.py test \
             chatbot.test_phase_00_core_user_flows \
+            chatbot.test_phase_00_ocr_law_flow \
+            chatbot.test_phase_00_report_lifecycle \
             chatbot.test_file_quarantine.FileQuarantinePipelineTests.test_multipart_registration_writes_only_to_quarantine \
             chatbot.test_consultation_v2.ConsultationCaseApiTests.test_fact_confirmation_precedes_real_worker_queue \
             --verbosity 1
