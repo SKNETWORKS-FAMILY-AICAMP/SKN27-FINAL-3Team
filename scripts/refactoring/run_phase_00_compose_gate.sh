@@ -8,6 +8,8 @@ evidence_dir="tmp/phase-00-compose-evidence"
 mkdir -p "$evidence_dir"
 mkdir -p "$evidence_dir/mock_uploads"
 chmod a+rwx "$evidence_dir/mock_uploads"
+mkdir -p "$evidence_dir/object_storage"
+chmod a+rwx "$evidence_dir/object_storage"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-skn27_phase00_${GITHUB_RUN_ID:-local}_${GITHUB_RUN_ATTEMPT:-0}}"
 compose=(docker compose -f docker-compose.yml -f test/compose/docker-compose.phase-00.yml)
 services=(postgres redis clamav neo4j backend agent-worker file-scan-worker)

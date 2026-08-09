@@ -17,6 +17,7 @@ services:
       - ./scripts/refactoring:/app/scripts/refactoring:ro
       - ./tmp/phase-00-compose-evidence:/app/tmp/phase-00-compose-evidence
       - ./tmp/phase-00-compose-evidence/mock_uploads:/app/backend/media/mock_uploads
+      - ./tmp/phase-00-compose-evidence/object_storage:/app/backend/media/mock_object_storage
 
   agent-worker:
     container_name: "${COMPOSE_PROJECT_NAME}_agent-worker"
@@ -30,6 +31,8 @@ services:
       SUPERVISOR_LLM_API_KEY: ""
       LEGAL_RAG_OPENAI_API_KEY: ""
       RUNPOD_API_KEY: ""
+    volumes:
+      - ./tmp/phase-00-compose-evidence/object_storage:/app/backend/media/mock_object_storage
 
   file-scan-worker:
     container_name: "${COMPOSE_PROJECT_NAME}_file-scan-worker"
@@ -38,6 +41,7 @@ services:
       FILE_SCAN_CLAMAV_HOST: "clamav"
     volumes:
       - ./tmp/phase-00-compose-evidence/mock_uploads:/app/backend/media/mock_uploads
+      - ./tmp/phase-00-compose-evidence/object_storage:/app/backend/media/mock_object_storage
 
   postgres:
     container_name: "${COMPOSE_PROJECT_NAME}_postgres"

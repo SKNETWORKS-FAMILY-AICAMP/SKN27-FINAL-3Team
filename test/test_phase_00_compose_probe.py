@@ -136,3 +136,6 @@ def test_phase_00_compose_override_shares_writable_mock_upload_root_with_file_sc
     assert override.count(
         "- ./tmp/phase-00-compose-evidence/mock_uploads:/app/backend/media/mock_uploads"
     ) == 2
+    assert override.count(
+        "- ./tmp/phase-00-compose-evidence/object_storage:/app/backend/media/mock_object_storage"
+    ) == 3
