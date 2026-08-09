@@ -11,6 +11,7 @@ services:
       SUPERVISOR_LLM_API_KEY: ""
       LEGAL_RAG_OPENAI_API_KEY: ""
       RUNPOD_API_KEY: ""
+      MOCK_UPLOAD_ROOT: "/app/backend/media/mock_object_storage/phase-00-mock-uploads"
       FILE_SCAN_PROVIDER: "clamav"
       FILE_SCAN_CLAMAV_HOST: "clamav"
     volumes:
@@ -33,6 +34,7 @@ services:
   file-scan-worker:
     container_name: "${COMPOSE_PROJECT_NAME}_file-scan-worker"
     environment:
+      MOCK_UPLOAD_ROOT: "/app/backend/media/mock_object_storage/phase-00-mock-uploads"
       FILE_SCAN_PROVIDER: "clamav"
       FILE_SCAN_CLAMAV_HOST: "clamav"
 

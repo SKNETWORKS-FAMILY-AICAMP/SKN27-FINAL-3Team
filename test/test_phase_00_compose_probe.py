@@ -126,3 +126,13 @@ def test_phase_00_probe_rejects_provider_capable_worker_plans() -> None:
         assert str(exc) == "provider_capable_node:law_ground_search"
     else:  # pragma: no cover - explicit failure if the safety boundary is removed.
         raise AssertionError("provider-capable plan was accepted")
+
+
+def test_phase_00_compose_override_shares_writable_mock_upload_root_with_file_scan_worker() -> None:
+    """Protects the D2 upload fixture path used by the backend and scan worker."""
+
+    override = Path("test/compose/docker-compose.phase-00.yml").read_text(encoding="utf-8")
+
+    assert override.count(
+        "MOCK_UPLOAD_ROOT: \"/app/backend/media/mock_object_storage/phase-00-mock-uploads\""
+    ) == 2
