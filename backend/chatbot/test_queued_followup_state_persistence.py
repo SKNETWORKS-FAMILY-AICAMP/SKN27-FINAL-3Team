@@ -15,9 +15,13 @@ from app.services.google_auth_service import issue_access_token
 from chatbot.file_scan_service import process_uploaded_file_scans
 from chatbot.models import (
     AgentWorkItem,
+    AgentWorkItemStatus,
     AnalysisJob,
+    AnalysisJobEvent,
+    AnalysisJobStatus,
     AuthSession,
     AuthSessionStatus,
+    ChatMessage,
     ChatSession,
     ChatSessionStatus,
     UserAccount,
@@ -179,6 +183,44 @@ class QueuedFollowupStatePersistenceTests(TestCase):
         self.assertNotIn("raw_ocr", repr(followup_state))
         self.assertNotIn("storage_uri", repr(followup_state))
 
+    def test_successful_pending_enqueue_persists_job_work_item_and_message_once(
+        self,
+    ) -> None:
+        session_id, _attachment_id, response = (
+            self._queue_fine_notice_classification_confirmation()
+        )
+
+        job_id = response["persistence"]["job_id"]
+        work_item_id = response["persistence"]["work_item_id"]
+        message_id = response["message_id"]
+        session = ChatSession.objects.get(session_id=session_id)
+        job = AnalysisJob.objects.get(job_id=job_id)
+        work_item = AgentWorkItem.objects.get(work_item_id=work_item_id)
+        message = ChatMessage.objects.get(message_id=message_id)
+        followup_state = session.metadata["chat_followup_state"]
+
+        self.assertEqual(response["work_item"]["job_id"], job_id)
+        self.assertEqual(response["work_item"]["work_item_id"], work_item_id)
+        self.assertEqual(job.session_id, session.pk)
+        self.assertEqual(job.owner_id, session.owner_id)
+        self.assertEqual(job.status, AnalysisJobStatus.QUEUED)
+        self.assertEqual(work_item.job_id, job.pk)
+        self.assertEqual(work_item.status, AgentWorkItemStatus.QUEUED)
+        self.assertEqual(message.session_id, session.pk)
+        self.assertEqual(job.message_id, message.pk)
+        self.assertEqual(followup_state["routing_intent"], job.routing_intent)
+        self.assertEqual(
+            followup_state["pending_questions"],
+            job.metadata["pending_questions"],
+        )
+        self.assertEqual(AnalysisJob.objects.filter(job_id=job_id).count(), 1)
+        self.assertEqual(
+            AgentWorkItem.objects.filter(work_item_id=work_item_id).count(),
+            1,
+        )
+        self.assertEqual(ChatMessage.objects.filter(message_id=message_id).count(), 1)
+        self.assertEqual(AgentWorkItem.objects.filter(job=job).count(), 1)
+
     def test_next_short_answer_uses_only_persisted_pending_field(self) -> None:
         session_id, attachment_id, _response = (
             self._queue_fine_notice_classification_confirmation()
@@ -335,6 +377,12 @@ class QueuedFollowupStatePersistenceTests(TestCase):
             job=collision_job,
             status="queued",
         )
+        existing_message_count = ChatMessage.objects.filter(session=session).count()
+        existing_job_count = AnalysisJob.objects.filter(session=session).count()
+        existing_work_item_count = AgentWorkItem.objects.filter(
+            job__session=session
+        ).count()
+        existing_event_count = AnalysisJobEvent.objects.filter(job=collision_job).count()
         payload, job_payload = self._queue_payload(
             owner_id=owner_id,
             session_id=session.session_id,
@@ -355,6 +403,106 @@ class QueuedFollowupStatePersistenceTests(TestCase):
             enqueue_analysis_job_work(payload, job_payload)
 
         session.refresh_from_db()
+        collision_job.refresh_from_db()
+        collision_work_item = AgentWorkItem.objects.get(
+            work_item_id="awork_job_rollback_followup"
+        )
         self.assertEqual(session.metadata["chat_followup_state"], existing_state)
         self.assertEqual(session.current_intent, "fine_notice_analysis")
         self.assertFalse(AnalysisJob.objects.filter(job_id="job_rollback_followup").exists())
+        self.assertFalse(
+            AgentWorkItem.objects.filter(job__job_id="job_rollback_followup").exists()
+        )
+        self.assertFalse(
+            ChatMessage.objects.filter(message_id=job_payload["message_id"]).exists()
+        )
+        self.assertFalse(
+            AnalysisJobEvent.objects.filter(job__job_id="job_rollback_followup").exists()
+        )
+        self.assertEqual(
+            ChatMessage.objects.filter(session=session).count(),
+            existing_message_count,
+        )
+        self.assertEqual(AnalysisJob.objects.filter(session=session).count(), existing_job_count)
+        self.assertEqual(
+            AgentWorkItem.objects.filter(job__session=session).count(),
+            existing_work_item_count,
+        )
+        self.assertEqual(collision_job.status, AnalysisJobStatus.QUEUED)
+        self.assertIsNone(collision_job.message)
+        self.assertEqual(collision_work_item.job_id, collision_job.pk)
+        self.assertEqual(collision_work_item.status, AgentWorkItemStatus.QUEUED)
+        self.assertEqual(
+            AnalysisJobEvent.objects.filter(job=collision_job).count(),
+            existing_event_count,
+        )
+        self.assertNotIn("document_disposition_type", repr(session.metadata))
+
+    def test_idempotent_pending_enqueue_reuses_job_work_item_message_and_snapshot(
+        self,
+    ) -> None:
+        owner_id = "usr_replay_followup"
+        session = ChatSession.objects.create(
+            session_id="ses_replay_followup",
+            owner_id=owner_id,
+            status=ChatSessionStatus.ACTIVE,
+            metadata={"auth_marker": "preserve"},
+        )
+        pending_questions = [
+            {
+                "field": "document_disposition_type",
+                "question": "What kind of fine notice is this?",
+            },
+            {
+                "field": "response_deadline",
+                "question": "When is the response deadline?",
+            },
+        ]
+        payload, job_payload = self._queue_payload(
+            owner_id=owner_id,
+            session_id=session.session_id,
+            job_id="job_replay_followup",
+            chat_response={
+                "session_id": session.session_id,
+                "message_id": "msg_job_replay_followup",
+                "routing_intent": "fine_notice_analysis",
+                "status": "queued",
+                "pending_questions": pending_questions,
+                "fine_notice_intake": {
+                    "contract_version": "fine_notice_intake.v1",
+                    "slots": {},
+                },
+            },
+        )
+
+        first = enqueue_analysis_job_work(payload, job_payload)
+        session.refresh_from_db()
+        first_snapshot = session.metadata["chat_followup_state"]
+
+        second = enqueue_analysis_job_work(payload, job_payload)
+
+        session.refresh_from_db()
+        job = AnalysisJob.objects.get(job_id=first["job_id"])
+        work_item = AgentWorkItem.objects.get(work_item_id=first["work_item_id"])
+        message = ChatMessage.objects.get(message_id=job_payload["message_id"])
+        replayed_snapshot = session.metadata["chat_followup_state"]
+
+        self.assertEqual(second["job_id"], first["job_id"])
+        self.assertEqual(second["work_item_id"], first["work_item_id"])
+        self.assertEqual(job.session_id, session.pk)
+        self.assertEqual(work_item.job_id, job.pk)
+        self.assertEqual(message.session_id, session.pk)
+        self.assertEqual(job.message_id, message.pk)
+        self.assertEqual(job.status, AnalysisJobStatus.QUEUED)
+        self.assertEqual(work_item.status, AgentWorkItemStatus.QUEUED)
+        self.assertEqual(replayed_snapshot, first_snapshot)
+        self.assertEqual(replayed_snapshot["pending_questions"], pending_questions)
+        self.assertEqual(session.current_intent, "fine_notice_analysis")
+        self.assertEqual(session.metadata["auth_marker"], "preserve")
+        self.assertEqual(AnalysisJob.objects.filter(job_id=first["job_id"]).count(), 1)
+        self.assertEqual(AgentWorkItem.objects.filter(job=job).count(), 1)
+        self.assertEqual(
+            ChatMessage.objects.filter(message_id=job_payload["message_id"]).count(),
+            1,
+        )
+        self.assertEqual(job.events.count(), 1)
