@@ -5,7 +5,7 @@
 - Base SHA: `9f05e8b67509c0a1f06bc39d631d6a7c94044a90`
 - Branch: `refactor/phase-01-canonical-mock-separation`
 - Worktree: `E:\dev\project\SKN27-FINAL-3Team-phase-01`
-- 검증한 동작 Head: `d7db59a89314d54b001bc3d0969240e2a8734fce`
+- 검증한 동작 Head: `24e898d75e18ed755b2df253d355a4f18c614b16`
 - PR: [#401](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/401) (`dev` ← `refactor/phase-01-canonical-mock-separation`, Draft, unmerged)
 
 P1 보완 append-only commit은 다음과 같다.
@@ -16,6 +16,8 @@ P1 보완 append-only commit은 다음과 같다.
 | `234e67c80b52cb25349c4e819f3711a98b425a59` | history marker와 file-scan persistence 정리 |
 | `cb63d8fa6f8a562a44118f0d2091ba6455ad6112` | collection 및 dynamic isolation 회귀 복구 |
 | `d7db59a89314d54b001bc3d0969240e2a8734fce` | Phase 1 runtime boundary CI gate 강화 |
+| `b7eb0e7a7b0b8b9e61d90febaf736891d6a26650` | P1 보완 README·Receipt 증빙 기록 |
+| `24e898d75e18ed755b2df253d355a4f18c614b16` | Compose shared staging root와 default contract 보완 |
 
 ## Phase 1-C findings
 
@@ -73,7 +75,7 @@ P1 보완 append-only commit은 다음과 같다.
 - object storage: `backend/chatbot/object_storage.py`의 Local Infrastructure Adapter와 동일한 root precedence (`settings` → environment → default)
 - `UploadedFile`: 실제 canonical row를 생성한다.
 - `mock://` 신규 write: 0
-- Compose evidence: 로컬 Docker daemon 접근 불가로 `NOT_EXECUTED`; PR CI `compose-integration` artifact에서 blocking 검증한다.
+- Compose evidence: `production-gate` run `31394194567`, artifact `9065139610`에서 upload `pass`, ClamAV `clean`, `file_scan_worker_consumed=true`, `cleanup_success`, `mock://` 0을 확인했다.
 
 ## Collection baseline
 
@@ -131,8 +133,9 @@ Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 h
 
 | Workflow | Job | Run ID | 결과 |
 |---|---|---|---|
-| `production-gate.yml` | `offline-verification` | P1 보완 push 후 기록 | PENDING |
-| `production-gate.yml` | `compose-integration` | P1 보완 push 후 기록 | PENDING |
+| `production-gate.yml` | `offline-verification` | `31394194567` / `93472953474` | PASS |
+| `production-gate.yml` | `compose-integration` | `31394194567` / `93474002730` | PASS |
+| `regression-signal` | `regression-signal` | `31394194584` / `93472953416` | PASS |
 
 `.github/workflows/production-gate.yml`에는 repo-wide ownership/import, dynamic isolation, legacy projection, neutral smoke persistence, collection baseline, attachment staging, public API contract와 frontend build-output surface gate를 추가했다. 기존 Phase 0 A–G, sensitivity, Docker 및 Compose gate는 유지했다.
 
@@ -140,7 +143,7 @@ Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 h
 
 - Collection: `tmp/phase-01-pytest-collection-baseline.json`
 - Sensitivity: `tmp/phase-00-sensitivity-evidence.json`
-- Compose: P1 보완 push의 `compose-integration` CI artifact를 최종 evidence로 사용한다.
+- Compose: `phase-00-compose-evidence` artifact `9065139610`; `gate-summary.json`의 database/cache/ClamAV/Neo4j=`ready`, backend=`true`, agent/file-scan worker consumed=`true`, status=`pass`.
 
 ## DB audit
 
@@ -159,8 +162,8 @@ Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 h
 ## Remaining risks
 
 - P0: 확인된 항목 없음.
-- P1: P1 보완 commit의 blocking CI 및 Compose artifact가 아직 새 Head에서 실행 전이다.
-- P2: Docker Desktop daemon이 로컬에서 중지되어 Compose full integration을 재현하지 못했다. npm advisory와 build chunk warning은 보안/성능 후속 점검 항목이다.
+- P1: 확인된 항목 없음. `24e898d`의 blocking CI와 Compose artifact를 확인했다.
+- P2: Docker Desktop daemon이 로컬에서 중지되어 Compose full integration은 재현하지 못했지만 CI artifact로 확인했다. npm advisory와 build chunk warning은 보안/성능 후속 점검 항목이다.
 
 ## Rollback
 
