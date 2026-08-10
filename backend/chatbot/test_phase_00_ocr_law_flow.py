@@ -1,8 +1,11 @@
 """Phase 0 characterization for the OCR-confirmed law-search lifecycle.
 
-Only network/provider leaves are deterministic: document classification, OCR,
-and the legal-RAG response.  The HTTP, planning, queue, worker, and ORM
-boundaries remain production implementations.
+C/G characterization keeps HTTP, routing, planning, queue, worker,
+persistence, authorization, confirmation, rendering, and download boundaries
+real. Classification and retrieval dependencies are deterministic
+service/pipeline-level doubles whose internal contracts are protected by a
+separate blocking service-contract selector. OCR is doubled at its
+provider-call boundary, not asserted to be a provider leaf.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from chatbot.models import (
     AnalysisJob,
     AuthSession,
     AuthSessionStatus,
+    ChatMessage,
     ChatSession,
     RetrievalEvent,
     UploadedFile,
@@ -322,7 +326,116 @@ class Phase00OcrLawFlowTests(TestCase):
             session.metadata["chat_followup_state"]["ocr_confirmation"]["attachment_ids"][0],
         )
 
-    def test_phase_00_stale_or_foreign_confirmation_is_rejected(self) -> None:
+    def test_phase_00_replaced_attachment_does_not_reuse_stale_ocr_confirmation(self) -> None:
+        session_id, attachment_a, _queued = self._queue_confirmed_ocr_law_flow()
+        session = ChatSession.objects.get(session_id=session_id)
+        self.assertEqual(
+            session.metadata["chat_followup_state"]["ocr_confirmation"]["attachment_ids"],
+            [attachment_a],
+        )
+
+        uploaded = self.client.post(
+            "/api/files/",
+            data={
+                "session_id": session_id,
+                "purpose": "fine_notice",
+                "file": SimpleUploadedFile(
+                    "replacement-notice.png",
+                    b"phase-00 replacement fine notice image",
+                    content_type="image/png",
+                ),
+            },
+        )
+        self.assertEqual(uploaded.status_code, 200, uploaded.content)
+        attachment_b = uploaded.json()["attachment"]["attachment_id"]
+        self.assertEqual(process_uploaded_file_scans(limit=1)["clean"], 1)
+
+        replaced = self.client.post(
+            "/api/chat/messages/",
+            data={
+                "session_id": session_id,
+                "user_text": "새 고지서 파일로 상담을 계속합니다.",
+                "attachments": [{"attachment_id": attachment_b}],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(replaced.status_code, 202, replaced.content)
+        replacement_body = replaced.json()
+        replacement_job_id = replacement_body["work_item"]["job_id"]
+        replacement_work_item_id = replacement_body["work_item"]["work_item_id"]
+        replacement_plan = replacement_body["analysis_plan"]
+
+        self.assertNotEqual(attachment_a, attachment_b)
+        self.assertNotIn(
+            "law_ground_search",
+            [step["node_code"] for step in replacement_plan["steps"]],
+        )
+        self.assertEqual(
+            replacement_body["routing_intent"], "attachment_document_classification"
+        )
+        self.assertIn(
+            "attachment_document_classification",
+            [step["node_code"] for step in replacement_plan["steps"]],
+        )
+        self.assertEqual(AnalysisJob.objects.filter(job_id=replacement_job_id).count(), 1)
+        replacement_job = AnalysisJob.objects.get(job_id=replacement_job_id)
+        self.assertEqual(
+            AgentWorkItem.objects.filter(work_item_id=replacement_work_item_id).count(),
+            1,
+        )
+        replacement_work_item = AgentWorkItem.objects.get(
+            work_item_id=replacement_work_item_id
+        )
+        self.assertIsNotNone(replacement_job.message_id)
+        self.assertEqual(
+            ChatMessage.objects.filter(pk=replacement_job.message_id).count(),
+            1,
+        )
+        replacement_message = ChatMessage.objects.get(pk=replacement_job.message_id)
+
+        self.assertEqual(replacement_job.session_id, session.pk)
+        self.assertEqual(replacement_job.message_id, replacement_message.pk)
+        self.assertEqual(replacement_work_item.job_id, replacement_job.pk)
+        self.assertEqual(
+            replacement_message.metadata["analysis_job_id"], replacement_job.job_id
+        )
+        self.assertEqual(replacement_job.routing_intent, replacement_body["routing_intent"])
+        self.assertEqual(replacement_message.routing_intent, replacement_job.routing_intent)
+        self.assertEqual(replacement_job.metadata["analysis_plan"], replacement_plan)
+        self.assertEqual(
+            replacement_job.metadata["pending_questions"],
+            replacement_body["pending_questions"],
+        )
+        self.assertEqual(replacement_work_item.payload["analysis_plan"], replacement_plan)
+        self.assertEqual(
+            replacement_work_item.payload["job_payload"]["routing_intent"],
+            replacement_job.routing_intent,
+        )
+        self.assertFalse(
+            AgentResult.objects.filter(
+                job=replacement_job,
+                node_code="law_ground_search",
+            ).exists()
+        )
+        self.assertFalse(RetrievalEvent.objects.filter(job=replacement_job).exists())
+
+        session.refresh_from_db()
+        stored_confirmation = session.metadata["chat_followup_state"]["ocr_confirmation"]
+        self.assertEqual(stored_confirmation["attachment_ids"], [attachment_a])
+        self.assertIsNone(replacement_body["fine_notice_intake"])
+        self.assertEqual(
+            replacement_work_item.payload["execution_payload"]["attachments"][0]["attachment_id"],
+            attachment_b,
+        )
+        attachment_a_record = UploadedFile.objects.get(attachment_id=attachment_a)
+        replacement_json = json.dumps(replacement_body)
+        self.assertNotIn(attachment_a, replacement_json)
+        self.assertNotIn(attachment_a_record.storage_uri, replacement_json)
+        for confirmed_value in stored_confirmation["fields"].values():
+            self.assertNotIn(confirmed_value, replacement_json)
+        self.assertNotIn("raw_ocr", replacement_json)
+
+    def test_phase_00_foreign_ocr_and_stale_classification_confirmation_are_rejected(self) -> None:
         session_id, attachment_id, _queued = self._queue_confirmed_ocr_law_flow()
         foreign_client = _authenticated_client("usr_phase_00_ocr_foreign")
         foreign = foreign_client.post(
