@@ -20,7 +20,7 @@ from app.services.agent_adapter_contract import (
     validate_agent_input_envelope,
     validate_agent_output_envelope,
 )
-from app.services.attachment_mock_service import resolve_attachment_references
+from app.services.attachment_staging_service import resolve_staged_attachment_references
 from app.services.legal_rag_service import search_legal_rag
 from app.services.law_ground_contract import (
     normalize_law_evidence,
@@ -42,7 +42,6 @@ from app.services.supervisor_execution_input_service import (
 from app.services.supervisor_routing_service import PUBLIC_AGENT_NODE_CODES
 
 
-DL_MOCK_NODE_CODES: set[str] = set()
 AGENT_EXECUTION_PROVENANCE_VERSION = "agent_execution_provenance.v1"
 AGENT_RUNTIME_VERSION = "agent_runtime.v1"
 REPORTING_NODE_CODE = "objection_report_generation"
@@ -307,94 +306,6 @@ def get_agent_node(node_code: str) -> dict[str, Any]:
     return _node_with_adapter_contract(NODE_REGISTRY.get(node_code, _unknown_node(node_code)))
 
 
-def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
-    """Compatibility entrypoint for legacy callers that now use sync adapters."""
-
-    payload = resolve_attachment_references(payload)
-    node_code = _payload_node_code(payload)
-    if node_code not in DL_MOCK_NODE_CODES:
-        return execute_agent_node(payload)
-
-    execution_status = str(payload.get("execution_status") or payload.get("mock_status") or "success")
-    result_status = _normalize_result_status(execution_status)
-    node = get_agent_node(node_code)
-    agent_input = _agent_input(payload, node)
-    execution_id = f"exec_{uuid4().hex[:12]}"
-    adapter_context = build_adapter_context(
-        execution_id=execution_id,
-        execution_mode="mock",
-        node=node,
-        plan_step=payload.get("plan_step"),
-    )
-
-    return _with_execution_provenance({
-        "execution_id": execution_id,
-        "execution_mode": "mock",
-        "job_id": payload.get("job_id"),
-        "node_code": node_code,
-        "node": node,
-        "adapter_context": adapter_context,
-        "agent_input": agent_input,
-        "agent_output": build_agent_output(
-            node_code=node_code,
-            payload=payload,
-            result_status=result_status,
-            execution_status=execution_status,
-        ),
-        "created_at": _now_iso(),
-    })
-
-
-def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    payload = resolve_attachment_references(payload)
-    executions = []
-    upstream_results = deepcopy(payload.get("upstream_results", {}))
-    for step in analysis_plan.get("steps", []):
-        step_payload = deepcopy(payload)
-        step_payload.update(
-            {
-                "analysis_plan_id": analysis_plan.get("plan_id"),
-                "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
-                "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
-                "node_code": step.get("node_code"),
-                "execution_status": step.get("status", "success"),
-                "execution_mode": step.get("execution_mode") or payload.get("execution_mode"),
-                "adapter_mode": step.get("adapter_mode") or payload.get("adapter_mode"),
-                "required_inputs": step.get("required_inputs", []),
-                "depends_on": step.get("depends_on", []),
-                "plan_step": step,
-                "upstream_results": deepcopy(upstream_results),
-            }
-        )
-        if isinstance(step.get("context"), dict):
-            step_context = deepcopy(payload.get("context") if isinstance(payload.get("context"), dict) else {})
-            step_context.update(deepcopy(step["context"]))
-            step_payload["context"] = step_context
-        execution = execute_mock_node(step_payload)
-        execution["plan_step"] = deepcopy(step)
-        executions.append(execution)
-        upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
-
-    return {
-        "execution_mode": _plan_execution_mode(executions),
-        "job_id": payload.get("job_id"),
-        "plan_id": analysis_plan.get("plan_id"),
-        "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
-        "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
-        "executions": executions,
-        "status_counts": _status_counts(executions),
-        "completed_node_codes": [
-            item["node_code"]
-            for item in executions
-            if item["agent_output"]["status"] == "success"
-        ],
-        "limitations": [
-            "중간발표용 mock 실행 결과이며 실제 LangGraph, RAG, OCR, ML, LLM 호출 결과가 아닙니다."
-        ],
-        "created_at": _now_iso(),
-    }
-
-
 def execute_agent_node(payload: dict[str, Any]) -> dict[str, Any]:
     """Execute one production Agent through a registered synchronous adapter."""
 
@@ -512,11 +423,7 @@ def execute_agent_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -
             )
             context["supervisor_handoff"] = deepcopy(supervisor_handoff)
             step_payload["context"] = context
-        execution = (
-            execute_mock_node(step_payload)
-            if step.get("node_code") in DL_MOCK_NODE_CODES
-            else execute_agent_node(step_payload)
-        )
+        execution = execute_agent_node(step_payload)
         execution["plan_step"] = deepcopy(step)
         executions.append(execution)
         upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
@@ -2039,14 +1946,7 @@ def _attachment_base64(attachment: dict[str, Any]) -> str | None:
     if object_storage_bytes is not None:
         return base64.b64encode(object_storage_bytes).decode("ascii")
 
-    if not storage_uri.startswith("mock://uploads/"):
-        return None
-
-    relative_path = storage_uri.removeprefix("mock://uploads/")
-    file_path = Path(os.environ.get("MOCK_UPLOAD_ROOT", "backend/media/mock_uploads")) / relative_path
-    if not file_path.exists() or not file_path.is_file():
-        return None
-    return base64.b64encode(file_path.read_bytes()).decode("ascii")
+    return None
 
 
 def _attachment_object_storage_bytes(attachment: dict[str, Any], storage_uri: str) -> bytes | None:

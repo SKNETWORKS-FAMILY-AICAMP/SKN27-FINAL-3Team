@@ -140,13 +140,10 @@ def compose_report_error_response(error: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def report_api_surface(*, canonical: bool, source: object) -> str:
-    """Keep the existing public API-surface labels in one place."""
+    """Return an honest public API-surface label for canonical reports."""
 
-    if not canonical:
-        return "mock"
-    if _optional_text(source) == WORKER_REPORT_SOURCE:
-        return "canonical"
-    return "canonical_mock"
+    del source
+    return "canonical" if canonical else "explicit_mock"
 
 
 def report_execution_mode(*, source: object) -> str:
@@ -154,7 +151,7 @@ def report_execution_mode(*, source: object) -> str:
 
     if _optional_text(source) == WORKER_REPORT_SOURCE:
         return "async_worker"
-    return "mock"
+    return "canonical"
 
 
 def _report_summary(record: Mapping[str, Any]) -> ReportSummary:

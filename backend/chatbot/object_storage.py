@@ -107,7 +107,7 @@ def write_object_from_source_uri(
     if boundary_error:
         return _write_skipped(reference, reason=boundary_error)
     source_uri = _text(reference.get("source_uri"))
-    source_path = _mock_upload_path_from_uri(source_uri)
+    source_path = _local_staging_path_from_uri(source_uri) or _mock_upload_path_from_uri(source_uri)
     if source_path and source_path.exists():
         data = source_path.read_bytes()
     else:
@@ -130,11 +130,14 @@ def delete_source_uri(
 ) -> dict[str, Any]:
     """Remove temporary upload bytes and their metadata sidecar."""
 
-    source_path = _mock_upload_path_from_uri(_text(source_uri))
+    source_path = _local_staging_path_from_uri(_text(source_uri)) or _mock_upload_path_from_uri(
+        _text(source_uri)
+    )
     attachment_dir = (
         source_path.parent
         if source_path is not None
-        else _mock_upload_directory(attachment_id or _metadata_attachment_id(source_uri))
+        else _local_staging_directory(attachment_id or _metadata_attachment_id(source_uri))
+        or _mock_upload_directory(attachment_id or _metadata_attachment_id(source_uri))
     )
     if attachment_dir is None:
         return {"status": "skipped", "reason": "unsupported_source_uri"}
@@ -159,9 +162,12 @@ def delete_source_uri(
 
 
 def _metadata_attachment_id(source_uri: str) -> str:
-    prefix = "mock://metadata/"
     value = _text(source_uri)
-    return value.removeprefix(prefix).strip("/") if value.startswith(prefix) else ""
+    if value.startswith("mock://metadata/"):
+        return value.removeprefix("mock://metadata/").strip("/")
+    if value.startswith("local://attachment-staging/"):
+        return value.removeprefix("local://attachment-staging/").strip("/").split("/", 1)[0]
+    return ""
 
 
 def _mock_upload_directory(attachment_id: str) -> Path | None:
@@ -809,6 +815,38 @@ def _mock_upload_path_from_uri(source_uri: str) -> Path | None:
         getattr(settings, "MOCK_UPLOAD_ROOT", "")
         or os.environ.get("MOCK_UPLOAD_ROOT", "backend/media/mock_uploads")
     ).resolve()
+    source_path = (root / Path(*PurePosixPath(relative).parts)).resolve()
+    if root != source_path and root not in source_path.parents:
+        return None
+    return source_path
+
+
+def _local_staging_root() -> Path:
+    return Path(
+        getattr(settings, "ATTACHMENT_STAGING_ROOT", "")
+        or os.environ.get("ATTACHMENT_STAGING_ROOT", "backend/media/attachment_staging")
+    ).resolve()
+
+
+def _local_staging_directory(attachment_id: str) -> Path | None:
+    normalized = _text(attachment_id)
+    if not normalized or not re.fullmatch(r"[A-Za-z0-9._-]+", normalized):
+        return None
+    root = _local_staging_root()
+    directory = (root / normalized).resolve()
+    if root != directory and root not in directory.parents:
+        return None
+    return directory
+
+
+def _local_staging_path_from_uri(source_uri: str) -> Path | None:
+    prefix = "local://attachment-staging/"
+    if not source_uri.startswith(prefix):
+        return None
+    relative = source_uri.removeprefix(prefix).strip("/")
+    if not relative:
+        return None
+    root = _local_staging_root()
     source_path = (root / Path(*PurePosixPath(relative).parts)).resolve()
     if root != source_path and root not in source_path.parents:
         return None

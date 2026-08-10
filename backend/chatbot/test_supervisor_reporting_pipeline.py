@@ -1779,7 +1779,7 @@ class SupervisorReportingPipelineTests(TestCase):
             },
         }
         with (
-            patch("chatbot.views._is_canonical_mock_request", return_value=True),
+            patch("chatbot.views._is_canonical_request", return_value=True),
             patch("chatbot.views._payload_with_request_identity", return_value=identity_body),
             patch("chatbot.views.record_usage_event") as usage,
         ):
