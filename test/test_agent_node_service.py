@@ -11,12 +11,10 @@ from app.services.agent_adapter_contract import (
 )
 from app.services.agent_node_service import (
     execute_agent_node,
+    execute_agent_plan,
     list_agent_nodes,
     list_public_agent_nodes,
 )
-from app.mock_runtime.agent_execution import execute_mock_node, execute_mock_plan
-from app.services.attachment_mock_service import register_attachment
-from app.services.chatbot_mock_service import build_analysis_plan
 from app.services.supervisor_control_service import validate_agent_results
 
 
@@ -94,7 +92,7 @@ def test_no_public_agent_advertises_mock_execution():
 def test_agent_execution_records_reproducible_runtime_provenance(monkeypatch):
     monkeypatch.setenv("APP_RELEASE_VERSION", "release-test-001")
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "job_id": "job_provenance",
             "node_code": "fine_notice_analysis",
@@ -270,26 +268,30 @@ def test_objection_agent_next_actions_keep_general_report_view_only():
     assert "download_report" not in next_actions
 
 
-def test_legacy_mock_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypatch):
+def test_canonical_agent_entrypoint_delegates_non_dl_agent_to_real_runtime(monkeypatch):
     calls = []
 
-    def fake_execute_agent_node(payload):
-        calls.append(payload)
+    def fake_run_sync_adapter(agent_input, _context):
+        calls.append(agent_input)
         return {
-            "execution_mode": "sync",
-            "node_code": payload["node_code"],
-            "agent_output": {"status": "success"},
+            "status": "success",
+            "summary": "canonical adapter result",
+            "structured_result": {},
+            "evidence": [],
+            "next_actions": [],
+            "limitations": [],
         }
 
-    monkeypatch.setattr(agent_node_service, "execute_agent_node", fake_execute_agent_node)
+    monkeypatch.setattr(agent_node_service, "_run_sync_adapter", fake_run_sync_adapter)
 
-    result = execute_mock_node({"node_code": "law_ground_search", "user_text": "법률 근거"})
+    result = execute_agent_node({"node_code": "law_ground_search", "user_text": "법률 근거"})
 
     assert result["execution_mode"] == "sync"
     assert len(calls) == 1
     assert calls[0]["node_code"] == "law_ground_search"
     assert calls[0]["user_text"] == "법률 근거"
-    assert calls[0]["attachment_resolution"]["unresolved_attachment_ids"] == []
+    assert calls[0]["attachments"] == []
+    assert "attachment_resolution" not in calls[0]
 
 
 def test_legacy_law_result_defaults_to_pgvector_backend(monkeypatch):
@@ -316,22 +318,29 @@ def test_legacy_law_result_defaults_to_pgvector_backend(monkeypatch):
     assert result["retrieval_quality"] == "postgres_pgvector"
 
 
-def test_legacy_mock_entrypoint_delegates_vision_to_real_runtime(monkeypatch):
+def test_canonical_agent_entrypoint_delegates_vision_to_real_runtime(monkeypatch):
     calls = []
 
-    def fake_execute_agent_node(payload):
-        calls.append(payload)
-        return {"execution_mode": "sync", "node_code": payload["node_code"], "agent_output": {"status": "partial"}}
+    def fake_run_sync_adapter(agent_input, _context):
+        calls.append(agent_input)
+        return {
+            "status": "partial",
+            "summary": "canonical vision adapter result",
+            "structured_result": {},
+            "evidence": [],
+            "next_actions": [],
+            "limitations": [],
+        }
 
-    monkeypatch.setattr(agent_node_service, "execute_agent_node", fake_execute_agent_node)
+    monkeypatch.setattr(agent_node_service, "_run_sync_adapter", fake_run_sync_adapter)
 
-    result = execute_mock_node({"node_code": "vision_media_analysis"})
+    result = execute_agent_node({"node_code": "vision_media_analysis"})
 
     assert result["execution_mode"] == "sync"
     assert len(calls) == 1
     assert calls[0]["node_code"] == "vision_media_analysis"
     assert calls[0]["attachments"] == []
-    assert calls[0]["attachment_resolution"]["unresolved_attachment_ids"] == []
+    assert "attachment_resolution" not in calls[0]
 
 
 def test_appeal_decision_runtime_invokes_real_graph_with_upstream_results(monkeypatch):
@@ -535,7 +544,7 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
         agent_input,
         expected_node_code="law_ground_search",
     )
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "node_code": "law_ground_search",
             "analysis_plan_id": "plan_contract",
@@ -561,8 +570,8 @@ def test_agent_adapter_input_and_context_envelopes_validate_signature_v1():
     assert execution["agent_input"]["slot_state"]["contract_version"] == "slot_filling_state.v1"
 
 
-def test_legacy_mock_entrypoint_returns_real_common_agent_output_envelope():
-    execution = execute_mock_node(
+def test_canonical_agent_entrypoint_returns_real_common_agent_output_envelope():
+    execution = execute_agent_node(
         {
             "node_code": "law_ground_search",
             "user_text": "고지서 법률 근거를 확인해줘",
@@ -728,18 +737,30 @@ def test_agent_contract_validators_report_malformed_collections():
     assert output_validation["invalid_collection_fields"] == ["structured_result"]
 
 
-def test_execute_mock_plan_maps_analysis_steps_to_node_executions():
-    plan = build_analysis_plan(
-        scenario="fine_notice",
-        requested_status="success",
-        payload={"user_text": "고지서 이의신청서 만들어줘"},
-        session_id="ses_plan",
-        message_id="msg_plan",
-        routing_intent="objection_request",
-        pending_questions=[],
-    )
+def test_execute_agent_plan_maps_analysis_steps_to_node_executions():
+    plan = {
+        "plan_id": "plan_canonical_contract",
+        "session_id": "ses_plan",
+        "message_id": "msg_plan",
+        "steps": [
+            {"order": 1, "node_code": "input_context_validation", "status": "ready", "depends_on": []},
+            {
+                "order": 2,
+                "node_code": "fine_notice_analysis",
+                "status": "ready",
+                "execution_mode": "sync",
+                "depends_on": ["input_context_validation"],
+            },
+            {
+                "order": 3,
+                "node_code": "agent_result_validation",
+                "status": "ready",
+                "depends_on": ["fine_notice_analysis"],
+            },
+        ],
+    }
 
-    execution = execute_mock_plan(plan, {"user_text": "고지서 이의신청서 만들어줘"})
+    execution = execute_agent_plan(plan, {"user_text": "고지서 이의신청서 만들어줘"})
 
     assert execution["plan_id"] == plan["plan_id"]
     assert len(execution["executions"]) == len(plan["steps"])
@@ -753,34 +774,33 @@ def test_execute_mock_plan_maps_analysis_steps_to_node_executions():
     assert dependent_execution["agent_input"]["upstream_results"]
 
 
-def test_execute_mock_node_resolves_attachment_id_for_agent_input(monkeypatch, tmp_path):
-    monkeypatch.setenv("MOCK_UPLOAD_ROOT", str(tmp_path))
-    attachment = register_attachment(
-        {
-            "session_id": "ses_agent_attachment",
-            "filename": "accident_statement.pdf",
-            "content_type": "application/pdf",
-            "purpose": "accident_statement",
-            "size_bytes": 1204,
-        }
-    )
-
-    execution = execute_mock_node(
+def test_execute_agent_node_preserves_canonical_attachment_input():
+    execution = execute_agent_node(
         {
             "node_code": "text_ml_case_search",
             "session_id": "ses_agent_attachment",
-            "attachments": [{"attachment_id": attachment["attachment_id"]}],
+            "attachments": [
+                {
+                    "attachment_id": "att_canonical_case",
+                    "filename": "accident_statement.pdf",
+                    "content_type": "application/pdf",
+                    "purpose": "accident_statement",
+                    "size_bytes": 1204,
+                    "storage_uri": "local://attachment-staging/ses_agent_attachment/att_canonical_case",
+                }
+            ],
         }
     )
 
     resolved_attachment = execution["agent_input"]["attachments"][0]
     assert resolved_attachment["purpose"] == "accident_statement"
-    assert resolved_attachment["type"] == "pdf"
-    assert resolved_attachment["storage_uri"] == attachment["storage_uri"]
+    assert resolved_attachment["content_type"] == "application/pdf"
+    assert resolved_attachment["storage_uri"].startswith("local://attachment-staging/")
+    assert "type" not in resolved_attachment
 
 
 def test_execute_sync_fine_notice_adapter_returns_supervisor_envelope_without_image():
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "fine_notice_analysis",
@@ -831,7 +851,7 @@ def test_fine_notice_adapter_requires_confirmation_and_rejects_conflicting_type(
         },
     )
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "fine_notice_analysis",
@@ -867,7 +887,7 @@ def test_execute_sync_fine_notice_adapter_reads_canonical_object_attachment(monk
 
     monkeypatch.setattr(agent_node_service, "read_object_bytes", fake_read_object_bytes)
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "fine_notice_analysis",
@@ -930,7 +950,7 @@ def test_fine_notice_adapter_emits_attachment_evidence_after_successful_ocr(monk
         },
     )
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "fine_notice_analysis",
@@ -979,19 +999,28 @@ def test_fine_notice_adapter_emits_attachment_evidence_after_successful_ocr(monk
     ]
 
 
-def test_legacy_plan_entrypoint_does_not_mock_supervisor_steps():
+def test_canonical_plan_executes_supervisor_steps():
     plan = {
         "plan_id": "plan_hybrid_fine",
         "session_id": "ses_hybrid_fine",
         "message_id": "msg_hybrid_fine",
         "steps": [
-            {"node_code": "input_context_validation", "status": "success"},
-            {"node_code": "fine_notice_analysis", "status": "success", "execution_mode": "sync"},
-            {"node_code": "agent_result_validation", "status": "success"},
+            {"node_code": "input_context_validation", "status": "ready", "depends_on": []},
+            {
+                "node_code": "fine_notice_analysis",
+                "status": "ready",
+                "execution_mode": "sync",
+                "depends_on": ["input_context_validation"],
+            },
+            {
+                "node_code": "agent_result_validation",
+                "status": "ready",
+                "depends_on": ["fine_notice_analysis"],
+            },
         ],
     }
 
-    execution = execute_mock_plan(plan, {"user_text": "고지서 분석해줘"})
+    execution = execute_agent_plan(plan, {"user_text": "고지서 분석해줘"})
     fine_execution = next(
         item for item in execution["executions"] if item["node_code"] == "fine_notice_analysis"
     )
@@ -1039,7 +1068,7 @@ def test_execute_sync_text_ml_case_search_adapter_returns_case_envelope(monkeypa
         },
     )
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "text_ml_case_search",
@@ -1097,7 +1126,7 @@ def test_execute_sync_text_ml_case_search_does_not_fallback_to_legal_rag(monkeyp
         raising=False,
     )
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "text_ml_case_search",
@@ -1167,7 +1196,7 @@ def test_execute_sync_law_ground_search_adapter_returns_law_envelope(monkeypatch
     monkeypatch.setattr(law_agent, "_get_neo4j_session", lambda: None)
     monkeypatch.setattr(law_agent, "search_law_provisions", fake_search_law_provisions)
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "law_ground_search",
@@ -1370,7 +1399,7 @@ def test_law_ground_search_adapter_passes_llm_extractor(monkeypatch):
 
     monkeypatch.setattr(law_ground_package, "run_law_ground_search", fake_run_law_ground_search)
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "node_code": "law_ground_search",
             "session_id": "ses_law_adapter_extractor",
@@ -1432,7 +1461,7 @@ def test_law_ground_search_uses_pgvector_legal_rag(monkeypatch):
 
 
 def test_execute_sync_objection_report_generation_adapter_returns_form_envelope():
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "objection_report_generation",
@@ -1525,7 +1554,7 @@ def test_execute_sync_objection_report_generation_adapter_returns_form_envelope(
 
 
 def test_reporting_agent_consumes_appeal_decision_from_supervisor_upstream_results():
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "node_code": "objection_report_generation",
             "session_id": "ses_report_handoff",
@@ -1566,7 +1595,7 @@ def test_reporting_agent_consumes_appeal_decision_from_supervisor_upstream_resul
 
 
 def test_reporting_agent_blocks_download_actions_when_appeal_deadline_has_passed():
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "node_code": "objection_report_generation",
             "session_id": "ses_report_deadline_passed",
@@ -1759,7 +1788,7 @@ def test_fine_notice_uses_rule_based_petition_when_llm_is_unavailable(monkeypatc
 
 
 def test_execute_sync_objection_report_generation_adapter_supports_fault_ratio_inputs():
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "objection_report_generation",
@@ -1886,8 +1915,9 @@ def test_law_ground_sync_adapter_can_feed_sync_objection_when_sync_requested(mon
         "steps": [
             {
                 "node_code": "law_ground_search",
-                "status": "success",
+                "status": "ready",
                 "execution_mode": "sync",
+                "depends_on": [],
                 "context": {
                     "query": {"raw_text": "road traffic signal violation article 5"},
                     "temporal_basis": {"mode": "as_of", "effective_at": "2026-07-06"},
@@ -1896,17 +1926,21 @@ def test_law_ground_sync_adapter_can_feed_sync_objection_when_sync_requested(mon
             },
             {
                 "node_code": "objection_report_generation",
-                "status": "success",
+                "status": "ready",
                 "execution_mode": "sync",
+                "depends_on": ["law_ground_search"],
             },
         ],
     }
 
-    execution = execute_mock_plan(
+    execution = execute_agent_plan(
         plan,
         {
             "execution_mode": "sync",
             "user_text": "prepare legal grounds and objection report",
+            "upstream_results": {
+                "agent_result_validation": {"structured_result": {"report_ready": True}},
+            },
         },
     )
 
@@ -1928,8 +1962,18 @@ def test_text_ml_and_vision_use_sync_adapters_when_sync_requested(monkeypatch):
         "session_id": "ses_mock_only_agents",
         "message_id": "msg_mock_only_agents",
         "steps": [
-            {"node_code": "text_ml_case_search", "status": "success", "execution_mode": "sync"},
-            {"node_code": "vision_media_analysis", "status": "success", "execution_mode": "sync"},
+            {
+                "node_code": "text_ml_case_search",
+                "status": "ready",
+                "execution_mode": "sync",
+                "depends_on": [],
+            },
+            {
+                "node_code": "vision_media_analysis",
+                "status": "ready",
+                "execution_mode": "sync",
+                "depends_on": [],
+            },
         ],
     }
 
@@ -1946,7 +1990,7 @@ def test_text_ml_and_vision_use_sync_adapters_when_sync_requested(monkeypatch):
         },
     )
 
-    execution = execute_mock_plan(
+    execution = execute_agent_plan(
         plan,
         {
             "execution_mode": "sync",

@@ -9,7 +9,10 @@ from django.views.decorators.http import require_http_methods
 
 from app.mock_runtime import attachments as mock_attachments
 from app.mock_runtime import history as mock_history
-from app.mock_runtime.agent_execution import execute_mock_plan
+from app.mock_runtime.agent_execution import (
+    UnsupportedExplicitMockNodeError,
+    execute_mock_plan,
+)
 from app.mock_runtime.analysis_jobs import create_analysis_job, get_analysis_job
 
 
@@ -46,4 +49,17 @@ def history(request: HttpRequest) -> JsonResponse:
 def agent_plan(request: HttpRequest) -> JsonResponse:
     payload = _body(request)
     plan = payload.get("analysis_plan") if isinstance(payload.get("analysis_plan"), dict) else {}
-    return JsonResponse({"node_execution": execute_mock_plan(plan, payload)})
+    try:
+        execution = execute_mock_plan(plan, payload)
+    except UnsupportedExplicitMockNodeError as exc:
+        return JsonResponse(
+            {
+                "error": {
+                    "code": "unsupported_explicit_mock_node",
+                    "message": "The requested Explicit Mock node is not supported.",
+                    "node_code": exc.node_code,
+                }
+            },
+            status=400,
+        )
+    return JsonResponse({"node_execution": execution})

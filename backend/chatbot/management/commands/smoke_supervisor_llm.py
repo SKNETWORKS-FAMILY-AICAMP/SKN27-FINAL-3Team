@@ -6,7 +6,7 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
-from app.services.chatbot_mock_service import submit_message
+from app.mock_runtime.chat import submit_message
 from app.services.supervisor_llm_service import validate_slot_filling_state
 
 

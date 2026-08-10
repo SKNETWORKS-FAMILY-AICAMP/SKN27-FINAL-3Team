@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.services.agent_node_service import execute_agent_node, execute_agent_plan, execute_mock_node
+from app.services.agent_node_service import execute_agent_node, execute_agent_plan
 
 
 @patch("ai.agents.appeal_decision_flow.graph.graph.invoke")
@@ -335,7 +335,7 @@ def test_agent_output_contract_is_validated_before_supervisor_handoff(run_adapte
 
 
 @patch("app.services.agent_node_service._run_sync_adapter")
-def test_legacy_mock_entrypoint_runs_real_adapter_for_non_dl_agent(run_adapter) -> None:
+def test_canonical_agent_entrypoint_runs_real_adapter(run_adapter) -> None:
     run_adapter.return_value = {
         "status": "success",
         "summary": "real law result",
@@ -345,7 +345,7 @@ def test_legacy_mock_entrypoint_runs_real_adapter_for_non_dl_agent(run_adapter) 
         "limitations": [],
     }
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "node_code": "law_ground_search",
             "job_id": "job_real_only",

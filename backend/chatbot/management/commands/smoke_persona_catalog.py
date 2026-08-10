@@ -6,7 +6,7 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
-from app.services.chatbot_mock_service import submit_message
+from app.mock_runtime.chat import submit_message
 from app.services.persona_catalog_service import get_demo_persona, list_demo_personas
 
 

@@ -1,91 +1,172 @@
-"""Explicit Mock agent dispatch isolated from the production agent module."""
+"""Fail-closed Explicit Mock Agent execution without Canonical Agent dispatch."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from app.services.agent_adapter_contract import build_adapter_context
-from app.services.attachment_mock_service import resolve_attachment_references
-from app.services.agent_node_service import (
-    _agent_input,
-    _normalize_result_status,
-    _now_iso,
-    _payload_node_code,
-    _plan_execution_mode,
-    _status_counts,
-    _with_execution_provenance,
-    build_agent_output,
-    get_agent_node,
-)
-from app.services import agent_node_service as canonical_agent_runtime
+from app.mock_runtime.attachments import resolve_attachment_references
 
 
-DL_MOCK_NODE_CODES: set[str] = set()
+class UnsupportedExplicitMockNodeError(ValueError):
+    """Raised when an Explicit Mock plan asks for an unregistered node."""
+
+    def __init__(self, node_code: str) -> None:
+        super().__init__(f"unsupported_explicit_mock_node:{node_code or 'missing'}")
+        self.node_code = node_code
+
+
+EXPLICIT_MOCK_NODE_METADATA: Mapping[str, Mapping[str, str]] = {
+    "input_context_validation": {"node_name": "Explicit Mock input validation"},
+    "fine_notice_analysis": {"node_name": "Explicit Mock fine notice analysis"},
+    "law_ground_search": {"node_name": "Explicit Mock law ground search"},
+    "text_ml_case_search": {"node_name": "Explicit Mock similar case search"},
+    "vision_media_analysis": {"node_name": "Explicit Mock vision analysis"},
+    "objection_report_generation": {"node_name": "Explicit Mock report generation"},
+    "agent_result_validation": {"node_name": "Explicit Mock result validation"},
+}
+SUPPORTED_EXPLICIT_MOCK_NODE_CODES = frozenset(EXPLICIT_MOCK_NODE_METADATA)
+_MOCK_EXECUTION_STATUSES = frozenset({"success", "partial", "failed", "running", "blocked", "skipped"})
 
 
 def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
-    """Execute an Explicit Mock node without adding a production dispatch path."""
+    """Run only a registered deterministic Explicit Mock node."""
 
-    payload = resolve_attachment_references(payload)
-    node_code = _payload_node_code(payload)
-    if node_code not in DL_MOCK_NODE_CODES:
-        return canonical_agent_runtime.execute_agent_node(payload)
-    execution_status = str(payload.get("execution_status") or payload.get("mock_status") or "success")
-    node = get_agent_node(node_code)
+    resolved_payload = resolve_attachment_references(payload)
+    node_code = _node_code(resolved_payload)
+    _require_supported_node(node_code)
+    execution_status = _execution_status(resolved_payload)
     execution_id = f"exec_{uuid4().hex[:12]}"
-    return _with_execution_provenance({
+    node = {
+        "node_code": node_code,
+        "node_name": EXPLICIT_MOCK_NODE_METADATA[node_code]["node_name"],
+        "node_type": "explicit_mock",
+    }
+    return {
         "execution_id": execution_id,
         "execution_mode": "explicit_mock",
-        "job_id": payload.get("job_id"),
+        "job_id": resolved_payload.get("job_id"),
         "node_code": node_code,
         "node": node,
-        "adapter_context": build_adapter_context(execution_id=execution_id, execution_mode="mock", node=node, plan_step=payload.get("plan_step")),
-        "agent_input": _agent_input(payload, node),
-        "agent_output": build_agent_output(node_code=node_code, payload=payload, result_status=_normalize_result_status(execution_status), execution_status=execution_status),
+        "adapter_context": {
+            "contract_version": "explicit_mock_adapter.v1",
+            "execution_id": execution_id,
+            "execution_mode": "explicit_mock",
+            "node_code": node_code,
+        },
+        "agent_input": {
+            "contract_version": "explicit_mock_agent_input.v1",
+            "job_id": resolved_payload.get("job_id"),
+            "session_id": resolved_payload.get("session_id"),
+            "message_id": resolved_payload.get("message_id"),
+            "node_code": node_code,
+        },
+        "agent_output": _mock_agent_output(
+            node_code=node_code,
+            payload=resolved_payload,
+            execution_status=execution_status,
+        ),
         "created_at": _now_iso(),
-    })
+    }
 
 
 def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
-    """Execute a test/demo plan through the isolated Explicit Mock dispatcher."""
+    """Run an Explicit Mock plan only when every step is registered."""
 
-    payload = resolve_attachment_references(payload)
+    resolved_payload = resolve_attachment_references(payload)
+    steps = [step for step in analysis_plan.get("steps", []) if isinstance(step, dict)]
+    for step in steps:
+        _require_supported_node(_node_code(step))
+
     executions: list[dict[str, Any]] = []
-    upstream_results = deepcopy(payload.get("upstream_results", {}))
-    for step in analysis_plan.get("steps", []):
-        step_payload = deepcopy(payload)
-        step_payload.update({
-            "analysis_plan_id": analysis_plan.get("plan_id"),
-            "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
-            "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
-            "node_code": step.get("node_code"),
-            "execution_status": step.get("status", "success"),
-            "execution_mode": step.get("execution_mode") or payload.get("execution_mode"),
-            "adapter_mode": step.get("adapter_mode") or payload.get("adapter_mode"),
-            "required_inputs": step.get("required_inputs", []),
-            "depends_on": step.get("depends_on", []),
-            "plan_step": step,
-            "upstream_results": deepcopy(upstream_results),
-        })
+    upstream_results = deepcopy(resolved_payload.get("upstream_results", {}))
+    for step in steps:
+        step_payload = deepcopy(resolved_payload)
+        step_payload.update(
+            {
+                "analysis_plan_id": analysis_plan.get("plan_id"),
+                "session_id": analysis_plan.get("session_id") or resolved_payload.get("session_id"),
+                "message_id": analysis_plan.get("message_id") or resolved_payload.get("message_id"),
+                "node_code": step.get("node_code"),
+                "execution_status": step.get("status", "success"),
+                "required_inputs": step.get("required_inputs", []),
+                "depends_on": step.get("depends_on", []),
+                "plan_step": step,
+                "upstream_results": deepcopy(upstream_results),
+            }
+        )
         if isinstance(step.get("context"), dict):
-            context = deepcopy(payload.get("context") if isinstance(payload.get("context"), dict) else {})
+            context = deepcopy(resolved_payload.get("context") if isinstance(resolved_payload.get("context"), dict) else {})
             context.update(deepcopy(step["context"]))
             step_payload["context"] = context
         execution = execute_mock_node(step_payload)
         execution["plan_step"] = deepcopy(step)
         executions.append(execution)
         upstream_results[execution["node_code"]] = deepcopy(execution["agent_output"])
+
     return {
-        "execution_mode": _plan_execution_mode(executions),
-        "job_id": payload.get("job_id"),
+        "execution_mode": "explicit_mock",
+        "job_id": resolved_payload.get("job_id"),
         "plan_id": analysis_plan.get("plan_id"),
-        "session_id": analysis_plan.get("session_id") or payload.get("session_id"),
-        "message_id": analysis_plan.get("message_id") or payload.get("message_id"),
+        "session_id": analysis_plan.get("session_id") or resolved_payload.get("session_id"),
+        "message_id": analysis_plan.get("message_id") or resolved_payload.get("message_id"),
         "executions": executions,
         "status_counts": _status_counts(executions),
         "completed_node_codes": [item["node_code"] for item in executions if item["agent_output"]["status"] == "success"],
-        "limitations": ["Explicit Mock execution does not represent production provider output."],
+        "limitations": ["Explicit Mock execution does not invoke Canonical Agent or external providers."],
         "created_at": _now_iso(),
     }
+
+
+def _mock_agent_output(*, node_code: str, payload: dict[str, Any], execution_status: str) -> dict[str, Any]:
+    result_status = "success" if execution_status == "running" else execution_status
+    return {
+        "node_code": node_code,
+        "node_name": EXPLICIT_MOCK_NODE_METADATA[node_code]["node_name"],
+        "job_id": payload.get("job_id"),
+        "status": result_status,
+        "summary": f"Explicit Mock result for {node_code}.",
+        "structured_result": {
+            "contract_version": "explicit_mock_agent_result.v1",
+            "node_code": node_code,
+            "status": result_status,
+        },
+        "evidence": [
+            {
+                "evidence_id": f"mock_{node_code}",
+                "source_reference": f"explicit_mock:{node_code}",
+                "summary": "Deterministic Explicit Mock evidence.",
+            }
+        ],
+        "next_actions": [],
+        "limitations": ["Explicit Mock output is test/demo-only and is not provider output."],
+    }
+
+
+def _require_supported_node(node_code: str) -> None:
+    if node_code not in SUPPORTED_EXPLICIT_MOCK_NODE_CODES:
+        raise UnsupportedExplicitMockNodeError(node_code)
+
+
+def _node_code(payload: Mapping[str, Any]) -> str:
+    return str(payload.get("node_code") or "").strip()
+
+
+def _execution_status(payload: Mapping[str, Any]) -> str:
+    value = str(payload.get("execution_status") or payload.get("mock_status") or "success").strip().lower()
+    return value if value in _MOCK_EXECUTION_STATUSES else "failed"
+
+
+def _status_counts(executions: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for execution in executions:
+        status = str((execution.get("agent_output") or {}).get("status") or "failed")
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
