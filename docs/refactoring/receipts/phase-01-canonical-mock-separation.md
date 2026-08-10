@@ -5,7 +5,7 @@
 - Base SHA: `9f05e8b67509c0a1f06bc39d631d6a7c94044a90`
 - Branch: `refactor/phase-01-canonical-mock-separation`
 - Worktree: `E:\dev\project\SKN27-FINAL-3Team-phase-01`
-- 검증한 동작 Head: `24e898d75e18ed755b2df253d355a4f18c614b16`
+- 검증한 동작 Head: `fa12890e4ebcd042ec7b48bb13d052a4c83b03ce`
 - PR: [#401](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/401) (`dev` ← `refactor/phase-01-canonical-mock-separation`, Draft, unmerged)
 
 P1 보완 append-only commit은 다음과 같다.
@@ -18,6 +18,8 @@ P1 보완 append-only commit은 다음과 같다.
 | `d7db59a89314d54b001bc3d0969240e2a8734fce` | Phase 1 runtime boundary CI gate 강화 |
 | `b7eb0e7a7b0b8b9e61d90febaf736891d6a26650` | P1 보완 README·Receipt 증빙 기록 |
 | `24e898d75e18ed755b2df253d355a4f18c614b16` | Compose shared staging root와 default contract 보완 |
+| `bb57268afdb914cf0e921c3ee544b26f18d3035b` | 독립 검토의 source marker·malformed plan·RAG test 보완 |
+| `fa12890e4ebcd042ec7b48bb13d052a4c83b03ce` | historical test의 stale mock executor reference 정리 |
 
 ## Phase 1-C findings
 
@@ -75,7 +77,7 @@ P1 보완 append-only commit은 다음과 같다.
 - object storage: `backend/chatbot/object_storage.py`의 Local Infrastructure Adapter와 동일한 root precedence (`settings` → environment → default)
 - `UploadedFile`: 실제 canonical row를 생성한다.
 - `mock://` 신규 write: 0
-- Compose evidence: `production-gate` run `31394194567`, artifact `9065139610`에서 upload `pass`, ClamAV `clean`, `file_scan_worker_consumed=true`, `cleanup_success`, `mock://` 0을 확인했다.
+- Compose evidence: `production-gate` run `31396988541`, artifact `9066272178`에서 upload `pass`, ClamAV `clean`, `file_scan_worker_consumed=true`, `cleanup_success`, `mock://` 0을 확인했다.
 
 ## Collection baseline
 
@@ -87,7 +89,7 @@ P1 보완 append-only commit은 다음과 같다.
 | `test/test_videomae_frame_directory.py` | 1 | 1 | known baseline (`cv2`) |
 | PR #401 도입 collection 오류 | 0 | 0 | PASS |
 
-`scripts/refactoring/verify_pytest_collection_baseline.py` 결과는 `known_baseline_only`, `collected_tests: 1673`, `unexpected_error_modules: []`이다.
+`scripts/refactoring/verify_pytest_collection_baseline.py` 최신 결과는 `known_baseline_only`, `collected_tests: 1674`, `unexpected_error_modules: []`이다.
 
 ## Attachment staging safety
 
@@ -113,7 +115,7 @@ P1 보완 append-only commit은 다음과 같다.
 | 명령 | Exit Code | 통과 | 실패 | 판정 |
 |---|---:|---:|---:|---|
 | Phase 1 ownership/import/isolation pytest | 0 | 14 | 0 | PASS |
-| Phase 1 Django URL/dynamic/persistence/public API | 0 | 28 | 0 | PASS |
+| Phase 1 Django URL/dynamic/persistence/public API | 0 | 31 | 0 | PASS |
 | targeted collection | 0 | 24 collected | 0 | PASS |
 | `verify_pytest_collection_baseline.py` | 0 | 1673 collected | 신규 0 | PASS |
 | Phase 0 core/quarantine/consultation | 0 | 14 | 0 | PASS |
@@ -126,6 +128,7 @@ P1 보완 append-only commit은 다음과 같다.
 | frontend test | 0 | 155 | 0 | PASS |
 | frontend build 및 built surface gate | 0 | 1 | 0 | PASS |
 | production RAG smoke tests | 0 | 3 | 0 | PASS |
+| `chatbot.tests` regression suite | 0 | 44 | 0 | PASS |
 
 Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 high severity advisory와 Vite chunk-size warning은 build 성공과 별개인 P2 follow-up이다.
 
@@ -133,9 +136,9 @@ Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 h
 
 | Workflow | Job | Run ID | 결과 |
 |---|---|---|---|
-| `production-gate.yml` | `offline-verification` | `31394194567` / `93472953474` | PASS |
-| `production-gate.yml` | `compose-integration` | `31394194567` / `93474002730` | PASS |
-| `regression-signal` | `regression-signal` | `31394194584` / `93472953416` | PASS |
+| `production-gate.yml` | `offline-verification` | `31396988541` / `93482212918` | PASS |
+| `production-gate.yml` | `compose-integration` | `31396988541` / `93483483962` | PASS |
+| `regression-signal` | `regression-signal` | `31396988144` / `93482211777` | PASS |
 
 `.github/workflows/production-gate.yml`에는 repo-wide ownership/import, dynamic isolation, legacy projection, neutral smoke persistence, collection baseline, attachment staging, public API contract와 frontend build-output surface gate를 추가했다. 기존 Phase 0 A–G, sensitivity, Docker 및 Compose gate는 유지했다.
 
@@ -143,7 +146,15 @@ Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 h
 
 - Collection: `tmp/phase-01-pytest-collection-baseline.json`
 - Sensitivity: `tmp/phase-00-sensitivity-evidence.json`
-- Compose: `phase-00-compose-evidence` artifact `9065139610`; `gate-summary.json`의 database/cache/ClamAV/Neo4j=`ready`, backend=`true`, agent/file-scan worker consumed=`true`, status=`pass`.
+- Compose: `phase-00-compose-evidence` artifact `9066272178`; `gate-summary.json`의 database/cache/ClamAV/Neo4j=`ready`, backend=`true`, agent/file-scan worker consumed=`true`, status=`pass`.
+
+## Independent review follow-up
+
+- independent review 결과: Critical 0, Important 0, merge assessment `Yes`.
+- legacy `HistoryEvent.source`의 `canonical_mock`, `mock://`, `/api/mock/` legacy marker는 public DTO에서 canonical contract로 정규화하고 DB 원본은 유지한다.
+- Explicit Mock plan은 non-object step, missing `steps`, missing node code를 `invalid_explicit_mock_plan` 4xx로 fail-closed 처리한다.
+- `chatbot.tests`의 law-ground characterization은 Explicit Mock이 아니라 Canonical `execute_agent_node`를 호출하도록 복구했고 44건 전체를 재실행했다.
+- `RemovedChatbotMockApiContract` historical reference의 stale `execute_mock_plan` patch도 `execute_agent_plan`으로 갱신했다.
 
 ## DB audit
 
@@ -162,7 +173,7 @@ Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 h
 ## Remaining risks
 
 - P0: 확인된 항목 없음.
-- P1: 확인된 항목 없음. `24e898d`의 blocking CI와 Compose artifact를 확인했다.
+- P1: 확인된 항목 없음. `fa12890`의 blocking CI와 Compose artifact를 확인했다.
 - P2: Docker Desktop daemon이 로컬에서 중지되어 Compose full integration은 재현하지 못했지만 CI artifact로 확인했다. npm advisory와 build chunk warning은 보안/성능 후속 점검 항목이다.
 
 ## Rollback
