@@ -22,6 +22,7 @@ CANONICAL_MOCK_MARKERS = {
     "mock_analysis_jobs",
     "mock_history_events",
 }
+LEGACY_MOCK_EXECUTION_MODES = {"mock", "canonical_mock", "explicit_mock"}
 _DROP = object()
 
 
@@ -116,7 +117,7 @@ def _sanitize_metadata_value(value: Any, *, key: str = "") -> Any:
             for item in (_sanitize_metadata_value(item, key=key) for item in value)
             if item is not _DROP
         ]
-    if isinstance(value, str) and value.startswith("mock://"):
+    if isinstance(value, str) and _is_mock_uri(value):
         return _DROP
     if key == "dropped_keys" and str(value).lower() in CANONICAL_MOCK_MARKERS:
         return _DROP
@@ -134,8 +135,37 @@ def _normalize_subject(subject: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _normalize_source(source: dict[str, Any] | None) -> dict[str, Any]:
-    source = source or {}
-    return {"surface": _text(source.get("surface")) or "api", "api_path": _text(source.get("api_path")) or None, "execution_mode": _text(source.get("execution_mode")) or "canonical", "node_code": _text(source.get("node_code")) or None}
+    return sanitize_history_source(source)
+
+
+def sanitize_history_source(source: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize source fields before canonical storage or public projection."""
+
+    source = source if isinstance(source, dict) else {}
+    surface = _text(source.get("surface")) or "api"
+    api_path = _text(source.get("api_path")) or None
+    execution_mode = _text(source.get("execution_mode")) or "canonical"
+    node_code = _text(source.get("node_code")) or None
+
+    if surface.lower() in LEGACY_MOCK_EXECUTION_MODES:
+        surface = "api"
+    if execution_mode.lower() in LEGACY_MOCK_EXECUTION_MODES:
+        execution_mode = "canonical"
+    if api_path and (_is_mock_uri(api_path) or api_path.lower().startswith("/api/mock/")):
+        api_path = None
+    if node_code and _is_mock_uri(node_code):
+        node_code = None
+
+    return {
+        "surface": surface,
+        "api_path": api_path,
+        "execution_mode": execution_mode,
+        "node_code": node_code,
+    }
+
+
+def _is_mock_uri(value: str) -> bool:
+    return value.strip().lower().startswith("mock://")
 
 
 def _normalize_privacy(privacy: dict[str, Any] | None) -> dict[str, Any]:

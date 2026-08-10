@@ -16,7 +16,7 @@ from django.test import Client, RequestFactory, SimpleTestCase, TestCase, overri
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from app.mock_runtime.agent_execution import execute_mock_node
+from app.services.agent_node_service import execute_agent_node
 from app.services.persona_catalog_service import list_demo_personas
 from chatbot.models import (
     AgentFeedbackEvent,
@@ -228,7 +228,7 @@ class ChatbotPersistenceModelTests(TestCase):
             domain_tags=["school_zone", "fine_notice"],
         )
 
-        execution = execute_mock_node(
+        execution = execute_agent_node(
             {
                 "node_code": "law_ground_search",
                 "search_query": "school zone emergency stopping fine",

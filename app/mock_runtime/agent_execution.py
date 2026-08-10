@@ -19,6 +19,14 @@ class UnsupportedExplicitMockNodeError(ValueError):
         self.node_code = node_code
 
 
+class InvalidExplicitMockPlanError(ValueError):
+    """Raised when an Explicit Mock plan cannot be validated as a complete plan."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"invalid_explicit_mock_plan:{reason}")
+        self.reason = reason
+
+
 EXPLICIT_MOCK_NODE_METADATA: Mapping[str, Mapping[str, str]] = {
     "input_context_validation": {"node_name": "Explicit Mock input validation"},
     "fine_notice_analysis": {"node_name": "Explicit Mock fine notice analysis"},
@@ -73,13 +81,16 @@ def execute_mock_node(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def execute_mock_plan(analysis_plan: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def execute_mock_plan(analysis_plan: Any, payload: dict[str, Any]) -> dict[str, Any]:
     """Run an Explicit Mock plan only when every step is registered."""
 
     resolved_payload = resolve_attachment_references(payload)
-    steps = [step for step in analysis_plan.get("steps", []) if isinstance(step, dict)]
+    steps = _validated_plan_steps(analysis_plan)
     for step in steps:
-        _require_supported_node(_node_code(step))
+        node_code = _node_code(step)
+        if not node_code:
+            raise InvalidExplicitMockPlanError("missing_node_code")
+        _require_supported_node(node_code)
 
     executions: list[dict[str, Any]] = []
     upstream_results = deepcopy(resolved_payload.get("upstream_results", {}))
@@ -149,6 +160,19 @@ def _mock_agent_output(*, node_code: str, payload: dict[str, Any], execution_sta
 def _require_supported_node(node_code: str) -> None:
     if node_code not in SUPPORTED_EXPLICIT_MOCK_NODE_CODES:
         raise UnsupportedExplicitMockNodeError(node_code)
+
+
+def _validated_plan_steps(analysis_plan: Any) -> list[dict[str, Any]]:
+    if not isinstance(analysis_plan, dict):
+        raise InvalidExplicitMockPlanError("analysis_plan_not_object")
+    if "steps" not in analysis_plan:
+        raise InvalidExplicitMockPlanError("missing_steps")
+    raw_steps = analysis_plan.get("steps")
+    if not isinstance(raw_steps, list):
+        raise InvalidExplicitMockPlanError("steps_not_list")
+    if any(not isinstance(step, dict) for step in raw_steps):
+        raise InvalidExplicitMockPlanError("step_not_object")
+    return raw_steps
 
 
 def _node_code(payload: Mapping[str, Any]) -> str:

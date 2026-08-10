@@ -33,6 +33,7 @@ from app.services.history_event_contract import (
     build_agent_execution_events,
     build_history_event,
     sanitize_metadata,
+    sanitize_history_source,
 )
 from app.services.chat_session_followup_service import (
     CHAT_SESSION_FOLLOWUP_STATE_VERSION,
@@ -2060,7 +2061,7 @@ def history_event_to_api(event: HistoryEvent) -> dict[str, Any]:
         "occurred_at": event.occurred_at.isoformat(),
         "actor": event.actor,
         "subject": event.subject,
-        "source": event.source,
+        "source": sanitize_history_source(event.source),
         "status": event.status,
         "summary": event.summary,
         "metadata": sanitize_metadata(event.metadata),

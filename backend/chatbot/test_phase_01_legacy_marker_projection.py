@@ -83,3 +83,43 @@ class LegacyHistoryMarkerProjectionTests(TestCase):
         for marker in MARKERS:
             self.assertNotIn(marker, serialized)
         self.assertEqual(public_event["metadata"]["safe"], "retained")
+
+    def test_legacy_source_marker_is_normalized_in_the_public_dto_only(self) -> None:
+        legacy_source = {
+            "surface": "mock",
+            "api_path": "mock://history/legacy-event",
+            "execution_mode": "canonical_mock",
+        }
+        HistoryEvent.objects.create(
+            event_id="evt_phase_01_legacy_source_marker",
+            event_type="chat_message_created",
+            event_version="history_event.v1",
+            occurred_at=timezone.now(),
+            actor_guest_id=self.guest_id,
+            actor_auth_state="guest",
+            subject_session_id=self.session_id,
+            source_execution_mode="canonical_mock",
+            status="success",
+            summary="legacy source event",
+            actor={"guest_id": self.guest_id, "auth_state": "guest"},
+            subject={"session_id": self.session_id},
+            source=legacy_source,
+            metadata={},
+            privacy={"risk_level": "low"},
+        )
+
+        response = self.client.get(f"/api/history/?session_id={self.session_id}")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        stored = HistoryEvent.objects.get(event_id="evt_phase_01_legacy_source_marker")
+        self.assertEqual(stored.source, legacy_source)
+        public_event = next(
+            event
+            for event in response.json()["events"]
+            if event["event_id"] == "evt_phase_01_legacy_source_marker"
+        )
+        self.assertEqual(public_event["source"]["execution_mode"], "canonical")
+        self.assertEqual(public_event["source"]["surface"], "api")
+        self.assertIsNone(public_event["source"]["api_path"])
+        self.assertNotIn("canonical_mock", repr(public_event))
+        self.assertNotIn("mock://", repr(public_event))

@@ -69,6 +69,21 @@ class ExplicitMockUrlIsolationTests(SimpleTestCase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertEqual(response.json()["error"]["code"], "unsupported_explicit_mock_node")
 
+    @override_settings(
+        EXPLICIT_MOCK_RUNTIME_ENABLED=True,
+        DEBUG=True,
+        ROOT_URLCONF="config.mock_urls",
+    )
+    def test_explicit_mock_plan_rejects_malformed_steps_without_partial_execution(self) -> None:
+        response = self.client.post(
+            "/api/mock/agents/plans/",
+            data={"analysis_plan": {"steps": ["not-a-plan-step"]}},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["error"]["code"], "invalid_explicit_mock_plan")
+
     @override_settings(EXPLICIT_MOCK_RUNTIME_ENABLED=False, DEBUG=True)
     def test_explicit_mock_urlconf_fails_closed_when_flag_is_disabled(self) -> None:
         with self.assertRaises(ImproperlyConfigured):
