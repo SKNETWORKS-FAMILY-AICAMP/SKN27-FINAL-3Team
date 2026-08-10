@@ -13,4 +13,3 @@ def json_response(_request: HttpRequest, data: dict[str, Any], status: int = 200
 
 def is_canonical_request(request: HttpRequest) -> bool:
     return request.path.startswith("/api/")
-

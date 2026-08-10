@@ -19,4 +19,3 @@ def get_analysis_job(job_id: str) -> dict[str, Any] | None:
     from app.services.analysis_job_mock_service import get_analysis_job as _get_analysis_job
 
     return _get_analysis_job(job_id)
-
