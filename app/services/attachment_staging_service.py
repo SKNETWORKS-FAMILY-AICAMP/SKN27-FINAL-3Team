@@ -69,7 +69,12 @@ def register_staged_attachment(
     if upload_file is not None and declared_size is not None and int(declared_size) > upload_limit:
         raise UploadTooLargeError(size_bytes=int(declared_size), limit_bytes=upload_limit)
 
-    attachment_id = _text(payload.get("attachment_id")) or f"att_{uuid4().hex[:12]}"
+    supplied_attachment_id = _text(payload.get("attachment_id"))
+    attachment_id = (
+        _validated_attachment_id(supplied_attachment_id)
+        if supplied_attachment_id
+        else f"att_{uuid4().hex[:12]}"
+    )
     original_filename = _original_filename(payload, upload_file)
     safe_filename = _safe_filename(original_filename)
     content_type = _content_type(payload, upload_file)
@@ -180,7 +185,24 @@ def resolve_staged_attachment_references(payload: dict[str, Any]) -> dict[str, A
 
 
 def _staging_root() -> Path:
-    return Path(os.environ.get("ATTACHMENT_STAGING_ROOT", "backend/media/attachment_staging"))
+    configured_root = ""
+    try:
+        from django.conf import settings
+
+        if settings.configured:
+            configured_root = _text(getattr(settings, "ATTACHMENT_STAGING_ROOT", ""))
+    except ImportError:
+        configured_root = ""
+    return Path(
+        configured_root
+        or os.environ.get("ATTACHMENT_STAGING_ROOT", "backend/media/attachment_staging")
+    ).resolve()
+
+
+def _validated_attachment_id(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value):
+        raise ValueError("attachment_id must use the canonical safe identifier format")
+    return value
 
 
 def _write_upload(stored_path: Path, upload_file: Any, *, max_bytes: int) -> int:

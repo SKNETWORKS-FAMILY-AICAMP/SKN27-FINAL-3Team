@@ -15,7 +15,14 @@ SENSITIVE_METADATA_KEYS = {
     "answer", "content", "completion", "full_text", "message", "ocr_raw", "ocr_result",
     "ocr_text", "prompt", "raw_output", "raw_payload", "reasoning", "transcript", "user_text",
 }
-CANONICAL_MOCK_MARKERS = {"mock_scenario", "mock_status", "canonical_mock"}
+CANONICAL_MOCK_MARKERS = {
+    "mock_scenario",
+    "mock_status",
+    "canonical_mock",
+    "mock_analysis_jobs",
+    "mock_history_events",
+}
+_DROP = object()
 
 
 def build_history_event(*, event_type: str, status: str, summary: str, actor: dict[str, Any] | None = None, subject: dict[str, Any] | None = None, source: dict[str, Any] | None = None, metadata: dict[str, Any] | None = None, privacy: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -86,10 +93,33 @@ def source_from_request(*, api_path: str, execution_mode: str = "canonical", sur
 
 
 def sanitize_metadata(value: Any) -> Any:
+    """Remove Canonical mock markers without deleting ordinary user wording."""
+
+    sanitized = _sanitize_metadata_value(value)
+    return {} if sanitized is _DROP else sanitized
+
+
+def _sanitize_metadata_value(value: Any, *, key: str = "") -> Any:
     if isinstance(value, dict):
-        return {str(key): sanitize_metadata(item) for key, item in value.items() if str(key).lower() not in SENSITIVE_METADATA_KEYS | CANONICAL_MOCK_MARKERS}
+        sanitized: dict[str, Any] = {}
+        for raw_key, item in value.items():
+            normalized_key = str(raw_key)
+            if normalized_key.lower() in SENSITIVE_METADATA_KEYS | CANONICAL_MOCK_MARKERS:
+                continue
+            normalized_item = _sanitize_metadata_value(item, key=normalized_key)
+            if normalized_item is not _DROP:
+                sanitized[normalized_key] = normalized_item
+        return sanitized
     if isinstance(value, list):
-        return [sanitize_metadata(item) for item in value]
+        return [
+            item
+            for item in (_sanitize_metadata_value(item, key=key) for item in value)
+            if item is not _DROP
+        ]
+    if isinstance(value, str) and value.startswith("mock://"):
+        return _DROP
+    if key == "dropped_keys" and str(value).lower() in CANONICAL_MOCK_MARKERS:
+        return _DROP
     return sanitize_pii(value if isinstance(value, (str, int, float, bool)) or value is None else str(value))
 
 

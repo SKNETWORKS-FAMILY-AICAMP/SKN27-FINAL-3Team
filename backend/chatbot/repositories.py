@@ -32,6 +32,7 @@ from app.services.history_event_contract import (
     SENSITIVE_METADATA_KEYS,
     build_agent_execution_events,
     build_history_event,
+    sanitize_metadata,
 )
 from app.services.chat_session_followup_service import (
     CHAT_SESSION_FOLLOWUP_STATE_VERSION,
@@ -2062,7 +2063,7 @@ def history_event_to_api(event: HistoryEvent) -> dict[str, Any]:
         "source": event.source,
         "status": event.status,
         "summary": event.summary,
-        "metadata": event.metadata,
+        "metadata": sanitize_metadata(event.metadata),
         "privacy": event.privacy,
         "created_at": event.created_at.isoformat(),
     }
@@ -8316,7 +8317,7 @@ def _upsert_history_event_payload(event_payload: dict[str, Any]) -> HistoryEvent
 
 
 def _history_metadata_snapshot(metadata: Any) -> dict[str, Any]:
-    raw_metadata = _dict_or_empty(metadata)
+    raw_metadata = _dict_or_empty(sanitize_metadata(metadata))
     sanitized: dict[str, Any] = {}
     dropped_keys = []
 
