@@ -38,6 +38,20 @@ jobs:
           test/test_legal_rag_service.py
           etl/fault_cases/src/agents/text_ml_case_search/tests/test_pgvector_unified_retriever.py
 
+      - name: Phase 1 canonical and Explicit Mock boundary gate
+        timeout-minutes: 10
+        run: |
+          python -m pytest -q --timeout=30 \
+            test/test_phase_01_runtime_import_boundaries.py \
+            test/test_phase_01_neutral_contracts.py \
+            test/test_phase_01_mock_runtime_isolation.py \
+            test/test_phase_01_frontend_mock_surface.py
+          python backend/manage.py test \
+            chatbot.test_phase_01_mock_url_isolation \
+            chatbot.test_phase_01_canonical_negative_reachability \
+            chatbot.test_phase_01_canonical_persistence \
+            --verbosity 1
+
       - name: Phase 0 core user-flow characterization gate
         timeout-minutes: 10
         run: |
