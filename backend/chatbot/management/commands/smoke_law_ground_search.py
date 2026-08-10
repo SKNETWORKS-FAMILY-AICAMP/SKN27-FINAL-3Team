@@ -7,7 +7,7 @@ from datetime import date
 
 from django.core.management.base import BaseCommand, CommandError
 
-from app.services.agent_node_service import execute_mock_node
+from app.mock_runtime.agent_execution import execute_mock_node
 
 
 class Command(BaseCommand):

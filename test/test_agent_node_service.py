@@ -11,11 +11,10 @@ from app.services.agent_adapter_contract import (
 )
 from app.services.agent_node_service import (
     execute_agent_node,
-    execute_mock_node,
-    execute_mock_plan,
     list_agent_nodes,
     list_public_agent_nodes,
 )
+from app.mock_runtime.agent_execution import execute_mock_node, execute_mock_plan
 from app.services.attachment_mock_service import register_attachment
 from app.services.chatbot_mock_service import build_analysis_plan
 from app.services.supervisor_control_service import validate_agent_results

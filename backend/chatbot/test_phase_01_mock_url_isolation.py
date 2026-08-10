@@ -39,6 +39,17 @@ class ExplicitMockUrlIsolationTests(SimpleTestCase):
         self.assertEqual(match.namespace, "explicit_mock")
         self.assertEqual(match.url_name, "attachments")
 
+    @override_settings(
+        EXPLICIT_MOCK_RUNTIME_ENABLED=True,
+        DEBUG=True,
+        ROOT_URLCONF="config.mock_urls",
+    )
+    def test_enabled_explicit_mock_route_uses_its_own_runtime_handler(self) -> None:
+        response = self.client.get("/api/mock/attachments/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"attachments": []})
+
     @override_settings(EXPLICIT_MOCK_RUNTIME_ENABLED=False, DEBUG=True)
     def test_explicit_mock_urlconf_fails_closed_when_flag_is_disabled(self) -> None:
         with self.assertRaises(ImproperlyConfigured):

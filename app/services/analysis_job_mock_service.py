@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from app.services.agent_node_service import execute_mock_plan
+from app.mock_runtime.agent_execution import execute_mock_plan
 from app.services.chatbot_mock_service import submit_message
 
 

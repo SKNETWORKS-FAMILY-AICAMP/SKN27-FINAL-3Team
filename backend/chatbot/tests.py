@@ -16,7 +16,7 @@ from django.test import Client, RequestFactory, SimpleTestCase, TestCase, overri
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from app.services.agent_node_service import execute_mock_node
+from app.mock_runtime.agent_execution import execute_mock_node
 from app.services.persona_catalog_service import list_demo_personas
 from chatbot.models import (
     AgentFeedbackEvent,

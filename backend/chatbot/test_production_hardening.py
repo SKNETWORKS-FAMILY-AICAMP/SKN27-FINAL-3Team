@@ -865,7 +865,7 @@ class ProductionApiContractTests(SimpleTestCase):
             patch("chatbot.views.submit_message", return_value=chat_response),
             patch("chatbot.views.enqueue_analysis_job_work", return_value=queue_result) as enqueue,
             patch(
-                "chatbot.views.create_analysis_job",
+                "app.mock_runtime.analysis_jobs.create_analysis_job",
                 side_effect=AssertionError("legacy synchronous job service must not run"),
             ),
             patch(
