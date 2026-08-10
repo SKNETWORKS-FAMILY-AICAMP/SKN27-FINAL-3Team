@@ -3112,7 +3112,7 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(queue_response.status_code, 200)
         work_item_id = queue_response.json()["work_item"]["work_item_id"]
 
-        with patch("app.services.agent_node_service.execute_mock_plan", side_effect=RuntimeError("boom")):
+        with patch("app.services.agent_node_service.execute_agent_plan", side_effect=RuntimeError("boom")):
             result = process_agent_work_items(limit=1)
 
         self.assertEqual(result["processed"], 1)
