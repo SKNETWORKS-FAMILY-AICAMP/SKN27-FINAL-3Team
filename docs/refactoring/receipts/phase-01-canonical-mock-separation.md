@@ -117,7 +117,7 @@ P1 보완 append-only commit은 다음과 같다.
 | Phase 1 ownership/import/isolation pytest | 0 | 14 | 0 | PASS |
 | Phase 1 Django URL/dynamic/persistence/public API | 0 | 31 | 0 | PASS |
 | targeted collection | 0 | 24 collected | 0 | PASS |
-| `verify_pytest_collection_baseline.py` | 0 | 1673 collected | 신규 0 | PASS |
+| `verify_pytest_collection_baseline.py` | 0 | 1674 collected | 신규 0 | PASS |
 | Phase 0 core/quarantine/consultation | 0 | 14 | 0 | PASS |
 | queued follow-up 및 analysis queue | 0 | 41 | 0 | PASS |
 | agent execution/privacy | 0 | 68 | 0 | PASS |
