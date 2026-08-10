@@ -9,9 +9,86 @@
 - P2 stale-OCR characterization commit: `7e0b003`
 - P2 CI/evidence-contract commit: `868cefc`
 
-The final P2 PR head and its newest `production-gate` run are authoritative
-in PR metadata. This receipt is not amended by a docs-only commit merely to
-self-reference that later run.
+The behavior-bearing P2 changes are recorded above. Their completed CI and
+artifact evidence is recorded in the final Phase 0-C P2 section below.
+
+## Final Phase 0-C P2 Evidence
+
+### Reviewed behavior head
+
+- Previous Phase 0-C reviewed head:
+  `7744bc76550fe871e8418242b6738b8c05b92b67`
+- Final behavior-bearing head:
+  `6c4a2a4d9c034598fe94a37bf335e9af48cdabac`
+
+### Final behavior-head CI
+
+- production-gate Run:
+  `31359874994`
+- offline-verification Job:
+  `93366497768`
+- compose-integration Job:
+  `93367080210`
+- Result:
+  PASS
+
+### Final artifacts
+
+- Compose artifact:
+  `phase-00-compose-evidence`
+- Compose artifact ID:
+  `9052075672`
+- Sensitivity artifact:
+  `phase-00-sensitivity-evidence`
+- Sensitivity artifact ID:
+  `9051982679`
+
+### Compose evidence
+
+- status:
+  pass
+- database:
+  ready
+- cache:
+  ready
+- ClamAV:
+  ready
+- Neo4j:
+  ready
+- backend live:
+  true
+- backend ready:
+  true
+- agent worker consumed:
+  true
+- file-scan worker consumed:
+  true
+- failed-step.txt:
+  absent
+- last-step.txt:
+  compose-final
+- cleanup:
+  cleanup_success
+
+### Sensitivity evidence
+
+- C original:
+  Exit 0
+- C mutant:
+  Exit 1 / assertion
+- G original:
+  Exit 0
+- G mutant:
+  Exit 1 / assertion
+- working tree unchanged:
+  true
+
+### Final PR head authority
+
+This receipt records the final behavior-bearing head and its completed CI and
+artifact evidence. Any subsequent receipt-only commit does not alter the tested
+behavior. The final PR head is authoritative in GitHub PR metadata, avoiding an
+infinite self-referential documentation commit cycle.
 
 ## P2 review adjudication
 
@@ -79,7 +156,11 @@ original/mutant exit and failure-kind fields. It records no private payload.
 4. `Phase 0 Compose integration gate`, with the
    `phase-00-compose-evidence` artifact retained for 14 days.
 
-## Docker evidence
+## Historical evidence — superseded
+
+This section is retained only as an audit record and is not the current Phase 0 authority.
+
+### Docker evidence
 
 | Scope | Result | Evidence |
 |---|---|---|
@@ -98,6 +179,5 @@ is retained; on teardown failure `failed-step.txt` is `cleanup`.
   or treated as a C/G pass.
 - Paid or external providers and operating AWS are outside the deterministic
   Phase 0 gate.
-- The next current-head CI run must verify the new Compose evidence semantics
-  and upload the new sensitivity receipt. A CI or runtime failure is recorded
-  as a baseline blocker; it is not repaired by this Phase 0 P2 scope.
+- A CI or runtime failure is recorded as a baseline blocker; it is not repaired
+  by this Phase 0 P2 scope.
