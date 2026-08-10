@@ -16,6 +16,15 @@ from chatbot.object_storage import _local_staging_root
 
 
 class NeutralFileScanSmokeTests(TestCase):
+    def test_default_staging_root_is_shared_local_object_storage_scope(self) -> None:
+        expected_root = (
+            Path.cwd() / "backend" / "media" / "mock_object_storage" / "attachment_staging"
+        ).resolve()
+        with patch.dict(os.environ, {"ATTACHMENT_STAGING_ROOT": ""}):
+            with override_settings(ATTACHMENT_STAGING_ROOT=""):
+                self.assertEqual(_staging_root(), expected_root)
+                self.assertEqual(_local_staging_root(), expected_root)
+
     def test_staging_and_object_storage_share_settings_environment_default_order(self) -> None:
         with tempfile.TemporaryDirectory() as configured_root, tempfile.TemporaryDirectory() as environment_root:
             with patch.dict(os.environ, {"ATTACHMENT_STAGING_ROOT": environment_root}):

@@ -193,9 +193,11 @@ def _staging_root() -> Path:
             configured_root = _text(getattr(settings, "ATTACHMENT_STAGING_ROOT", ""))
     except ImportError:
         configured_root = ""
+    environment_root = _text(os.environ.get("ATTACHMENT_STAGING_ROOT"))
     return Path(
         configured_root
-        or os.environ.get("ATTACHMENT_STAGING_ROOT", "backend/media/attachment_staging")
+        or environment_root
+        or "backend/media/mock_object_storage/attachment_staging"
     ).resolve()
 
 

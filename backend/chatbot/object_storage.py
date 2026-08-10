@@ -822,9 +822,12 @@ def _mock_upload_path_from_uri(source_uri: str) -> Path | None:
 
 
 def _local_staging_root() -> Path:
+    configured_root = _text(getattr(settings, "ATTACHMENT_STAGING_ROOT", ""))
+    environment_root = _text(os.environ.get("ATTACHMENT_STAGING_ROOT"))
     return Path(
-        getattr(settings, "ATTACHMENT_STAGING_ROOT", "")
-        or os.environ.get("ATTACHMENT_STAGING_ROOT", "backend/media/attachment_staging")
+        configured_root
+        or environment_root
+        or "backend/media/mock_object_storage/attachment_staging"
     ).resolve()
 
 
