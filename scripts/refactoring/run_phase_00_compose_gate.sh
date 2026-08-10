@@ -15,20 +15,29 @@ compose=(docker compose -f docker-compose.yml -f test/compose/docker-compose.pha
 services=(postgres redis clamav neo4j backend agent-worker file-scan-worker)
 gate_step="initializing"
 
-write_failure_evidence() {
+write_runtime_evidence() {
   "${compose[@]}" ps >"$evidence_dir/compose-ps-final.txt" 2>&1 || true
   "${compose[@]}" logs --no-color >"$evidence_dir/compose-logs.txt" 2>&1 || true
-  printf '%s\n' "$gate_step" >"$evidence_dir/failed-step.txt"
 }
 
 cleanup() {
   local original_status=$?
-  write_failure_evidence
+  trap - EXIT
+  write_runtime_evidence
   if ! "${compose[@]}" down -v --remove-orphans >>"$evidence_dir/cleanup.txt" 2>&1; then
     printf '%s\n' "cleanup_failed" >>"$evidence_dir/cleanup.txt"
+    printf '%s\n' "cleanup" >"$evidence_dir/failed-step.txt"
     exit 1
   fi
-  exit "$original_status"
+  if [[ "$original_status" -ne 0 ]]; then
+    printf 'original_gate_failure=%s\n' "$gate_step" >>"$evidence_dir/cleanup.txt"
+    printf '%s\n' "$gate_step" >"$evidence_dir/failed-step.txt"
+    exit "$original_status"
+  fi
+  rm -f "$evidence_dir/failed-step.txt"
+  printf '%s\n' "cleanup_success" >>"$evidence_dir/cleanup.txt"
+  printf '%s\n' "$gate_step" >"$evidence_dir/last-step.txt"
+  exit 0
 }
 trap cleanup EXIT
 

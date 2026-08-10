@@ -30,6 +30,14 @@ jobs:
           test/test_supervisor_production_contract.py
           test/test_api_route_specs.py
 
+      - name: Phase 0 deterministic service-contract gate
+        timeout-minutes: 10
+        run: >
+          python -m pytest -q --timeout=30
+          test/test_attachment_document_classification_adapter.py
+          test/test_legal_rag_service.py
+          etl/fault_cases/src/agents/text_ml_case_search/tests/test_pgvector_unified_retriever.py
+
       - name: Phase 0 core user-flow characterization gate
         timeout-minutes: 10
         run: |
@@ -40,6 +48,18 @@ jobs:
             chatbot.test_file_quarantine.FileQuarantinePipelineTests.test_multipart_registration_writes_only_to_quarantine \
             chatbot.test_consultation_v2.ConsultationCaseApiTests.test_fact_confirmation_precedes_real_worker_queue \
             --verbosity 1
+
+      - name: Phase 0 sensitivity negative controls
+        timeout-minutes: 10
+        run: python scripts/refactoring/verify_phase_00_test_sensitivity.py
+
+      - name: Upload Phase 0 sensitivity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-00-sensitivity-evidence
+          path: tmp/phase-00-sensitivity-evidence.json
+          retention-days: 14
 
       - name: Queued follow-up state regression
         timeout-minutes: 5
