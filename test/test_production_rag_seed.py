@@ -1102,7 +1102,7 @@ def test_text_ml_smoke_require_results_rejects_empty_pgvector_evidence(
 ) -> None:
     monkeypatch.setattr(
         smoke_text_ml_case_search,
-        "execute_mock_node",
+        "execute_agent_node",
         lambda _payload: {
             "execution_mode": "sync",
             "adapter_context": {"execution_mode": "sync"},

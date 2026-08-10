@@ -370,12 +370,12 @@ def test_error_projection_preserves_report_readiness_status_without_extra_fields
 @pytest.mark.parametrize(
     ("canonical", "source", "expected_surface", "expected_mode"),
     [
-        (False, "analysis_worker_reporting", "mock", "async_worker"),
+        (False, "analysis_worker_reporting", "explicit_mock", "async_worker"),
         (True, "analysis_worker_reporting", "canonical", "async_worker"),
-        (True, "canonical_report_action", "canonical_mock", "mock"),
+        (True, "canonical_report_action", "canonical", "canonical"),
     ],
 )
-def test_surface_helpers_use_existing_runtime_labels(
+def test_surface_helpers_expose_only_canonical_or_explicit_mock_labels(
     canonical: bool,
     source: str,
     expected_surface: str,

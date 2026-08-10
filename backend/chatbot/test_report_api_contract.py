@@ -154,6 +154,9 @@ class ReportApiContractTests(TestCase):
         self.assertEqual(detail_response.status_code, 200)
         ReportListResponse.model_validate(list_response.json())
         ReportDetailResponse.model_validate(detail_response.json())
+        self.assertEqual(list_response.json()["api_surface"], "canonical")
+        self.assertEqual(detail_response.json()["api_surface"], "canonical")
+        self.assertEqual(detail_response.json()["execution_mode"], "async_worker")
         detail = detail_response.json()["report"]
         public_json = json.dumps(detail, sort_keys=True)
         self.assertNotIn("owner_id", public_json)
