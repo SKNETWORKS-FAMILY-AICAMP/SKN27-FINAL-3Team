@@ -1,24 +1,33 @@
 # Phase 0 Verification Matrix
-## C/G blocking verification completion
 
-| Flow | Endpoint/lifecycle | Persistence and ownership boundary | Privacy or replay boundary | Blocking selector |
-|---|---|---|---|---|
-| C | classified upload -> matching OCR confirmation -> short answer -> law worker -> result API | `UploadedFile`, `ChatSession`, `AnalysisJob`, `AgentWorkItem`, `AgentResult`, `RetrievalEvent` | stale/foreign confirmation rejection; raw OCR/storage/auth redaction | `chatbot.test_phase_00_ocr_law_flow` |
-| G | authenticated case -> confirmed facts -> worker report -> confirmation -> DOCX | `Case`, `ConfirmedFactVersion`, `AnalysisJob`, `AgentWorkItem`, `AgentResult`, `AnalysisDisplayResult`, `Report` | foreign/anonymous denial; pre-confirmation and stale denial; no storage material | `chatbot.test_phase_00_report_lifecycle` |
+## Current authority
 
-The C/G modules are included in the existing `Phase 0 core user-flow characterization gate` in `.github/workflows/production-gate.yml`; no permissive `continue-on-error` setting is used.
+This is the single current A–G verification matrix. Earlier C/G support-only
+and D2-pending descriptions are superseded and are not acceptance evidence.
 
-- 기준 SHA: `198efeba3cabacc3a977cfcaf2f8d7e06fd47104`
-- 작성 기준일: 2026-08-08
+| Flow | Production path under test | Persisted/state assertion | Blocking evidence |
+|---|---|---|---|
+| A | guest session -> Google login -> same consultation resume | guest/auth ownership is promoted only for the matching session | Phase 0 core user-flow characterization gate |
+| B | upload -> quarantine/scan -> clean attachment -> classification workflow | `UploadedFile` quarantine/scan state; D2 file-scan worker consumption | core gate plus Compose integration gate |
+| C | OCR-confirmed fine notice -> short answer -> law worker -> result | matching attachment-bound OCR state, plan/queue/message/job/work-item bindings, `AgentResult` and `RetrievalEvent`; replacement B cannot reuse A | core gate; new stale-OCR test; deterministic service-contract gate; sensitivity negative control |
+| D | accident intake -> confirmation -> Case -> queue | `Case`, `ConfirmedFactVersion`, `AnalysisJob`, and `AgentWorkItem` binding | Phase 0 core user-flow characterization gate |
+| E | confirmed facts -> analysis job -> worker -> persisted result | worker claim and persisted `AgentResult` | core gate plus Compose agent-worker probe |
+| F | stale lease or stopped worker -> safe reclaim/retry | one terminal work result without unsafe duplicate execution | Phase 0 core user-flow characterization gate |
+| G | worker report -> user confirmation -> owner-only DOCX download | case/fact/job/work-item/result/display/report provenance and confirmation state | core gate; deterministic service-contract gate; sensitivity negative control |
 
-| 흐름 | 보호 테스트 | 실제 production 경계 | patch 범위 | DB 검증 | CI blocking | 신규 test |
-|---|---|---|---|---|---|---|
-| A guest → Google → resume | `test_phase_00_guest_login_promotes_only_its_session` | guest/auth/session/resume `/api/` | Google `urllib_request.urlopen` | `ChatSession` owner/auth metadata | core user-flow gate | 추가 |
-| B upload → scan → classify → OCR | `test_multipart_registration_writes_only_to_quarantine`; Compose file probe | `/api/files/`, upload persistence, file worker | 없음; D2는 실제 ClamAV | `UploadedFile` status/scan metadata | core + Compose gate | classification/OCR canonical gap은 Phase 0-C review input |
-| C OCR → follow-up → law search | supporting follow-up tests | follow-up service state | 없음 | existing unit has no DB row | supporting only | canonical persistence gap은 Phase 0-C review input |
-| D intake → Case | `ConsultationCaseApiTests::test_fact_confirmation_precedes_real_worker_queue` | Case/fact/job `/api/` | 없음 | `Case`, `ConfirmedFactVersion`, `AnalysisJob`, `AgentWorkItem` | core user-flow gate | 불필요 |
-| E facts → job → worker → result | `test_phase_00_internal_worker_plan_persists_once` | enqueue/claim/worker/persistence | 없음 | `AnalysisJob`, `AgentWorkItem`, `AgentResult` | core + Compose gate | 추가 |
-| F stale lease → re-run | `test_phase_00_stale_internal_work_is_reclaimed_once` | stale requeue/claim/worker | 없음 | work attempt/status, one `AgentResult` | core user-flow gate | 추가 |
-| G report → confirm → download | `test_owner_download_exposes_only_public_document_headers` | report confirmation/download `/api/` | 없음 | `Report` fixture | supporting only | generation-to-download gap은 Phase 0-C review input |
+The C/G service-level and pipeline-level doubles are not provider-leaf claims.
+Their internal contracts are blocking through the deterministic
+service-contract gate, while their HTTP, routing, planning, queue, worker,
+persistence, authorization, confirmation, rendering, and download boundaries
+remain production implementations.
 
-The core gate does not classify `/api/mock/`, sidecar-only, source-text, or orchestration-fixture tests as a production characterization pass. D2 evidence is required separately because D1 Docker build/import does not exercise service integration.
+## Docker boundary
+
+| Scope | Current result | Evidence |
+|---|---|---|
+| D1 image build and import smoke | PASS | `production-gate` Run `30861528733`, Job `91844345278`; the approved-base tree was equivalent |
+| D2 Compose service integration | PASS | historical C/G `production-gate` Run `31317365628`, compose Job `93255063276`, `phase-00-compose-evidence` artifact reported `status=pass` |
+
+Each new PR head must rerun the blocking workflow. For the corrected Compose
+receipt, success additionally requires no `failed-step.txt`,
+`last-step.txt=compose-final`, and `cleanup.txt` containing `cleanup_success`.
