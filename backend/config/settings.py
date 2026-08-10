@@ -18,6 +18,7 @@ def _positive_int_env(name: str, default: int) -> int:
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-change-before-deploy")
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
+EXPLICIT_MOCK_RUNTIME_ENABLED = os.environ.get("EXPLICIT_MOCK_RUNTIME_ENABLED", "0") == "1"
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]").split(",")
