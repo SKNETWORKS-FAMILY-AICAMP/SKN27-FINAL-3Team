@@ -1,0 +1,25 @@
+{
+  "contract_version": "phase_01_pytest_collection_baseline.v2",
+  "expected_collection_errors": [
+    {
+      "path": "test/test_evaluate_videomae_classifier.py",
+      "exception_type": "ModuleNotFoundError",
+      "missing_module": "cv2"
+    },
+    {
+      "path": "test/test_prepare_benchmark_manifest.py",
+      "exception_type": "ModuleNotFoundError",
+      "missing_module": "cv2"
+    },
+    {
+      "path": "test/test_supervisor_acceptance_fixture_pdf.py",
+      "exception_type": "ModuleNotFoundError",
+      "missing_module": "pypdf"
+    },
+    {
+      "path": "test/test_videomae_frame_directory.py",
+      "exception_type": "ModuleNotFoundError",
+      "missing_module": "cv2"
+    }
+  ]
+}

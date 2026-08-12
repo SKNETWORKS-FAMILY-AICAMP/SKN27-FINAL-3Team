@@ -47,6 +47,7 @@ jobs:
             test/test_phase_01_mock_runtime_ownership.py \
             test/test_phase_01_mock_runtime_isolation.py \
             test/test_phase_01_attachment_staging_security.py \
+            test/test_phase_01_collection_baseline_contract.py \
             test/test_phase_01_frontend_mock_surface.py
           python backend/manage.py test \
             chatbot.test_phase_01_mock_url_isolation \

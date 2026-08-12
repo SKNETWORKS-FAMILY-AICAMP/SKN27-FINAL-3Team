@@ -8,13 +8,22 @@ behavior and does not expose Explicit Mock URI schemes.
 from __future__ import annotations
 
 import json
-import os
 import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from app.services.attachment_staging_path_contract import (
+    delete_staged_attachment_file,
+    open_staged_attachment_file_for_write,
+    prepare_staged_attachment_directory,
+    read_staged_attachment_metadata,
+    remove_empty_staged_attachment_directory,
+    staging_root,
+    write_staged_attachment_metadata,
+)
 
 
 SUPPORTED_PURPOSES = {
@@ -80,21 +89,17 @@ def register_staged_attachment(
     content_type = _content_type(payload, upload_file)
     attachment_type = _text(payload.get("type")) or _infer_attachment_type(content_type, safe_filename)
     purpose = _normalize_purpose(_text(payload.get("purpose")) or _infer_purpose(safe_filename, attachment_type))
-    staging_dir = _staging_root() / attachment_id
-    staging_dir.mkdir(parents=True, exist_ok=True)
+    staging_dir = prepare_staged_attachment_directory(attachment_id)
 
     stored_path: Path | None = None
     size_bytes = _positive_int(payload.get("size_bytes"))
     if upload_file is not None:
         stored_path = staging_dir / safe_filename
         try:
-            size_bytes = _write_upload(stored_path, upload_file, max_bytes=upload_limit)
+            size_bytes = _write_upload(attachment_id, safe_filename, upload_file, max_bytes=upload_limit)
         except UploadTooLargeError:
-            stored_path.unlink(missing_ok=True)
-            try:
-                staging_dir.rmdir()
-            except OSError:
-                pass
+            delete_staged_attachment_file(attachment_id, safe_filename)
+            remove_empty_staged_attachment_directory(attachment_id)
             raise
 
     storage_uri = (
@@ -132,12 +137,12 @@ def register_staged_attachment(
         },
         "limitations": [],
     }
-    _write_metadata(staging_dir / "metadata.json", attachment)
+    _write_metadata(attachment_id, attachment)
     return attachment
 
 
 def get_staged_attachment(attachment_id: str) -> dict[str, Any] | None:
-    return _read_metadata(_staging_root() / _safe_segment(attachment_id) / "metadata.json")
+    return _read_metadata(attachment_id)
 
 
 def resolve_staged_attachment_references(payload: dict[str, Any]) -> dict[str, Any]:
@@ -185,20 +190,7 @@ def resolve_staged_attachment_references(payload: dict[str, Any]) -> dict[str, A
 
 
 def _staging_root() -> Path:
-    configured_root = ""
-    try:
-        from django.conf import settings
-
-        if settings.configured:
-            configured_root = _text(getattr(settings, "ATTACHMENT_STAGING_ROOT", ""))
-    except ImportError:
-        configured_root = ""
-    environment_root = _text(os.environ.get("ATTACHMENT_STAGING_ROOT"))
-    return Path(
-        configured_root
-        or environment_root
-        or "backend/media/mock_object_storage/attachment_staging"
-    ).resolve()
+    return staging_root()
 
 
 def _validated_attachment_id(value: str) -> str:
@@ -207,10 +199,10 @@ def _validated_attachment_id(value: str) -> str:
     return value
 
 
-def _write_upload(stored_path: Path, upload_file: Any, *, max_bytes: int) -> int:
+def _write_upload(attachment_id: str, filename: str, upload_file: Any, *, max_bytes: int) -> int:
     size_bytes = 0
     try:
-        with stored_path.open("wb") as handle:
+        with open_staged_attachment_file_for_write(attachment_id, filename) as handle:
             chunks = upload_file.chunks() if hasattr(upload_file, "chunks") else [upload_file.read()]
             for chunk in chunks:
                 next_size = size_bytes + len(chunk)
@@ -219,7 +211,7 @@ def _write_upload(stored_path: Path, upload_file: Any, *, max_bytes: int) -> int
                 handle.write(chunk)
                 size_bytes = next_size
     except Exception:
-        stored_path.unlink(missing_ok=True)
+        delete_staged_attachment_file(attachment_id, filename)
         raise
     return size_bytes
 
@@ -339,13 +331,13 @@ def _positive_int(value: Any) -> int:
         return 0
 
 
-def _write_metadata(path: Path, attachment: dict[str, Any]) -> None:
-    path.write_text(json.dumps(attachment, ensure_ascii=False, indent=2), encoding="utf-8")
+def _write_metadata(attachment_id: str, attachment: dict[str, Any]) -> None:
+    write_staged_attachment_metadata(attachment_id, json.dumps(attachment, ensure_ascii=False, indent=2))
 
 
-def _read_metadata(path: Path) -> dict[str, Any] | None:
+def _read_metadata(attachment_id: str) -> dict[str, Any] | None:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(read_staged_attachment_metadata(attachment_id))
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None

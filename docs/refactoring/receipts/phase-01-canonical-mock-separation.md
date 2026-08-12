@@ -84,7 +84,7 @@ P1 보완 append-only commit은 다음과 같다.
 | Error/module | Base | P1 보완 Head | 분류 |
 |---|---:|---:|---|
 | `test/test_evaluate_videomae_classifier.py` | 1 | 1 | known baseline (`cv2`) |
-| `test/test_prepare_benchmark_manifest.py` | 1 | 1 | known baseline (`pypdf`) |
+| `test/test_prepare_benchmark_manifest.py` | 1 | 1 | known baseline (`cv2`) |
 | `test/test_supervisor_acceptance_fixture_pdf.py` | 1 | 1 | known baseline (`pypdf`) |
 | `test/test_videomae_frame_directory.py` | 1 | 1 | known baseline (`cv2`) |
 | PR #401 도입 collection 오류 | 0 | 0 | PASS |
@@ -181,3 +181,29 @@ Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 h
 PR을 merge하지 않은 Draft 상태에서 Phase 1-C 재검토를 받는다. rollback이 필요하면 P1 보완 commit을 최신순으로 별도 revert commit으로 되돌린다. schema 변경과 migration이 없으므로 schema rollback은 필요하지 않다.
 
 Phase 2 View/Application 분리와 Phase 3 queue/repository/storage/bounded-context 재설계는 이 PR 범위에 포함하지 않는다.
+
+## Phase 1-B P1 2차 보완
+
+- staging contract는 `app.services.attachment_staging_path_contract.py`로 중앙화했다.
+- POSIX symlink와 Windows junction에 대해 metadata read, metadata write, upload cleanup delete, local object-storage read/delete를 모두 fail-closed 처리한다.
+- `test/test_phase_01_attachment_staging_security.py`는 외부 metadata와 victim file이 변경되지 않는지 검증한다.
+- `scripts/refactoring/verify_pytest_collection_baseline.py`는 v2 typed contract를 읽고 `ModuleNotFoundError`와 `missing_module`까지 exact-match 한다.
+- 허용 collection debt는 `cv2` 3건과 `pypdf` 1건뿐이다.
+- `backend/chatbot/test_phase_01_dynamic_negative_reachability.py`는 Canonical chat session, file upload/list/detail, history, analysis list/detail/result, agent catalog, report list/detail/document confirmation/download, File Scan Worker, Analysis Worker와 ORM persistence에서 Explicit Mock entry를 fail-fast로 금지한다.
+
+### 현재 로컬 검증
+
+- `python -m pytest -q --timeout=30 -p no:cacheprovider test/test_phase_01_attachment_staging_security.py test/test_phase_01_neutral_contracts.py test/test_phase_01_collection_baseline_contract.py`: `20 passed`.
+- `python backend/manage.py test chatbot.test_phase_01_dynamic_negative_reachability chatbot.test_phase_01_smoke_file_scan_staging --verbosity 1`: `6 tests`, `OK`.
+- `python scripts/refactoring/verify_pytest_collection_baseline.py`: `new_collection_regression`을 fail-closed로 반환했다. 허용 `cv2` 3건은 일치했지만 Windows Python 3.13의 `pymupdf._extra` DLL load failure 6건이 typed contract 밖 오류로 검출됐다.
+- Production DB audit: `NOT_EXECUTED`.
+- Physical column removal: `DEFERRED` (`AnalysisJob.mock_scenario`).
+- 이 보완은 migration, remote DB write, commit, push, PR merge 또는 Draft 해제를 수행하지 않는다.
+
+### D1/D2와 전체 로컬 suite
+
+- D1: `docker build -t skn27-phase-01-p1-local .`와 `docker run --rm skn27-phase-01-p1-local python -c "import app.services.attachment_staging_path_contract; import app.services.chat_orchestration_service; import chatbot.object_storage; import chatbot.runtime_health"`가 통과했다.
+- D2: `scripts/refactoring/run_phase_00_compose_gate.sh`는 Linux LF helper를 사용한 로컬 재현에서 `status=pass`, `agent_worker_consumed=true`, `file_scan_worker_consumed=true`, `cleanup_success`, `last-step=compose-final`을 기록했다.
+- 전체 `python -m pytest -q --timeout=30 -p no:cacheprovider`는 Windows Python 3.13 `pymupdf._extra` DLL 오류 6건과 허용 dependency debt 3건으로 collection에서 중단됐다.
+- 전체 `python backend/manage.py test chatbot --verbosity 1`는 `452 tests`, `2 failures, 21 errors`였다. `pymupdf._extra` DLL 오류와 기존 Windows quarantine portability 관찰 2건이 포함되며, P1 focused/CI-equivalent gate의 결과와 분리한다.
+- Docker Linux D1/D2는 현재 worktree의 Canonical staging·Worker·Compose 경로를 통과했으며, Windows native dependency 오류는 허용 baseline을 확장하지 않고 별도 환경 blocker로 유지한다.
