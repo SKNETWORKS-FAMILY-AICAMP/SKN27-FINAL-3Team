@@ -128,17 +128,15 @@ def test_pull_request_gate_runs_offline_runtime_build_and_infrastructure_checks(
         "test/test_deployment_readiness_artifacts.py",
         "test/test_supervisor_production_contract.py",
         "test/test_api_route_specs.py",
-        "backend/manage.py test chatbot",
         "npm run build",
         "ruff check",
         "terraform fmt -check",
         "terraform validate",
         "docker build",
     ):
-        if command == "backend/manage.py test chatbot":
-            assert command not in workflow
-        else:
-            assert command in workflow
+        assert command in workflow
+    assert "Full Django chatbot regression gate" in workflow
+    assert "run: python backend/manage.py test chatbot --verbosity 1" in workflow
     assert "--run-live" not in workflow
     assert "--run-aws" not in workflow
 
