@@ -56,9 +56,14 @@ jobs:
             chatbot.test_phase_01_dynamic_negative_reachability \
             chatbot.test_phase_01_legacy_marker_projection \
             chatbot.test_phase_01_smoke_file_scan_staging \
+            chatbot.test_phase_01_attachment_scan_gate_compatibility \
+            chatbot.test_phase_01_public_worker_node_isolation \
             chatbot.test_report_api_contract \
             --verbosity 1
 
+      - name: Full Django chatbot regression gate
+        timeout-minutes: 30
+        run: python backend/manage.py test chatbot --verbosity 1
       - name: Pytest collection no-new-regression gate
         timeout-minutes: 10
         run: python scripts/refactoring/verify_pytest_collection_baseline.py
