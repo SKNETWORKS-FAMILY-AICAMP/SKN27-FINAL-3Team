@@ -18,6 +18,11 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
+from app.application.cases.confirm_facts import (
+    CaseFactConfirmationAccessDenied,
+    ConfirmCaseFactsCommand,
+    execute_confirm_case_facts,
+)
 from app.application.cases.get_workspace import (
     CaseWorkspaceAccessDenied,
     GetCaseWorkspaceQuery,
@@ -1637,30 +1642,24 @@ def consultation_case_fact_confirmation(request: HttpRequest, case_id: str) -> J
     login_response = _case_login_required_response(request, subject, action="case_fact_confirmation")
     if login_response is not None:
         return login_response
-    access = authorize_resource_access(
-        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
-        identity_payload,
-    )
-    if not access["allowed"]:
-        return _object_access_denied_response(request, access)
-    validated, validation_response = _validate_request_dto(
-        request,
-        ConfirmCaseFactsRequest,
-        body,
-    )
-    if validation_response is not None:
-        return validation_response
     try:
-        fact_version = confirm_case_facts(
-            case_id,
-            owner_id=str(subject.get("user_id") or ""),
-            payload=validated,
+        result = execute_confirm_case_facts(
+            ConfirmCaseFactsCommand(
+                case_id=case_id,
+                owner_id=str(subject.get("user_id") or ""),
+                identity_payload=identity_payload,
+                raw_payload=body,
+            )
         )
+    except CaseFactConfirmationAccessDenied as exc:
+        return _object_access_denied_response(request, exc.access)
+    except ValidationError as exc:
+        return _request_validation_error_response(request, exc)
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
     response_payload = _serialize_response_dto(
         ConfirmCaseFactsResponse,
-        {"contract_version": "confirmed_facts.v1", "fact_version": fact_version},
+        {"contract_version": "confirmed_facts.v1", "fact_version": result.fact_version},
     )
     return _json_response(request, response_payload, status=201)
 
@@ -2573,29 +2572,36 @@ def _validate_request_dto(
     try:
         dto = dto_type.model_validate(payload)
     except ValidationError as exc:
-        details = [
-            {
-                "field": ".".join(str(part) for part in error["loc"]),
-                "type": error["type"],
-                "message": error["msg"],
-            }
-            for error in exc.errors(include_url=False, include_input=False)
-        ]
-        return {}, _json_response(
-            request,
-            {
-                "error": {
-                    "contract_version": "request_validation_error.v1",
-                    "type": "validation",
-                    "code": "validation_error",
-                    "status": 422,
-                    "message": "요청 필드를 확인해 주세요.",
-                    "details": details,
-                }
-            },
-            status=422,
-        )
+        return {}, _request_validation_error_response(request, exc)
     return dto.model_dump(mode="python"), None
+
+
+def _request_validation_error_response(
+    request: HttpRequest,
+    error: ValidationError,
+) -> JsonResponse:
+    details = [
+        {
+            "field": ".".join(str(part) for part in item["loc"]),
+            "type": item["type"],
+            "message": item["msg"],
+        }
+        for item in error.errors(include_url=False, include_input=False)
+    ]
+    return _json_response(
+        request,
+        {
+            "error": {
+                "contract_version": "request_validation_error.v1",
+                "type": "validation",
+                "code": "validation_error",
+                "status": 422,
+                "message": "요청 필드를 확인해 주세요.",
+                "details": details,
+            }
+        },
+        status=422,
+    )
 
 
 def _serialize_response_dto(
