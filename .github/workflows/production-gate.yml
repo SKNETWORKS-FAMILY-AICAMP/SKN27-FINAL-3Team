@@ -83,6 +83,13 @@ jobs:
             chatbot.test_phase_02_case_workspace_use_case \
             --verbosity 1
 
+      - name: Phase 2 B2 case fact confirmation application boundary
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_02_case_fact_confirmation_use_case \
+            chatbot.test_consultation_v2.ConsultationCaseApiTests.test_fact_confirmation_precedes_real_worker_queue \
+            --verbosity 1
+
       - name: Full Django chatbot regression gate
         timeout-minutes: 30
         run: python backend/manage.py test chatbot --verbosity 1
