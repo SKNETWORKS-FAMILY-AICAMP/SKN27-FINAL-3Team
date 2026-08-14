@@ -95,6 +95,73 @@ GET /api/cases/<case_id>/workspace/
 - D2 could not start because `bash scripts/refactoring/run_phase_00_compose_gate.sh` failed before script execution with WSL `execvpe(/bin/bash) failed: No such file or directory`.
 - No push and no PR creation are authorized while D1/D2 are blocked.
 
+## Corrected Local Docker Verification
+
+### Historical Status
+
+- BLOCKED_BY_LOCAL_DOCKER_RUNTIME: historical/superseded.
+- BLOCKED_BY_INVALID_D1_SMOKE_COMMAND: historical/superseded. Django ORM-dependent Application module was imported before Django setup.
+- BLOCKED_BY_LOCAL_COMPOSE_GATE_FAILURE: historical/superseded.
+- BLOCKED_BY_GIT_BASH_PYTHON3_RESOLUTION: historical/superseded. Git Bash resolved python3 to the WindowsApps alias.
+
+### D1
+
+- Image: skn27-phase-02-b1-local
+- Image build: PASS
+- CI-equivalent import: PASS
+- Django runtime check: PASS
+- P2-B1 Django-aware import: PASS
+- ROOT_URLCONF: config.urls
+- Explicit Mock: False
+- Result: PASS
+
+### D2 Host Runtime
+
+- Git Bash: C:\Program Files\Git\bin\bash.exe
+- Original python3: WindowsApps alias
+- Resolution: temporary external PATH shim
+- Repository script changed: NO
+- System PATH changed: NO
+- User PATH changed: NO
+- Python executable: C:\Users\asus\AppData\Local\Programs\Python\Python313\python.exe
+- Shim retained: NO
+
+### D2 Result
+
+- Script: scripts/refactoring/run_phase_00_compose_gate.sh
+- Exit Code: 0
+- PostgreSQL: ready
+- Redis: ready
+- ClamAV: ready
+- Neo4j: ready
+- Backend live: true
+- Backend ready: true
+- Agent Worker: consumed
+- File Scan Worker: consumed
+- File status: ready
+- Scan status: clean
+- Scanner: clamav
+- Retry count: 0
+- Staging URI: local://attachment-staging/att_phase00_1786708182_4657/file-scan-smoke.txt
+- Mock URI: 0
+- failed-step: absent
+- last-step: compose-final
+- cleanup: cleanup_success
+- residue: containers 0, volumes 0, networks 0
+- Result: PASS
+
+### Evidence
+
+- Local evidence: tmp/phase-00-compose-evidence
+- gate-summary.json: PASS
+- file-scan-result.json: PASS
+- last-step.txt: compose-final
+- cleanup.txt: cleanup_success
+
+### Head Classification
+
+- Behavior Head: 0a5305ef1ef2d0de77a04ddd5ada067b04a679fc
+- Docker evidence delta: docs-only
 ## Deferred Scope
 
 - P2B2 `ConfirmCaseFacts`
