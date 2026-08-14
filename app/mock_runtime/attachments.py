@@ -10,6 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from app.services.attachment_scan_gate_contract import (
+    CANONICAL_SCAN_GATE_MARKER,
+    is_canonical_scan_ready_reference,
+    merge_canonical_scan_ready_reference,
+)
+
 
 
 SUPPORTED_PURPOSES = {
@@ -25,21 +31,6 @@ SUPPORTED_PURPOSES = {
 
 MAX_MOCK_UPLOAD_BYTES = 20 * 1024 * 1024
 
-
-class _CanonicalScanGateMarker(str):
-    """JSON-safe in-process provenance marker that still requires identity."""
-
-    __slots__ = ()
-
-    def __new__(cls) -> "_CanonicalScanGateMarker":
-        return str.__new__(cls, "canonical-scan-gate")
-
-    def __deepcopy__(self, memo: dict[int, Any]) -> "_CanonicalScanGateMarker":
-        del memo
-        return self
-
-
-CANONICAL_SCAN_GATE_MARKER = _CanonicalScanGateMarker()
 
 
 class UploadTooLargeError(ValueError):
@@ -180,8 +171,8 @@ def resolve_attachment_references(payload: dict[str, Any]) -> dict[str, Any]:
     for attachment in attachments:
         attachment_id = attachment.get("attachment_id")
 
-        if _is_canonical_scan_ready_reference(attachment):
-            resolved_attachments.append(_merge_attachment_metadata(attachment, {}))
+        if is_canonical_scan_ready_reference(attachment):
+            resolved_attachments.append(merge_canonical_scan_ready_reference(attachment))
             if attachment_id:
                 resolution["resolved_attachment_ids"].append(str(attachment_id))
             continue
@@ -343,18 +334,6 @@ def _merge_attachment_metadata(
     attachment_ref: dict[str, Any],
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
-    if _is_canonical_scan_ready_reference(attachment_ref):
-        attachment = {
-            **attachment_ref,
-            "resolution_status": "scan_ready",
-            "metadata_source": "canonical_scan_gate",
-        }
-        return {
-            key: value
-            for key, value in attachment.items()
-            if key != "_canonical_scan_gate" and value is not None
-        }
-
     handoff = metadata.get("agent_handoff", {})
     attachment = {
         **attachment_ref,
@@ -367,24 +346,6 @@ def _merge_attachment_metadata(
         "metadata_source": "mock_upload_registry",
     }
     return {key: value for key, value in attachment.items() if value is not None}
-
-
-def _is_canonical_scan_ready_reference(attachment_ref: dict[str, Any]) -> bool:
-    object_storage = attachment_ref.get("object_storage")
-    if not isinstance(object_storage, dict):
-        return False
-    storage_uri = str(attachment_ref.get("storage_uri") or "")
-    return (
-        attachment_ref.get("_canonical_scan_gate")
-        is CANONICAL_SCAN_GATE_MARKER
-        and attachment_ref.get("resolution_status") == "scan_ready"
-        and attachment_ref.get("status") == "ready"
-        and attachment_ref.get("scan_status") == "clean"
-        and storage_uri.startswith("s3://")
-        and object_storage.get("resource_type") == "uploaded_file"
-        and object_storage.get("status") == "ready"
-        and object_storage.get("storage_uri") == storage_uri
-    )
 
 
 def _normalize_inline_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
