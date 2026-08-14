@@ -1124,7 +1124,7 @@ class ConsultationPersistenceSafetyTests(TestCase):
         )
         with (
             patch(
-                "chatbot.repositories.register_mock_attachment",
+                "chatbot.repositories.register_staged_attachment",
                 return_value=server_attachment,
             ) as register_attachment,
             patch(
@@ -1151,12 +1151,18 @@ class ConsultationPersistenceSafetyTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200, response.content)
+        attachment = response.json()["attachment"]
         registration_payload = register_attachment.call_args.args[0]
         self.assertNotIn("attachment_id", registration_payload)
-        self.assertNotEqual(
-            response.json()["attachment"]["attachment_id"],
-            "att_client_controlled",
-        )
+        self.assertEqual(attachment["attachment_id"], server_attachment["attachment_id"])
+        self.assertNotEqual(attachment["attachment_id"], "att_client_controlled")
+        self.assertEqual(attachment["session_id"], self.session.session_id)
+        self.assertEqual(attachment["case_id"], self.case.case_id)
+        self.assertEqual(attachment["persistence"]["status"], "metadata_saved")
+        persisted = UploadedFile.objects.get(attachment_id=server_attachment["attachment_id"])
+        self.assertEqual(persisted.owner_id, self.owner_id)
+        self.assertEqual(persisted.session_id, self.session.id)
+        self.assertEqual(persisted.case_id, self.case.id)
 
     @override_settings(RAW_MEDIA_RETENTION_DAYS=45, USER_RETENTION_DAYS=365)
     def test_upload_retention_uses_media_and_authenticated_document_settings(self) -> None:
