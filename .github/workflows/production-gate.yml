@@ -38,6 +38,60 @@ jobs:
           test/test_legal_rag_service.py
           etl/fault_cases/src/agents/text_ml_case_search/tests/test_pgvector_unified_retriever.py
 
+      - name: Phase 1 canonical and Explicit Mock boundary gate
+        timeout-minutes: 10
+        run: |
+          python -m pytest -q --timeout=30 \
+            test/test_phase_01_runtime_import_boundaries.py \
+            test/test_phase_01_neutral_contracts.py \
+            test/test_phase_01_mock_runtime_ownership.py \
+            test/test_phase_01_mock_runtime_isolation.py \
+            test/test_phase_01_attachment_staging_security.py \
+            test/test_phase_01_collection_baseline_contract.py \
+            test/test_phase_01_frontend_mock_surface.py
+          python backend/manage.py test \
+            chatbot.test_phase_01_mock_url_isolation \
+            chatbot.test_phase_01_canonical_negative_reachability \
+            chatbot.test_phase_01_canonical_persistence \
+            chatbot.test_phase_01_dynamic_negative_reachability \
+            chatbot.test_phase_01_legacy_marker_projection \
+            chatbot.test_phase_01_smoke_file_scan_staging \
+            chatbot.test_phase_01_attachment_scan_gate_compatibility \
+            chatbot.test_phase_01_public_worker_node_isolation \
+            chatbot.test_report_api_contract \
+            --verbosity 1
+
+      - name: Phase 1 attachment compatibility regressions
+        timeout-minutes: 10
+        run: >
+          python backend/manage.py test
+          chatbot.test_file_quarantine.FileQuarantinePipelineTests.test_object_read_rechecks_retention_under_the_database_fence
+          chatbot.test_consultation_v2.ConsultationPersistenceSafetyTests.test_file_api_ignores_client_supplied_attachment_id
+          chatbot.test_phase_01_attachment_scan_gate_compatibility
+          --verbosity 1
+
+      - name: Phase 1 all-public-worker Explicit Mock isolation
+        timeout-minutes: 10
+        run: >
+          python backend/manage.py test
+          chatbot.test_phase_01_public_worker_node_isolation
+          --verbosity 1
+
+      - name: Full Django chatbot regression gate
+        timeout-minutes: 30
+        run: python backend/manage.py test chatbot --verbosity 1
+      - name: Pytest collection no-new-regression gate
+        timeout-minutes: 10
+        run: python scripts/refactoring/verify_pytest_collection_baseline.py
+
+      - name: Upload pytest collection baseline evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-01-pytest-collection-baseline
+          path: tmp/phase-01-pytest-collection-baseline.json
+          retention-days: 14
+
       - name: Phase 0 core user-flow characterization gate
         timeout-minutes: 10
         run: |
@@ -97,6 +151,9 @@ jobs:
       - name: Frontend production build
         working-directory: app/web
         run: npm run build
+
+      - name: Frontend Explicit Mock build-surface gate
+        run: python -m pytest -q --timeout=30 test/test_phase_01_frontend_mock_surface.py
 
       - uses: hashicorp/setup-terraform@v3
         with:

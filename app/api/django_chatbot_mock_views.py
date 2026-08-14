@@ -1,11 +1,11 @@
-"""Optional Django view adapter for the chatbot mock service."""
+"""Optional Django view adapter for the Explicit Mock runtime."""
 
 from __future__ import annotations
 
 import json
 from typing import Any, Callable
 
-from app.services.chatbot_mock_service import create_session, perform_report_action, submit_message
+from app.mock_runtime.chat import create_session, perform_report_action, submit_message
 
 try:
     from django.http import HttpRequest, JsonResponse

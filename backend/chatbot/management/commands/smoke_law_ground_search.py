@@ -7,7 +7,7 @@ from datetime import date
 
 from django.core.management.base import BaseCommand, CommandError
 
-from app.services.agent_node_service import execute_mock_node
+from app.services.agent_node_service import execute_agent_node
 
 
 class Command(BaseCommand):
@@ -36,7 +36,7 @@ class Command(BaseCommand):
         parser.add_argument("--format", choices=["json", "text"], default="json", help="Output format.")
 
     def handle(self, *args, **options):
-        execution = execute_mock_node(
+        execution = execute_agent_node(
             {
                 "node_code": "law_ground_search",
                 "execution_mode": "sync",

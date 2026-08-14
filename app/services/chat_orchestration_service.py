@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from app.security.chat_input_privacy import protect_chat_input_payload
-from app.services.attachment_mock_service import resolve_attachment_references
+from app.services.attachment_staging_service import resolve_staged_attachment_references
 from app.services.attachment_workflow_service import build_attachment_workflows
 from app.services.case_memory_service import update_case_memory
 from app.services.case_evidence_service import build_case_evidence
@@ -161,7 +161,7 @@ def submit_message(
     confirmed_report_user_facts: str = "",
 ) -> dict[str, Any]:
     payload = protect_chat_input_payload(payload)
-    payload = resolve_attachment_references(payload)
+    payload = resolve_staged_attachment_references(payload)
     session_id = str(payload.get("session_id") or f"ses_{uuid4().hex[:12]}")
     message_id = f"msg_{uuid4().hex[:12]}"
     attachments = [item for item in payload.get("attachments", []) if isinstance(item, dict)]

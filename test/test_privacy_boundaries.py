@@ -23,7 +23,7 @@ from ai.agents.law_ground_search import agent as law_ground_search_agent
 from ai.agents.law_ground_search import llm_extractor, query_understanding, search
 from app.security.pii_masking import MASK_TOKEN
 from app.services import agent_node_service
-from app.services.agent_node_service import execute_mock_node
+from app.services.agent_node_service import execute_agent_node
 from app.services.history_event_mock_service import build_history_event
 from chatbot import file_scan_service, object_storage, repositories
 
@@ -139,7 +139,7 @@ def test_agent_adapter_error_exposes_only_stable_error_metadata(monkeypatch) -> 
 
     monkeypatch.setattr(agent_node_service, "_run_sync_adapter", raise_private_error)
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "law_ground_search",
@@ -167,7 +167,7 @@ def test_fine_notice_adapter_internal_error_never_exposes_exception_message(monk
 
     monkeypatch.setattr(graph_module.graph, "invoke", raise_private_error)
 
-    execution = execute_mock_node(
+    execution = execute_agent_node(
         {
             "execution_mode": "sync",
             "node_code": "fine_notice_analysis",

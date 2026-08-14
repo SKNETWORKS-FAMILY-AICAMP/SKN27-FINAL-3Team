@@ -39,18 +39,12 @@ from app.services.agent_node_service import (
     execute_agent_node,
     list_public_agent_nodes,
 )
-from app.services.analysis_job_mock_service import create_analysis_job
 from app.services.analysis_job_query_service import (
     load_analysis_job_detail,
     load_analysis_result,
 )
 from app.services.analysis_progress_service import build_analysis_progress
-from app.services.attachment_mock_service import (
-    UploadTooLargeError,
-    get_attachment as get_mock_attachment,
-    list_attachments as list_mock_attachments,
-    register_attachment as register_mock_attachment,
-)
+from app.services.attachment_staging_service import UploadTooLargeError
 from app.services.auth_session_service import (
     create_guest_session as _create_guest_session,
     get_current_auth_subject as _get_current_auth_subject,
@@ -79,12 +73,9 @@ from app.services.google_auth_service import (
     create_token_refresh as _create_token_refresh,
     validate_google_code_request_boundary as _validate_google_code_request_boundary,
 )
-from app.services.history_event_mock_service import (
+from app.services.history_event_contract import (
     HISTORY_EVENT_VERSION,
     actor_from_payload,
-    list_history_events as list_sidecar_history_events,
-    record_agent_execution_events as record_sidecar_agent_execution_events,
-    record_history_event as record_sidecar_history_event,
     source_from_request,
     subject_from_payload,
 )
@@ -102,7 +93,7 @@ from app.services.report_query_service import (
     report_execution_mode,
 )
 from chatbot.api_response import (
-    is_canonical_mock_request as _is_canonical_mock_request,
+    is_canonical_request as _is_canonical_request,
     json_response as _json_response,
 )
 from chatbot.case_repository import (
@@ -681,7 +672,7 @@ def history_events(request: HttpRequest) -> JsonResponse:
     identity_error = _request_identity_error_response(request, identity_payload)
     if identity_error is not None:
         return identity_error
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         job_id = request.GET.get("job_id")
         if job_id:
             metadata = get_analysis_job_access_metadata(job_id)
@@ -706,27 +697,15 @@ def history_events(request: HttpRequest) -> JsonResponse:
         "event_type": request.GET.get("event_type"),
         "limit": _positive_int(request.GET.get("limit"), default=100),
     }
-    if _is_canonical_mock_request(request):
-        if not any(filters.get(key) for key in ("session_id", "user_id", "guest_id", "job_id")):
-            if subject.get("user_id"):
-                filters["user_id"] = subject["user_id"]
-            elif subject.get("guest_id"):
-                filters["guest_id"] = subject["guest_id"]
-        filters["subject_type"] = subject.get("subject_type")
-        events = list_history_event_records(**filters)
-        storage = {
-            "backend": "postgresql",
-            "policy": "standard_light",
-            "table": "history_events",
-        }
-        policy = history_operating_policy(subject.get("subject_type"))
-    else:
-        events = list_sidecar_history_events(**filters)
-        storage = {
-            "backend": "mock_sidecar_json",
-            "policy": "standard_light",
-        }
-        policy = history_operating_policy("anonymous")
+    if not any(filters.get(key) for key in ("session_id", "user_id", "guest_id", "job_id")):
+        if subject.get("user_id"):
+            filters["user_id"] = subject["user_id"]
+        elif subject.get("guest_id"):
+            filters["guest_id"] = subject["guest_id"]
+    filters["subject_type"] = subject.get("subject_type")
+    events = list_history_event_records(**filters)
+    storage = {"backend": "postgresql", "policy": "standard_light", "table": "history_events"}
+    policy = history_operating_policy(subject.get("subject_type"))
     after_service_summary = build_history_after_service_summary(events)
     return _json_response(
         request,
@@ -748,7 +727,7 @@ def history_events(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "OPTIONS"])
 def mypage_summary(request: HttpRequest) -> JsonResponse:
     identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         access = _authorize_mypage_query(request, identity_payload)
         if not access["allowed"]:
             return _object_access_denied_response(request, access)
@@ -760,7 +739,7 @@ def mypage_summary(request: HttpRequest) -> JsonResponse:
         owner_id=owner_id,
         limit=_positive_int(request.GET.get("limit"), default=10),
     )
-    if _is_canonical_mock_request(request) and request.GET.get("session_id"):
+    if _is_canonical_request(request) and request.GET.get("session_id"):
         summary["session_cache"] = read_chat_session_state(request.GET["session_id"])
     return _json_response(request, summary)
 
@@ -780,22 +759,19 @@ def agent_nodes(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "POST", "OPTIONS"])
 def attachments(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
-        if _is_canonical_mock_request(request):
-            identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-            policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
-            if policy_response is not None:
-                return policy_response
-            access = _authorize_session_query(request.GET.get("session_id"), identity_payload, resource_type="uploaded_file_list")
-            if not access["allowed"]:
-                return _object_access_denied_response(request, access)
-            subject = access_subject_from_payload(identity_payload)["subject"]
-            owner_id = subject.get("user_id")
-            attachments_payload = list_uploaded_files(
-                session_id=request.GET.get("session_id"),
-                owner_id=owner_id if owner_id else None,
-            )
-        else:
-            attachments_payload = list_mock_attachments(session_id=request.GET.get("session_id"))
+        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+        policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
+        if policy_response is not None:
+            return policy_response
+        access = _authorize_session_query(request.GET.get("session_id"), identity_payload, resource_type="uploaded_file_list")
+        if not access["allowed"]:
+            return _object_access_denied_response(request, access)
+        subject = access_subject_from_payload(identity_payload)["subject"]
+        owner_id = subject.get("user_id")
+        attachments_payload = list_uploaded_files(
+            session_id=request.GET.get("session_id"),
+            owner_id=owner_id if owner_id else None,
+        )
         return _json_response(request, {"attachments": attachments_payload})
 
     payload = _request_payload(request)
@@ -809,7 +785,7 @@ def attachments(request: HttpRequest) -> JsonResponse:
             ),
         )
     upload_file = _first_upload_file(request)
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         identity_payload = _payload_with_request_identity(request, payload)
         policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
         if policy_response is not None:
@@ -832,14 +808,12 @@ def attachments(request: HttpRequest) -> JsonResponse:
             _refund_usage_safely(usage, reason="file_upload_access_denied")
             return _persistence_access_denied_response(request)
         attachment["usage"] = usage
-    else:
-        attachment = register_mock_attachment(payload, upload_file=upload_file)
     return _json_response(request, {"attachment": attachment})
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
         access_metadata = get_uploaded_file_access_metadata(attachment_id)
         if access_metadata is not None:
@@ -847,8 +821,6 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
             if not access["allowed"]:
                 return _object_access_denied_response(request, access)
         attachment = get_uploaded_file(attachment_id)
-    else:
-        attachment = get_mock_attachment(attachment_id)
     if not attachment:
         return _json_response(
             request,
@@ -899,9 +871,9 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         )
 
     body = _json_body(request)
-    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
+    identity_body = _payload_with_request_identity(request, body) if _is_canonical_request(request) else body
     usage = None
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         identity_error = _request_identity_error_response(request, identity_body)
         if identity_error is not None:
             return identity_error
@@ -1196,8 +1168,6 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
             "work_item": work_item,
             "usage": usage,
         }
-    else:
-        job = create_analysis_job(identity_body)
     actor = _history_actor(request, body)
     source = _history_source(request)
     subject = subject_from_payload(
@@ -1216,7 +1186,6 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         source=source,
         metadata={
             "routing_intent": job.get("routing_intent"),
-            "mock_scenario": job.get("mock_scenario"),
             "active_node": job.get("active_node"),
             "analysis_plan_id": job.get("analysis_plan_id"),
             "status_counts": job.get("status_counts", {}),
@@ -1535,17 +1504,17 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def update_chat_save_state(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
+    identity_body = _payload_with_request_identity(request, body) if _is_canonical_request(request) else body
     session_id = str(body.get("session_id") or identity_body.get("session_id") or "")
 
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         access = _authorize_session_query(session_id, identity_body, resource_type="chat_save_state")
         if not access["allowed"]:
             return _object_access_denied_response(request, access)
 
     subject = access_subject_from_payload(identity_body)["subject"]
     save_state = conversation_save_state_from_payload(body, default="pending")
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         guest_violation = _guest_identity_policy_violation(subject)
         if guest_violation:
             return _guest_identity_policy_response(request, guest_violation)
@@ -1749,8 +1718,8 @@ def run_agent_node(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def run_agent_plan(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    execution_payload = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
-    if _is_canonical_mock_request(request):
+    execution_payload = _payload_with_request_identity(request, body) if _is_canonical_request(request) else body
+    if _is_canonical_request(request):
         try:
             execution_payload = protect_chat_input_payload(execution_payload)
         except ChatInputRejected as exc:
@@ -1796,7 +1765,7 @@ def run_agent_plan(request: HttpRequest) -> JsonResponse:
     response = {"analysis_plan": analysis_plan}
     if chat_response:
         response["chat_response"] = chat_response
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         if _uses_async_worker(execution_payload) or _analysis_plan_requires_persisted_reporting(
             analysis_plan
         ):
@@ -1874,7 +1843,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
             return auth_response
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
         subject = access_subject_from_payload(identity_payload)["subject"]
-        if _is_canonical_mock_request(request):
+        if _is_canonical_request(request):
             guest_violation = _guest_identity_policy_violation(subject)
             if guest_violation:
                 return _guest_identity_policy_response(request, guest_violation)
@@ -1889,7 +1858,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
                 )
         reports = list_report_records(
             session_id=request.GET.get("session_id"),
-            owner_id=str(subject.get("user_id") or "") if _is_canonical_mock_request(request) else request.GET.get("owner_id"),
+            owner_id=str(subject.get("user_id") or "") if _is_canonical_request(request) else request.GET.get("owner_id"),
         )
         has_worker_reports = any(
             report.get("source") == WORKER_REPORT_SOURCE
@@ -1900,17 +1869,17 @@ def report_action(request: HttpRequest) -> JsonResponse:
             compose_report_list_response(
                 reports,
                 api_surface=report_api_surface(
-                    canonical=_is_canonical_mock_request(request),
+                    canonical=_is_canonical_request(request),
                     source=WORKER_REPORT_SOURCE if has_worker_reports else "",
                 ),
             ),
         )
 
     body = _json_body(request)
-    identity_body = _payload_with_request_identity(request, body) if _is_canonical_mock_request(request) else body
+    identity_body = _payload_with_request_identity(request, body) if _is_canonical_request(request) else body
     subject = access_subject_from_payload(identity_body)["subject"]
     action = str(body.get("action") or identity_body.get("action") or "save").lower()
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         guest_violation = _guest_identity_policy_violation(subject)
         if guest_violation:
             return _guest_identity_policy_response(request, guest_violation)
@@ -1936,7 +1905,7 @@ def report_action(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "OPTIONS"])
 def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
     access_metadata = None
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         auth_response = _report_auth_error_response(
             request,
             session_id=request.GET.get("session_id"),
@@ -1978,7 +1947,7 @@ def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
         compose_report_detail_response(
             report,
             api_surface=report_api_surface(
-                canonical=_is_canonical_mock_request(request),
+                canonical=_is_canonical_request(request),
                 source=report.get("source"),
             ),
             execution_mode=report_execution_mode(source=report.get("source")),
@@ -2077,7 +2046,7 @@ def report_document_confirmation(request: HttpRequest, report_id: str) -> JsonRe
 
 @require_http_methods(["GET", "OPTIONS"])
 def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
-    if _is_canonical_mock_request(request):
+    if _is_canonical_request(request):
         auth_response = _report_auth_error_response(
             request,
             session_id=request.GET.get("session_id"),
@@ -2703,7 +2672,7 @@ def _canonical_guest_identity_policy_response(
     identity_error = _request_identity_error_response(request, payload)
     if identity_error is not None:
         return identity_error
-    if not _is_canonical_mock_request(request):
+    if not _is_canonical_request(request):
         return None
     subject = access_subject_from_payload(payload)["subject"]
     violation = _guest_identity_policy_violation(subject)
@@ -2912,12 +2881,7 @@ def _actor_from_auth_me_payload(request: HttpRequest, payload: dict[str, object]
 
 
 def _history_source(request: HttpRequest, node_code: str | None = None) -> dict[str, object]:
-    execution_mode = "canonical_mock" if _is_canonical_mock_request(request) else "mock"
-    return source_from_request(
-        api_path=request.path,
-        execution_mode=execution_mode,
-        node_code=node_code,
-    )
+    return source_from_request(api_path=request.path, execution_mode="canonical", node_code=node_code)
 
 
 def _has_blocked_attachments(chat_response: dict[str, object]) -> bool:
@@ -3409,7 +3373,6 @@ def _agent_plan_job_payload(body: dict[str, object], response: dict[str, object]
         "session_id": node_execution.get("session_id") or chat_response.get("session_id") or body.get("session_id"),
         "message_id": message_id,
         "routing_intent": chat_response.get("routing_intent") or analysis_plan.get("routing_intent"),
-        "mock_scenario": chat_response.get("mock_scenario") or body.get("mock_scenario"),
         "status": status,
         "active_node": progress.get("active_node") or "agent_result_validation",
         "progress_message": progress.get("message") or "Supervisor plan execution completed.",
@@ -3591,12 +3554,10 @@ def _supervisor_execution_response(
 
 def _record_history_safely(request: HttpRequest, **kwargs: object) -> dict[str, object] | None:
     try:
-        if _is_canonical_mock_request(request):
-            metadata = kwargs.get("metadata")
-            if isinstance(metadata, dict) and metadata.get("conversation_save_state") in {"pending", "session_only"}:
-                return None
-            return record_history_event_record(**kwargs)
-        return record_sidecar_history_event(**kwargs)
+        metadata = kwargs.get("metadata")
+        if isinstance(metadata, dict) and metadata.get("conversation_save_state") in {"pending", "session_only"}:
+            return None
+        return record_history_event_record(**kwargs)
     except (DatabaseError, OSError):
         return None
 
@@ -3610,10 +3571,7 @@ def _record_agent_events_safely(
     subject: dict[str, object],
 ) -> None:
     try:
-        if _is_canonical_mock_request(request):
-            record_agent_history_event_records(executions, actor=actor, source=source, subject=subject)
-        else:
-            record_sidecar_agent_execution_events(executions, actor=actor, source=source, subject=subject)
+        record_agent_history_event_records(executions, actor=actor, source=source, subject=subject)
     except (DatabaseError, OSError):
         return
 

@@ -24,7 +24,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from app.security.pii_masking import sanitize_pii
-from app.services.attachment_mock_service import CANONICAL_SCAN_GATE_MARKER
+from app.services.attachment_scan_gate_contract import CANONICAL_SCAN_GATE_MARKER
 from chatbot.attachment_classification_service import (
     confirmed_attachment_classification_handoff,
 )

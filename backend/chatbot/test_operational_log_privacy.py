@@ -73,7 +73,7 @@ class OperationalLogPrivacyTests(TestCase):
             content_type="application/json",
         )
         with (
-            patch("chatbot.views._is_canonical_mock_request", return_value=True),
+            patch("chatbot.views._is_canonical_request", return_value=True),
             patch("chatbot.views.reserve_analysis_job_request", side_effect=_private_exception()),
             self.assertLogs("chatbot.views", level="WARNING") as captured,
         ):

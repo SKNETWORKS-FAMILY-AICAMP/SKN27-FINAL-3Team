@@ -12,6 +12,14 @@ from typing import Any
 
 from django.conf import settings
 
+from app.services.attachment_staging_path_contract import (
+    cleanup_staged_source_uri,
+    local_staging_path_from_uri,
+    read_staged_source_bytes,
+    staged_attachment_directory,
+    staging_root,
+)
+
 OBJECT_STORAGE_POLICY_VERSION = "object_storage_adapter.v1"
 DEFAULT_OBJECT_STORAGE_PROVIDER = "mock_s3"
 DEFAULT_OBJECT_STORAGE_BUCKET = "skn27-demo-object-storage"
@@ -107,10 +115,12 @@ def write_object_from_source_uri(
     if boundary_error:
         return _write_skipped(reference, reason=boundary_error)
     source_uri = _text(reference.get("source_uri"))
-    source_path = _mock_upload_path_from_uri(source_uri)
-    if source_path and source_path.exists():
-        data = source_path.read_bytes()
+    if source_uri.startswith("local://attachment-staging/"):
+        data = read_staged_source_bytes(source_uri)
     else:
+        source_path = _mock_upload_path_from_uri(source_uri)
+        data = source_path.read_bytes() if source_path and source_path.exists() else None
+    if data is None:
         return _write_skipped(reference, reason="source_file_unavailable")
     return write_object(
         reference,
@@ -130,7 +140,12 @@ def delete_source_uri(
 ) -> dict[str, Any]:
     """Remove temporary upload bytes and their metadata sidecar."""
 
-    source_path = _mock_upload_path_from_uri(_text(source_uri))
+    normalized_source_uri = _text(source_uri)
+    if normalized_source_uri.startswith("local://attachment-staging/"):
+        result = cleanup_staged_source_uri(normalized_source_uri, attachment_id=attachment_id)
+        if result is not None:
+            return result
+    source_path = _mock_upload_path_from_uri(normalized_source_uri)
     attachment_dir = (
         source_path.parent
         if source_path is not None
@@ -159,9 +174,12 @@ def delete_source_uri(
 
 
 def _metadata_attachment_id(source_uri: str) -> str:
-    prefix = "mock://metadata/"
     value = _text(source_uri)
-    return value.removeprefix(prefix).strip("/") if value.startswith(prefix) else ""
+    if value.startswith("mock://metadata/"):
+        return value.removeprefix("mock://metadata/").strip("/")
+    if value.startswith("local://attachment-staging/"):
+        return value.removeprefix("local://attachment-staging/").strip("/").split("/", 1)[0]
+    return ""
 
 
 def _mock_upload_directory(attachment_id: str) -> Path | None:
@@ -813,6 +831,21 @@ def _mock_upload_path_from_uri(source_uri: str) -> Path | None:
     if root != source_path and root not in source_path.parents:
         return None
     return source_path
+
+
+def _local_staging_root() -> Path:
+    return staging_root()
+
+
+def _local_staging_directory(attachment_id: str) -> Path | None:
+    normalized = _text(attachment_id)
+    if not normalized or not re.fullmatch(r"[A-Za-z0-9._-]+", normalized):
+        return None
+    return staged_attachment_directory(normalized)
+
+
+def _local_staging_path_from_uri(source_uri: str) -> Path | None:
+    return local_staging_path_from_uri(source_uri)
 
 
 def _boto3_client():

@@ -16,7 +16,7 @@ from django.test import Client, RequestFactory, SimpleTestCase, TestCase, overri
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from app.services.agent_node_service import execute_mock_node
+from app.services.agent_node_service import execute_agent_node
 from app.services.persona_catalog_service import list_demo_personas
 from chatbot.models import (
     AgentFeedbackEvent,
@@ -228,7 +228,7 @@ class ChatbotPersistenceModelTests(TestCase):
             domain_tags=["school_zone", "fine_notice"],
         )
 
-        execution = execute_mock_node(
+        execution = execute_agent_node(
             {
                 "node_code": "law_ground_search",
                 "search_query": "school zone emergency stopping fine",
@@ -3112,7 +3112,7 @@ class RemovedChatbotMockApiContract:
         self.assertEqual(queue_response.status_code, 200)
         work_item_id = queue_response.json()["work_item"]["work_item_id"]
 
-        with patch("app.services.agent_node_service.execute_mock_plan", side_effect=RuntimeError("boom")):
+        with patch("app.services.agent_node_service.execute_agent_plan", side_effect=RuntimeError("boom")):
             result = process_agent_work_items(limit=1)
 
         self.assertEqual(result["processed"], 1)

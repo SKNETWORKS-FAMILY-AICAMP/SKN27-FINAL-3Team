@@ -25,13 +25,15 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from ai.agents.objection_report_generation import render_report_docx
-from app.services.attachment_mock_service import (
-    register_attachment as register_mock_attachment,
+from app.services.attachment_staging_service import (
+    register_staged_attachment,
 )
-from app.services.history_event_mock_service import (
+from app.services.history_event_contract import (
     SENSITIVE_METADATA_KEYS,
     build_agent_execution_events,
     build_history_event,
+    sanitize_metadata,
+    sanitize_history_source,
 )
 from app.services.chat_session_followup_service import (
     CHAT_SESSION_FOLLOWUP_STATE_VERSION,
@@ -578,8 +580,6 @@ HISTORY_METADATA_ALLOWED_KEYS = {
     "merge_policy",
     "metadata_policy",
     "missing_fields",
-    "mock_scenario",
-    "mock_status",
     "node_code",
     "node_name",
     "pending_fields",
@@ -610,8 +610,8 @@ def register_uploaded_file(
 ) -> dict[str, Any]:
     """Register a canonical file upload and persist its metadata in Django DB.
 
-    The mock sidecar remains the local byte source, while the canonical
-    metadata exposes the object-storage adapter URI and fallback envelope.
+    Local attachment staging remains the byte source until the canonical
+    object-storage adapter accepts its quarantined handoff.
     """
 
     if not _text(payload.get("session_id")):
@@ -642,7 +642,7 @@ def register_uploaded_file(
     if not intake["accepted"]:
         raise UploadValidationError(str(intake["error_code"]))
     registration_payload["purpose"] = str(intake["routing_purpose"])
-    attachment = register_mock_attachment(
+    attachment = register_staged_attachment(
         registration_payload,
         upload_file=upload_file,
         max_upload_bytes=int(getattr(settings, "FILE_UPLOAD_MAX_BYTES", 20 * 1024 * 1024)),
@@ -736,7 +736,7 @@ def persist_uploaded_file_metadata(
     has_binary_upload = (
         binary_upload
         if binary_upload is not None
-        else source_storage_uri.startswith("mock://uploads/")
+        else source_storage_uri.startswith("local://attachment-staging/")
     )
     if not quarantine_ready and has_binary_upload:
         delete_source_uri(source_storage_uri, attachment_id=attachment_id)
@@ -1125,8 +1125,6 @@ def persist_chat_message_analysis_boundary(
                 "metadata": {
                     "source": "canonical_chat_message",
                     "analysis_job_id": job_id,
-                    "mock_scenario": chat_response.get("mock_scenario"),
-                    "mock_status": payload.get("mock_status"),
                     "response_status": chat_response.get("status"),
                     "conversation_save_policy": CONVERSATION_SAVE_POLICY_VERSION,
                     "conversation_save_state": conversation_save_state,
@@ -1146,7 +1144,6 @@ def persist_chat_message_analysis_boundary(
                 "message": message,
                 "owner_id": owner_id or session.owner_id,
                 "routing_intent": _text(chat_response.get("routing_intent")),
-                "mock_scenario": _text(chat_response.get("mock_scenario")),
                 "status": _analysis_job_status(chat_response.get("status")),
                 "active_node": _text(progress.get("active_node")),
                 "progress_message": _text(progress.get("message")),
@@ -2064,10 +2061,10 @@ def history_event_to_api(event: HistoryEvent) -> dict[str, Any]:
         "occurred_at": event.occurred_at.isoformat(),
         "actor": event.actor,
         "subject": event.subject,
-        "source": event.source,
+        "source": sanitize_history_source(event.source),
         "status": event.status,
         "summary": event.summary,
-        "metadata": event.metadata,
+        "metadata": sanitize_metadata(event.metadata),
         "privacy": event.privacy,
         "created_at": event.created_at.isoformat(),
     }
@@ -2133,7 +2130,6 @@ def persist_analysis_job_execution(
                     "metadata": {
                         "source": "canonical_analysis_job",
                         "analysis_job_id": job_id,
-                        "mock_scenario": job_payload.get("mock_scenario"),
                         "response_status": job_payload.get("status"),
                         "attachments": job_payload.get("attachments", []),
                         "blocked_attachments": job_payload.get("blocked_attachments", []),
@@ -2152,7 +2148,6 @@ def persist_analysis_job_execution(
                 "message": message,
                 "owner_id": owner_id or session.owner_id,
                 "routing_intent": _text(job_payload.get("routing_intent")),
-                "mock_scenario": _text(job_payload.get("mock_scenario")),
                 "status": _analysis_job_status(job_payload.get("status")),
                 "active_node": _text(job_payload.get("active_node")),
                 "progress_message": _text(job_payload.get("progress_message")),
@@ -2522,7 +2517,6 @@ def enqueue_analysis_job_work(
                     "metadata": {
                         "source": "canonical_analysis_job_queue",
                         "analysis_job_id": job_id,
-                        "mock_scenario": job_payload.get("mock_scenario"),
                         "response_status": AgentWorkItemStatus.QUEUED.value,
                         "attachments": job_payload.get("attachments", []),
                         "blocked_attachments": job_payload.get("blocked_attachments", []),
@@ -2574,7 +2568,6 @@ def enqueue_analysis_job_work(
             "message": message,
             "owner_id": owner_id or session.owner_id,
             "routing_intent": _text(job_payload.get("routing_intent")),
-            "mock_scenario": _text(job_payload.get("mock_scenario")),
             "status": AnalysisJobStatus.QUEUED.value,
             "active_node": active_node,
             "progress_message": progress_message,
@@ -3661,7 +3654,7 @@ def persist_report_action(
         job=job,
         source_fact_version=source_fact_version,
     )
-    source_storage_uri = _text(payload.get("storage_uri")) or f"mock://reports/{report_id}"
+    source_storage_uri = _text(payload.get("storage_uri"))
     object_storage = build_report_storage_reference(
         report_id=report_id,
         owner_id=report_owner_id,
@@ -3751,7 +3744,6 @@ def persist_report_action(
                 metadata={
                     "source": "canonical_report_action",
                     "action": _text(payload.get("action")) or "save",
-                    "mock_status": report_payload.get("status"),
                     "report_quality": report_quality,
                     "limitations": report_payload.get("limitations", []),
                     "object_storage_status": "pending",
@@ -4490,7 +4482,6 @@ def get_report_record_detail(report_id: str) -> dict[str, Any] | None:
             "job_id": job.job_id,
             "status": job.status,
             "routing_intent": job.routing_intent,
-            "mock_scenario": job.mock_scenario,
         }
         if job
         else None,
@@ -5000,7 +4991,6 @@ def get_analysis_job_record(job_id: str) -> dict[str, Any] | None:
         "message_id": job.message.message_id if job.message_id else None,
         "owner_id": job.owner_id or None,
         "routing_intent": job.routing_intent,
-        "mock_scenario": job.mock_scenario,
         "status": job.status,
         "active_node": job.active_node,
         "progress_message": job.progress_message,
@@ -5570,7 +5560,7 @@ def _metadata_snapshot(
         "session_id": attachment.get("session_id"),
         "message_id": attachment.get("message_id"),
         "filename": attachment.get("filename"),
-        "mock_status": attachment.get("status"),
+        "staging_status": attachment.get("staging_status") or attachment.get("status"),
         "checks": attachment.get("checks") or {},
         "intake": attachment.get("intake") or {},
         "limitations": attachment.get("limitations") or [],
@@ -7022,11 +7012,9 @@ def _resolved_agent_work_item_execution_payload(work_item: AgentWorkItem) -> dic
         execution_payload = apply_attachment_scan_gate(execution_payload)
         if _list_or_empty(execution_payload.get("blocked_attachments")):
             raise AttachmentScanGateError
-        from app.services.attachment_mock_service import (
-            resolve_attachment_references,
-        )
+        from app.services.attachment_staging_service import resolve_staged_attachment_references
 
-        execution_payload = resolve_attachment_references(execution_payload)
+        execution_payload = resolve_staged_attachment_references(execution_payload)
     return execution_payload
 
 
@@ -8330,7 +8318,7 @@ def _upsert_history_event_payload(event_payload: dict[str, Any]) -> HistoryEvent
 
 
 def _history_metadata_snapshot(metadata: Any) -> dict[str, Any]:
-    raw_metadata = _dict_or_empty(metadata)
+    raw_metadata = _dict_or_empty(sanitize_metadata(metadata))
     sanitized: dict[str, Any] = {}
     dropped_keys = []
 
@@ -8816,7 +8804,7 @@ def _report_object_storage(report: Report) -> dict[str, Any]:
     if isinstance(object_storage, dict) and object_storage.get("storage_uri"):
         return dict(object_storage)
     return storage_reference_from_uri(
-        report.storage_uri or f"mock://reports/{report.report_id}",
+        report.storage_uri or "",
         resource_type="report",
         resource_id=report.report_id,
         filename=f"{report.report_id}.txt",

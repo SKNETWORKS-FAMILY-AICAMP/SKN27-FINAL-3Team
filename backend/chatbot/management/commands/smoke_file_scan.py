@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.core.files.uploadedfile import SimpleUploadedFile
 
+from app.services.attachment_staging_service import register_staged_attachment
 from chatbot.file_scan_service import process_uploaded_file_scans, scan_uploaded_file
 from chatbot.models import ChatSession, ChatSessionStatus, UploadedFile
 from chatbot.repositories import persist_uploaded_file_metadata
@@ -84,7 +84,22 @@ class Command(BaseCommand):
 
 
 def _persist_smoke_upload(*, attachment_id: str, session_id: str) -> None:
-    storage_uri = _write_smoke_upload(attachment_id)
+    attachment = register_staged_attachment(
+        {
+            "attachment_id": attachment_id,
+            "session_id": session_id,
+            "purpose": "fine_notice",
+            "type": "text",
+            "original_filename": "file-scan-smoke.txt",
+            "filename": "file-scan-smoke.txt",
+            "content_type": "text/plain",
+        },
+        upload_file=SimpleUploadedFile(
+            "file-scan-smoke.txt",
+            b"file scan smoke clean sample\n",
+            content_type="text/plain",
+        ),
+    )
     session, _created = ChatSession.objects.get_or_create(
         session_id=session_id,
         defaults={
@@ -101,26 +116,17 @@ def _persist_smoke_upload(*, attachment_id: str, session_id: str) -> None:
             "original_filename": "file-scan-smoke.txt",
             "filename": "file-scan-smoke.txt",
             "content_type": "text/plain",
-            "size_bytes": len("file scan smoke clean sample\n".encode("utf-8")),
-            "storage_uri": storage_uri,
+            "size_bytes": attachment["size_bytes"],
+            "storage_uri": attachment["storage_uri"],
             "status": "uploaded",
             "agent_handoff": {
                 "attachment_id": attachment_id,
                 "purpose": "fine_notice",
                 "type": "text",
             },
-            "checks": {},
+            "checks": attachment["checks"],
             "limitations": [],
         },
         raw_payload={"source": "smoke_file_scan"},
         binary_upload=True,
     )
-
-
-def _write_smoke_upload(attachment_id: str) -> str:
-    filename = "file-scan-smoke.txt"
-    root = Path(getattr(settings, "MOCK_UPLOAD_ROOT", "") or "backend/media/mock_uploads")
-    upload_dir = root / attachment_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    (upload_dir / filename).write_text("file scan smoke clean sample\n", encoding="utf-8")
-    return f"mock://uploads/{attachment_id}/{filename}"
