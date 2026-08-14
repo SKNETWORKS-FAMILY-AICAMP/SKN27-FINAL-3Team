@@ -18,6 +18,11 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
+from app.application.cases.get_workspace import (
+    CaseWorkspaceAccessDenied,
+    GetCaseWorkspaceQuery,
+    execute_get_case_workspace,
+)
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
@@ -1605,19 +1610,20 @@ def consultation_case_workspace(request: HttpRequest, case_id: str) -> JsonRespo
     login_response = _case_login_required_response(request, subject, action="case_workspace")
     if login_response is not None:
         return login_response
-    access = authorize_resource_access(
-        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
-        identity_payload,
-    )
-    if not access["allowed"]:
-        return _object_access_denied_response(request, access)
     try:
-        workspace = get_case_workspace(case_id)
+        result = execute_get_case_workspace(
+            GetCaseWorkspaceQuery(
+                case_id=case_id,
+                identity_payload=identity_payload,
+            )
+        )
+    except CaseWorkspaceAccessDenied as exc:
+        return _object_access_denied_response(request, exc.access)
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
     response_payload = _serialize_response_dto(
         ConsultationCaseWorkspaceResponse,
-        {"workspace": workspace},
+        {"workspace": result.workspace},
     )
     return _json_response(request, response_payload)
 
