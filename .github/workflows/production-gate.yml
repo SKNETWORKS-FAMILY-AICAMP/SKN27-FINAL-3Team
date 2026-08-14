@@ -61,6 +61,22 @@ jobs:
             chatbot.test_report_api_contract \
             --verbosity 1
 
+      - name: Phase 1 attachment compatibility regressions
+        timeout-minutes: 10
+        run: >
+          python backend/manage.py test
+          chatbot.test_file_quarantine.FileQuarantinePipelineTests.test_object_read_rechecks_retention_under_the_database_fence
+          chatbot.test_consultation_v2.ConsultationPersistenceSafetyTests.test_file_api_ignores_client_supplied_attachment_id
+          chatbot.test_phase_01_attachment_scan_gate_compatibility
+          --verbosity 1
+
+      - name: Phase 1 all-public-worker Explicit Mock isolation
+        timeout-minutes: 10
+        run: >
+          python backend/manage.py test
+          chatbot.test_phase_01_public_worker_node_isolation
+          --verbosity 1
+
       - name: Full Django chatbot regression gate
         timeout-minutes: 30
         run: python backend/manage.py test chatbot --verbosity 1
