@@ -1,209 +1,146 @@
-# Phase 1 Canonical/Mock Runtime Separation Receipt
+# Phase 1 Canonical/Explicit Mock Runtime Separation Receipt
 
-## Git
+## 범위와 Git 상태
 
+- Repository: `SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team`
 - Base SHA: `9f05e8b67509c0a1f06bc39d631d6a7c94044a90`
+- Previous reviewed Head: `f79d8cf41c443507d3fe6a7ddfec536ced1d7d17`
+- Behavior Head: `7ed21931b5e94bd4860ab8f43121e41d4cacba90`
 - Branch: `refactor/phase-01-canonical-mock-separation`
-- Worktree: `E:\dev\project\SKN27-FINAL-3Team-phase-01`
-- 검증한 동작 Head: `fa12890e4ebcd042ec7b48bb13d052a4c83b03ce`
 - PR: [#401](https://github.com/SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team/pull/401) (`dev` ← `refactor/phase-01-canonical-mock-separation`, Draft, unmerged)
+- Final documentation Head: 이 receipt를 포함하는 docs-only commit 이후의 PR Head를 PR metadata에서 관리한다. 이 문서는 behavior 검증 SHA와 docs-only 검증 SHA를 혼동하지 않는다.
 
-P1 보완 append-only commit은 다음과 같다.
+이번 P1 3차 보완은 기존 commit을 수정하지 않은 append-only 변경이다.
 
 | SHA | 내용 |
 |---|---|
-| `8b4f946eb65683f1725a3449fb2e5169c6bf7109` | Explicit Mock 구현 소유권 이동 |
-| `234e67c80b52cb25349c4e819f3711a98b425a59` | history marker와 file-scan persistence 정리 |
-| `cb63d8fa6f8a562a44118f0d2091ba6455ad6112` | collection 및 dynamic isolation 회귀 복구 |
-| `d7db59a89314d54b001bc3d0969240e2a8734fce` | Phase 1 runtime boundary CI gate 강화 |
-| `b7eb0e7a7b0b8b9e61d90febaf736891d6a26650` | P1 보완 README·Receipt 증빙 기록 |
-| `24e898d75e18ed755b2df253d355a4f18c614b16` | Compose shared staging root와 default contract 보완 |
-| `bb57268afdb914cf0e921c3ee544b26f18d3035b` | 독립 검토의 source marker·malformed plan·RAG test 보완 |
-| `fa12890e4ebcd042ec7b48bb13d052a4c83b03ce` | historical test의 stale mock executor reference 정리 |
+| `caedce107bc6903b0f9643acd250bb89bbd700ae` | attachment scan gate compatibility RED |
+| `b0830c8` | neutral scan gate contract |
+| `f63fdf5` | Canonical attachment ID safety seam |
+| `ed44127` | 8개 public node 실제 Worker isolation |
+| `73cee48` | Phase 1 및 full Django blocking gate |
+| `5ce5911` | 독립 P1 blocking steps |
+| `7ed21931b5e94bd4860ab8f43121e41d4cacba90` | full Django blocking 정책 CI contract |
 
-## Phase 1-C findings
+## P1 해결 Matrix
 
-| P1 | 조치 | 테스트 | 결과 |
+| P1 | Root Cause | 구현 | 증명 테스트 | Behavior CI 결과 |
+|---|---|---|---|---|
+| P1-01 | staging, Explicit Mock runtime, legacy shim이 서로 다른 `CANONICAL_SCAN_GATE_MARKER` identity를 소유했다. | `app/services/attachment_scan_gate_contract.py`가 singleton, predicate, merge를 단일 소유한다. | `chatbot.test_phase_01_attachment_scan_gate_compatibility` | PASS |
+| P1-02 | 테스트가 제거된 `register_mock_attachment` alias를 patch했다. | 실제 lookup seam `chatbot.repositories.register_staged_attachment`를 patch하고 server ID persistence assertion을 유지했다. | `ConsultationPersistenceSafetyTests.test_file_api_ignores_client_supplied_attachment_id` | PASS |
+| P1-03 | public catalog 비교만 있고 8개 node의 실제 queue/Worker 실행 증거가 없었다. | 실제 `AnalysisJob`·`AgentWorkItem`·queue·Worker·ORM 경로에서 provider leaf만 deterministic double로 대체했다. | `chatbot.test_phase_01_public_worker_node_isolation` | PASS |
+| P1-04 | full Django와 regression-signal의 의미가 구분되지 않았고 blocking 증적이 부족했다. | 독립 P1 steps, blocking full Django gate, 해당 policy CI contract를 추가했다. | `test_pull_request_gate_runs_offline_runtime_build_and_infrastructure_checks` | PASS |
+
+## Canonical Scan Gate Contract
+
+- Owner module: `app/services/attachment_scan_gate_contract.py`
+- Shared marker: `CANONICAL_SCAN_GATE_MARKER`
+- Staging marker identity: `app.services.attachment_staging_service.CANONICAL_SCAN_GATE_MARKER is CANONICAL_SCAN_GATE_MARKER`
+- Legacy marker identity: `app.mock_runtime.attachments.CANONICAL_SCAN_GATE_MARKER is CANONICAL_SCAN_GATE_MARKER` 및 `app.services.attachment_mock_service.CANONICAL_SCAN_GATE_MARKER is CANONICAL_SCAN_GATE_MARKER`
+- Forged string: 문자열 `"canonical-scan-gate"`만 가진 client payload는 identity predicate에서 거절된다.
+- `metadata_source`: 두 resolver 모두 canonical reference에 `canonical_scan_gate`를 유지하고 private `_canonical_scan_gate` key는 public payload에서 제거한다.
+- Retention expired: `read_object_bytes` 전에 fail-closed되어 bytes를 반환하지 않는다.
+- Retention active: 기존 canonical object bytes read를 유지한다.
+- Explicit Mock attachment: canonical provenance로 승격되지 않는다.
+
+## Attachment ID Safety
+
+- Previous patch seam: `chatbot.repositories.register_mock_attachment`
+- New patch seam: `chatbot.repositories.register_staged_attachment`
+- Client ID: client-supplied `attachment_id`는 Canonical staging/persistence identifier로 신뢰하지 않는다.
+- Persisted ID와 public response ID는 모두 server-generated ID이며 client 값과 다르다.
+- session/owner/case binding assertion을 유지했다.
+- `register_mock_attachment` alias는 Canonical production module에 복원하지 않았다.
+
+## Public Worker Node Matrix
+
+모든 case는 `explicit_mock_usage_forbidden()` 안에서 실제 queue와 `process_agent_work_items`를 실행한다. `execute_agent_node`, `execute_agent_plan`, worker, repository persistence, `AgentResult.objects.create()`를 patch하지 않는다.
+
+| node_code | provider double | terminal contract | Explicit Mock/sidecar/marker |
 |---|---|---|---|
-| 실제 Mock owner 부재 | `app/mock_runtime/**`에 구현을 이동하고 legacy service를 thin shim으로 축소 | ownership/import gate | PASS |
-| Agent Canonical fallback | allowlist 기반 Explicit Mock executor와 전용 4xx 오류 | mock URL isolation | PASS |
-| legacy History marker 노출 | write 및 public projection에서 marker를 contract 기준으로 제거 | legacy marker projection | PASS |
-| `smoke_file_scan`의 `mock://` write | neutral staging `UploadedFile`로 이관 | smoke persistence | PASS |
-| `execute_mock_node` collection 오류 | canonical executor import와 collection baseline gate로 교체 | targeted collect, baseline | PASS |
-| 실제 경계 검증 부족 | HTTP·Worker·ORM·public DTO fail-fast reachability test 추가 | dynamic negative reachability | PASS |
+| `fine_notice_analysis` | `graph.invoke` | worker success와 `AgentResult` persistence | 0 / 0 / 0 |
+| `attachment_document_classification` | `classify_document_bytes` | worker success와 `AgentResult` persistence | 0 / 0 / 0 |
+| `law_ground_search` | `run_law_ground_search` | worker success와 `AgentResult` persistence | 0 / 0 / 0 |
+| `text_ml_case_search` | `run_text_ml_case_search` | worker success와 `AgentResult` persistence | 0 / 0 / 0 |
+| `traffic_accident_confirmation_ocr` | `graph.invoke` | worker success와 `AgentResult` persistence | 0 / 0 / 0 |
+| `vision_media_analysis` | `run_vision_media_analysis` | worker success와 `AgentResult` persistence | 0 / 0 / 0 |
+| `appeal_decision_flow` | `graph.invoke` | worker success와 `AgentResult` persistence | 0 / 0 / 0 |
+| `objection_report_generation` | `run_objection_report_generation` | worker success와 `AgentResult` persistence | 0 / 0 / 0 |
 
-## Actual Mock ownership
+`executed_public_node_codes == actual_public_node_codes`를 exact-match로 assertion한다. public DB/API payload의 `canonical_mock`, `mock_scenario`, `mock_status`, `mock://`도 0이다.
 
-| Runtime module | 실제 구현 | legacy shim | Production import |
-|---|---|---|---|
-| `app/mock_runtime/analysis_jobs.py` | analysis-job sidecar CRUD | `app/services/analysis_job_mock_service.py` | 0 |
-| `app/mock_runtime/attachments.py` | attachment fixture·sidecar | `app/services/attachment_mock_service.py` | 0 |
-| `app/mock_runtime/history.py` | mock history sidecar | `app/services/history_event_mock_service.py` | 0 |
-| `app/mock_runtime/chat.py` | scenario/chat deterministic response | `app/services/chatbot_mock_service.py` | 0 |
-| `app/mock_runtime/agent_execution.py` | Explicit Mock plan/node executor | 없음 | 0 |
+## Blocking Regression Gates
 
-`test/test_phase_01_mock_runtime_ownership.py`는 runtime에서 legacy mock service import가 0임과 shim에 function/class/sidecar logic이 없음을 검사한다. `test/test_phase_01_runtime_import_boundaries.py`는 `app/**`, `backend/**`, `ai/**`, `etl/**`, `storage/**`의 module-level·local·dynamic import 및 forbidden dispatch symbol을 검사한다.
+`production-gate.yml`의 `offline-verification`은 다음을 모두 blocking으로 실행한다.
 
-## Agent fail-closed
+| Gate | Selector 또는 step | Behavior CI |
+|---|---|---|
+| Phase 1 boundary | canonical/Explicit Mock Python 및 Django selector | PASS |
+| Attachment compatibility | retention fence, attachment ID seam, compatibility test | PASS |
+| Public Worker isolation | `chatbot.test_phase_01_public_worker_node_isolation` | PASS |
+| Full Django | `python backend/manage.py test chatbot --verbosity 1` | PASS |
+| Collection baseline v2 | `python scripts/refactoring/verify_pytest_collection_baseline.py` | PASS |
+| Phase 0, queued follow-up, frontend, Terraform, Docker | 기존 blocking steps 유지 | PASS |
 
-- 지원 node: `input_context_validation`, `fine_notice_analysis`, `law_ground_search`, `text_ml_case_search`, `vision_media_analysis`, `objection_report_generation`, `agent_result_validation`
-- 미지원 node: `UnsupportedExplicitMockNodeError` 후 mock HTTP view가 `400`과 `unsupported_explicit_mock_node`를 반환한다.
-- Canonical fallback: 0 (`app.services.agent_node_service.execute_agent_node`를 import·호출하지 않는다.)
-- provider call: 0; executor는 deterministic in-process 결과만 사용한다.
-- 공개 `execution_mode`: `explicit_mock` 하나로 통일한다.
+## Full Regression과 known debt
 
-## Dynamic negative reachability
+- Full Django chatbot regression은 `production-gate.yml`의 blocking step이며 Linux CI에서 PASS다.
+- typed pytest collection baseline v2는 정확히 `cv2` 3건과 `pypdf` 1건을 known dependency debt로 관리하며 Linux behavior CI에서 unexpected collection regression 0으로 PASS다.
+- `regression-signal`의 `Full offline pytest`와 Django suite는 `continue-on-error: true`를 가진 non-blocking signal이다. workflow success는 full offline pytest의 merge proof가 아니다.
+- full offline pytest는 dependency debt 때문에 전체 green으로 표현하지 않는다.
 
-| Canonical flow | Mock call | Sidecar write | DB marker | Public marker |
-|---|---:|---:|---:|---:|
-| `POST /api/files/` 및 file persistence | 0 | 0 | 0 | 0 |
-| `GET /api/history/` 및 legacy projection | 0 | 0 | 0 | 0 |
-| queued `input_context_validation` worker | 0 | 0 | 0 | 0 |
-| report list/detail/download public contract | 0 | 해당 없음 | 0 | 0 |
+## Local Verification
 
-`backend/chatbot/test_phase_01_dynamic_negative_reachability.py`는 Explicit Mock runtime과 sidecar entry point를 fail-fast spy로 감싼 뒤 실제 canonical HTTP/Worker/ORM 흐름을 실행한다. Mock 호출이 일어나면 테스트가 즉시 실패한다.
+| 명령 또는 gate | 결과 | 판정 |
+|---|---|---|
+| Phase 1 Python selector | `27 passed` | PASS |
+| focused P1-01/P1-02 | `4 tests`, `OK` | PASS |
+| public Worker isolation | `1 test`, `OK` | PASS |
+| dynamic isolation + public Worker | `4 tests`, `OK` | PASS |
+| 실제 존재 Phase 1 Django selector | `24 tests`, `OK` | PASS |
+| Contract and artifact gate | `53 passed` | PASS |
+| Node tests | `155 passed` | PASS |
+| `npm --prefix app/web run build` | exit 0 | PASS |
+| `ruff check --select E9,F63,F7,F82 .` | exit 0 | PASS |
+| `python backend/manage.py check` | exit 0 | PASS |
+| OpenAPI/routes drift checks | exit 0 | PASS |
+| mock persistence audit | marker 및 `mock://` 0 | PASS |
 
-## Persistence
+Windows native full Django, deterministic contracts, full collection은 `pymupdf._extra` DLL loading으로 중단된다. 기존 EICAR quarantine portability 관찰도 유지한다. 두 관찰은 focused P1 regression이 아니며, P1 behavior 판정은 Docker Linux와 blocking Linux CI 결과로 분리했다. Terraform CLI는 이 Windows 환경에 설치되어 있지 않아 local 실행은 `NOT_EXECUTED`; behavior CI의 Terraform gate는 PASS다.
 
-- `AnalysisJob`: physical `mock_scenario` column은 유지한다. canonical 신규 write·read·response serialization은 0이며, 테스트 job 값은 빈 문자열이다.
-- `ChatMessage`, `UploadedFile`, `HistoryEvent`, `Report`, `AgentWorkItem`: canonical 신규 DB/API mock marker는 0이다.
-- `HistoryEvent`: `sanitize_metadata()`가 `mock_scenario`, `mock_status`, `canonical_mock`, `mock_analysis_jobs`, `mock_history_events`와 `mock://` URI를 nested metadata에서도 제거한다. 일반 사용자 문자열의 `mock` 단어는 제거하지 않는다.
-- legacy History row: 원본 DB row는 read-only로 보존하고 public DTO에서만 sanitize한다.
+## Local Docker
 
-## File scan smoke
+- D1 build: `docker build -t skn27-phase-01-p1-third-local .` PASS
+- D1 import: `phase-01 p1 third import smoke ok`
+- `ROOT_URLCONF`: `config.urls`
+- `EXPLICIT_MOCK_RUNTIME_ENABLED`: `False`
+- `/api/mock/` registered: `False`
+- D2: `scripts/refactoring/run_phase_00_compose_gate.sh` PASS
+- D2 database/Redis/ClamAV/Neo4j: ready
+- D2 backend live/ready, Agent Worker 및 File Scan Worker consumed: true
+- D2 staging URI: `local://attachment-staging/`
+- D2 new `mock://`: 0
+- D2 last step: `compose-final`; cleanup: `cleanup_success`; container/volume/network 잔존: 0
 
-- source URI: `local://attachment-staging/…`
-- staging: `app.services.attachment_staging_service.register_staged_attachment()`
-- object storage: `backend/chatbot/object_storage.py`의 Local Infrastructure Adapter와 동일한 root precedence (`settings` → environment → default)
-- `UploadedFile`: 실제 canonical row를 생성한다.
-- `mock://` 신규 write: 0
-- Compose evidence: `production-gate` run `31396988541`, artifact `9066272178`에서 upload `pass`, ClamAV `clean`, `file_scan_worker_consumed=true`, `cleanup_success`, `mock://` 0을 확인했다.
+## Behavior CI와 Artifact
 
-## Collection baseline
+| Workflow | Job | Run ID | Result | Blocking |
+|---|---|---:|---|---|
+| `production-gate.yml` | `offline-verification` | `31776184874` / `94691971726` | PASS | yes |
+| `production-gate.yml` | `compose-integration` | `31776184874` / `94692658166` | PASS | yes |
+| `regression-signal` | `regression-signal` | `31776184869` / `94691972055` | PASS | no |
 
-| Error/module | Base | P1 보완 Head | 분류 |
-|---|---:|---:|---|
-| `test/test_evaluate_videomae_classifier.py` | 1 | 1 | known baseline (`cv2`) |
-| `test/test_prepare_benchmark_manifest.py` | 1 | 1 | known baseline (`cv2`) |
-| `test/test_supervisor_acceptance_fixture_pdf.py` | 1 | 1 | known baseline (`pypdf`) |
-| `test/test_videomae_frame_directory.py` | 1 | 1 | known baseline (`cv2`) |
-| PR #401 도입 collection 오류 | 0 | 0 | PASS |
+- Compose: `9210084153`
+- Sensitivity: `9209980513`
+- Collection baseline: `9209976190`
 
-`scripts/refactoring/verify_pytest_collection_baseline.py` 최신 결과는 `known_baseline_only`, `collected_tests: 1674`, `unexpected_error_modules: []`이다.
+## Production Delta와 Deferred Scope
 
-## Attachment staging safety
+- API, Model, migration, View, Repository, Frontend, Dockerfile, root Compose, dependency, Terraform: 이번 P1 remediation에서 변경하지 않았다.
+- Service: neutral scan gate contract와 기존 staging/mock compatibility import만 변경했다.
+- Agent: production dispatch를 변경하지 않았고 public node coverage test만 추가했다.
+- Production DB audit: `NOT_EXECUTED`
+- `AnalysisJob.mock_scenario` physical column removal: `DEFERRED`
+- Remaining TOCTOU risk: P2에서 file identity/replace race의 추가 hardening을 검토한다.
 
-- ID validation: `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`
-- traversal rejection: `../escape`, `..\\escape`, `/tmp/escape`, `C:\\escape`, `att/child`
-- root 일관성: staging service와 object storage가 동일한 root를 선택한다.
-- cleanup/oversize rollback: 기존 attachment contract 회귀를 유지한다.
-- 결과: staging root 밖 file/directory 생성 0.
-
-## Public API contract
-
-| Field/header | 이전 | 최종 | Consumer test |
-|---|---|---|---|
-| `api_surface` | `canonical_mock` | `canonical` | `chatbot.test_report_api_contract` |
-| `execution_mode` | `mock` | `async_worker` (canonical) | `chatbot.test_report_api_contract` |
-| Explicit Mock label | 혼재 | `explicit_mock` | `chatbot.test_phase_01_mock_url_isolation` |
-| Production frontend `/api/mock/` | 검증 범위 제한 | source·`.ts`/`.tsx`·build output 0 | `test/test_phase_01_frontend_mock_surface.py` |
-
-기본 `config.urls`에는 `/api/mock/`가 없다. Explicit Mock은 `EXPLICIT_MOCK_RUNTIME_ENABLED=True`, `DEBUG=True`, `ROOT_URLCONF=config.mock_urls`를 모두 명시한 test/demo 프로세스에서만 열릴 수 있다.
-
-## Verification
-
-| 명령 | Exit Code | 통과 | 실패 | 판정 |
-|---|---:|---:|---:|---|
-| Phase 1 ownership/import/isolation pytest | 0 | 14 | 0 | PASS |
-| Phase 1 Django URL/dynamic/persistence/public API | 0 | 31 | 0 | PASS |
-| targeted collection | 0 | 24 collected | 0 | PASS |
-| `verify_pytest_collection_baseline.py` | 0 | 1674 collected | 신규 0 | PASS |
-| Phase 0 core/quarantine/consultation | 0 | 14 | 0 | PASS |
-| queued follow-up 및 analysis queue | 0 | 41 | 0 | PASS |
-| agent execution/privacy | 0 | 68 | 0 | PASS |
-| deterministic contracts | 0 | 33 | 0 | PASS |
-| compose probe pytest | 0 | 7 | 0 | PASS |
-| sensitivity script | 0 | - | 0 | PASS |
-| `manage.py check`, OpenAPI/routes, Ruff, diff check | 0 | - | 0 | PASS |
-| frontend test | 0 | 155 | 0 | PASS |
-| frontend build 및 built surface gate | 0 | 1 | 0 | PASS |
-| production RAG smoke tests | 0 | 3 | 0 | PASS |
-| `chatbot.tests` regression suite | 0 | 44 | 0 | PASS |
-
-Frontend install은 `npm --prefix app/web ci`로 재현했으며 npm의 기존 high severity advisory와 Vite chunk-size warning은 build 성공과 별개인 P2 follow-up이다.
-
-## CI
-
-| Workflow | Job | Run ID | 결과 |
-|---|---|---|---|
-| `production-gate.yml` | `offline-verification` | `31396988541` / `93482212918` | PASS |
-| `production-gate.yml` | `compose-integration` | `31396988541` / `93483483962` | PASS |
-| `regression-signal` | `regression-signal` | `31396988144` / `93482211777` | PASS |
-
-`.github/workflows/production-gate.yml`에는 repo-wide ownership/import, dynamic isolation, legacy projection, neutral smoke persistence, collection baseline, attachment staging, public API contract와 frontend build-output surface gate를 추가했다. 기존 Phase 0 A–G, sensitivity, Docker 및 Compose gate는 유지했다.
-
-## Artifacts
-
-- Collection: `tmp/phase-01-pytest-collection-baseline.json`
-- Sensitivity: `tmp/phase-00-sensitivity-evidence.json`
-- Compose: `phase-00-compose-evidence` artifact `9066272178`; `gate-summary.json`의 database/cache/ClamAV/Neo4j=`ready`, backend=`true`, agent/file-scan worker consumed=`true`, status=`pass`.
-
-## Independent review follow-up
-
-- independent review 결과: Critical 0, Important 0, merge assessment `Yes`.
-- legacy `HistoryEvent.source`의 `canonical_mock`, `mock://`, `/api/mock/` legacy marker는 public DTO에서 canonical contract로 정규화하고 DB 원본은 유지한다.
-- Explicit Mock plan은 non-object step, missing `steps`, missing node code를 `invalid_explicit_mock_plan` 4xx로 fail-closed 처리한다.
-- `chatbot.tests`의 law-ground characterization은 Explicit Mock이 아니라 Canonical `execute_agent_node`를 호출하도록 복구했고 44건 전체를 재실행했다.
-- `RemovedChatbotMockApiContract` historical reference의 stale `execute_mock_plan` patch도 `execute_agent_plan`으로 갱신했다.
-
-## DB audit
-
-- Local/Test: `scripts/refactoring/audit_phase_01_mock_persistence.py --format json` 실행 완료. local test DB row/marker count는 모두 0이다.
-- Production: `NOT_EXECUTED` — 운영 DB/AWS에는 접근하지 않았다.
-- Physical column: `AnalysisJob.mock_scenario`는 `DEFERRED`.
-- Removal: 별도 migration PR 또는 후속 Legacy Phase 범위다. 이 PR은 migration을 생성하지 않는다.
-
-## Known baseline debt
-
-- `cv2`: known collection baseline
-- `pypdf`: known collection baseline
-- Windows EICAR: 환경 의존 known baseline
-- PR #401 신규 collection regression: 0
-
-## Remaining risks
-
-- P0: 확인된 항목 없음.
-- P1: 확인된 항목 없음. `fa12890`의 blocking CI와 Compose artifact를 확인했다.
-- P2: Docker Desktop daemon이 로컬에서 중지되어 Compose full integration은 재현하지 못했지만 CI artifact로 확인했다. npm advisory와 build chunk warning은 보안/성능 후속 점검 항목이다.
-
-## Rollback
-
-PR을 merge하지 않은 Draft 상태에서 Phase 1-C 재검토를 받는다. rollback이 필요하면 P1 보완 commit을 최신순으로 별도 revert commit으로 되돌린다. schema 변경과 migration이 없으므로 schema rollback은 필요하지 않다.
-
-Phase 2 View/Application 분리와 Phase 3 queue/repository/storage/bounded-context 재설계는 이 PR 범위에 포함하지 않는다.
-
-## Phase 1-B P1 2차 보완
-
-- staging contract는 `app.services.attachment_staging_path_contract.py`로 중앙화했다.
-- POSIX symlink와 Windows junction에 대해 metadata read, metadata write, upload cleanup delete, local object-storage read/delete를 모두 fail-closed 처리한다.
-- `test/test_phase_01_attachment_staging_security.py`는 외부 metadata와 victim file이 변경되지 않는지 검증한다.
-- `scripts/refactoring/verify_pytest_collection_baseline.py`는 v2 typed contract를 읽고 `ModuleNotFoundError`와 `missing_module`까지 exact-match 한다.
-- 허용 collection debt는 `cv2` 3건과 `pypdf` 1건뿐이다.
-- `backend/chatbot/test_phase_01_dynamic_negative_reachability.py`는 Canonical chat session, file upload/list/detail, history, analysis list/detail/result, agent catalog, report list/detail/document confirmation/download, File Scan Worker, Analysis Worker와 ORM persistence에서 Explicit Mock entry를 fail-fast로 금지한다.
-
-### 현재 로컬 검증
-
-- `python -m pytest -q --timeout=30 -p no:cacheprovider test/test_phase_01_attachment_staging_security.py test/test_phase_01_neutral_contracts.py test/test_phase_01_collection_baseline_contract.py`: `20 passed`.
-- `python backend/manage.py test chatbot.test_phase_01_dynamic_negative_reachability chatbot.test_phase_01_smoke_file_scan_staging --verbosity 1`: `6 tests`, `OK`.
-- `python scripts/refactoring/verify_pytest_collection_baseline.py`: `new_collection_regression`을 fail-closed로 반환했다. 허용 `cv2` 3건은 일치했지만 Windows Python 3.13의 `pymupdf._extra` DLL load failure 6건이 typed contract 밖 오류로 검출됐다.
-- Production DB audit: `NOT_EXECUTED`.
-- Physical column removal: `DEFERRED` (`AnalysisJob.mock_scenario`).
-- 이 보완은 migration, remote DB write, commit, push, PR merge 또는 Draft 해제를 수행하지 않는다.
-
-### D1/D2와 전체 로컬 suite
-
-- D1: `docker build -t skn27-phase-01-p1-local .`와 `docker run --rm skn27-phase-01-p1-local python -c "import app.services.attachment_staging_path_contract; import app.services.chat_orchestration_service; import chatbot.object_storage; import chatbot.runtime_health"`가 통과했다.
-- D2: `scripts/refactoring/run_phase_00_compose_gate.sh`는 Linux LF helper를 사용한 로컬 재현에서 `status=pass`, `agent_worker_consumed=true`, `file_scan_worker_consumed=true`, `cleanup_success`, `last-step=compose-final`을 기록했다.
-- 전체 `python -m pytest -q --timeout=30 -p no:cacheprovider`는 Windows Python 3.13 `pymupdf._extra` DLL 오류 6건과 허용 dependency debt 3건으로 collection에서 중단됐다.
-- 전체 `python backend/manage.py test chatbot --verbosity 1`는 `452 tests`, `2 failures, 21 errors`였다. `pymupdf._extra` DLL 오류와 기존 Windows quarantine portability 관찰 2건이 포함되며, P1 focused/CI-equivalent gate의 결과와 분리한다.
-- Docker Linux D1/D2는 현재 worktree의 Canonical staging·Worker·Compose 경로를 통과했으며, Windows native dependency 오류는 허용 baseline을 확장하지 않고 별도 환경 blocker로 유지한다.
+PR #401은 Draft·unmerged 상태로 유지한다. 최종 docs-only Head의 blocking CI가 PASS한 뒤에만 Phase 1-C 독립 재검토 입력으로 사용한다.
