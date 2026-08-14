@@ -196,7 +196,7 @@ class CaseWorkspaceUseCaseCharacterizationTests(TestCase):
         self.assertTrue(forbidden_names.isdisjoint(imported_names | referenced_names))
 
         views_path = REPOSITORY_ROOT / "backend" / "chatbot" / "views.py"
-        views_tree = ast.parse(views_path.read_text(encoding="utf-8"))
+        views_tree = ast.parse(views_path.read_text(encoding="utf-8-sig"))
         view = next(
             node
             for node in views_tree.body
