@@ -60,7 +60,7 @@ EXPLICIT_MOCK_TARGETS = (
 
 
 @contextmanager
-def explicit_mock_usage_forbidden() -> Iterator[None]:
+def explicit_mock_usage_forbidden() -> Iterator[dict[str, object]]:
     """Make every supported Explicit Mock entry fail if canonical code reaches it."""
 
     # Load import-time aliases before patching their source functions so the
@@ -75,14 +75,15 @@ def explicit_mock_usage_forbidden() -> Iterator[None]:
     import app.services.history_event_mock_service  # noqa: F401
 
     with ExitStack() as stack:
+        blocked_calls = {}
         for target in EXPLICIT_MOCK_TARGETS:
-            stack.enter_context(
+            blocked_calls[target] = stack.enter_context(
                 patch(
                     target,
                     side_effect=AssertionError(f"Canonical runtime called Explicit Mock entry: {target}"),
                 )
             )
-        yield
+        yield blocked_calls
 
 
 @override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)
