@@ -23,6 +23,11 @@ from app.application.cases.confirm_facts import (
     ConfirmCaseFactsCommand,
     execute_confirm_case_facts,
 )
+from app.application.cases.start_analysis import (
+    CaseAnalysisAccessDenied,
+    StartCaseAnalysisCommand,
+    execute_start_case_analysis,
+)
 from app.application.cases.get_workspace import (
     CaseWorkspaceAccessDenied,
     GetCaseWorkspaceQuery,
@@ -31,12 +36,10 @@ from app.application.cases.get_workspace import (
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
-    ConfirmCaseFactsRequest,
     ConsultationCaseListResponse,
     ConsultationCaseWorkspaceResponse,
     CreateConsultationCaseRequest,
     CreateConsultationCaseResponse,
-    StartCaseAnalysisRequest,
     StartCaseAnalysisResponse,
 )
 from app.contracts.report import (
@@ -108,12 +111,8 @@ from chatbot.api_response import (
 )
 from chatbot.case_repository import (
     CaseRepositoryError,
-    confirm_case_facts,
     create_case,
-    get_case_access_metadata,
-    get_case_workspace,
     list_cases,
-    start_case_analysis,
 )
 from chatbot.attachment_classification_service import (
     AttachmentClassificationConfirmationError,
@@ -1672,28 +1671,21 @@ def consultation_case_analysis_jobs(request: HttpRequest, case_id: str) -> JsonR
     login_response = _case_login_required_response(request, subject, action="case_analysis")
     if login_response is not None:
         return login_response
-    access = authorize_resource_access(
-        get_case_access_metadata(case_id) or {"type": "case", "case_id": case_id},
-        identity_payload,
-    )
-    if not access["allowed"]:
-        return _object_access_denied_response(request, access)
-    validated, validation_response = _validate_request_dto(
-        request,
-        StartCaseAnalysisRequest,
-        body,
-    )
-    if validation_response is not None:
-        return validation_response
     try:
-        result = start_case_analysis(
-            case_id,
-            owner_id=str(subject.get("user_id") or ""),
-            payload=validated,
+        result = execute_start_case_analysis(
+            StartCaseAnalysisCommand(
+                case_id=case_id,
+                identity_payload=identity_payload,
+                raw_payload=body,
+            )
         )
+    except CaseAnalysisAccessDenied as exc:
+        return _object_access_denied_response(request, exc.access)
+    except ValidationError as exc:
+        return _request_validation_error_response(request, exc)
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
-    response_payload = _serialize_response_dto(StartCaseAnalysisResponse, result)
+    response_payload = _serialize_response_dto(StartCaseAnalysisResponse, result.response)
     return _json_response(request, response_payload, status=202)
 
 
