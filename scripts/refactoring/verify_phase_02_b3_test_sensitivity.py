@@ -36,16 +36,22 @@ TARGETS = {
 
 MUTATION_CHILD_SCRIPT = r'''
 import os
+from pathlib import Path
 import sys
 from unittest.mock import patch
 
+repo_root = Path(sys.argv[1]).resolve()
+test_id = sys.argv[2]
+mutation = sys.argv[3]
+sys.path.insert(0, str(repo_root / "backend"))
+sys.path.insert(0, str(repo_root))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+
 import django
 django.setup()
 
 from django.test.runner import DiscoverRunner
 
-mutation = sys.argv[1]
 if mutation == "authorization_bypass":
     context = patch(
         "app.application.cases.start_analysis.authorize_resource_access",
@@ -72,7 +78,7 @@ elif mutation == "reusable_job_bypass":
         calls += 1
         if calls > 1:
             existing_job = (
-                AnalysisJob.objects.filter(case_id=case_id)
+                AnalysisJob.objects.filter(case__case_id=case_id)
                 .order_by("-created_at")
                 .first()
             )
@@ -89,8 +95,8 @@ else:
     raise SystemExit(f"unsupported mutation: {mutation}")
 
 with context:
-    failures = DiscoverRunner(verbosity=1).run_tests([sys.argv[2]])
-raise SystemExit(bool(failures))
+    failures = DiscoverRunner(verbosity=1, interactive=False).run_tests([test_id])
+raise SystemExit(0 if failures == 0 else 1)
 '''
 
 
@@ -106,11 +112,12 @@ class MutationOutcome:
 
 
 def _evidence_head() -> str:
-    return os.environ.get("PHASE_02_B3_SENSITIVITY_HEAD") or subprocess.check_output(
-        ["git", "rev-parse", "HEAD"],
-        cwd=REPO_ROOT,
-        text=True,
+    return os.environ.get("PHASE_02_B3_SENSITIVITY_HEAD", "").strip() or _git_output(
+        "rev-parse", "HEAD"
     ).strip()
+
+def _evidence_path(configured: str = "") -> Path:
+    return Path(configured).resolve() if configured else DEFAULT_EVIDENCE_PATH
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -124,6 +131,10 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_django_test(test_id: str) -> subprocess.CompletedProcess[str]:
+    return _run([sys.executable, "backend/manage.py", "test", test_id, "--verbosity", "1"])
+
+
 def failure_kind(result: subprocess.CompletedProcess[str]) -> str:
     if result.returncode == 0:
         raise SensitivityError("mutation unexpectedly passed")
@@ -132,12 +143,29 @@ def failure_kind(result: subprocess.CompletedProcess[str]) -> str:
     return "assertion"
 
 
-def _assert_clean_worktree() -> bool:
-    return not _run(["git", "status", "--porcelain"]).stdout.strip()
+def _git_output(*arguments: str) -> str:
+    result = _run(
+        ["git", "-c", f"safe.directory={REPO_ROOT.as_posix()}", *arguments]
+    )
+    if result.returncode != 0:
+        raise SensitivityError(f"git {' '.join(arguments)} failed")
+    return result.stdout
 
+
+def _working_tree_status() -> str:
+    return _git_output("status", "--porcelain")
 
 def _run_mutation(name: str, target: str) -> MutationOutcome:
-    result = _run([sys.executable, "-c", MUTATION_CHILD_SCRIPT, name, target])
+    result = _run(
+        [
+            sys.executable,
+            "-c",
+            MUTATION_CHILD_SCRIPT,
+            str(REPO_ROOT),
+            target,
+            name,
+        ]
+    )
     return MutationOutcome(
         name=name,
         exit_code=result.returncode,
@@ -152,9 +180,19 @@ def build_evidence(
     mutations: tuple[MutationOutcome, ...],
     working_tree_unchanged: bool,
 ) -> dict[str, Any]:
+    expected_names = tuple(TARGETS)
+    passed = (
+        original_exit_code == 0
+        and tuple(mutation.name for mutation in mutations) == expected_names
+        and all(
+            mutation.exit_code != 0 and mutation.failure_kind == "assertion"
+            for mutation in mutations
+        )
+        and working_tree_unchanged
+    )
     return {
         "contract_version": "phase_02_b3_sensitivity.v1",
-        "status": "pass",
+        "status": "pass" if passed else "fail",
         "head": head,
         "original": {"exit_code": original_exit_code},
         "mutations": [
@@ -169,43 +207,45 @@ def build_evidence(
     }
 
 
-def _verify_controls(
-    original_exit_code: int,
-    mutations: tuple[MutationOutcome, ...],
-    working_tree_unchanged: bool,
-) -> None:
-    if original_exit_code != 0:
-        raise SensitivityError("original B3 characterization suite did not pass")
-    if not working_tree_unchanged:
-        raise SensitivityError("sensitivity runner changed the working tree")
-    if tuple(mutation.name for mutation in mutations) != tuple(TARGETS):
-        raise SensitivityError("mutation target set mismatch")
+def _write_evidence(path: Path, evidence: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--evidence-path", type=Path, default=DEFAULT_EVIDENCE_PATH)
+    parser.add_argument("--evidence-path", type=Path, default=None)
     args = parser.parse_args(argv)
 
+    before_status = _working_tree_status()
+    original_exit_code = 1
+    mutations: tuple[MutationOutcome, ...] = ()
+    error: str | None = None
     try:
-        original = _run([sys.executable, "manage.py", "test", TEST_MODULE, "--verbosity", "1"])
+        original = _run_django_test(TEST_MODULE)
+        original_exit_code = original.returncode
+        if original_exit_code != 0:
+            raise SensitivityError(f"original B3 characterization suite failed: {original_exit_code}")
         mutations = tuple(_run_mutation(name, target) for name, target in TARGETS.items())
-        working_tree_unchanged = _assert_clean_worktree()
-        _verify_controls(original.returncode, mutations, working_tree_unchanged)
-        evidence = build_evidence(
-            head=_evidence_head(),
-            original_exit_code=original.returncode,
-            mutations=mutations,
-            working_tree_unchanged=working_tree_unchanged,
-        )
     except (OSError, SensitivityError) as exc:
-        print(f"phase 02 B3 sensitivity failure: {exc}", file=sys.stderr)
-        return 1
+        error = str(exc)
 
-    args.evidence_path.parent.mkdir(parents=True, exist_ok=True)
-    args.evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    working_tree_unchanged = before_status == _working_tree_status()
+    evidence = build_evidence(
+        head=_evidence_head(),
+        original_exit_code=original_exit_code,
+        mutations=mutations,
+        working_tree_unchanged=working_tree_unchanged,
+    )
+    if error is not None:
+        evidence["error"] = error
+
+    evidence_path = args.evidence_path or _evidence_path(
+        os.environ.get("PHASE_02_B3_SENSITIVITY_EVIDENCE_PATH", "")
+    )
+    _write_evidence(evidence_path, evidence)
     print(json.dumps(evidence, sort_keys=True))
-    return 0
+    return 0 if evidence["status"] == "pass" else 1
 
 
 if __name__ == "__main__":
