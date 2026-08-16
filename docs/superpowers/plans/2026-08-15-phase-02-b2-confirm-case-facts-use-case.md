@@ -51,7 +51,6 @@ POST /api/cases/<case_id>/facts/confirm/
 @dataclass(frozen=True)
 class ConfirmCaseFactsCommand:
     case_id: str
-    owner_id: str
     identity_payload: Mapping[str, Any]
     raw_payload: Mapping[str, Any]
 
@@ -67,7 +66,7 @@ def execute_confirm_case_facts(
 ) -> ConfirmCaseFactsResult: ...
 ```
 
-The application command imports `ConfirmCaseFactsRequest`, `ValidationError`, existing repository functions, and `authorize_resource_access`. It must not import Django HTTP types, decorators, `app.mock_runtime`, views, ORM models, or transaction APIs.
+application command는 `ConfirmCaseFactsRequest`, 기존 repository functions, `access_subject_from_payload`, `authorize_resource_access`를 import한다. `ValidationError`를 import하거나 처리하지 않으며, 전파된 validation error의 기존 HTTP `422` envelope mapping은 View가 담당한다. Django HTTP type, decorator, `app.mock_runtime`, view, ORM model, transaction API를 import해서는 안 된다.
 
 The repository remains the sole owner of `transaction.atomic`, `select_for_update`, exact replay, request fingerprints, fact-version creation, `Case.current_fact_version`, `active_fact_version_id`, `active_analysis_job_id`, and `confirmed_facts_idempotency.v1` metadata.
 
@@ -150,15 +149,21 @@ The repository remains the sole owner of `transaction.atomic`, `select_for_updat
 - [ ] Push the feature branch and create a Draft PR titled `refactor: extract case fact confirmation application use case`.
 - [ ] Verify blocking CI and report `READY_FOR_PHASE_2_B2_REVIEW` only when all required gates pass.
 
+## P2 Delta trusted identity 보완
+
+`identity_payload`는 `ConfirmCaseFactsCommand`의 단일 authority input이다. application은 validation 전에 이 payload를 authorize하고 `access_subject_from_payload(identity_payload)["subject"]`를 호출한 뒤 authenticated `user_id`만 `confirm_case_facts`에 전달한다. View는 `owner_id`를 전달하지 않고 client payload `owner_id`는 authority가 아니며, 변경하지 않은 repository ownership check는 defense-in-depth fence로 유지한다.
+
+`P2-B2` sensitivity는 `scripts/refactoring/verify_phase_02_b2_test_sensitivity.py`를 사용한다. temporary child process에서 runtime-only authorization 및 validation bypass를 실행하고 tracked source를 보존하며 `phase_02_b2_sensitivity.v1`를 기록한다. 이는 Phase 0 sensitivity evidence와 구분된다.
+
 ## Sensitivity
 
-- Mutation A: temporarily remove `authorize_resource_access` from the application command; foreign-owner invalid payload must fail because authorization is no longer first.
-- Mutation B: temporarily pass raw payload to the repository or return the repository call to the view; validation/boundary test must fail.
-- Restore the exact original source after each mutation and verify the focused suite passes with a clean worktree.
+- Mutation A: application authorization을 allow로 runtime-patch한다. authorization이 더 이상 먼저 수행되지 않으므로 foreign-owner invalid-payload assertion은 실패해야 한다.
+- Mutation B: invalid raw input이 repository에 도달하도록 `ConfirmCaseFactsRequest.model_validate`를 runtime-patch한다. owner invalid-payload `422` assertion은 실패해야 한다.
+- 각 mutation은 external temporary child process에서 실행한다. tracked source는 변경하지 않고 실행 전후 Git status가 일치해야 하며, mutation 없이 focused suite가 통과해야 한다.
 
 ## Docker and Compose
 
-- D1 image: `skn27-phase-02-b2-local`; run CI-equivalent imports, Django check, and Django-aware B2 application import.
+- D1 image: `skn27-phase-02-b2-p2-delta-local`; CI-equivalent import, Django check, Django-aware B2 application import를 실행한다.
 - D2 script: `scripts/refactoring/run_phase_00_compose_gate.sh`; use an external temporary Git Bash `python3` shim only if the WindowsApps alias remains unresolved. Remove the shim after execution and commit no local evidence.
 
 ## Rollback

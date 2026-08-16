@@ -39,21 +39,23 @@ The View remains the HTTP adapter. `app.application.cases.confirm_facts` owns ap
 - `CaseFactConfirmationAccessDenied`
 - `execute_confirm_case_facts`
 
-The command resolves access metadata (with the existing Case fallback), authorizes the identity payload, validates `ConfirmCaseFactsRequest`, and delegates the validated Python payload to the existing repository command.
+Command는 기존 Case fallback을 포함해 access metadata를 해석하고, `identity_payload`를 authorization한 뒤 `access_subject_from_payload(identity_payload)["subject"]`에서만 `owner_id`를 도출한다. 이어서 `ConfirmCaseFactsRequest`를 validation하고 검증된 Python payload를 기존 repository command에 위임한다. `ValidationError`를 import하거나 처리하지 않으며, 기존 HTTP `422` mapping은 View가 담당한다. 변경하지 않은 repository ownership 재확인은 defense-in-depth로 유지한다.
 
 ## Characterization and sensitivity
 
-- `chatbot.test_phase_02_case_fact_confirmation_use_case`: 8 tests, `OK`.
+- `chatbot.test_phase_02_case_fact_confirmation_use_case`: command field exact set, client owner injection, runtime authorization-bypass repository fence를 포함한 11 tests, `OK`.
 - Existing `test_fact_confirmation_precedes_real_worker_queue` and `chatbot.test_phase_02_case_workspace_use_case`: 7 tests, `OK`.
-- Mutation A removed application authorization: the foreign invalid-payload characterization changed from `403` to `422 request_validation_error.v1`; the test failed as required.
-- Mutation B delegated raw payload before validation: the owner invalid-payload characterization changed from `422` to `409 consultation_case_error.v2`; the test failed as required.
-- Both mutations were restored byte-for-byte. The combined B2/B1 regression run found 15 tests and passed.
+- `scripts/refactoring/verify_phase_02_b2_test_sensitivity.py`는 tracked source를 바꾸지 않고 original focused B2 suite와 runtime-only child-process mutation 두 건을 실행한다.
+- `authorization_bypass`는 foreign invalid-payload assertion을 실패시키며, `validation_bypass`는 owner invalid payload가 repository에 도달하게 만들어 `422` assertion을 실패시킨다.
+- evidence contract는 `phase_02_b2_sensitivity.v1`이며, mutation exit code와 `AssertionError` failure kind는 하드코딩하지 않고 관측한다. 이는 Phase 0 sensitivity artifact와 구분된다.
+- runner는 실행 전후 Git status를 비교하고 매 실행마다 evidence를 덮어쓰며, control이 비결정적이면 failure status를 기록한다.
 
 ## Local verification
 
 - Phase 1 Python gate: 27 passed.
 - Phase 1 Django gate: 35 tests, `OK`.
-- Phase 0 deterministic suite and Windows full Django suite retain the Base-identical `pymupdf._extra` DLL-loading environment debt. The feature adds 8 B2 tests; the full Django error count remained 20 on both Base and feature. This is not a source regression.
+- 현재 Windows full Django 관찰: Base와 reviewed Head는 모두 동일한 `attachment_document_classification_adapter` fixture-resolution error count를 보인다. P2-B2 변경으로 도입된 regression은 0이다.
+- 별도 historical/local 관찰: 일부 collection 또는 focused run에서 `pymupdf._extra` DLL loading이 보고됐다. 이를 현재 Windows full-Django failure의 유일한 원인으로 단정하지 않는다.
 - `test/test_phase_01_collection_baseline_contract.py`: 6 passed. The Windows collection verifier separately reports the same PyMuPDF import environment issue and no B2 source regression.
 - `python backend/manage.py check`, OpenAPI check, frontend route check, and `ruff check --select E9,F63,F7,F82 .`: passed.
 - `node --test app/web/*.test.js`: 155 passed.
@@ -61,17 +63,17 @@ The command resolves access metadata (with the existing Case fallback), authoriz
 
 ## Docker D1
 
-- `docker build -t skn27-phase-02-b2-local .`: passed.
+- `docker build -t skn27-phase-02-b2-p2-delta-local .`: passed.
 - CI-equivalent `chat_orchestration_service` and `runtime_health` import: passed.
 - Container Django check: passed.
-- Container `ConfirmCaseFacts` import with production runtime settings: passed (`phase-02-b2 import ok`).
+- production runtime settings의 container `ConfirmCaseFacts` import: 통과 (`phase-02-b2 p2 delta import ok`). `owner_id`가 없는 `ConfirmCaseFactsCommand.dataclass_fields`, `ROOT_URLCONF=config.urls`, Explicit Mock disabled를 함께 확인했다.
 
 ## Compose D2
 
-`scripts/refactoring/run_phase_00_compose_gate.sh` ran with an ephemeral Git Bash `python3` shim and `COMPOSE_PROJECT_NAME=skn27_phase02_b2_local`. Repository scripts and system/user PATH were unchanged.
+`scripts/refactoring/run_phase_00_compose_gate.sh`는 Bash command substitution을 위해 Windows CRLF stdout을 정규화하는 일회성 Git Bash `python3` shim 및 `COMPOSE_PROJECT_NAME=skn27_phase02_b2_p2_delta_local`로 실행했다. Repository script와 system/user PATH는 변경하지 않았다.
 
 - `gate-summary.json`: `status: pass`; backend, database, cache, Neo4j, ClamAV, agent worker, and file-scan worker ready/consumed.
-- File scan: `status: pass`, `scan_status: clean`, `retry_count: 0`, and `local://attachment-staging/...` evidence.
+- File scan: `status: pass`, `scan_status: clean`, `retry_count: 0`. fresh gate artifact는 별도 `local://attachment-staging/...` text field를 노출하지 않는다.
 - `mock://` evidence: 0.
 - `failed-step.txt`: absent.
 - `last-step.txt`: `compose-final`.
@@ -80,6 +82,8 @@ The command resolves access metadata (with the existing Case fallback), authoriz
 
 ## CI and review
 
-- `.github/workflows/production-gate.yml` adds the blocking `Phase 2 B2 case fact confirmation application boundary` step without `continue-on-error` or `|| true`.
+- `.github/workflows/production-gate.yml`는 blocking `Phase 2 B2 case fact confirmation application boundary` step을 유지하고, `continue-on-error` 또는 `|| true` 없이 blocking `Phase 2 B2 sensitivity negative controls`, `phase-02-b2-sensitivity-evidence`, P2-B2 `F401` guard를 추가한다.
+- `production-gate`는 blocking이고 `regression-signal`은 non-blocking이다.
+- 이전 독립 검토 결과는 `PASS_WITH_CONDITIONS`, `ALLOWED_AFTER_P2_FIX`, `PHASE_2_B2_NEEDS_DELTA_FIX`이다.
 - The Draft PR CI result is pending at this receipt commit and must pass before review readiness is declared.
 - Draft PR must remain unmerged and must not be converted to Ready by this task.
