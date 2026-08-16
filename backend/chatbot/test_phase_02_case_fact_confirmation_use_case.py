@@ -5,11 +5,13 @@ import importlib
 import json
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from app.services.google_auth_service import issue_access_token
+from chatbot.case_repository import CaseOwnerMismatch
 from chatbot.models import (
     AgentWorkItem,
     AnalysisJob,
@@ -171,6 +173,17 @@ class CaseFactConfirmationUseCaseCharacterizationTests(TestCase):
         self.assertNotIn("details", payload["error"])
         self.assertEqual(ConfirmedFactVersion.objects.filter(case__case_id=self.case_id).count(), 0)
 
+    def test_client_supplied_owner_id_cannot_override_trusted_identity(self) -> None:
+        response = authenticated_client("usr_phase_02_b2_attacker").post(
+            self.confirm_url,
+            data={**self.payload, "owner_id": self.owner_id},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+        self.assertEqual(ConfirmedFactVersion.objects.filter(case__case_id=self.case_id).count(), 0)
+
     def test_owner_invalid_payload_preserves_validation_error_contract(self) -> None:
         response = self._confirm({"facts": []})
 
@@ -210,13 +223,20 @@ class CaseFactConfirmationUseCaseCharacterizationTests(TestCase):
         self.assertEqual(AnalysisJob.objects.filter(case__case_id=self.case_id).count(), 0)
         self.assertEqual(AgentWorkItem.objects.count(), 0)
 
-    def test_z_application_command_has_no_http_mock_orm_or_transaction_dependencies_and_view_is_adapter_only(self) -> None:
+    def test_application_derives_owner_from_matching_trusted_identity(self) -> None:
         module = importlib.import_module("app.application.cases.confirm_facts")
 
+        self.assertEqual(
+            tuple(module.ConfirmCaseFactsCommand.__dataclass_fields__),
+            ("case_id", "identity_payload", "raw_payload"),
+        )
+        self.assertEqual(
+            tuple(module.ConfirmCaseFactsCommand.dataclass_fields),
+            ("case_id", "identity_payload", "raw_payload"),
+        )
         result = module.execute_confirm_case_facts(
             module.ConfirmCaseFactsCommand(
                 case_id=self.case_id,
-                owner_id=self.owner_id,
                 identity_payload={"auth_context": {"user_id": self.owner_id}},
                 raw_payload=self.payload,
             )
@@ -224,6 +244,26 @@ class CaseFactConfirmationUseCaseCharacterizationTests(TestCase):
         self.assertEqual(result.fact_version["schema_version"], "confirmed_facts.v1")
         self.assertEqual(result.fact_version["version_no"], 1)
         self.assertNotIn("mock_scenario", json.dumps(result.fact_version, sort_keys=True))
+
+    def test_application_rejects_foreign_identity_at_repository_fence_when_authorization_is_bypassed(self) -> None:
+        module = importlib.import_module("app.application.cases.confirm_facts")
+
+        with patch.object(module, "authorize_resource_access", return_value={"allowed": True}):
+            with self.assertRaises(CaseOwnerMismatch):
+                module.execute_confirm_case_facts(
+                    module.ConfirmCaseFactsCommand(
+                        case_id=self.case_id,
+                        identity_payload={
+                            "auth_context": {"user_id": "usr_phase_02_b2_attacker"}
+                        },
+                        raw_payload=self.payload,
+                    )
+                )
+
+        self.assertEqual(ConfirmedFactVersion.objects.filter(case__case_id=self.case_id).count(), 0)
+
+    def test_z_application_command_has_no_http_mock_orm_or_transaction_dependencies_and_view_is_adapter_only(self) -> None:
+        module = importlib.import_module("app.application.cases.confirm_facts")
 
         application_path = Path(module.__file__)
         application_tree = ast.parse(application_path.read_text(encoding="utf-8"))

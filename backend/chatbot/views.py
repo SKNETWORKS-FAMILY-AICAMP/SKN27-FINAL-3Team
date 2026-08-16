@@ -1646,7 +1646,6 @@ def consultation_case_fact_confirmation(request: HttpRequest, case_id: str) -> J
         result = execute_confirm_case_facts(
             ConfirmCaseFactsCommand(
                 case_id=case_id,
-                owner_id=str(subject.get("user_id") or ""),
                 identity_payload=identity_payload,
                 raw_payload=body,
             )
