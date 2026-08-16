@@ -112,6 +112,7 @@ from chatbot.api_response import (
 from chatbot.case_repository import (
     CaseRepositoryError,
     create_case,
+    get_case_access_metadata,
     list_cases,
 )
 from chatbot.attachment_classification_service import (
