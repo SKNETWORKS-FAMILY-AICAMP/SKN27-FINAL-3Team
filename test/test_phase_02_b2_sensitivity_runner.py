@@ -75,3 +75,14 @@ def test_mutation_failure_kind_requires_assertion_failure() -> None:
     assert runner.failure_kind(assertion_failure) == "assertion"
     with pytest.raises(runner.SensitivityError, match="assertion mismatch"):
         runner.failure_kind(non_assertion_failure)
+
+
+def test_evidence_head_prefers_ci_pull_request_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _load_runner()
+
+    monkeypatch.setenv(
+        "PHASE_02_B2_SENSITIVITY_HEAD",
+        "phase-02-b2-pull-request-head",
+    )
+
+    assert runner._evidence_head() == "phase-02-b2-pull-request-head"

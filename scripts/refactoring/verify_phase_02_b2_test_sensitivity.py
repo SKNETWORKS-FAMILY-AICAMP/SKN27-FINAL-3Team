@@ -179,6 +179,9 @@ def _head() -> str:
     return _git_output("rev-parse", "HEAD").strip()
 
 
+def _evidence_head() -> str:
+    return os.environ.get("PHASE_02_B2_SENSITIVITY_HEAD", "").strip() or _head()
+
 def _evidence_path() -> Path:
     configured = os.environ.get("PHASE_02_B2_SENSITIVITY_EVIDENCE_PATH", "")
     return Path(configured).resolve() if configured else DEFAULT_EVIDENCE_PATH
@@ -229,7 +232,7 @@ def build_evidence(
 
 def main() -> int:
     before_status = _working_tree_status()
-    head = _head()
+    head = _evidence_head()
     original_exit_code: int | None = None
     outcomes: list[MutationOutcome] = []
     error: str | None = None

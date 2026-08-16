@@ -48,7 +48,7 @@ Command는 기존 Case fallback을 포함해 access metadata를 해석하고, `i
 - `scripts/refactoring/verify_phase_02_b2_test_sensitivity.py`는 tracked source를 바꾸지 않고 original focused B2 suite와 runtime-only child-process mutation 두 건을 실행한다.
 - `authorization_bypass`는 foreign invalid-payload assertion을 실패시키며, `validation_bypass`는 owner invalid payload가 repository에 도달하게 만들어 `422` assertion을 실패시킨다.
 - evidence contract는 `phase_02_b2_sensitivity.v1`이며, mutation exit code와 `AssertionError` failure kind는 하드코딩하지 않고 관측한다. 이는 Phase 0 sensitivity artifact와 구분된다.
-- runner는 실행 전후 Git status를 비교하고 매 실행마다 evidence를 덮어쓰며, control이 비결정적이면 failure status를 기록한다.
+- runner는 실행 전후 Git status를 비교하고 매 실행마다 evidence를 덮어쓰며, control이 비결정적이면 failure status를 기록한다. CI에서는 `PHASE_02_B2_SENSITIVITY_HEAD`로 PR Head를 명시 전달해 merge ref가 아닌 reviewed Head를 기록한다.
 
 ## Local verification
 

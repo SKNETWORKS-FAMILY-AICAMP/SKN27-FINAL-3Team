@@ -92,6 +92,8 @@ jobs:
 
       - name: Phase 2 B2 sensitivity negative controls
         timeout-minutes: 10
+        env:
+          PHASE_02_B2_SENSITIVITY_HEAD: ${{ github.event.pull_request.head.sha }}
         run: python scripts/refactoring/verify_phase_02_b2_test_sensitivity.py
 
       - name: Upload Phase 2 B2 sensitivity evidence
