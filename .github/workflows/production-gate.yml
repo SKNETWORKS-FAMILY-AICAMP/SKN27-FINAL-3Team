@@ -128,6 +128,27 @@ jobs:
       - name: Full Django chatbot regression gate
         timeout-minutes: 30
         run: python backend/manage.py test chatbot --verbosity 1
+      - name: Phase 2 D1 case list application boundary
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_02_case_list_use_case \
+            chatbot.test_consultation_v2.ConsultationCaseApiTests.test_authenticated_user_creates_lists_and_reads_case_workspace \
+            chatbot.test_consultation_v2.ConsultationCaseApiTests.test_case_creation_validates_typed_request_before_repository \
+            --verbosity 1
+
+      - name: Phase 2 D1 sensitivity negative controls
+        timeout-minutes: 10
+        env:
+          PHASE_02_D1_SENSITIVITY_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/refactoring/verify_phase_02_d1_test_sensitivity.py
+
+      - name: Upload Phase 2 D1 sensitivity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-02-d1-sensitivity-evidence
+          path: tmp/phase-02-d1-sensitivity-evidence.json
+          retention-days: 14
       - name: Pytest collection no-new-regression gate
         timeout-minutes: 10
         run: python scripts/refactoring/verify_pytest_collection_baseline.py
