@@ -33,6 +33,11 @@ from app.application.cases.get_workspace import (
     GetCaseWorkspaceQuery,
     execute_get_case_workspace,
 )
+from app.application.cases.list_cases import (
+    CaseListAccessDenied,
+    ListConsultationCasesQuery,
+    execute_list_consultation_cases,
+)
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
@@ -113,7 +118,6 @@ from chatbot.case_repository import (
     CaseRepositoryError,
     create_case,
     get_case_access_metadata,
-    list_cases,
 )
 from chatbot.attachment_classification_service import (
     AttachmentClassificationConfirmationError,
@@ -1573,11 +1577,17 @@ def consultation_cases(request: HttpRequest) -> JsonResponse:
     owner_id = str(subject.get("user_id") or "")
 
     if request.method == "GET":
+        try:
+            result = execute_list_consultation_cases(
+                ListConsultationCasesQuery(identity_payload=identity_payload)
+            )
+        except CaseListAccessDenied as exc:
+            return _object_access_denied_response(request, exc.access)
         response_payload = _serialize_response_dto(
             ConsultationCaseListResponse,
             {
                 "contract_version": "consultation_case_list.v2",
-                "cases": list_cases(owner_id=owner_id),
+                "cases": result.cases,
             },
         )
         return _json_response(
