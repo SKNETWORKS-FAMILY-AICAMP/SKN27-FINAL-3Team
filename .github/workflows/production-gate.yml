@@ -104,6 +104,27 @@ jobs:
           path: tmp/phase-02-b2-sensitivity-evidence.json
           retention-days: 14
 
+      - name: Phase 2 B3 case analysis application boundary
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_02_case_analysis_use_case \
+            chatbot.test_consultation_v2.ConsultationCaseApiTests.test_fact_confirmation_precedes_real_worker_queue \
+            --verbosity 1
+
+      - name: Phase 2 B3 sensitivity negative controls
+        timeout-minutes: 10
+        env:
+          PHASE_02_B3_SENSITIVITY_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/refactoring/verify_phase_02_b3_test_sensitivity.py
+
+      - name: Upload Phase 2 B3 sensitivity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-02-b3-sensitivity-evidence
+          path: tmp/phase-02-b3-sensitivity-evidence.json
+          retention-days: 14
+
       - name: Full Django chatbot regression gate
         timeout-minutes: 30
         run: python backend/manage.py test chatbot --verbosity 1
@@ -159,6 +180,8 @@ jobs:
         run: ruff check --select E9,F63,F7,F82 .
       - name: Phase 2 B2 unused import guard
         run: ruff check --select F401 app/application/cases/confirm_facts.py
+      - name: Phase 2 B3 unused import guard
+        run: ruff check --select F401 app/application/cases/start_analysis.py
 
       - name: Secret and deployment artifacts
         run: python -m pytest test/test_deployment_readiness_artifacts.py -q
