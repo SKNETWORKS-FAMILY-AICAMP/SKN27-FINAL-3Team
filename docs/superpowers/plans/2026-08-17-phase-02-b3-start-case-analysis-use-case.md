@@ -145,3 +145,92 @@ POST /api/cases/<case_id>/analysis/jobs/
 
 - Revert only the P2-B3 commits in reverse order if extraction must be withdrawn; do not modify repository persistence to compensate.
 - P2-B3 `StartCaseAnalysis` is the only included slice. Phase 3 repository/Queue split, Queue redesign, production DB audit, model/migration, and frontend changes remain deferred.
+
+## Post-implementation Audit Metadata
+
+### Reviewed revisions
+
+- Base:
+  `6c7688a17241b2e396420faaa2e00abeaa300e78`
+- Behavior Head:
+  `70e21aa5b5f6315ebb1d2c92dfd1290ab927e6a7`
+- Reviewed Final Head:
+  `b21b2aa98641c13da0cd595d96dff59677898b1e`
+
+### Append-only implementation history
+
+| Purpose | Commit | Message |
+| --- | --- | --- |
+| plan | `d048c5331b3959921f5fd16119b0dfe538ef2bde` | `docs: plan case analysis application extraction` |
+| characterization | `1f665b0c6c1fc4bae0ff1f29a54b1d994de418c6` | `test: characterize case analysis application boundary` |
+| Application extraction | `f29119400ab027d665c8475f30bb68ab0803cee6` | `refactor: extract case analysis application command` |
+| B3 sensitivity | `504be7e98728139db409681af355bd6c592ae430` | `test: add phase 2 b3 sensitivity evidence` |
+| sensitivity runner fix | `a8b49f71be6cdd6a811c72e4334e314945392a11` | `fix: correct phase 2 b3 sensitivity runner execution` |
+| CI | `7ea17a971335b93115b3a170210aa9b2b564c627` | `ci: block case analysis boundary regressions` |
+| stale `get_case_access_metadata` import fix | `70e21aa5b5f6315ebb1d2c92dfd1290ab927e6a7` | `fix: restore case access metadata import` |
+| Receipt | `b21b2aa98641c13da0cd595d96dff59677898b1e` | `docs: record case analysis extraction evidence` |
+
+### Final implementation outcome
+
+- HTTP Adapter / Application separation:
+  PASS
+- Repository transaction:
+  unchanged
+- Queue implementation:
+  unchanged
+- reusable Job:
+  preserved
+- failed Job non-reuse:
+  preserved
+- new FactVersion new Job:
+  preserved
+- Queue payload privacy:
+  preserved
+- rollback:
+  preserved
+- API contract:
+  unchanged
+
+### Independent review result
+
+- Final judgment:
+  `PASS_WITH_CONDITIONS`
+- Merge allowed:
+  `ALLOWED_AFTER_P2_FIX`
+- Phase status:
+  `PHASE_2_B3_NEEDS_DELTA_FIX`
+- Remaining condition:
+  final audit metadata only
+
+### Evidence at reviewed Final Head
+
+- production-gate:
+  `31959802228`
+- offline-verification:
+  `95195935462`
+- compose-integration:
+  `95196481482`
+- regression-signal:
+  `31959802223`
+- regression-signal blocking:
+  `NO`
+- Compose artifact:
+  `9267018370`
+- Phase 2-B3 sensitivity artifact:
+  `9266951447`
+- Phase 2-B2 sensitivity artifact:
+  `9266949821`
+- Phase 0 sensitivity artifact:
+  `9266959310`
+- Collection artifact:
+  `9266956169`
+
+### Authority note
+
+이 section은 사전 계획을 소급 변경하지 않는다.
+
+사전 계획과 실제 구현 결과를 분리하여 기록하는
+post-implementation audit appendix다.
+
+현재 docs-only metadata commit 자체의 SHA와 이후 CI는
+PR #404 본문을 최종 authority로 사용한다.

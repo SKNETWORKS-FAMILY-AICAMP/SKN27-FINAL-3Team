@@ -76,3 +76,107 @@
 - Production DB audit: `NOT_EXECUTED`
 - Phase 3 repository/queue split: `DEFERRED`
 - `start_case_analysis()` transaction, lock, reusable Job, Queue 구현의 분할/재구현: Phase 3로 이연.
+
+## Final Independent Review Audit
+
+### Review result
+
+- Final judgment:
+  `PASS_WITH_CONDITIONS`
+- Merge allowed:
+  `ALLOWED_AFTER_P2_FIX`
+- Phase status:
+  `PHASE_2_B3_NEEDS_DELTA_FIX`
+- P0:
+  none
+- P1:
+  none
+- P2:
+  final audit metadata only
+
+### Reviewed revisions
+
+- Base:
+  `6c7688a17241b2e396420faaa2e00abeaa300e78`
+- Behavior Head:
+  `70e21aa5b5f6315ebb1d2c92dfd1290ab927e6a7`
+- Reviewed Final Head:
+  `b21b2aa98641c13da0cd595d96dff59677898b1e`
+
+### Final behavior evidence
+
+- B3 focused:
+  15 tests, OK
+- B3/B2/B1 focused:
+  33 tests, OK
+- B3 CI-equivalent boundary:
+  16 tests, OK
+- Frontend:
+  155 passed
+- Frontend build:
+  PASS
+- Docker D1:
+  PASS
+- Compose D2:
+  PASS
+- Queue rollback:
+  PASS
+- Queue payload privacy:
+  PASS
+- reusable Job matrix:
+  PASS
+- version-scoped idempotency:
+  PASS
+
+### Fix history
+
+- sensitivity runner fix commit:
+  `a8b49f71be6cdd6a811c72e4334e314945392a11`
+- stale `get_case_access_metadata` import fix commit:
+  `70e21aa5b5f6315ebb1d2c92dfd1290ab927e6a7`
+
+### CI authority at reviewed Final Head
+
+- production-gate:
+  `31959802228`
+- offline-verification:
+  `95195935462`
+- compose-integration:
+  `95196481482`
+- regression-signal:
+  `31959802223`
+- regression-signal policy:
+  non-blocking
+
+### Artifact authority
+
+- Compose:
+  `9267018370`
+- Phase 2-B3 sensitivity:
+  `9266951447`
+- Phase 2-B2 sensitivity:
+  `9266949821`
+- Phase 0 sensitivity:
+  `9266959310`
+- Collection:
+  `9266956169`
+
+### Baseline observations
+
+- Windows `pymupdf._extra`:
+  Base와 Final에서 동일한 환경 관찰
+- quarantine portability:
+  Base와 Final에서 동일한 환경 관찰
+- PR #404 introduced regression:
+  0
+- Production DB audit:
+  `NOT_EXECUTED`
+
+### Self-reference policy
+
+이 Receipt는 reviewed behavior/final Head와 해당 CI evidence를 기록한다.
+
+이 metadata-only commit 자신의 SHA 및 이후 최신 CI는
+PR #404 본문과 Delta Review 결과를 authority로 사용한다.
+
+불필요한 self-referential docs commit을 연쇄 생성하지 않는다.
