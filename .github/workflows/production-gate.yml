@@ -149,6 +149,36 @@ jobs:
           name: phase-02-d1-sensitivity-evidence
           path: tmp/phase-02-d1-sensitivity-evidence.json
           retention-days: 14
+
+      - name: Phase 2 D2 case creation application boundary
+        timeout-minutes: 10
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_02_case_creation_use_case \
+            chatbot.test_consultation_v2.ConsultationCaseApiTests.test_authenticated_user_creates_lists_and_reads_case_workspace \
+            chatbot.test_consultation_v2.ConsultationCaseApiTests.test_case_creation_requires_authenticated_user \
+            chatbot.test_consultation_v2.ConsultationCaseApiTests.test_case_creation_validates_typed_request_before_repository \
+            chatbot.test_consultation_v2.ConsultationPersistenceSafetyTests.test_guest_case_promotion_requires_matching_guest_identity \
+            chatbot.test_consultation_v2.ConsultationPersistenceSafetyTests.test_guest_case_promotion_rejects_active_unbound_worker_jobs \
+            chatbot.test_consultation_v2.ConsultationPersistenceSafetyTests.test_guest_case_promotion_succeeds_after_worker_becomes_terminal \
+            chatbot.test_consultation_v2.ConsultationPersistenceSafetyTests.test_case_creation_rejects_an_unpromoted_analysis_reservation \
+            chatbot.test_consultation_v2.ConsultationPersistenceSafetyTests.test_guest_document_is_relinked_and_extended_when_session_becomes_a_case \
+            chatbot.test_consultation_v2.ConsultationPersistenceSafetyTests.test_guest_case_promotion_transfers_job_and_report_ownership \
+            --verbosity 1
+
+      - name: Phase 2 D2 sensitivity negative controls
+        timeout-minutes: 10
+        env:
+          PHASE_02_D2_SENSITIVITY_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/refactoring/verify_phase_02_d2_test_sensitivity.py
+
+      - name: Upload Phase 2 D2 sensitivity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-02-d2-sensitivity-evidence
+          path: tmp/phase-02-d2-sensitivity-evidence.json
+          retention-days: 14
       - name: Pytest collection no-new-regression gate
         timeout-minutes: 10
         run: python scripts/refactoring/verify_pytest_collection_baseline.py
@@ -203,6 +233,8 @@ jobs:
         run: ruff check --select F401 app/application/cases/confirm_facts.py
       - name: Phase 2 B3 unused import guard
         run: ruff check --select F401 app/application/cases/start_analysis.py
+      - name: Phase 2 D2 unused import guard
+        run: ruff check --select F401 app/application/cases/create_case.py
 
       - name: Secret and deployment artifacts
         run: python -m pytest test/test_deployment_readiness_artifacts.py -q

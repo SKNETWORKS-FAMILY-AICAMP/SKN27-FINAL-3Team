@@ -38,6 +38,10 @@ from app.application.cases.list_cases import (
     ListConsultationCasesQuery,
     execute_list_consultation_cases,
 )
+from app.application.cases.create_case import (
+    CreateConsultationCaseCommand,
+    execute_create_consultation_case,
+)
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
@@ -116,7 +120,6 @@ from chatbot.api_response import (
 )
 from chatbot.case_repository import (
     CaseRepositoryError,
-    create_case,
     get_case_access_metadata,
 )
 from chatbot.attachment_classification_service import (
@@ -1574,7 +1577,6 @@ def consultation_cases(request: HttpRequest) -> JsonResponse:
     login_response = _case_login_required_response(request, subject, action="case_access")
     if login_response is not None:
         return login_response
-    owner_id = str(subject.get("user_id") or "")
 
     if request.method == "GET":
         try:
@@ -1603,16 +1605,17 @@ def consultation_cases(request: HttpRequest) -> JsonResponse:
     if validation_response is not None:
         return validation_response
     try:
-        case = create_case(
-            owner_id=owner_id,
-            guest_id=str(subject.get("guest_id") or ""),
-            payload=validated,
+        result = execute_create_consultation_case(
+            CreateConsultationCaseCommand(
+                identity_payload=identity_payload,
+                payload=validated,
+            )
         )
     except CaseRepositoryError as exc:
         return _case_repository_error_response(request, exc)
     response_payload = _serialize_response_dto(
         CreateConsultationCaseResponse,
-        {"contract_version": "consultation_case.v2", "case": case},
+        {"contract_version": "consultation_case.v2", "case": result.case},
     )
     return _json_response(request, response_payload, status=201)
 
