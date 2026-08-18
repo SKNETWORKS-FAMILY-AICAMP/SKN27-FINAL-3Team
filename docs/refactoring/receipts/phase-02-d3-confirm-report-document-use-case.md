@@ -6,10 +6,14 @@
 - Base SHA: `5ee4d3f501429268057b9628a35c5ffbfc184b45`
 - Branch: `refactor/phase-02-d3-confirm-report-document-use-case`
 - Behavior Head: `7833b729db5d59b7224e782bb46faf4875896f8f`
-- Final Head (runtime implementation): `7833b729db5d59b7224e782bb46faf4875896f8f`
-- PR: `PENDING_DRAFT_PR`
+- Runtime Implementation Head: `7833b729db5d59b7224e782bb46faf4875896f8f`
+- Final Reviewed Head: `c81dba79e4b6f4c18f45da0c573f3c6281259be6`
+- PR: `#407`
+- State: `OPEN`
+- Draft: `true`
+- Merge: `NOT_PERFORMED`
 
-이 receipt는 비동작 metadata commit으로 별도 기록한다. 따라서 self-referential SHA 대신 실제 runtime implementation Head를 Final Head로 기록한다.
+이 receipt는 비동작 metadata commit과 Final Reviewed Head를 구분한다. Runtime behavior authority는 `Runtime Implementation Head`이고, 독립 검토의 Final authority는 `Final Reviewed Head`다.
 
 ## Target
 
@@ -88,14 +92,29 @@ Base와 Head 모두 authorization-before-validation이다. foreign owner + inval
 
 ## Local Full Django Observation
 
-`python backend/manage.py test chatbot --verbosity 1`은 506 tests 중 20 errors였다. 모두 D3와 무관한 Windows 환경 관찰이다.
+`python backend/manage.py test chatbot --verbosity 1`의 Windows 독립 비교 결과는 다음과 같다.
 
-- `pymupdf._extra` DLL loading
-- `app.services.attachment_document_classification_adapter` import/patch resolution
+- Base: 498 tests / 20 errors
+- Head: 507 tests / 20 errors
+- Exact failing test set: same
+- New D3 regression: 0
+- Classification: `BASELINE_ENVIRONMENT_DEBT`
 
-D3 focused, report lifecycle, Repository, previous Phase 2 slice regression은 모두 통과했다.
+- `pymupdf._extra` DLL loading — 10
+- `app.services.attachment_document_classification_adapter` patch resolution — 10
+
+Head의 추가 9 tests는 D3 characterization tests이며 통과했다. D3 focused, report lifecycle, Repository, previous Phase 2 slice regression은 모두 통과했다.
 
 ## CI
+
+### Final CI Authority
+
+- Final CI Authority Head: `c81dba79e4b6f4c18f45da0c573f3c6281259be6`.
+- `offline-verification`: run `32124552591` / job `95672114113` / `success`, blocking.
+- `compose-integration`: run `32124552591` / job `95673472025` / `success`, blocking.
+- `regression-signal`: run `32124552612` / job `95672114373` / `success`.
+
+### Historical CI Evidence
 
 - Evidence Head: `bf9ad4db8ccb83d9be17c43a12425403728671ee`.
 - `production-gate` run `32111900802` / `offline-verification` job `95632969375`: `PASS`, blocking, 5m4s.
