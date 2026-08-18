@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from app.application.history.list_events import (
+    ListHistoryEventsQuery,
+    execute_list_history_events as execute_history_query,
+)
 from app.services.google_auth_service import issue_access_token
 from chatbot.models import AnalysisJob, AuthSession, AuthSessionStatus, ChatSession, UserAccount
 from chatbot.repositories import record_history_event_record
@@ -73,7 +78,7 @@ class HistoryListEventsUseCaseTests(TestCase):
     ) -> None:
         with patch(
             "chatbot.views.execute_list_history_events",
-            create=True,
+            wraps=execute_history_query,
         ) as execute_list_history_events:
             response = self.owner_client.get(f"/api/history/?job_id={self.job_id}")
 
@@ -84,3 +89,45 @@ class HistoryListEventsUseCaseTests(TestCase):
             {event["event_id"] for event in response.json()["events"]},
         )
         execute_list_history_events.assert_called_once()
+    def test_application_uses_auth_context_instead_of_top_level_identity(self) -> None:
+        query = ListHistoryEventsQuery(
+            identity_payload={
+                "user_id": "usr_untrusted_top_level",
+                "auth_context": {"user_id": self.owner_id, "subject_type": "user"},
+            },
+            session_id=None,
+            user_id=None,
+            guest_id=None,
+            job_id=None,
+            event_type=None,
+            limit=None,
+            canonical_request=False,
+        )
+
+        with patch(
+            "app.application.history.list_events.list_history_event_records",
+            return_value=[],
+        ) as records:
+            execute_history_query(query)
+
+        self.assertEqual(records.call_args.kwargs["user_id"], self.owner_id)
+
+    def test_application_module_is_transport_orm_transaction_cache_and_worker_free(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[2]
+            / "app"
+            / "application"
+            / "history"
+            / "list_events.py"
+        ).read_text(encoding="utf-8")
+
+        for forbidden_import in (
+            "from django.http",
+            "from django.db",
+            "from chatbot.models",
+            "transaction.atomic",
+            "django.core.cache",
+            "from chatbot.views",
+            "celery",
+        ):
+            self.assertNotIn(forbidden_import, source)
