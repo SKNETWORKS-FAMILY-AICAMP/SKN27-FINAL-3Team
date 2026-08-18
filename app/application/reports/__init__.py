@@ -1,0 +1,1 @@
+"""Report-focused application use cases."""
