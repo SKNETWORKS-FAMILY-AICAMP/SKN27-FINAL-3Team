@@ -7,7 +7,7 @@
 - Branch: `refactor/phase-02-d4-update-conversation-save-state-use-case`
 - Behavior Head: `b64615ace29e9ecb728bb5a9b4e22af68d8ed334`
 - Final Head: `b64615ace29e9ecb728bb5a9b4e22af68d8ed334` (runtime behavior; receipt metadata commit follows)
-- PR: Draft creation pending at receipt authoring time
+- PR: `#408` (`OPEN`, Draft)
 - Merge: `NOT_PERFORMED`
 
 ## Target
