@@ -8,13 +8,13 @@
 - RED Head: `9b76084b82415b8be9c4dd111534bbcb523ab5dc`
 - GREEN/Behavior Head: `5d9f5405d4cef863e5cb2ebd690b2f17e0981f0d`
 - Verification-gate Head: `743de5a2f0bee2b4bf2c107f854de333adff7659`
-- Final reviewed runtime Head: `df513820b2bfa3b72cadc4e0b4057436cd8f440a`
+- Reviewed Runtime Head: `93d0ed76cad94b337d96297547db407f7c34b457`
 - PR: `#410`
 - State: `OPEN`
 - Draft: `true`
 - Merge: `NOT_PERFORMED`
 
-이 Receipt는 runtime 및 검증 변경이 끝난 `df513820b2bfa3b72cadc4e0b4057436cd8f440a`를 기록한다. 이어지는 docs-only metadata commit의 SHA는 self-reference 하지 않는다.
+이 Receipt는 Final Head CI를 포함해 검토한 Runtime Head `93d0ed76cad94b337d96297547db407f7c34b457`를 기록한다. 이어지는 docs-only P2 metadata remediation commit의 SHA는 self-reference 하지 않는다.
 
 ## Target
 
@@ -65,7 +65,7 @@
 | Django/OpenAPI/frontend/Ruff | `python backend/manage.py check`; `python scripts/generate_openapi_v1.py --check`; `python scripts/generate_frontend_case_routes.py --check`; `ruff check --select E9,F63,F7,F82 .`; `ruff check --select F401 app/application/history/list_events.py` | `PASS` |
 | Diff | `git diff --check` | `PASS` |
 
-Windows native full Django suite는 `python backend/manage.py test chatbot --verbosity 1`에서 `526 tests`, `20 errors`였다. `pymupdf._extra` DLL loading 및 attachment classification adapter import 계열의 기존 Windows 환경 debt이며, D6 source delta 경로와 무관하다. focused History 및 이전 Phase 2 boundary regression은 모두 통과했다. Linux blocking CI가 full Django authority다.
+Windows local independent review의 full Django suite는 `python backend/manage.py test chatbot --verbosity 1`에서 `528 tests`, `20 errors`였다. 오류는 `pymupdf._extra` DLL loading 및 attachment classification / portability 계열의 기존 환경 debt이며 D6 source delta 경로와 무관하다. New D6 regression은 `0`이다. Linux Final Head CI의 Full Django chatbot regression gate는 `PASS`다.
 
 ## Sensitivity
 
@@ -106,9 +106,26 @@ B2, B3, D1, D2, D3, D4, D5 기존 sensitivity gates도 모두 `PASS`였다.
 
 ## CI
 
-- D6 blocking steps는 `.github/workflows/production-gate.yml`에 추가했다.
-- Draft PR 생성 직후의 CI: `PENDING`
-- CI가 통과한 뒤 PR body에 run/job/artifact metadata만 갱신한다. 이 갱신은 CI를 재실행하지 않는다.
+- Reviewed Runtime Head: `93d0ed76cad94b337d96297547db407f7c34b457`
+- production-gate Run: `32195957915` — `success`
+- offline-verification Job: `95899906537` — `success`
+- compose-integration Job: `95901241805` — `success`
+- regression-signal Run/Job: `32195957733` / `95899905880` — `success`
+- D6 boundary, D6 sensitivity, D6 sensitivity artifact upload, Full Django regression, D6 import guard: `PASS`
+- B1–D5 regression, previous sensitivity gates, OpenAPI, frontend route, Python static, Docker smoke: `PASS`
+- Compose: `PASS`; `cleanup_success`; residue: none
+
+## Final Head Artifacts
+
+- D6 sensitivity: `9345930265`
+  - Final Head 일치
+  - required mutation: `5`
+  - baseline: `PASS`
+  - each mutation: `AssertionError`
+  - `working_tree_unchanged`: `true`
+- Compose: `9346057320`
+- Phase 0 sensitivity: `9345940855`
+- Pytest collection baseline: `9345933714`
 
 ## Deferred and Risks
 
@@ -116,4 +133,19 @@ B2, B3, D1, D2, D3, D4, D5 기존 sensitivity gates도 모두 `PASS`였다.
 - Remaining Phase 2 slices 및 Phase 3 대규모 구조 변경: 범위 외
 - P0: `0`
 - P1: `0`
-- P2: Windows full-suite dependency portability debt (`pymupdf._extra`, attachment classification adapter import)
+- Windows dependency portability debt (`pymupdf._extra`, attachment classification / portability)은 D6와 무관한 environment observation이다.
+- P2: `REMEDIATED_PENDING_DELTA_REVIEW` (Receipt final-state metadata only)
+
+## Independent Review Addendum
+
+- Implementation: `PASS`
+- Security/Privacy: `PASS`
+- RED Chronology: `INDEPENDENTLY_PROVABLE`
+- P0: `0`
+- P1: `0`
+- P2 finding: Receipt metadata only
+- Reviewed Runtime Head: `93d0ed76cad94b337d96297547db407f7c34b457`
+- Windows independent result: `528 tests / 20 errors`
+- Linux blocking CI: `PASS`
+- Production DB audit: `NOT_EXECUTED`
+- P2 remediation status: `REMEDIATED_PENDING_DELTA_REVIEW`
