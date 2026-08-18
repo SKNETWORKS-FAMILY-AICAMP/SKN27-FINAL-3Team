@@ -58,6 +58,16 @@ from app.application.reports.confirm_document import (
     ReportDocumentConfirmationNotFound,
     execute_confirm_report_document,
 )
+from app.application.reports.read_queries import (
+    GetReportDetailQuery,
+    ListReportsQuery,
+    ReportReadAccessDenied,
+    ReportReadGuestIdentityInvalid,
+    ReportReadLoginRequired,
+    ReportReadNotFound,
+    execute_get_report_detail,
+    execute_list_reports,
+)
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
@@ -124,9 +134,7 @@ from app.services.supervisor_routing_service import route_supervisor_input
 from app.services.resume_manifest_service import build_resume_manifest
 from app.services.report_query_service import (
     WORKER_REPORT_SOURCE,
-    compose_report_detail_response,
     compose_report_error_response,
-    compose_report_list_response,
     report_api_surface,
     report_execution_mode,
 )
@@ -167,13 +175,11 @@ from chatbot.repositories import (
     get_mycase_summary,
     get_report_access_metadata,
     get_report_download_metadata,
-    get_report_record_detail,
     get_uploaded_file_access_metadata,
     get_uploaded_file,
     history_operating_policy,
     list_analysis_job_records,
     list_history_event_records,
-    list_report_records,
     list_uploaded_files,
     normalize_report_download_document_type,
     load_chat_followup_state,
@@ -1863,38 +1869,26 @@ def report_action(request: HttpRequest) -> JsonResponse:
         if auth_response is not None:
             return auth_response
         identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-        subject = access_subject_from_payload(identity_payload)["subject"]
-        if _is_canonical_request(request):
-            guest_violation = _guest_identity_policy_violation(subject)
-            if guest_violation:
-                return _guest_identity_policy_response(request, guest_violation)
-            if subject.get("subject_type") != "user":
-                return _login_required_response(
-                    request,
-                    action="report_list",
-                    reason="report_list_requires_authenticated_user",
-                    message="저장된 보고서를 조회하려면 로그인이 필요합니다.",
-                    policy_version="report_action_policy.v1",
-                    subject=subject,
+        try:
+            result = execute_list_reports(
+                ListReportsQuery(
+                    identity_payload=identity_payload,
+                    session_id=request.GET.get("session_id"),
+                    guest_violation_resolver=_guest_identity_policy_violation,
                 )
-        reports = list_report_records(
-            session_id=request.GET.get("session_id"),
-            owner_id=str(subject.get("user_id") or "") if _is_canonical_request(request) else request.GET.get("owner_id"),
-        )
-        has_worker_reports = any(
-            report.get("source") == WORKER_REPORT_SOURCE
-            for report in reports
-        )
-        return _json_response(
-            request,
-            compose_report_list_response(
-                reports,
-                api_surface=report_api_surface(
-                    canonical=_is_canonical_request(request),
-                    source=WORKER_REPORT_SOURCE if has_worker_reports else "",
-                ),
-            ),
-        )
+            )
+        except ReportReadGuestIdentityInvalid as error:
+            return _guest_identity_policy_response(request, error.violation)
+        except ReportReadLoginRequired as error:
+            return _login_required_response(
+                request,
+                action="report_list",
+                reason="report_list_requires_authenticated_user",
+                message="저장된 보고서를 조회하려면 로그인이 필요합니다.",
+                policy_version="report_action_policy.v1",
+                subject=error.subject,
+            )
+        return _json_response(request, result.payload)
 
     body = _json_body(request)
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_request(request) else body
@@ -1925,36 +1919,35 @@ def report_action(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
-    access_metadata = None
-    if _is_canonical_request(request):
-        auth_response = _report_auth_error_response(
-            request,
-            session_id=request.GET.get("session_id"),
-        )
-        if auth_response is not None:
-            return auth_response
-        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-        subject = access_subject_from_payload(identity_payload)["subject"]
-        guest_violation = _guest_identity_policy_violation(subject)
-        if guest_violation:
-            return _guest_identity_policy_response(request, guest_violation)
-        if subject.get("subject_type") != "user":
-            return _login_required_response(
-                request,
-                action="report_detail",
-                reason="report_detail_requires_authenticated_user",
-                message="보고서 상세 내용을 조회하려면 로그인이 필요합니다.",
-                policy_version="report_action_policy.v1",
-                subject=subject,
+    auth_response = _report_auth_error_response(
+        request,
+        session_id=request.GET.get("session_id"),
+    )
+    if auth_response is not None:
+        return auth_response
+    identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
+    try:
+        result = execute_get_report_detail(
+            GetReportDetailQuery(
+                report_id=report_id,
+                identity_payload=identity_payload,
+                guest_violation_resolver=_guest_identity_policy_violation,
             )
-        access_metadata = get_report_access_metadata(report_id)
-        if access_metadata is not None:
-            access = authorize_report_download_metadata(access_metadata, identity_payload)
-            if not access["allowed"]:
-                return _report_object_access_denied_response(request, access)
-
-    report = get_report_record_detail(report_id)
-    if report is None:
+        )
+    except ReportReadGuestIdentityInvalid as error:
+        return _guest_identity_policy_response(request, error.violation)
+    except ReportReadLoginRequired as error:
+        return _login_required_response(
+            request,
+            action="report_detail",
+            reason="report_detail_requires_authenticated_user",
+            message="보고서 상세 내용을 조회하려면 로그인이 필요합니다.",
+            policy_version="report_action_policy.v1",
+            subject=error.subject,
+        )
+    except ReportReadAccessDenied as error:
+        return _report_object_access_denied_response(request, error.access)
+    except ReportReadNotFound:
         return _report_error_response(
             request,
             {
@@ -1963,18 +1956,7 @@ def report_detail(request: HttpRequest, report_id: str) -> JsonResponse:
             },
             status=404,
         )
-    return _json_response(
-        request,
-        compose_report_detail_response(
-            report,
-            api_surface=report_api_surface(
-                canonical=_is_canonical_request(request),
-                source=report.get("source"),
-            ),
-            execution_mode=report_execution_mode(source=report.get("source")),
-        ),
-    )
-
+    return _json_response(request, result.payload)
 
 @csrf_exempt
 @require_http_methods(["POST", "OPTIONS"])
