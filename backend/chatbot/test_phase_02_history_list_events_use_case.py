@@ -14,7 +14,15 @@ from app.application.history.list_events import (
     execute_list_history_events as execute_history_query,
 )
 from app.services.google_auth_service import issue_access_token
-from chatbot.models import AnalysisJob, AuthSession, AuthSessionStatus, ChatSession, UserAccount
+from app.services.guest_credential_service import issue_guest_credential
+from chatbot.models import (
+    AnalysisJob,
+    AuthSession,
+    AuthSessionStatus,
+    ChatSession,
+    HistoryEvent,
+    UserAccount,
+)
 from chatbot.repositories import record_history_event_record
 
 
@@ -76,6 +84,8 @@ class HistoryListEventsUseCaseTests(TestCase):
     def test_http_get_delegates_to_application_with_trusted_identity_and_preserves_history_response(
         self,
     ) -> None:
+        history_count = HistoryEvent.objects.count()
+
         with patch(
             "chatbot.views.execute_list_history_events",
             wraps=execute_history_query,
@@ -89,6 +99,7 @@ class HistoryListEventsUseCaseTests(TestCase):
             {event["event_id"] for event in response.json()["events"]},
         )
         execute_list_history_events.assert_called_once()
+        self.assertEqual(HistoryEvent.objects.count(), history_count)
     def test_application_uses_auth_context_instead_of_top_level_identity(self) -> None:
         query = ListHistoryEventsQuery(
             identity_payload={
@@ -131,3 +142,48 @@ class HistoryListEventsUseCaseTests(TestCase):
             "celery",
         ):
             self.assertNotIn(forbidden_import, source)
+    def test_credentialed_foreign_guest_history_filter_is_denied(self) -> None:
+        owner_guest_id = "gst_phase_02_d6_history_owner"
+        foreign_guest_id = "gst_phase_02_d6_history_foreign"
+        foreign_client = Client(
+            HTTP_X_GUEST_ID=foreign_guest_id,
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential(foreign_guest_id)[0],
+        )
+
+        response = foreign_client.get(f"/api/history/?guest_id={owner_guest_id}")
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+
+    def test_credentialed_guest_history_keeps_existing_retention_cutoff(self) -> None:
+        guest_id = "gst_phase_02_d6_history_retention"
+        expired_event_id = "evt_phase_02_d6_guest_retention_expired"
+        HistoryEvent.objects.create(
+            event_id=expired_event_id,
+            event_type="chat_message_created",
+            event_version="history_event.v1",
+            occurred_at=timezone.now() - timedelta(days=8),
+            actor_guest_id=guest_id,
+            actor_auth_state="guest",
+            subject_session_id="ses_phase_02_d6_history_retention",
+            source_execution_mode="canonical",
+            status="success",
+            summary="expired guest history event",
+            actor={"guest_id": guest_id, "auth_state": "guest"},
+            subject={"session_id": "ses_phase_02_d6_history_retention"},
+            source={"execution_mode": "canonical"},
+            metadata={"conversation_save_state": "saved"},
+            privacy={"risk_level": "low", "retention_policy": "standard_light"},
+        )
+        guest_client = Client(
+            HTTP_X_GUEST_ID=guest_id,
+            HTTP_X_GUEST_CREDENTIAL=issue_guest_credential(guest_id)[0],
+        )
+
+        response = guest_client.get(f"/api/history/?guest_id={guest_id}")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertNotIn(
+            expired_event_id,
+            {event["event_id"] for event in response.json()["events"]},
+        )
