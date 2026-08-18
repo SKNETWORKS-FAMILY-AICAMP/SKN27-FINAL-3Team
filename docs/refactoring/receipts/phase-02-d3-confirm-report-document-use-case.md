@@ -97,9 +97,11 @@ D3 focused, report lifecycle, Repository, previous Phase 2 slice regression은 �
 
 ## CI
 
-- D3 focused / sensitivity / artifact / F401 blocking gate를 `production-gate.yml`에 추가했다.
-- Run / job / Final Head: push 후 확인.
-- Blocking result: `PENDING_DRAFT_PR`.
+- Evidence Head: `bf9ad4db8ccb83d9be17c43a12425403728671ee`.
+- `production-gate` run `32111900802` / `offline-verification` job `95632969375`: `PASS`, blocking, 5m4s.
+- `production-gate` run `32111900802` / `compose-integration` job `95634214514`: `PASS`, blocking, 3m6s.
+- `regression-signal` run `32111900796` / job `95632969524`: `PASS`, 2m2s.
+- `offline-verification` 내부 `Phase 2 D3 report document confirmation application boundary`, `Phase 2 D3 sensitivity negative controls`, `Upload Phase 2 D3 sensitivity evidence`, `Phase 2 D3 unused import guard`: 모두 `success`.
 
 ## Deferred
 
