@@ -6,7 +6,8 @@
 - Base SHA: `0dcd41bd56978d89347f74aa96e56b8017ffbdb3`
 - Branch: `refactor/phase-02-d4-update-conversation-save-state-use-case`
 - Behavior Head: `b64615ace29e9ecb728bb5a9b4e22af68d8ed334`
-- Final Head: `b64615ace29e9ecb728bb5a9b4e22af68d8ed334` (runtime behavior; receipt metadata commit follows)
+- Reviewed Runtime / PR Head before docs remediation: `467497838d086e313d3ee585a62efcee002ad841`
+- Docs-only remediation: independent review 후 수행. 새 Docs Delta Head는 자기참조를 피하기 위해 Git/PR authority와 후속 Delta Review에서 기록한다.
 - PR: `#408` (`OPEN`, Draft)
 - Merge: `NOT_PERFORMED`
 
@@ -111,17 +112,25 @@ Base와 Head는 다음 순서를 보존한다.
 
 ## Environment and Existing Debt
 
-- Windows ownership E2E: D4 + ownership combined run에서 D4/API contract 16 tests는 통과했고, ownership E2E 3건은 D4 assertions 전에 `pymupdf._extra` DLL loading으로 중단됐다. 이는 `BASELINE_ENVIRONMENT_DEBT`이며 Linux blocking CI에서 재검증한다.
+- Windows ownership E2E: 이번 docs-only remediation에서는 terminal sandbox helper가 새 process를 initialization 단계에서 거절해 독립 재실행하지 못했다. 기존 `pymupdf._extra` DLL loading은 portability/environment observation으로만 유지하며 D4 PASS evidence로 사용하지 않는다.
+- Linux blocking CI: 다음 ownership E2E 3건을 실제 실행하여 PASS했다. Classification: `VERIFIED_IN_LINUX_BLOCKING_CI`.
+  - `test_matching_guest_login_can_promote_all_resources_to_one_case`
+  - `test_other_user_cannot_read_mutate_or_claim_promoted_resources`
+  - `test_attacker_cannot_access_or_mutate_any_owner_bound_resource`
 - Existing Phase 0 sensitivity: clean behavior head에서 process-only Git safe-directory context로 실행했지만 `ocr_law` original test가 `app.services.attachment_document_classification_adapter` patch resolution `AttributeError`로 실패했다. 이 source 상태는 Base에도 존재하며 D4는 이를 변경하지 않았다. 분류: `PRE_EXISTING_PHASE_00_SENSITIVITY_DEBT`.
-- New D4 regression observed locally: `0`.
+- New D4 production regression: Linux blocking CI 기준 `0`.
 
 ## CI
 
 - D4 blocking workflow steps were added: focused boundary, D4 sensitivity negative controls, evidence artifact, F401 guard.
-- CI evidence head: `9d2ed9306fd757181c50528a89c92fcba4d81e30`.
-- `production-gate`: run `32134541067`, `offline-verification` job `95702730288`, `success`, blocking.
-- `production-gate`: run `32134541067`, `compose-integration` job `95704168137`, `success`, blocking.
-- `regression-signal`: run `32134540841`, job `95702729159`, `success`.
+- Reviewed Runtime / PR Head CI authority: `467497838d086e313d3ee585a62efcee002ad841`.
+- `production-gate`: run `32135419258`, `offline-verification` job `95705484668`, `success`, blocking.
+- `production-gate`: run `32135419258`, `compose-integration` job `95706845315`, `success`, blocking.
+- `regression-signal`: run `32135419271`, job `95705484301`, `success`.
+- D4 boundary: `19 tests, OK`.
+- Full Django chatbot regression: `516 tests, OK`.
+- D4 sensitivity: `5/5 assertion detection`.
+- D4 evidence artifact: `9323853216`.
 - Linux CI passed the D4 focused boundary, D4 sensitivity, Phase 0 sensitivity, frontend, Terraform, and Docker/Compose gates.
 
 ## Deferred
@@ -134,4 +143,5 @@ Base와 Head는 다음 순서를 보존한다.
 
 - P0: 0.
 - P1: 0.
-- P2: Windows `pymupdf._extra` portability and pre-existing Phase 0 sensitivity patch-resolution debt; neither is introduced by this D4 source delta.
+- P2: Receipt/PR metadata remediation performed; `REMEDIATED_PENDING_DELTA_REVIEW`.
+- Windows `pymupdf._extra` portability와 Phase 0 sensitivity patch-resolution debt는 D4 source delta가 도입하지 않은 기존 환경 관찰이다.
