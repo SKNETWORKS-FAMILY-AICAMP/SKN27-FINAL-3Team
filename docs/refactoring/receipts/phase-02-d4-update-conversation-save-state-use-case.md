@@ -118,7 +118,11 @@ Base와 Head는 다음 순서를 보존한다.
 ## CI
 
 - D4 blocking workflow steps were added: focused boundary, D4 sensitivity negative controls, evidence artifact, F401 guard.
-- PR run/job/head/result: Draft PR creation and remote CI dispatch pending at receipt authoring time.
+- CI evidence head: `9d2ed9306fd757181c50528a89c92fcba4d81e30`.
+- `production-gate`: run `32134541067`, `offline-verification` job `95702730288`, `success`, blocking.
+- `production-gate`: run `32134541067`, `compose-integration` job `95704168137`, `success`, blocking.
+- `regression-signal`: run `32134540841`, job `95702729159`, `success`.
+- Linux CI passed the D4 focused boundary, D4 sensitivity, Phase 0 sensitivity, frontend, Terraform, and Docker/Compose gates.
 
 ## Deferred
 
