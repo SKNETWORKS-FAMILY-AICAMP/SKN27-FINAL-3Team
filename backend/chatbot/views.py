@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from functools import partial
 import ipaddress
 import json
 import logging
@@ -17,6 +18,14 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
+
+from app.application.chat.update_save_state import (
+    ConversationSaveStateAccessDenied,
+    ConversationSaveStateGuestIdentityInvalid,
+    ConversationSaveStateLoginRequired,
+    UpdateConversationSaveStateCommand,
+    execute_update_conversation_save_state,
+)
 
 from app.application.cases.confirm_facts import (
     CaseFactConfirmationAccessDenied,
@@ -166,7 +175,6 @@ from chatbot.repositories import (
     list_history_event_records,
     list_report_records,
     list_uploaded_files,
-    mark_conversation_save_state,
     normalize_report_download_document_type,
     load_chat_followup_state,
     enqueue_analysis_job_work,
@@ -1527,52 +1535,49 @@ def submit_chat_message(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def update_chat_save_state(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    identity_body = _payload_with_request_identity(request, body) if _is_canonical_request(request) else body
-    session_id = str(body.get("session_id") or identity_body.get("session_id") or "")
-
-    if _is_canonical_request(request):
-        access = _authorize_session_query(session_id, identity_body, resource_type="chat_save_state")
-        if not access["allowed"]:
-            return _object_access_denied_response(request, access)
-
-    subject = access_subject_from_payload(identity_body)["subject"]
-    save_state = conversation_save_state_from_payload(body, default="pending")
-    if _is_canonical_request(request):
-        guest_violation = _guest_identity_policy_violation(subject)
-        if guest_violation:
-            return _guest_identity_policy_response(request, guest_violation)
-        if save_state == "saved" and subject.get("subject_type") != "user":
-            return _login_required_response(
-                request,
-                action="conversation_save",
-                reason="saved_requires_authenticated_user",
-                message="상담 내용을 저장하려면 로그인이 필요합니다.",
-                policy_version="conversation_save_policy.v1",
-                subject=subject,
-            )
-    result = mark_conversation_save_state(
-        session_id=session_id,
-        save_state=save_state,
-        owner_id=str(subject.get("user_id") or ""),
-        guest_id=str(subject.get("guest_id") or ""),
-        raw_payload=body,
+    canonical_request = _is_canonical_request(request)
+    identity_body = (
+        _payload_with_request_identity(request, body)
+        if canonical_request
+        else body
     )
-    if result.get("conversation_save_state") == "saved":
-        _record_history_safely(
-            request,
-            event_type="conversation_saved",
-            status="success",
-            summary="Conversation was promoted to My Page history after user consent.",
-            actor=_history_actor(request, body),
-            subject=subject_from_payload(body, session_id=session_id),
-            source=_history_source(request),
-            metadata={
+    session_id = str(body.get("session_id") or identity_body.get("session_id") or "")
+    command = UpdateConversationSaveStateCommand(
+        identity_payload=identity_body,
+        session_id=session_id,
+        raw_payload=body,
+        canonical_request=canonical_request,
+        guest_violation_resolver=_guest_identity_policy_violation,
+        history_recorder=partial(_record_history_safely, request),
+        history_event_factory=lambda: {
+            "event_type": "conversation_saved",
+            "status": "success",
+            "summary": "Conversation was promoted to My Page history after user consent.",
+            "actor": _history_actor(request, body),
+            "subject": subject_from_payload(body, session_id=session_id),
+            "source": _history_source(request),
+            "metadata": {
                 "conversation_save_state": "saved",
                 "conversation_save_policy": "conversation_save_policy.v1",
             },
+        },
+    )
+    try:
+        result = execute_update_conversation_save_state(command)
+    except ConversationSaveStateAccessDenied as exc:
+        return _object_access_denied_response(request, exc.access)
+    except ConversationSaveStateGuestIdentityInvalid as exc:
+        return _guest_identity_policy_response(request, exc.violation)
+    except ConversationSaveStateLoginRequired as exc:
+        return _login_required_response(
+            request,
+            action="conversation_save",
+            reason="saved_requires_authenticated_user",
+            message="상담 내용을 저장하려면 로그인이 필요합니다.",
+            policy_version="conversation_save_policy.v1",
+            subject=exc.subject,
         )
-    return _json_response(request, {"conversation_save": result})
-
+    return _json_response(request, {"conversation_save": result.conversation_save})
 
 @csrf_exempt
 @require_http_methods(["GET", "POST", "OPTIONS"])

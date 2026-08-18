@@ -202,6 +202,33 @@ jobs:
           name: phase-02-d3-sensitivity-evidence
           path: tmp/phase-02-d3-sensitivity-evidence.json
           retention-days: 14
+      - name: Phase 2 D4 conversation save-state application boundary
+        timeout-minutes: 10
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_02_conversation_save_state_use_case \
+            chatbot.test_chat_session_api_contract.ChatSessionApiContractTests \
+            chatbot.test_guest_login_session_ownership_e2e.GuestLoginSessionOwnershipE2ETests.test_matching_guest_login_can_promote_all_resources_to_one_case \
+            chatbot.test_guest_login_session_ownership_e2e.GuestLoginSessionOwnershipE2ETests.test_other_user_cannot_read_mutate_or_claim_promoted_resources \
+            chatbot.test_resource_ownership_e2e.ResourceOwnershipE2ETests.test_attacker_cannot_access_or_mutate_any_owner_bound_resource \
+            --verbosity 1
+          python -m pytest -p no:cacheprovider \
+            test/test_phase_02_conversation_save_state_sensitivity_runner.py \
+            -q
+
+      - name: Phase 2 D4 sensitivity negative controls
+        timeout-minutes: 10
+        env:
+          PHASE_02_D4_SENSITIVITY_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/refactoring/verify_phase_02_conversation_save_state_test_sensitivity.py
+
+      - name: Upload Phase 2 D4 sensitivity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-02-d4-sensitivity-evidence
+          path: tmp/phase-02-d4-sensitivity-evidence.json
+          retention-days: 14
       - name: Pytest collection no-new-regression gate
         timeout-minutes: 10
         run: python scripts/refactoring/verify_pytest_collection_baseline.py
@@ -260,6 +287,9 @@ jobs:
         run: ruff check --select F401 app/application/cases/create_case.py
       - name: Phase 2 D3 unused import guard
         run: ruff check --select F401 app/application/reports/confirm_document.py
+
+      - name: Phase 2 D4 application import gate
+        run: ruff check --select F401 app/application/chat/update_save_state.py
 
       - name: Secret and deployment artifacts
         run: python -m pytest test/test_deployment_readiness_artifacts.py -q
