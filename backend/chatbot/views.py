@@ -42,6 +42,13 @@ from app.application.cases.create_case import (
     CreateConsultationCaseCommand,
     execute_create_consultation_case,
 )
+from app.application.reports.confirm_document import (
+    ConfirmReportDocumentCommand,
+    ReportDocumentConfirmationAccessDenied,
+    ReportDocumentConfirmationLoginRequired,
+    ReportDocumentConfirmationNotFound,
+    execute_confirm_report_document,
+)
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
@@ -144,7 +151,6 @@ from chatbot.repositories import (
     authorize_report_download_metadata,
     build_history_after_service_summary,
     conversation_save_state_from_payload,
-    confirm_report_document,
     get_analysis_job_access_metadata,
     get_analysis_job_record,
     get_chat_session_access_metadata,
@@ -1983,37 +1989,33 @@ def report_document_confirmation(request: HttpRequest, report_id: str) -> JsonRe
     guest_violation = _guest_identity_policy_violation(subject)
     if guest_violation:
         return _guest_identity_policy_response(request, guest_violation)
-    if subject.get("subject_type") != "user":
+    try:
+        result = execute_confirm_report_document(
+            ConfirmReportDocumentCommand(
+                report_id=report_id,
+                identity_payload=identity_payload,
+                raw_payload=body,
+            )
+        )
+    except ReportDocumentConfirmationLoginRequired as exc:
         return _login_required_response(
             request,
             action="report_document_confirmation",
             reason="report_document_confirmation_requires_authenticated_user",
             message="로그인 후 이의신청서의 최종 확인을 저장할 수 있습니다.",
             policy_version="report_action_policy.v1",
-            subject=subject,
+            subject=exc.subject,
         )
-    access_metadata = get_report_access_metadata(report_id)
-    if access_metadata is None:
+    except ReportDocumentConfirmationNotFound:
         return _report_error_response(
             request,
             {"code": "report_not_found", "message": "Requested report was not found."},
             status=404,
         )
-    access = authorize_report_download_metadata(access_metadata, identity_payload)
-    if not access["allowed"]:
-        return _report_object_access_denied_response(request, access)
-    validated, validation_response = _validate_request_dto(
-        request,
-        ConfirmReportDocumentRequest,
-        body,
-    )
-    if validation_response is not None:
-        return validation_response
-    try:
-        confirmation = confirm_report_document(
-            report_id,
-            owner_id=str(subject.get("user_id") or ""),
-        )
+    except ReportDocumentConfirmationAccessDenied as exc:
+        return _report_object_access_denied_response(request, exc.access)
+    except ValidationError as exc:
+        return _request_validation_error_response(request, exc)
     except ReportReferenceError as exc:
         if exc.reason == "appeal_gate_blocked":
             return _report_error_response(
@@ -2048,11 +2050,10 @@ def report_document_confirmation(request: HttpRequest, report_id: str) -> JsonRe
         ConfirmReportDocumentResponse,
         {
             "contract_version": "document_confirmation.v1",
-            "document_confirmation": confirmation,
+            "document_confirmation": result.confirmation,
         },
     )
     return _json_response(request, response_payload, status=201)
-
 
 @require_http_methods(["GET", "OPTIONS"])
 def download_report(request: HttpRequest, report_id: str) -> HttpResponse:
