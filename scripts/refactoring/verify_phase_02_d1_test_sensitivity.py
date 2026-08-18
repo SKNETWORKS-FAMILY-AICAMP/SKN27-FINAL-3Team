@@ -77,7 +77,6 @@ def temporarily_bypass_application_in_view():
         (
             "from chatbot.case_repository import (",
             "    CaseRepositoryError,",
-            "    create_case,",
             "    get_case_access_metadata,",
             ")",
         )
@@ -86,7 +85,6 @@ def temporarily_bypass_application_in_view():
         (
             "from chatbot.case_repository import (",
             "    CaseRepositoryError,",
-            "    create_case,",
             "    get_case_access_metadata,",
             "    list_cases,",
             ")",

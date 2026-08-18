@@ -7,10 +7,9 @@ import json
 import os
 import subprocess
 import sys
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Iterator
+from typing import Any, Final
 
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[2]
