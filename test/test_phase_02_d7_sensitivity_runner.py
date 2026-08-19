@@ -47,6 +47,16 @@ def test_d7_evidence_requires_exact_mutation_set_restoration_and_fresh_head() ->
     assert evidence["status"] == "pass"
 
 
+def test_d7_owner_session_fence_targets_mixed_foreign_session_regression() -> None:
+    module = runner()
+
+    assert module.TARGETS["owner_session_fence_bypass"] == (
+        module.TEST_MODULE
+        + ".MyPageSummaryUseCaseTests."
+        + "test_mixed_owned_owner_and_foreign_session_is_denied_before_cache_read"
+    )
+
+
 def test_d7_evidence_rejects_missing_success_dirty_or_stale_results() -> None:
     module = runner()
     valid = outcomes(module)

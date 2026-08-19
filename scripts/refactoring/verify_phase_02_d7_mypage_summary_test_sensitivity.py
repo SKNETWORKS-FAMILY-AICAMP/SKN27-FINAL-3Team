@@ -18,7 +18,8 @@ TARGETS: Final = {
     "view_application_bypass": TEST_MODULE
     + ".MyPageSummaryUseCaseTests.test_http_get_requires_the_new_application_seam",
     "owner_session_fence_bypass": TEST_MODULE
-    + ".MyPageSummaryUseCaseTests.test_foreign_owner_and_legacy_user_requests_are_denied",
+    + ".MyPageSummaryUseCaseTests."
+    + "test_mixed_owned_owner_and_foreign_session_is_denied_before_cache_read",
     "saved_state_fence_bypass": TEST_MODULE
     + ".MyPageSummaryUseCaseTests.test_pending_and_session_only_rows_are_hidden_while_saved_rows_are_visible",
     "cache_fallback_bypass": TEST_MODULE
@@ -78,8 +79,8 @@ if mutation_name == "view_application_bypass":
 elif mutation_name == "owner_session_fence_bypass":
     mutation = mutate_once(
         application,
-        "    if not access[\"allowed\"]:\n        raise MyPageSummaryAccessDenied(access)\n\n\ndef _session_access(",
-        "    if False and not access[\"allowed\"]:\n        raise MyPageSummaryAccessDenied(access)\n\n\ndef _session_access(",
+        "        session_access = _session_access(\n            query.session_id,\n            identity_payload,\n            resource_type=\"mypage\",\n        )",
+        "        session_access = {\"allowed\": True}",
     )
 elif mutation_name == "saved_state_fence_bypass":
     mutation = mutate_once(
