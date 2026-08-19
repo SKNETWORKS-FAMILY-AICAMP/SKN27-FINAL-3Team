@@ -15,8 +15,9 @@
 - Security RED Head: `4fa4e57324f768503d4c7fdacef9ed59eacf7f37`
 - Security GREEN Head: `ffe3f003c2ab99b54842bd722aa1b621fda2b469`
 - Verification Head: `e0d6a819949e7a90ac090707d82489bd5dc66263`
+- Reviewed Final Runtime Head: `cc42b371aea64ec781c6815a39991835febf31e7`
 
-이 Receipt는 security fix와 sensitivity verification을 완료한 `e0d6a819949e7a90ac090707d82489bd5dc66263`를 기록한다. 이어지는 docs-only Receipt metadata commit은 자기 자신의 Git SHA를 본문에 기록하지 않는다. push 후 PR의 Final Head와 새 CI는 PR metadata에서 확인한다.
+이 Receipt는 security fix와 sensitivity verification, 그리고 독립 검토가 확인한 Reviewed Final Runtime Head `cc42b371aea64ec781c6815a39991835febf31e7`를 기록한다. 이어지는 docs-only metadata remediation commit은 자기 자신의 미래 Git SHA를 본문에 기록하지 않는다. Docs Delta Head authority는 Git과 PR metadata에서 확인한다.
 
 ## Independent Review Finding
 
@@ -99,18 +100,30 @@ The errors are existing local environment observations outside this D7 delta:
 
 D7 focused and previous application regression suites have no failures or errors.
 
-## CI
+## Final Runtime CI
 
-The pre-security-fix CI for `bf0736acbb91c48dcf06bcb8af7de3ae80114fc9` passed:
+Reviewed Final Runtime Head `cc42b371aea64ec781c6815a39991835febf31e7` received all blocking CI successfully.
 
-- `regression-signal`
-- `offline-verification`
-- `compose-integration`
-- strict D7 artifact SHA evidence
+- `production-gate`: Run `32222672840`, `success`
+- `offline-verification`: Job `95976042758`, `success`
+- `compose-integration`: Job `95977361708`, `success`
+- `regression-signal`: Run `32222672854`, `success`
 
-This pre-fix CI is not security-delta authority. A new Final Head must receive new blocking CI after push.
+## D7 sensitivity artifact authority
 
-Local Docker D1 and Compose D2 remain `NOT_EXECUTED` for this delta; no Docker, Compose, dependency, or system configuration files were changed.
+- Artifact: `9354537141`
+- PR Source Head: `cc42b371aea64ec781c6815a39991835febf31e7`
+- CI Runtime Checkout: `f4e64009bd317661d8d1161356c175c74d6259cf`
+- baseline exit: `0`
+- exact mutation set: `5`
+- all mutations: `AssertionError`
+- source restoration: `true`
+- `working_tree_unchanged`: `true`
+- artifact `head == actual_head`: `true`
+
+PR Source Head와 CI Runtime Checkout SHA가 다른 것은 `pull_request` merge checkout에서 정상이며, runner의 strict equality가 runtime checkout authority를 검증한다.
+
+Local Docker D1 and Compose D2 remain `NOT_EXECUTED` for this delta. Final CI Docker smoke와 Compose gate는 `PASS`이며, Docker, Compose, dependency, 또는 system configuration files는 변경하지 않았다.
 
 ## Deferred Scope
 
@@ -119,10 +132,26 @@ Local Docker D1 and Compose D2 remain `NOT_EXECUTED` for this delta; no Docker, 
 - Production DB audit: `NOT_EXECUTED`.
 - Phase 3 and unrelated public projection, schema, repository, Queue/Worker, Storage/Renderer, Agent/RAG work: out of scope.
 
+## Final Security Delta Independent Review
+
+- P0: `CLOSED`
+  - own owner + foreign session은 `403 object_access_denied`이며, unauthorized `get_mycase_summary` calls `0`, `read_chat_session_state` calls `0`, foreign session data leakage `0`
+- P1: `CLOSED`
+  - `owner_session_fence_bypass`는 실제 session authorization을 우회하고 mixed own-owner + foreign-session regression을 직접 `AssertionError`로 검출한다.
+- P2: metadata correction은 이 docs-only delta에서 보정됐으며 `P2_REMEDIATED_PENDING_DELTA_REVIEW` 상태다.
+- Security correction: `PASS`
+- Security chronology: `INDEPENDENTLY_PROVABLE`
+- Behavior strategy: `STRICT_BEHAVIOR_PARITY_EXCEPT_SECURITY_CORRECTION`
+- Intentional security drift: own owner + foreign session의 `200` foreign `session_cache` disclosure → `403 object_access_denied`
+- Reviewed Final Runtime Head: `cc42b371aea64ec781c6815a39991835febf31e7`
+- Final Runtime CI: `PASS`
+- `MYPAGE_PUBLIC_PROJECTION_HARDENING_REQUIRED`: `DEFERRED`
+- Production DB audit: `NOT_EXECUTED`
+
 ## Status
 
-- P0: `REMEDIATED_PENDING_INDEPENDENT_REVIEW`
-- P1: `REMEDIATED_PENDING_INDEPENDENT_REVIEW`
-- P2: `UPDATED_PENDING_INDEPENDENT_REVIEW`
+- P0: `CLOSED`
+- P1: `CLOSED`
+- P2: `P2_REMEDIATED_PENDING_DELTA_REVIEW`
 - PR: `DRAFT`
 - Merge: `NOT_PERFORMED`
