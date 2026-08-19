@@ -31,6 +31,11 @@ from app.application.history.list_events import (
     ListHistoryEventsQuery,
     execute_list_history_events,
 )
+from app.application.mypage.get_summary import (
+    GetMyPageSummaryQuery,
+    MyPageSummaryAccessDenied,
+    execute_get_mypage_summary,
+)
 from app.application.cases.confirm_facts import (
     CaseFactConfirmationAccessDenied,
     ConfirmCaseFactsCommand,
@@ -174,7 +179,6 @@ from chatbot.repositories import (
     get_analysis_job_record,
     get_chat_session_access_metadata,
     get_latest_owned_chat_session_record,
-    get_mycase_summary,
     get_report_access_metadata,
     get_report_download_metadata,
     get_uploaded_file_access_metadata,
@@ -201,7 +205,7 @@ from chatbot.repositories import (
     reserve_analysis_job_request,
 )
 from chatbot.models import GuestIdentity, GuestIdentityStatus
-from chatbot.progress_cache import read_analysis_job_progress, read_chat_session_state
+from chatbot.progress_cache import read_analysis_job_progress
 
 
 logger = logging.getLogger(__name__)
@@ -729,21 +733,20 @@ def history_events(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "OPTIONS"])
 def mypage_summary(request: HttpRequest) -> JsonResponse:
     identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-    if _is_canonical_request(request):
-        access = _authorize_mypage_query(request, identity_payload)
-        if not access["allowed"]:
-            return _object_access_denied_response(request, access)
-
-    subject = access_subject_from_payload(identity_payload)["subject"]
-    owner_id = request.GET.get("owner_id") or request.GET.get("user_id") or subject.get("user_id")
-    summary = get_mycase_summary(
-        session_id=request.GET.get("session_id"),
-        owner_id=owner_id,
-        limit=_positive_int(request.GET.get("limit"), default=10),
-    )
-    if _is_canonical_request(request) and request.GET.get("session_id"):
-        summary["session_cache"] = read_chat_session_state(request.GET["session_id"])
-    return _json_response(request, summary)
+    try:
+        result = execute_get_mypage_summary(
+            GetMyPageSummaryQuery(
+                identity_payload=identity_payload,
+                session_id=request.GET.get("session_id"),
+                owner_id=request.GET.get("owner_id"),
+                user_id=request.GET.get("user_id"),
+                limit=request.GET.get("limit"),
+                canonical_request=_is_canonical_request(request),
+            )
+        )
+    except MyPageSummaryAccessDenied as error:
+        return _object_access_denied_response(request, error.access)
+    return _json_response(request, result.payload)
 
 
 @require_http_methods(["GET", "OPTIONS"])
@@ -2386,19 +2389,6 @@ def _request_access_payload(
     if session_id:
         payload["session_id"] = session_id
     return _payload_with_request_identity(request, payload)
-
-
-def _authorize_mypage_query(
-    request: HttpRequest,
-    identity_payload: dict[str, object],
-) -> dict[str, object]:
-    requested_owner = request.GET.get("owner_id") or request.GET.get("user_id")
-    if requested_owner:
-        return authorize_resource_access(
-            {"type": "mypage", "owner_id": requested_owner},
-            identity_payload,
-        )
-    return _authorize_session_query(request.GET.get("session_id"), identity_payload, resource_type="mypage")
 
 
 
