@@ -63,14 +63,25 @@ def _authorize_mypage_query(
 ) -> None:
     requested_owner = query.owner_id or query.user_id
     if requested_owner:
-        access = authorize_resource_access(
+        owner_access = authorize_resource_access(
             {"type": "mypage", "owner_id": requested_owner},
             identity_payload,
         )
-    else:
-        access = _session_access(query.session_id, identity_payload, resource_type="mypage")
-    if not access["allowed"]:
-        raise MyPageSummaryAccessDenied(access)
+        if not owner_access["allowed"]:
+            raise MyPageSummaryAccessDenied(owner_access)
+
+    if query.session_id:
+        session_access = _session_access(
+            query.session_id,
+            identity_payload,
+            resource_type="mypage",
+        )
+        if not session_access["allowed"]:
+            raise MyPageSummaryAccessDenied(session_access)
+    elif not requested_owner:
+        access = _session_access(None, identity_payload, resource_type="mypage")
+        if not access["allowed"]:
+            raise MyPageSummaryAccessDenied(access)
 
 
 def _session_access(
