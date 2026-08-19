@@ -277,6 +277,33 @@ jobs:
           name: phase-02-d6-sensitivity-evidence
           path: tmp/phase-02-d6-sensitivity-evidence.json
           retention-days: 14
+      - name: Phase 2 D7 GetMyPageSummary application boundary
+        timeout-minutes: 10
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_02_mypage_summary_use_case \
+            chatbot.test_mypage_api_contract \
+            chatbot.test_guest_credential_boundary \
+            chatbot.tests.ProductionReadinessTests.test_mypage_summary_returns_empty_collection_for_session \
+            chatbot.tests.ProductionReadinessTests.test_mypage_summary_denies_other_owner_query \
+            --verbosity 1
+          python -m pytest -p no:cacheprovider \
+            test/test_phase_02_d7_sensitivity_runner.py \
+            -q
+
+      - name: Phase 2 D7 sensitivity negative controls
+        timeout-minutes: 10
+        env:
+          PHASE_02_D7_SENSITIVITY_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python scripts/refactoring/verify_phase_02_d7_mypage_summary_test_sensitivity.py
+
+      - name: Upload Phase 2 D7 sensitivity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-02-d7-sensitivity-evidence
+          path: tmp/phase-02-d7-sensitivity-evidence.json
+          retention-days: 14
       - name: Pytest collection no-new-regression gate
         timeout-minutes: 10
         run: python scripts/refactoring/verify_pytest_collection_baseline.py
@@ -343,6 +370,8 @@ jobs:
         run: ruff check --select F401 app/application/reports/read_queries.py
       - name: Phase 2 D6 application import gate
         run: ruff check --select F401 app/application/history/list_events.py
+      - name: Phase 2 D7 application import gate
+        run: ruff check --select F401 app/application/mypage/get_summary.py
       - name: Secret and deployment artifacts
         run: python -m pytest test/test_deployment_readiness_artifacts.py -q
 
