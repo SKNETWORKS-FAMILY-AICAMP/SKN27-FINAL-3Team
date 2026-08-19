@@ -22,6 +22,7 @@ from chatbot.models import (
     UserAccount,
 )
 from chatbot.progress_cache import chat_session_state_key, read_chat_session_state
+from chatbot.repositories import get_mycase_summary
 
 
 TEST_JWT_SIGNING_KEY = "phase-02-d7-mypage-summary-signing-key-is-long-enough"
@@ -191,6 +192,74 @@ class MyPageSummaryUseCaseTests(TestCase):
         self.assertEqual(own_response.status_code, 200, own_response.content)
         self.assertEqual(foreign_response.status_code, 403, foreign_response.content)
         self.assertEqual(foreign_response.json()["error"]["code"], "object_access_denied")
+
+    def test_mixed_owned_owner_and_foreign_session_is_denied_before_cache_read(self) -> None:
+        """Catches owner authorization bypassing the independently requested session."""
+
+        with (
+            patch(
+                "app.application.mypage.get_summary.get_mycase_summary",
+                wraps=get_mycase_summary,
+            ) as get_summary,
+            patch(
+                "app.application.mypage.get_summary.read_chat_session_state",
+                wraps=read_chat_session_state,
+            ) as read_session_state,
+        ):
+            response = self.owner_client.get(
+                "/api/mypage/summary/"
+                f"?owner_id={self.owner_id}&session_id={self.foreign_session_id}"
+            )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
+        self.assertNotIn("session_cache", response.json())
+        self.assertNotIn(self.foreign_owner_id, repr(response.json()))
+        get_summary.assert_not_called()
+        read_session_state.assert_not_called()
+
+    def test_mixed_owner_session_authorization_matrix(self) -> None:
+        cases = (
+            (
+                "owned_owner_and_session",
+                self.owner_client,
+                f"owner_id={self.owner_id}&session_id={self.owner_session_id}",
+                200,
+            ),
+            (
+                "owned_legacy_user_and_foreign_session",
+                self.owner_client,
+                f"user_id={self.owner_id}&session_id={self.foreign_session_id}",
+                403,
+            ),
+            (
+                "foreign_session_only",
+                self.owner_client,
+                f"session_id={self.foreign_session_id}",
+                403,
+            ),
+            (
+                "foreign_owner_and_owned_session",
+                self.owner_client,
+                f"owner_id={self.foreign_owner_id}&session_id={self.owner_session_id}",
+                403,
+            ),
+            (
+                "foreign_owner_and_foreign_session",
+                self.owner_client,
+                f"owner_id={self.foreign_owner_id}&session_id={self.foreign_session_id}",
+                403,
+            ),
+            ("owned_owner_only", self.owner_client, f"owner_id={self.owner_id}", 200),
+            ("owned_session_only", self.owner_client, f"session_id={self.owner_session_id}", 200),
+        )
+
+        for scenario, client, query, expected_status in cases:
+            with self.subTest(scenario=scenario):
+                response = client.get(f"/api/mypage/summary/?{query}")
+                self.assertEqual(response.status_code, expected_status, response.content)
+                if expected_status == 403:
+                    self.assertEqual(response.json()["error"]["code"], "object_access_denied")
 
     def test_limit_defaults_to_ten_for_missing_invalid_zero_and_negative_values(self) -> None:
         for query in ("", "limit=invalid", "limit=0", "limit=-1"):
