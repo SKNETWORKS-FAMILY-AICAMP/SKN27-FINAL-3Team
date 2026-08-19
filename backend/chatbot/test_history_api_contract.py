@@ -84,7 +84,10 @@ class HistoryApiContractTests(TestCase):
         self.assertEqual(response.json()["error"]["code"], "object_access_denied")
 
     def test_invalid_limit_keeps_the_existing_default_of_100(self) -> None:
-        with patch("chatbot.views.list_history_event_records", return_value=[]) as records:
+        with patch(
+            "app.application.history.list_events.list_history_event_records",
+            return_value=[],
+        ) as records:
             response = self.owner_client.get("/api/history/?limit=0")
 
         self.assertEqual(response.status_code, 200, response.content)

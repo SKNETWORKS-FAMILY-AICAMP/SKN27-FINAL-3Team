@@ -26,7 +26,11 @@ from app.application.chat.update_save_state import (
     UpdateConversationSaveStateCommand,
     execute_update_conversation_save_state,
 )
-
+from app.application.history.list_events import (
+    HistoryListAccessDenied,
+    ListHistoryEventsQuery,
+    execute_list_history_events,
+)
 from app.application.cases.confirm_facts import (
     CaseFactConfirmationAccessDenied,
     ConfirmCaseFactsCommand,
@@ -122,7 +126,6 @@ from app.services.google_auth_service import (
     validate_google_code_request_boundary as _validate_google_code_request_boundary,
 )
 from app.services.history_event_contract import (
-    HISTORY_EVENT_VERSION,
     actor_from_payload,
     source_from_request,
     subject_from_payload,
@@ -166,7 +169,6 @@ from chatbot.repositories import (
     access_subject_from_payload,
     authorize_resource_access,
     authorize_report_download_metadata,
-    build_history_after_service_summary,
     conversation_save_state_from_payload,
     get_analysis_job_access_metadata,
     get_analysis_job_record,
@@ -177,9 +179,7 @@ from chatbot.repositories import (
     get_report_download_metadata,
     get_uploaded_file_access_metadata,
     get_uploaded_file,
-    history_operating_policy,
     list_analysis_job_records,
-    list_history_event_records,
     list_uploaded_files,
     normalize_report_download_document_type,
     load_chat_followup_state,
@@ -709,57 +709,22 @@ def history_events(request: HttpRequest) -> JsonResponse:
     identity_error = _request_identity_error_response(request, identity_payload)
     if identity_error is not None:
         return identity_error
-    if _is_canonical_request(request):
-        job_id = request.GET.get("job_id")
-        if job_id:
-            metadata = get_analysis_job_access_metadata(job_id)
-            if metadata is not None:
-                access = _authorize_session_query(
-                    str(metadata.get("session_id") or ""),
-                    identity_payload,
-                    resource_type="history",
-                )
-                if not access["allowed"]:
-                    return _object_access_denied_response(request, access)
-        access = _authorize_history_query(request, identity_payload)
-        if not access["allowed"]:
-            return _object_access_denied_response(request, access)
-
-    subject = access_subject_from_payload(identity_payload)["subject"]
-    filters = {
-        "session_id": request.GET.get("session_id"),
-        "user_id": request.GET.get("user_id"),
-        "guest_id": request.GET.get("guest_id"),
-        "job_id": request.GET.get("job_id"),
-        "event_type": request.GET.get("event_type"),
-        "limit": _positive_int(request.GET.get("limit"), default=100),
-    }
-    if not any(filters.get(key) for key in ("session_id", "user_id", "guest_id", "job_id")):
-        if subject.get("user_id"):
-            filters["user_id"] = subject["user_id"]
-        elif subject.get("guest_id"):
-            filters["guest_id"] = subject["guest_id"]
-    filters["subject_type"] = subject.get("subject_type")
-    events = list_history_event_records(**filters)
-    storage = {"backend": "postgresql", "policy": "standard_light", "table": "history_events"}
-    policy = history_operating_policy(subject.get("subject_type"))
-    after_service_summary = build_history_after_service_summary(events)
-    return _json_response(
-        request,
-        {
-            "history_contract": HISTORY_EVENT_VERSION,
-            "storage": storage,
-            "history_policy": policy,
-            "after_service_summary": after_service_summary,
-            "count": len(events),
-            "events": events,
-            "limitations": [
-                "대화 원문, OCR 원문, 에이전트 추론 원문은 표준 경량 이력에 저장하지 않습니다.",
-                "원본 이벤트의 DB 테이블 원문과 민감 필드는 이 응답에 포함하지 않습니다.",
-            ],
-        },
-    )
-
+    try:
+        result = execute_list_history_events(
+            ListHistoryEventsQuery(
+                identity_payload=identity_payload,
+                session_id=request.GET.get("session_id"),
+                user_id=request.GET.get("user_id"),
+                guest_id=request.GET.get("guest_id"),
+                job_id=request.GET.get("job_id"),
+                event_type=request.GET.get("event_type"),
+                limit=request.GET.get("limit"),
+                canonical_request=_is_canonical_request(request),
+            )
+        )
+    except HistoryListAccessDenied as error:
+        return _object_access_denied_response(request, error.access)
+    return _json_response(request, result.payload)
 
 @require_http_methods(["GET", "OPTIONS"])
 def mypage_summary(request: HttpRequest) -> JsonResponse:
@@ -2435,39 +2400,6 @@ def _authorize_mypage_query(
         )
     return _authorize_session_query(request.GET.get("session_id"), identity_payload, resource_type="mypage")
 
-
-def _authorize_history_query(
-    request: HttpRequest,
-    identity_payload: dict[str, object],
-) -> dict[str, object]:
-    subject = access_subject_from_payload(identity_payload)["subject"]
-    requested_user_id = request.GET.get("user_id")
-    if requested_user_id:
-        return authorize_resource_access(
-            {"type": "history", "owner_id": requested_user_id},
-            identity_payload,
-        )
-
-    requested_guest_id = request.GET.get("guest_id")
-    if requested_guest_id:
-        return authorize_resource_access(
-            {"type": "history", "guest_id": requested_guest_id},
-            identity_payload,
-        )
-
-    session_access = _authorize_session_query(
-        request.GET.get("session_id"),
-        identity_payload,
-        resource_type="history",
-    )
-    if not session_access["allowed"]:
-        return session_access
-
-    if not any(request.GET.get(key) for key in ("session_id", "job_id", "event_type")):
-        if subject.get("user_id") or subject.get("guest_id"):
-            return session_access
-        return authorize_resource_access({"type": "history", "owner_id": "__authenticated_subject_required__"}, identity_payload)
-    return session_access
 
 
 def _authorize_session_query(
