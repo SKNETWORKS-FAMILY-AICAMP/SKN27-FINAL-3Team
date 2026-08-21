@@ -8,10 +8,13 @@
 - RED Head: `1acb9f118bf4834146bba6b728c64eccf15fb5ee`
 - GREEN Head: `840cc42947b31c44aad1403b7350656c9734b8e2`
 - Verification Runtime Head: `647ad2989bbf45a872d56e79d014441ea0d63d6d`
-- PR: `PENDING_DRAFT_CREATION`
+- Reviewed Pre-remediation PR Head: `791ba0f340e96cbfe9b518774c7b377ca910af41`
+- PR: `#412`
+- State: `OPEN`
+- Draft: `true`
 - Merge: `NOT_PERFORMED`
 
-이 Receipt는 verification runtime source head를 기록한다. 이어지는 docs-only commit의 미래 SHA를 본문에 self-reference 하지 않는다. Docs Delta Head authority는 Git과 Draft PR metadata에서 확인한다.
+이 Receipt는 verification runtime source head와 pre-remediation review authority를 기록한다. 이어지는 docs-only remediation commit의 미래 SHA를 본문에 self-reference 하지 않는다. `DOCS_DELTA_HEAD` authority는 Git과 Draft PR metadata에서 확인한다.
 
 ## Target and Scope
 
@@ -70,6 +73,20 @@ Route, HTTP method, public manifest schema, persistence schema/migration, reposi
 
 Verification Runtime Head `647ad2989bbf45a872d56e79d014441ea0d63d6d`에서 `python scripts/refactoring/verify_phase_02_d8_resume_latest_consultation_test_sensitivity.py`는 baseline `0`, source restoration `true`, `working_tree_unchanged: true`를 확인했다.
 
+Reviewed Pre-remediation PR Head `791ba0f340e96cbfe9b518774c7b377ca910af41`의 blocking CI artifact:
+
+- Artifact ID: `9436675986`
+- Name: `phase-02-d8-sensitivity-evidence`
+- baseline: `0`
+- exact mutations: `5`; all five: `AssertionError`
+- restoration: `true`
+- `working_tree_unchanged=true`
+- PR Source Head: `791ba0f340e96cbfe9b518774c7b377ca910af41`
+- CI runtime checkout: `009feda2365a74470c71e1556da32799ab1531b1`
+- artifact `head == actual_head == 009feda2365a74470c71e1556da32799ab1531b1`
+
+`009feda2365a74470c71e1556da32799ab1531b1`는 `pull_request` runtime checkout이며 실제 merge commit authority가 아니다. PR은 unmerged 상태다.
+
 | Mutation | Direct detection |
 | --- | --- |
 | `view_application_bypass` | View seam call assertion |
@@ -90,8 +107,12 @@ Verification Runtime Head `647ad2989bbf45a872d56e79d014441ea0d63d6d`에서 `pyth
 | --- | --- |
 | D8 focused + resume manifest + guest boundary | `24 tests, OK` |
 | B1–D7 Application regression | `84 tests, OK` |
+| D8 sensitivity runner contract | `4 passed` |
 | Phase 2 sensitivity/API/OpenAPI/frontend auth contracts | `86 passed` |
-| Django check / OpenAPI / frontend route / static / diff | `PASS` |
+| Django check | `PASS` |
+| OpenAPI / frontend route | `PASS` |
+| Ruff/static/F401 | `PASS` |
+| `git diff --check` | `PASS` |
 | frontend `node --test ./*.test.js` | `155 passed` |
 | frontend `npm run build` | `PASS` |
 | Docker D1 image build + Django check + initialized import smoke | `PASS` |
@@ -115,16 +136,30 @@ Windows full Django `python backend/manage.py test chatbot --verbosity 1`는 `54
 
 - `pymupdf._extra` DLL loading
 - existing attachment classification adapter import portability
+- D8 new regression: `0`
+- Windows portability observation: `existing / unchanged`
 
-## CI and Deferred Scope
+## Independent Review — Pre-P2-Remediation
 
-- Draft PR source head CI: `PENDING`
-- `production-gate`: `PENDING`
-- `offline-verification`: `PENDING`
-- `compose-integration`: `PENDING`
-- `regression-signal`: `PENDING`
+- P0: `CLOSED / 0`
+- P1: `CLOSED / 0`
+- P2: `metadata remediation required`
+- Final Judgment: `PASS_WITH_CONDITIONS`
+- Merge Allowed: `ALLOWED_AFTER_P2_FIX`
+- Phase Status: `PHASE_2_D8_NEEDS_DELTA_FIX`
+- P2 reason: Receipt PR/CI metadata stale
+
+## Runtime CI and Deferred Scope
+
+Reviewed Pre-remediation PR Head `791ba0f340e96cbfe9b518774c7b377ca910af41`에서 확인된 blocking CI:
+
+- `production-gate` Run `32453929572`: `SUCCESS`
+- `offline-verification` Job `96687470687`: `SUCCESS`
+- `compose-integration` Job `96688657729`: `SUCCESS`
+- `regression-signal` Run `32453929627` / Job `96687470816`: `SUCCESS`
 - Production DB audit: `NOT_EXECUTED`
 - `RESUME_GUEST_TRANSPORT_VIEW_CONTRACT_ALIGNMENT`: `DEFERRED_ARCHITECTURAL_OBSERVATION`
+- `MYPAGE_PUBLIC_PROJECTION_HARDENING_REQUIRED`: `DEFERRED`
 - Phase 2 remaining boundaries and Phase 3 structural work: out of scope
 
 ## Status
@@ -135,5 +170,8 @@ Windows full Django `python backend/manage.py test chatbot --verbosity 1`는 `54
 - Guest transport decision: `PRESERVE_ACTUAL_EXTERNAL_CONTRACT`
 - D1: `PASS`
 - D2: `PASS`
-- CI: `PENDING_DRAFT_PR`
+- Runtime CI: `PASS`
+- P0: `CLOSED`
+- P1: `CLOSED`
+- P2: `P2_REMEDIATED_PENDING_DELTA_REVIEW`
 - Merge: `NOT_PERFORMED`
