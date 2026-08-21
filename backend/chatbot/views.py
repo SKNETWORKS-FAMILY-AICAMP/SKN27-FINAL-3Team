@@ -24,6 +24,10 @@ from app.application.auth.resume_latest_consultation import (
     ResumeLatestConsultationQuery,
     execute_resume_latest_consultation,
 )
+from app.application.chat.create_session import (
+    CreateChatSessionCommand,
+    execute_create_chat_session,
+)
 from app.application.chat.update_save_state import (
     ConversationSaveStateAccessDenied,
     ConversationSaveStateGuestIdentityInvalid,
@@ -116,7 +120,6 @@ from app.services.capability_catalog import capability_catalog_payload
 from app.services.chat_orchestration_service import (
     build_scope_guidance_response,
     compose_agent_response,
-    create_session,
     submit_message,
 )
 from app.services.chat_session_followup_service import (
@@ -1248,19 +1251,15 @@ def create_chat_session(request: HttpRequest) -> JsonResponse:
     identity_error = _request_identity_error_response(request, identity_body)
     if identity_error is not None:
         return identity_error
-    subject = access_subject_from_payload(identity_body)["subject"]
-    payload = create_session(user_id=subject.get("user_id"))
-    _record_history_safely(
-        request,
-        event_type="chat_session_created",
-        status="success",
-        summary="상담 세션을 생성했습니다.",
-        actor=_history_actor(request, identity_body),
-        subject=subject_from_payload(identity_body, session_id=payload.get("session_id")),
-        source=_history_source(request),
-        metadata={"session_status": payload.get("status")},
+    result = execute_create_chat_session(
+        CreateChatSessionCommand(
+            identity_payload=identity_body,
+            history_actor=_history_actor(request, identity_body),
+            history_source=_history_source(request),
+            history_recorder=partial(_record_history_safely, request),
+        )
     )
-    return _json_response(request, payload)
+    return _json_response(request, result.payload)
 
 
 @csrf_exempt

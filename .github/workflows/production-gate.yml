@@ -327,6 +327,31 @@ jobs:
           name: phase-02-d8-sensitivity-evidence
           path: tmp/phase-02-d8-sensitivity-evidence.json
           retention-days: 14
+      - name: Phase 2 D9 CreateChatSession application boundary
+        timeout-minutes: 10
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_02_create_chat_session_use_case \
+            chatbot.test_chat_session_api_contract \
+            chatbot.test_guest_credential_boundary \
+            --verbosity 1
+          python -m pytest -p no:cacheprovider \
+            test/test_phase_02_d9_sensitivity_runner.py \
+            -q
+
+      - name: Phase 2 D9 sensitivity negative controls
+        timeout-minutes: 10
+        env:
+          PHASE_02_D9_SENSITIVITY_HEAD: ${{ github.sha }}
+        run: python scripts/refactoring/verify_phase_02_d9_create_chat_session_test_sensitivity.py
+
+      - name: Upload Phase 2 D9 sensitivity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-02-d9-sensitivity-evidence
+          path: tmp/phase-02-d9-sensitivity-evidence.json
+          retention-days: 14
       - name: Pytest collection no-new-regression gate
         timeout-minutes: 10
         run: python scripts/refactoring/verify_pytest_collection_baseline.py
@@ -399,6 +424,8 @@ jobs:
         run: python -m pytest test/test_deployment_readiness_artifacts.py -q
       - name: Phase 2 D8 application import gate
         run: ruff check --select F401 app/application/auth/resume_latest_consultation.py
+      - name: Phase 2 D9 application import gate
+        run: ruff check --select F401 app/application/chat/create_session.py
 
       - uses: actions/setup-node@v4
         with:
