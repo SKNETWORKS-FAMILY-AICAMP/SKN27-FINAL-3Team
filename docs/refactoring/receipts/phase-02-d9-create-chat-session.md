@@ -7,10 +7,26 @@
 - Branch: `refactor/phase-02-d9-create-chat-session-use-case`
 - RED Head: `ee40edbc368347f0724d6e9b1f4ce7bb297781ea`
 - GREEN Head: `ff5d7cc1f03e13756b2e95700328f3d10b73e6e5`
-- Verification / final runtime Head: `839447db4ad330ad9cbf913c3a7cc64dac33969c`
-- PR: `PENDING_DRAFT_CREATION`
+- Verification Runtime Head: `839447db4ad330ad9cbf913c3a7cc64dac33969c`
+- Reviewed Pre-remediation PR/Docs Head: `4479f9344817757dabe6c44fd9ed64d5b45c8484`
+- PR: `#413`
+- State: `OPEN`
+- Draft: `true`
+- Merge: `NOT_PERFORMED`
 
 This receipt does not include its own commit SHA to avoid a self-reference commit loop.
+
+## Independent Review — Pre-P2-Remediation
+
+- Independent Review Head: `4479f9344817757dabe6c44fd9ed64d5b45c8484`
+- P0: `0 / CLOSED`
+- P1: `0 / CLOSED`
+- P2: `1 / Receipt PR-CI metadata stale`
+- Final Judgment: `PASS_WITH_CONDITIONS`
+- Merge Allowed: `ALLOWED_AFTER_P2_FIX`
+- Phase Status: `PHASE_2_D9_NEEDS_DELTA_FIX`
+
+This is the historical result of the independent review performed before this docs-only P2 remediation.
 
 ## RED chronology
 
@@ -92,7 +108,8 @@ Baseline exit code was `0`; all five mutations had nonzero exit code and `failur
 - D9 focused: `9 tests, OK`
 - D9 + chat-session contract + guest boundary: `28 tests, OK`
 - B1–D8 plus D9 Application boundaries: `102 tests, OK`
-- API/OpenAPI/sensitivity runner pytest selection: `58 passed`
+- Broader API/OpenAPI/sensitivity runner pytest selection: `58 passed`
+- Independent Review related pytest selection: `35 passed` (a distinct selection; not the same suite count as `58 passed`)
 - Django system check: passed
 - OpenAPI and frontend route catalog drift checks: passed
 - Ruff static and D9 F401 import gates: passed
@@ -112,7 +129,28 @@ Baseline exit code was `0`; all five mutations had nonzero exit code and `failur
 
 ## CI
 
-The final source Head, runtime checkout SHA, `production-gate`, `offline-verification`, `compose-integration`, `regression-signal`, and `phase-02-d9-sensitivity-evidence` artifact will be recorded after this receipt is pushed. This receipt deliberately does not create a post-CI self-reference commit.
+The independent review verified CI for Reviewed Pre-remediation PR/Docs Head `4479f9344817757dabe6c44fd9ed64d5b45c8484`.
+
+- Source PR/Docs Head: `4479f9344817757dabe6c44fd9ed64d5b45c8484`
+- Runtime synthetic merge checkout: `c100b2ccef928e83bb558d32803c7b25d10e12f9`
+- `c100b2ccef928e83bb558d32803c7b25d10e12f9` is the pull-request runtime checkout, not an actual merge authority.
+- `production-gate` Run `32478403853`: `SUCCESS`
+- `offline-verification` Job `96759428128`: `SUCCESS`
+- `compose-integration` Job `96760943131`: `SUCCESS`
+- `regression-signal` Run `32478403849` / Job `96759427891`: `SUCCESS`
+
+### D9 sensitivity artifact
+
+- Artifact ID: `9445247444`
+- Name: `phase-02-d9-sensitivity-evidence`
+- Source Head: `4479f9344817757dabe6c44fd9ed64d5b45c8484`
+- Runtime checkout: `c100b2ccef928e83bb558d32803c7b25d10e12f9`
+- Baseline: exit `0`
+- Exact mutations: `5`; each result is `AssertionError`
+- Source restoration: `true`
+- Working tree preservation: `true`
+
+Fresh CI for this docs-only remediation is intentionally tracked by GitHub Actions and PR metadata after its single docs commit; this receipt does not create a post-CI self-reference commit.
 
 ## Deferred
 
@@ -128,3 +166,17 @@ The final source Head, runtime checkout SHA, `production-gate`, `offline-verific
 - Windows portability debt
 
 `ESTIMATED_REMAINING_PHASE_2_SLICES=7`
+
+## Post-remediation status
+
+- Implementation: `PASS`
+- RED chronology: `INDEPENDENTLY_PROVABLE`
+- Trusted identity / spoof protection: `PASS`
+- Draft state / persistence: `PASS`
+- History semantics: `PASS`
+- Sensitivity: `PASS`
+- Reviewed Runtime CI: `PASS`
+- P0: `CLOSED`
+- P1: `CLOSED`
+- P2: `P2_REMEDIATED_PENDING_DELTA_REVIEW`
+- Merge: `NOT_PERFORMED`
