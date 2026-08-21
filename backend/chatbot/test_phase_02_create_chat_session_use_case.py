@@ -173,6 +173,7 @@ class CreateChatSessionUseCaseCharacterizationTests(TestCase):
         )
 
     def test_history_database_and_os_failures_keep_the_draft_response_successful(self) -> None:
+        self.client.raise_request_exception = False
         for failure in (DatabaseError("history unavailable"), OSError("history unavailable")):
             with self.subTest(failure_type=failure.__class__.__name__):
                 with patch(
