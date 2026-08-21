@@ -19,6 +19,11 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
+from app.application.auth.resume_latest_consultation import (
+    ResumeLatestConsultationLoginRequired,
+    ResumeLatestConsultationQuery,
+    execute_resume_latest_consultation,
+)
 from app.application.chat.update_save_state import (
     ConversationSaveStateAccessDenied,
     ConversationSaveStateGuestIdentityInvalid,
@@ -139,7 +144,6 @@ from app.services.public_consultation_routing_service import (
     resolve_public_consultation_intent,
 )
 from app.services.supervisor_routing_service import route_supervisor_input
-from app.services.resume_manifest_service import build_resume_manifest
 from app.services.report_query_service import (
     WORKER_REPORT_SOURCE,
     compose_report_error_response,
@@ -178,7 +182,6 @@ from chatbot.repositories import (
     get_analysis_job_access_metadata,
     get_analysis_job_record,
     get_chat_session_access_metadata,
-    get_latest_owned_chat_session_record,
     get_report_access_metadata,
     get_report_download_metadata,
     get_uploaded_file_access_metadata,
@@ -670,41 +673,20 @@ def auth_resume(request: HttpRequest) -> JsonResponse:
     identity_error = _request_identity_error_response(request, identity_payload)
     if identity_error is not None:
         return identity_error
-    subject = access_subject_from_payload(identity_payload)["subject"]
-    if subject.get("subject_type") != "user":
+    try:
+        result = execute_resume_latest_consultation(
+            ResumeLatestConsultationQuery(identity_payload=identity_payload)
+        )
+    except ResumeLatestConsultationLoginRequired as error:
         return _login_required_response(
             request,
             action="resume_latest_consultation",
             reason="resume_manifest_requires_authenticated_user",
             message="저장된 상담을 복원하려면 Google 로그인이 필요합니다.",
             policy_version="resume_manifest.v1",
-            subject=subject,
+            subject=error.subject,
         )
-
-    session_record = get_latest_owned_chat_session_record(
-        str(subject.get("user_id") or "")
-    )
-    analysis_detail = None
-    latest_job_id = (
-        str(session_record.get("latest_job_id") or "")
-        if isinstance(session_record, dict)
-        else ""
-    )
-    if latest_job_id:
-        outcome = load_analysis_job_detail(
-            latest_job_id,
-            load_job=get_analysis_job_record,
-            load_progress=read_analysis_job_progress,
-        )
-        if outcome.kind == "detail":
-            analysis_detail = outcome.payload
-    return _json_response(
-        request,
-        build_resume_manifest(
-            session_record=session_record,
-            analysis_detail=analysis_detail,
-        ),
-    )
+    return _json_response(request, result.payload)
 
 
 @require_http_methods(["GET", "OPTIONS"])
