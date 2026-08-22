@@ -325,3 +325,10 @@ class FileReadSecurityBoundaryTests(TestCase):
         detail_attachment = detail_response.json()["attachment"]
         self.assertFalse(private_fields.intersection(list_attachment), list_attachment)
         self.assertFalse(private_fields.intersection(detail_attachment), detail_attachment)
+    def test_foreign_owner_detail_without_optional_session_is_denied(self) -> None:
+        response = self.owner_client.get(
+            f"/api/files/{self.foreign_attachment.attachment_id}/",
+        )
+
+        self.assertEqual(response.status_code, 403, response.content)
+        self.assertEqual(response.json()["error"]["code"], "object_access_denied")
