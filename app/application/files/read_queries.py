@@ -18,6 +18,24 @@ from chatbot.repositories import (
 
 GuestViolationResolver = Callable[[Mapping[str, Any]], dict[str, Any] | None]
 
+PUBLIC_FILE_ATTACHMENT_FIELDS = (
+    "attachment_id",
+    "case_id",
+    "session_id",
+    "message_id",
+    "purpose",
+    "type",
+    "original_filename",
+    "filename",
+    "content_type",
+    "size_bytes",
+    "status",
+    "scan_status",
+    "retention_expires_at",
+    "privacy_risk",
+    "created_at",
+    "limitations",
+)
 
 @dataclass(frozen=True)
 class ListFileAttachmentsQuery:
@@ -31,6 +49,7 @@ class GetFileAttachmentQuery:
     attachment_id: str
     identity_payload: Mapping[str, Any]
     session_id: str | None
+    guest_violation_resolver: GuestViolationResolver
 
 
 @dataclass(frozen=True)
@@ -62,7 +81,7 @@ class FileReadNotFound(Exception):
 def execute_list_file_attachments(
     query: ListFileAttachmentsQuery,
 ) -> ListFileAttachmentsResult:
-    """Authorize and list attachments using the current repository contract."""
+    """Authorize and project a public attachment list with a trusted scope."""
 
     trusted_identity = _trusted_identity(query.identity_payload, query.session_id)
     subject = access_subject_from_payload(trusted_identity)["subject"]
@@ -70,30 +89,57 @@ def execute_list_file_attachments(
     if violation:
         raise FileReadGuestIdentityInvalid(violation)
 
-    access = _authorize_session_query(
-        query.session_id,
-        trusted_identity,
-        resource_type="uploaded_file_list",
-    )
-    if not access["allowed"]:
-        raise FileReadAccessDenied(access)
-
+    subject_type = str(subject.get("subject_type") or "")
     owner_id = str(subject.get("user_id") or "")
-    attachments = list_uploaded_files(
-        session_id=query.session_id,
-        owner_id=owner_id or None,
+    if not query.session_id:
+        if subject_type != "user" or not owner_id:
+            raise FileReadAccessDenied(_unscoped_list_access_denied())
+        attachments = list_uploaded_files(owner_id=owner_id)
+    else:
+        session_access = get_chat_session_access_metadata(query.session_id)
+        if subject_type == "guest" and session_access is None:
+            raise FileReadAccessDenied(_unscoped_list_access_denied())
+        access = _authorize_session_query(
+            query.session_id,
+            trusted_identity,
+            resource_type="uploaded_file_list",
+        )
+        if not access["allowed"]:
+            raise FileReadAccessDenied(access)
+        if subject_type not in {"user", "guest"}:
+            raise FileReadAccessDenied(_unscoped_list_access_denied())
+        attachments = list_uploaded_files(
+            session_id=query.session_id,
+            owner_id=owner_id or None,
+        )
+
+    return ListFileAttachmentsResult(
+        payload={
+            "attachments": [
+                project_file_attachment_public(attachment) for attachment in attachments
+            ]
+        }
     )
-    return ListFileAttachmentsResult(payload={"attachments": attachments})
 
 
 def execute_get_file_attachment(
     query: GetFileAttachmentQuery,
 ) -> GetFileAttachmentResult:
-    """Authorize and return one attachment using the current repository contract."""
+    """Authorize and project one attachment with guest and session parity."""
 
     trusted_identity = _trusted_identity(query.identity_payload, query.session_id)
+    subject = access_subject_from_payload(trusted_identity)["subject"]
+    violation = query.guest_violation_resolver(subject)
+    if violation:
+        raise FileReadGuestIdentityInvalid(violation)
+
     access_metadata = get_uploaded_file_access_metadata(query.attachment_id)
     if access_metadata is not None:
+        _authorize_supplied_session_scope(
+            query.session_id,
+            access_metadata,
+            trusted_identity,
+        )
         access = authorize_resource_access(access_metadata, trusted_identity)
         if not access["allowed"]:
             raise FileReadAccessDenied(access)
@@ -101,7 +147,9 @@ def execute_get_file_attachment(
     attachment = get_uploaded_file(query.attachment_id)
     if attachment is None:
         raise FileReadNotFound()
-    return GetFileAttachmentResult(payload={"attachment": attachment})
+    return GetFileAttachmentResult(
+        payload={"attachment": project_file_attachment_public(attachment)}
+    )
 
 
 def _trusted_identity(
@@ -135,3 +183,52 @@ def _authorize_session_query(
         )
     session_access["type"] = resource_type
     return authorize_resource_access(session_access, identity_payload)
+
+
+def project_file_attachment_public(attachment: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the single allow-listed FileRead representation for public GET routes."""
+
+    record = dict(attachment)
+    return {
+        field: record[field]
+        for field in PUBLIC_FILE_ATTACHMENT_FIELDS
+        if field in record
+    }
+
+
+def _authorize_supplied_session_scope(
+    session_id: str | None,
+    access_metadata: Mapping[str, Any],
+    identity_payload: dict[str, Any],
+) -> None:
+    if not session_id:
+        return
+
+    session_access = get_chat_session_access_metadata(session_id)
+    if session_access is not None:
+        access = authorize_resource_access(session_access, identity_payload)
+        if not access["allowed"]:
+            raise FileReadAccessDenied(access)
+
+    actual_session_id = str(access_metadata.get("session_id") or "")
+    if actual_session_id != session_id:
+        raise FileReadAccessDenied(
+            {
+                "contract_version": "object_access.v1",
+                "allowed": False,
+                "reason": "session_mismatch",
+                "resource": {
+                    "type": "uploaded_file",
+                    "attachment_id": access_metadata.get("attachment_id"),
+                },
+            }
+        )
+
+
+def _unscoped_list_access_denied() -> dict[str, Any]:
+    return {
+        "contract_version": "object_access.v1",
+        "allowed": False,
+        "reason": "trusted_scope_required",
+        "resource": {"type": "uploaded_file_list"},
+    }

@@ -196,10 +196,10 @@ from chatbot.repositories import (
     get_chat_session_access_metadata,
     get_report_access_metadata,
     get_report_download_metadata,
-    get_uploaded_file_access_metadata,
+
     get_uploaded_file,
     list_analysis_job_records,
-    list_uploaded_files,
+
     normalize_report_download_document_type,
     load_chat_followup_state,
     enqueue_analysis_job_work,
@@ -819,14 +819,20 @@ def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
     if _is_canonical_request(request):
         session_id = request.GET.get("session_id")
         identity_payload = _request_access_payload(request, session_id=session_id)
+        identity_error = _request_identity_error_response(request, identity_payload)
+        if identity_error is not None:
+            return identity_error
         try:
             result = execute_get_file_attachment(
                 GetFileAttachmentQuery(
                     attachment_id=attachment_id,
                     identity_payload=identity_payload,
                     session_id=session_id,
+                    guest_violation_resolver=_guest_identity_policy_violation,
                 )
             )
+        except FileReadGuestIdentityInvalid as exc:
+            return _guest_identity_policy_response(request, exc.violation)
         except FileReadAccessDenied as exc:
             return _object_access_denied_response(request, exc.access)
         except FileReadNotFound:

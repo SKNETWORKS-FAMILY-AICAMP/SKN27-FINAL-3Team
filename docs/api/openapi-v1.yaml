@@ -3718,6 +3718,151 @@ components:
       - case
       title: CreateConsultationCaseResponse
       type: object
+    FileReadAttachment:
+      additionalProperties: false
+      description: Allow-listed public representation for canonical FileRead GET routes.
+      properties:
+        attachment_id:
+          maxLength: 128
+          minLength: 1
+          title: Attachment Id
+          type: string
+        session_id:
+          maxLength: 128
+          minLength: 1
+          title: Session Id
+          type: string
+        purpose:
+          maxLength: 64
+          minLength: 1
+          title: Purpose
+          type: string
+        type:
+          maxLength: 64
+          minLength: 1
+          title: Type
+          type: string
+        original_filename:
+          maxLength: 255
+          minLength: 1
+          title: Original Filename
+          type: string
+        filename:
+          maxLength: 255
+          minLength: 1
+          title: Filename
+          type: string
+        content_type:
+          maxLength: 255
+          minLength: 1
+          title: Content Type
+          type: string
+        size_bytes:
+          minimum: 0
+          title: Size Bytes
+          type: integer
+        status:
+          maxLength: 64
+          minLength: 1
+          title: Status
+          type: string
+        scan_status:
+          maxLength: 64
+          minLength: 1
+          title: Scan Status
+          type: string
+        privacy_risk:
+          title: Privacy Risk
+          type: boolean
+        created_at:
+          format: date-time
+          title: Created At
+          type: string
+        limitations:
+          items:
+            type: string
+          title: Limitations
+          type: array
+        case_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Case Id
+        message_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Message Id
+        retention_expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+          title: Retention Expires At
+      required:
+      - attachment_id
+      - session_id
+      - purpose
+      - type
+      - original_filename
+      - filename
+      - content_type
+      - size_bytes
+      - status
+      - scan_status
+      - privacy_risk
+      - created_at
+      - limitations
+      title: FileReadAttachment
+      type: object
+    FileAttachmentDetailResponse:
+      additionalProperties: true
+      properties:
+        attachment:
+          $ref: '#/components/schemas/FileReadAttachment'
+      required:
+      - attachment
+      title: FileAttachmentDetailResponse
+      type: object
+    FileAttachmentListResponse:
+      additionalProperties: true
+      properties:
+        attachments:
+          items:
+            $ref: '#/components/schemas/FileReadAttachment'
+          title: Attachments
+          type: array
+      required:
+      - attachments
+      title: FileAttachmentListResponse
+      type: object
+    FileAttachmentNotFoundError:
+      additionalProperties: true
+      properties:
+        code:
+          const: attachment_not_found
+          title: Code
+          type: string
+        message:
+          title: Message
+          type: string
+      required:
+      - code
+      - message
+      title: FileAttachmentNotFoundError
+      type: object
+    FileAttachmentNotFoundErrorResponse:
+      additionalProperties: true
+      properties:
+        error:
+          $ref: '#/components/schemas/FileAttachmentNotFoundError'
+      required:
+      - error
+      title: FileAttachmentNotFoundErrorResponse
+      type: object
     FileAttachment:
       additionalProperties: true
       properties:
@@ -3855,51 +4000,6 @@ components:
       - limitations
       - persistence
       title: FileAttachment
-      type: object
-    FileAttachmentDetailResponse:
-      additionalProperties: true
-      properties:
-        attachment:
-          $ref: '#/components/schemas/FileAttachment'
-      required:
-      - attachment
-      title: FileAttachmentDetailResponse
-      type: object
-    FileAttachmentListResponse:
-      additionalProperties: true
-      properties:
-        attachments:
-          items:
-            $ref: '#/components/schemas/FileAttachment'
-          title: Attachments
-          type: array
-      required:
-      - attachments
-      title: FileAttachmentListResponse
-      type: object
-    FileAttachmentNotFoundError:
-      additionalProperties: true
-      properties:
-        code:
-          const: attachment_not_found
-          title: Code
-          type: string
-        message:
-          title: Message
-          type: string
-      required:
-      - code
-      - message
-      title: FileAttachmentNotFoundError
-      type: object
-    FileAttachmentNotFoundErrorResponse:
-      additionalProperties: true
-      properties:
-        error:
-          $ref: '#/components/schemas/FileAttachmentNotFoundError'
-      required:
-      - error
-      title: FileAttachmentNotFoundErrorResponse
       type: object
     FileAttachmentResponse:
       additionalProperties: true
