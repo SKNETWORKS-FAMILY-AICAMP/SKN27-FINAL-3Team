@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import Client, TestCase, override_settings
@@ -78,6 +79,13 @@ class FileReadQueriesApplicationSeamTests(TestCase):
             "chatbot.views.execute_list_file_attachments",
             create=True,
         ) as execute_application:
+            execute_application.return_value = SimpleNamespace(
+                payload={
+                    "attachments": [
+                        {"attachment_id": self.owner_attachment.attachment_id}
+                    ]
+                }
+            )
             response = self.owner_client.get(
                 "/api/files/",
                 {"session_id": self.owner_session.session_id},
@@ -95,6 +103,9 @@ class FileReadQueriesApplicationSeamTests(TestCase):
             "chatbot.views.execute_get_file_attachment",
             create=True,
         ) as execute_application:
+            execute_application.return_value = SimpleNamespace(
+                payload={"attachment": {"attachment_id": self.owner_attachment.attachment_id}}
+            )
             response = self.owner_client.get(
                 f"/api/files/{self.owner_attachment.attachment_id}/",
                 {"session_id": self.owner_session.session_id},
