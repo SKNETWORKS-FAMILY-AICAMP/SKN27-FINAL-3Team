@@ -208,6 +208,33 @@ class FileReadSecurityBoundaryTests(TestCase):
             agent_handoff={"worker_payload": "private"},
         )
 
+    def test_guest_session_list_excludes_foreign_owner_attachment_even_when_session_matches(self) -> None:
+        foreign_attachment = self._attachment(
+            attachment_id="att_phase_02_d10_security_guest_session_foreign",
+            owner_id=self.foreign_owner_id,
+            session=self.guest_session,
+            filename="guest-session-foreign-owner-evidence.png",
+        )
+
+        response = self.guest_client.get(
+            "/api/files/",
+            {"session_id": self.guest_session.session_id},
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        attachments = response.json()["attachments"]
+        attachment_ids = [attachment["attachment_id"] for attachment in attachments]
+        self.assertIn(self.guest_attachment.attachment_id, attachment_ids)
+        self.assertNotIn(foreign_attachment.attachment_id, attachment_ids)
+        self.assertNotIn(
+            foreign_attachment.original_filename,
+            [attachment.get("original_filename") for attachment in attachments],
+        )
+        self.assertNotIn(
+            foreign_attachment.metadata["filename"],
+            [attachment.get("filename") for attachment in attachments],
+        )
+
     def test_valid_guest_without_session_cannot_enumerate_cross_owner_attachments(self) -> None:
         response = self.guest_client.get("/api/files/")
 
