@@ -113,6 +113,8 @@ def execute_list_file_attachments(
             owner_id=owner_id or None,
         )
 
+    attachments = _authorized_file_attachments(attachments, trusted_identity)
+
     return ListFileAttachmentsResult(
         payload={
             "attachments": [
@@ -183,6 +185,27 @@ def _authorize_session_query(
         )
     session_access["type"] = resource_type
     return authorize_resource_access(session_access, identity_payload)
+
+
+def _authorized_file_attachments(
+    attachments: list[Mapping[str, Any]],
+    trusted_identity: dict[str, Any],
+) -> list[Mapping[str, Any]]:
+    """Return only attachment candidates authorized by the resource contract."""
+
+    authorized_attachments: list[Mapping[str, Any]] = []
+    for attachment in attachments:
+        attachment_id = str(attachment.get("attachment_id") or "")
+        if not attachment_id:
+            continue
+        access_metadata = get_uploaded_file_access_metadata(attachment_id)
+        if access_metadata is None:
+            continue
+        access = authorize_resource_access(access_metadata, trusted_identity)
+        if not access["allowed"]:
+            continue
+        authorized_attachments.append(attachment)
+    return authorized_attachments
 
 
 def project_file_attachment_public(attachment: Mapping[str, Any]) -> dict[str, Any]:
