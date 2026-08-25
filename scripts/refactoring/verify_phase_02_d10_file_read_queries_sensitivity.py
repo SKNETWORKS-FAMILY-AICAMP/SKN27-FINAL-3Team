@@ -103,8 +103,8 @@ elif mutation_name == "list_scope_authorization_bypass":
 elif mutation_name == "detail_owner_authorization_bypass":
     mutation = mutate_once(
         application,
-        "        access = authorize_resource_access(access_metadata, trusted_identity)\n        if not access[\"allowed\"]:\n",
-        "        access = authorize_resource_access(access_metadata, trusted_identity)\n        if False and not access[\"allowed\"]:\n",
+        "        _authorize_supplied_session_scope(\n            query.session_id,\n            access_metadata,\n            trusted_identity,\n        )\n        access = authorize_resource_access(access_metadata, trusted_identity)\n        if not access[\"allowed\"]:\n",
+        "        _authorize_supplied_session_scope(\n            query.session_id,\n            access_metadata,\n            trusted_identity,\n        )\n        access = authorize_resource_access(access_metadata, trusted_identity)\n        if False and not access[\"allowed\"]:\n",
     )
 elif mutation_name == "canonical_guest_policy_bypass":
     mutation = mutate_once(
