@@ -17,6 +17,7 @@ EXPECTED = (
     "detail_owner_authorization_bypass",
     "canonical_guest_policy_bypass",
     "privacy_projection_bypass",
+    "guest_session_attachment_owner_bypass",
 )
 
 
@@ -70,6 +71,9 @@ def test_d10_targets_cover_the_file_read_contract_boundaries() -> None:
     )
     assert module.TARGETS["privacy_projection_bypass"].endswith(
         "test_list_and_detail_exclude_private_attachment_metadata"
+    )
+    assert module.TARGETS["guest_session_attachment_owner_bypass"].endswith(
+        "test_guest_session_list_excludes_foreign_owner_attachment_even_when_session_matches"
     )
 
 

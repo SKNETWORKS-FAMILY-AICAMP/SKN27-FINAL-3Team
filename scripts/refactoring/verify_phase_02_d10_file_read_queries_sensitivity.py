@@ -35,6 +35,9 @@ TARGETS: Final = {
     "privacy_projection_bypass": TEST_MODULE
     + ".FileReadSecurityBoundaryTests."
     + "test_list_and_detail_exclude_private_attachment_metadata",
+    "guest_session_attachment_owner_bypass": TEST_MODULE
+    + ".FileReadSecurityBoundaryTests."
+    + "test_guest_session_list_excludes_foreign_owner_attachment_even_when_session_matches",
 }
 
 
@@ -114,6 +117,12 @@ elif mutation_name == "privacy_projection_bypass":
         application,
         "    return {\n        field: record[field]\n        for field in PUBLIC_FILE_ATTACHMENT_FIELDS\n        if field in record\n    }\n",
         "    return record\n",
+    )
+elif mutation_name == "guest_session_attachment_owner_bypass":
+    mutation = mutate_once(
+        application,
+        "    attachments = _authorized_file_attachments(attachments, trusted_identity)\n",
+        "    attachments = attachments\n",
     )
 else:
     raise SystemExit(f"unsupported mutation: {mutation_name}")
