@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from app.services.google_auth_service import issue_access_token
 from app.services.guest_credential_service import issue_guest_credential
-from chatbot.models import AnalysisJob, ChatSession, GuestIdentity, GuestIdentityStatus
+from chatbot.models import (
+    AnalysisJob,
+    AuthSession,
+    AuthSessionStatus,
+    ChatSession,
+    GuestIdentity,
+    GuestIdentityStatus,
+    UserAccount,
+)
+
 from chatbot.repositories import (
     authorize_resource_access,
     get_analysis_job_access_metadata,
@@ -108,3 +120,78 @@ class AnalysisReadQueriesGuestPolicyTests(TestCase):
 
         self.assertEqual(response.status_code, 401, response.content)
         self.assertEqual(response.json()["error"]["code"], "guest_session_invalid")
+
+
+def _authenticated_client(user_id: str) -> Client:
+    issued_at = timezone.now()
+    expires_at = issued_at + timedelta(hours=1)
+    auth_session_id = f"auth_{user_id}"
+    token, _claims = issue_access_token(
+        user_id=user_id,
+        auth_session_id=auth_session_id,
+        issued_at=issued_at,
+        expires_at=expires_at,
+    )
+    user = UserAccount.objects.create(user_id=user_id)
+    AuthSession.objects.create(
+        auth_session_id=auth_session_id,
+        user=user,
+        subject_type="user",
+        subject_id=f"user:{user_id}",
+        status=AuthSessionStatus.ACTIVE,
+        issued_at=issued_at,
+        expires_at=expires_at,
+    )
+    return Client(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+
+@override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)
+class AnalysisReadQueriesApplicationSeamTests(TestCase):
+    def setUp(self) -> None:
+        self.owner_id = "usr_d11_application_owner"
+        self.session_id = "ses_d11_application_owner"
+        self.job_id = "job_d11_application_owner"
+        self.owner_client = _authenticated_client(self.owner_id)
+        self.session = ChatSession.objects.create(
+            session_id=self.session_id,
+            owner_id=self.owner_id,
+        )
+        AnalysisJob.objects.create(
+            job_id=self.job_id,
+            session=self.session,
+            owner_id=self.owner_id,
+            status="queued",
+        )
+
+    def test_analysis_job_list_delegates_to_execute_list_analysis_jobs(self) -> None:
+        with patch(
+            "chatbot.views.execute_list_analysis_jobs",
+            create=True,
+            return_value=SimpleNamespace(payload={"jobs": []}),
+        ) as execute_list_analysis_jobs:
+            response = self.owner_client.get("/api/analysis/jobs/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        execute_list_analysis_jobs.assert_called_once()
+
+    def test_analysis_job_detail_delegates_to_execute_get_analysis_job_detail(self) -> None:
+        with patch(
+            "chatbot.views.execute_get_analysis_job_detail",
+            create=True,
+            return_value=SimpleNamespace(payload={"job_id": self.job_id}),
+        ) as execute_get_analysis_job_detail:
+            response = self.owner_client.get(f"/api/analysis/jobs/{self.job_id}/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        execute_get_analysis_job_detail.assert_called_once()
+
+    def test_analysis_result_delegates_to_execute_get_analysis_result(self) -> None:
+        with patch(
+            "chatbot.views.execute_get_analysis_result",
+            create=True,
+            return_value=SimpleNamespace(payload={"job_id": self.job_id}, pending=True),
+        ) as execute_get_analysis_result:
+            response = self.owner_client.get(f"/api/analysis/results/{self.job_id}/")
+
+        self.assertEqual(response.status_code, 202, response.content)
+        execute_get_analysis_result.assert_called_once()
