@@ -115,8 +115,8 @@ elif mutation_name == "result_view_application_bypass":
 elif mutation_name == "list_scope_authorization_bypass":
     mutation = mutate_once(
         application,
-        '                owner_id=str(subject.get("user_id") or ""),\n',
-        '                owner_id="usr_d11_other_owner",\n',
+        '            owner_id=str(subject.get("user_id") or ""),\n',
+        '            owner_id="usr_d11_other_owner",\n',
     )
 elif mutation_name == "job_owner_precedence_bypass":
     mutation = mutate_once(
