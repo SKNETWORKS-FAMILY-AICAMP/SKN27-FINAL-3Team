@@ -1114,12 +1114,31 @@ class ProductionApiContractTests(SimpleTestCase):
             reason="analysis_plan_not_executable",
         )
 
-    @patch("app.application.analysis.read_queries.get_analysis_job_access_metadata", return_value=None)
+    @patch(
+        "chatbot.views._request_access_payload",
+        return_value={
+            "auth_context": {
+                "subject_type": "user",
+                "subject_id": "user:usr_persisted_output",
+                "user_id": "usr_persisted_output",
+            }
+        },
+    )
+    @patch(
+        "app.application.analysis.read_queries.get_analysis_job_access_metadata",
+        return_value={
+            "type": "analysis_job",
+            "job_id": "job_1",
+            "owner_id": "usr_persisted_output",
+            "session_id": "ses_persisted_output",
+        },
+    )
     @patch("app.application.analysis.read_queries.get_analysis_job_record")
     def test_analysis_result_uses_persisted_agent_outputs(
         self,
         get_job,
         _get_access_metadata,
+        _request_access_payload,
     ) -> None:
         get_job.return_value = {
             "job_id": "job_1",

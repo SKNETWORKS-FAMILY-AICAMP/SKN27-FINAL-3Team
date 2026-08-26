@@ -9,6 +9,10 @@ from unittest.mock import patch
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from app.services.analysis_job_query_service import (
+    load_analysis_job_detail,
+    load_analysis_result,
+)
 from app.services.google_auth_service import issue_access_token
 from app.services.guest_credential_service import issue_guest_credential
 from chatbot.models import (
@@ -100,6 +104,71 @@ class AnalysisReadQueriesSecurityTests(TestCase):
         self.assertNotIn("job_d11_foreign_cache", rendered)
         self.assertNotIn("ses_d11_foreign_cache", rendered)
         self.assertNotIn("foreign cache state", rendered)
+
+    def test_analysis_job_detail_fails_closed_when_access_metadata_is_missing_but_record_exists(self) -> None:
+        stored_job = {
+            "job_id": self.job_id,
+            "session_id": self.session_id,
+            "status": "queued",
+        }
+        with (
+            patch(
+                "app.application.analysis.read_queries.get_analysis_job_access_metadata",
+                return_value=None,
+            ),
+            patch(
+                "app.application.analysis.read_queries.load_analysis_job_detail",
+                wraps=load_analysis_job_detail,
+            ) as load_detail,
+            patch(
+                "app.application.analysis.read_queries.get_analysis_job_record",
+                return_value=stored_job,
+            ) as get_job,
+            patch(
+                "app.application.analysis.read_queries.read_analysis_job_progress",
+                return_value={},
+            ) as read_progress,
+        ):
+            response = self.guest_client.get(f"/api/analysis/jobs/{self.job_id}/")
+
+        self.assertEqual(response.status_code, 404, response.content)
+        self.assertEqual(response.json()["error"]["code"], "analysis_job_not_found")
+        load_detail.assert_not_called()
+        get_job.assert_not_called()
+        read_progress.assert_not_called()
+
+    def test_analysis_result_fails_closed_when_access_metadata_is_missing_but_record_exists(self) -> None:
+        stored_job = {
+            "job_id": self.job_id,
+            "session_id": self.session_id,
+            "status": "success",
+            "agent_results": [],
+        }
+        with (
+            patch(
+                "app.application.analysis.read_queries.get_analysis_job_access_metadata",
+                return_value=None,
+            ),
+            patch(
+                "app.application.analysis.read_queries.load_analysis_result",
+                wraps=load_analysis_result,
+            ) as load_result,
+            patch(
+                "app.application.analysis.read_queries.get_analysis_job_record",
+                return_value=stored_job,
+            ) as get_job,
+            patch(
+                "app.application.analysis.read_queries.compose_agent_response",
+                return_value={"status": "success"},
+            ) as compose_response,
+        ):
+            response = self.guest_client.get(f"/api/analysis/results/{self.job_id}/")
+
+        self.assertEqual(response.status_code, 404, response.content)
+        self.assertEqual(response.json()["error"]["code"], "analysis_result_not_found")
+        load_result.assert_not_called()
+        get_job.assert_not_called()
+        compose_response.assert_not_called()
 
 
 @override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)
@@ -256,6 +325,61 @@ class AnalysisReadQueriesContractTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json(), {"jobs": []})
+
+    def test_valid_guest_lists_own_session_jobs_and_excludes_foreign_or_unverifiable_candidates(self) -> None:
+        guest_id = "gst_d11_session_list"
+        session_id = "ses_d11_session_list"
+        GuestIdentity.objects.create(
+            guest_id=guest_id,
+            status=GuestIdentityStatus.ACTIVE,
+        )
+        guest_session = ChatSession.objects.create(
+            session_id=session_id,
+            metadata={"auth_context": {"guest_id": guest_id}},
+        )
+        legitimate_job_id = "job_d11_guest_legitimate"
+        foreign_job_id = "job_d11_guest_foreign_owner"
+        missing_metadata_job_id = "job_d11_guest_missing_metadata"
+        AnalysisJob.objects.create(
+            job_id=legitimate_job_id,
+            session=guest_session,
+            owner_id="",
+            status="queued",
+        )
+        AnalysisJob.objects.create(
+            job_id=foreign_job_id,
+            session=guest_session,
+            owner_id=self.other_owner_id,
+            status="queued",
+        )
+        AnalysisJob.objects.create(
+            job_id=missing_metadata_job_id,
+            session=guest_session,
+            owner_id="",
+            status="queued",
+        )
+        credential, _claims = issue_guest_credential(guest_id)
+        client = Client(
+            HTTP_X_GUEST_ID=guest_id,
+            HTTP_X_GUEST_CREDENTIAL=credential,
+        )
+
+        def access_metadata(job_id: str):
+            if job_id == missing_metadata_job_id:
+                return None
+            return get_analysis_job_access_metadata(job_id)
+
+        with patch(
+            "app.application.analysis.read_queries.get_analysis_job_access_metadata",
+            side_effect=access_metadata,
+        ):
+            response = client.get(f"/api/analysis/jobs/?session_id={session_id}")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            [job["job_id"] for job in response.json()["jobs"]],
+            [legitimate_job_id],
+        )
 
     def test_analysis_job_detail_excludes_private_metadata(self) -> None:
         response = self.owner_client.get(f"/api/analysis/jobs/{self.job_id}/")
