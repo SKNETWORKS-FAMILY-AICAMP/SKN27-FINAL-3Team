@@ -130,7 +130,7 @@ The baseline exit code was `0`; all seven mutations failed directly by assertion
 - Delta P0 direct RED: `test_guest_session_list_excludes_foreign_owner_attachment_even_when_session_matches` failed with the expected foreign attachment disclosure before the GREEN commit and passed after it.
 - Delta sensitivity: baseline `0`, exact mutations `7`, all direct `AssertionError`, `source_restored=true`, `working_tree_unchanged=true`, `residual_diff_zero=true` at `b4219ad1e7a05222087b6da1b7f4dfc2606c6686`.
 - B1–D10 application-boundary selection, API route/OpenAPI generation selection, frontend suite/build, and OpenAPI drift results below are pre-delta evidence until the final Delta Head is verified.
-- D1/D2 results below are pre-delta evidence. Fresh local Docker/Compose evidence has not been asserted for the Delta Head.
+- D1/D2 results below are pre-delta evidence. Fresh final-Delta local Docker/Compose provenance is recorded separately in `Final Delta verification provenance` and is distinct from GitHub CI evidence.
 
 ### Windows local-suite observation
 
@@ -147,10 +147,12 @@ These are environment observations, not D10-specific functional regressions. Lin
 - Pre-delta offline-verification: `97045414143` / `SUCCESS`
 - Pre-delta compose-integration: `97046155784` / `SUCCESS`
 - Pre-delta regression-signal: `32578985127` / `SUCCESS`
-- Fresh Delta CI: `PENDING` after the final docs commit; its run, jobs, artifacts, and synthetic checkout are intentionally not self-referenced here.
+- Final Delta GitHub blocking CI completed successfully before this docs-only provenance correction; the exact run, job, artifact, and synthetic checkout are recorded in `Final Delta verification provenance`.
+- Fresh CI for this docs-only provenance commit is intentionally not self-referenced here to avoid a further Receipt commit loop.
 - Production DB audit: `NOT_EXECUTED`
 - Pre-delta Independent Review: `FAIL` / `BLOCKED` / `PHASE_2_D10_NEEDS_DELTA_FIX`
-- Delta Independent Review: `NOT_PERFORMED`
+- Delta Independent Review — Pre-P2-Provenance-Fix: `PASS_WITH_CONDITIONS` / `ALLOWED_AFTER_P2_FIX` / `PHASE_2_D10_NEEDS_DELTA_FIX`.
+- Docs-only provenance Delta Review: `NOT_PERFORMED`.
 - Draft Ready transition: `NOT_PERFORMED`
 - Merge: `NOT_PERFORMED`
 
@@ -169,14 +171,66 @@ These are environment observations, not D10-specific functional regressions. Lin
 
 - Application boundary: `PASS`
 - P0 unscoped list enumeration: `REMEDIATED_IN_D10` (historical)
-- P0 cross-owner guest-session list disclosure: `REMEDIATED_PENDING_DELTA_REVIEW`
-- P1 guest-session inconsistent-relation sensitivity gap: `REMEDIATED_PENDING_DELTA_REVIEW`
-- P2 Receipt PR/CI metadata and view-name mismatch: `REMEDIATED_PENDING_DELTA_REVIEW`
+- P0 cross-owner guest-session list disclosure: `CLOSED` by the Delta Independent Review; this docs-only correction does not alter the runtime closure.
+- P1 guest-session inconsistent-relation sensitivity gap: `CLOSED` by the Delta Independent Review with `guest_session_attachment_owner_bypass` and `test_guest_session_list_excludes_foreign_owner_attachment_even_when_session_matches`.
+- P2 Receipt PR/CI metadata and view-name mismatch: `CLOSED` by the Delta Independent Review; this docs-only correction addresses the separate fresh D1/D2 provenance finding.
+- P2 fresh D1/D2 provenance: `P2_REMEDIATED_PENDING_DOCS_DELTA_REVIEW`.
 - Owner/session/guest authorization: `PASS` in Delta focused coverage
 - Public projection: `PASS` in Delta focused coverage
 - Sensitivity: `PASS` with `7` direct mutations
-- Fresh Delta local Docker D1/D2: `NOT_EXECUTED`
+- Fresh Delta local Docker D1: `PASS`; D2: `PASS`; `cleanup_success=true`.
 - Full Windows pytest: `ENVIRONMENT_BLOCKED`
-- Fresh Delta CI: `PENDING`
-- Delta Independent Review: `NOT_PERFORMED`
+- Final Delta GitHub blocking CI: `SUCCESS`; fresh CI for this docs-only provenance commit is `PENDING` and intentionally not self-referenced here.
+- Delta Independent Review — Pre-P2-Provenance-Fix: `PASS_WITH_CONDITIONS` / `ALLOWED_AFTER_P2_FIX` / `PHASE_2_D10_NEEDS_DELTA_FIX`.
+- Docs-only provenance Delta Review: `NOT_PERFORMED`.
 - Merge: `NOT_PERFORMED`
+
+## Final Delta verification provenance
+
+### Local Final Delta verification
+
+- Reviewed Final Delta Head: `1a2da456c0132fdb5179eaca879b85da979e7668`
+- D1: `PASS`
+  - Execution timing: Final Delta Head 생성 이후. Local image `skn27-phase-02-d10-delta-local` was created at `2026-08-26T05:18:20.373905635Z` (`2026-08-26 14:18:20 KST`).
+  - Purpose: Docker image build and D1 import-smoke verification.
+  - Build command: `docker build --progress=quiet -t skn27-phase-02-d10-delta-local .`.
+  - Import-smoke command: `docker run --rm -e DJANGO_SETTINGS_MODULE=config.settings skn27-phase-02-d10-delta-local python -c "import django; django.setup(); from app.application.files.read_queries import execute_list_file_attachments; print('D1_IMPORT_SMOKE_PASS')"`.
+  - Evidence: `D1_IMPORT_SMOKE_PASS`.
+  - Repository source changed by verification: `NO`.
+- D2: `PASS`
+  - Gate: `scripts/refactoring/run_phase_00_compose_gate.sh`.
+  - Evidence timestamp: `2026-08-26 14:26 KST`.
+  - `gate-summary.json`: `status=pass`, backend ready/live, agent worker consumed, and file scan worker consumed.
+  - `cleanup_success`: `true`; the Compose project left no container or volume residue.
+- External LF normalization shim: `USED`.
+  - Purpose: Windows host line-ending normalization only; Python subprocess CRLF output was normalized to LF before Git Bash `read` consumed probe identifiers.
+  - Repository source modified: `NO`.
+  - Canonical gate script modified: `NO`.
+  - Docker/Compose semantics modified: `NO`.
+  - The shim changed no authorization logic, test result, health condition, timeout, service dependency, Compose manifest, or repository script.
+
+### GitHub blocking CI for Final Delta Head
+
+- production-gate: `32934110180` / `SUCCESS`
+- offline-verification: `98071933549` / `SUCCESS`
+- compose-integration: `98072987523` / `SUCCESS`
+- regression-signal: `32934110157` / `98071933390` / `SUCCESS`
+- D10 sensitivity artifact: `9594311701` (`phase-02-d10-sensitivity-evidence`).
+  - Source Head: `1a2da456c0132fdb5179eaca879b85da979e7668`
+  - Synthetic runtime checkout: `49a613327fc0faf5e9cfd6747ef7f74a95c8751a`
+  - baseline: `0`; mutations: `7`; all: `AssertionError`.
+  - `source_restored=true`, `working_tree_unchanged=true`, `residual_diff_zero=true`.
+
+Local D1/D2 and GitHub CI are separate evidence sources. Fresh CI generated by this docs-only provenance commit is intentionally not added to this Receipt, preventing a self-reference commit loop.
+
+## Delta Independent Review — Pre-P2-Provenance-Fix
+
+- Reviewed Head: `1a2da456c0132fdb5179eaca879b85da979e7668`
+- P0: `0` — `P0_CROSS_OWNER_FILE_LIST_DISCLOSURE` closed: legitimate guest attachment A remained and foreign-owner attachment X was excluded.
+- P1: `0` — `P1_SENSITIVITY_GUEST_SESSION_INCONSISTENT_RELATION_GAP` closed with `guest_session_attachment_owner_bypass` and its direct detector.
+- P2: `1` — `P2_RECEIPT_FRESH_D1_D2_PROVENANCE_STALE`.
+- Final Judgment: `PASS_WITH_CONDITIONS`.
+- Merge Allowed: `ALLOWED_AFTER_P2_FIX`.
+- Phase Status: `PHASE_2_D10_NEEDS_DELTA_FIX`.
+
+This is historical review authority before the docs-only provenance correction. It does not declare `PHASE_2_D10_READY_TO_MERGE`, `PASS`, or `ALLOWED`.
