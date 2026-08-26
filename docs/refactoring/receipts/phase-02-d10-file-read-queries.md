@@ -10,9 +10,13 @@
 - RED_SECURITY Head: `694153d7e7f47aeacb38a45729aa882b93531474`
 - GREEN_SECURITY Head: `6966399736e537c5534943ea9fa1a601982f0f0e`
 - Sensitivity Verification Runtime Head: `ec143c3fbddcb1d51c6f517cd9ccc6aa0021903d`
-- PR: `PENDING`
-- State: `NOT_CREATED`
-- Draft: `PENDING`
+- Reviewed Pre-delta Head: `33143f87d7e192aa235967418776d8a77131f6bc`
+- Delta RED Head: `f39e83c08f4f2ac912e3b4074d4a759429e5c740`
+- Delta GREEN Head: `68cd3ba69ff163225bc5aa0f1f6fb063af825c79`
+- Delta Sensitivity Head: `b4219ad1e7a05222087b6da1b7f4dfc2606c6686`
+- PR: `#414`
+- State: `OPEN`
+- Draft: `true`
 - Merge: `NOT_PERFORMED`
 
 This receipt does not include its own commit SHA to avoid a self-reference commit loop.
@@ -36,13 +40,25 @@ This receipt does not include its own commit SHA to avoid a self-reference commi
 5. `test: add phase 2 D10 sensitivity gate`
    - Head: `ec143c3fbddcb1d51c6f517cd9ccc6aa0021903d`
    - Result: baseline and six negative controls passed.
+6. `test: reproduce guest-session cross-owner FileRead disclosure`
+   - Head: `f39e83c08f4f2ac912e3b4074d4a759429e5c740`
+   - Result: valid guest G, guest-authorized session S, legitimate attachment A, and foreign-owner attachment X.session_id=S fixture에서 `GET /api/files/?session_id=S`가 X를 노출하는 `AssertionError`를 재현했다.
+7. `fix: enforce per-attachment authorization in FileRead list`
+   - Head: `68cd3ba69ff163225bc5aa0f1f6fb063af825c79`
+   - Result: candidate attachment를 `get_uploaded_file_access_metadata`와 `authorize_resource_access`로 검증한 후에만 public projection하도록 변경했다.
+8. `test: cover guest-session cross-owner FileRead sensitivity`
+   - Head: `ab815e4c4ad68745af91c7478f9525209fe53cc3`
+   - Result: `guest_session_attachment_owner_bypass`와 exact seven-mutation contract를 추가했다.
+9. `fix: preserve D10 detail sensitivity mutation`
+   - Head: `b4219ad1e7a05222087b6da1b7f4dfc2606c6686`
+   - Result: 새 list helper와 충돌하지 않도록 `detail_owner_authorization_bypass` mutation anchor를 detail-only 문맥으로 고정했다.
 
-`RED_SECURITY_HEAD` is an ancestor of `GREEN_SECURITY_HEAD`.
+`RED_SECURITY_HEAD` is an ancestor of `GREEN_SECURITY_HEAD`. `D10_DELTA_RED_HEAD` is an ancestor of `D10_DELTA_GREEN_HEAD`, and all Delta commits are append-only descendants of `33143f87d7e192aa235967418776d8a77131f6bc`.
 
 ## Application boundary
 
 - Routes: `GET /api/files/`, `GET /api/files/<attachment_id>/`
-- View: `list_files`, `file_detail`
+- View: `attachments`, `attachment_detail`
 - Application module: `app/application/files/read_queries.py`
 - Commands: `ListFileAttachmentsQuery`, `GetFileAttachmentQuery`
 - Executors: `execute_list_file_attachments`, `execute_get_file_attachment`
@@ -51,16 +67,23 @@ This receipt does not include its own commit SHA to avoid a self-reference commi
 
 The views retain HTTP parsing, trusted request identity reconstruction, and typed-error-to-response mapping. Repository selection, owner/session authorization, guest policy, and public projection are inside the application boundary.
 
-## P0 security remediation
+## P0 security delta remediation
 
-`P0_CANDIDATE_UNSCOPED_FILE_LIST_ENUMERATION` was directly reproduced: a valid guest without a session could receive attachments outside the intended owner/session scope. It is `CONFIRMED` and `REMEDIATED_IN_D10`.
+### Initial implementation and pre-delta Independent Review
 
-- The list executor does not call `list_uploaded_files(session_id=None, owner_id=None)` on any public route.
-- User requests without a session are owner-scoped.
-- Guest list requests require an existing authorized session; unscoped guest enumeration is fail-closed with `object_access.v1` and `trusted_scope_required`.
-- Detail requests authorize the supplied session, then require the attachment session to match it before owner/guest resource authorization.
-- Expired, malformed, and forged guest credentials retain the existing guest identity policy behavior.
-- Unknown sessions preserve the owner-scoped empty-list behavior; foreign existing sessions and foreign owner resources are denied.
+Initial implementation blocked unscoped guest-without-session enumeration. However, the Independent Review of `33143f87d7e192aa235967418776d8a77131f6bc` independently found `P0_CROSS_OWNER_FILE_LIST_DISCLOSURE`: guest G authorized session S, while a legacy/inconsistent `UploadedFile` X had `session_id=S` and `owner_id=authenticated user B`. `GET /api/files/?session_id=S` returned X metadata with HTTP `200`; direct detail access to X correctly returned `403`.
+
+The root cause was the guest list path passing `owner_id=None` to `list_uploaded_files`, which consequently applied only the session filter. The list route then projected raw candidates without individual attachment authorization. There is no database constraint that prevents this legacy/inconsistent owner/session relation; this Delta intentionally does not add a migration or redesign persistence.
+
+### Delta remediation
+
+- Collection scope authorization remains separate: users are owner-scoped; guests require an authorized session; guest requests with no session remain fail-closed.
+- Every candidate now loads `get_uploaded_file_access_metadata` and uses the existing `authorize_resource_access` contract before `project_file_attachment_public`.
+- Owner precedence is unchanged: resource `owner_id=B` and guest G is denied even when `session_id=S` matches.
+- `test_guest_session_list_excludes_foreign_owner_attachment_even_when_session_matches` proves legitimate guest-bound A remains in the HTTP `200` list while foreign-owner X, its `attachment_id`, `original_filename`, and `filename` are absent.
+- Detail semantics are unchanged: foreign owner and supplied session mismatch remain `403`.
+
+`P0_CROSS_OWNER_FILE_LIST_DISCLOSURE`: `REMEDIATED_PENDING_DELTA_REVIEW`.
 
 ## Public projection and OpenAPI
 
@@ -86,19 +109,28 @@ Runner: `scripts/refactoring/verify_phase_02_d10_file_read_queries_sensitivity.p
 | `detail_owner_authorization_bypass` | `AssertionError` |
 | `canonical_guest_policy_bypass` | `AssertionError` |
 | `privacy_projection_bypass` | `AssertionError` |
+| `guest_session_attachment_owner_bypass` | `AssertionError` |
 
-The baseline exit code was `0`; all six mutations failed as expected. `source_restored`, `working_tree_unchanged`, and `residual_diff_zero` were `true`. Evidence: `tmp/phase-02-d10-sensitivity-evidence.json`.
+The baseline exit code was `0`; all seven mutations failed directly by assertion. The seventh mutation removes the per-attachment list authorization call and is detected by `test_guest_session_list_excludes_foreign_owner_attachment_even_when_session_matches`. At `b4219ad1e7a05222087b6da1b7f4dfc2606c6686`, `source_restored`, `working_tree_unchanged`, and `residual_diff_zero` were `true`.
+
+`P1_SENSITIVITY_GUEST_SESSION_INCONSISTENT_RELATION_GAP`: `REMEDIATED_PENDING_DELTA_REVIEW`.
+
+## P2 metadata correction
+
+- PR metadata: `#414`, `OPEN`, Draft `true`, Merge `NOT_PERFORMED`.
+- View metadata: `attachments` and `attachment_detail` match `backend/chatbot/views.py`.
+- Pre-delta CI is no longer recorded as pending: production-gate `32578985125`, offline-verification `97045414143`, compose-integration `97046155784`, and regression-signal `32578985127` completed successfully for `33143f87d7e192aa235967418776d8a77131f6bc`.
+- The historical Independent Review remains authoritative for its reviewed Head: `FAIL`, `BLOCKED`, and `PHASE_2_D10_NEEDS_DELTA_FIX`; it identified `P0_CROSS_OWNER_FILE_LIST_DISCLOSURE`, `P1_SENSITIVITY_GUEST_SESSION_INCONSISTENT_RELATION_GAP`, `P2_RECEIPT_PR_CI_METADATA_STALE`, and `P2_RECEIPT_VIEW_NAME_MISMATCH`.
+
+`P2_RECEIPT_PR_CI_METADATA_STALE` and `P2_RECEIPT_VIEW_NAME_MISMATCH`: `REMEDIATED_PENDING_DELTA_REVIEW`.
 
 ## Verification
 
-- D10 focused: `13 tests, OK`
-- B1–D10 application-boundary selection: `115 tests, OK`
-- API route/OpenAPI generation selection: `27 passed`
-- Frontend node suite: `155 passed`
-- Frontend production build: passed
-- OpenAPI generation drift check: passed
-- D1: `docker build -t skn27-phase-02-d10-local .` passed; Django-initialized module smoke output `D1_IMPORT_SMOKE_PASS`.
-- D2: script-equivalent PowerShell execution of `scripts/refactoring/run_phase_00_compose_gate.sh` passed. PostgreSQL, ClamAV, Neo4j, Redis, backend live/ready, agent-worker, and file-scan-worker all passed; `cleanup_success` was recorded. Evidence: `tmp/phase-00-compose-evidence/gate-summary.json`.
+- Delta D10 focused: `python backend/manage.py test chatbot.test_phase_02_file_read_queries_use_case --verbosity 1` — `14 tests, OK`.
+- Delta P0 direct RED: `test_guest_session_list_excludes_foreign_owner_attachment_even_when_session_matches` failed with the expected foreign attachment disclosure before the GREEN commit and passed after it.
+- Delta sensitivity: baseline `0`, exact mutations `7`, all direct `AssertionError`, `source_restored=true`, `working_tree_unchanged=true`, `residual_diff_zero=true` at `b4219ad1e7a05222087b6da1b7f4dfc2606c6686`.
+- B1–D10 application-boundary selection, API route/OpenAPI generation selection, frontend suite/build, and OpenAPI drift results below are pre-delta evidence until the final Delta Head is verified.
+- D1/D2 results below are pre-delta evidence. Fresh local Docker/Compose evidence has not been asserted for the Delta Head.
 
 ### Windows local-suite observation
 
@@ -110,10 +142,15 @@ These are environment observations, not D10-specific functional regressions. Lin
 
 ## CI and release state
 
-- Fresh PR CI: `PENDING`
-- Fresh sensitivity artifact: `PENDING`
+- Reviewed Pre-delta Head: `33143f87d7e192aa235967418776d8a77131f6bc`
+- Pre-delta production-gate: `32578985125` / `SUCCESS`
+- Pre-delta offline-verification: `97045414143` / `SUCCESS`
+- Pre-delta compose-integration: `97046155784` / `SUCCESS`
+- Pre-delta regression-signal: `32578985127` / `SUCCESS`
+- Fresh Delta CI: `PENDING` after the final docs commit; its run, jobs, artifacts, and synthetic checkout are intentionally not self-referenced here.
 - Production DB audit: `NOT_EXECUTED`
-- Independent Review: `NOT_PERFORMED`
+- Pre-delta Independent Review: `FAIL` / `BLOCKED` / `PHASE_2_D10_NEEDS_DELTA_FIX`
+- Delta Independent Review: `NOT_PERFORMED`
 - Draft Ready transition: `NOT_PERFORMED`
 - Merge: `NOT_PERFORMED`
 
@@ -131,13 +168,15 @@ These are environment observations, not D10-specific functional regressions. Lin
 ## Current status
 
 - Application boundary: `PASS`
-- P0 unscoped list enumeration: `REMEDIATED_IN_D10`
-- Owner/session/guest authorization: `PASS`
-- Public projection: `PASS`
-- OpenAPI synchronization: `PASS`
-- Sensitivity: `PASS`
-- Local Docker D1/D2: `PASS`
+- P0 unscoped list enumeration: `REMEDIATED_IN_D10` (historical)
+- P0 cross-owner guest-session list disclosure: `REMEDIATED_PENDING_DELTA_REVIEW`
+- P1 guest-session inconsistent-relation sensitivity gap: `REMEDIATED_PENDING_DELTA_REVIEW`
+- P2 Receipt PR/CI metadata and view-name mismatch: `REMEDIATED_PENDING_DELTA_REVIEW`
+- Owner/session/guest authorization: `PASS` in Delta focused coverage
+- Public projection: `PASS` in Delta focused coverage
+- Sensitivity: `PASS` with `7` direct mutations
+- Fresh Delta local Docker D1/D2: `NOT_EXECUTED`
 - Full Windows pytest: `ENVIRONMENT_BLOCKED`
-- CI: `PENDING`
-- Independent Review: `NOT_PERFORMED`
+- Fresh Delta CI: `PENDING`
+- Delta Independent Review: `NOT_PERFORMED`
 - Merge: `NOT_PERFORMED`
