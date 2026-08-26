@@ -195,3 +195,81 @@ class AnalysisReadQueriesApplicationSeamTests(TestCase):
 
         self.assertEqual(response.status_code, 202, response.content)
         execute_get_analysis_result.assert_called_once()
+
+
+@override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)
+class AnalysisReadQueriesContractTests(TestCase):
+    def setUp(self) -> None:
+        self.owner_id = "usr_d11_contract_owner"
+        self.other_owner_id = "usr_d11_other_owner"
+        self.session_id = "ses_d11_contract_owner"
+        self.job_id = "job_d11_contract_owner"
+        self.owner_client = _authenticated_client(self.owner_id)
+        self.owner_session = ChatSession.objects.create(
+            session_id=self.session_id,
+            owner_id=self.owner_id,
+        )
+        AnalysisJob.objects.create(
+            job_id=self.job_id,
+            session=self.owner_session,
+            owner_id=self.owner_id,
+            status="queued",
+            metadata={
+                "storage_uri": "s3://private-d11/job.json",
+                "access_token": "d11-private-token",
+                "raw_output": "d11-private-output",
+            },
+        )
+
+    def test_authenticated_owner_list_is_scoped_to_owner(self) -> None:
+        other_session = ChatSession.objects.create(
+            session_id="ses_d11_other_owner",
+            owner_id=self.other_owner_id,
+        )
+        AnalysisJob.objects.create(
+            job_id="job_d11_other_owner",
+            session=other_session,
+            owner_id=self.other_owner_id,
+            status="queued",
+        )
+
+        response = self.owner_client.get("/api/analysis/jobs/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            [job["job_id"] for job in response.json()["jobs"]],
+            [self.job_id],
+        )
+
+    def test_valid_guest_without_session_lists_no_jobs(self) -> None:
+        guest_id = "gst_d11_valid_no_session"
+        GuestIdentity.objects.create(
+            guest_id=guest_id,
+            status=GuestIdentityStatus.ACTIVE,
+        )
+        credential, _claims = issue_guest_credential(guest_id)
+
+        response = Client(
+            HTTP_X_GUEST_ID=guest_id,
+            HTTP_X_GUEST_CREDENTIAL=credential,
+        ).get("/api/analysis/jobs/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json(), {"jobs": []})
+
+    def test_analysis_job_detail_excludes_private_metadata(self) -> None:
+        response = self.owner_client.get(f"/api/analysis/jobs/{self.job_id}/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        rendered = repr(response.json()["job"])
+        self.assertNotIn("s3://private-d11/job.json", rendered)
+        self.assertNotIn("d11-private-token", rendered)
+        self.assertNotIn("d11-private-output", rendered)
+
+    def test_analysis_result_preserves_pending_and_terminal_http_status(self) -> None:
+        pending = self.owner_client.get(f"/api/analysis/results/{self.job_id}/")
+        AnalysisJob.objects.filter(job_id=self.job_id).update(status="success")
+        terminal = self.owner_client.get(f"/api/analysis/results/{self.job_id}/")
+
+        self.assertEqual(pending.status_code, 202, pending.content)
+        self.assertEqual(terminal.status_code, 200, terminal.content)
