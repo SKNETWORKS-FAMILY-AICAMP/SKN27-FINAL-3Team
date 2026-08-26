@@ -99,13 +99,13 @@ elif mutation_name == "detail_view_application_bypass":
     mutation = mutate_once(
         views,
         "        result = execute_get_analysis_job_detail(\n",
-        "        from app.application.analysis.read_queries import execute_get_analysis_job_detail as _direct_detail\n            result = _direct_detail(\n",
+        "        from app.application.analysis.read_queries import execute_get_analysis_job_detail as _direct_detail\n        result = _direct_detail(\n",
     )
 elif mutation_name == "result_view_application_bypass":
     mutation = mutate_once(
         views,
         "        result = execute_get_analysis_result(\n",
-        "        from app.application.analysis.read_queries import execute_get_analysis_result as _direct_result\n            result = _direct_result(\n",
+        "        from app.application.analysis.read_queries import execute_get_analysis_result as _direct_result\n        result = _direct_result(\n",
     )
 elif mutation_name == "list_scope_authorization_bypass":
     mutation = mutate_once(
@@ -134,8 +134,8 @@ elif mutation_name == "progress_cache_identity_validation_bypass":
 elif mutation_name == "public_projection_bypass":
     mutation = mutate_once(
         query_service,
-        '_DETAIL_SCALAR_FIELDS = (\n    "contract_version",\n',
-        '_DETAIL_SCALAR_FIELDS = (\n    "contract_version",\n    "metadata",\n',
+        "    projected = _project_mapping(job, _DETAIL_SCALAR_FIELDS)\n",
+        "    projected = {**_project_mapping(job, _DETAIL_SCALAR_FIELDS), \"metadata\": {\"storage_uri\": \"s3://private-d11/projection\"}}\n",
     )
 elif mutation_name == "pending_terminal_status_bypass":
     mutation = mutate_once(

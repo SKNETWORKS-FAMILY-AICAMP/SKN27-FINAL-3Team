@@ -265,6 +265,7 @@ class AnalysisReadQueriesContractTests(TestCase):
         self.assertNotIn("s3://private-d11/job.json", rendered)
         self.assertNotIn("d11-private-token", rendered)
         self.assertNotIn("d11-private-output", rendered)
+        self.assertNotIn("s3://private-d11/projection", rendered)
 
     def test_analysis_result_preserves_pending_and_terminal_http_status(self) -> None:
         pending = self.owner_client.get(f"/api/analysis/results/{self.job_id}/")
