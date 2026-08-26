@@ -872,6 +872,9 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         identity_error = _request_identity_error_response(request, identity_payload)
         if identity_error is not None:
             return identity_error
+        policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
+        if policy_response is not None:
+            return policy_response
         subject = access_subject_from_payload(identity_payload)["subject"]
         if session_id:
             session_access = get_chat_session_access_metadata(session_id)
@@ -2681,19 +2684,27 @@ def _analysis_job_access_response(
     metadata = get_analysis_job_access_metadata(job_id)
     if metadata is None:
         return None
-    session_id = str(metadata.get("session_id") or "").strip()
-    access = (
-        _authorize_session_query(
-            session_id,
-            identity_payload,
-            resource_type="analysis_result",
-        )
-        if session_id
-        else authorize_resource_access(metadata, identity_payload)
-    )
+    access = _authorize_analysis_job_metadata(metadata, identity_payload)
     if access["allowed"]:
         return None
     return _object_access_denied_response(request, access)
+
+
+def _authorize_analysis_job_metadata(
+    metadata: dict[str, object],
+    identity_payload: dict[str, object],
+) -> dict[str, object]:
+    """Preserve explicit job ownership before legacy session fallback."""
+
+    owner_id = str(metadata.get("owner_id") or "").strip()
+    if owner_id:
+        return authorize_resource_access(metadata, identity_payload)
+    session_id = str(metadata.get("session_id") or "").strip()
+    return _authorize_session_query(
+        session_id,
+        identity_payload,
+        resource_type="analysis_result",
+    )
 
 
 def _persistence_access_denied_response(request: HttpRequest) -> JsonResponse:
