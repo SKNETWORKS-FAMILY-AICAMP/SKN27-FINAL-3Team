@@ -57,13 +57,35 @@ class FileAttachmentResponse(FileContractModel):
     attachment: FileAttachment
 
 
+class FileReadAttachment(FileContractModel):
+    """Allow-listed public representation for canonical FileRead GET routes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    attachment_id: str = Field(min_length=1, max_length=128)
+    session_id: str = Field(min_length=1, max_length=128)
+    purpose: str = Field(min_length=1, max_length=64)
+    type: str = Field(min_length=1, max_length=64)
+    original_filename: str = Field(min_length=1, max_length=255)
+    filename: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=1, max_length=255)
+    size_bytes: int = Field(ge=0)
+    status: str = Field(min_length=1, max_length=64)
+    scan_status: str = Field(min_length=1, max_length=64)
+    privacy_risk: bool
+    created_at: datetime
+    limitations: list[str]
+    case_id: str | None = None
+    message_id: str | None = None
+    retention_expires_at: datetime | None = None
+
+
 class FileAttachmentListResponse(FileContractModel):
-    attachments: list[FileAttachment]
+    attachments: list[FileReadAttachment]
 
 
-class FileAttachmentDetailResponse(FileAttachmentResponse):
-    pass
-
+class FileAttachmentDetailResponse(FileContractModel):
+    attachment: FileReadAttachment
 
 class FileObjectAccessError(FileContractModel):
     contract_version: Literal["object_access.v1"]

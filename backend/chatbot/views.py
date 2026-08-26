@@ -86,6 +86,15 @@ from app.application.reports.read_queries import (
     execute_get_report_detail,
     execute_list_reports,
 )
+from app.application.files.read_queries import (
+    FileReadAccessDenied,
+    FileReadGuestIdentityInvalid,
+    FileReadNotFound,
+    GetFileAttachmentQuery,
+    ListFileAttachmentsQuery,
+    execute_get_file_attachment,
+    execute_list_file_attachments,
+)
 from app.security.chat_input_privacy import ChatInputRejected, protect_chat_input_payload
 from app.contracts.consultation_case import (
     ConfirmCaseFactsResponse,
@@ -187,10 +196,10 @@ from chatbot.repositories import (
     get_chat_session_access_metadata,
     get_report_access_metadata,
     get_report_download_metadata,
-    get_uploaded_file_access_metadata,
+
     get_uploaded_file,
     list_analysis_job_records,
-    list_uploaded_files,
+
     normalize_report_download_document_type,
     load_chat_followup_state,
     enqueue_analysis_job_work,
@@ -749,20 +758,24 @@ def agent_nodes(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "POST", "OPTIONS"])
 def attachments(request: HttpRequest) -> JsonResponse:
     if request.method == "GET":
-        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-        policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
-        if policy_response is not None:
-            return policy_response
-        access = _authorize_session_query(request.GET.get("session_id"), identity_payload, resource_type="uploaded_file_list")
-        if not access["allowed"]:
-            return _object_access_denied_response(request, access)
-        subject = access_subject_from_payload(identity_payload)["subject"]
-        owner_id = subject.get("user_id")
-        attachments_payload = list_uploaded_files(
-            session_id=request.GET.get("session_id"),
-            owner_id=owner_id if owner_id else None,
-        )
-        return _json_response(request, {"attachments": attachments_payload})
+        session_id = request.GET.get("session_id")
+        identity_payload = _request_access_payload(request, session_id=session_id)
+        identity_error = _request_identity_error_response(request, identity_payload)
+        if identity_error is not None:
+            return identity_error
+        try:
+            result = execute_list_file_attachments(
+                ListFileAttachmentsQuery(
+                    identity_payload=identity_payload,
+                    session_id=session_id,
+                    guest_violation_resolver=_guest_identity_policy_violation,
+                )
+            )
+        except FileReadGuestIdentityInvalid as exc:
+            return _guest_identity_policy_response(request, exc.violation)
+        except FileReadAccessDenied as exc:
+            return _object_access_denied_response(request, exc.access)
+        return _json_response(request, result.payload)
 
     payload = _request_payload(request)
     upload_limit_violation = getattr(request, "file_upload_limit_violation", None)
@@ -804,13 +817,38 @@ def attachments(request: HttpRequest) -> JsonResponse:
 @require_http_methods(["GET", "OPTIONS"])
 def attachment_detail(request: HttpRequest, attachment_id: str) -> JsonResponse:
     if _is_canonical_request(request):
-        identity_payload = _request_access_payload(request, session_id=request.GET.get("session_id"))
-        access_metadata = get_uploaded_file_access_metadata(attachment_id)
-        if access_metadata is not None:
-            access = authorize_resource_access(access_metadata, identity_payload)
-            if not access["allowed"]:
-                return _object_access_denied_response(request, access)
-        attachment = get_uploaded_file(attachment_id)
+        session_id = request.GET.get("session_id")
+        identity_payload = _request_access_payload(request, session_id=session_id)
+        identity_error = _request_identity_error_response(request, identity_payload)
+        if identity_error is not None:
+            return identity_error
+        try:
+            result = execute_get_file_attachment(
+                GetFileAttachmentQuery(
+                    attachment_id=attachment_id,
+                    identity_payload=identity_payload,
+                    session_id=session_id,
+                    guest_violation_resolver=_guest_identity_policy_violation,
+                )
+            )
+        except FileReadGuestIdentityInvalid as exc:
+            return _guest_identity_policy_response(request, exc.violation)
+        except FileReadAccessDenied as exc:
+            return _object_access_denied_response(request, exc.access)
+        except FileReadNotFound:
+            return _json_response(
+                request,
+                {
+                    "error": {
+                        "code": "attachment_not_found",
+                        "message": "요청한 첨부파일 메타데이터를 찾을 수 없습니다.",
+                    }
+                },
+                status=404,
+            )
+        return _json_response(request, result.payload)
+
+    attachment = get_uploaded_file(attachment_id)
     if not attachment:
         return _json_response(
             request,

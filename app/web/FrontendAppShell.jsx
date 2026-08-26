@@ -1701,7 +1701,6 @@ export default function FrontendAppShell({
           attachment_id: attachment.attachment_id,
           purpose: attachment.purpose,
           type: attachment.type,
-          storage_uri: attachment.storage_uri,
         })),
       };
       const submission = await submitWithGuestSessionRecovery({
