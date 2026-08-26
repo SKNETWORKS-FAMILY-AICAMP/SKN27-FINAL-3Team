@@ -20,6 +20,8 @@ EXPECTED = (
     "progress_cache_identity_validation_bypass",
     "public_projection_bypass",
     "pending_terminal_status_bypass",
+    "access_metadata_absence_fail_open_bypass",
+    "guest_session_list_scope_bypass",
 )
 
 
@@ -82,6 +84,12 @@ def test_d11_targets_cover_each_analysis_read_boundary() -> None:
     )
     assert module.TARGETS["pending_terminal_status_bypass"].endswith(
         "test_analysis_result_preserves_pending_and_terminal_http_status"
+    )
+    assert module.TARGETS["access_metadata_absence_fail_open_bypass"].endswith(
+        "AnalysisReadQueriesSecurityTests"
+    )
+    assert module.TARGETS["guest_session_list_scope_bypass"].endswith(
+        "test_valid_guest_lists_own_session_jobs_and_excludes_foreign_or_unverifiable_candidates"
     )
 
 

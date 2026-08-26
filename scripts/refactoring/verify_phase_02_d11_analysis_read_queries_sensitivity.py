@@ -44,6 +44,11 @@ TARGETS: Final = {
     "pending_terminal_status_bypass": TEST_MODULE
     + ".AnalysisReadQueriesContractTests."
     + "test_analysis_result_preserves_pending_and_terminal_http_status",
+    "access_metadata_absence_fail_open_bypass": TEST_MODULE
+    + ".AnalysisReadQueriesSecurityTests",
+    "guest_session_list_scope_bypass": TEST_MODULE
+    + ".AnalysisReadQueriesContractTests."
+    + "test_valid_guest_lists_own_session_jobs_and_excludes_foreign_or_unverifiable_candidates",
 }
 
 
@@ -142,6 +147,18 @@ elif mutation_name == "pending_terminal_status_bypass":
         application,
         '        pending=outcome.kind == "pending",\n',
         "        pending=True,\n",
+    )
+elif mutation_name == "access_metadata_absence_fail_open_bypass":
+    mutation = mutate_once(
+        application,
+        "        raise AnalysisJobAccessMetadataMissing()\n",
+        "        return\n",
+    )
+elif mutation_name == "guest_session_list_scope_bypass":
+    mutation = mutate_once(
+        application,
+        "                list_analysis_job_records_for_session(session_id=query.session_id),\n",
+        "                list_analysis_job_records(\n                    owner_id=str(subject.get(\"user_id\") or \"\"),\n                    session_id=query.session_id,\n                ),\n",
     )
 else:
     raise SystemExit(f"unsupported mutation: {mutation_name}")
