@@ -4922,16 +4922,36 @@ def list_analysis_job_records(
     normalized_owner_id = _text(owner_id)
     if not normalized_owner_id:
         return []
-    queryset = (
-        AnalysisJob.objects.select_related("session")
-        .filter(
+    queryset = _analysis_job_summary_queryset().filter(
             Q(owner_id=normalized_owner_id)
             | Q(owner_id="", session__owner_id=normalized_owner_id)
         )
-        .order_by("-updated_at")
-    )
     if session_id:
         queryset = queryset.filter(session__session_id=_text(session_id))
+    return _analysis_job_summary_records(queryset)
+
+
+def list_analysis_job_records_for_session(
+    *,
+    session_id: str,
+) -> list[dict[str, Any]]:
+    """List only public job summaries belonging to one supplied session."""
+
+    normalized_session_id = _text(session_id)
+    if not normalized_session_id:
+        return []
+    return _analysis_job_summary_records(
+        _analysis_job_summary_queryset().filter(
+            session__session_id=normalized_session_id
+        )
+    )
+
+
+def _analysis_job_summary_queryset():
+    return AnalysisJob.objects.select_related("session").order_by("-updated_at")
+
+
+def _analysis_job_summary_records(queryset) -> list[dict[str, Any]]:
     return [
         {
             "contract_version": "analysis_job_summary.v1",

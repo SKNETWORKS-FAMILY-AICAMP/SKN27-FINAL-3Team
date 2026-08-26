@@ -19,6 +19,7 @@ from chatbot.repositories import (
     get_analysis_job_record,
     get_chat_session_access_metadata,
     list_analysis_job_records,
+    list_analysis_job_records_for_session,
 )
 
 
@@ -85,6 +86,10 @@ class AnalysisResultNotFound(Exception):
     """The requested AnalysisJob result does not exist."""
 
 
+class AnalysisJobAccessMetadataMissing(Exception):
+    """The requested job cannot be exposed without access metadata."""
+
+
 def execute_list_analysis_jobs(
     query: ListAnalysisJobsQuery,
 ) -> ListAnalysisJobsResult:
@@ -104,14 +109,21 @@ def execute_list_analysis_jobs(
         if not access["allowed"]:
             raise AnalysisReadAccessDenied(access)
 
-    return ListAnalysisJobsResult(
-        payload={
-            "jobs": list_analysis_job_records(
-                owner_id=str(subject.get("user_id") or ""),
-                session_id=query.session_id,
+    if str(subject.get("subject_type") or "") == "guest":
+        if not query.session_id:
+            jobs: list[Mapping[str, Any]] = []
+        else:
+            jobs = _authorized_analysis_job_summaries(
+                list_analysis_job_records_for_session(session_id=query.session_id),
+                trusted_identity,
             )
-        }
-    )
+    else:
+        jobs = list_analysis_job_records(
+            owner_id=str(subject.get("user_id") or ""),
+            session_id=query.session_id,
+        )
+
+    return ListAnalysisJobsResult(payload={"jobs": list(jobs)})
 
 
 def execute_get_analysis_job_detail(
@@ -125,7 +137,10 @@ def execute_get_analysis_job_detail(
         canonical_request=query.canonical_request,
         guest_violation_resolver=query.guest_violation_resolver,
     )
-    _authorize_analysis_job(query.job_id, trusted_identity)
+    try:
+        _authorize_analysis_job(query.job_id, trusted_identity)
+    except AnalysisJobAccessMetadataMissing:
+        raise AnalysisJobNotFound()
     outcome = load_analysis_job_detail(
         query.job_id,
         load_job=get_analysis_job_record,
@@ -147,7 +162,10 @@ def execute_get_analysis_result(
         canonical_request=query.canonical_request,
         guest_violation_resolver=query.guest_violation_resolver,
     )
-    _authorize_analysis_job(query.job_id, trusted_identity)
+    try:
+        _authorize_analysis_job(query.job_id, trusted_identity)
+    except AnalysisJobAccessMetadataMissing:
+        raise AnalysisResultNotFound()
     outcome = load_analysis_result(
         query.job_id,
         load_job=get_analysis_job_record,
@@ -196,10 +214,30 @@ def _authorize_analysis_job(
 ) -> None:
     metadata = get_analysis_job_access_metadata(job_id)
     if metadata is None:
-        return
+        raise AnalysisJobAccessMetadataMissing()
     access = _authorize_analysis_job_metadata(metadata, identity_payload)
     if not access["allowed"]:
         raise AnalysisReadAccessDenied(access)
+
+
+def _authorized_analysis_job_summaries(
+    summaries: list[Mapping[str, Any]],
+    identity_payload: dict[str, Any],
+) -> list[Mapping[str, Any]]:
+    """Return only session candidates individually authorized for this subject."""
+
+    authorized: list[Mapping[str, Any]] = []
+    for summary in summaries:
+        job_id = str(summary.get("job_id") or "").strip()
+        if not job_id:
+            continue
+        metadata = get_analysis_job_access_metadata(job_id)
+        if metadata is None:
+            continue
+        access = _authorize_analysis_job_metadata(metadata, identity_payload)
+        if access["allowed"]:
+            authorized.append(summary)
+    return authorized
 
 
 def _authorize_analysis_job_metadata(
