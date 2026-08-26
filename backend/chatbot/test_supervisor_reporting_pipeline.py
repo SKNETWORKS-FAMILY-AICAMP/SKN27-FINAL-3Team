@@ -327,15 +327,9 @@ class SupervisorReportingPipelineTests(TestCase):
         work_item_id = queued["work_item_id"]
         request = RequestFactory().get(f"/api/analysis/results/{job_id}/")
 
-        with (
-            patch(
-                "chatbot.views._analysis_job_access_response",
-                return_value=None,
-            ),
-            patch(
-                "chatbot.views.read_analysis_job_progress",
-                return_value=None,
-            ),
+        with patch(
+            "app.application.analysis.read_queries._authorize_analysis_job",
+            return_value=None,
         ):
             response = analysis_result(request, job_id)
 
