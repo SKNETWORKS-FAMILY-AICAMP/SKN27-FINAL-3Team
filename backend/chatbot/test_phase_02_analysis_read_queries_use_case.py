@@ -80,7 +80,7 @@ class AnalysisReadQueriesSecurityTests(TestCase):
     def test_analysis_job_detail_discards_cache_snapshot_with_mismatched_identity(self) -> None:
         AnalysisJob.objects.filter(job_id=self.job_id).update(owner_id="")
         with patch(
-            "chatbot.views.read_analysis_job_progress",
+            "app.application.analysis.read_queries.read_analysis_job_progress",
             return_value={
                 "status": "hit",
                 "snapshot": {

@@ -19,6 +19,18 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from pydantic import BaseModel, ValidationError
 
+from app.application.analysis.read_queries import (
+    AnalysisJobNotFound,
+    AnalysisReadAccessDenied,
+    AnalysisReadGuestIdentityInvalid,
+    AnalysisResultNotFound,
+    GetAnalysisJobDetailQuery,
+    GetAnalysisResultQuery,
+    ListAnalysisJobsQuery,
+    execute_get_analysis_job_detail,
+    execute_get_analysis_result,
+    execute_list_analysis_jobs,
+)
 from app.application.auth.resume_latest_consultation import (
     ResumeLatestConsultationLoginRequired,
     ResumeLatestConsultationQuery,
@@ -114,10 +126,6 @@ from app.services.agent_node_service import (
     execute_agent_node,
     list_public_agent_nodes,
 )
-from app.services.analysis_job_query_service import (
-    load_analysis_job_detail,
-    load_analysis_result,
-)
 from app.services.analysis_progress_service import build_analysis_progress
 from app.services.attachment_staging_service import UploadTooLargeError
 from app.services.auth_session_service import (
@@ -128,7 +136,6 @@ from app.services.auth_error_contract import build_auth_error, build_www_authent
 from app.services.capability_catalog import capability_catalog_payload
 from app.services.chat_orchestration_service import (
     build_scope_guidance_response,
-    compose_agent_response,
     submit_message,
 )
 from app.services.chat_session_followup_service import (
@@ -198,7 +205,6 @@ from chatbot.repositories import (
     get_report_download_metadata,
 
     get_uploaded_file,
-    list_analysis_job_records,
 
     normalize_report_download_document_type,
     load_chat_followup_state,
@@ -220,7 +226,6 @@ from chatbot.repositories import (
     reserve_analysis_job_request,
 )
 from chatbot.models import GuestIdentity, GuestIdentityStatus
-from chatbot.progress_cache import read_analysis_job_progress
 
 
 logger = logging.getLogger(__name__)
@@ -872,35 +877,20 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
         identity_error = _request_identity_error_response(request, identity_payload)
         if identity_error is not None:
             return identity_error
-        policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
-        if policy_response is not None:
-            return policy_response
-        subject = access_subject_from_payload(identity_payload)["subject"]
-        if session_id:
-            session_access = get_chat_session_access_metadata(session_id)
-            if session_access is None:
-                return _object_access_denied_response(
-                    request,
-                    {
-                        "contract_version": "object_access.v1",
-                        "allowed": False,
-                        "reason": "not_found_or_forbidden",
-                        "resource": {"type": "chat_session"},
-                    },
-                )
-            access = authorize_resource_access(session_access, identity_payload)
-            if not access["allowed"]:
-                return _object_access_denied_response(request, access)
-        return _json_response(
-            request,
-            {
-                "jobs": list_analysis_job_records(
-                    owner_id=str(subject.get("user_id") or ""),
+        try:
+            result = execute_list_analysis_jobs(
+                ListAnalysisJobsQuery(
+                    identity_payload=identity_payload,
                     session_id=session_id,
+                    canonical_request=_is_canonical_request(request),
+                    guest_violation_resolver=_guest_identity_policy_violation,
                 )
-            },
-        )
-
+            )
+        except AnalysisReadGuestIdentityInvalid as exc:
+            return _guest_identity_policy_response(request, exc.violation)
+        except AnalysisReadAccessDenied as exc:
+            return _object_access_denied_response(request, exc.access)
+        return _json_response(request, result.payload)
     body = _json_body(request)
     identity_body = _payload_with_request_identity(request, body) if _is_canonical_request(request) else body
     usage = None
@@ -1237,15 +1227,24 @@ def analysis_jobs(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
-    access_response = _analysis_job_access_response(request, job_id)
-    if access_response is not None:
-        return access_response
-    outcome = load_analysis_job_detail(
-        job_id,
-        load_job=get_analysis_job_record,
-        load_progress=read_analysis_job_progress,
-    )
-    if outcome.kind == "not_found":
+    identity_payload = _request_access_payload(request)
+    identity_error = _request_identity_error_response(request, identity_payload)
+    if identity_error is not None:
+        return identity_error
+    try:
+        result = execute_get_analysis_job_detail(
+            GetAnalysisJobDetailQuery(
+                job_id=job_id,
+                identity_payload=identity_payload,
+                canonical_request=_is_canonical_request(request),
+                guest_violation_resolver=_guest_identity_policy_violation,
+            )
+        )
+    except AnalysisReadGuestIdentityInvalid as exc:
+        return _guest_identity_policy_response(request, exc.violation)
+    except AnalysisReadAccessDenied as exc:
+        return _object_access_denied_response(request, exc.access)
+    except AnalysisJobNotFound:
         return _json_response(
             request,
             {
@@ -1256,20 +1255,29 @@ def analysis_job_detail(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    return _json_response(request, {"job": outcome.payload})
+    return _json_response(request, {"job": result.payload})
 
 
 @require_http_methods(["GET", "OPTIONS"])
 def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
-    access_response = _analysis_job_access_response(request, job_id)
-    if access_response is not None:
-        return access_response
-    outcome = load_analysis_result(
-        job_id,
-        load_job=get_analysis_job_record,
-        compose_response=compose_agent_response,
-    )
-    if outcome.kind == "not_found":
+    identity_payload = _request_access_payload(request)
+    identity_error = _request_identity_error_response(request, identity_payload)
+    if identity_error is not None:
+        return identity_error
+    try:
+        result = execute_get_analysis_result(
+            GetAnalysisResultQuery(
+                job_id=job_id,
+                identity_payload=identity_payload,
+                canonical_request=_is_canonical_request(request),
+                guest_violation_resolver=_guest_identity_policy_violation,
+            )
+        )
+    except AnalysisReadGuestIdentityInvalid as exc:
+        return _guest_identity_policy_response(request, exc.violation)
+    except AnalysisReadAccessDenied as exc:
+        return _object_access_denied_response(request, exc.access)
+    except AnalysisResultNotFound:
         return _json_response(
             request,
             {
@@ -1280,9 +1288,8 @@ def analysis_result(request: HttpRequest, job_id: str) -> JsonResponse:
             },
             status=404,
         )
-    status = 202 if outcome.kind == "pending" else 200
-    return _json_response(request, {"result": outcome.payload}, status=status)
-
+    status = 202 if result.pending else 200
+    return _json_response(request, {"result": result.payload}, status=status)
 
 @csrf_exempt
 @require_http_methods(["POST", "OPTIONS"])
@@ -2414,21 +2421,6 @@ def _request_access_payload(
 
 
 
-def _authorize_session_query(
-    session_id: str | None,
-    identity_payload: dict[str, object],
-    *,
-    resource_type: str,
-) -> dict[str, object]:
-    if not session_id:
-        return authorize_resource_access({"type": resource_type}, identity_payload)
-    session_access = get_chat_session_access_metadata(session_id)
-    if session_access is None:
-        return authorize_resource_access({"type": resource_type, "session_id": session_id}, identity_payload)
-    session_access["type"] = resource_type
-    return authorize_resource_access(session_access, identity_payload)
-
-
 def _rate_limit_response(request: HttpRequest, usage: dict[str, object]) -> JsonResponse:
     required_action = "login" if usage.get("subject_type") in {"anonymous", "guest"} else "wait_or_upgrade"
     return _json_response(
@@ -2671,40 +2663,6 @@ def _public_object_access(access: dict[str, object]) -> dict[str, object]:
         if isinstance(resource_type, str) and resource_type:
             public["resource"] = {"type": resource_type}
     return public
-
-
-def _analysis_job_access_response(
-    request: HttpRequest,
-    job_id: str,
-) -> JsonResponse | None:
-    identity_payload = _request_access_payload(request)
-    policy_response = _canonical_guest_identity_policy_response(request, identity_payload)
-    if policy_response is not None:
-        return policy_response
-    metadata = get_analysis_job_access_metadata(job_id)
-    if metadata is None:
-        return None
-    access = _authorize_analysis_job_metadata(metadata, identity_payload)
-    if access["allowed"]:
-        return None
-    return _object_access_denied_response(request, access)
-
-
-def _authorize_analysis_job_metadata(
-    metadata: dict[str, object],
-    identity_payload: dict[str, object],
-) -> dict[str, object]:
-    """Preserve explicit job ownership before legacy session fallback."""
-
-    owner_id = str(metadata.get("owner_id") or "").strip()
-    if owner_id:
-        return authorize_resource_access(metadata, identity_payload)
-    session_id = str(metadata.get("session_id") or "").strip()
-    return _authorize_session_query(
-        session_id,
-        identity_payload,
-        resource_type="analysis_result",
-    )
 
 
 def _persistence_access_denied_response(request: HttpRequest) -> JsonResponse:
