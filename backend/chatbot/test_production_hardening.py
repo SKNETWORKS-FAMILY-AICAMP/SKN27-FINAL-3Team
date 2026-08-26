@@ -9,12 +9,12 @@ from django.core.management import call_command
 from django.test import RequestFactory, SimpleTestCase
 from django.urls import Resolver404, resolve
 
+from app.application.analysis.read_queries import AnalysisReadGuestIdentityInvalid
 from app.services.guest_credential_service import issue_guest_credential
 from chatbot.api_response import json_response
 from chatbot.models import ReportType
 from chatbot.runtime_health import build_runtime_health
 from chatbot.views import (
-    _analysis_job_access_response,
     agent_nodes,
     analysis_jobs,
     analysis_result,
@@ -90,29 +90,27 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "live")
 
-    @patch("chatbot.views.get_analysis_job_access_metadata")
-    @patch("chatbot.views._canonical_guest_identity_policy_response")
+    @patch("chatbot.views.execute_get_analysis_result")
     def test_analysis_result_access_gate_honors_canonical_guest_policy(
         self,
-        guest_policy,
-        access_metadata,
+        execute_get_analysis_result,
     ) -> None:
-        denied = json_response(
-            RequestFactory().get("/api/analysis/results/job_1/"),
-            {"error": {"code": "guest_identity_invalid"}},
-            status=401,
+        execute_get_analysis_result.side_effect = AnalysisReadGuestIdentityInvalid(
+            {
+                "guest_id": "gst_production_expired",
+                "reason": "guest_expired",
+                "status": "expired",
+            }
         )
-        guest_policy.return_value = denied
-        access_metadata.return_value = None
 
-        response = _analysis_job_access_response(
+        response = analysis_result(
             RequestFactory().get("/api/analysis/results/job_1/"),
             "job_1",
         )
 
-        self.assertIs(response, denied)
-        access_metadata.assert_not_called()
-
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(json.loads(response.content)["error"]["code"], "guest_session_invalid")
+        execute_get_analysis_result.assert_called_once()
     @patch("chatbot.views.build_runtime_health")
     def test_readiness_endpoint_returns_503_when_a_required_probe_fails(self, health) -> None:
         health.return_value = {
@@ -1116,8 +1114,8 @@ class ProductionApiContractTests(SimpleTestCase):
             reason="analysis_plan_not_executable",
         )
 
-    @patch("chatbot.views.get_analysis_job_access_metadata", return_value=None)
-    @patch("chatbot.views.get_analysis_job_record")
+    @patch("app.application.analysis.read_queries.get_analysis_job_access_metadata", return_value=None)
+    @patch("app.application.analysis.read_queries.get_analysis_job_record")
     def test_analysis_result_uses_persisted_agent_outputs(
         self,
         get_job,
@@ -1170,11 +1168,11 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertEqual(body["progress_state"]["state"], "success")
         self.assertNotIn("mock", str(body).lower())
 
-    @patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None)
+    @patch("chatbot.views._guest_identity_policy_violation", return_value=None)
     @patch("chatbot.views._get_current_auth_subject")
-    @patch("chatbot.views.get_chat_session_access_metadata")
-    @patch("chatbot.views.get_analysis_job_access_metadata")
-    @patch("chatbot.views.get_analysis_job_record")
+    @patch("app.application.analysis.read_queries.get_chat_session_access_metadata")
+    @patch("app.application.analysis.read_queries.get_analysis_job_access_metadata")
+    @patch("app.application.analysis.read_queries.get_analysis_job_record")
     def test_guest_can_poll_its_own_queued_analysis_result(
         self,
         get_job,
@@ -1220,11 +1218,11 @@ class ProductionApiContractTests(SimpleTestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.json()["result"]["status"], "queued")
 
-    @patch("chatbot.views._canonical_guest_identity_policy_response", return_value=None)
+    @patch("chatbot.views._guest_identity_policy_violation", return_value=None)
     @patch("chatbot.views._get_current_auth_subject")
-    @patch("chatbot.views.get_chat_session_access_metadata")
-    @patch("chatbot.views.get_analysis_job_access_metadata")
-    @patch("chatbot.views.get_analysis_job_record")
+    @patch("app.application.analysis.read_queries.get_chat_session_access_metadata")
+    @patch("app.application.analysis.read_queries.get_analysis_job_access_metadata")
+    @patch("app.application.analysis.read_queries.get_analysis_job_record")
     def test_guest_cannot_poll_another_guests_analysis_result(
         self,
         get_job,
