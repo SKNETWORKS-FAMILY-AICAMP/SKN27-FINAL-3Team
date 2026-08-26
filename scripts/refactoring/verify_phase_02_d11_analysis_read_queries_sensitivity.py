@@ -93,19 +93,19 @@ if mutation_name == "list_view_application_bypass":
     mutation = mutate_once(
         views,
         "        result = execute_list_analysis_jobs(\n",
-        "        from app.application.analysis.read_queries import execute_list_analysis_jobs as _direct_list\n        result = _direct_list(\n",
+        "        from app.application.analysis.read_queries import execute_list_analysis_jobs as _direct_list\n            result = _direct_list(\n",
     )
 elif mutation_name == "detail_view_application_bypass":
     mutation = mutate_once(
         views,
         "        result = execute_get_analysis_job_detail(\n",
-        "        from app.application.analysis.read_queries import execute_get_analysis_job_detail as _direct_detail\n        result = _direct_detail(\n",
+        "        from app.application.analysis.read_queries import execute_get_analysis_job_detail as _direct_detail\n            result = _direct_detail(\n",
     )
 elif mutation_name == "result_view_application_bypass":
     mutation = mutate_once(
         views,
         "        result = execute_get_analysis_result(\n",
-        "        from app.application.analysis.read_queries import execute_get_analysis_result as _direct_result\n        result = _direct_result(\n",
+        "        from app.application.analysis.read_queries import execute_get_analysis_result as _direct_result\n            result = _direct_result(\n",
     )
 elif mutation_name == "list_scope_authorization_bypass":
     mutation = mutate_once(
