@@ -361,7 +361,7 @@ def _project_analysis_job_detail(
     projected.update(
         {
             "progress_state": _project_progress_state(job.get("progress_state")),
-            "progress_cache": _project_public_progress_cache(progress_cache),
+            "progress_cache": _project_authoritative_progress_cache(job, progress_cache),
             "work_item": _project_work_item(job.get("work_item")),
             "assistant_message_payload": _project_assistant_message_payload(
                 job.get("assistant_message_payload")
@@ -527,6 +527,32 @@ def _project_public_progress_cache(value: Any) -> dict[str, Any]:
             snapshot, _PUBLIC_PROGRESS_SNAPSHOT_FIELDS
         )
     return projected
+
+
+def _project_authoritative_progress_cache(
+    job: dict[str, Any],
+    progress_cache: Any,
+) -> dict[str, Any]:
+    """Fail closed when a cache snapshot belongs to another job or session."""
+
+    if not isinstance(progress_cache, dict):
+        return {}
+    snapshot = progress_cache.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return _project_public_progress_cache(progress_cache)
+
+    job_id = _public_text(job.get("job_id"))
+    session_id = _public_text(job.get("session_id"))
+    cached_job_id = _public_text(snapshot.get("job_id"))
+    cached_session_id = _public_text(snapshot.get("session_id"))
+    identity_mismatch = (
+        bool(cached_job_id and cached_job_id != job_id)
+        or bool(cached_session_id and session_id and cached_session_id != session_id)
+    )
+    if not identity_mismatch:
+        return _project_public_progress_cache(progress_cache)
+
+    return _project_mapping(progress_cache, _PUBLIC_PROGRESS_CACHE_FIELDS)
 
 
 def _project_attachments(value: Any) -> list[dict[str, Any]]:
