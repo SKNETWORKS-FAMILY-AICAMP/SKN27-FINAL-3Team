@@ -9,7 +9,7 @@
 - GREEN_SECURITY Head: `a5ba7f57c6a24f5dab73c16307c35e57f74c34d3`
 - RED_APP Head: `6e074a82344a3a1c06f361aee8142281478dce3e`
 - GREEN_APP Head: `f3abb67ec6390b07a91c840561cd70be6a3762ce`
-- Sensitivity Runtime Head: `6f1ade1876f15b99de86323f027d8f597d338de2`
+- Sensitivity Runtime Head: `246d55f5fc695082c5108735438794b73f2295d1`
 - PR: `NOT_CREATED_AT_RECEIPT_TIME`
 - Production DB audit: `NOT_EXECUTED`
 
@@ -86,7 +86,7 @@ Runner: `scripts/refactoring/verify_phase_02_d11_analysis_read_queries_sensitivi
 | `public_projection_bypass` | structured private-field exclusion | `AssertionError` |
 | `pending_terminal_status_bypass` | queued `202` and terminal `200` contract | `AssertionError` |
 
-At `6f1ade1876f15b99de86323f027d8f597d338de2`, baseline exit code was `0`; all nine mutation subprocesses failed directly by `AssertionError`; `source_restored=true`, `working_tree_unchanged=true`, and `residual_diff_zero=true`.
+At `246d55f5fc695082c5108735438794b73f2295d1`, baseline exit code was `0`; all nine mutation subprocesses failed directly by `AssertionError`; `source_restored=true`, `working_tree_unchanged=true`, and `residual_diff_zero=true`.
 
 ## Verification
 
@@ -108,6 +108,12 @@ At `6f1ade1876f15b99de86323f027d8f597d338de2`, baseline exit code was `0`; all n
 ## CI
 
 - Source Head, synthetic pull-request runtime checkout, production-gate, offline-verification, compose-integration, regression-signal, and `phase-02-d11-sensitivity-evidence` artifact: `PENDING_DRAFT_PR_CREATION`.
+
+## CI follow-up
+
+The first Draft CI source Head `0b0bbcf76e842c4410e8ede1ee086bc064de4a0e` had `regression-signal=success`, but `production-gate` stopped before D11 steps because `chatbot.test_supervisor_reporting_pipeline.SupervisorReportingPipelineTests.test_persisted_job_remains_pollable_without_transient_progress_cache` still patched removed `chatbot.views._analysis_job_access_response`.
+
+`246d55f5fc695082c5108735438794b73f2295d1` changes only that test seam to `app.application.analysis.read_queries._authorize_analysis_job`. It passed directly, the focused combined selection passed `45 tests, OK`, and the final D11 sensitivity runtime passed all nine direct controls. Fresh GitHub CI for the post-remediation Source Head is pending push.
 
 ## Deferred
 
