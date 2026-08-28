@@ -31,6 +31,13 @@ from app.application.analysis.read_queries import (
     execute_get_analysis_result,
     execute_list_analysis_jobs,
 )
+from app.application.auth.get_current_identity import (
+    CurrentAuthIdentityAccessDenied,
+    CurrentAuthIdentityInvalid,
+    CurrentAuthIdentityPersistenceUnavailable,
+    GetCurrentAuthIdentityQuery,
+    execute_get_current_auth_identity,
+)
 from app.application.auth.resume_latest_consultation import (
     ResumeLatestConsultationLoginRequired,
     ResumeLatestConsultationQuery,
@@ -131,7 +138,6 @@ from app.services.attachment_staging_service import UploadTooLargeError
 from app.services.auth_session_service import (
     create_guest_session as _create_guest_session,
     get_current_auth_subject as _get_current_auth_subject,
-    normalize_guest_identity_sources,
 )
 from app.services.auth_error_contract import build_auth_error, build_www_authenticate_header
 from app.services.capability_catalog import capability_catalog_payload
@@ -649,73 +655,33 @@ def auth_logout(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def auth_me(request: HttpRequest) -> JsonResponse:
-    guest_id, guest_source_error = normalize_guest_identity_sources(
-        request.headers.get("X-Guest-Id"),
-        request.GET.get("guest_id"),
+    query = GetCurrentAuthIdentityQuery(
+        authorization_header=request.headers.get("Authorization"),
+        header_guest_id=request.headers.get("X-Guest-Id"),
+        query_guest_id=request.GET.get("guest_id"),
+        guest_credential=request.headers.get("X-Guest-Credential"),
+        session_id=request.GET.get("session_id"),
+        canonical_request=_is_canonical_request(request),
+        audit_source=_history_source(request),
+        guest_state_resolver=get_current_guest_identity_violation,
+        persistence_writer=persist_current_auth_subject,
+        history_recorder=record_history_event_record,
     )
-    if guest_source_error:
+    try:
+        result = execute_get_current_auth_identity(query)
+    except CurrentAuthIdentityInvalid as error:
         status = 401
-        payload = build_auth_error("token_invalid", reason=guest_source_error)
+        payload = error.payload
+    except CurrentAuthIdentityAccessDenied as error:
+        status = 403
+        payload = error.payload
+    except CurrentAuthIdentityPersistenceUnavailable as error:
+        status = 503
+        payload = error.payload
     else:
-        status, payload = _get_current_auth_subject(
-            authorization_header=request.headers.get("Authorization"),
-            guest_id=guest_id,
-            guest_credential=request.headers.get("X-Guest-Credential"),
-            session_id=request.GET.get("session_id"),
-        )
-    if status < 400:
-        subject = payload.get("subject") if isinstance(payload.get("subject"), dict) else {}
-        try:
-            guest_violation = get_current_guest_identity_violation(subject.get("guest_id"))
-        except DatabaseError:
-            status = 503
-            payload = build_auth_error(
-                "provider_unavailable",
-                reason="auth_me_persistence_unavailable",
-            )
-            payload["error"]["required_action"] = "retry"
-        else:
-            if guest_violation:
-                status = 401
-                payload = build_auth_error(
-                    "token_invalid",
-                    reason=str(guest_violation["reason"]),
-                )
-            else:
-                try:
-                    payload["persistence"] = persist_current_auth_subject(
-                        payload,
-                        session_id=request.GET.get("session_id"),
-                    )
-                except AuthSessionStateError as exc:
-                    status = 401
-                    payload = build_auth_error("token_invalid", reason=exc.reason)
-                except SessionBindingError as exc:
-                    status = 403
-                    payload = build_auth_error("forbidden", reason=exc.reason)
-                except DatabaseError:
-                    status = 503
-                    payload = build_auth_error(
-                        "provider_unavailable",
-                        reason="auth_me_persistence_unavailable",
-                    )
-                    payload["error"]["required_action"] = "retry"
-    _record_history_safely(
-        request,
-        event_type="auth_me_checked",
-        status="success" if status < 400 else "failed",
-        summary="현재 인증 주체 상태를 확인했습니다.",
-        actor=_actor_from_auth_me_payload(request, payload),
-        subject=subject_from_payload({"session_id": request.GET.get("session_id")}),
-        source=_history_source(request),
-        metadata={
-            "http_status": status,
-            "auth_state": payload.get("auth_state"),
-            "subject_type": (payload.get("subject") or {}).get("subject_type"),
-            "is_authenticated": (payload.get("subject") or {}).get("is_authenticated"),
-            "error_code": (payload.get("error") or {}).get("code"),
-        },
-    )
+        status = 200
+        payload = result.payload
+
     response = _json_response(request, payload, status=status)
     if status in {401, 403} and isinstance(payload.get("error"), dict):
         response["WWW-Authenticate"] = build_www_authenticate_header(payload)
