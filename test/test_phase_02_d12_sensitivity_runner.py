@@ -93,6 +93,19 @@ def test_d12_targets_cover_each_get_current_auth_identity_boundary() -> None:
     )
 
 
+def test_d12_openapi_mutation_remains_a_valid_non_anonymous_route_spec() -> None:
+    module = runner()
+
+    assert (
+        '        security_requirements=(\n'
+        '            {"bearerAuth": ()},\n'
+        '        ),\n'
+        '    ),\n'
+        '    RouteSpec(\n'
+        '        operation_id="getResumeManifest",\n'
+    ) in module.MUTATION_CHILD_SCRIPT
+
+
 def test_d12_evidence_rejects_missing_success_dirty_or_stale_results() -> None:
     module = runner()
     valid = outcomes(module)
