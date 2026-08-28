@@ -1,0 +1,120 @@
+# Phase 2-D12 GetCurrentAuthIdentity implementation receipt
+
+## Authority
+- Repository: SKNETWORKS-FAMILY-AICAMP/SKN27-FINAL-3Team
+- Base: fb9b2fbfc614bc67aa8019d8c4da47071bbef4c9 (dev and origin/dev at work start)
+- Branch: refactor/phase-02-d12-get-current-auth-identity
+- RED_SECURITY Head: 1b5760785520681c98ff8740614091e2c51d938a
+- GREEN_SECURITY Head: aaf3fe937c343b23a559aefd8db5126c1858e607
+- RED_APP Head: 8c72102b5c31166d8e6708aeb763835b18324a51
+- GREEN_APP Head: 14e780966b1d5af907375adb1c79df8a6279da8d
+- Sensitivity Runtime Head: bde41e12fe63ab08c029b691308df54b09566b16
+- PR: PENDING_DRAFT_PR_CREATION at Receipt commit time.
+- Self-reference: this Receipt deliberately records no future Receipt SHA, CI run, synthetic SHA, or artifact ID.
+
+## Decision and public contract
+- AUTH_ME_TRANSPORT_DECISION=PRESERVE_ACTUAL_EXTERNAL_CONTRACT.
+- External anonymous GET /api/auth/me/ remains 401 auth_required.
+- OpenAPI requires bearer OR signed guest credential; it does not advertise anonymous access.
+- Middleware was not modified and /api/auth/me/ was not made public.
+- The service-level anonymous branch remains internal and is not an external transport success path.
+- AUTH_ME_GET_MUTATION_SEMANTICS_PRESERVED.
+- Authenticated persisted user/AuthSession requests retain the public auth/me contract.
+- Signed guest credential requests retain the public guest identity contract and bootstrap behavior.
+- No credential, malformed/invalid credential, and invalid persisted authority return the existing 401 contract.
+- Session binding errors map to 403 forbidden and persistence DatabaseError maps to retryable 503 provider_unavailable.
+
+## Security and state
+- Conflicting X-Guest-Id and query guest_id fail closed with guest_identity_source_mismatch.
+- Existing expired or inactive GuestIdentity rows fail closed; an absent row with a valid signed credential retains bootstrap 200 behavior.
+- Active persisted AuthSession and user state remain authoritative; unpersisted or invalid user JWT authority is rejected.
+- Persistence failure returns auth_me_persistence_unavailable with required_action=retry.
+- The Application result uses explicit public projection and excludes credential, token, and raw-claim fields.
+
+## Application boundary
+- Module: app/application/auth/get_current_identity.py.
+- DTOs: GetCurrentAuthIdentityQuery and GetCurrentAuthIdentityResult carry transport-normalized input and the projected result.
+- Typed errors: invalid, access-denied, and persistence-unavailable map in the View to the existing HTTP response contract.
+- auth_me now parses HTTP input, creates the query, invokes execute_get_current_auth_identity, and serializes typed outcomes.
+- Existing service validation and repository persistence/history helpers are reused; the Application layer contains no ORM access.
+
+## Transaction and history
+- persist_current_auth_subject remains before the successful response and preserves optional session binding semantics.
+- Repository persistence continues to create the current AuthEvent receipt.
+- auth_me_checked HistoryEvent is recorded after successful persistence and remains best-effort.
+- History persistence failure does not change an already-successful auth/me response.
+- Transaction/outbox architecture changes are deferred; this Slice preserves the existing GET mutation decision.
+
+## RED, GREEN and intentional drift
+- RED security was test-only in 1b576078; GREEN security followed in aaf3fe9.
+- RED application seam was test-only in 8c72102; GREEN Application extraction followed in 14e7809.
+- Both RED tests failed by direct AssertionError, and both RED-to-GREEN ancestry checks exited 0.
+- The GREEN View keeps the compatibility alias for _get_current_auth_subject because unrelated routes import it; auth/me itself no longer orchestrates through that alias.
+- Sensitivity correction commits 49fd618 and bde41e1 changed only the runner/test so the OpenAPI negative control remains a valid non-anonymous RouteSpec and reaches its direct assertion detector.
+
+## Sensitivity
+env PHASE_02_D12_SENSITIVITY_HEAD=bde41e12fe63ab08c029b691308df54b09566b16 .venv/bin/python scripts/refactoring/verify_phase_02_d12_get_current_auth_identity_sensitivity.py recorded baseline exit 0, all nine assertion failures, source restoration, unchanged worktree, residual diff zero, and status: pass.
+
+| Control | Direct detector | Result |
+|---|---|---|
+| view_application_bypass | View executor seam | AssertionError |
+| anonymous_transport_contract_bypass | OpenAPI bearer-or-guest contract | AssertionError |
+| guest_identity_source_mismatch_bypass | conflicting guest IDs | AssertionError |
+| persisted_guest_state_bypass | expired guest row | AssertionError |
+| persisted_auth_session_bypass | unpersisted JWT authority | AssertionError |
+| session_binding_authorization_bypass | binding 403 mapping | AssertionError |
+| persistence_failure_mapping_bypass | persistence 503 mapping | AssertionError |
+| history_event_bypass | successful history sequencing | AssertionError |
+| private_projection_bypass | credential/raw-claim exclusion | AssertionError |
+
+## Verification
+- Focused: .venv/bin/python backend/manage.py test chatbot.test_phase_02_get_current_auth_identity_use_case chatbot.test_guest_credential_boundary chatbot.test_security_hardening --verbosity 1.
+- B1-D11: .venv/bin/python backend/manage.py test for the 14 discovered chatbot.test_phase_02_*_use_case modules excluding D12.
+- Python contracts: .venv/bin/python -m pytest test/test_auth_session_service.py test/test_frontend_auth_session_contract.py test/test_api_route_specs.py test/test_openapi_v1_generation.py test/test_phase_02_d12_sensitivity_runner.py -q -p no:cacheprovider.
+- Static: .venv/bin/python backend/manage.py check; generate_openapi_v1.py --check; generate_frontend_case_routes.py --check; required Ruff selectors; git diff --check.
+
+| Check | Result |
+|---|---|
+| D12 focused + guest credential + security | 42 tests, OK |
+| B1-D11 Application boundary modules | 131 tests, OK |
+| AuthSession persistence-lock regression | 1 test, OK |
+| Python service/OpenAPI/runner pytest subset | 42 passed |
+| Prescribed pytest including frontend contract | 67 passed, 2 failed only because host node executable is absent |
+| D12 sensitivity | baseline 0, 9/9 AssertionError, pass |
+| Django check | OK |
+| OpenAPI generation check | current |
+| Frontend case-route generation check | current |
+| Ruff E9,F63,F7,F82 and D12 F401 guard | All checks passed |
+| git diff --check | clean |
+| Frontend node --test / npm run build | NOT_EXECUTED_HOST_NODE_NPM_UNAVAILABLE |
+| Docker D1 build/import smoke | NOT_EXECUTED_HOST_DOCKER_IMAGE_PULL_STALLED after more than seven minutes before image creation |
+| Compose D2 | NOT_EXECUTED_USER_SCOPE_CLEANUP_PROHIBITED |
+| Windows | NOT_EXECUTED_WINDOWS_HOST_UNAVAILABLE; no Windows shell was present |
+| Production DB audit | NOT_EXECUTED |
+
+## CI
+- Fresh exact-source-head CI is intentionally pending Draft PR creation.
+- Source Head, synthetic PR checkout SHA, and actual merge authority will be recorded separately in the Draft PR and Independent Review, not by a Receipt self-reference commit.
+- production-gate, offline-verification, compose-integration, and regression-signal runs: PENDING_FRESH_CI_AFTER_DRAFT_PR.
+- phase-02-d12-sensitivity-evidence artifact: PENDING_FRESH_CI_AFTER_DRAFT_PR.
+
+## Scope
+- Production: get_current_identity Application boundary, auth/me View thinning, guest source normalization/state authority, and OpenAPI correction.
+- Tests: D12 characterization/security coverage, existing contract expectation updates, and sensitivity runner coverage.
+- Workflow: blocking D12 boundary, sensitivity, artifact, and F401 gates in production-gate.yml.
+- Docs: this Receipt and generated docs/api/openapi-v1.yaml.
+- Not modified: frontend production source, middleware, models/migrations, guest-session/refresh/logout flows, D13, Phase 3, and Production DB.
+
+## Deferred
+- IssueGuestSession, RefreshAuthSession, and LogoutAuthSession remain separate Phase 2 slices.
+- Phase 3 work and transaction/outbox redesign remain deferred.
+- Windows portability debt, host Node/npm availability, Docker image-pull availability, and Production DB audit are not source changes in this Slice.
+
+## Status at handoff
+- Draft PR: pending creation; it must remain Draft.
+- Independent Review: not performed.
+- Merge: not performed.
+- Current pre-merge remaining: 4.
+- Projected after D12 merge: 3; authoritative recount is required after merge.
+- PHASE_2_EXIT_REVIEW_REQUIRED=YES.
+- Next step after fresh CI/artifact: PHASE_2_D12_INDEPENDENT_REVIEW.
