@@ -170,6 +170,16 @@ class GetCurrentAuthIdentitySecurityContractTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["subject"]["user_id"], "usr_d12_active")
 
+    def test_auth_me_delegates_to_execute_get_current_auth_identity(self) -> None:
+        with patch(
+            "chatbot.views.execute_get_current_auth_identity",
+            create=True,
+        ) as executor:
+            response = self._guest_client("gst_d12_executor").get("/api/auth/me/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        executor.assert_called_once()
+
     def test_public_response_excludes_credentials_and_raw_claims(self) -> None:
         response = self._guest_client("gst_d12_private").get("/api/auth/me/")
 
