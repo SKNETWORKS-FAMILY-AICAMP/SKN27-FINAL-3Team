@@ -97,12 +97,12 @@ def test_d12_openapi_mutation_remains_a_valid_non_anonymous_route_spec() -> None
     module = runner()
 
     assert (
-        '        security_requirements=(\n'
-        '            {"bearerAuth": ()},\n'
-        '        ),\n'
-        '    ),\n'
-        '    RouteSpec(\n'
-        '        operation_id="getResumeManifest",\n'
+        '        security_requirements=(\\n'
+        '            {"bearerAuth": ()},\\n'
+        '        ),\\n'
+        '    ),\\n'
+        '    RouteSpec(\\n'
+        '        operation_id="getResumeManifest",\\n'
     ) in module.MUTATION_CHILD_SCRIPT
 
 

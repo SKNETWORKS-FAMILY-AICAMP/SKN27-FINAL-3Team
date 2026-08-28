@@ -121,7 +121,7 @@ elif mutation_name == "anonymous_transport_contract_bypass":
     mutation = mutate_once(
         route_specs,
         '        security_requirements=(\n            {"bearerAuth": ()},\n            {"guestCredentialAuth": ()},\n        ),\n    ),\n    RouteSpec(\n        operation_id="getResumeManifest",\n',
-        '        security_requirements=(\n            {},\n            {"bearerAuth": ()},\n        ),\n    ),\n    RouteSpec(\n        operation_id="getResumeManifest",\n',
+        '        security_requirements=(\n            {"bearerAuth": ()},\n        ),\n    ),\n    RouteSpec(\n        operation_id="getResumeManifest",\n',
     )
 elif mutation_name == "guest_identity_source_mismatch_bypass":
     mutation = mutate_once(
