@@ -1325,6 +1325,32 @@ def _locked_active_auth_session(
     return auth_session
 
 
+def get_current_guest_identity_violation(guest_id: str | None) -> dict[str, Any] | None:
+    """Return the persisted guest-state violation for the auth/me authority check."""
+
+    normalized_guest_id = _normalize_guest_id(guest_id)
+    if not normalized_guest_id:
+        return None
+    guest = GuestIdentity.objects.filter(guest_id=normalized_guest_id).first()
+    if guest is None:
+        return None
+    if guest.status == GuestIdentityStatus.EXPIRED or (
+        guest.expires_at and guest.expires_at <= timezone.now()
+    ):
+        return {
+            "guest_id": normalized_guest_id,
+            "reason": "guest_expired",
+            "status": guest.status,
+        }
+    if guest.status != GuestIdentityStatus.ACTIVE:
+        return {
+            "guest_id": normalized_guest_id,
+            "reason": "guest_inactive",
+            "status": guest.status,
+        }
+    return None
+
+
 def persist_current_auth_subject(
     auth_payload: dict[str, Any],
     *,

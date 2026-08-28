@@ -17,6 +17,23 @@ from app.services.google_auth_service import decode_access_token
 GUEST_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
+def normalize_guest_identity_sources(
+    header_guest_id: str | None,
+    query_guest_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Normalize transport guest IDs and reject conflicting identity sources."""
+
+    normalized_header_guest_id = _normalize_guest_id(header_guest_id)
+    normalized_query_guest_id = _normalize_guest_id(query_guest_id)
+    if (
+        normalized_header_guest_id
+        and normalized_query_guest_id
+        and normalized_header_guest_id != normalized_query_guest_id
+    ):
+        return None, "guest_identity_source_mismatch"
+    return normalized_header_guest_id or normalized_query_guest_id, None
+
+
 def create_guest_session(
     payload: dict[str, Any] | None = None,
     *,
