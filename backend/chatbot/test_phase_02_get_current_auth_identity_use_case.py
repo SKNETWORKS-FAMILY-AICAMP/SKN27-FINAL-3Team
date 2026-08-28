@@ -9,6 +9,11 @@ from django.db import DatabaseError
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
+from app.application.auth.get_current_identity import (
+    CurrentAuthIdentityInvalid,
+    GetCurrentAuthIdentityQuery,
+    execute_get_current_auth_identity,
+)
 from app.contracts import api_route_specs
 from app.contracts.openapi_v1 import build_openapi_document
 from app.services.guest_credential_service import issue_guest_credential
@@ -18,9 +23,10 @@ from chatbot.models import (
     AuthSessionStatus,
     GuestIdentity,
     GuestIdentityStatus,
+    HistoryEvent,
     UserAccount,
 )
-from chatbot.repositories import SessionBindingError
+from chatbot.repositories import SessionBindingError, persist_current_auth_subject
 
 
 TEST_JWT_SIGNING_KEY = "d12-get-current-auth-identity-test-signing-key"
@@ -131,6 +137,17 @@ class GetCurrentAuthIdentitySecurityContractTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
 
+    def test_successful_persistence_records_auth_me_checked_history_after_auth_event(self) -> None:
+        response = self._guest_client("gst_d12_history_success").get("/api/auth/me/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(
+            HistoryEvent.objects.filter(
+                event_type="auth_me_checked",
+                status="success",
+            ).exists()
+        )
+
     def test_valid_jwt_without_persisted_active_session_is_rejected(self) -> None:
         token, _claims = issue_access_token(
             user_id="usr_d12_unpersisted",
@@ -142,6 +159,32 @@ class GetCurrentAuthIdentitySecurityContractTests(TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(
             response.json()["error"]["auth"]["reason"],
+            "auth_session_not_persisted",
+        )
+
+    def test_application_rejects_unpersisted_jwt_before_public_projection(self) -> None:
+        token, _claims = issue_access_token(
+            user_id="usr_d12_application_unpersisted",
+            auth_session_id="auth_d12_application_unpersisted",
+        )
+        query = GetCurrentAuthIdentityQuery(
+            authorization_header=f"Bearer {token}",
+            header_guest_id=None,
+            query_guest_id=None,
+            guest_credential=None,
+            session_id=None,
+            canonical_request=True,
+            audit_source={"surface": "api", "api_path": "/api/auth/me/"},
+            guest_state_resolver=lambda _guest_id: None,
+            persistence_writer=persist_current_auth_subject,
+            history_recorder=lambda **_kwargs: None,
+        )
+
+        with self.assertRaises(CurrentAuthIdentityInvalid) as error:
+            execute_get_current_auth_identity(query)
+
+        self.assertEqual(
+            error.exception.payload["error"]["auth"]["reason"],
             "auth_session_not_persisted",
         )
 
