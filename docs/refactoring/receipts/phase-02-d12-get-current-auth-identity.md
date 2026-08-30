@@ -93,10 +93,19 @@ env PHASE_02_D12_SENSITIVITY_HEAD=bde41e12fe63ab08c029b691308df54b09566b16 .venv
 | Production DB audit | NOT_EXECUTED |
 
 ## CI
-- Fresh exact-source-head CI is intentionally pending Draft PR creation.
-- Source Head, synthetic PR checkout SHA, and actual merge authority will be recorded separately in the Draft PR and Independent Review, not by a Receipt self-reference commit.
-- production-gate, offline-verification, compose-integration, and regression-signal runs: PENDING_FRESH_CI_AFTER_DRAFT_PR.
-- phase-02-d12-sensitivity-evidence artifact: PENDING_FRESH_CI_AFTER_DRAFT_PR.
+- Initial Draft PR #416 CI authority failure:
+  - production-gate `33172045718`: failed.
+  - offline-verification job `98851313081`: failed.
+  - compose-integration job `98852385504`: skipped.
+  - regression-signal `33172045698` / job `98851312730`: success.
+  - failed phase-02-d12-sensitivity-evidence artifact: `9686120723`.
+- The initial PR Source Head was `a3e3e20b5aa3fe9e2c94deb51275f16d0390e653`, but the workflow checkout was synthetic merge SHA `eb11bc7d6f6872add3aabca46de8bfa97cff21bc`.
+- Root cause: `PHASE_02_D12_SENSITIVITY_HEAD` passed the PR Source Head to a runner executing at the synthetic checkout, so the stale-head guard correctly failed before mutations.
+- Classification: `CI_AUTHORITY_PROPAGATION_DEFECT`. Production defect: NO. Application defect: NO. Security contract defect: NO. Sensitivity guard defect: NO.
+- Remediation RED: `9e8269e1f83fb900107d0824f5203b652bfdc78d` adds the direct D12 workflow runtime-authority contract test and failed by AssertionError before the workflow change.
+- Remediation GREEN: `c37cdb09c7f85ad1808465679faf0d6800463783` changes only the D12 workflow authority expression to `PHASE_02_D12_SENSITIVITY_HEAD: ${{ github.sha }}`. The stale-head guard, checkout action, artifact contract, and D1-D11 workflow remain unchanged.
+- Green local runtime sensitivity passed with `head == actual_head == c37cdb09c7f85ad1808465679faf0d6800463783`, baseline exit 0, all nine AssertionError mutations, source restoration, unchanged worktree, and residual diff zero.
+- Fresh CI and artifact identity will be recorded in PR #416 after this Docs commit; no Receipt self-reference commit records future CI IDs.
 
 ## Scope
 - Production: get_current_identity Application boundary, auth/me View thinning, guest source normalization/state authority, and OpenAPI correction.
@@ -111,9 +120,10 @@ env PHASE_02_D12_SENSITIVITY_HEAD=bde41e12fe63ab08c029b691308df54b09566b16 .venv
 - Windows portability debt, host Node/npm availability, Docker image-pull availability, and Production DB audit are not source changes in this Slice.
 
 ## Status at handoff
-- Draft PR: pending creation; it must remain Draft.
+- Draft PR: #416 is OPEN and must remain Draft.
 - Independent Review: not performed.
 - Merge: not performed.
+- Current status: `D12_CI_REMEDIATED_PENDING_FRESH_CI`.
 - Current pre-merge remaining: 4.
 - Projected after D12 merge: 3; authoritative recount is required after merge.
 - PHASE_2_EXIT_REVIEW_REQUIRED=YES.
