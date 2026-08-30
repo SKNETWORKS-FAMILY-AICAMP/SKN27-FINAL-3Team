@@ -158,3 +158,17 @@ def test_d12_failure_kind_requires_assertion() -> None:
     with pytest.raises(module.SensitivityError, match="assertion mismatch"):
         module.failure_kind(subprocess.CompletedProcess(["test"], 1, "ImportError"))
 
+
+def test_d12_workflow_uses_runtime_checkout_sha_for_sensitivity_authority() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "production-gate.yml").read_text(
+        encoding="utf-8"
+    )
+    d12_sensitivity_block = workflow.split(
+        "      - name: Phase 2 D12 sensitivity negative controls\n", 1
+    )[1].split("      - name: Upload Phase 2 D12 sensitivity evidence\n", 1)[0]
+
+    assert "PHASE_02_D12_SENSITIVITY_HEAD: ${{ github.sha }}" in d12_sensitivity_block
+    assert (
+        "PHASE_02_D12_SENSITIVITY_HEAD: "
+        "${{ github.event.pull_request.head.sha }}"
+    ) not in d12_sensitivity_block
