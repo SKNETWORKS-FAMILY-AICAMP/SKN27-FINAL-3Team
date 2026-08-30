@@ -412,7 +412,7 @@ jobs:
       - name: Phase 2 D12 sensitivity negative controls
         timeout-minutes: 10
         env:
-          PHASE_02_D12_SENSITIVITY_HEAD: ${{ github.event.pull_request.head.sha }}
+          PHASE_02_D12_SENSITIVITY_HEAD: ${{ github.sha }}
         run: python scripts/refactoring/verify_phase_02_d12_get_current_auth_identity_sensitivity.py
 
       - name: Upload Phase 2 D12 sensitivity evidence
