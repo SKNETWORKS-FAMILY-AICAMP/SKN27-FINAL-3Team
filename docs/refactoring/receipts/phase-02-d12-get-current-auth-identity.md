@@ -107,6 +107,38 @@ env PHASE_02_D12_SENSITIVITY_HEAD=bde41e12fe63ab08c029b691308df54b09566b16 .venv
 - Green local runtime sensitivity passed with `head == actual_head == c37cdb09c7f85ad1808465679faf0d6800463783`, baseline exit 0, all nine AssertionError mutations, source restoration, unchanged worktree, and residual diff zero.
 - Fresh CI and artifact identity will be recorded in PR #416 after this Docs commit; no Receipt self-reference commit records future CI IDs.
 
+## Independent Review — Pre-P2-Remediation
+- Reviewed Head: `6e6b7f0176a35b3867398c658728dda16d56b1d4`.
+- Final Judgment: `PASS_WITH_CONDITIONS`.
+- Merge Allowed: `ALLOWED_AFTER_P2_FIX`.
+- P0: `0`.
+- P1: `0`.
+- P2: `1`.
+- Finding: `P2_D12_SENSITIVITY_CONTROL_NAME_SEMANTIC_MISMATCH`.
+- Phase Status: `PHASE_2_D12_NEEDS_DELTA_FIX`.
+
+## Sensitivity Control Semantic Remediation
+- D12_P2_RED_HEAD: `a2978ea94d702388391f37a3b9c6e3bfc3bba6a7`.
+- D12_P2_GREEN_HEAD: `a96dc3147adbfabbb8c24e43ef516529ef394ad3`.
+- Old control: `anonymous_transport_contract_bypass`.
+- New control: `signed_guest_security_alternative_removal`.
+- Actual mutation: signed guest security alternative removed; Bearer-only remains.
+- Direct detector: `test_openapi_requires_bearer_or_signed_guest_credential`.
+- Detector/invariant coverage changed: `NO`.
+- Mutation implementation changed: `NO`, except dispatch/key rename.
+- Exact mutation count: `9`.
+- Local sensitivity evidence at GREEN Head: baseline exit `0`; all `9` controls failed by direct `AssertionError`; `head == actual_head == a96dc3147adbfabbb8c24e43ef516529ef394ad3`; source restored, worktree unchanged, and residual diff zero were all `true`.
+- Production behavior changed: `NO`.
+- Application/View changed: `NO`.
+- OpenAPI behavior changed: `NO`.
+- Workflow changed: `NO`.
+- P0: `CLOSED`.
+- P1: `CLOSED`.
+- P2: `P2_REMEDIATED_PENDING_DELTA_REVIEW`.
+- Merge: `NOT_PERFORMED`.
+- Independent Delta Review: `NOT_PERFORMED`.
+- Self-reference: this Receipt records no future Receipt SHA, CI run/job, synthetic SHA, or artifact ID; fresh CI/artifact metadata belongs only in PR #416.
+
 ## Scope
 - Production: get_current_identity Application boundary, auth/me View thinning, guest source normalization/state authority, and OpenAPI correction.
 - Tests: D12 characterization/security coverage, existing contract expectation updates, and sensitivity runner coverage.
