@@ -17,7 +17,7 @@ RUNNER_PATH = (
 )
 EXPECTED = (
     "view_application_bypass",
-    "anonymous_transport_contract_bypass",
+    "signed_guest_security_alternative_removal",
     "guest_identity_source_mismatch_bypass",
     "persisted_guest_state_bypass",
     "persisted_auth_session_bypass",
@@ -67,7 +67,7 @@ def test_d12_targets_cover_each_get_current_auth_identity_boundary() -> None:
     assert module.TARGETS["view_application_bypass"].endswith(
         "test_auth_me_delegates_to_execute_get_current_auth_identity"
     )
-    assert module.TARGETS["anonymous_transport_contract_bypass"].endswith(
+    assert module.TARGETS["signed_guest_security_alternative_removal"].endswith(
         "test_openapi_requires_bearer_or_signed_guest_credential"
     )
     assert module.TARGETS["guest_identity_source_mismatch_bypass"].endswith(

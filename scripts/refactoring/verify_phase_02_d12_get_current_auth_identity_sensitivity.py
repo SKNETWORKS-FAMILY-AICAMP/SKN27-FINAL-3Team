@@ -23,7 +23,7 @@ TARGETS: Final = {
         + ".GetCurrentAuthIdentitySecurityContractTests."
         + "test_auth_me_delegates_to_execute_get_current_auth_identity"
     ),
-    "anonymous_transport_contract_bypass": (
+    "signed_guest_security_alternative_removal": (
         TEST_MODULE
         + ".GetCurrentAuthIdentitySecurityContractTests."
         + "test_openapi_requires_bearer_or_signed_guest_credential"
@@ -117,7 +117,7 @@ if mutation_name == "view_application_bypass":
         "        result = execute_get_current_auth_identity(query)\n",
         "        from app.application.auth.get_current_identity import execute_get_current_auth_identity as _direct_execute\n        result = _direct_execute(query)\n",
     )
-elif mutation_name == "anonymous_transport_contract_bypass":
+elif mutation_name == "signed_guest_security_alternative_removal":
     mutation = mutate_once(
         route_specs,
         '        security_requirements=(\n            {"bearerAuth": ()},\n            {"guestCredentialAuth": ()},\n        ),\n    ),\n    RouteSpec(\n        operation_id="getResumeManifest",\n',
