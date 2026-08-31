@@ -93,6 +93,16 @@ def test_d12_targets_cover_each_get_current_auth_identity_boundary() -> None:
     )
 
 
+def test_d12_openapi_control_name_matches_signed_guest_alternative_removal() -> None:
+    module = runner()
+
+    assert "signed_guest_security_alternative_removal" in module.TARGETS
+    assert "anonymous_transport_contract_bypass" not in module.TARGETS
+    assert module.TARGETS["signed_guest_security_alternative_removal"].endswith(
+        "test_openapi_requires_bearer_or_signed_guest_credential"
+    )
+
+
 def test_d12_openapi_mutation_remains_a_valid_non_anonymous_route_spec() -> None:
     module = runner()
 
