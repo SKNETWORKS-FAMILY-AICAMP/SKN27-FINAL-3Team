@@ -151,12 +151,39 @@ env PHASE_02_D12_SENSITIVITY_HEAD=bde41e12fe63ab08c029b691308df54b09566b16 .venv
 - Phase 3 work and transaction/outbox redesign remain deferred.
 - Windows portability debt, host Node/npm availability, Docker image-pull availability, and Production DB audit are not source changes in this Slice.
 
-## Status at handoff
-- Draft PR: #416 is OPEN and must remain Draft.
-- Independent Review: not performed.
-- Merge: not performed.
-- Current status: `D12_CI_REMEDIATED_PENDING_FRESH_CI`.
-- Current pre-merge remaining: 4.
-- Projected after D12 merge: 3; authoritative recount is required after merge.
-- PHASE_2_EXIT_REVIEW_REQUIRED=YES.
-- Next step after fresh CI/artifact: PHASE_2_D12_INDEPENDENT_REVIEW.
+## Historical Status at Initial CI-Authority-Remediation Handoff
+- Historical Draft status at that handoff: PR #416 was OPEN and had to remain Draft.
+- Historical Independent Review status at that handoff: not performed.
+- Historical Merge status at that handoff: not performed.
+- Historical status at that handoff: `D12_CI_REMEDIATED_PENDING_FRESH_CI`.
+- Historical current pre-merge remaining at that handoff: 4.
+- Historical projected remaining after D12 merge at that handoff: 3; authoritative recount was required after merge.
+- Historical PHASE_2_EXIT_REVIEW_REQUIRED=YES.
+- Historical next step after fresh CI/artifact: PHASE_2_D12_INDEPENDENT_REVIEW.
+
+## Independent P2 Delta Review — Pre-Receipt-Status-Fix
+- Reviewed Head: `ce4f3521deeb9303c45f63f30098abb129565016`.
+- Final Judgment: `PASS_WITH_CONDITIONS`.
+- Merge Allowed: `ALLOWED_AFTER_P2_FIX`.
+- P0: `0`.
+- P1: `0`.
+- P2: `1`.
+- Finding: `P2_D12_RECEIPT_STALE_CURRENT_STATUS`.
+- Phase Status: `PHASE_2_D12_NEEDS_DELTA_FIX`.
+
+## Current Status After Receipt Clarification
+- P0: `CLOSED`.
+- P1: `CLOSED`.
+- P2: `P2_REMEDIATED_PENDING_RECEIPT_DELTA_REVIEW`.
+- Receipt status clarification: `COMPLETED`.
+- Runtime/Application behavior changed: `NO`.
+- Tests/sensitivity/workflow changed: `NO`.
+- Draft: `true`.
+- Merge: `NOT_PERFORMED`.
+- Independent Receipt Delta Review: `NOT_PERFORMED`.
+- Phase Status: `PHASE_2_D12_READY_FOR_RECEIPT_STATUS_DELTA_INDEPENDENT_REVIEW`.
+- Next step: `PHASE_2_D12_RECEIPT_STATUS_DELTA_INDEPENDENT_REVIEW`.
+- Current pre-merge remaining: `4`.
+- Projected after D12 merge: `3`.
+- Authoritative recount: `REQUIRED_AFTER_MERGE`.
+- PHASE_2_EXIT_REVIEW_REQUIRED: `YES`.
