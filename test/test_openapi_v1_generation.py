@@ -234,7 +234,7 @@ def test_auth_session_routes_document_runtime_auth_boundary() -> None:
 
     current_subject = paths["/api/auth/me/"]["get"]
     assert current_subject["operationId"] == "getCurrentAuthSubject"
-    assert current_subject["security"] == [{}, {"bearerAuth": []}]
+    assert current_subject["security"] == [{"bearerAuth": []}, {"guestCredentialAuth": []}]
     assert current_subject["parameters"] == [
         {
             "name": "X-Guest-Credential",
@@ -266,8 +266,13 @@ def test_auth_session_routes_document_runtime_auth_boundary() -> None:
         },
     ]
     assert current_subject["responses"]["401"]["x-error-codes"] == [
+        "auth_required",
         "token_invalid",
         "token_expired",
+    ]
+    assert current_subject["responses"]["403"]["x-error-codes"] == ["forbidden"]
+    assert current_subject["responses"]["503"]["x-error-codes"] == [
+        "provider_unavailable"
     ]
 
 

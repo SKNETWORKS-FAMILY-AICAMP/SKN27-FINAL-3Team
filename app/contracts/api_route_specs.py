@@ -691,12 +691,15 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         request_model=None,
         response_model=AuthSubjectResponse,
         success_status=200,
-        errors=_auth_errors((401, ("token_invalid", "token_expired"))),
+        errors=_auth_errors(
+            (401, ("auth_required", "token_invalid", "token_expired")),
+            (403, ("forbidden",)),
+            (503, ("provider_unavailable",)),
+        ),
         auth_required=False,
-        auth_optional=True,
         contract_status="shadow",
         tags=("Auth",),
-        summary="Inspect current anonymous, guest, or authenticated subject",
+        summary="Inspect the current signed guest or authenticated subject",
         request_parameters=(
             GUEST_CREDENTIAL_HEADER_PARAMETER,
             RequestParameterSpec(
@@ -714,6 +717,10 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
                 location="query",
                 description="Optional chat session binding identifier.",
             ),
+        ),
+        security_requirements=(
+            {"bearerAuth": ()},
+            {"guestCredentialAuth": ()},
         ),
     ),
     RouteSpec(

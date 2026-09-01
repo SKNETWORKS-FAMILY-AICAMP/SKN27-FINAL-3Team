@@ -31,6 +31,13 @@ from app.application.analysis.read_queries import (
     execute_get_analysis_result,
     execute_list_analysis_jobs,
 )
+from app.application.auth.get_current_identity import (
+    CurrentAuthIdentityAccessDenied,
+    CurrentAuthIdentityInvalid,
+    CurrentAuthIdentityPersistenceUnavailable,
+    GetCurrentAuthIdentityQuery,
+    execute_get_current_auth_identity,
+)
 from app.application.auth.resume_latest_consultation import (
     ResumeLatestConsultationLoginRequired,
     ResumeLatestConsultationQuery,
@@ -201,6 +208,7 @@ from chatbot.repositories import (
     get_analysis_job_access_metadata,
     get_analysis_job_record,
     get_chat_session_access_metadata,
+    get_current_guest_identity_violation,
     get_report_access_metadata,
     get_report_download_metadata,
 
@@ -647,37 +655,33 @@ def auth_logout(request: HttpRequest) -> JsonResponse:
 
 @require_http_methods(["GET", "OPTIONS"])
 def auth_me(request: HttpRequest) -> JsonResponse:
-    status, payload = _get_current_auth_subject(
+    query = GetCurrentAuthIdentityQuery(
         authorization_header=request.headers.get("Authorization"),
-        guest_id=request.headers.get("X-Guest-Id") or request.GET.get("guest_id"),
+        header_guest_id=request.headers.get("X-Guest-Id"),
+        query_guest_id=request.GET.get("guest_id"),
         guest_credential=request.headers.get("X-Guest-Credential"),
         session_id=request.GET.get("session_id"),
+        canonical_request=_is_canonical_request(request),
+        audit_source=_history_source(request),
+        guest_state_resolver=get_current_guest_identity_violation,
+        persistence_writer=persist_current_auth_subject,
+        history_recorder=record_history_event_record,
     )
-    if status < 400:
-        try:
-            payload["persistence"] = persist_current_auth_subject(
-                payload,
-                session_id=request.GET.get("session_id"),
-            )
-        except AuthSessionStateError as exc:
-            status = 401
-            payload = build_auth_error("token_invalid", reason=exc.reason)
-    _record_history_safely(
-        request,
-        event_type="auth_me_checked",
-        status="success" if status < 400 else "failed",
-        summary="현재 인증 주체 상태를 확인했습니다.",
-        actor=_actor_from_auth_me_payload(request, payload),
-        subject=subject_from_payload({"session_id": request.GET.get("session_id")}),
-        source=_history_source(request),
-        metadata={
-            "http_status": status,
-            "auth_state": payload.get("auth_state"),
-            "subject_type": (payload.get("subject") or {}).get("subject_type"),
-            "is_authenticated": (payload.get("subject") or {}).get("is_authenticated"),
-            "error_code": (payload.get("error") or {}).get("code"),
-        },
-    )
+    try:
+        result = execute_get_current_auth_identity(query)
+    except CurrentAuthIdentityInvalid as error:
+        status = 401
+        payload = error.payload
+    except CurrentAuthIdentityAccessDenied as error:
+        status = 403
+        payload = error.payload
+    except CurrentAuthIdentityPersistenceUnavailable as error:
+        status = 503
+        payload = error.payload
+    else:
+        status = 200
+        payload = result.payload
+
     response = _json_response(request, payload, status=status)
     if status in {401, 403} and isinstance(payload.get("error"), dict):
         response["WWW-Authenticate"] = build_www_authenticate_header(payload)

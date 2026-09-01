@@ -459,11 +459,11 @@ paths:
     get:
       tags:
       - Auth
-      summary: Inspect current anonymous, guest, or authenticated subject
+      summary: Inspect the current signed guest or authenticated subject
       operationId: getCurrentAuthSubject
       security:
-      - {}
       - bearerAuth: []
+      - guestCredentialAuth: []
       x-contract-status: shadow
       x-django-route-name: auth-me
       x-django-view: auth_me
@@ -481,9 +481,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthErrorResponse'
           x-error-codes:
+          - auth_required
           - token_invalid
           - token_expired
           x-response-semantics: authentication_failure
+        '403':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - forbidden
+          x-response-semantics: authorization_denied
+        '503':
+          description: Typed API error response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+          x-error-codes:
+          - provider_unavailable
       parameters:
       - name: X-Guest-Credential
         in: header

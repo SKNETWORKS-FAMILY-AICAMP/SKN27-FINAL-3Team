@@ -163,7 +163,12 @@ def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> Non
     )
     assert actual[("POST", "/api/auth/refresh/")].auth_optional is True
     assert actual[("POST", "/api/auth/logout/")].auth_optional is True
-    assert actual[("GET", "/api/auth/me/")].auth_optional is True
+    auth_me = actual[("GET", "/api/auth/me/")]
+    assert auth_me.auth_optional is False
+    assert auth_me.security_requirements == (
+        {"bearerAuth": ()},
+        {"guestCredentialAuth": ()},
+    )
     assert actual[("GET", "/api/auth/resume/")].response_model is (
         auth_contracts.ResumeManifestResponse
     )
