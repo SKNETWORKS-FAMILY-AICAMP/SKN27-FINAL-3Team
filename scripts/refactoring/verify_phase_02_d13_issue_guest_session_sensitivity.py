@@ -253,7 +253,7 @@ elif mutation_name == "public_projection_bypass":
         {**auth_payload, "persistence": persistence}
     )
 """,
-        "    payload = {**auth_payload, "persistence": persistence}\n",
+        '    payload = {**auth_payload, "persistence": persistence}\n',
     )
 else:
     raise SystemExit(f"unsupported mutation: {mutation_name}")

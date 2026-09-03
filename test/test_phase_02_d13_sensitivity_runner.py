@@ -175,6 +175,19 @@ def test_d13_failure_kind_requires_assertion() -> None:
         module.failure_kind(subprocess.CompletedProcess(["test"], 1, "ImportError"))
 
 
+def test_d13_mutation_child_script_compiles_before_mutations_run() -> None:
+    module = runner()
+
+    try:
+        compile(module.MUTATION_CHILD_SCRIPT, str(RUNNER_PATH), "exec")
+    except SyntaxError:
+        compiles = False
+    else:
+        compiles = True
+
+    assert compiles
+
+
 def test_d13_workflow_uses_runtime_checkout_sha_for_sensitivity_authority() -> None:
     workflow = (ROOT / ".github" / "workflows" / "production-gate.yml").read_text(
         encoding="utf-8"
