@@ -146,8 +146,23 @@ def test_auth_session_api_route_specs_promote_existing_django_endpoints() -> Non
         ("GET", "/api/auth/resume/"),
     }
 
-    assert actual[("POST", "/api/auth/guest-session/")].response_model is (
+    guest_session = actual[("POST", "/api/auth/guest-session/")]
+    assert guest_session.response_model is (
         auth_contracts.GuestSessionResponse
+    )
+    assert guest_session.success_status == 200
+    assert guest_session.auth_required is False
+    assert guest_session.request_body_required is False
+    assert {
+        error.status: error.codes for error in guest_session.errors
+    } == {
+        401: ("token_invalid",),
+        403: ("forbidden",),
+        503: ("provider_unavailable",),
+    }
+    assert all(
+        error.response_model is auth_contracts.AuthErrorResponse
+        for error in guest_session.errors
     )
     assert "guest_credential" in auth_contracts.GuestSessionResponse.model_fields
     assert [
