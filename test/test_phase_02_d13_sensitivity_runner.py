@@ -26,7 +26,12 @@ EXPECTED = (
     "guest_state_401_mapping_bypass",
     "session_binding_403_mapping_bypass",
     "persistence_503_mapping_bypass",
+    "credential_subject_authority_bypass",
+    "auth_event_bypass",
+    "history_event_bypass",
+    "public_projection_bypass",
 )
+REVIEW_REQUIRED_TARGETS = EXPECTED[-4:]
 
 
 def runner():
@@ -45,7 +50,7 @@ def outcomes(module):
     return tuple(module.MutationOutcome(name, 1, "assertion") for name in module.TARGETS)
 
 
-def test_d13_evidence_requires_exact_ten_controls_restoration_and_fresh_head() -> None:
+def test_d13_evidence_requires_exact_fourteen_controls_restoration_and_fresh_head() -> None:
     module = runner()
     evidence = module.build_evidence(
         head="d13-test-head",
@@ -58,9 +63,16 @@ def test_d13_evidence_requires_exact_ten_controls_restoration_and_fresh_head() -
     )
 
     assert tuple(module.TARGETS) == EXPECTED
-    assert len(module.TARGETS) == 10
+    assert len(module.TARGETS) == 14
     assert evidence["contract_version"] == "phase_02_d13_sensitivity.v1"
     assert evidence["status"] == "pass"
+
+
+def test_d13_review_invariant_targets_are_present_before_directness_checks() -> None:
+    module = runner()
+
+    assert set(REVIEW_REQUIRED_TARGETS).issubset(module.TARGETS)
+    assert len(module.TARGETS) == len(EXPECTED)
 
 
 def test_d13_targets_cover_each_issue_guest_session_boundary() -> None:
