@@ -423,6 +423,32 @@ jobs:
           path: tmp/phase-02-d12-sensitivity-evidence.json
           retention-days: 14
 
+      - name: Phase 2 D13 IssueGuestSession application boundary
+        timeout-minutes: 10
+        run: |
+          python backend/manage.py test \
+            chatbot.test_phase_02_issue_guest_session_use_case \
+            chatbot.test_guest_session_runtime_contract \
+            chatbot.test_guest_credential_boundary \
+            --verbosity 1
+          python -m pytest -p no:cacheprovider \
+            test/test_phase_02_d13_sensitivity_runner.py \
+            -q
+
+      - name: Phase 2 D13 sensitivity negative controls
+        timeout-minutes: 10
+        env:
+          PHASE_02_D13_SENSITIVITY_HEAD: ${{ github.sha }}
+        run: python scripts/refactoring/verify_phase_02_d13_issue_guest_session_sensitivity.py
+
+      - name: Upload Phase 2 D13 sensitivity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-02-d13-sensitivity-evidence
+          path: tmp/phase-02-d13-sensitivity-evidence.json
+          retention-days: 14
+
       - name: Pytest collection no-new-regression gate
         timeout-minutes: 10
         run: python scripts/refactoring/verify_pytest_collection_baseline.py
@@ -503,6 +529,8 @@ jobs:
         run: ruff check --select F401 app/application/analysis/read_queries.py
       - name: Phase 2 D12 application import/F401 gate
         run: ruff check --select F401 app/application/auth/get_current_identity.py
+      - name: Phase 2 D13 application import/F401 gate
+        run: ruff check --select F401 app/application/auth/issue_guest_session.py
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
