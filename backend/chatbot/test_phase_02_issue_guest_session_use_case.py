@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.test import Client, TestCase, override_settings
 from django.utils import timezone
@@ -23,6 +24,20 @@ SENSITIVE_MARKERS = {
 
 @override_settings(APP_JWT_SECRET=TEST_JWT_SIGNING_KEY)
 class IssueGuestSessionSecurityContractTests(TestCase):
+    def test_guest_session_delegates_to_issue_guest_session_application(self) -> None:
+        with patch(
+            "chatbot.views.execute_issue_guest_session",
+            create=True,
+        ) as execute_application:
+            response = Client(raise_request_exception=False).post(
+                "/api/auth/guest-session/",
+                data={},
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        execute_application.assert_called_once()
+
     def test_guest_session_does_not_persist_request_secret_markers(self) -> None:
         response = Client(raise_request_exception=False).post(
             "/api/auth/guest-session/",
