@@ -286,9 +286,13 @@ def guest_session(request: HttpRequest) -> JsonResponse:
             )
         )
     except IssueGuestSessionInvalid as error:
-        return _json_response(request, error.payload, status=401)
+        response = _json_response(request, error.payload, status=401)
+        response["WWW-Authenticate"] = build_www_authenticate_header(error.payload)
+        return response
     except IssueGuestSessionAccessDenied as error:
-        return _json_response(request, error.payload, status=403)
+        response = _json_response(request, error.payload, status=403)
+        response["WWW-Authenticate"] = build_www_authenticate_header(error.payload)
+        return response
     except IssueGuestSessionPersistenceUnavailable as error:
         return _json_response(request, error.payload, status=503)
     return _json_response(request, result.payload)

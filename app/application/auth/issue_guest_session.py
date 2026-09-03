@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from django.db import DatabaseError
 
@@ -21,6 +21,69 @@ from chatbot.repositories import (
 GuestSessionCreator = Callable[..., dict[str, Any]]
 PersistenceWriter = Callable[[dict[str, Any]], dict[str, Any]]
 HistoryRecorder = Callable[..., object]
+
+
+PUBLIC_ISSUE_GUEST_SESSION_FIELDS: Final = (
+    "auth_state",
+    "guest",
+    "subject",
+    "session_binding",
+    "guest_credential",
+    "rate_limit",
+    "merge_policy",
+    "limitations",
+    "persistence",
+)
+PUBLIC_ISSUE_GUEST_SESSION_NESTED_FIELDS: Final = {
+    "guest": (
+        "guest_id",
+        "status",
+        "issued_at",
+        "expires_at",
+        "ttl_seconds",
+        "policy_status",
+    ),
+    "subject": (
+        "subject_id",
+        "subject_type",
+        "user_id",
+        "guest_id",
+        "auth_session_id",
+        "is_authenticated",
+    ),
+    "session_binding": (
+        "session_id",
+        "can_bind_to_chat_session",
+        "binding_policy",
+    ),
+    "rate_limit": (
+        "subject_id",
+        "policy_status",
+        "keys",
+        "notes",
+    ),
+    "merge_policy": (
+        "guest_to_user_merge",
+        "auto_merge",
+        "reason",
+    ),
+    "persistence": (
+        "backend",
+        "tables",
+        "guest_identity_table",
+        "auth_events_table",
+        "chat_session_table",
+        "guest_id",
+        "event_id",
+        "session_id",
+        "status",
+    ),
+}
+PUBLIC_ISSUE_GUEST_SESSION_LIST_FIELDS: Final = {
+    "limitations": (),
+    "rate_limit": ("keys", "notes"),
+    "persistence": ("tables",),
+}
 
 
 @dataclass(frozen=True)
@@ -80,9 +143,32 @@ def execute_issue_guest_session(
             _persistence_unavailable_payload()
         ) from error
 
-    payload = {**auth_payload, "persistence": persistence}
+    payload = project_issue_guest_session_public(
+        {**auth_payload, "persistence": persistence}
+    )
     _record_history_best_effort(command, payload)
     return IssueGuestSessionResult(payload=payload)
+
+
+def project_issue_guest_session_public(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the explicit public contract for the IssueGuestSession route."""
+
+    source = _mapping(payload)
+    projected: dict[str, Any] = {}
+    for field in PUBLIC_ISSUE_GUEST_SESSION_FIELDS:
+        if field not in source:
+            continue
+        if field in PUBLIC_ISSUE_GUEST_SESSION_NESTED_FIELDS:
+            projected[field] = _project_public_mapping(
+                source[field],
+                PUBLIC_ISSUE_GUEST_SESSION_NESTED_FIELDS[field],
+                list_fields=PUBLIC_ISSUE_GUEST_SESSION_LIST_FIELDS.get(field, ()),
+            )
+        elif field == "limitations":
+            projected[field] = _public_string_list(source[field])
+        else:
+            projected[field] = _public_scalar(source[field])
+    return projected
 
 
 def _record_history_best_effort(
@@ -136,6 +222,34 @@ def _persistence_unavailable_payload() -> dict[str, Any]:
 
 def _mapping(value: object) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _project_public_mapping(
+    value: object,
+    fields: tuple[str, ...],
+    *,
+    list_fields: tuple[str, ...],
+) -> dict[str, Any]:
+    source = _mapping(value)
+    return {
+        field: (
+            _public_string_list(source[field])
+            if field in list_fields
+            else _public_scalar(source[field])
+        )
+        for field in fields
+        if field in source
+    }
+
+
+def _public_string_list(value: object) -> list[str]:
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
+def _public_scalar(value: object) -> str | int | float | bool | None:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return None
 
 
 def _text_or_none(value: object) -> str | None:

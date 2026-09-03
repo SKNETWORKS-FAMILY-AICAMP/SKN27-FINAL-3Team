@@ -610,7 +610,11 @@ AUTH_SESSION_API_ROUTE_SPECS: tuple[RouteSpec, ...] = (
         request_model=GuestSessionRequest,
         response_model=GuestSessionResponse,
         success_status=200,
-        errors=(),
+        errors=_auth_errors(
+            (401, ("token_invalid",)),
+            (403, ("forbidden",)),
+            (503, ("provider_unavailable",)),
+        ),
         auth_required=False,
         contract_status="shadow",
         tags=("Auth",),
