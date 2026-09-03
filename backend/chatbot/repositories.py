@@ -247,6 +247,14 @@ class AuthSessionStateError(ValueError):
         self.reason = reason
 
 
+class GuestIdentityStateError(ValueError):
+    """Fail-closed guest-identity persistence error safe to expose as a reason code."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class SessionBindingError(PermissionError):
     """Stable chat-session ownership error safe to expose as a reason code."""
 
@@ -1226,10 +1234,8 @@ def persist_chat_message_analysis_boundary(
 
 def persist_guest_session_identity(
     auth_payload: dict[str, Any],
-    *,
-    raw_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Persist the guest identity preview returned by the auth mock contract."""
+    """Persist an issuable guest identity and its allow-listed audit facts."""
 
     guest_payload = _dict_or_empty(auth_payload.get("guest"))
     subject = _dict_or_empty(auth_payload.get("subject"))
@@ -1242,22 +1248,35 @@ def persist_guest_session_identity(
     session_id = _text(session_binding.get("session_id"))
     expires_at = _datetime_or_none(guest_payload.get("expires_at"))
 
+    guest_metadata = {
+        "source": "auth_guest_session",
+        "auth_state": auth_payload.get("auth_state"),
+        "ttl_seconds": guest_payload.get("ttl_seconds"),
+        "policy_status": guest_payload.get("policy_status"),
+        "merge_policy": auth_payload.get("merge_policy") or {},
+        "rate_limit": auth_payload.get("rate_limit") or {},
+    }
+
     with transaction.atomic():
-        guest, _created = GuestIdentity.objects.update_or_create(
-            guest_id=guest_id,
-            defaults={
-                "status": GuestIdentityStatus.ACTIVE,
-                "expires_at": expires_at,
-                "metadata": {
-                    "source": "auth_guest_session",
-                    "auth_state": auth_payload.get("auth_state"),
-                    "ttl_seconds": guest_payload.get("ttl_seconds"),
-                    "policy_status": guest_payload.get("policy_status"),
-                    "merge_policy": auth_payload.get("merge_policy") or {},
-                    "rate_limit": auth_payload.get("rate_limit") or {},
-                },
-            },
+        guest = (
+            GuestIdentity.objects.select_for_update()
+            .filter(guest_id=guest_id)
+            .first()
         )
+        if guest is None:
+            guest = GuestIdentity.objects.create(
+                guest_id=guest_id,
+                status=GuestIdentityStatus.ACTIVE,
+                expires_at=expires_at,
+                metadata=guest_metadata,
+            )
+        else:
+            _require_issuable_guest_identity(guest)
+            guest.expires_at = expires_at
+            guest.metadata = guest_metadata
+            guest.save(update_fields=["expires_at", "metadata", "updated_at"])
+
+        _require_issuable_guest_identity(guest)
         chat_session = _bind_chat_session_auth_context(
             session_id=session_id,
             owner_id="",
@@ -1276,7 +1295,6 @@ def persist_guest_session_identity(
             metadata={
                 "source": "auth_guest_session",
                 "chat_session_id": chat_session.session_id if chat_session else None,
-                "raw_payload": _safe_payload(raw_payload or {}),
             },
         )
 
@@ -1295,6 +1313,17 @@ def persist_guest_session_identity(
         "session_id": chat_session.session_id if chat_session else None,
         "status": "saved",
     }
+
+
+def _require_issuable_guest_identity(guest: GuestIdentity) -> None:
+    """Block terminal or expired persisted identities from being reissued."""
+
+    if guest.status == GuestIdentityStatus.EXPIRED or (
+        guest.expires_at and guest.expires_at <= timezone.now()
+    ):
+        raise GuestIdentityStateError("guest_expired")
+    if guest.status != GuestIdentityStatus.ACTIVE:
+        raise GuestIdentityStateError("guest_inactive")
 
 
 def _locked_active_auth_session(

@@ -197,6 +197,7 @@ from chatbot.request_parsing import (
 from chatbot.runtime_health import build_runtime_health
 from chatbot.repositories import (
     AuthSessionStateError,
+    GuestIdentityStateError,
     ReportReferenceError,
     SessionBindingError,
     UploadStorageUnavailableError,
@@ -265,12 +266,17 @@ def capabilities(_request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def guest_session(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
+    if not isinstance(body, dict):
+        body = {}
     payload = _create_guest_session(
         body,
         guest_credential=request.headers.get("X-Guest-Credential"),
     )
     try:
-        payload["persistence"] = persist_guest_session_identity(payload, raw_payload=body)
+        payload["persistence"] = persist_guest_session_identity(payload)
+    except GuestIdentityStateError as exc:
+        invalid = build_auth_error("token_invalid", reason=exc.reason)
+        return _json_response(request, invalid, status=401)
     except SessionBindingError as exc:
         forbidden = build_auth_error("forbidden", reason=exc.reason)
         return _json_response(request, forbidden, status=403)
@@ -3501,4 +3507,3 @@ def _positive_int(value: object, *, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return number if number > 0 else default
-
