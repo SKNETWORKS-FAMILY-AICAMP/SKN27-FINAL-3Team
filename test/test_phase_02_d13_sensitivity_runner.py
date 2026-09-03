@@ -108,6 +108,18 @@ def test_d13_targets_cover_each_issue_guest_session_boundary() -> None:
     assert module.TARGETS["persistence_503_mapping_bypass"].endswith(
         "test_guest_session_returns_structured_503_when_persistence_store_is_unavailable"
     )
+    assert module.TARGETS["credential_subject_authority_bypass"].endswith(
+        "test_valid_signed_credential_remains_the_subject_despite_forged_body_identity"
+    )
+    assert module.TARGETS["auth_event_bypass"].endswith(
+        "test_guest_session_persists_one_safe_auth_event"
+    )
+    assert module.TARGETS["history_event_bypass"].endswith(
+        "test_guest_session_persists_one_safe_history_event"
+    )
+    assert module.TARGETS["public_projection_bypass"].endswith(
+        "test_issue_guest_session_projects_only_public_collaborator_fields"
+    )
 
 
 def test_d13_evidence_rejects_missing_success_dirty_or_stale_results() -> None:

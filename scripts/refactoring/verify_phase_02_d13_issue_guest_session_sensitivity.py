@@ -51,6 +51,15 @@ TARGETS: Final = {
         "chatbot.test_guest_session_runtime_contract.GuestSessionRuntimeContractTests."
         "test_guest_session_returns_structured_503_when_persistence_store_is_unavailable"
     ),
+    "credential_subject_authority_bypass": (
+        TEST_CASE
+        + "test_valid_signed_credential_remains_the_subject_despite_forged_body_identity"
+    ),
+    "auth_event_bypass": TEST_CASE + "test_guest_session_persists_one_safe_auth_event",
+    "history_event_bypass": TEST_CASE + "test_guest_session_persists_one_safe_history_event",
+    "public_projection_bypass": (
+        TEST_CASE + "test_issue_guest_session_projects_only_public_collaborator_fields"
+    ),
 }
 
 
@@ -197,6 +206,55 @@ elif mutation_name == "persistence_503_mapping_bypass":
         raise IssueGuestSessionInvalid(
 """,
     )
+elif mutation_name == "credential_subject_authority_bypass":
+    mutation = mutate_once(
+        auth_service,
+        """    guest_id = (
+        _normalize_guest_id(credential_claims.get("sub"))
+        if credential_valid
+        else None
+    ) or f"gst_{uuid4().hex}"
+""",
+        """    guest_id = _normalize_guest_id(payload.get("guest_id")) or (
+        _normalize_guest_id(credential_claims.get("sub"))
+        if credential_valid
+        else None
+    ) or f"gst_{uuid4().hex}"
+""",
+    )
+elif mutation_name == "auth_event_bypass":
+    mutation = mutate_once(
+        repositories,
+        """        event = _create_auth_event(
+            event_type="guest_session_created",
+            subject_id=subject_id,
+            guest=guest,
+            metadata={
+                "source": "auth_guest_session",
+                "chat_session_id": chat_session.session_id if chat_session else None,
+            },
+        )
+""",
+        """        event = type(
+            "D13UnsavedAuthEvent", (), {"event_id": "authevt_d13_mutated"}
+        )()
+""",
+    )
+elif mutation_name == "history_event_bypass":
+    mutation = mutate_once(
+        application,
+        "    _record_history_best_effort(command, payload)\n",
+        "    pass\n",
+    )
+elif mutation_name == "public_projection_bypass":
+    mutation = mutate_once(
+        application,
+        """    payload = project_issue_guest_session_public(
+        {**auth_payload, "persistence": persistence}
+    )
+""",
+        "    payload = {**auth_payload, "persistence": persistence}\n",
+    )
 else:
     raise SystemExit(f"unsupported mutation: {mutation_name}")
 
@@ -279,7 +337,7 @@ def build_evidence(
         and head == actual_head
         and original_exit_code == 0
         and tuple(item.name for item in mutations) == tuple(TARGETS)
-        and len(mutations) == 10
+        and len(mutations) == 14
         and all(
             item.exit_code != 0 and item.failure_kind == "assertion"
             for item in mutations
