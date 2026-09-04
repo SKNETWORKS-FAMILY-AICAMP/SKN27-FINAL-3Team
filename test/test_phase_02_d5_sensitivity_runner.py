@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -48,3 +49,84 @@ def test_d5_failure_kind_requires_assertion() -> None:
     assert module.failure_kind(subprocess.CompletedProcess(["test"], 1, "AssertionError: D5")) == "assertion"
     with pytest.raises(module.SensitivityError, match="assertion mismatch"):
         module.failure_kind(subprocess.CompletedProcess(["test"], 1, "ImportError"))
+
+
+def test_each_d5_mutation_uses_a_unique_empty_pycache_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = runner()
+    launches: list[tuple[str | None, bool | None, bool | None]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        environment = kwargs.get("env")
+        prefix = environment.get("PYTHONPYCACHEPREFIX") if isinstance(environment, dict) else None
+        prefix_path = Path(prefix) if prefix else None
+        launches.append(
+            (
+                prefix,
+                prefix_path.exists() if prefix_path else None,
+                not any(prefix_path.iterdir()) if prefix_path else None,
+            )
+        )
+        return subprocess.CompletedProcess(command, 1, "AssertionError: D5")
+
+    monkeypatch.setattr(module, "_run", fake_run)
+
+    assert module._run_mutation("first_mutation", "first.target").failure_kind == "assertion"
+    assert module._run_mutation("second_mutation", "second.target").failure_kind == "assertion"
+
+    assert len(launches) == 2
+    assert all(prefix is not None for prefix, _, _ in launches)
+    prefixes = [Path(prefix) for prefix, _, _ in launches if prefix]
+    assert all(exists is True for _, exists, _ in launches)
+    assert all(is_empty is True for _, _, is_empty in launches)
+    assert prefixes[0] != prefixes[1]
+    assert all(not prefix.is_relative_to(module.REPO_ROOT) for prefix in prefixes)
+    assert all(not prefix.exists() for prefix in prefixes)
+
+
+def test_d5_failure_evidence_preserves_completed_and_failed_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = runner()
+    evidence_path = tmp_path / "d5-evidence.json"
+    mutation_results = iter(
+        (
+            subprocess.CompletedProcess(["mutation"], 1, "AssertionError: first"),
+            subprocess.CompletedProcess(["mutation"], 0, "unexpected pass"),
+        )
+    )
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if command[0] == "git":
+            return subprocess.CompletedProcess(command, 0, "")
+        if command[1] == "backend/manage.py":
+            return subprocess.CompletedProcess(command, 0, "")
+        return next(mutation_results)
+
+    monkeypatch.setattr(
+        module,
+        "TARGETS",
+        {
+            "first_mutation": "first.target",
+            "second_mutation": "second.target",
+        },
+    )
+    monkeypatch.setattr(module, "_run", fake_run)
+    monkeypatch.setenv("PHASE_02_D5_SENSITIVITY_HEAD", "d5-test-head")
+    monkeypatch.setenv("PHASE_02_D5_SENSITIVITY_EVIDENCE_PATH", str(evidence_path))
+
+    assert module.main() == 1
+
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence["status"] == "fail"
+    assert evidence["mutations"] == [
+        {
+            "name": "first_mutation",
+            "exit_code": 1,
+            "failure_kind": "assertion",
+        }
+    ]
+    assert evidence.get("completed_mutations") == ["first_mutation"]
+    assert evidence.get("failed_mutation") == "second_mutation"
+    assert evidence.get("failed_mutation_exit_code") == 0
+    assert evidence.get("error") == "second_mutation: mutation unexpectedly passed"
