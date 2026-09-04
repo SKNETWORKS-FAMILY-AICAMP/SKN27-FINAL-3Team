@@ -179,7 +179,7 @@ offline-verification, compose-integration, regression-signal, and D13
 sensitivity-artifact evidence. No future CI run/job/artifact ID belongs in this
 Receipt, avoiding a self-referential docs commit.
 
-## Current remediation status
+## Current remediation status before Receipt P2 correction (historical)
 
 ```text
 P0:
@@ -207,3 +207,70 @@ PHASE_2_D13_DELTA_INDEPENDENT_REVIEW
 Deferred without change: RefreshAuthSession, LogoutAuthSession, D14, Phase 2
 Exit Review, Phase 3, frontend production, Docker/Compose source, and the
 global auth response `extra` policy.
+
+## Current planning authority and remediation status
+
+This metadata-only amendment preserves all historical RED/GREEN, sensitivity,
+workflow, remediation, and Independent Review records above. It does not change
+runtime/Application behavior, tests, sensitivity, workflow, or OpenAPI.
+
+Current pre-merge remaining:
+3
+
+Projected after D13 merge:
+2
+
+Authoritative recount:
+REQUIRED_AFTER_MERGE
+
+Phase 2 Exit Review:
+REQUIRED
+
+```text
+P0:
+CLOSED
+
+P1:
+CLOSED
+
+P2:
+P2_REMEDIATED_PENDING_RECEIPT_DELTA_REVIEW
+
+Receipt metadata correction:
+COMPLETED
+
+Runtime/Application behavior changed:
+NO
+
+Tests changed:
+NO
+
+Sensitivity changed:
+NO
+
+Workflow changed:
+NO
+
+OpenAPI changed:
+NO
+
+Draft:
+true
+
+Merge:
+NOT_PERFORMED
+
+Independent Receipt Delta Review:
+NOT_PERFORMED
+
+Phase Status:
+PHASE_2_D13_READY_FOR_RECEIPT_DELTA_REVIEW
+
+NEXT_STEP:
+PHASE_2_D13_RECEIPT_DELTA_INDEPENDENT_REVIEW
+
+CURRENT_PRE_MERGE_REMAINING=3
+PROJECTED_AFTER_D13_MERGE=2
+AUTHORITATIVE_RECOUNT_REQUIRED=YES
+PHASE_2_EXIT_REVIEW_REQUIRED=YES
+```
