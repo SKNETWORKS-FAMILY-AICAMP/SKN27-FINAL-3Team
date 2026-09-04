@@ -38,6 +38,13 @@ from app.application.auth.get_current_identity import (
     GetCurrentAuthIdentityQuery,
     execute_get_current_auth_identity,
 )
+from app.application.auth.issue_guest_session import (
+    IssueGuestSessionAccessDenied,
+    IssueGuestSessionCommand,
+    IssueGuestSessionInvalid,
+    IssueGuestSessionPersistenceUnavailable,
+    execute_issue_guest_session,
+)
 from app.application.auth.resume_latest_consultation import (
     ResumeLatestConsultationLoginRequired,
     ResumeLatestConsultationQuery,
@@ -265,40 +272,30 @@ def capabilities(_request: HttpRequest) -> JsonResponse:
 @require_http_methods(["POST", "OPTIONS"])
 def guest_session(request: HttpRequest) -> JsonResponse:
     body = _json_body(request)
-    payload = _create_guest_session(
-        body,
-        guest_credential=request.headers.get("X-Guest-Credential"),
-    )
+    if not isinstance(body, dict):
+        body = {}
     try:
-        payload["persistence"] = persist_guest_session_identity(payload, raw_payload=body)
-    except SessionBindingError as exc:
-        forbidden = build_auth_error("forbidden", reason=exc.reason)
-        return _json_response(request, forbidden, status=403)
-    except DatabaseError:
-        unavailable = build_auth_error(
-            "provider_unavailable",
-            reason="guest_session_store_unavailable",
+        result = execute_issue_guest_session(
+            IssueGuestSessionCommand(
+                payload=body,
+                guest_credential=request.headers.get("X-Guest-Credential"),
+                audit_source=_history_source(request),
+                guest_session_creator=_create_guest_session,
+                persistence_writer=persist_guest_session_identity,
+                history_recorder=partial(_record_history_safely, request),
+            )
         )
-        unavailable["error"]["required_action"] = "retry"
-        return _json_response(request, unavailable, status=503)
-    _record_history_safely(
-        request,
-        event_type="guest_session_created",
-        status="success",
-        summary="비회원 상담 세션을 생성했습니다.",
-        actor={
-            "guest_id": payload.get("guest", {}).get("guest_id"),
-            "auth_state": "guest",
-        },
-        subject=subject_from_payload(body, session_id=payload.get("session_binding", {}).get("session_id")),
-        source=_history_source(request),
-        metadata={
-            "ttl_seconds": payload.get("guest", {}).get("ttl_seconds"),
-            "rate_limit_keys": payload.get("rate_limit", {}).get("keys", []),
-            "merge_policy": payload.get("merge_policy", {}),
-        },
-    )
-    return _json_response(request, payload)
+    except IssueGuestSessionInvalid as error:
+        response = _json_response(request, error.payload, status=401)
+        response["WWW-Authenticate"] = build_www_authenticate_header(error.payload)
+        return response
+    except IssueGuestSessionAccessDenied as error:
+        response = _json_response(request, error.payload, status=403)
+        response["WWW-Authenticate"] = build_www_authenticate_header(error.payload)
+        return response
+    except IssueGuestSessionPersistenceUnavailable as error:
+        return _json_response(request, error.payload, status=503)
+    return _json_response(request, result.payload)
 
 
 @csrf_exempt
@@ -3501,4 +3498,3 @@ def _positive_int(value: object, *, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return number if number > 0 else default
-

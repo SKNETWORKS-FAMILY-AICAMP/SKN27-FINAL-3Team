@@ -191,6 +191,14 @@ def test_auth_session_routes_document_runtime_auth_boundary() -> None:
     assert guest_session["operationId"] == "createGuestSession"
     assert guest_session["security"] == []
     assert guest_session["requestBody"]["required"] is False
+    guest_session_responses = guest_session["responses"]
+    assert {"200", "401", "403", "503"}.issubset(guest_session_responses)
+    for status, code in (("401", "token_invalid"), ("403", "forbidden"), ("503", "provider_unavailable")):
+        response = guest_session_responses[status]
+        assert response["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/AuthErrorResponse"
+        }
+        assert response["x-error-codes"] == [code]
 
     google_code = paths["/api/auth/google/code/"]["post"]
     assert google_code["operationId"] == "exchangeGoogleAuthorizationCode"
