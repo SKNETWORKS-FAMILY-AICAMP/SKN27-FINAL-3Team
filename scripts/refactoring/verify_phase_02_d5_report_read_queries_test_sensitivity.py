@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -13,6 +14,8 @@ from typing import Any, Final
 REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 DEFAULT_EVIDENCE_PATH: Final = REPO_ROOT / "tmp" / "phase-02-d5-sensitivity-evidence.json"
 TEST_MODULE: Final = "chatbot.test_phase_02_report_read_queries_use_case"
+PYCACHE_STRATEGY: Final = "per_mutation_unique_prefix"
+MUTATION_OUTPUT_TAIL_LIMIT: Final = 2_000
 TARGETS: Final = {
     "list_view_application_bypass": TEST_MODULE + ".ReportReadQueriesUseCaseCharacterizationTests.test_list_http_get_delegates_to_application_with_trusted_owner_identity",
     "detail_view_application_bypass": TEST_MODULE + ".ReportReadQueriesUseCaseCharacterizationTests.test_detail_http_get_delegates_to_application_with_trusted_owner_identity",
@@ -118,14 +121,23 @@ raise SystemExit(0 if failures == 0 else 1)
 class SensitivityError(RuntimeError):
     pass
 
+
+class MutationExecutionError(SensitivityError):
+    def __init__(self, *, name: str, exit_code: int, message: str, output_tail: str) -> None:
+        self.name = name
+        self.exit_code = exit_code
+        self.output_tail = output_tail
+        super().__init__(f"{name}: {message}")
+
+
 @dataclass(frozen=True)
 class MutationOutcome:
     name: str
     exit_code: int
     failure_kind: str
 
-def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+def _run(command: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, cwd=REPO_ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
 
 def _git(*args: str) -> str:
     result = _run(["git", "-c", f"safe.directory={REPO_ROOT.as_posix()}", *args])
@@ -140,25 +152,88 @@ def failure_kind(result: subprocess.CompletedProcess[str]) -> str:
         raise SensitivityError("assertion mismatch: mutation did not fail by assertion")
     return "assertion"
 
-def _run_mutation(name: str, target: str) -> MutationOutcome:
-    result = _run([sys.executable, "-c", MUTATION_CHILD_SCRIPT, str(REPO_ROOT), target, name])
-    return MutationOutcome(name, result.returncode, failure_kind(result))
 
-def build_evidence(*, head: str, original_exit_code: int, mutations: tuple[MutationOutcome, ...], working_tree_unchanged: bool) -> dict[str, Any]:
+def _mutation_pycache_prefix(name: str) -> tempfile.TemporaryDirectory[str]:
+    sanitized_name = "".join(character if character.isalnum() else "-" for character in name)
+    return tempfile.TemporaryDirectory(prefix=f"phase-02-d5-{sanitized_name}-pycache-")
+
+
+def _output_tail(output: str) -> str:
+    return output[-MUTATION_OUTPUT_TAIL_LIMIT:]
+
+
+def _run_mutation(name: str, target: str) -> MutationOutcome:
+    with _mutation_pycache_prefix(name) as prefix:
+        pycache_prefix = Path(prefix).resolve()
+        if pycache_prefix.is_relative_to(REPO_ROOT):
+            raise SensitivityError("mutation pycache prefix must be outside the repository")
+        environment = os.environ.copy()
+        environment["PYTHONPYCACHEPREFIX"] = str(pycache_prefix)
+        result = _run([sys.executable, "-c", MUTATION_CHILD_SCRIPT, str(REPO_ROOT), target, name], env=environment)
+        try:
+            kind = failure_kind(result)
+        except SensitivityError as exc:
+            raise MutationExecutionError(name=name, exit_code=result.returncode, message=str(exc), output_tail=_output_tail(result.stdout)) from exc
+    return MutationOutcome(name, result.returncode, kind)
+
+
+def build_evidence(
+    *,
+    head: str,
+    original_exit_code: int,
+    mutations: tuple[MutationOutcome, ...],
+    working_tree_unchanged: bool,
+    failed_mutation: str | None = None,
+    failed_mutation_exit_code: int | None = None,
+    failed_mutation_output_tail: str | None = None,
+) -> dict[str, Any]:
     passed = (original_exit_code == 0 and tuple(item.name for item in mutations) == tuple(TARGETS) and all(item.exit_code != 0 and item.failure_kind == "assertion" for item in mutations) and working_tree_unchanged)
-    return {"contract_version": "phase_02_d5_sensitivity.v1", "status": "pass" if passed else "fail", "head": head, "original": {"exit_code": original_exit_code}, "mutations": [item.__dict__ for item in mutations], "working_tree_unchanged": working_tree_unchanged}
+    return {
+        "contract_version": "phase_02_d5_sensitivity.v1",
+        "status": "pass" if passed else "fail",
+        "head": head,
+        "original": {"exit_code": original_exit_code},
+        "mutations": [item.__dict__ for item in mutations],
+        "completed_mutations": [item.name for item in mutations],
+        "failed_mutation": failed_mutation,
+        "failed_mutation_exit_code": failed_mutation_exit_code,
+        "failed_mutation_output_tail": failed_mutation_output_tail,
+        "pycache_strategy": PYCACHE_STRATEGY,
+        "working_tree_unchanged": working_tree_unchanged,
+    }
 
 def main() -> int:
     before = _git("status", "--porcelain")
-    original_exit_code, outcomes, error = 1, (), None
+    original_exit_code, error = 1, None
+    outcomes_list: list[MutationOutcome] = []
+    failed_mutation = None
+    failed_mutation_exit_code = None
+    failed_mutation_output_tail = None
     try:
         original_exit_code = _run([sys.executable, "backend/manage.py", "test", TEST_MODULE, "--verbosity", "1"]).returncode
         if original_exit_code:
             raise SensitivityError(f"original D5 characterization suite failed: {original_exit_code}")
-        outcomes = tuple(_run_mutation(name, target) for name, target in TARGETS.items())
+        for name, target in TARGETS.items():
+            try:
+                outcome = _run_mutation(name, target)
+            except MutationExecutionError as exc:
+                failed_mutation = exc.name
+                failed_mutation_exit_code = exc.exit_code
+                failed_mutation_output_tail = exc.output_tail
+                error = str(exc)
+                break
+            outcomes_list.append(outcome)
     except (OSError, SensitivityError) as exc:
         error = str(exc)
-    evidence = build_evidence(head=os.environ.get("PHASE_02_D5_SENSITIVITY_HEAD", "").strip() or _git("rev-parse", "HEAD").strip(), original_exit_code=original_exit_code, mutations=outcomes, working_tree_unchanged=before == _git("status", "--porcelain"))
+    evidence = build_evidence(
+        head=os.environ.get("PHASE_02_D5_SENSITIVITY_HEAD", "").strip() or _git("rev-parse", "HEAD").strip(),
+        original_exit_code=original_exit_code,
+        mutations=tuple(outcomes_list),
+        working_tree_unchanged=before == _git("status", "--porcelain"),
+        failed_mutation=failed_mutation,
+        failed_mutation_exit_code=failed_mutation_exit_code,
+        failed_mutation_output_tail=failed_mutation_output_tail,
+    )
     if error:
         evidence["error"] = error
     path = Path(os.environ.get("PHASE_02_D5_SENSITIVITY_EVIDENCE_PATH", DEFAULT_EVIDENCE_PATH))
